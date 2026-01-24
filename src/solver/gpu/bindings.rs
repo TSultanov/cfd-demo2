@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 7c0f2fdb8500976964fc7d34b39089e49ee13dd3a24ed9b434bbe45f0f277b46
+// SourceHash: 2a6742d028ce66dc489c19238fb601e18c353a95a1c24ab24f3b6fe56ea5b3e0
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -13,14 +13,10 @@ pub enum ShaderEntry {
     DotProduct,
     DotProductPair,
     GeneratedDpInitIncompressibleMomentum,
-    GeneratedDpInitIncompressibleMomentumGeneric,
     GeneratedDpUpdateFromDiagIncompressibleMomentum,
-    GeneratedDpUpdateFromDiagIncompressibleMomentumGeneric,
     GeneratedFluxModuleCompressible,
     GeneratedFluxModuleGradientsIncompressibleMomentum,
-    GeneratedFluxModuleGradientsIncompressibleMomentumGeneric,
     GeneratedFluxModuleIncompressibleMomentum,
-    GeneratedFluxModuleIncompressibleMomentumGeneric,
     GeneratedGenericCoupledApply,
     GeneratedGenericCoupledAssemblyCompressible,
     GeneratedGenericCoupledAssemblyGenericDiffusionDemo,
@@ -29,21 +25,16 @@ pub enum ShaderEntry {
     GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo,
     GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann,
     GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum,
-    GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumGeneric,
     GeneratedGenericCoupledAssemblyIncompressibleMomentum,
-    GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric,
     GeneratedGenericCoupledUpdateCompressible,
     GeneratedGenericCoupledUpdateGenericDiffusionDemo,
     GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann,
     GeneratedGenericCoupledUpdateIncompressibleMomentum,
-    GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric,
     GeneratedPackedStateGradientsCompressible,
     GeneratedPackedStateGradientsGenericDiffusionDemo,
     GeneratedPackedStateGradientsGenericDiffusionDemoNeumann,
     GeneratedPackedStateGradientsIncompressibleMomentum,
-    GeneratedPackedStateGradientsIncompressibleMomentumGeneric,
     GeneratedRhieChowCorrectVelocityIncompressibleMomentum,
-    GeneratedRhieChowCorrectVelocityIncompressibleMomentumGeneric,
     GenericCoupledSchurSetup,
     GmresCgs,
     GmresLogic,
@@ -55,10 +46,10 @@ pub enum ShaderEntry {
 }
 impl ShaderEntry {
     pub fn create_pipeline_layout(&self, device: &wgpu::Device) -> wgpu::PipelineLayout {
-        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentumGeneric => generated :: dp_init_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumGeneric => generated :: dp_update_from_diag_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumGeneric => generated :: flux_module_gradients_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentumGeneric => generated :: flux_module_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumGeneric => generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => generated :: generic_coupled_update_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentumGeneric => generated :: packed_state_gradients_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityIncompressibleMomentum => generated :: rhie_chow_correct_velocity_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityIncompressibleMomentumGeneric => generated :: rhie_chow_correct_velocity_incompressible_momentum_generic :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
+        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityIncompressibleMomentum => generated :: rhie_chow_correct_velocity_incompressible_momentum :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
     }
     pub fn create_shader_module_embed_source(&self, device: &wgpu::Device) -> wgpu::ShaderModule {
-        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentumGeneric => { generated :: dp_init_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumGeneric => { generated :: dp_update_from_diag_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumGeneric => { generated :: flux_module_gradients_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentumGeneric => { generated :: flux_module_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumGeneric => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric => { generated :: generic_coupled_assembly_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric => { generated :: generic_coupled_update_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentumGeneric => { generated :: packed_state_gradients_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityIncompressibleMomentumGeneric => { generated :: rhie_chow_correct_velocity_incompressible_momentum_generic :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
+        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
     }
 }
 mod _root {
@@ -194,84 +185,6 @@ pub mod layout_asserts {
         );
         assert!(std::mem::size_of::<generated::dp_init_incompressible_momentum::Constants>() == 48);
     };
-    const GENERATED_DP_INIT_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                dt
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                dt_old
-            ) == 4
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                dtau
-            ) == 8
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                time
-            ) == 12
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                viscosity
-            ) == 16
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                density
-            ) == 20
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                component
-            ) == 24
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                alpha_p
-            ) == 28
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                scheme
-            ) == 32
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                alpha_u
-            ) == 36
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                stride_x
-            ) == 40
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_init_incompressible_momentum_generic::Constants,
-                time_scheme
-            ) == 44
-        );
-        assert!(
-            std::mem::size_of::<generated::dp_init_incompressible_momentum_generic::Constants>()
-                == 48
-        );
-    };
     const GENERATED_DP_UPDATE_FROM_DIAG_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
@@ -348,85 +261,6 @@ pub mod layout_asserts {
         assert!(
             std::mem::size_of::<generated::dp_update_from_diag_incompressible_momentum::Constants>(
             ) == 48
-        );
-    };
-    const GENERATED_DP_UPDATE_FROM_DIAG_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-                dt
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-                dt_old
-            ) == 4
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-                dtau
-            ) == 8
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-                time
-            ) == 12
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-                viscosity
-            ) == 16
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-                density
-            ) == 20
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-                component
-            ) == 24
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-                alpha_p
-            ) == 28
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-                scheme
-            ) == 32
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-                alpha_u
-            ) == 36
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-                stride_x
-            ) == 40
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-                time_scheme
-            ) == 44
-        );
-        assert!(
-            std::mem::size_of::<
-                generated::dp_update_from_diag_incompressible_momentum_generic::Constants,
-            >() == 48
         );
     };
     const GENERATED_FLUX_MODULE_COMPRESSIBLE_VECTOR2_ASSERTS: () = {
@@ -600,104 +434,6 @@ pub mod layout_asserts {
             ) == 48
         );
     };
-    const GENERATED_FLUX_MODULE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_GENERIC_VECTOR2_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Vector2,
-                x
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Vector2,
-                y
-            ) == 4
-        );
-        assert!(
-            std::mem::size_of::<
-                generated::flux_module_gradients_incompressible_momentum_generic::Vector2,
-            >() == 8
-        );
-    };
-    const GENERATED_FLUX_MODULE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-                dt
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-                dt_old
-            ) == 4
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-                dtau
-            ) == 8
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-                time
-            ) == 12
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-                viscosity
-            ) == 16
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-                density
-            ) == 20
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-                component
-            ) == 24
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-                alpha_p
-            ) == 28
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-                scheme
-            ) == 32
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-                alpha_u
-            ) == 36
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-                stride_x
-            ) == 40
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-                time_scheme
-            ) == 44
-        );
-        assert!(
-            std::mem::size_of::<
-                generated::flux_module_gradients_incompressible_momentum_generic::Constants,
-            >() == 48
-        );
-    };
     const GENERATED_FLUX_MODULE_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(generated::flux_module_incompressible_momentum::Vector2, x) == 0
@@ -820,138 +556,6 @@ pub mod layout_asserts {
         );
         assert!(
             std::mem::size_of::<generated::flux_module_incompressible_momentum::Constants>() == 72
-        );
-    };
-    const GENERATED_FLUX_MODULE_INCOMPRESSIBLE_MOMENTUM_GENERIC_VECTOR2_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Vector2,
-                x
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Vector2,
-                y
-            ) == 4
-        );
-        assert!(
-            std::mem::size_of::<generated::flux_module_incompressible_momentum_generic::Vector2>()
-                == 8
-        );
-    };
-    const GENERATED_FLUX_MODULE_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                dt
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                dt_old
-            ) == 4
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                dtau
-            ) == 8
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                time
-            ) == 12
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                viscosity
-            ) == 16
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                density
-            ) == 20
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                component
-            ) == 24
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                alpha_p
-            ) == 28
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                scheme
-            ) == 32
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                alpha_u
-            ) == 36
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                stride_x
-            ) == 40
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                time_scheme
-            ) == 44
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                eos_gamma
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                eos_gm1
-            ) == 52
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                eos_r
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                eos_dp_drho
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                eos_p_offset
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::flux_module_incompressible_momentum_generic::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
-            std::mem::size_of::<generated::flux_module_incompressible_momentum_generic::Constants>(
-            ) == 72
         );
     };
     const GENERATED_GENERIC_COUPLED_APPLY_CONSTANTS_ASSERTS: () = {
@@ -1666,8 +1270,6 @@ pub mod layout_asserts {
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants > () == 72) ; } ;
-    const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_INCOMPRESSIBLE_MOMENTUM_GENERIC_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Vector2 > () == 8) ; } ;
-    const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants > () == 72) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
@@ -1798,140 +1400,6 @@ pub mod layout_asserts {
         assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_incompressible_momentum::Constants,
-            >() == 72
-        );
-    };
-    const GENERATED_GENERIC_COUPLED_ASSEMBLY_INCOMPRESSIBLE_MOMENTUM_GENERIC_VECTOR2_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Vector2,
-                x
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Vector2,
-                y
-            ) == 4
-        );
-        assert!(
-            std::mem::size_of::<
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Vector2,
-            >() == 8
-        );
-    };
-    const GENERATED_GENERIC_COUPLED_ASSEMBLY_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                dt
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                dt_old
-            ) == 4
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                dtau
-            ) == 8
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                time
-            ) == 12
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                viscosity
-            ) == 16
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                density
-            ) == 20
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                component
-            ) == 24
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                alpha_p
-            ) == 28
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                scheme
-            ) == 32
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                alpha_u
-            ) == 36
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                stride_x
-            ) == 40
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                time_scheme
-            ) == 44
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                eos_gamma
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                eos_gm1
-            ) == 52
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                eos_r
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                eos_dp_drho
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                eos_p_offset
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
-            std::mem::size_of::<
-                generated::generic_coupled_assembly_incompressible_momentum_generic::Constants,
             >() == 72
         );
     };
@@ -2389,121 +1857,6 @@ pub mod layout_asserts {
         assert!(
             std::mem::size_of::<generated::generic_coupled_update_incompressible_momentum::Constants>(
             ) == 72
-        );
-    };
-    const GENERATED_GENERIC_COUPLED_UPDATE_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                dt
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                dt_old
-            ) == 4
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                dtau
-            ) == 8
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                time
-            ) == 12
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                viscosity
-            ) == 16
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                density
-            ) == 20
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                component
-            ) == 24
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                alpha_p
-            ) == 28
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                scheme
-            ) == 32
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                alpha_u
-            ) == 36
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                stride_x
-            ) == 40
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                time_scheme
-            ) == 44
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                eos_gamma
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                eos_gm1
-            ) == 52
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                eos_r
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                eos_dp_drho
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                eos_p_offset
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
-            std::mem::size_of::<
-                generated::generic_coupled_update_incompressible_momentum_generic::Constants,
-            >() == 72
         );
     };
     const GENERATED_PACKED_STATE_GRADIENTS_COMPRESSIBLE_VECTOR2_ASSERTS: () = {
@@ -3028,140 +2381,6 @@ pub mod layout_asserts {
             ) == 72
         );
     };
-    const GENERATED_PACKED_STATE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_GENERIC_VECTOR2_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Vector2,
-                x
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Vector2,
-                y
-            ) == 4
-        );
-        assert!(
-            std::mem::size_of::<
-                generated::packed_state_gradients_incompressible_momentum_generic::Vector2,
-            >() == 8
-        );
-    };
-    const GENERATED_PACKED_STATE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                dt
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                dt_old
-            ) == 4
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                dtau
-            ) == 8
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                time
-            ) == 12
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                viscosity
-            ) == 16
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                density
-            ) == 20
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                component
-            ) == 24
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                alpha_p
-            ) == 28
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                scheme
-            ) == 32
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                alpha_u
-            ) == 36
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                stride_x
-            ) == 40
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                time_scheme
-            ) == 44
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                eos_gamma
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                eos_gm1
-            ) == 52
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                eos_r
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                eos_dp_drho
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                eos_p_offset
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
-            std::mem::size_of::<
-                generated::packed_state_gradients_incompressible_momentum_generic::Constants,
-            >() == 72
-        );
-    };
     const GENERATED_RHIE_CHOW_CORRECT_VELOCITY_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
@@ -3238,86 +2457,6 @@ pub mod layout_asserts {
         assert!(
             std::mem::size_of::<
                 generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
-            >() == 48
-        );
-    };
-    const GENERATED_RHIE_CHOW_CORRECT_VELOCITY_INCOMPRESSIBLE_MOMENTUM_GENERIC_CONSTANTS_ASSERTS: (
-    ) = {
-        assert!(
-            std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
-                dt
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
-                dt_old
-            ) == 4
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
-                dtau
-            ) == 8
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
-                time
-            ) == 12
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
-                viscosity
-            ) == 16
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
-                density
-            ) == 20
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
-                component
-            ) == 24
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
-                alpha_p
-            ) == 28
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
-                scheme
-            ) == 32
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
-                alpha_u
-            ) == 36
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
-                stride_x
-            ) == 40
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
-                time_scheme
-            ) == 44
-        );
-        assert!(
-            std::mem::size_of::<
-                generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants,
             >() == 48
         );
     };
@@ -4120,21 +3259,11 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for dot_product_pair::SolverParams {}
     unsafe impl bytemuck::Zeroable for generated::dp_init_incompressible_momentum::Constants {}
     unsafe impl bytemuck::Pod for generated::dp_init_incompressible_momentum::Constants {}
-    unsafe impl bytemuck::Zeroable for generated::dp_init_incompressible_momentum_generic::Constants {}
-    unsafe impl bytemuck::Pod for generated::dp_init_incompressible_momentum_generic::Constants {}
     unsafe impl bytemuck::Zeroable
         for generated::dp_update_from_diag_incompressible_momentum::Constants
     {
     }
     unsafe impl bytemuck::Pod for generated::dp_update_from_diag_incompressible_momentum::Constants {}
-    unsafe impl bytemuck::Zeroable
-        for generated::dp_update_from_diag_incompressible_momentum_generic::Constants
-    {
-    }
-    unsafe impl bytemuck::Pod
-        for generated::dp_update_from_diag_incompressible_momentum_generic::Constants
-    {
-    }
     unsafe impl bytemuck::Zeroable for generated::flux_module_compressible::Vector2 {}
     unsafe impl bytemuck::Pod for generated::flux_module_compressible::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::flux_module_compressible::Constants {}
@@ -4151,33 +3280,10 @@ pub mod bytemuck_impls {
     {
     }
     unsafe impl bytemuck::Pod for generated::flux_module_gradients_incompressible_momentum::Constants {}
-    unsafe impl bytemuck::Zeroable
-        for generated::flux_module_gradients_incompressible_momentum_generic::Vector2
-    {
-    }
-    unsafe impl bytemuck::Pod
-        for generated::flux_module_gradients_incompressible_momentum_generic::Vector2
-    {
-    }
-    unsafe impl bytemuck::Zeroable
-        for generated::flux_module_gradients_incompressible_momentum_generic::Constants
-    {
-    }
-    unsafe impl bytemuck::Pod
-        for generated::flux_module_gradients_incompressible_momentum_generic::Constants
-    {
-    }
     unsafe impl bytemuck::Zeroable for generated::flux_module_incompressible_momentum::Vector2 {}
     unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::flux_module_incompressible_momentum::Constants {}
     unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum::Constants {}
-    unsafe impl bytemuck::Zeroable for generated::flux_module_incompressible_momentum_generic::Vector2 {}
-    unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum_generic::Vector2 {}
-    unsafe impl bytemuck::Zeroable
-        for generated::flux_module_incompressible_momentum_generic::Constants
-    {
-    }
-    unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum_generic::Constants {}
     unsafe impl bytemuck::Zeroable for generated::generic_coupled_apply::Constants {}
     unsafe impl bytemuck::Pod for generated::generic_coupled_apply::Constants {}
     unsafe impl bytemuck::Zeroable for generated::generic_coupled_assembly_compressible::Vector2 {}
@@ -4275,16 +3381,6 @@ pub mod bytemuck_impls {
     {
     }
     unsafe impl bytemuck::Zeroable
-        for generated::generic_coupled_assembly_grad_state_incompressible_momentum_generic::Vector2
-    {
-    }
-    unsafe impl bytemuck::Pod
-        for generated::generic_coupled_assembly_grad_state_incompressible_momentum_generic::Vector2
-    {
-    }
-    unsafe impl bytemuck :: Zeroable for generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants { }
-    unsafe impl bytemuck :: Pod for generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants { }
-    unsafe impl bytemuck::Zeroable
         for generated::generic_coupled_assembly_incompressible_momentum::Vector2
     {
     }
@@ -4295,22 +3391,6 @@ pub mod bytemuck_impls {
     }
     unsafe impl bytemuck::Pod
         for generated::generic_coupled_assembly_incompressible_momentum::Constants
-    {
-    }
-    unsafe impl bytemuck::Zeroable
-        for generated::generic_coupled_assembly_incompressible_momentum_generic::Vector2
-    {
-    }
-    unsafe impl bytemuck::Pod
-        for generated::generic_coupled_assembly_incompressible_momentum_generic::Vector2
-    {
-    }
-    unsafe impl bytemuck::Zeroable
-        for generated::generic_coupled_assembly_incompressible_momentum_generic::Constants
-    {
-    }
-    unsafe impl bytemuck::Pod
-        for generated::generic_coupled_assembly_incompressible_momentum_generic::Constants
     {
     }
     unsafe impl bytemuck::Zeroable for generated::generic_coupled_update_compressible::Constants {}
@@ -4333,14 +3413,6 @@ pub mod bytemuck_impls {
     {
     }
     unsafe impl bytemuck::Pod for generated::generic_coupled_update_incompressible_momentum::Constants {}
-    unsafe impl bytemuck::Zeroable
-        for generated::generic_coupled_update_incompressible_momentum_generic::Constants
-    {
-    }
-    unsafe impl bytemuck::Pod
-        for generated::generic_coupled_update_incompressible_momentum_generic::Constants
-    {
-    }
     unsafe impl bytemuck::Zeroable for generated::packed_state_gradients_compressible::Vector2 {}
     unsafe impl bytemuck::Pod for generated::packed_state_gradients_compressible::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::packed_state_gradients_compressible::Constants {}
@@ -4382,35 +3454,11 @@ pub mod bytemuck_impls {
     }
     unsafe impl bytemuck::Pod for generated::packed_state_gradients_incompressible_momentum::Constants {}
     unsafe impl bytemuck::Zeroable
-        for generated::packed_state_gradients_incompressible_momentum_generic::Vector2
-    {
-    }
-    unsafe impl bytemuck::Pod
-        for generated::packed_state_gradients_incompressible_momentum_generic::Vector2
-    {
-    }
-    unsafe impl bytemuck::Zeroable
-        for generated::packed_state_gradients_incompressible_momentum_generic::Constants
-    {
-    }
-    unsafe impl bytemuck::Pod
-        for generated::packed_state_gradients_incompressible_momentum_generic::Constants
-    {
-    }
-    unsafe impl bytemuck::Zeroable
         for generated::rhie_chow_correct_velocity_incompressible_momentum::Constants
     {
     }
     unsafe impl bytemuck::Pod
         for generated::rhie_chow_correct_velocity_incompressible_momentum::Constants
-    {
-    }
-    unsafe impl bytemuck::Zeroable
-        for generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants
-    {
-    }
-    unsafe impl bytemuck::Pod
-        for generated::rhie_chow_correct_velocity_incompressible_momentum_generic::Constants
     {
     }
     unsafe impl bytemuck::Zeroable for generic_coupled_schur_setup::SetupParams {}
@@ -6724,229 +5772,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
-    pub mod dp_init_incompressible_momentum_generic {
-        use super::{_root, _root::*};
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Constants {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub dt: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub dt_old: f32,
-            #[doc = "offset: 8, size: 4, type: `f32`"]
-            pub dtau: f32,
-            #[doc = "offset: 12, size: 4, type: `f32`"]
-            pub time: f32,
-            #[doc = "offset: 16, size: 4, type: `f32`"]
-            pub viscosity: f32,
-            #[doc = "offset: 20, size: 4, type: `f32`"]
-            pub density: f32,
-            #[doc = "offset: 24, size: 4, type: `u32`"]
-            pub component: u32,
-            #[doc = "offset: 28, size: 4, type: `f32`"]
-            pub alpha_p: f32,
-            #[doc = "offset: 32, size: 4, type: `u32`"]
-            pub scheme: u32,
-            #[doc = "offset: 36, size: 4, type: `f32`"]
-            pub alpha_u: f32,
-            #[doc = "offset: 40, size: 4, type: `u32`"]
-            pub stride_x: u32,
-            #[doc = "offset: 44, size: 4, type: `u32`"]
-            pub time_scheme: u32,
-        }
-        impl Constants {
-            pub const fn new(
-                dt: f32,
-                dt_old: f32,
-                dtau: f32,
-                time: f32,
-                viscosity: f32,
-                density: f32,
-                component: u32,
-                alpha_p: f32,
-                scheme: u32,
-                alpha_u: f32,
-                stride_x: u32,
-                time_scheme: u32,
-            ) -> Self {
-                Self {
-                    dt,
-                    dt_old,
-                    dtau,
-                    time,
-                    viscosity,
-                    density,
-                    component,
-                    alpha_p,
-                    scheme,
-                    alpha_u,
-                    stride_x,
-                    time_scheme,
-                }
-            }
-        }
-        pub const STATE_STRIDE: u32 = 8u32;
-        pub const D_P_OFFSET: u32 = 3u32;
-        pub mod compute {
-            use super::{_root, _root::*};
-            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-            pub fn create_main_pipeline_embed_source(
-                device: &wgpu::Device,
-            ) -> wgpu::ComputePipeline {
-                let module = super::create_shader_module_embed_source(device);
-                let layout = super::create_pipeline_layout(device);
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("Compute Pipeline main"),
-                    layout: Some(&layout),
-                    module: &module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            }
-        }
-        pub const ENTRY_MAIN: &str = "main";
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub cell_vols: wgpu::BufferBinding<'a>,
-            pub state: wgpu::BufferBinding<'a>,
-            pub constants: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup0Entries<'a> {
-            pub cell_vols: wgpu::BindGroupEntry<'a>,
-            pub state: wgpu::BindGroupEntry<'a>,
-            pub constants: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup0Entries<'a> {
-            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-                Self {
-                    cell_vols: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
-                    },
-                    state: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.state),
-                    },
-                    constants: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.constants),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
-                [self.cell_vols, self.state, self.constants]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0(wgpu::BindGroup);
-        impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedDpInitIncompressibleMomentumGeneric::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: dp_init_incompressible_momentum_generic :: Constants > () as _) , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedDpInitIncompressibleMomentumGeneric::BindGroup0"),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(0, &self.0, &[]);
-            }
-        }
-        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-        #[doc = "   - Bind group 1: More frequent updates"]
-        #[doc = "   - Bind group 2: More frequent updates"]
-        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-        #[derive(Debug, Copy, Clone)]
-        pub struct WgpuBindGroups<'a> {
-            pub bind_group0: &'a WgpuBindGroup0,
-        }
-        impl<'a> WgpuBindGroups<'a> {
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                self.bind_group0.set(pass);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuPipelineLayout;
-        impl WgpuPipelineLayout {
-            pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 1],
-            ) -> [wgpu::BindGroupLayout; 1] {
-                entries
-            }
-        }
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("GeneratedDpInitIncompressibleMomentumGeneric::PipelineLayout"),
-                bind_group_layouts: &[&WgpuBindGroup0::get_bind_group_layout(device)],
-                push_constant_ranges: &[],
-            })
-        }
-        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("dp_init_incompressible_momentum_generic.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(source),
-            })
-        }
-        pub const SHADER_STRING: &str = r#"
-struct Constants {
-    dt: f32,
-    dt_old: f32,
-    dtau: f32,
-    time: f32,
-    viscosity: f32,
-    density: f32,
-    component: u32,
-    alpha_p: f32,
-    scheme: u32,
-    alpha_u: f32,
-    stride_x: u32,
-    time_scheme: u32,
-}
-
-const STATE_STRIDE: u32 = 8u;
-const D_P_OFFSET: u32 = 3u;
-
-@group(0) @binding(0) 
-var<storage> cell_vols: array<f32>;
-@group(0) @binding(1) 
-var<storage, read_write> state: array<f32>;
-@group(0) @binding(2) 
-var<uniform> constants: Constants;
-
-@compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let _e4 = constants.stride_x;
-    let idx = ((global_id.y * _e4) + global_id.x);
-    let num_cells = (arrayLength((&state)) / 8u);
-    if (idx >= num_cells) {
-        return;
-    }
-    let _e15 = constants.density;
-    let rho = max(_e15, 0.000000000001f);
-    let _e20 = constants.dt;
-    let dt = max(_e20, 0f);
-    let _e25 = cell_vols[idx];
-    let vol = max(_e25, 0.000000000001f);
-    let d_p = (dt / (rho * vol));
-    state[((idx * STATE_STRIDE) + D_P_OFFSET)] = d_p;
-    return;
-}
-"#;
-    }
     pub mod dp_update_from_diag_incompressible_momentum {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
@@ -7143,288 +5968,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let source = std::borrow::Cow::Borrowed(SHADER_STRING);
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("dp_update_from_diag_incompressible_momentum.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(source),
-            })
-        }
-        pub const SHADER_STRING: &str = r#"
-struct Constants {
-    dt: f32,
-    dt_old: f32,
-    dtau: f32,
-    time: f32,
-    viscosity: f32,
-    density: f32,
-    component: u32,
-    alpha_p: f32,
-    scheme: u32,
-    alpha_u: f32,
-    stride_x: u32,
-    time_scheme: u32,
-}
-
-const STATE_STRIDE: u32 = 8u;
-const D_P_OFFSET: u32 = 3u;
-const UNKNOWNS_PER_CELL: u32 = 3u;
-const U_LEN: u32 = 2u;
-const U_0_: u32 = 0u;
-const U_1_: u32 = 1u;
-
-@group(0) @binding(0) 
-var<storage> scalar_row_offsets: array<u32>;
-@group(0) @binding(1) 
-var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(2) 
-var<storage> matrix_values: array<f32>;
-@group(0) @binding(3) 
-var<storage, read_write> state: array<f32>;
-@group(0) @binding(4) 
-var<uniform> constants: Constants;
-
-fn safe_inverse(val: f32) -> f32 {
-    if (abs(val) > 0.00000000000001f) {
-        return (1f / val);
-    }
-    return 0f;
-}
-
-@compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var sum_u_inv: f32 = 0f;
-
-    let _e5 = constants.stride_x;
-    let idx = ((global_id.y * _e5) + global_id.x);
-    let num_cells = (arrayLength((&scalar_row_offsets)) - 1u);
-    if (idx >= num_cells) {
-        return;
-    }
-    let scalar_offset = scalar_row_offsets[idx];
-    let scalar_end = scalar_row_offsets[(idx + 1u)];
-    let num_neighbors = (scalar_end - scalar_offset);
-    let _e25 = diagonal_indices[idx];
-    let diag_rank = (_e25 - scalar_offset);
-    let start_row_0_ = (scalar_offset * 9u);
-    let row_stride = (num_neighbors * UNKNOWNS_PER_CELL);
-    {
-        let start_row_u = (start_row_0_ + (U_0_ * row_stride));
-        let diag_u = matrix_values[((start_row_u + (diag_rank * UNKNOWNS_PER_CELL)) + U_0_)];
-        let _e41 = safe_inverse(diag_u);
-        let _e43 = sum_u_inv;
-        sum_u_inv = (_e43 + _e41);
-    }
-    {
-        let start_row_u_1 = (start_row_0_ + (U_1_ * row_stride));
-        let diag_u_1 = matrix_values[((start_row_u_1 + (diag_rank * UNKNOWNS_PER_CELL)) + U_1_)];
-        let _e55 = safe_inverse(diag_u_1);
-        let _e56 = sum_u_inv;
-        sum_u_inv = (_e56 + _e55);
-    }
-    let _e58 = sum_u_inv;
-    let d_p = (_e58 / 2f);
-    state[((idx * STATE_STRIDE) + D_P_OFFSET)] = d_p;
-    return;
-}
-"#;
-    }
-    pub mod dp_update_from_diag_incompressible_momentum_generic {
-        use super::{_root, _root::*};
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Constants {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub dt: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub dt_old: f32,
-            #[doc = "offset: 8, size: 4, type: `f32`"]
-            pub dtau: f32,
-            #[doc = "offset: 12, size: 4, type: `f32`"]
-            pub time: f32,
-            #[doc = "offset: 16, size: 4, type: `f32`"]
-            pub viscosity: f32,
-            #[doc = "offset: 20, size: 4, type: `f32`"]
-            pub density: f32,
-            #[doc = "offset: 24, size: 4, type: `u32`"]
-            pub component: u32,
-            #[doc = "offset: 28, size: 4, type: `f32`"]
-            pub alpha_p: f32,
-            #[doc = "offset: 32, size: 4, type: `u32`"]
-            pub scheme: u32,
-            #[doc = "offset: 36, size: 4, type: `f32`"]
-            pub alpha_u: f32,
-            #[doc = "offset: 40, size: 4, type: `u32`"]
-            pub stride_x: u32,
-            #[doc = "offset: 44, size: 4, type: `u32`"]
-            pub time_scheme: u32,
-        }
-        impl Constants {
-            pub const fn new(
-                dt: f32,
-                dt_old: f32,
-                dtau: f32,
-                time: f32,
-                viscosity: f32,
-                density: f32,
-                component: u32,
-                alpha_p: f32,
-                scheme: u32,
-                alpha_u: f32,
-                stride_x: u32,
-                time_scheme: u32,
-            ) -> Self {
-                Self {
-                    dt,
-                    dt_old,
-                    dtau,
-                    time,
-                    viscosity,
-                    density,
-                    component,
-                    alpha_p,
-                    scheme,
-                    alpha_u,
-                    stride_x,
-                    time_scheme,
-                }
-            }
-        }
-        pub const STATE_STRIDE: u32 = 8u32;
-        pub const D_P_OFFSET: u32 = 3u32;
-        pub const UNKNOWNS_PER_CELL: u32 = 3u32;
-        pub const U_LEN: u32 = 2u32;
-        pub const U_0: u32 = 0u32;
-        pub const U_1: u32 = 1u32;
-        pub mod compute {
-            use super::{_root, _root::*};
-            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-            pub fn create_main_pipeline_embed_source(
-                device: &wgpu::Device,
-            ) -> wgpu::ComputePipeline {
-                let module = super::create_shader_module_embed_source(device);
-                let layout = super::create_pipeline_layout(device);
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("Compute Pipeline main"),
-                    layout: Some(&layout),
-                    module: &module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            }
-        }
-        pub const ENTRY_MAIN: &str = "main";
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub scalar_row_offsets: wgpu::BufferBinding<'a>,
-            pub diagonal_indices: wgpu::BufferBinding<'a>,
-            pub matrix_values: wgpu::BufferBinding<'a>,
-            pub state: wgpu::BufferBinding<'a>,
-            pub constants: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup0Entries<'a> {
-            pub scalar_row_offsets: wgpu::BindGroupEntry<'a>,
-            pub diagonal_indices: wgpu::BindGroupEntry<'a>,
-            pub matrix_values: wgpu::BindGroupEntry<'a>,
-            pub state: wgpu::BindGroupEntry<'a>,
-            pub constants: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup0Entries<'a> {
-            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-                Self {
-                    scalar_row_offsets: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.scalar_row_offsets),
-                    },
-                    diagonal_indices: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.diagonal_indices),
-                    },
-                    matrix_values: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.matrix_values),
-                    },
-                    state: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.state),
-                    },
-                    constants: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.constants),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 5] {
-                [
-                    self.scalar_row_offsets,
-                    self.diagonal_indices,
-                    self.matrix_values,
-                    self.state,
-                    self.constants,
-                ]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0(wgpu::BindGroup);
-        impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedDpUpdateFromDiagIncompressibleMomentumGeneric::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"scalar_row_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"matrix_values\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: dp_update_from_diag_incompressible_momentum_generic :: Constants > () as _) , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedDpUpdateFromDiagIncompressibleMomentumGeneric::BindGroup0",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(0, &self.0, &[]);
-            }
-        }
-        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-        #[doc = "   - Bind group 1: More frequent updates"]
-        #[doc = "   - Bind group 2: More frequent updates"]
-        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-        #[derive(Debug, Copy, Clone)]
-        pub struct WgpuBindGroups<'a> {
-            pub bind_group0: &'a WgpuBindGroup0,
-        }
-        impl<'a> WgpuBindGroups<'a> {
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                self.bind_group0.set(pass);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuPipelineLayout;
-        impl WgpuPipelineLayout {
-            pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 1],
-            ) -> [wgpu::BindGroupLayout; 1] {
-                entries
-            }
-        }
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(
-                    "GeneratedDpUpdateFromDiagIncompressibleMomentumGeneric::PipelineLayout",
-                ),
-                bind_group_layouts: &[&WgpuBindGroup0::get_bind_group_layout(device)],
-                push_constant_ranges: &[],
-            })
-        }
-        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("dp_update_from_diag_incompressible_momentum_generic.wgsl"),
                 source: wgpu::ShaderSource::Wgsl(source),
             })
         }
@@ -8278,7 +6821,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let s_own_rho = state[((owner_1 * 8u) + 0u)];
     let s_own_rho_e = state[((owner_1 * 8u) + 3u)];
     let _cse_1450_ = state[((owner_1 * 8u) + 1u)];
-    let _cse_1460_ = state[((owner_1 * 8u) + 2u)];
+    let _cse_1459_ = state[((owner_1 * 8u) + 2u)];
     let _e122 = neigh_idx;
     let _e129 = state[((_e122 * 8u) + 4u)];
     let _e136 = state[((owner_1 * 8u) + 4u)];
@@ -8309,7 +6852,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e263 = bc_kind[((idx * 8u) + 2u)];
     let _e270 = bc_value[((idx * 8u) + 2u)];
     let _e271 = bc_neighbor_scalar(_e249, _e256, _e263, _e270, d_own_1, is_boundary_1);
-    let _cse_2_ = vec2<f32>(_cse_1450_, _cse_1460_);
+    let _cse_2_ = vec2<f32>(_cse_1450_, _cse_1459_);
     let _cse_1_ = ((_cse_2_ * 1f) / vec2(s_own_rho));
     let _e277 = normal_vec;
     let _cse_0_ = dot(_cse_1_, _e277);
@@ -8374,10 +6917,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_54_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_55_);
         let _cse_53_ = dot(_cse_54_, (face_center_vec - c_owner_vec));
         let _cse_51_ = (_cse_1450_ + _cse_53_);
-        let _cse_63_ = ((_e271 - _cse_1460_) / _cse_57_);
+        let _cse_63_ = ((_e271 - _cse_1459_) / _cse_57_);
         let _cse_62_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_63_);
         let _cse_61_ = dot(_cse_62_, (face_center_vec - c_owner_vec));
-        let _cse_59_ = (_cse_1460_ + _cse_61_);
+        let _cse_59_ = (_cse_1459_ + _cse_61_);
         let _cse_50_ = vec2<f32>(_cse_51_, _cse_59_);
         let _cse_69_ = ((_e181 - s_own_rho) / _cse_57_);
         let _cse_68_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_69_);
@@ -8411,7 +6954,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_87_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_88_);
         let _cse_86_ = dot(_cse_87_, (face_center_vec - c_neigh_cell_vec));
         let _cse_85_ = (_e241 + _cse_86_);
-        let _cse_94_ = ((_cse_1460_ - _e271) / _cse_89_);
+        let _cse_94_ = ((_cse_1459_ - _e271) / _cse_89_);
         let _cse_93_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_94_);
         let _cse_92_ = dot(_cse_93_, (face_center_vec - c_neigh_cell_vec));
         let _cse_91_ = (_e271 + _cse_92_);
@@ -8453,11 +6996,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_118_ = (((_cse_1450_ * 0.625f) + (_e241 * 0.375f)) + _cse_120_);
         let _cse_117_ = (_cse_118_ - _cse_1450_);
         let _cse_115_ = (_cse_1450_ + _cse_117_);
-        let _cse_129_ = dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1460_)) / vec2(_cse_122_)), (c_neigh_cell_vec - c_owner_vec));
+        let _cse_129_ = dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1459_)) / vec2(_cse_122_)), (c_neigh_cell_vec - c_owner_vec));
         let _cse_128_ = (_cse_129_ * 0.125f);
-        let _cse_126_ = (((_cse_1460_ * 0.625f) + (_e271 * 0.375f)) + _cse_128_);
-        let _cse_125_ = (_cse_126_ - _cse_1460_);
-        let _cse_123_ = (_cse_1460_ + _cse_125_);
+        let _cse_126_ = (((_cse_1459_ * 0.625f) + (_e271 * 0.375f)) + _cse_128_);
+        let _cse_125_ = (_cse_126_ - _cse_1459_);
+        let _cse_123_ = (_cse_1459_ + _cse_125_);
         let _cse_114_ = vec2<f32>(_cse_115_, _cse_123_);
         let _cse_134_ = dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_122_)), (c_neigh_cell_vec - c_owner_vec));
         let _cse_133_ = (_cse_134_ * 0.125f);
@@ -8490,9 +7033,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_151_ = (((_e241 * 0.625f) + (_cse_1450_ * 0.375f)) + _cse_152_);
         let _cse_150_ = (_cse_151_ - _e241);
         let _cse_149_ = (_e241 + _cse_150_);
-        let _cse_159_ = dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1460_ - _e271)) / vec2(_cse_154_)), (c_owner_vec - c_neigh_cell_vec));
+        let _cse_159_ = dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1459_ - _e271)) / vec2(_cse_154_)), (c_owner_vec - c_neigh_cell_vec));
         let _cse_158_ = (_cse_159_ * 0.125f);
-        let _cse_157_ = (((_e271 * 0.625f) + (_cse_1460_ * 0.375f)) + _cse_158_);
+        let _cse_157_ = (((_e271 * 0.625f) + (_cse_1459_ * 0.375f)) + _cse_158_);
         let _cse_156_ = (_cse_157_ - _e271);
         let _cse_155_ = (_e271 + _cse_156_);
         let _cse_148_ = vec2<f32>(_cse_149_, _cse_155_);
@@ -8532,11 +7075,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_182_ = max(_cse_183_, min(_cse_184_, 0f));
         let _cse_181_ = min(_cse_182_, max(_cse_184_, 0f));
         let _cse_179_ = (_cse_1450_ + _cse_181_);
-        let _cse_192_ = (_e271 - _cse_1460_);
+        let _cse_192_ = (_e271 - _cse_1459_);
         let _cse_191_ = dot((((c_neigh_cell_vec - c_owner_vec) * _cse_192_) / vec2(_cse_186_)), (face_center_vec - c_owner_vec));
         let _cse_190_ = max(_cse_191_, min(_cse_192_, 0f));
         let _cse_189_ = min(_cse_190_, max(_cse_192_, 0f));
-        let _cse_187_ = (_cse_1460_ + _cse_189_);
+        let _cse_187_ = (_cse_1459_ + _cse_189_);
         let _cse_178_ = vec2<f32>(_cse_179_, _cse_187_);
         let _cse_198_ = dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_186_)), (face_center_vec - c_owner_vec));
         let _cse_197_ = max(_cse_198_, min((_e181 - s_own_rho), 0f));
@@ -8569,7 +7112,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_215_ = max(_cse_216_, min(_cse_217_, 0f));
         let _cse_214_ = min(_cse_215_, max(_cse_217_, 0f));
         let _cse_213_ = (_e241 + _cse_214_);
-        let _cse_223_ = (_cse_1460_ - _e271);
+        let _cse_223_ = (_cse_1459_ - _e271);
         let _cse_222_ = dot((((c_owner_vec - c_neigh_cell_vec) * _cse_223_) / vec2(_cse_218_)), (face_center_vec - c_neigh_cell_vec));
         let _cse_221_ = max(_cse_222_, min(_cse_223_, 0f));
         let _cse_220_ = min(_cse_221_, max(_cse_223_, 0f));
@@ -8612,11 +7155,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_246_ = dot(_cse_247_, (face_center_vec - c_owner_vec));
         let _cse_245_ = ((((_cse_246_ * abs(_cse_248_)) / max(abs(_cse_248_), (abs(_cse_246_) + 0.00000001f))) * max((_cse_248_ * _cse_246_), 0f)) / max(abs((_cse_248_ * _cse_246_)), 0.00000001f));
         let _cse_243_ = (_cse_1450_ + _cse_245_);
-        let _cse_257_ = (_e271 - _cse_1460_);
+        let _cse_257_ = (_e271 - _cse_1459_);
         let _cse_256_ = (((c_neigh_cell_vec - c_owner_vec) * _cse_257_) / vec2(_cse_250_));
         let _cse_255_ = dot(_cse_256_, (face_center_vec - c_owner_vec));
         let _cse_254_ = ((((_cse_255_ * abs(_cse_257_)) / max(abs(_cse_257_), (abs(_cse_255_) + 0.00000001f))) * max((_cse_257_ * _cse_255_), 0f)) / max(abs((_cse_257_ * _cse_255_)), 0.00000001f));
-        let _cse_252_ = (_cse_1460_ + _cse_254_);
+        let _cse_252_ = (_cse_1459_ + _cse_254_);
         let _cse_242_ = vec2<f32>(_cse_243_, _cse_252_);
         let _cse_262_ = (((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_250_));
         let _cse_261_ = dot(_cse_262_, (face_center_vec - c_owner_vec));
@@ -8649,7 +7192,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_279_ = dot(_cse_280_, (face_center_vec - c_neigh_cell_vec));
         let _cse_278_ = ((((_cse_279_ * abs(_cse_281_)) / max(abs(_cse_281_), (abs(_cse_279_) + 0.00000001f))) * max((_cse_281_ * _cse_279_), 0f)) / max(abs((_cse_281_ * _cse_279_)), 0.00000001f));
         let _cse_277_ = (_e241 + _cse_278_);
-        let _cse_288_ = (_cse_1460_ - _e271);
+        let _cse_288_ = (_cse_1459_ - _e271);
         let _cse_287_ = (((c_owner_vec - c_neigh_cell_vec) * _cse_288_) / vec2(_cse_282_));
         let _cse_286_ = dot(_cse_287_, (face_center_vec - c_neigh_cell_vec));
         let _cse_285_ = ((((_cse_286_ * abs(_cse_288_)) / max(abs(_cse_288_), (abs(_cse_286_) + 0.00000001f))) * max((_cse_288_ * _cse_286_), 0f)) / max(abs((_cse_288_ * _cse_286_)), 0.00000001f));
@@ -8690,12 +7233,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_310_ = max(_cse_311_, min(_cse_314_, 0f));
         let _cse_309_ = min(_cse_310_, max(_cse_314_, 0f));
         let _cse_307_ = (_cse_1450_ + _cse_309_);
-        let _cse_322_ = (_e271 - _cse_1460_);
-        let _cse_320_ = (((_cse_1460_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_322_) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_319_ = (_cse_320_ - _cse_1460_);
+        let _cse_322_ = (_e271 - _cse_1459_);
+        let _cse_320_ = (((_cse_1459_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_322_) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_319_ = (_cse_320_ - _cse_1459_);
         let _cse_318_ = max(_cse_319_, min(_cse_322_, 0f));
         let _cse_317_ = min(_cse_318_, max(_cse_322_, 0f));
-        let _cse_315_ = (_cse_1460_ + _cse_317_);
+        let _cse_315_ = (_cse_1459_ + _cse_317_);
         let _cse_306_ = vec2<f32>(_cse_307_, _cse_315_);
         let _cse_326_ = ((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho);
         let _cse_325_ = max(_cse_326_, min((_e181 - s_own_rho), 0f));
@@ -8727,8 +7270,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_343_ = max(_cse_344_, min(_cse_346_, 0f));
         let _cse_342_ = min(_cse_343_, max(_cse_346_, 0f));
         let _cse_341_ = (_e241 + _cse_342_);
-        let _cse_352_ = (_cse_1460_ - _e271);
-        let _cse_351_ = (((_e271 * 0.625f) + (_cse_1460_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_352_) / vec2(max(dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec)), 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_352_ = (_cse_1459_ - _e271);
+        let _cse_351_ = (((_e271 * 0.625f) + (_cse_1459_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_352_) / vec2(max(dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec)), 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_350_ = (_cse_351_ - _e271);
         let _cse_349_ = max(_cse_350_, min(_cse_352_, 0f));
         let _cse_348_ = min(_cse_349_, max(_cse_352_, 0f));
@@ -8763,20 +7306,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let _e1912 = constants.scheme;
     if ((_e1912 == 6u) && !(is_boundary_1)) {
-        let _cse_378_ = max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f);
-        let _cse_376_ = (((_cse_1450_ * 0.625f) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_375_ = (_cse_376_ - _cse_1450_);
-        let _cse_374_ = ((_cse_375_ * abs((_e241 - _cse_1450_))) / max(abs((_e241 - _cse_1450_)), (abs(_cse_375_) + 0.00000001f)));
-        let _cse_379_ = ((_e241 - _cse_1450_) * _cse_375_);
-        let _cse_373_ = ((_cse_374_ * max(_cse_379_, 0f)) / max(abs(_cse_379_), 0.00000001f));
+        let _cse_377_ = max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f);
+        let _cse_375_ = (((_cse_1450_ * 0.625f) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_374_ = (_cse_375_ - _cse_1450_);
+        let _cse_378_ = ((_e241 - _cse_1450_) * _cse_374_);
+        let _cse_373_ = ((((_cse_374_ * abs((_e241 - _cse_1450_))) / max(abs((_e241 - _cse_1450_)), (abs(_cse_374_) + 0.00000001f))) * max(_cse_378_, 0f)) / max(abs(_cse_378_), 0.00000001f));
         let _cse_371_ = (_cse_1450_ + _cse_373_);
-        let _cse_384_ = (((_cse_1460_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1460_)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_383_ = (_cse_384_ - _cse_1460_);
-        let _cse_386_ = ((_e271 - _cse_1460_) * _cse_383_);
-        let _cse_382_ = ((((_cse_383_ * abs((_e271 - _cse_1460_))) / max(abs((_e271 - _cse_1460_)), (abs(_cse_383_) + 0.00000001f))) * max(_cse_386_, 0f)) / max(abs(_cse_386_), 0.00000001f));
-        let _cse_380_ = (_cse_1460_ + _cse_382_);
-        let _cse_370_ = vec2<f32>(_cse_371_, _cse_380_);
-        let _cse_390_ = (((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_384_ = (((_cse_1459_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1459_)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_383_ = (_cse_384_ - _cse_1459_);
+        let _cse_382_ = ((_cse_383_ * abs((_e271 - _cse_1459_))) / max(abs((_e271 - _cse_1459_)), (abs(_cse_383_) + 0.00000001f)));
+        let _cse_386_ = ((_e271 - _cse_1459_) * _cse_383_);
+        let _cse_381_ = ((_cse_382_ * max(_cse_386_, 0f)) / max(abs(_cse_386_), 0.00000001f));
+        let _cse_379_ = (_cse_1459_ + _cse_381_);
+        let _cse_370_ = vec2<f32>(_cse_371_, _cse_379_);
+        let _cse_390_ = (((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
         let _cse_389_ = (_cse_390_ - s_own_rho);
         let _cse_388_ = ((((_cse_389_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_389_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_389_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_389_)), 0.00000001f));
         let _cse_387_ = (s_own_rho + _cse_388_);
@@ -8784,7 +7327,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e2037 = normal_vec;
         let _cse_368_ = dot(_cse_369_, _e2037);
         let _e2041 = constants.eos_gamma;
-        let _cse_395_ = ((_e2041 * (s_own_p + ((((((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p) * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p)) + 0.00000001f))) * max(((_e151 - s_own_p) * ((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p)), 0f)) / max(abs(((_e151 - s_own_p) * ((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p))), 0.00000001f)))) / _cse_387_);
+        let _cse_395_ = ((_e2041 * (s_own_p + ((((((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p) * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p)) + 0.00000001f))) * max(((_e151 - s_own_p) * ((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p)), 0f)) / max(abs(((_e151 - s_own_p) * ((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p))), 0.00000001f)))) / _cse_387_);
         let _e2132 = constants.eos_dp_drho;
         let _cse_394_ = (_cse_395_ + _e2132);
         let _cse_398_ = (_cse_368_ * _cse_368_);
@@ -8800,20 +7343,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_399_ = (max(0f, (1f - abs((f32(_e2167) - 1f)))) * _cse_400_);
         let _cse_392_ = (_cse_393_ + _cse_399_);
         let _cse_391_ = sqrt(_cse_392_);
-        let _cse_409_ = max(dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec)), 0.000000000001f);
-        let _cse_408_ = (((_e241 * 0.625f) + (_cse_1450_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1450_ - _e241)) / vec2(_cse_409_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
-        let _cse_407_ = (_cse_408_ - _e241);
-        let _cse_410_ = ((_cse_1450_ - _e241) * _cse_407_);
-        let _cse_406_ = ((((_cse_407_ * abs((_cse_1450_ - _e241))) / max(abs((_cse_1450_ - _e241)), (abs(_cse_407_) + 0.00000001f))) * max(_cse_410_, 0f)) / max(abs(_cse_410_), 0.00000001f));
+        let _cse_410_ = max(dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec)), 0.000000000001f);
+        let _cse_409_ = (((_e241 * 0.625f) + (_cse_1450_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1450_ - _e241)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_408_ = (_cse_409_ - _e241);
+        let _cse_407_ = ((_cse_408_ * abs((_cse_1450_ - _e241))) / max(abs((_cse_1450_ - _e241)), (abs(_cse_408_) + 0.00000001f)));
+        let _cse_411_ = ((_cse_1450_ - _e241) * _cse_408_);
+        let _cse_406_ = ((_cse_407_ * max(_cse_411_, 0f)) / max(abs(_cse_411_), 0.00000001f));
         let _cse_405_ = (_e241 + _cse_406_);
-        let _cse_415_ = (((_e271 * 0.625f) + (_cse_1460_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1460_ - _e271)) / vec2(_cse_409_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_415_ = (((_e271 * 0.625f) + (_cse_1459_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1459_ - _e271)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_414_ = (_cse_415_ - _e271);
-        let _cse_413_ = ((_cse_414_ * abs((_cse_1460_ - _e271))) / max(abs((_cse_1460_ - _e271)), (abs(_cse_414_) + 0.00000001f)));
-        let _cse_416_ = ((_cse_1460_ - _e271) * _cse_414_);
-        let _cse_412_ = ((_cse_413_ * max(_cse_416_, 0f)) / max(abs(_cse_416_), 0.00000001f));
-        let _cse_411_ = (_e271 + _cse_412_);
-        let _cse_404_ = vec2<f32>(_cse_405_, _cse_411_);
-        let _cse_420_ = (((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_409_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_416_ = ((_cse_1459_ - _e271) * _cse_414_);
+        let _cse_413_ = ((((_cse_414_ * abs((_cse_1459_ - _e271))) / max(abs((_cse_1459_ - _e271)), (abs(_cse_414_) + 0.00000001f))) * max(_cse_416_, 0f)) / max(abs(_cse_416_), 0.00000001f));
+        let _cse_412_ = (_e271 + _cse_413_);
+        let _cse_404_ = vec2<f32>(_cse_405_, _cse_412_);
+        let _cse_420_ = (((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_419_ = (_cse_420_ - _e181);
         let _cse_418_ = ((((_cse_419_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_419_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_419_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_419_)), 0.00000001f));
         let _cse_417_ = (_e181 + _cse_418_);
@@ -8821,7 +7364,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e2299 = normal_vec;
         let _cse_402_ = dot(_cse_403_, _e2299);
         let _e2303 = constants.eos_gamma;
-        let _cse_425_ = ((_e2303 * (_e151 + ((((((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_409_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151) * abs((s_own_p - _e151))) / max(abs((s_own_p - _e151)), (abs(((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_409_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)) + 0.00000001f))) * max(((s_own_p - _e151) * ((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_409_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)), 0f)) / max(abs(((s_own_p - _e151) * ((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_409_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151))), 0.00000001f)))) / _cse_417_);
+        let _cse_425_ = ((_e2303 * (_e151 + ((((((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151) * abs((s_own_p - _e151))) / max(abs((s_own_p - _e151)), (abs(((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)) + 0.00000001f))) * max(((s_own_p - _e151) * ((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)), 0f)) / max(abs(((s_own_p - _e151) * ((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151))), 0.00000001f)))) / _cse_417_);
         let _e2394 = constants.eos_dp_drho;
         let _cse_424_ = (_cse_425_ + _e2394);
         let _cse_428_ = (_cse_402_ * _cse_402_);
@@ -8864,7 +7407,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e2524 = constants.eos_dp_drho;
     u_r_0_ = (_e181 + ((_cse_432_ * (_e151 - (((_e181 * _e2504) + (_e181 * _e2508)) - _e2513))) / max((((_e2519 * _e151) / _e181) + _e2524), 0.000000000001f)));
     let _e2536 = normal_vec;
-    f_l_0_ = (s_own_rho * dot(((vec2<f32>(_cse_1450_, _cse_1460_) * 1f) / vec2(s_own_rho)), _e2536));
+    f_l_0_ = (s_own_rho * dot(((vec2<f32>(_cse_1450_, _cse_1459_) * 1f) / vec2(s_own_rho)), _e2536));
     let _e2545 = normal_vec;
     f_r_0_ = (_e181 * dot(((vec2<f32>(_e241, _e271) * 1f) / vec2(_e181)), _e2545));
     let _e2551 = constants.scheme;
@@ -8910,9 +7453,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e2661 = constants.eos_dp_drho;
         u_r_0_ = (_cse_454_ + ((_cse_444_ * (_cse_460_ - (((_cse_454_ * _e2641) + (_cse_454_ * _e2645)) - _e2650))) / max((((_e2656 * _cse_460_) / _cse_454_) + _e2661), 0.000000000001f)));
         let _e2688 = normal_vec;
-        f_l_0_ = (_cse_438_ * dot(((vec2<f32>((_cse_1450_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_442_)), (face_center_vec - c_owner_vec))), (_cse_1460_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1460_)) / vec2(_cse_442_)), (face_center_vec - c_owner_vec)))) * 1f) / vec2(_cse_438_)), _e2688));
+        f_l_0_ = (_cse_438_ * dot(((vec2<f32>((_cse_1450_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_442_)), (face_center_vec - c_owner_vec))), (_cse_1459_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1459_)) / vec2(_cse_442_)), (face_center_vec - c_owner_vec)))) * 1f) / vec2(_cse_438_)), _e2688));
         let _e2712 = normal_vec;
-        f_r_0_ = (_cse_454_ * dot(((vec2<f32>((_e241 + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1450_ - _e241)) / vec2(_cse_458_)), (face_center_vec - c_neigh_cell_vec))), (_e271 + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1460_ - _e271)) / vec2(_cse_458_)), (face_center_vec - c_neigh_cell_vec)))) * 1f) / vec2(_cse_454_)), _e2712));
+        f_r_0_ = (_cse_454_ * dot(((vec2<f32>((_e241 + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1450_ - _e241)) / vec2(_cse_458_)), (face_center_vec - c_neigh_cell_vec))), (_e271 + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1459_ - _e271)) / vec2(_cse_458_)), (face_center_vec - c_neigh_cell_vec)))) * 1f) / vec2(_cse_454_)), _e2712));
     }
     let _e2717 = constants.scheme;
     if ((_e2717 == 2u) && !(is_boundary_1)) {
@@ -8973,9 +7516,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e2863 = constants.eos_dp_drho;
         u_r_0_ = (_cse_492_ + ((_cse_478_ * (_cse_502_ - (((_cse_492_ * _e2843) + (_cse_492_ * _e2847)) - _e2852))) / max((((_e2858 * _cse_502_) / _cse_492_) + _e2863), 0.000000000001f)));
         let _e2908 = normal_vec;
-        f_l_0_ = (_cse_468_ * dot(((vec2<f32>(((((_cse_1450_ + (_cse_1450_ * 0.625f)) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_476_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1450_), ((((_cse_1460_ + (_cse_1460_ * 0.625f)) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1460_)) / vec2(_cse_476_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1460_)) * 1f) / vec2(_cse_468_)), _e2908));
+        f_l_0_ = (_cse_468_ * dot(((vec2<f32>(((((_cse_1450_ + (_cse_1450_ * 0.625f)) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_476_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1450_), ((((_cse_1459_ + (_cse_1459_ * 0.625f)) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1459_)) / vec2(_cse_476_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1459_)) * 1f) / vec2(_cse_468_)), _e2908));
         let _e2950 = normal_vec;
-        f_r_0_ = (_cse_492_ * dot(((vec2<f32>(((((_e241 + (_e241 * 0.625f)) + (_cse_1450_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1450_ - _e241)) / vec2(_cse_500_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e241), ((((_e271 + (_e271 * 0.625f)) + (_cse_1460_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1460_ - _e271)) / vec2(_cse_500_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e271)) * 1f) / vec2(_cse_492_)), _e2950));
+        f_r_0_ = (_cse_492_ * dot(((vec2<f32>(((((_e241 + (_e241 * 0.625f)) + (_cse_1450_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1450_ - _e241)) / vec2(_cse_500_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e241), ((((_e271 + (_e271 * 0.625f)) + (_cse_1459_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1459_ - _e271)) / vec2(_cse_500_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e271)) * 1f) / vec2(_cse_492_)), _e2950));
     }
     let _e2955 = constants.scheme;
     if ((_e2955 == 3u) && !(is_boundary_1)) {
@@ -9024,9 +7567,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_549_ = min(_cse_550_, _cse_555_);
         let _cse_548_ = (_e151 + _cse_549_);
         let _cse_557_ = (_e241 - _cse_1450_);
-        let _cse_560_ = (_e271 - _cse_1460_);
+        let _cse_560_ = (_e271 - _cse_1459_);
         let _cse_562_ = (_cse_1450_ - _e241);
-        let _cse_563_ = (_cse_1460_ - _e271);
+        let _cse_563_ = (_cse_1459_ - _e271);
         let _e3053 = constants.eos_theta_ref;
         let _e3057 = constants.eos_dp_drho;
         let _e3062 = constants.eos_p_offset;
@@ -9040,7 +7583,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e3101 = constants.eos_dp_drho;
         u_r_0_ = (_cse_538_ + ((_cse_524_ * (_cse_548_ - (((_cse_538_ * _e3081) + (_cse_538_ * _e3085)) - _e3090))) / max((((_e3096 * _cse_548_) / _cse_538_) + _e3101), 0.000000000001f)));
         let _e3138 = normal_vec;
-        f_l_0_ = (_cse_514_ * dot(((vec2<f32>((_cse_1450_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_557_) / vec2(_cse_520_)), (face_center_vec - c_owner_vec)), min(_cse_557_, 0f)), max(_cse_557_, 0f))), (_cse_1460_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_560_) / vec2(_cse_520_)), (face_center_vec - c_owner_vec)), min(_cse_560_, 0f)), max(_cse_560_, 0f)))) * 1f) / vec2(_cse_514_)), _e3138));
+        f_l_0_ = (_cse_514_ * dot(((vec2<f32>((_cse_1450_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_557_) / vec2(_cse_520_)), (face_center_vec - c_owner_vec)), min(_cse_557_, 0f)), max(_cse_557_, 0f))), (_cse_1459_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_560_) / vec2(_cse_520_)), (face_center_vec - c_owner_vec)), min(_cse_560_, 0f)), max(_cse_560_, 0f)))) * 1f) / vec2(_cse_514_)), _e3138));
         let _e3172 = normal_vec;
         f_r_0_ = (_cse_538_ * dot(((vec2<f32>((_e241 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_562_) / vec2(_cse_544_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_562_, 0f)), max(_cse_562_, 0f))), (_e271 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_563_) / vec2(_cse_544_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_563_, 0f)), max(_cse_563_, 0f)))) * 1f) / vec2(_cse_538_)), _e3172));
     }
@@ -9094,7 +7637,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_611_ = (_cse_612_ / _cse_570_);
         let _cse_610_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_611_);
         let _cse_609_ = dot(_cse_610_, (face_center_vec - c_owner_vec));
-        let _cse_618_ = (_e271 - _cse_1460_);
+        let _cse_618_ = (_e271 - _cse_1459_);
         let _cse_617_ = (_cse_618_ / _cse_570_);
         let _cse_616_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_617_);
         let _cse_615_ = dot(_cse_616_, (face_center_vec - c_owner_vec));
@@ -9102,7 +7645,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_622_ = (_cse_623_ / _cse_592_);
         let _cse_621_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_622_);
         let _cse_620_ = dot(_cse_621_, (face_center_vec - c_neigh_cell_vec));
-        let _cse_627_ = (_cse_1460_ - _e271);
+        let _cse_627_ = (_cse_1459_ - _e271);
         let _cse_626_ = (_cse_627_ / _cse_592_);
         let _cse_625_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_626_);
         let _cse_624_ = dot(_cse_625_, (face_center_vec - c_neigh_cell_vec));
@@ -9123,7 +7666,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e3408 = constants.eos_dp_drho;
         u_r_0_ = (_cse_586_ + ((((1f - max(0f, (1f - abs((f32(_e3371) - 2f))))) * _e3384) * (_cse_603_ - (((_cse_586_ * _e3388) + (_cse_586_ * _e3392)) - _e3397))) / max((((_e3403 * _cse_603_) / _cse_586_) + _e3408), 0.000000000001f)));
         let _e3455 = normal_vec;
-        f_l_0_ = (_cse_564_ * dot(((vec2<f32>((_cse_1450_ + ((((_cse_609_ * abs(_cse_612_)) / max(abs(_cse_612_), (abs(_cse_609_) + 0.00000001f))) * max((_cse_612_ * _cse_609_), 0f)) / max(abs((_cse_612_ * _cse_609_)), 0.00000001f))), (_cse_1460_ + ((((_cse_615_ * abs(_cse_618_)) / max(abs(_cse_618_), (abs(_cse_615_) + 0.00000001f))) * max((_cse_618_ * _cse_615_), 0f)) / max(abs((_cse_618_ * _cse_615_)), 0.00000001f)))) * 1f) / vec2(_cse_564_)), _e3455));
+        f_l_0_ = (_cse_564_ * dot(((vec2<f32>((_cse_1450_ + ((((_cse_609_ * abs(_cse_612_)) / max(abs(_cse_612_), (abs(_cse_609_) + 0.00000001f))) * max((_cse_612_ * _cse_609_), 0f)) / max(abs((_cse_612_ * _cse_609_)), 0.00000001f))), (_cse_1459_ + ((((_cse_615_ * abs(_cse_618_)) / max(abs(_cse_618_), (abs(_cse_615_) + 0.00000001f))) * max((_cse_618_ * _cse_615_), 0f)) / max(abs((_cse_618_ * _cse_615_)), 0.00000001f)))) * 1f) / vec2(_cse_564_)), _e3455));
         let _e3499 = normal_vec;
         f_r_0_ = (_cse_586_ * dot(((vec2<f32>((_e241 + ((((_cse_620_ * abs(_cse_623_)) / max(abs(_cse_623_), (abs(_cse_620_) + 0.00000001f))) * max((_cse_623_ * _cse_620_), 0f)) / max(abs((_cse_623_ * _cse_620_)), 0.00000001f))), (_e271 + ((((_cse_624_ * abs(_cse_627_)) / max(abs(_cse_627_), (abs(_cse_624_) + 0.00000001f))) * max((_cse_627_ * _cse_624_), 0f)) / max(abs((_cse_627_ * _cse_624_)), 0.00000001f)))) * 1f) / vec2(_cse_586_)), _e3499));
     }
@@ -9159,38 +7702,38 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_650_ = (_cse_651_ - s_own_p);
         let _cse_657_ = min((_e151 - s_own_p), 0f);
         let _cse_649_ = max(_cse_650_, _cse_657_);
-        let _cse_658_ = max((_e151 - s_own_p), 0f);
-        let _cse_648_ = min(_cse_649_, _cse_658_);
+        let _cse_648_ = min(_cse_649_, max((_e151 - s_own_p), 0f));
         let _cse_647_ = (s_own_p + _cse_648_);
-        let _cse_664_ = ((_e181 * 0.625f) + (s_own_rho * 0.375f));
-        let _cse_670_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
-        let _cse_669_ = max(_cse_670_, 0.000000000001f);
-        let _cse_668_ = ((s_own_rho - _e181) / _cse_669_);
-        let _cse_667_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_668_);
-        let _cse_666_ = dot(_cse_667_, (c_owner_vec - c_neigh_cell_vec));
-        let _cse_665_ = (_cse_666_ * 0.125f);
-        let _cse_663_ = (_cse_664_ + _cse_665_);
-        let _cse_662_ = (_cse_663_ - _e181);
-        let _cse_671_ = min((s_own_rho - _e181), 0f);
-        let _cse_661_ = max(_cse_662_, _cse_671_);
-        let _cse_672_ = max((s_own_rho - _e181), 0f);
-        let _cse_660_ = min(_cse_661_, _cse_672_);
-        let _cse_659_ = (_e181 + _cse_660_);
-        let _cse_678_ = ((_e151 * 0.625f) + (s_own_p * 0.375f));
-        let _cse_682_ = ((s_own_p - _e151) / _cse_669_);
-        let _cse_681_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_682_);
-        let _cse_680_ = dot(_cse_681_, (c_owner_vec - c_neigh_cell_vec));
-        let _cse_679_ = (_cse_680_ * 0.125f);
-        let _cse_677_ = (_cse_678_ + _cse_679_);
-        let _cse_676_ = (_cse_677_ - _e151);
-        let _cse_683_ = min((s_own_p - _e151), 0f);
-        let _cse_675_ = max(_cse_676_, _cse_683_);
-        let _cse_674_ = min(_cse_675_, max((s_own_p - _e151), 0f));
-        let _cse_673_ = (_e151 + _cse_674_);
+        let _cse_663_ = ((_e181 * 0.625f) + (s_own_rho * 0.375f));
+        let _cse_669_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
+        let _cse_668_ = max(_cse_669_, 0.000000000001f);
+        let _cse_667_ = ((s_own_rho - _e181) / _cse_668_);
+        let _cse_666_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_667_);
+        let _cse_665_ = dot(_cse_666_, (c_owner_vec - c_neigh_cell_vec));
+        let _cse_664_ = (_cse_665_ * 0.125f);
+        let _cse_662_ = (_cse_663_ + _cse_664_);
+        let _cse_661_ = (_cse_662_ - _e181);
+        let _cse_670_ = min((s_own_rho - _e181), 0f);
+        let _cse_660_ = max(_cse_661_, _cse_670_);
+        let _cse_671_ = max((s_own_rho - _e181), 0f);
+        let _cse_659_ = min(_cse_660_, _cse_671_);
+        let _cse_658_ = (_e181 + _cse_659_);
+        let _cse_677_ = ((_e151 * 0.625f) + (s_own_p * 0.375f));
+        let _cse_681_ = ((s_own_p - _e151) / _cse_668_);
+        let _cse_680_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_681_);
+        let _cse_679_ = dot(_cse_680_, (c_owner_vec - c_neigh_cell_vec));
+        let _cse_678_ = (_cse_679_ * 0.125f);
+        let _cse_676_ = (_cse_677_ + _cse_678_);
+        let _cse_675_ = (_cse_676_ - _e151);
+        let _cse_682_ = min((s_own_p - _e151), 0f);
+        let _cse_674_ = max(_cse_675_, _cse_682_);
+        let _cse_683_ = max((s_own_p - _e151), 0f);
+        let _cse_673_ = min(_cse_674_, _cse_683_);
+        let _cse_672_ = (_e151 + _cse_673_);
         let _cse_686_ = (_e241 - _cse_1450_);
-        let _cse_689_ = (_e271 - _cse_1460_);
+        let _cse_689_ = (_e271 - _cse_1459_);
         let _cse_690_ = (_cse_1450_ - _e241);
-        let _cse_691_ = (_cse_1460_ - _e271);
+        let _cse_691_ = (_cse_1459_ - _e271);
         let _e3638 = constants.eos_theta_ref;
         let _e3642 = constants.eos_dp_drho;
         let _e3647 = constants.eos_p_offset;
@@ -9202,11 +7745,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e3675 = constants.eos_p_offset;
         let _e3681 = constants.eos_gamma;
         let _e3686 = constants.eos_dp_drho;
-        u_r_0_ = (_cse_659_ + ((_cse_642_ * (_cse_673_ - (((_cse_659_ * _e3666) + (_cse_659_ * _e3670)) - _e3675))) / max((((_e3681 * _cse_673_) / _cse_659_) + _e3686), 0.000000000001f)));
+        u_r_0_ = (_cse_658_ + ((_cse_642_ * (_cse_672_ - (((_cse_658_ * _e3666) + (_cse_658_ * _e3670)) - _e3675))) / max((((_e3681 * _cse_672_) / _cse_658_) + _e3686), 0.000000000001f)));
         let _e3741 = normal_vec;
-        f_l_0_ = (_cse_628_ * dot(((vec2<f32>((_cse_1450_ + min(max(((((_cse_1450_ * 0.625f) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_686_) / vec2(_cse_638_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1450_), min(_cse_686_, 0f)), max(_cse_686_, 0f))), (_cse_1460_ + min(max(((((_cse_1460_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_689_) / vec2(_cse_638_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1460_), min(_cse_689_, 0f)), max(_cse_689_, 0f)))) * 1f) / vec2(_cse_628_)), _e3741));
+        f_l_0_ = (_cse_628_ * dot(((vec2<f32>((_cse_1450_ + min(max(((((_cse_1450_ * 0.625f) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_686_) / vec2(_cse_638_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1450_), min(_cse_686_, 0f)), max(_cse_686_, 0f))), (_cse_1459_ + min(max(((((_cse_1459_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_689_) / vec2(_cse_638_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1459_), min(_cse_689_, 0f)), max(_cse_689_, 0f)))) * 1f) / vec2(_cse_628_)), _e3741));
         let _e3793 = normal_vec;
-        f_r_0_ = (_cse_659_ * dot(((vec2<f32>((_e241 + min(max(((((_e241 * 0.625f) + (_cse_1450_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_690_) / vec2(_cse_669_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e241), min(_cse_690_, 0f)), max(_cse_690_, 0f))), (_e271 + min(max(((((_e271 * 0.625f) + (_cse_1460_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_691_) / vec2(_cse_669_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e271), min(_cse_691_, 0f)), max(_cse_691_, 0f)))) * 1f) / vec2(_cse_659_)), _e3793));
+        f_r_0_ = (_cse_658_ * dot(((vec2<f32>((_e241 + min(max(((((_e241 * 0.625f) + (_cse_1450_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_690_) / vec2(_cse_668_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e241), min(_cse_690_, 0f)), max(_cse_690_, 0f))), (_e271 + min(max(((((_e271 * 0.625f) + (_cse_1459_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_691_) / vec2(_cse_668_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e271), min(_cse_691_, 0f)), max(_cse_691_, 0f)))) * 1f) / vec2(_cse_658_)), _e3793));
     }
     let _e3798 = constants.scheme;
     if ((_e3798 == 6u) && !(is_boundary_1)) {
@@ -9264,11 +7807,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_738_ = (_e151 + _cse_739_);
         let _cse_746_ = (((_cse_1450_ * 0.625f) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_701_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
         let _cse_745_ = (_cse_746_ - _cse_1450_);
-        let _cse_750_ = (((_cse_1460_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1460_)) / vec2(_cse_701_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_749_ = (_cse_750_ - _cse_1460_);
+        let _cse_750_ = (((_cse_1459_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1459_)) / vec2(_cse_701_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_749_ = (_cse_750_ - _cse_1459_);
         let _cse_753_ = (((_e241 * 0.625f) + (_cse_1450_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1450_ - _e241)) / vec2(_cse_727_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_752_ = (_cse_753_ - _e241);
-        let _cse_755_ = (((_e271 * 0.625f) + (_cse_1460_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1460_ - _e271)) / vec2(_cse_727_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_755_ = (((_e271 * 0.625f) + (_cse_1459_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1459_ - _e271)) / vec2(_cse_727_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_754_ = (_cse_755_ - _e271);
         let _e4025 = low_mach_params.model;
         let _e4038 = low_mach_params.pressure_coupling_alpha;
@@ -9287,9 +7830,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e4107 = constants.eos_dp_drho;
         u_r_0_ = (_cse_718_ + ((((1f - max(0f, (1f - abs((f32(_e4070) - 2f))))) * _e4083) * (_cse_738_ - (((_cse_718_ * _e4087) + (_cse_718_ * _e4091)) - _e4096))) / max((((_e4102 * _cse_738_) / _cse_718_) + _e4107), 0.000000000001f)));
         let _e4162 = normal_vec;
-        f_l_0_ = (_cse_692_ * dot(((vec2<f32>((_cse_1450_ + ((((_cse_745_ * abs((_e241 - _cse_1450_))) / max(abs((_e241 - _cse_1450_)), (abs(_cse_745_) + 0.00000001f))) * max(((_e241 - _cse_1450_) * _cse_745_), 0f)) / max(abs(((_e241 - _cse_1450_) * _cse_745_)), 0.00000001f))), (_cse_1460_ + ((((_cse_749_ * abs((_e271 - _cse_1460_))) / max(abs((_e271 - _cse_1460_)), (abs(_cse_749_) + 0.00000001f))) * max(((_e271 - _cse_1460_) * _cse_749_), 0f)) / max(abs(((_e271 - _cse_1460_) * _cse_749_)), 0.00000001f)))) * 1f) / vec2(_cse_692_)), _e4162));
+        f_l_0_ = (_cse_692_ * dot(((vec2<f32>((_cse_1450_ + ((((_cse_745_ * abs((_e241 - _cse_1450_))) / max(abs((_e241 - _cse_1450_)), (abs(_cse_745_) + 0.00000001f))) * max(((_e241 - _cse_1450_) * _cse_745_), 0f)) / max(abs(((_e241 - _cse_1450_) * _cse_745_)), 0.00000001f))), (_cse_1459_ + ((((_cse_749_ * abs((_e271 - _cse_1459_))) / max(abs((_e271 - _cse_1459_)), (abs(_cse_749_) + 0.00000001f))) * max(((_e271 - _cse_1459_) * _cse_749_), 0f)) / max(abs(((_e271 - _cse_1459_) * _cse_749_)), 0.00000001f)))) * 1f) / vec2(_cse_692_)), _e4162));
         let _e4214 = normal_vec;
-        f_r_0_ = (_cse_718_ * dot(((vec2<f32>((_e241 + ((((_cse_752_ * abs((_cse_1450_ - _e241))) / max(abs((_cse_1450_ - _e241)), (abs(_cse_752_) + 0.00000001f))) * max(((_cse_1450_ - _e241) * _cse_752_), 0f)) / max(abs(((_cse_1450_ - _e241) * _cse_752_)), 0.00000001f))), (_e271 + ((((_cse_754_ * abs((_cse_1460_ - _e271))) / max(abs((_cse_1460_ - _e271)), (abs(_cse_754_) + 0.00000001f))) * max(((_cse_1460_ - _e271) * _cse_754_), 0f)) / max(abs(((_cse_1460_ - _e271) * _cse_754_)), 0.00000001f)))) * 1f) / vec2(_cse_718_)), _e4214));
+        f_r_0_ = (_cse_718_ * dot(((vec2<f32>((_e241 + ((((_cse_752_ * abs((_cse_1450_ - _e241))) / max(abs((_cse_1450_ - _e241)), (abs(_cse_752_) + 0.00000001f))) * max(((_cse_1450_ - _e241) * _cse_752_), 0f)) / max(abs(((_cse_1450_ - _e241) * _cse_752_)), 0.00000001f))), (_e271 + ((((_cse_754_ * abs((_cse_1459_ - _e271))) / max(abs((_cse_1459_ - _e271)), (abs(_cse_754_) + 0.00000001f))) * max(((_cse_1459_ - _e271) * _cse_754_), 0f)) / max(abs(((_cse_1459_ - _e271) * _cse_754_)), 0.00000001f)))) * 1f) / vec2(_cse_718_)), _e4214));
     }
     let _e4223 = a_plus;
     let _e4224 = f_l_0_;
@@ -9304,7 +7847,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     u_l_1_ = _cse_1450_;
     u_r_1_ = _e241;
     let _e4249 = normal_vec;
-    f_l_1_ = ((_cse_1450_ * dot(((vec2<f32>(_cse_1450_, _cse_1460_) * 1f) / vec2(s_own_rho)), _e4249)) + (s_own_p * _cse_758_));
+    f_l_1_ = ((_cse_1450_ * dot(((vec2<f32>(_cse_1450_, _cse_1459_) * 1f) / vec2(s_own_rho)), _e4249)) + (s_own_p * _cse_758_));
     let _e4260 = normal_vec;
     f_r_1_ = ((_e241 * dot(((vec2<f32>(_e241, _e271) * 1f) / vec2(_e181)), _e4260)) + (_e151 * _cse_758_));
     let _e4268 = constants.scheme;
@@ -9327,9 +7870,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         u_l_1_ = _cse_759_;
         u_r_1_ = _cse_768_;
         let _e4320 = normal_vec;
-        f_l_1_ = ((_cse_759_ * dot(((vec2<f32>(_cse_759_, (_cse_1460_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1460_)) / vec2(_cse_766_)), (face_center_vec - c_owner_vec)))) * 1f) / vec2((s_own_rho + dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_766_)), (face_center_vec - c_owner_vec))))), _e4320)) + ((s_own_p + dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_766_)), (face_center_vec - c_owner_vec))) * _cse_777_));
+        f_l_1_ = ((_cse_759_ * dot(((vec2<f32>(_cse_759_, (_cse_1459_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1459_)) / vec2(_cse_766_)), (face_center_vec - c_owner_vec)))) * 1f) / vec2((s_own_rho + dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_766_)), (face_center_vec - c_owner_vec))))), _e4320)) + ((s_own_p + dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_766_)), (face_center_vec - c_owner_vec))) * _cse_777_));
         let _e4354 = normal_vec;
-        f_r_1_ = ((_cse_768_ * dot(((vec2<f32>(_cse_768_, (_e271 + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1460_ - _e271)) / vec2(_cse_773_)), (face_center_vec - c_neigh_cell_vec)))) * 1f) / vec2((_e181 + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_773_)), (face_center_vec - c_neigh_cell_vec))))), _e4354)) + ((_e151 + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_773_)), (face_center_vec - c_neigh_cell_vec))) * _cse_777_));
+        f_r_1_ = ((_cse_768_ * dot(((vec2<f32>(_cse_768_, (_e271 + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1459_ - _e271)) / vec2(_cse_773_)), (face_center_vec - c_neigh_cell_vec)))) * 1f) / vec2((_e181 + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_773_)), (face_center_vec - c_neigh_cell_vec))))), _e4354)) + ((_e151 + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_773_)), (face_center_vec - c_neigh_cell_vec))) * _cse_777_));
     }
     let _e4369 = constants.scheme;
     if ((_e4369 == 2u) && !(is_boundary_1)) {
@@ -9363,9 +7906,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         u_l_1_ = _cse_778_;
         u_r_1_ = _cse_793_;
         let _e4457 = normal_vec;
-        f_l_1_ = ((_cse_778_ * dot(((vec2<f32>(_cse_778_, ((((_cse_1460_ + (_cse_1460_ * 0.625f)) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1460_)) / vec2(_cse_791_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1460_)) * 1f) / vec2(((((s_own_rho + (s_own_rho * 0.625f)) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_791_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho))), _e4457)) + (((((s_own_p + (s_own_p * 0.625f)) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_791_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p) * _cse_808_));
+        f_l_1_ = ((_cse_778_ * dot(((vec2<f32>(_cse_778_, ((((_cse_1459_ + (_cse_1459_ * 0.625f)) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1459_)) / vec2(_cse_791_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1459_)) * 1f) / vec2(((((s_own_rho + (s_own_rho * 0.625f)) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_791_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho))), _e4457)) + (((((s_own_p + (s_own_p * 0.625f)) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_791_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p) * _cse_808_));
         let _e4518 = normal_vec;
-        f_r_1_ = ((_cse_793_ * dot(((vec2<f32>(_cse_793_, ((((_e271 + (_e271 * 0.625f)) + (_cse_1460_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1460_ - _e271)) / vec2(_cse_804_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e271)) * 1f) / vec2(((((_e181 + (_e181 * 0.625f)) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_804_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181))), _e4518)) + (((((_e151 + (_e151 * 0.625f)) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_804_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151) * _cse_808_));
+        f_r_1_ = ((_cse_793_ * dot(((vec2<f32>(_cse_793_, ((((_e271 + (_e271 * 0.625f)) + (_cse_1459_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1459_ - _e271)) / vec2(_cse_804_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e271)) * 1f) / vec2(((((_e181 + (_e181 * 0.625f)) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_804_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181))), _e4518)) + (((((_e151 + (_e151 * 0.625f)) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_804_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151) * _cse_808_));
     }
     let _e4542 = constants.scheme;
     if ((_e4542 == 3u) && !(is_boundary_1)) {
@@ -9391,13 +7934,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_832_ = max(_cse_828_, 0f);
         let _cse_823_ = min(_cse_824_, _cse_832_);
         let _cse_822_ = (_e241 + _cse_823_);
-        let _cse_834_ = (_e271 - _cse_1460_);
+        let _cse_834_ = (_e271 - _cse_1459_);
         let _cse_836_ = normal_vec.x;
-        let _cse_837_ = (_cse_1460_ - _e271);
+        let _cse_837_ = (_cse_1459_ - _e271);
         u_l_1_ = _cse_809_;
         u_r_1_ = _cse_822_;
         let _e4621 = normal_vec;
-        f_l_1_ = ((_cse_809_ * dot(((vec2<f32>(_cse_809_, (_cse_1460_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_834_) / vec2(_cse_818_)), (face_center_vec - c_owner_vec)), min(_cse_834_, 0f)), max(_cse_834_, 0f)))) * 1f) / vec2((s_own_rho + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_818_)), (face_center_vec - c_owner_vec)), min((_e181 - s_own_rho), 0f)), max((_e181 - s_own_rho), 0f))))), _e4621)) + ((s_own_p + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_818_)), (face_center_vec - c_owner_vec)), min((_e151 - s_own_p), 0f)), max((_e151 - s_own_p), 0f))) * _cse_836_));
+        f_l_1_ = ((_cse_809_ * dot(((vec2<f32>(_cse_809_, (_cse_1459_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_834_) / vec2(_cse_818_)), (face_center_vec - c_owner_vec)), min(_cse_834_, 0f)), max(_cse_834_, 0f)))) * 1f) / vec2((s_own_rho + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_818_)), (face_center_vec - c_owner_vec)), min((_e181 - s_own_rho), 0f)), max((_e181 - s_own_rho), 0f))))), _e4621)) + ((s_own_p + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_818_)), (face_center_vec - c_owner_vec)), min((_e151 - s_own_p), 0f)), max((_e151 - s_own_p), 0f))) * _cse_836_));
         let _e4676 = normal_vec;
         f_r_1_ = ((_cse_822_ * dot(((vec2<f32>(_cse_822_, (_e271 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_837_) / vec2(_cse_829_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_837_, 0f)), max(_cse_837_, 0f)))) * 1f) / vec2((_e181 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_829_)), (face_center_vec - c_neigh_cell_vec)), min((s_own_rho - _e181), 0f)), max((s_own_rho - _e181), 0f))))), _e4676)) + ((_e151 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_829_)), (face_center_vec - c_neigh_cell_vec)), min((s_own_p - _e151), 0f)), max((s_own_p - _e151), 0f))) * _cse_836_));
     }
@@ -9441,7 +7984,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_873_ = (_cse_874_ / _cse_876_);
         let _cse_860_ = (_cse_861_ * _cse_873_);
         let _cse_859_ = (_e241 + _cse_860_);
-        let _cse_882_ = (_e271 - _cse_1460_);
+        let _cse_882_ = (_e271 - _cse_1459_);
         let _cse_881_ = (_cse_882_ / _cse_847_);
         let _cse_880_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_881_);
         let _cse_879_ = dot(_cse_880_, (face_center_vec - c_owner_vec));
@@ -9452,7 +7995,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_890_ = ((_e151 - s_own_p) / _cse_847_);
         let _cse_889_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_890_);
         let _cse_888_ = dot(_cse_889_, (face_center_vec - c_owner_vec));
-        let _cse_894_ = (_cse_1460_ - _e271);
+        let _cse_894_ = (_cse_1459_ - _e271);
         let _cse_893_ = (_cse_894_ / _cse_866_);
         let _cse_892_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_893_);
         let _cse_891_ = dot(_cse_892_, (face_center_vec - c_neigh_cell_vec));
@@ -9467,7 +8010,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         u_r_1_ = _cse_859_;
         let _e4839 = normal_vec;
         let _e4865 = normal_vec.x;
-        f_l_1_ = ((_cse_838_ * dot(((vec2<f32>(_cse_838_, (_cse_1460_ + ((((_cse_879_ * abs(_cse_882_)) / max(abs(_cse_882_), (abs(_cse_879_) + 0.00000001f))) * max(_cse_884_, 0f)) / max(abs(_cse_884_), 0.00000001f)))) * 1f) / vec2((s_own_rho + ((((_cse_885_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_885_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_885_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_885_)), 0.00000001f))))), _e4839)) + ((s_own_p + ((((_cse_888_ * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(_cse_888_) + 0.00000001f))) * max(((_e151 - s_own_p) * _cse_888_), 0f)) / max(abs(((_e151 - s_own_p) * _cse_888_)), 0.00000001f))) * _e4865));
+        f_l_1_ = ((_cse_838_ * dot(((vec2<f32>(_cse_838_, (_cse_1459_ + ((((_cse_879_ * abs(_cse_882_)) / max(abs(_cse_882_), (abs(_cse_879_) + 0.00000001f))) * max(_cse_884_, 0f)) / max(abs(_cse_884_), 0.00000001f)))) * 1f) / vec2((s_own_rho + ((((_cse_885_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_885_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_885_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_885_)), 0.00000001f))))), _e4839)) + ((s_own_p + ((((_cse_888_ * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(_cse_888_) + 0.00000001f))) * max(((_e151 - s_own_p) * _cse_888_), 0f)) / max(abs(((_e151 - s_own_p) * _cse_888_)), 0.00000001f))) * _e4865));
         let _e4911 = normal_vec;
         let _e4937 = normal_vec.x;
         f_r_1_ = ((_cse_859_ * dot(((vec2<f32>(_cse_859_, (_e271 + ((((_cse_891_ * abs(_cse_894_)) / max(abs(_cse_894_), (abs(_cse_891_) + 0.00000001f))) * max(_cse_895_, 0f)) / max(abs(_cse_895_), 0.00000001f)))) * 1f) / vec2((_e181 + ((((_cse_896_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_896_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_896_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_896_)), 0.00000001f))))), _e4911)) + ((_e151 + ((((_cse_899_ * abs((s_own_p - _e151))) / max(abs((s_own_p - _e151)), (abs(_cse_899_) + 0.00000001f))) * max(((s_own_p - _e151) * _cse_899_), 0f)) / max(abs(((s_own_p - _e151) * _cse_899_)), 0.00000001f))) * _e4937));
@@ -9508,15 +8051,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_937_ = max(_cse_933_, 0f);
         let _cse_922_ = min(_cse_923_, _cse_937_);
         let _cse_921_ = (_e241 + _cse_922_);
-        let _cse_940_ = (_e271 - _cse_1460_);
+        let _cse_940_ = (_e271 - _cse_1459_);
         let _cse_941_ = normal_vec.x;
-        let _cse_942_ = (_cse_1460_ - _e271);
+        let _cse_942_ = (_cse_1459_ - _e271);
         u_l_1_ = _cse_902_;
         u_r_1_ = _cse_921_;
         let _e5057 = normal_vec;
-        f_l_1_ = ((_cse_902_ * dot(((vec2<f32>(_cse_902_, (_cse_1460_ + min(max(((((_cse_1460_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_940_) / vec2(_cse_917_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1460_), min(_cse_940_, 0f)), max(_cse_940_, 0f)))) * 1f) / vec2((s_own_rho + min(max(((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_917_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho), min((_e181 - s_own_rho), 0f)), max((_e181 - s_own_rho), 0f))))), _e5057)) + ((s_own_p + min(max(((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_917_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p), min((_e151 - s_own_p), 0f)), max((_e151 - s_own_p), 0f))) * _cse_941_));
+        f_l_1_ = ((_cse_902_ * dot(((vec2<f32>(_cse_902_, (_cse_1459_ + min(max(((((_cse_1459_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_940_) / vec2(_cse_917_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1459_), min(_cse_940_, 0f)), max(_cse_940_, 0f)))) * 1f) / vec2((s_own_rho + min(max(((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_917_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho), min((_e181 - s_own_rho), 0f)), max((_e181 - s_own_rho), 0f))))), _e5057)) + ((s_own_p + min(max(((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_917_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p), min((_e151 - s_own_p), 0f)), max((_e151 - s_own_p), 0f))) * _cse_941_));
         let _e5139 = normal_vec;
-        f_r_1_ = ((_cse_921_ * dot(((vec2<f32>(_cse_921_, (_e271 + min(max(((((_e271 * 0.625f) + (_cse_1460_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_942_) / vec2(_cse_934_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e271), min(_cse_942_, 0f)), max(_cse_942_, 0f)))) * 1f) / vec2((_e181 + min(max(((((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_934_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181), min((s_own_rho - _e181), 0f)), max((s_own_rho - _e181), 0f))))), _e5139)) + ((_e151 + min(max(((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_934_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151), min((s_own_p - _e151), 0f)), max((s_own_p - _e151), 0f))) * _cse_941_));
+        f_r_1_ = ((_cse_921_ * dot(((vec2<f32>(_cse_921_, (_e271 + min(max(((((_e271 * 0.625f) + (_cse_1459_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_942_) / vec2(_cse_934_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e271), min(_cse_942_, 0f)), max(_cse_942_, 0f)))) * 1f) / vec2((_e181 + min(max(((((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_934_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181), min((s_own_rho - _e181), 0f)), max((s_own_rho - _e181), 0f))))), _e5139)) + ((_e151 + min(max(((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_934_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151), min((s_own_p - _e151), 0f)), max((s_own_p - _e151), 0f))) * _cse_941_));
     }
     let _e5171 = constants.scheme;
     if ((_e5171 == 6u) && !(is_boundary_1)) {
@@ -9570,21 +8113,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_990_ = (_cse_991_ / _cse_993_);
         let _cse_971_ = (_cse_972_ * _cse_990_);
         let _cse_970_ = (_e241 + _cse_971_);
-        let _cse_1001_ = (_e271 - _cse_1460_);
+        let _cse_1001_ = (_e271 - _cse_1459_);
         let _cse_1000_ = dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1001_) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec));
         let _cse_999_ = (_cse_1000_ * 0.125f);
-        let _cse_997_ = (((_cse_1460_ * 0.625f) + (_e271 * 0.375f)) + _cse_999_);
-        let _cse_996_ = (_cse_997_ - _cse_1460_);
-        let _cse_1006_ = (_cse_1460_ - _e271);
+        let _cse_997_ = (((_cse_1459_ * 0.625f) + (_e271 * 0.375f)) + _cse_999_);
+        let _cse_996_ = (_cse_997_ - _cse_1459_);
+        let _cse_1006_ = (_cse_1459_ - _e271);
         let _cse_1005_ = dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1006_) / vec2(_cse_983_)), (c_owner_vec - c_neigh_cell_vec));
         let _cse_1004_ = (_cse_1005_ * 0.125f);
-        let _cse_1003_ = (((_e271 * 0.625f) + (_cse_1460_ * 0.375f)) + _cse_1004_);
+        let _cse_1003_ = (((_e271 * 0.625f) + (_cse_1459_ * 0.375f)) + _cse_1004_);
         let _cse_1002_ = (_cse_1003_ - _e271);
         u_l_1_ = _cse_943_;
         u_r_1_ = _cse_970_;
         let _e5389 = normal_vec;
         let _e5479 = normal_vec.x;
-        f_l_1_ = ((_cse_943_ * dot(((vec2<f32>(_cse_943_, (_cse_1460_ + ((((_cse_996_ * abs(_cse_1001_)) / max(abs(_cse_1001_), (abs(_cse_996_) + 0.00000001f))) * max((_cse_1001_ * _cse_996_), 0f)) / max(abs((_cse_1001_ * _cse_996_)), 0.00000001f)))) * 1f) / vec2((s_own_rho + ((((((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho) * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho)) + 0.00000001f))) * max(((_e181 - s_own_rho) * ((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho)), 0f)) / max(abs(((_e181 - s_own_rho) * ((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho))), 0.00000001f))))), _e5389)) + ((s_own_p + ((((((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p) * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p)) + 0.00000001f))) * max(((_e151 - s_own_p) * ((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p)), 0f)) / max(abs(((_e151 - s_own_p) * ((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p))), 0.00000001f))) * _e5479));
+        f_l_1_ = ((_cse_943_ * dot(((vec2<f32>(_cse_943_, (_cse_1459_ + ((((_cse_996_ * abs(_cse_1001_)) / max(abs(_cse_1001_), (abs(_cse_996_) + 0.00000001f))) * max((_cse_1001_ * _cse_996_), 0f)) / max(abs((_cse_1001_ * _cse_996_)), 0.00000001f)))) * 1f) / vec2((s_own_rho + ((((((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho) * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho)) + 0.00000001f))) * max(((_e181 - s_own_rho) * ((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho)), 0f)) / max(abs(((_e181 - s_own_rho) * ((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho))), 0.00000001f))))), _e5389)) + ((s_own_p + ((((((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p) * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p)) + 0.00000001f))) * max(((_e151 - s_own_p) * ((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p)), 0f)) / max(abs(((_e151 - s_own_p) * ((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_958_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p))), 0.00000001f))) * _e5479));
         let _e5591 = normal_vec;
         let _e5681 = normal_vec.x;
         f_r_1_ = ((_cse_970_ * dot(((vec2<f32>(_cse_970_, (_e271 + ((((_cse_1002_ * abs(_cse_1006_)) / max(abs(_cse_1006_), (abs(_cse_1002_) + 0.00000001f))) * max((_cse_1006_ * _cse_1002_), 0f)) / max(abs((_cse_1006_ * _cse_1002_)), 0.00000001f)))) * 1f) / vec2((_e181 + ((((((((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_983_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181) * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(((((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_983_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181)) + 0.00000001f))) * max(((s_own_rho - _e181) * ((((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_983_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181)), 0f)) / max(abs(((s_own_rho - _e181) * ((((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_983_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181))), 0.00000001f))))), _e5591)) + ((_e151 + ((((((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_983_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151) * abs((s_own_p - _e151))) / max(abs((s_own_p - _e151)), (abs(((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_983_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)) + 0.00000001f))) * max(((s_own_p - _e151) * ((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_983_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)), 0f)) / max(abs(((s_own_p - _e151) * ((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_983_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151))), 0.00000001f))) * _e5681));
@@ -9599,22 +8142,22 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e5701 = u_l_1_;
     fluxes[((idx * 8u) + 1u)] = (((((_e5690 * _e5691) - (_e5693 * _e5694)) + ((_e5697 * _e5698) * (_e5700 - _e5701))) / denom) * area);
     let _cse_1009_ = normal_vec.y;
-    u_l_2_ = _cse_1460_;
+    u_l_2_ = _cse_1459_;
     u_r_2_ = _e271;
     let _e5716 = normal_vec;
-    f_l_2_ = ((_cse_1460_ * dot(((vec2<f32>(_cse_1450_, _cse_1460_) * 1f) / vec2(s_own_rho)), _e5716)) + (s_own_p * _cse_1009_));
+    f_l_2_ = ((_cse_1459_ * dot(((vec2<f32>(_cse_1450_, _cse_1459_) * 1f) / vec2(s_own_rho)), _e5716)) + (s_own_p * _cse_1009_));
     let _e5727 = normal_vec;
     f_r_2_ = ((_e271 * dot(((vec2<f32>(_e241, _e271) * 1f) / vec2(_e181)), _e5727)) + (_e151 * _cse_1009_));
     let _e5735 = constants.scheme;
     if ((_e5735 == 1u) && !(is_boundary_1)) {
-        let _cse_1015_ = (_e271 - _cse_1460_);
+        let _cse_1015_ = (_e271 - _cse_1459_);
         let _cse_1018_ = dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec));
         let _cse_1017_ = max(_cse_1018_, 0.000000000001f);
         let _cse_1014_ = (_cse_1015_ / _cse_1017_);
         let _cse_1013_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1014_);
         let _cse_1012_ = dot(_cse_1013_, (face_center_vec - c_owner_vec));
-        let _cse_1010_ = (_cse_1460_ + _cse_1012_);
-        let _cse_1023_ = (_cse_1460_ - _e271);
+        let _cse_1010_ = (_cse_1459_ + _cse_1012_);
+        let _cse_1023_ = (_cse_1459_ - _e271);
         let _cse_1025_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
         let _cse_1024_ = max(_cse_1025_, 0.000000000001f);
         let _cse_1022_ = (_cse_1023_ / _cse_1024_);
@@ -9631,10 +8174,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let _e5836 = constants.scheme;
     if ((_e5836 == 2u) && !(is_boundary_1)) {
-        let _cse_1034_ = (_cse_1460_ * 0.625f);
+        let _cse_1034_ = (_cse_1459_ * 0.625f);
         let _cse_1035_ = (_e271 * 0.375f);
         let _cse_1033_ = (_cse_1034_ + _cse_1035_);
-        let _cse_1041_ = (_e271 - _cse_1460_);
+        let _cse_1041_ = (_e271 - _cse_1459_);
         let _cse_1043_ = dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec));
         let _cse_1042_ = max(_cse_1043_, 0.000000000001f);
         let _cse_1040_ = (_cse_1041_ / _cse_1042_);
@@ -9642,12 +8185,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1038_ = dot(_cse_1039_, (c_neigh_cell_vec - c_owner_vec));
         let _cse_1037_ = (_cse_1038_ * 0.125f);
         let _cse_1032_ = (_cse_1033_ + _cse_1037_);
-        let _cse_1031_ = (_cse_1032_ - _cse_1460_);
-        let _cse_1029_ = (_cse_1460_ + _cse_1031_);
+        let _cse_1031_ = (_cse_1032_ - _cse_1459_);
+        let _cse_1029_ = (_cse_1459_ + _cse_1031_);
         let _cse_1048_ = (_e271 * 0.625f);
-        let _cse_1049_ = (_cse_1460_ * 0.375f);
+        let _cse_1049_ = (_cse_1459_ * 0.375f);
         let _cse_1047_ = (_cse_1048_ + _cse_1049_);
-        let _cse_1054_ = (_cse_1460_ - _e271);
+        let _cse_1054_ = (_cse_1459_ - _e271);
         let _cse_1056_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
         let _cse_1055_ = max(_cse_1056_, 0.000000000001f);
         let _cse_1053_ = (_cse_1054_ / _cse_1055_);
@@ -9667,7 +8210,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let _e6009 = constants.scheme;
     if ((_e6009 == 3u) && !(is_boundary_1)) {
-        let _cse_1067_ = (_e271 - _cse_1460_);
+        let _cse_1067_ = (_e271 - _cse_1459_);
         let _cse_1070_ = dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec));
         let _cse_1069_ = max(_cse_1070_, 0.000000000001f);
         let _cse_1066_ = (_cse_1067_ / _cse_1069_);
@@ -9677,8 +8220,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1063_ = max(_cse_1064_, _cse_1071_);
         let _cse_1072_ = max(_cse_1067_, 0f);
         let _cse_1062_ = min(_cse_1063_, _cse_1072_);
-        let _cse_1060_ = (_cse_1460_ + _cse_1062_);
-        let _cse_1079_ = (_cse_1460_ - _e271);
+        let _cse_1060_ = (_cse_1459_ + _cse_1062_);
+        let _cse_1079_ = (_cse_1459_ - _e271);
         let _cse_1081_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
         let _cse_1080_ = max(_cse_1081_, 0.000000000001f);
         let _cse_1078_ = (_cse_1079_ / _cse_1080_);
@@ -9701,7 +8244,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let _e6166 = constants.scheme;
     if ((_e6166 == 4u) && !(is_boundary_1)) {
-        let _cse_1096_ = (_e271 - _cse_1460_);
+        let _cse_1096_ = (_e271 - _cse_1459_);
         let _cse_1099_ = dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec));
         let _cse_1098_ = max(_cse_1099_, 0.000000000001f);
         let _cse_1095_ = (_cse_1096_ / _cse_1098_);
@@ -9719,8 +8262,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1108_ = max(_cse_1109_, 0.00000001f);
         let _cse_1105_ = (_cse_1106_ / _cse_1108_);
         let _cse_1091_ = (_cse_1092_ * _cse_1105_);
-        let _cse_1089_ = (_cse_1460_ + _cse_1091_);
-        let _cse_1116_ = (_cse_1460_ - _e271);
+        let _cse_1089_ = (_cse_1459_ + _cse_1091_);
+        let _cse_1116_ = (_cse_1459_ - _e271);
         let _cse_1118_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
         let _cse_1117_ = max(_cse_1118_, 0.000000000001f);
         let _cse_1115_ = (_cse_1116_ / _cse_1117_);
@@ -9772,10 +8315,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let _e6409 = constants.scheme;
     if ((_e6409 == 5u) && !(is_boundary_1)) {
-        let _cse_1160_ = (_cse_1460_ * 0.625f);
+        let _cse_1160_ = (_cse_1459_ * 0.625f);
         let _cse_1161_ = (_e271 * 0.375f);
         let _cse_1159_ = (_cse_1160_ + _cse_1161_);
-        let _cse_1167_ = (_e271 - _cse_1460_);
+        let _cse_1167_ = (_e271 - _cse_1459_);
         let _cse_1169_ = dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec));
         let _cse_1168_ = max(_cse_1169_, 0.000000000001f);
         let _cse_1166_ = (_cse_1167_ / _cse_1168_);
@@ -9783,16 +8326,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1164_ = dot(_cse_1165_, (c_neigh_cell_vec - c_owner_vec));
         let _cse_1163_ = (_cse_1164_ * 0.125f);
         let _cse_1158_ = (_cse_1159_ + _cse_1163_);
-        let _cse_1157_ = (_cse_1158_ - _cse_1460_);
+        let _cse_1157_ = (_cse_1158_ - _cse_1459_);
         let _cse_1170_ = min(_cse_1167_, 0f);
         let _cse_1156_ = max(_cse_1157_, _cse_1170_);
         let _cse_1171_ = max(_cse_1167_, 0f);
         let _cse_1155_ = min(_cse_1156_, _cse_1171_);
-        let _cse_1153_ = (_cse_1460_ + _cse_1155_);
+        let _cse_1153_ = (_cse_1459_ + _cse_1155_);
         let _cse_1178_ = (_e271 * 0.625f);
-        let _cse_1179_ = (_cse_1460_ * 0.375f);
+        let _cse_1179_ = (_cse_1459_ * 0.375f);
         let _cse_1177_ = (_cse_1178_ + _cse_1179_);
-        let _cse_1184_ = (_cse_1460_ - _e271);
+        let _cse_1184_ = (_cse_1459_ - _e271);
         let _cse_1186_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
         let _cse_1185_ = max(_cse_1186_, 0.000000000001f);
         let _cse_1183_ = (_cse_1184_ / _cse_1185_);
@@ -9818,10 +8361,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let _e6638 = constants.scheme;
     if ((_e6638 == 6u) && !(is_boundary_1)) {
-        let _cse_1201_ = (_cse_1460_ * 0.625f);
+        let _cse_1201_ = (_cse_1459_ * 0.625f);
         let _cse_1202_ = (_e271 * 0.375f);
         let _cse_1200_ = (_cse_1201_ + _cse_1202_);
-        let _cse_1208_ = (_e271 - _cse_1460_);
+        let _cse_1208_ = (_e271 - _cse_1459_);
         let _cse_1210_ = dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec));
         let _cse_1209_ = max(_cse_1210_, 0.000000000001f);
         let _cse_1207_ = (_cse_1208_ / _cse_1209_);
@@ -9829,7 +8372,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1205_ = dot(_cse_1206_, (c_neigh_cell_vec - c_owner_vec));
         let _cse_1204_ = (_cse_1205_ * 0.125f);
         let _cse_1199_ = (_cse_1200_ + _cse_1204_);
-        let _cse_1198_ = (_cse_1199_ - _cse_1460_);
+        let _cse_1198_ = (_cse_1199_ - _cse_1459_);
         let _cse_1212_ = abs(_cse_1208_);
         let _cse_1215_ = abs(_cse_1198_);
         let _cse_1214_ = (_cse_1215_ + 0.00000001f);
@@ -9842,11 +8385,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1219_ = max(_cse_1220_, 0.00000001f);
         let _cse_1216_ = (_cse_1217_ / _cse_1219_);
         let _cse_1196_ = (_cse_1197_ * _cse_1216_);
-        let _cse_1194_ = (_cse_1460_ + _cse_1196_);
+        let _cse_1194_ = (_cse_1459_ + _cse_1196_);
         let _cse_1227_ = (_e271 * 0.625f);
-        let _cse_1228_ = (_cse_1460_ * 0.375f);
+        let _cse_1228_ = (_cse_1459_ * 0.375f);
         let _cse_1226_ = (_cse_1227_ + _cse_1228_);
-        let _cse_1233_ = (_cse_1460_ - _e271);
+        let _cse_1233_ = (_cse_1459_ - _e271);
         let _cse_1235_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
         let _cse_1234_ = max(_cse_1235_, 0.000000000001f);
         let _cse_1232_ = (_cse_1233_ / _cse_1234_);
@@ -9899,7 +8442,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     u_l_3_ = s_own_rho_e;
     u_r_3_ = _e211;
     let _e7182 = normal_vec;
-    f_l_3_ = ((s_own_rho_e + s_own_p) * dot(((vec2<f32>(_cse_1450_, _cse_1460_) * 1f) / vec2(s_own_rho)), _e7182));
+    f_l_3_ = ((s_own_rho_e + s_own_p) * dot(((vec2<f32>(_cse_1450_, _cse_1459_) * 1f) / vec2(s_own_rho)), _e7182));
     let _e7192 = normal_vec;
     f_r_3_ = ((_e211 + _e151) * dot(((vec2<f32>(_e241, _e271) * 1f) / vec2(_e181)), _e7192));
     let _e7198 = constants.scheme;
@@ -9919,9 +8462,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         u_l_3_ = _cse_1258_;
         u_r_3_ = _cse_1264_;
         let _e7265 = normal_vec;
-        f_l_3_ = (((_cse_1258_ + s_own_p) + dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_1262_)), (face_center_vec - c_owner_vec))) * dot(((vec2<f32>((_cse_1450_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_1262_)), (face_center_vec - c_owner_vec))), (_cse_1460_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1460_)) / vec2(_cse_1262_)), (face_center_vec - c_owner_vec)))) * 1f) / vec2((s_own_rho + dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1262_)), (face_center_vec - c_owner_vec))))), _e7265));
+        f_l_3_ = (((_cse_1258_ + s_own_p) + dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_1262_)), (face_center_vec - c_owner_vec))) * dot(((vec2<f32>((_cse_1450_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_1262_)), (face_center_vec - c_owner_vec))), (_cse_1459_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1459_)) / vec2(_cse_1262_)), (face_center_vec - c_owner_vec)))) * 1f) / vec2((s_own_rho + dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1262_)), (face_center_vec - c_owner_vec))))), _e7265));
         let _e7306 = normal_vec;
-        f_r_3_ = (((_cse_1264_ + _e151) + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_1268_)), (face_center_vec - c_neigh_cell_vec))) * dot(((vec2<f32>((_e241 + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1450_ - _e241)) / vec2(_cse_1268_)), (face_center_vec - c_neigh_cell_vec))), (_e271 + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1460_ - _e271)) / vec2(_cse_1268_)), (face_center_vec - c_neigh_cell_vec)))) * 1f) / vec2((_e181 + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1268_)), (face_center_vec - c_neigh_cell_vec))))), _e7306));
+        f_r_3_ = (((_cse_1264_ + _e151) + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_1268_)), (face_center_vec - c_neigh_cell_vec))) * dot(((vec2<f32>((_e241 + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1450_ - _e241)) / vec2(_cse_1268_)), (face_center_vec - c_neigh_cell_vec))), (_e271 + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1459_ - _e271)) / vec2(_cse_1268_)), (face_center_vec - c_neigh_cell_vec)))) * 1f) / vec2((_e181 + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1268_)), (face_center_vec - c_neigh_cell_vec))))), _e7306));
     }
     let _e7311 = constants.scheme;
     if ((_e7311 == 2u) && !(is_boundary_1)) {
@@ -9948,9 +8491,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         u_l_3_ = _cse_1274_;
         u_r_3_ = _cse_1284_;
         let _e7432 = normal_vec;
-        f_l_3_ = ((((((_cse_1274_ + s_own_p) + (s_own_p * 0.625f)) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_1282_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p) * dot(((vec2<f32>(((((_cse_1450_ + (_cse_1450_ * 0.625f)) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_1282_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1450_), ((((_cse_1460_ + (_cse_1460_ * 0.625f)) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1460_)) / vec2(_cse_1282_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1460_)) * 1f) / vec2(((((s_own_rho + (s_own_rho * 0.625f)) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1282_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho))), _e7432));
+        f_l_3_ = ((((((_cse_1274_ + s_own_p) + (s_own_p * 0.625f)) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_1282_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p) * dot(((vec2<f32>(((((_cse_1450_ + (_cse_1450_ * 0.625f)) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_1282_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1450_), ((((_cse_1459_ + (_cse_1459_ * 0.625f)) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1459_)) / vec2(_cse_1282_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1459_)) * 1f) / vec2(((((s_own_rho + (s_own_rho * 0.625f)) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1282_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho))), _e7432));
         let _e7509 = normal_vec;
-        f_r_3_ = ((((((_cse_1284_ + _e151) + (_e151 * 0.625f)) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_1292_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151) * dot(((vec2<f32>(((((_e241 + (_e241 * 0.625f)) + (_cse_1450_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1450_ - _e241)) / vec2(_cse_1292_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e241), ((((_e271 + (_e271 * 0.625f)) + (_cse_1460_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1460_ - _e271)) / vec2(_cse_1292_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e271)) * 1f) / vec2(((((_e181 + (_e181 * 0.625f)) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1292_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181))), _e7509));
+        f_r_3_ = ((((((_cse_1284_ + _e151) + (_e151 * 0.625f)) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_1292_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151) * dot(((vec2<f32>(((((_e241 + (_e241 * 0.625f)) + (_cse_1450_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1450_ - _e241)) / vec2(_cse_1292_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e241), ((((_e271 + (_e271 * 0.625f)) + (_cse_1459_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1459_ - _e271)) / vec2(_cse_1292_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e271)) * 1f) / vec2(((((_e181 + (_e181 * 0.625f)) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1292_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181))), _e7509));
     }
     let _e7514 = constants.scheme;
     if ((_e7514 == 3u) && !(is_boundary_1)) {
@@ -9975,13 +8518,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1309_ = min(_cse_1310_, _cse_1317_);
         let _cse_1308_ = (_e211 + _cse_1309_);
         let _cse_1319_ = (_e241 - _cse_1450_);
-        let _cse_1322_ = (_e271 - _cse_1460_);
+        let _cse_1322_ = (_e271 - _cse_1459_);
         let _cse_1324_ = (_cse_1450_ - _e241);
-        let _cse_1325_ = (_cse_1460_ - _e271);
+        let _cse_1325_ = (_cse_1459_ - _e271);
         u_l_3_ = _cse_1298_;
         u_r_3_ = _cse_1308_;
         let _e7627 = normal_vec;
-        f_l_3_ = (((_cse_1298_ + s_own_p) + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_1304_)), (face_center_vec - c_owner_vec)), min((_e151 - s_own_p), 0f)), max((_e151 - s_own_p), 0f))) * dot(((vec2<f32>((_cse_1450_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1319_) / vec2(_cse_1304_)), (face_center_vec - c_owner_vec)), min(_cse_1319_, 0f)), max(_cse_1319_, 0f))), (_cse_1460_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1322_) / vec2(_cse_1304_)), (face_center_vec - c_owner_vec)), min(_cse_1322_, 0f)), max(_cse_1322_, 0f)))) * 1f) / vec2((s_own_rho + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1304_)), (face_center_vec - c_owner_vec)), min((_e181 - s_own_rho), 0f)), max((_e181 - s_own_rho), 0f))))), _e7627));
+        f_l_3_ = (((_cse_1298_ + s_own_p) + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_1304_)), (face_center_vec - c_owner_vec)), min((_e151 - s_own_p), 0f)), max((_e151 - s_own_p), 0f))) * dot(((vec2<f32>((_cse_1450_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1319_) / vec2(_cse_1304_)), (face_center_vec - c_owner_vec)), min(_cse_1319_, 0f)), max(_cse_1319_, 0f))), (_cse_1459_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1322_) / vec2(_cse_1304_)), (face_center_vec - c_owner_vec)), min(_cse_1322_, 0f)), max(_cse_1322_, 0f)))) * 1f) / vec2((s_own_rho + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1304_)), (face_center_vec - c_owner_vec)), min((_e181 - s_own_rho), 0f)), max((_e181 - s_own_rho), 0f))))), _e7627));
         let _e7694 = normal_vec;
         f_r_3_ = (((_cse_1308_ + _e151) + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_1314_)), (face_center_vec - c_neigh_cell_vec)), min((s_own_p - _e151), 0f)), max((s_own_p - _e151), 0f))) * dot(((vec2<f32>((_e241 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1324_) / vec2(_cse_1314_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_1324_, 0f)), max(_cse_1324_, 0f))), (_e271 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1325_) / vec2(_cse_1314_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_1325_, 0f)), max(_cse_1325_, 0f)))) * 1f) / vec2((_e181 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1314_)), (face_center_vec - c_neigh_cell_vec)), min((s_own_rho - _e181), 0f)), max((s_own_rho - _e181), 0f))))), _e7694));
     }
@@ -10023,7 +8566,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1359_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1360_);
         let _cse_1358_ = dot(_cse_1359_, (face_center_vec - c_owner_vec));
         let _cse_1363_ = (_cse_1361_ * _cse_1358_);
-        let _cse_1368_ = (_e271 - _cse_1460_);
+        let _cse_1368_ = (_e271 - _cse_1459_);
         let _cse_1367_ = (_cse_1368_ / _cse_1332_);
         let _cse_1366_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1367_);
         let _cse_1365_ = dot(_cse_1366_, (face_center_vec - c_owner_vec));
@@ -10039,7 +8582,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1378_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1379_);
         let _cse_1377_ = dot(_cse_1378_, (face_center_vec - c_neigh_cell_vec));
         let _cse_1381_ = (_cse_1380_ * _cse_1377_);
-        let _cse_1385_ = (_cse_1460_ - _e271);
+        let _cse_1385_ = (_cse_1459_ - _e271);
         let _cse_1384_ = (_cse_1385_ / _cse_1346_);
         let _cse_1383_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1384_);
         let _cse_1382_ = dot(_cse_1383_, (face_center_vec - c_neigh_cell_vec));
@@ -10050,7 +8593,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         u_l_3_ = _cse_1326_;
         u_r_3_ = _cse_1340_;
         let _e7900 = normal_vec;
-        f_l_3_ = (((_cse_1326_ + s_own_p) + ((((_cse_1354_ * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(_cse_1354_) + 0.00000001f))) * max(((_e151 - s_own_p) * _cse_1354_), 0f)) / max(abs(((_e151 - s_own_p) * _cse_1354_)), 0.00000001f))) * dot(((vec2<f32>((_cse_1450_ + ((((_cse_1358_ * abs(_cse_1361_)) / max(abs(_cse_1361_), (abs(_cse_1358_) + 0.00000001f))) * max(_cse_1363_, 0f)) / max(abs(_cse_1363_), 0.00000001f))), (_cse_1460_ + ((((_cse_1365_ * abs(_cse_1368_)) / max(abs(_cse_1368_), (abs(_cse_1365_) + 0.00000001f))) * max(_cse_1370_, 0f)) / max(abs(_cse_1370_), 0.00000001f)))) * 1f) / vec2((s_own_rho + ((((_cse_1371_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_1371_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_1371_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_1371_)), 0.00000001f))))), _e7900));
+        f_l_3_ = (((_cse_1326_ + s_own_p) + ((((_cse_1354_ * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(_cse_1354_) + 0.00000001f))) * max(((_e151 - s_own_p) * _cse_1354_), 0f)) / max(abs(((_e151 - s_own_p) * _cse_1354_)), 0.00000001f))) * dot(((vec2<f32>((_cse_1450_ + ((((_cse_1358_ * abs(_cse_1361_)) / max(abs(_cse_1361_), (abs(_cse_1358_) + 0.00000001f))) * max(_cse_1363_, 0f)) / max(abs(_cse_1363_), 0.00000001f))), (_cse_1459_ + ((((_cse_1365_ * abs(_cse_1368_)) / max(abs(_cse_1368_), (abs(_cse_1365_) + 0.00000001f))) * max(_cse_1370_, 0f)) / max(abs(_cse_1370_), 0.00000001f)))) * 1f) / vec2((s_own_rho + ((((_cse_1371_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_1371_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_1371_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_1371_)), 0.00000001f))))), _e7900));
         let _e7985 = normal_vec;
         f_r_3_ = (((_cse_1340_ + _e151) + ((((_cse_1374_ * abs((s_own_p - _e151))) / max(abs((s_own_p - _e151)), (abs(_cse_1374_) + 0.00000001f))) * max(((s_own_p - _e151) * _cse_1374_), 0f)) / max(abs(((s_own_p - _e151) * _cse_1374_)), 0.00000001f))) * dot(((vec2<f32>((_e241 + ((((_cse_1377_ * abs(_cse_1380_)) / max(abs(_cse_1380_), (abs(_cse_1377_) + 0.00000001f))) * max(_cse_1381_, 0f)) / max(abs(_cse_1381_), 0.00000001f))), (_e271 + ((((_cse_1382_ * abs(_cse_1385_)) / max(abs(_cse_1385_), (abs(_cse_1382_) + 0.00000001f))) * max(_cse_1386_, 0f)) / max(abs(_cse_1386_), 0.00000001f)))) * 1f) / vec2((_e181 + ((((_cse_1387_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_1387_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_1387_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_1387_)), 0.00000001f))))), _e7985));
     }
@@ -10085,15 +8628,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1405_ = min(_cse_1406_, _cse_1417_);
         let _cse_1404_ = (_e211 + _cse_1405_);
         let _cse_1420_ = (_e241 - _cse_1450_);
-        let _cse_1423_ = (_e271 - _cse_1460_);
+        let _cse_1423_ = (_e271 - _cse_1459_);
         let _cse_1424_ = (_cse_1450_ - _e241);
-        let _cse_1425_ = (_cse_1460_ - _e271);
+        let _cse_1425_ = (_cse_1459_ - _e271);
         u_l_3_ = _cse_1390_;
         u_r_3_ = _cse_1404_;
         let _e8157 = normal_vec;
-        f_l_3_ = (((_cse_1390_ + s_own_p) + min(max(((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_1400_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p), min((_e151 - s_own_p), 0f)), max((_e151 - s_own_p), 0f))) * dot(((vec2<f32>((_cse_1450_ + min(max(((((_cse_1450_ * 0.625f) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1420_) / vec2(_cse_1400_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1450_), min(_cse_1420_, 0f)), max(_cse_1420_, 0f))), (_cse_1460_ + min(max(((((_cse_1460_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1423_) / vec2(_cse_1400_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1460_), min(_cse_1423_, 0f)), max(_cse_1423_, 0f)))) * 1f) / vec2((s_own_rho + min(max(((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1400_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho), min((_e181 - s_own_rho), 0f)), max((_e181 - s_own_rho), 0f))))), _e8157));
+        f_l_3_ = (((_cse_1390_ + s_own_p) + min(max(((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_1400_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p), min((_e151 - s_own_p), 0f)), max((_e151 - s_own_p), 0f))) * dot(((vec2<f32>((_cse_1450_ + min(max(((((_cse_1450_ * 0.625f) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1420_) / vec2(_cse_1400_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1450_), min(_cse_1420_, 0f)), max(_cse_1420_, 0f))), (_cse_1459_ + min(max(((((_cse_1459_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1423_) / vec2(_cse_1400_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1459_), min(_cse_1423_, 0f)), max(_cse_1423_, 0f)))) * 1f) / vec2((s_own_rho + min(max(((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1400_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho), min((_e181 - s_own_rho), 0f)), max((_e181 - s_own_rho), 0f))))), _e8157));
         let _e8260 = normal_vec;
-        f_r_3_ = (((_cse_1404_ + _e151) + min(max(((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_1414_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151), min((s_own_p - _e151), 0f)), max((s_own_p - _e151), 0f))) * dot(((vec2<f32>((_e241 + min(max(((((_e241 * 0.625f) + (_cse_1450_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1424_) / vec2(_cse_1414_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e241), min(_cse_1424_, 0f)), max(_cse_1424_, 0f))), (_e271 + min(max(((((_e271 * 0.625f) + (_cse_1460_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1425_) / vec2(_cse_1414_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e271), min(_cse_1425_, 0f)), max(_cse_1425_, 0f)))) * 1f) / vec2((_e181 + min(max(((((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1414_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181), min((s_own_rho - _e181), 0f)), max((s_own_rho - _e181), 0f))))), _e8260));
+        f_r_3_ = (((_cse_1404_ + _e151) + min(max(((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_1414_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151), min((s_own_p - _e151), 0f)), max((s_own_p - _e151), 0f))) * dot(((vec2<f32>((_e241 + min(max(((((_e241 * 0.625f) + (_cse_1450_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1424_) / vec2(_cse_1414_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e241), min(_cse_1424_, 0f)), max(_cse_1424_, 0f))), (_e271 + min(max(((((_e271 * 0.625f) + (_cse_1459_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1425_) / vec2(_cse_1414_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e271), min(_cse_1425_, 0f)), max(_cse_1425_, 0f)))) * 1f) / vec2((_e181 + min(max(((((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1414_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181), min((s_own_rho - _e181), 0f)), max((s_own_rho - _e181), 0f))))), _e8260));
     }
     let _e8265 = constants.scheme;
     if ((_e8265 == 6u) && !(is_boundary_1)) {
@@ -10121,21 +8664,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1437_ = (_e211 + _cse_1438_);
         let _cse_1449_ = (((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_1434_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
         let _cse_1448_ = (_cse_1449_ - s_own_p);
-        let _cse_1458_ = (_e241 - _cse_1450_);
-        let _cse_1457_ = (_cse_1458_ / _cse_1434_);
-        let _cse_1456_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1457_);
+        let _cse_1457_ = (_e241 - _cse_1450_);
+        let _cse_1456_ = (((c_neigh_cell_vec - c_owner_vec) * _cse_1457_) / vec2(_cse_1434_));
         let _cse_1455_ = dot(_cse_1456_, (c_neigh_cell_vec - c_owner_vec));
         let _cse_1454_ = (_cse_1455_ * 0.125f);
         let _cse_1452_ = (((_cse_1450_ * 0.625f) + (_e241 * 0.375f)) + _cse_1454_);
         let _cse_1451_ = (_cse_1452_ - _cse_1450_);
-        let _cse_1459_ = (_cse_1458_ * _cse_1451_);
-        let _cse_1467_ = (_e271 - _cse_1460_);
-        let _cse_1466_ = (((c_neigh_cell_vec - c_owner_vec) * _cse_1467_) / vec2(_cse_1434_));
-        let _cse_1465_ = dot(_cse_1466_, (c_neigh_cell_vec - c_owner_vec));
-        let _cse_1464_ = (_cse_1465_ * 0.125f);
-        let _cse_1462_ = (((_cse_1460_ * 0.625f) + (_e271 * 0.375f)) + _cse_1464_);
-        let _cse_1461_ = (_cse_1462_ - _cse_1460_);
-        let _cse_1468_ = (_cse_1467_ * _cse_1461_);
+        let _cse_1458_ = (_cse_1457_ * _cse_1451_);
+        let _cse_1467_ = (_e271 - _cse_1459_);
+        let _cse_1466_ = (_cse_1467_ / _cse_1434_);
+        let _cse_1465_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1466_);
+        let _cse_1464_ = dot(_cse_1465_, (c_neigh_cell_vec - c_owner_vec));
+        let _cse_1463_ = (_cse_1464_ * 0.125f);
+        let _cse_1461_ = (((_cse_1459_ * 0.625f) + (_e271 * 0.375f)) + _cse_1463_);
+        let _cse_1460_ = (_cse_1461_ - _cse_1459_);
+        let _cse_1468_ = (_cse_1467_ * _cse_1460_);
         let _cse_1470_ = (((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1434_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
         let _cse_1469_ = (_cse_1470_ - s_own_rho);
         let _cse_1472_ = (((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_1445_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
@@ -10148,11 +8691,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1474_ = (((_e241 * 0.625f) + (_cse_1450_ * 0.375f)) + _cse_1475_);
         let _cse_1473_ = (_cse_1474_ - _e241);
         let _cse_1480_ = (_cse_1479_ * _cse_1473_);
-        let _cse_1486_ = (_cse_1460_ - _e271);
+        let _cse_1486_ = (_cse_1459_ - _e271);
         let _cse_1485_ = (((c_owner_vec - c_neigh_cell_vec) * _cse_1486_) / vec2(_cse_1445_));
         let _cse_1484_ = dot(_cse_1485_, (c_owner_vec - c_neigh_cell_vec));
         let _cse_1483_ = (_cse_1484_ * 0.125f);
-        let _cse_1482_ = (((_e271 * 0.625f) + (_cse_1460_ * 0.375f)) + _cse_1483_);
+        let _cse_1482_ = (((_e271 * 0.625f) + (_cse_1459_ * 0.375f)) + _cse_1483_);
         let _cse_1481_ = (_cse_1482_ - _e271);
         let _cse_1487_ = (_cse_1486_ * _cse_1481_);
         let _cse_1489_ = (((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1445_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
@@ -10160,7 +8703,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         u_l_3_ = _cse_1426_;
         u_r_3_ = _cse_1437_;
         let _e8562 = normal_vec;
-        f_l_3_ = (((_cse_1426_ + s_own_p) + ((((_cse_1448_ * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(_cse_1448_) + 0.00000001f))) * max(((_e151 - s_own_p) * _cse_1448_), 0f)) / max(abs(((_e151 - s_own_p) * _cse_1448_)), 0.00000001f))) * dot(((vec2<f32>((_cse_1450_ + ((((_cse_1451_ * abs(_cse_1458_)) / max(abs(_cse_1458_), (abs(_cse_1451_) + 0.00000001f))) * max(_cse_1459_, 0f)) / max(abs(_cse_1459_), 0.00000001f))), (_cse_1460_ + ((((_cse_1461_ * abs(_cse_1467_)) / max(abs(_cse_1467_), (abs(_cse_1461_) + 0.00000001f))) * max(_cse_1468_, 0f)) / max(abs(_cse_1468_), 0.00000001f)))) * 1f) / vec2((s_own_rho + ((((_cse_1469_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_1469_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_1469_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_1469_)), 0.00000001f))))), _e8562));
+        f_l_3_ = (((_cse_1426_ + s_own_p) + ((((_cse_1448_ * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(_cse_1448_) + 0.00000001f))) * max(((_e151 - s_own_p) * _cse_1448_), 0f)) / max(abs(((_e151 - s_own_p) * _cse_1448_)), 0.00000001f))) * dot(((vec2<f32>((_cse_1450_ + ((((_cse_1451_ * abs(_cse_1457_)) / max(abs(_cse_1457_), (abs(_cse_1451_) + 0.00000001f))) * max(_cse_1458_, 0f)) / max(abs(_cse_1458_), 0.00000001f))), (_cse_1459_ + ((((_cse_1460_ * abs(_cse_1467_)) / max(abs(_cse_1467_), (abs(_cse_1460_) + 0.00000001f))) * max(_cse_1468_, 0f)) / max(abs(_cse_1468_), 0.00000001f)))) * 1f) / vec2((s_own_rho + ((((_cse_1469_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_1469_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_1469_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_1469_)), 0.00000001f))))), _e8562));
         let _e8647 = normal_vec;
         f_r_3_ = (((_cse_1437_ + _e151) + ((((_cse_1471_ * abs((s_own_p - _e151))) / max(abs((s_own_p - _e151)), (abs(_cse_1471_) + 0.00000001f))) * max(((s_own_p - _e151) * _cse_1471_), 0f)) / max(abs(((s_own_p - _e151) * _cse_1471_)), 0.00000001f))) * dot(((vec2<f32>((_e241 + ((((_cse_1473_ * abs(_cse_1479_)) / max(abs(_cse_1479_), (abs(_cse_1473_) + 0.00000001f))) * max(_cse_1480_, 0f)) / max(abs(_cse_1480_), 0.00000001f))), (_e271 + ((((_cse_1481_ * abs(_cse_1486_)) / max(abs(_cse_1486_), (abs(_cse_1481_) + 0.00000001f))) * max(_cse_1487_, 0f)) / max(abs(_cse_1487_), 0.00000001f)))) * 1f) / vec2((_e181 + ((((_cse_1488_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_1488_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_1488_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_1488_)), 0.00000001f))))), _e8647));
     }
@@ -10875,508 +9418,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
-    pub mod flux_module_gradients_incompressible_momentum_generic {
-        use super::{_root, _root::*};
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Vector2 {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub x: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub y: f32,
-        }
-        impl Vector2 {
-            pub const fn new(x: f32, y: f32) -> Self {
-                Self { x, y }
-            }
-        }
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Constants {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub dt: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub dt_old: f32,
-            #[doc = "offset: 8, size: 4, type: `f32`"]
-            pub dtau: f32,
-            #[doc = "offset: 12, size: 4, type: `f32`"]
-            pub time: f32,
-            #[doc = "offset: 16, size: 4, type: `f32`"]
-            pub viscosity: f32,
-            #[doc = "offset: 20, size: 4, type: `f32`"]
-            pub density: f32,
-            #[doc = "offset: 24, size: 4, type: `u32`"]
-            pub component: u32,
-            #[doc = "offset: 28, size: 4, type: `f32`"]
-            pub alpha_p: f32,
-            #[doc = "offset: 32, size: 4, type: `u32`"]
-            pub scheme: u32,
-            #[doc = "offset: 36, size: 4, type: `f32`"]
-            pub alpha_u: f32,
-            #[doc = "offset: 40, size: 4, type: `u32`"]
-            pub stride_x: u32,
-            #[doc = "offset: 44, size: 4, type: `u32`"]
-            pub time_scheme: u32,
-        }
-        impl Constants {
-            pub const fn new(
-                dt: f32,
-                dt_old: f32,
-                dtau: f32,
-                time: f32,
-                viscosity: f32,
-                density: f32,
-                component: u32,
-                alpha_p: f32,
-                scheme: u32,
-                alpha_u: f32,
-                stride_x: u32,
-                time_scheme: u32,
-            ) -> Self {
-                Self {
-                    dt,
-                    dt_old,
-                    dtau,
-                    time,
-                    viscosity,
-                    density,
-                    component,
-                    alpha_p,
-                    scheme,
-                    alpha_u,
-                    stride_x,
-                    time_scheme,
-                }
-            }
-        }
-        pub mod compute {
-            use super::{_root, _root::*};
-            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-            pub fn create_main_pipeline_embed_source(
-                device: &wgpu::Device,
-            ) -> wgpu::ComputePipeline {
-                let module = super::create_shader_module_embed_source(device);
-                let layout = super::create_pipeline_layout(device);
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("Compute Pipeline main"),
-                    layout: Some(&layout),
-                    module: &module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            }
-        }
-        pub const ENTRY_MAIN: &str = "main";
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub face_owner: wgpu::BufferBinding<'a>,
-            pub face_neighbor: wgpu::BufferBinding<'a>,
-            pub face_areas: wgpu::BufferBinding<'a>,
-            pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
-            pub cell_centers: wgpu::BufferBinding<'a>,
-            pub cell_vols: wgpu::BufferBinding<'a>,
-            pub cell_face_offsets: wgpu::BufferBinding<'a>,
-            pub cell_faces: wgpu::BufferBinding<'a>,
-            pub face_boundary: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup0Entries<'a> {
-            pub face_owner: wgpu::BindGroupEntry<'a>,
-            pub face_neighbor: wgpu::BindGroupEntry<'a>,
-            pub face_areas: wgpu::BindGroupEntry<'a>,
-            pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_vols: wgpu::BindGroupEntry<'a>,
-            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
-            pub cell_faces: wgpu::BindGroupEntry<'a>,
-            pub face_boundary: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup0Entries<'a> {
-            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-                Self {
-                    face_owner: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.face_owner),
-                    },
-                    face_neighbor: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
-                    },
-                    face_areas: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.face_areas),
-                    },
-                    face_normals: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
-                    },
-                    cell_centers: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
-                    },
-                    cell_vols: wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
-                    },
-                    cell_face_offsets: wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
-                    },
-                    cell_faces: wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
-                    },
-                    face_boundary: wgpu::BindGroupEntry {
-                        binding: 12,
-                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
-                [
-                    self.face_owner,
-                    self.face_neighbor,
-                    self.face_areas,
-                    self.face_normals,
-                    self.face_centers,
-                    self.cell_centers,
-                    self.cell_vols,
-                    self.cell_face_offsets,
-                    self.cell_faces,
-                    self.face_boundary,
-                ]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0(wgpu::BindGroup);
-        impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleGradientsIncompressibleMomentumGeneric::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedFluxModuleGradientsIncompressibleMomentumGeneric::BindGroup0",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(0, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1EntriesParams<'a> {
-            pub state: wgpu::BufferBinding<'a>,
-            pub constants: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup1Entries<'a> {
-            pub state: wgpu::BindGroupEntry<'a>,
-            pub constants: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup1Entries<'a> {
-            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
-                Self {
-                    state: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.state),
-                    },
-                    constants: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.constants),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-                [self.state, self.constants]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1(wgpu::BindGroup);
-        impl WgpuBindGroup1 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleGradientsIncompressibleMomentumGeneric::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: flux_module_gradients_incompressible_momentum_generic :: Constants > () as _) , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedFluxModuleGradientsIncompressibleMomentumGeneric::BindGroup1",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(1, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup2EntriesParams<'a> {
-            pub bc_kind: wgpu::BufferBinding<'a>,
-            pub bc_value: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup2Entries<'a> {
-            pub bc_kind: wgpu::BindGroupEntry<'a>,
-            pub bc_value: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup2Entries<'a> {
-            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
-                Self {
-                    bc_kind: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
-                    },
-                    bc_value: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.bc_value),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-                [self.bc_kind, self.bc_value]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup2(wgpu::BindGroup);
-        impl WgpuBindGroup2 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleGradientsIncompressibleMomentumGeneric::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedFluxModuleGradientsIncompressibleMomentumGeneric::BindGroup2",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(2, &self.0, &[]);
-            }
-        }
-        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-        #[doc = "   - Bind group 1: More frequent updates"]
-        #[doc = "   - Bind group 2: More frequent updates"]
-        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-        #[derive(Debug, Copy, Clone)]
-        pub struct WgpuBindGroups<'a> {
-            pub bind_group0: &'a WgpuBindGroup0,
-            pub bind_group1: &'a WgpuBindGroup1,
-            pub bind_group2: &'a WgpuBindGroup2,
-        }
-        impl<'a> WgpuBindGroups<'a> {
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                self.bind_group0.set(pass);
-                self.bind_group1.set(pass);
-                self.bind_group2.set(pass);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuPipelineLayout;
-        impl WgpuPipelineLayout {
-            pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 3],
-            ) -> [wgpu::BindGroupLayout; 3] {
-                entries
-            }
-        }
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(
-                    "GeneratedFluxModuleGradientsIncompressibleMomentumGeneric::PipelineLayout",
-                ),
-                bind_group_layouts: &[
-                    &WgpuBindGroup0::get_bind_group_layout(device),
-                    &WgpuBindGroup1::get_bind_group_layout(device),
-                    &WgpuBindGroup2::get_bind_group_layout(device),
-                ],
-                push_constant_ranges: &[],
-            })
-        }
-        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("flux_module_gradients_incompressible_momentum_generic.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(source),
-            })
-        }
-        pub const SHADER_STRING: &str = r#"
-struct Vector2_ {
-    x: f32,
-    y: f32,
-}
-
-struct Constants {
-    dt: f32,
-    dt_old: f32,
-    dtau: f32,
-    time: f32,
-    viscosity: f32,
-    density: f32,
-    component: u32,
-    alpha_p: f32,
-    scheme: u32,
-    alpha_u: f32,
-    stride_x: u32,
-    time_scheme: u32,
-}
-
-@group(0) @binding(0) 
-var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
-var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
-var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
-var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
-var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
-var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
-var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
-var<storage> cell_faces: array<u32>;
-@group(0) @binding(12) 
-var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
-var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
-var<uniform> constants: Constants;
-@group(2) @binding(0) 
-var<storage> bc_kind: array<u32>;
-@group(2) @binding(1) 
-var<storage> bc_value: array<f32>;
-
-@compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var grad_acc_p: vec2<f32> = vec2<f32>(0f, 0f);
-    var k: u32;
-    var normal_vec: vec2<f32>;
-    var other_idx: u32;
-    var other_center_vec: vec2<f32>;
-    var lambda: f32;
-
-    let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
-    if (idx >= arrayLength((&cell_vols))) {
-        return;
-    }
-    let cell_center = cell_centers[idx];
-    let cell_center_vec = vec2<f32>(cell_center.x, cell_center.y);
-    let vol = cell_vols[idx];
-    let start = cell_face_offsets[idx];
-    let end = cell_face_offsets[(idx + 1u)];
-    k = start;
-    loop {
-        let _e31 = k;
-        if (_e31 < end) {
-        } else {
-            break;
-        }
-        {
-            let _e34 = k;
-            let face_idx = cell_faces[_e34];
-            let owner = face_owner[face_idx];
-            let neighbor_raw = face_neighbor[face_idx];
-            let is_boundary = (neighbor_raw == -1i);
-            let boundary_type = face_boundary[face_idx];
-            let area = face_areas[face_idx];
-            let face_center = face_centers[face_idx];
-            let face_center_vec = vec2<f32>(face_center.x, face_center.y);
-            let _e60 = face_normals[face_idx].x;
-            let _e64 = face_normals[face_idx].y;
-            normal_vec = vec2<f32>(_e60, _e64);
-            let _e68 = normal_vec;
-            if (dot((face_center_vec - cell_center_vec), _e68) < 0f) {
-                let _e72 = normal_vec;
-                normal_vec = -(_e72);
-            }
-            other_idx = idx;
-            other_center_vec = face_center_vec;
-            if (neighbor_raw != -1i) {
-                let neighbor = u32(neighbor_raw);
-                other_idx = neighbor;
-                if (owner != idx) {
-                    other_idx = owner;
-                }
-                let _e81 = other_idx;
-                let other_center = cell_centers[_e81];
-                other_center_vec = vec2<f32>(other_center.x, other_center.y);
-            }
-            let d_own = distance(cell_center_vec, face_center_vec);
-            let _e88 = other_center_vec;
-            let d_neigh = distance(_e88, face_center_vec);
-            let total_dist = (d_own + d_neigh);
-            lambda = 0.5f;
-            if (total_dist > 0.000001f) {
-                lambda = (d_neigh / total_dist);
-            }
-            let _e96 = lambda;
-            let lambda_other = (1f - _e96);
-            let _e99 = normal_vec;
-            let _e106 = state[((idx * 8u) + 2u)];
-            let _e107 = lambda;
-            let _e109 = other_idx;
-            let _e116 = state[((_e109 * 8u) + 2u)];
-            let _e123 = state[((idx * 8u) + 2u)];
-            let _e130 = bc_value[((face_idx * 3u) + 2u)];
-            let _e137 = bc_kind[((face_idx * 3u) + 2u)];
-            let _e147 = state[((idx * 8u) + 2u)];
-            let _e154 = bc_value[((face_idx * 3u) + 2u)];
-            let _e163 = bc_kind[((face_idx * 3u) + 2u)];
-            let _e173 = grad_acc_p;
-            grad_acc_p = (_e173 + ((_e99 * ((_e106 * _e107) + (select(_e116, select(select(_e123, _e130, (_e137 == 1u)), (_e147 + (_e154 * d_own)), (_e163 == 2u)), is_boundary) * lambda_other))) * area));
-        }
-        continuing {
-            let _e176 = k;
-            k = (_e176 + 1u);
-        }
-    }
-    let _e178 = grad_acc_p;
-    let grad_out_p = ((_e178 * 1f) / vec2(max(vol, 0.000000000001f)));
-    state[((idx * 8u) + 4u)] = grad_out_p.x;
-    state[((idx * 8u) + 5u)] = grad_out_p.y;
-    return;
-}
-"#;
-    }
     pub mod flux_module_incompressible_momentum {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
@@ -11865,551 +9906,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let source = std::borrow::Cow::Borrowed(SHADER_STRING);
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("flux_module_incompressible_momentum.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(source),
-            })
-        }
-        pub const SHADER_STRING: &str = r#"
-struct Vector2_ {
-    x: f32,
-    y: f32,
-}
-
-struct Constants {
-    dt: f32,
-    dt_old: f32,
-    dtau: f32,
-    time: f32,
-    viscosity: f32,
-    density: f32,
-    component: u32,
-    alpha_p: f32,
-    scheme: u32,
-    alpha_u: f32,
-    stride_x: u32,
-    time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
-}
-
-@group(0) @binding(0) 
-var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
-var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
-var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
-var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(4) 
-var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(12) 
-var<storage> face_boundary: array<u32>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
-@group(1) @binding(0) 
-var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
-var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
-var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
-var<storage, read_write> fluxes: array<f32>;
-@group(1) @binding(4) 
-var<uniform> constants: Constants;
-@group(2) @binding(0) 
-var<storage> bc_kind: array<u32>;
-@group(2) @binding(1) 
-var<storage> bc_value: array<f32>;
-
-fn bc_neighbor_scalar(interior: f32, owner: f32, kind: u32, value: f32, d_own: f32, is_boundary: bool) -> f32 {
-    var boundary: f32;
-
-    boundary = owner;
-    if (kind == 1u) {
-        boundary = value;
-    }
-    if (kind == 2u) {
-        boundary = (owner + (value * d_own));
-    }
-    let _e13 = boundary;
-    return select(interior, _e13, is_boundary);
-}
-
-@compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var neigh_idx: u32;
-    var normal_vec: vec2<f32>;
-    var c_neigh_vec: vec2<f32>;
-    var lambda: f32 = 0.5f;
-    var phi: f32;
-
-    let _e5 = constants.stride_x;
-    let idx = ((global_id.y * _e5) + global_id.x);
-    if (idx >= arrayLength((&face_areas))) {
-        return;
-    }
-    let owner_1 = face_owner[idx];
-    let neighbor = face_neighbor[idx];
-    let is_boundary_1 = (neighbor == -1i);
-    neigh_idx = owner_1;
-    if (neighbor != -1i) {
-        neigh_idx = u32(neighbor);
-    }
-    let area = face_areas[idx];
-    let boundary_type = face_boundary[idx];
-    let face_center = face_centers[idx];
-    let _e36 = face_normals[idx].x;
-    let _e40 = face_normals[idx].y;
-    normal_vec = vec2<f32>(_e36, _e40);
-    let c_owner = cell_centers[owner_1];
-    let c_owner_vec = vec2<f32>(c_owner.x, c_owner.y);
-    let face_center_vec = vec2<f32>(face_center.x, face_center.y);
-    let _e53 = normal_vec;
-    if (dot((face_center_vec - c_owner_vec), _e53) < 0f) {
-        let _e57 = normal_vec;
-        normal_vec = -(_e57);
-    }
-    let _e60 = neigh_idx;
-    let c_neigh = cell_centers[_e60];
-    c_neigh_vec = vec2<f32>(c_neigh.x, c_neigh.y);
-    let c_neigh_cell_vec = c_neigh_vec;
-    if is_boundary_1 {
-        c_neigh_vec = face_center_vec;
-    }
-    let d_own_1 = distance(c_owner_vec, face_center_vec);
-    let _e69 = c_neigh_vec;
-    let d_neigh = distance(_e69, face_center_vec);
-    let total_dist = (d_own_1 + d_neigh);
-    if (total_dist > 0.000001f) {
-        lambda = (d_neigh / total_dist);
-    }
-    let _e76 = lambda;
-    let lambda_other = (1f - _e76);
-    let _e79 = c_neigh_vec;
-    let d_vec = (_e79 - c_owner_vec);
-    let _e81 = normal_vec;
-    let dist_proj = abs(dot(d_vec, _e81));
-    let dist = max(dist_proj, 0.000001f);
-    let s_own_U_x = state[((owner_1 * 8u) + 0u)];
-    let s_own_U_y = state[((owner_1 * 8u) + 1u)];
-    let s_own_d_p = state[((owner_1 * 8u) + 3u)];
-    let s_own_p = state[((owner_1 * 8u) + 2u)];
-    let _e114 = neigh_idx;
-    let _e121 = state[((_e114 * 8u) + 0u)];
-    let _e128 = state[((owner_1 * 8u) + 0u)];
-    let _e135 = bc_kind[((idx * 3u) + 0u)];
-    let _e142 = bc_value[((idx * 3u) + 0u)];
-    let _e143 = bc_neighbor_scalar(_e121, _e128, _e135, _e142, d_own_1, is_boundary_1);
-    let _e144 = neigh_idx;
-    let _e151 = state[((_e144 * 8u) + 1u)];
-    let _e158 = state[((owner_1 * 8u) + 1u)];
-    let _e165 = bc_kind[((idx * 3u) + 1u)];
-    let _e172 = bc_value[((idx * 3u) + 1u)];
-    let _e173 = bc_neighbor_scalar(_e151, _e158, _e165, _e172, d_own_1, is_boundary_1);
-    let _e174 = neigh_idx;
-    let _e181 = state[((_e174 * 8u) + 3u)];
-    let _e188 = state[((owner_1 * 8u) + 3u)];
-    let s_neigh_d_p = select(_e181, _e188, is_boundary_1);
-    let _e190 = neigh_idx;
-    let _e197 = state[((_e190 * 8u) + 2u)];
-    let _e204 = state[((owner_1 * 8u) + 2u)];
-    let _e211 = bc_kind[((idx * 3u) + 2u)];
-    let _e218 = bc_value[((idx * 3u) + 2u)];
-    let _e219 = bc_neighbor_scalar(_e197, _e204, _e211, _e218, d_own_1, is_boundary_1);
-    let _e222 = constants.density;
-    let _e224 = lambda;
-    let _e229 = normal_vec;
-    let _e235 = constants.density;
-    let _e236 = lambda;
-    phi = (((_e222 * dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e224) + (vec2<f32>(_e143, _e173) * lambda_other)), _e229)) * area) - ((((_e235 * ((s_own_d_p * _e236) + (s_neigh_d_p * lambda_other))) * (_e219 - s_own_p)) / dist) * area));
-    let _e253 = phi;
-    fluxes[((idx * 3u) + 0u)] = _e253;
-    let _e260 = phi;
-    fluxes[((idx * 3u) + 1u)] = _e260;
-    let _e267 = phi;
-    fluxes[((idx * 3u) + 2u)] = _e267;
-    return;
-}
-"#;
-    }
-    pub mod flux_module_incompressible_momentum_generic {
-        use super::{_root, _root::*};
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Vector2 {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub x: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub y: f32,
-        }
-        impl Vector2 {
-            pub const fn new(x: f32, y: f32) -> Self {
-                Self { x, y }
-            }
-        }
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Constants {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub dt: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub dt_old: f32,
-            #[doc = "offset: 8, size: 4, type: `f32`"]
-            pub dtau: f32,
-            #[doc = "offset: 12, size: 4, type: `f32`"]
-            pub time: f32,
-            #[doc = "offset: 16, size: 4, type: `f32`"]
-            pub viscosity: f32,
-            #[doc = "offset: 20, size: 4, type: `f32`"]
-            pub density: f32,
-            #[doc = "offset: 24, size: 4, type: `u32`"]
-            pub component: u32,
-            #[doc = "offset: 28, size: 4, type: `f32`"]
-            pub alpha_p: f32,
-            #[doc = "offset: 32, size: 4, type: `u32`"]
-            pub scheme: u32,
-            #[doc = "offset: 36, size: 4, type: `f32`"]
-            pub alpha_u: f32,
-            #[doc = "offset: 40, size: 4, type: `u32`"]
-            pub stride_x: u32,
-            #[doc = "offset: 44, size: 4, type: `u32`"]
-            pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
-        }
-        impl Constants {
-            pub const fn new(
-                dt: f32,
-                dt_old: f32,
-                dtau: f32,
-                time: f32,
-                viscosity: f32,
-                density: f32,
-                component: u32,
-                alpha_p: f32,
-                scheme: u32,
-                alpha_u: f32,
-                stride_x: u32,
-                time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
-            ) -> Self {
-                Self {
-                    dt,
-                    dt_old,
-                    dtau,
-                    time,
-                    viscosity,
-                    density,
-                    component,
-                    alpha_p,
-                    scheme,
-                    alpha_u,
-                    stride_x,
-                    time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
-                }
-            }
-        }
-        pub mod compute {
-            use super::{_root, _root::*};
-            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-            pub fn create_main_pipeline_embed_source(
-                device: &wgpu::Device,
-            ) -> wgpu::ComputePipeline {
-                let module = super::create_shader_module_embed_source(device);
-                let layout = super::create_pipeline_layout(device);
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("Compute Pipeline main"),
-                    layout: Some(&layout),
-                    module: &module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            }
-        }
-        pub const ENTRY_MAIN: &str = "main";
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub face_owner: wgpu::BufferBinding<'a>,
-            pub face_neighbor: wgpu::BufferBinding<'a>,
-            pub face_areas: wgpu::BufferBinding<'a>,
-            pub face_normals: wgpu::BufferBinding<'a>,
-            pub cell_centers: wgpu::BufferBinding<'a>,
-            pub face_boundary: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup0Entries<'a> {
-            pub face_owner: wgpu::BindGroupEntry<'a>,
-            pub face_neighbor: wgpu::BindGroupEntry<'a>,
-            pub face_areas: wgpu::BindGroupEntry<'a>,
-            pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub cell_centers: wgpu::BindGroupEntry<'a>,
-            pub face_boundary: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup0Entries<'a> {
-            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-                Self {
-                    face_owner: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.face_owner),
-                    },
-                    face_neighbor: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
-                    },
-                    face_areas: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.face_areas),
-                    },
-                    face_normals: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    cell_centers: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
-                    },
-                    face_boundary: wgpu::BindGroupEntry {
-                        binding: 12,
-                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 7] {
-                [
-                    self.face_owner,
-                    self.face_neighbor,
-                    self.face_areas,
-                    self.face_normals,
-                    self.cell_centers,
-                    self.face_boundary,
-                    self.face_centers,
-                ]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0(wgpu::BindGroup);
-        impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleIncompressibleMomentumGeneric::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedFluxModuleIncompressibleMomentumGeneric::BindGroup0"),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(0, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1EntriesParams<'a> {
-            pub state: wgpu::BufferBinding<'a>,
-            pub state_old: wgpu::BufferBinding<'a>,
-            pub state_old_old: wgpu::BufferBinding<'a>,
-            pub fluxes: wgpu::BufferBinding<'a>,
-            pub constants: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup1Entries<'a> {
-            pub state: wgpu::BindGroupEntry<'a>,
-            pub state_old: wgpu::BindGroupEntry<'a>,
-            pub state_old_old: wgpu::BindGroupEntry<'a>,
-            pub fluxes: wgpu::BindGroupEntry<'a>,
-            pub constants: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup1Entries<'a> {
-            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
-                Self {
-                    state: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.state),
-                    },
-                    state_old: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.state_old),
-                    },
-                    state_old_old: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.state_old_old),
-                    },
-                    fluxes: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.fluxes),
-                    },
-                    constants: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.constants),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 5] {
-                [
-                    self.state,
-                    self.state_old,
-                    self.state_old_old,
-                    self.fluxes,
-                    self.constants,
-                ]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1(wgpu::BindGroup);
-        impl WgpuBindGroup1 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleIncompressibleMomentumGeneric::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: flux_module_incompressible_momentum_generic :: Constants > () as _) , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedFluxModuleIncompressibleMomentumGeneric::BindGroup1"),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(1, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup2EntriesParams<'a> {
-            pub bc_kind: wgpu::BufferBinding<'a>,
-            pub bc_value: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup2Entries<'a> {
-            pub bc_kind: wgpu::BindGroupEntry<'a>,
-            pub bc_value: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup2Entries<'a> {
-            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
-                Self {
-                    bc_kind: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
-                    },
-                    bc_value: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.bc_value),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-                [self.bc_kind, self.bc_value]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup2(wgpu::BindGroup);
-        impl WgpuBindGroup2 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleIncompressibleMomentumGeneric::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedFluxModuleIncompressibleMomentumGeneric::BindGroup2"),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(2, &self.0, &[]);
-            }
-        }
-        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-        #[doc = "   - Bind group 1: More frequent updates"]
-        #[doc = "   - Bind group 2: More frequent updates"]
-        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-        #[derive(Debug, Copy, Clone)]
-        pub struct WgpuBindGroups<'a> {
-            pub bind_group0: &'a WgpuBindGroup0,
-            pub bind_group1: &'a WgpuBindGroup1,
-            pub bind_group2: &'a WgpuBindGroup2,
-        }
-        impl<'a> WgpuBindGroups<'a> {
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                self.bind_group0.set(pass);
-                self.bind_group1.set(pass);
-                self.bind_group2.set(pass);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuPipelineLayout;
-        impl WgpuPipelineLayout {
-            pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 3],
-            ) -> [wgpu::BindGroupLayout; 3] {
-                entries
-            }
-        }
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("GeneratedFluxModuleIncompressibleMomentumGeneric::PipelineLayout"),
-                bind_group_layouts: &[
-                    &WgpuBindGroup0::get_bind_group_layout(device),
-                    &WgpuBindGroup1::get_bind_group_layout(device),
-                    &WgpuBindGroup2::get_bind_group_layout(device),
-                ],
-                push_constant_ranges: &[],
-            })
-        }
-        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("flux_module_incompressible_momentum_generic.wgsl"),
                 source: wgpu::ShaderSource::Wgsl(source),
             })
         }
@@ -19902,1496 +17398,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
-    pub mod generic_coupled_assembly_grad_state_incompressible_momentum_generic {
-        use super::{_root, _root::*};
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Vector2 {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub x: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub y: f32,
-        }
-        impl Vector2 {
-            pub const fn new(x: f32, y: f32) -> Self {
-                Self { x, y }
-            }
-        }
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Constants {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub dt: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub dt_old: f32,
-            #[doc = "offset: 8, size: 4, type: `f32`"]
-            pub dtau: f32,
-            #[doc = "offset: 12, size: 4, type: `f32`"]
-            pub time: f32,
-            #[doc = "offset: 16, size: 4, type: `f32`"]
-            pub viscosity: f32,
-            #[doc = "offset: 20, size: 4, type: `f32`"]
-            pub density: f32,
-            #[doc = "offset: 24, size: 4, type: `u32`"]
-            pub component: u32,
-            #[doc = "offset: 28, size: 4, type: `f32`"]
-            pub alpha_p: f32,
-            #[doc = "offset: 32, size: 4, type: `u32`"]
-            pub scheme: u32,
-            #[doc = "offset: 36, size: 4, type: `f32`"]
-            pub alpha_u: f32,
-            #[doc = "offset: 40, size: 4, type: `u32`"]
-            pub stride_x: u32,
-            #[doc = "offset: 44, size: 4, type: `u32`"]
-            pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
-        }
-        impl Constants {
-            pub const fn new(
-                dt: f32,
-                dt_old: f32,
-                dtau: f32,
-                time: f32,
-                viscosity: f32,
-                density: f32,
-                component: u32,
-                alpha_p: f32,
-                scheme: u32,
-                alpha_u: f32,
-                stride_x: u32,
-                time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
-            ) -> Self {
-                Self {
-                    dt,
-                    dt_old,
-                    dtau,
-                    time,
-                    viscosity,
-                    density,
-                    component,
-                    alpha_p,
-                    scheme,
-                    alpha_u,
-                    stride_x,
-                    time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
-                }
-            }
-        }
-        pub mod compute {
-            use super::{_root, _root::*};
-            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-            pub fn create_main_pipeline_embed_source(
-                device: &wgpu::Device,
-            ) -> wgpu::ComputePipeline {
-                let module = super::create_shader_module_embed_source(device);
-                let layout = super::create_pipeline_layout(device);
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("Compute Pipeline main"),
-                    layout: Some(&layout),
-                    module: &module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            }
-        }
-        pub const ENTRY_MAIN: &str = "main";
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub face_owner: wgpu::BufferBinding<'a>,
-            pub face_neighbor: wgpu::BufferBinding<'a>,
-            pub face_areas: wgpu::BufferBinding<'a>,
-            pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
-            pub cell_centers: wgpu::BufferBinding<'a>,
-            pub cell_vols: wgpu::BufferBinding<'a>,
-            pub cell_face_offsets: wgpu::BufferBinding<'a>,
-            pub cell_faces: wgpu::BufferBinding<'a>,
-            pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
-            pub diagonal_indices: wgpu::BufferBinding<'a>,
-            pub face_boundary: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup0Entries<'a> {
-            pub face_owner: wgpu::BindGroupEntry<'a>,
-            pub face_neighbor: wgpu::BindGroupEntry<'a>,
-            pub face_areas: wgpu::BindGroupEntry<'a>,
-            pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_vols: wgpu::BindGroupEntry<'a>,
-            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
-            pub cell_faces: wgpu::BindGroupEntry<'a>,
-            pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
-            pub diagonal_indices: wgpu::BindGroupEntry<'a>,
-            pub face_boundary: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup0Entries<'a> {
-            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-                Self {
-                    face_owner: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.face_owner),
-                    },
-                    face_neighbor: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
-                    },
-                    face_areas: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.face_areas),
-                    },
-                    face_normals: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
-                    },
-                    cell_centers: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
-                    },
-                    cell_vols: wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
-                    },
-                    cell_face_offsets: wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
-                    },
-                    cell_faces: wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
-                    },
-                    cell_face_matrix_indices: wgpu::BindGroupEntry {
-                        binding: 10,
-                        resource: wgpu::BindingResource::Buffer(params.cell_face_matrix_indices),
-                    },
-                    diagonal_indices: wgpu::BindGroupEntry {
-                        binding: 11,
-                        resource: wgpu::BindingResource::Buffer(params.diagonal_indices),
-                    },
-                    face_boundary: wgpu::BindGroupEntry {
-                        binding: 12,
-                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
-                [
-                    self.face_owner,
-                    self.face_neighbor,
-                    self.face_areas,
-                    self.face_normals,
-                    self.face_centers,
-                    self.cell_centers,
-                    self.cell_vols,
-                    self.cell_face_offsets,
-                    self.cell_faces,
-                    self.cell_face_matrix_indices,
-                    self.diagonal_indices,
-                    self.face_boundary,
-                ]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0(wgpu::BindGroup);
-        impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumGeneric::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumGeneric::BindGroup0") , layout : & bind_group_layout , entries : & entries , }) ;
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(0, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1EntriesParams<'a> {
-            pub state: wgpu::BufferBinding<'a>,
-            pub state_old: wgpu::BufferBinding<'a>,
-            pub state_old_old: wgpu::BufferBinding<'a>,
-            pub constants: wgpu::BufferBinding<'a>,
-            pub state_iter: wgpu::BufferBinding<'a>,
-            pub grad_state: wgpu::BufferBinding<'a>,
-            pub fluxes: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup1Entries<'a> {
-            pub state: wgpu::BindGroupEntry<'a>,
-            pub state_old: wgpu::BindGroupEntry<'a>,
-            pub state_old_old: wgpu::BindGroupEntry<'a>,
-            pub constants: wgpu::BindGroupEntry<'a>,
-            pub state_iter: wgpu::BindGroupEntry<'a>,
-            pub grad_state: wgpu::BindGroupEntry<'a>,
-            pub fluxes: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup1Entries<'a> {
-            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
-                Self {
-                    state: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.state),
-                    },
-                    state_old: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.state_old),
-                    },
-                    state_old_old: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.state_old_old),
-                    },
-                    constants: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.constants),
-                    },
-                    state_iter: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.state_iter),
-                    },
-                    grad_state: wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Buffer(params.grad_state),
-                    },
-                    fluxes: wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Buffer(params.fluxes),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 7] {
-                [
-                    self.state,
-                    self.state_old,
-                    self.state_old_old,
-                    self.constants,
-                    self.state_iter,
-                    self.grad_state,
-                    self.fluxes,
-                ]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1(wgpu::BindGroup);
-        impl WgpuBindGroup1 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumGeneric::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_assembly_grad_state_incompressible_momentum_generic :: Constants > () as _) , } , count : None , } , # [doc = " @binding(4): \"state_iter\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"grad_state\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumGeneric::BindGroup1") , layout : & bind_group_layout , entries : & entries , }) ;
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(1, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup2EntriesParams<'a> {
-            pub matrix_values: wgpu::BufferBinding<'a>,
-            pub rhs: wgpu::BufferBinding<'a>,
-            pub scalar_row_offsets: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup2Entries<'a> {
-            pub matrix_values: wgpu::BindGroupEntry<'a>,
-            pub rhs: wgpu::BindGroupEntry<'a>,
-            pub scalar_row_offsets: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup2Entries<'a> {
-            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
-                Self {
-                    matrix_values: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.matrix_values),
-                    },
-                    rhs: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.rhs),
-                    },
-                    scalar_row_offsets: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.scalar_row_offsets),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
-                [self.matrix_values, self.rhs, self.scalar_row_offsets]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup2(wgpu::BindGroup);
-        impl WgpuBindGroup2 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumGeneric::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"matrix_values\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"rhs\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"scalar_row_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumGeneric::BindGroup2") , layout : & bind_group_layout , entries : & entries , }) ;
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(2, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup3EntriesParams<'a> {
-            pub bc_kind: wgpu::BufferBinding<'a>,
-            pub bc_value: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup3Entries<'a> {
-            pub bc_kind: wgpu::BindGroupEntry<'a>,
-            pub bc_value: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup3Entries<'a> {
-            pub fn new(params: WgpuBindGroup3EntriesParams<'a>) -> Self {
-                Self {
-                    bc_kind: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
-                    },
-                    bc_value: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.bc_value),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-                [self.bc_kind, self.bc_value]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup3(wgpu::BindGroup);
-        impl WgpuBindGroup3 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumGeneric::BindGroup3::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup3Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumGeneric::BindGroup3") , layout : & bind_group_layout , entries : & entries , }) ;
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(3, &self.0, &[]);
-            }
-        }
-        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-        #[doc = "   - Bind group 1: More frequent updates"]
-        #[doc = "   - Bind group 2: More frequent updates"]
-        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-        #[derive(Debug, Copy, Clone)]
-        pub struct WgpuBindGroups<'a> {
-            pub bind_group0: &'a WgpuBindGroup0,
-            pub bind_group1: &'a WgpuBindGroup1,
-            pub bind_group2: &'a WgpuBindGroup2,
-            pub bind_group3: &'a WgpuBindGroup3,
-        }
-        impl<'a> WgpuBindGroups<'a> {
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                self.bind_group0.set(pass);
-                self.bind_group1.set(pass);
-                self.bind_group2.set(pass);
-                self.bind_group3.set(pass);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuPipelineLayout;
-        impl WgpuPipelineLayout {
-            pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 4],
-            ) -> [wgpu::BindGroupLayout; 4] {
-                entries
-            }
-        }
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device . create_pipeline_layout (& wgpu :: PipelineLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumGeneric::PipelineLayout") , bind_group_layouts : & [& WgpuBindGroup0 :: get_bind_group_layout (device) , & WgpuBindGroup1 :: get_bind_group_layout (device) , & WgpuBindGroup2 :: get_bind_group_layout (device) , & WgpuBindGroup3 :: get_bind_group_layout (device)] , push_constant_ranges : & [] , })
-        }
-        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(
-                    "generic_coupled_assembly_grad_state_incompressible_momentum_generic.wgsl",
-                ),
-                source: wgpu::ShaderSource::Wgsl(source),
-            })
-        }
-        pub const SHADER_STRING: &str = r#"
-struct Vector2_ {
-    x: f32,
-    y: f32,
-}
-
-struct Constants {
-    dt: f32,
-    dt_old: f32,
-    dtau: f32,
-    time: f32,
-    viscosity: f32,
-    density: f32,
-    component: u32,
-    alpha_p: f32,
-    scheme: u32,
-    alpha_u: f32,
-    stride_x: u32,
-    time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
-}
-
-@group(0) @binding(0) 
-var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
-var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
-var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
-var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
-var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
-var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
-var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
-var<storage> cell_faces: array<u32>;
-@group(0) @binding(10) 
-var<storage> cell_face_matrix_indices: array<u32>;
-@group(0) @binding(11) 
-var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(12) 
-var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
-var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
-var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
-var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
-var<uniform> constants: Constants;
-@group(1) @binding(4) 
-var<storage> state_iter: array<f32>;
-@group(1) @binding(5) 
-var<storage> grad_state: array<Vector2_>;
-@group(1) @binding(6) 
-var<storage, read_write> fluxes: array<f32>;
-@group(2) @binding(0) 
-var<storage, read_write> matrix_values: array<f32>;
-@group(2) @binding(1) 
-var<storage, read_write> rhs: array<f32>;
-@group(2) @binding(2) 
-var<storage> scalar_row_offsets: array<u32>;
-@group(3) @binding(0) 
-var<storage> bc_kind: array<u32>;
-@group(3) @binding(1) 
-var<storage> bc_value: array<f32>;
-
-@compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var rank: u32 = 0u;
-    var diag_0_: f32 = 0f;
-    var rhs_0_: f32 = 0f;
-    var diag_1_: f32 = 0f;
-    var rhs_1_: f32 = 0f;
-    var diag_2_: f32 = 0f;
-    var rhs_2_: f32 = 0f;
-    var k: u32;
-    var normal: Vector2_;
-    var is_boundary: bool;
-    var other_idx: u32;
-    var other_center: Vector2_;
-    var dist: f32;
-    var phi_0_: f32;
-    var phi_1_: f32;
-    var phi_2_: f32;
-
-    let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
-    if (idx >= arrayLength((&cell_vols))) {
-        return;
-    }
-    let center = cell_centers[idx];
-    let vol = cell_vols[idx];
-    let start = cell_face_offsets[idx];
-    let end = cell_face_offsets[(idx + 1u)];
-    let scalar_offset = scalar_row_offsets[idx];
-    let _e32 = diagonal_indices[idx];
-    let diag_rank = (_e32 - scalar_offset);
-    let _e38 = scalar_row_offsets[(idx + 1u)];
-    let num_neighbors = (_e38 - scalar_offset);
-    let start_row_0_ = (scalar_offset * 9u);
-    let start_row_1_ = (start_row_0_ + ((num_neighbors * 3u) * 1u));
-    let start_row_2_ = (start_row_0_ + ((num_neighbors * 3u) * 2u));
-    loop {
-        let _e53 = rank;
-        if (_e53 < num_neighbors) {
-        } else {
-            break;
-        }
-        {
-            let _e55 = rank;
-            matrix_values[((start_row_0_ + (_e55 * 3u)) + 0u)] = 0f;
-            let _e64 = rank;
-            matrix_values[((start_row_0_ + (_e64 * 3u)) + 1u)] = 0f;
-            let _e73 = rank;
-            matrix_values[((start_row_0_ + (_e73 * 3u)) + 2u)] = 0f;
-            let _e82 = rank;
-            matrix_values[((start_row_1_ + (_e82 * 3u)) + 0u)] = 0f;
-            let _e91 = rank;
-            matrix_values[((start_row_1_ + (_e91 * 3u)) + 1u)] = 0f;
-            let _e100 = rank;
-            matrix_values[((start_row_1_ + (_e100 * 3u)) + 2u)] = 0f;
-            let _e109 = rank;
-            matrix_values[((start_row_2_ + (_e109 * 3u)) + 0u)] = 0f;
-            let _e118 = rank;
-            matrix_values[((start_row_2_ + (_e118 * 3u)) + 1u)] = 0f;
-            let _e127 = rank;
-            matrix_values[((start_row_2_ + (_e127 * 3u)) + 2u)] = 0f;
-        }
-        continuing {
-            let _e137 = rank;
-            rank = (_e137 + 1u);
-        }
-    }
-    let _e141 = constants.density;
-    let _e146 = constants.dt;
-    let _e148 = diag_0_;
-    diag_0_ = (_e148 + ((vol * _e141) / _e146));
-    let _e152 = constants.density;
-    let _e156 = constants.dt;
-    let _e165 = state_old[((idx * 8u) + 0u)];
-    let _e167 = rhs_0_;
-    rhs_0_ = (_e167 + (((vol * _e152) / _e156) * _e165));
-    let _e171 = constants.time_scheme;
-    if (_e171 == 1u) {
-        let _e176 = constants.dt;
-        let _e179 = constants.dt_old;
-        let r = (_e176 / _e179);
-        let _e183 = constants.density;
-        let _e187 = constants.dt;
-        let diag_bdf2_ = ((((vol * _e183) / _e187) * ((r * 2f) + 1f)) / (r + 1f));
-        let factor_n = (r + 1f);
-        let factor_nm1_ = ((r * r) / (r + 1f));
-        let _e203 = diag_0_;
-        let _e206 = constants.density;
-        let _e210 = constants.dt;
-        diag_0_ = ((_e203 - ((vol * _e206) / _e210)) + diag_bdf2_);
-        let _e214 = rhs_0_;
-        let _e217 = constants.density;
-        let _e221 = constants.dt;
-        let _e229 = state_old[((idx * 8u) + 0u)];
-        let _e234 = constants.density;
-        let _e238 = constants.dt;
-        let _e246 = state_old[((idx * 8u) + 0u)];
-        let _e254 = state_old_old[((idx * 8u) + 0u)];
-        rhs_0_ = ((_e214 - (((vol * _e217) / _e221) * _e229)) + (((vol * _e234) / _e238) * ((factor_n * _e246) - (factor_nm1_ * _e254))));
-    }
-    let _e261 = constants.dtau;
-    if (_e261 > 0f) {
-        let _e266 = constants.density;
-        let _e270 = constants.dtau;
-        let _e272 = diag_0_;
-        diag_0_ = (_e272 + ((vol * _e266) / _e270));
-        let _e276 = constants.density;
-        let _e280 = constants.dtau;
-        let _e288 = state_iter[((idx * 8u) + 0u)];
-        let _e290 = rhs_0_;
-        rhs_0_ = (_e290 + (((vol * _e276) / _e280) * _e288));
-    }
-    let _e294 = constants.density;
-    let _e299 = constants.dt;
-    let _e301 = diag_1_;
-    diag_1_ = (_e301 + ((vol * _e294) / _e299));
-    let _e305 = constants.density;
-    let _e309 = constants.dt;
-    let _e318 = state_old[((idx * 8u) + 1u)];
-    let _e320 = rhs_1_;
-    rhs_1_ = (_e320 + (((vol * _e305) / _e309) * _e318));
-    let _e324 = constants.time_scheme;
-    if (_e324 == 1u) {
-        let _e329 = constants.dt;
-        let _e332 = constants.dt_old;
-        let r_1 = (_e329 / _e332);
-        let _e336 = constants.density;
-        let _e340 = constants.dt;
-        let diag_bdf2_1 = ((((vol * _e336) / _e340) * ((r_1 * 2f) + 1f)) / (r_1 + 1f));
-        let factor_n_1 = (r_1 + 1f);
-        let factor_nm1_1 = ((r_1 * r_1) / (r_1 + 1f));
-        let _e356 = diag_1_;
-        let _e359 = constants.density;
-        let _e363 = constants.dt;
-        diag_1_ = ((_e356 - ((vol * _e359) / _e363)) + diag_bdf2_1);
-        let _e367 = rhs_1_;
-        let _e370 = constants.density;
-        let _e374 = constants.dt;
-        let _e382 = state_old[((idx * 8u) + 1u)];
-        let _e387 = constants.density;
-        let _e391 = constants.dt;
-        let _e399 = state_old[((idx * 8u) + 1u)];
-        let _e407 = state_old_old[((idx * 8u) + 1u)];
-        rhs_1_ = ((_e367 - (((vol * _e370) / _e374) * _e382)) + (((vol * _e387) / _e391) * ((factor_n_1 * _e399) - (factor_nm1_1 * _e407))));
-    }
-    let _e414 = constants.dtau;
-    if (_e414 > 0f) {
-        let _e419 = constants.density;
-        let _e423 = constants.dtau;
-        let _e425 = diag_1_;
-        diag_1_ = (_e425 + ((vol * _e419) / _e423));
-        let _e429 = constants.density;
-        let _e433 = constants.dtau;
-        let _e441 = state_iter[((idx * 8u) + 1u)];
-        let _e443 = rhs_1_;
-        rhs_1_ = (_e443 + (((vol * _e429) / _e433) * _e441));
-    }
-    k = start;
-    loop {
-        let _e446 = k;
-        if (_e446 < end) {
-        } else {
-            break;
-        }
-        {
-            let _e449 = k;
-            let face_idx = cell_faces[_e449];
-            let owner = face_owner[face_idx];
-            let neighbor_raw = face_neighbor[face_idx];
-            let boundary_type = face_boundary[face_idx];
-            let area = face_areas[face_idx];
-            let f_center = face_centers[face_idx];
-            let _e469 = face_normals[face_idx];
-            normal = _e469;
-            is_boundary = false;
-            other_idx = idx;
-            if (owner != idx) {
-                let _e477 = normal.x;
-                normal.x = -(_e477);
-                let _e481 = normal.y;
-                normal.y = -(_e481);
-            }
-            if (neighbor_raw != -1i) {
-                let neighbor = u32(neighbor_raw);
-                other_idx = neighbor;
-                if (owner != idx) {
-                    other_idx = owner;
-                }
-                let _e488 = other_idx;
-                let _e490 = cell_centers[_e488];
-                other_center = _e490;
-            } else {
-                is_boundary = true;
-                other_idx = idx;
-                other_center = f_center;
-            }
-            let _e494 = other_center.x;
-            let dx = (_e494 - center.x);
-            let _e498 = other_center.y;
-            let dy = (_e498 - center.y);
-            let _e502 = normal.x;
-            let _e505 = normal.y;
-            let dist_proj = abs(((dx * _e502) + (dy * _e505)));
-            let dist_euc = sqrt(((dx * dx) + (dy * dy)));
-            dist = max(dist_euc, 0.000001f);
-            if (dist_proj > 0.000001f) {
-                dist = dist_proj;
-            }
-            let _e519 = k;
-            let scalar_mat_idx = cell_face_matrix_indices[_e519];
-            let neighbor_rank = (scalar_mat_idx - scalar_offset);
-            let _e525 = constants.viscosity;
-            let _e527 = dist;
-            let diff_coeff_U = ((_e525 * area) / _e527);
-            let _e529 = is_boundary;
-            if !(_e529) {
-                let _e531 = diag_0_;
-                diag_0_ = (_e531 + diff_coeff_U);
-                let _e540 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
-                matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e540 - diff_coeff_U);
-            } else {
-                let _e548 = bc_kind[((face_idx * 3u) + 0u)];
-                if (_e548 == 1u) {
-                    let _e551 = diag_0_;
-                    diag_0_ = (_e551 + diff_coeff_U);
-                    let _e559 = bc_value[((face_idx * 3u) + 0u)];
-                    let _e561 = rhs_0_;
-                    rhs_0_ = (_e561 + (diff_coeff_U * _e559));
-                } else {
-                    let _e569 = bc_kind[((face_idx * 3u) + 0u)];
-                    if (_e569 == 2u) {
-                        let _e574 = constants.viscosity;
-                        let _e582 = bc_value[((face_idx * 3u) + 0u)];
-                        let _e585 = rhs_0_;
-                        rhs_0_ = (_e585 + -(((_e574 * area) * _e582)));
-                    }
-                }
-            }
-            let _e587 = is_boundary;
-            if !(_e587) {
-                let _e589 = diag_1_;
-                diag_1_ = (_e589 + diff_coeff_U);
-                let _e598 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
-                matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e598 - diff_coeff_U);
-            } else {
-                let _e606 = bc_kind[((face_idx * 3u) + 1u)];
-                if (_e606 == 1u) {
-                    let _e609 = diag_1_;
-                    diag_1_ = (_e609 + diff_coeff_U);
-                    let _e617 = bc_value[((face_idx * 3u) + 1u)];
-                    let _e619 = rhs_1_;
-                    rhs_1_ = (_e619 + (diff_coeff_U * _e617));
-                } else {
-                    let _e627 = bc_kind[((face_idx * 3u) + 1u)];
-                    if (_e627 == 2u) {
-                        let _e632 = constants.viscosity;
-                        let _e640 = bc_value[((face_idx * 3u) + 1u)];
-                        let _e643 = rhs_1_;
-                        rhs_1_ = (_e643 + -(((_e632 * area) * _e640)));
-                    }
-                }
-            }
-            let _e651 = fluxes[((face_idx * 3u) + 0u)];
-            phi_0_ = _e651;
-            if (owner != idx) {
-                let _e654 = phi_0_;
-                let _e657 = phi_0_;
-                phi_0_ = (_e657 - (_e654 * 2f));
-            }
-            let _e659 = is_boundary;
-            if !(_e659) {
-                let _e661 = phi_0_;
-                let _e664 = diag_0_;
-                diag_0_ = (_e664 + max(_e661, 0f));
-                let _e673 = phi_0_;
-                let _e676 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
-                matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e676 + min(_e673, 0f));
-                let _e678 = phi_0_;
-                let _e685 = state[((idx * 8u) + 0u)];
-                let _e686 = other_idx;
-                let _e693 = state[((_e686 * 8u) + 0u)];
-                let _e694 = phi_0_;
-                let _e698 = other_idx;
-                let _e705 = state[((_e698 * 8u) + 0u)];
-                let _e706 = other_idx;
-                let _e714 = grad_state[((_e706 * 8u) + 0u)].x;
-                let _e715 = other_idx;
-                let _e723 = grad_state[((_e715 * 8u) + 0u)].y;
-                let _e729 = other_center.x;
-                let _e731 = other_center.y;
-                let _e742 = state[((idx * 8u) + 0u)];
-                let _e750 = grad_state[((idx * 8u) + 0u)].x;
-                let _e758 = grad_state[((idx * 8u) + 0u)].y;
-                let _e769 = phi_0_;
-                let _e775 = constants.scheme;
-                let _e779 = other_idx;
-                let _e786 = state[((_e779 * 8u) + 0u)];
-                let _e787 = other_idx;
-                let _e794 = state[((_e787 * 8u) + 0u)];
-                let _e804 = state[((idx * 8u) + 0u)];
-                let _e808 = other_idx;
-                let _e816 = grad_state[((_e808 * 8u) + 0u)].x;
-                let _e817 = other_idx;
-                let _e825 = grad_state[((_e817 * 8u) + 0u)].y;
-                let _e831 = other_center.x;
-                let _e833 = other_center.y;
-                let _e840 = other_idx;
-                let _e847 = state[((_e840 * 8u) + 0u)];
-                let _e855 = state[((idx * 8u) + 0u)];
-                let _e862 = state[((idx * 8u) + 0u)];
-                let _e866 = other_idx;
-                let _e873 = state[((_e866 * 8u) + 0u)];
-                let _e884 = grad_state[((idx * 8u) + 0u)].x;
-                let _e892 = grad_state[((idx * 8u) + 0u)].y;
-                let _e895 = other_center.x;
-                let _e897 = other_center.y;
-                let _e913 = state[((idx * 8u) + 0u)];
-                let _e915 = phi_0_;
-                let _e921 = constants.scheme;
-                let _e925 = other_idx;
-                let _e932 = state[((_e925 * 8u) + 0u)];
-                let _e933 = other_idx;
-                let _e941 = grad_state[((_e933 * 8u) + 0u)].x;
-                let _e942 = other_idx;
-                let _e950 = grad_state[((_e942 * 8u) + 0u)].y;
-                let _e956 = other_center.x;
-                let _e958 = other_center.y;
-                let _e968 = state[((idx * 8u) + 0u)];
-                let _e969 = other_idx;
-                let _e976 = state[((_e969 * 8u) + 0u)];
-                let _e987 = state[((idx * 8u) + 0u)];
-                let _e988 = other_idx;
-                let _e995 = state[((_e988 * 8u) + 0u)];
-                let _e1007 = state[((idx * 8u) + 0u)];
-                let _e1015 = grad_state[((idx * 8u) + 0u)].x;
-                let _e1023 = grad_state[((idx * 8u) + 0u)].y;
-                let _e1033 = other_idx;
-                let _e1040 = state[((_e1033 * 8u) + 0u)];
-                let _e1047 = state[((idx * 8u) + 0u)];
-                let _e1052 = other_idx;
-                let _e1059 = state[((_e1052 * 8u) + 0u)];
-                let _e1066 = state[((idx * 8u) + 0u)];
-                let _e1072 = phi_0_;
-                let _e1078 = constants.scheme;
-                let _e1082 = other_idx;
-                let _e1089 = state[((_e1082 * 8u) + 0u)];
-                let _e1090 = other_idx;
-                let _e1098 = grad_state[((_e1090 * 8u) + 0u)].x;
-                let _e1099 = other_idx;
-                let _e1107 = grad_state[((_e1099 * 8u) + 0u)].y;
-                let _e1113 = other_center.x;
-                let _e1115 = other_center.y;
-                let _e1125 = state[((idx * 8u) + 0u)];
-                let _e1126 = other_idx;
-                let _e1133 = state[((_e1126 * 8u) + 0u)];
-                let _e1143 = state[((idx * 8u) + 0u)];
-                let _e1144 = other_idx;
-                let _e1151 = state[((_e1144 * 8u) + 0u)];
-                let _e1154 = other_idx;
-                let _e1162 = grad_state[((_e1154 * 8u) + 0u)].x;
-                let _e1163 = other_idx;
-                let _e1171 = grad_state[((_e1163 * 8u) + 0u)].y;
-                let _e1177 = other_center.x;
-                let _e1179 = other_center.y;
-                let _e1194 = state[((idx * 8u) + 0u)];
-                let _e1195 = other_idx;
-                let _e1202 = state[((_e1195 * 8u) + 0u)];
-                let _e1204 = other_idx;
-                let _e1212 = grad_state[((_e1204 * 8u) + 0u)].x;
-                let _e1213 = other_idx;
-                let _e1221 = grad_state[((_e1213 * 8u) + 0u)].y;
-                let _e1227 = other_center.x;
-                let _e1229 = other_center.y;
-                let _e1243 = state[((idx * 8u) + 0u)];
-                let _e1244 = other_idx;
-                let _e1251 = state[((_e1244 * 8u) + 0u)];
-                let _e1253 = other_idx;
-                let _e1261 = grad_state[((_e1253 * 8u) + 0u)].x;
-                let _e1262 = other_idx;
-                let _e1270 = grad_state[((_e1262 * 8u) + 0u)].y;
-                let _e1276 = other_center.x;
-                let _e1278 = other_center.y;
-                let _e1294 = state[((idx * 8u) + 0u)];
-                let _e1302 = grad_state[((idx * 8u) + 0u)].x;
-                let _e1310 = grad_state[((idx * 8u) + 0u)].y;
-                let _e1320 = other_idx;
-                let _e1327 = state[((_e1320 * 8u) + 0u)];
-                let _e1334 = state[((idx * 8u) + 0u)];
-                let _e1338 = other_idx;
-                let _e1345 = state[((_e1338 * 8u) + 0u)];
-                let _e1352 = state[((idx * 8u) + 0u)];
-                let _e1362 = grad_state[((idx * 8u) + 0u)].x;
-                let _e1370 = grad_state[((idx * 8u) + 0u)].y;
-                let _e1385 = other_idx;
-                let _e1392 = state[((_e1385 * 8u) + 0u)];
-                let _e1399 = state[((idx * 8u) + 0u)];
-                let _e1408 = grad_state[((idx * 8u) + 0u)].x;
-                let _e1416 = grad_state[((idx * 8u) + 0u)].y;
-                let _e1430 = other_idx;
-                let _e1437 = state[((_e1430 * 8u) + 0u)];
-                let _e1444 = state[((idx * 8u) + 0u)];
-                let _e1453 = grad_state[((idx * 8u) + 0u)].x;
-                let _e1461 = grad_state[((idx * 8u) + 0u)].y;
-                let _e1477 = phi_0_;
-                let _e1483 = constants.scheme;
-                let _e1487 = other_idx;
-                let _e1494 = state[((_e1487 * 8u) + 0u)];
-                let _e1495 = other_idx;
-                let _e1502 = state[((_e1495 * 8u) + 0u)];
-                let _e1511 = state[((idx * 8u) + 0u)];
-                let _e1515 = other_idx;
-                let _e1523 = grad_state[((_e1515 * 8u) + 0u)].x;
-                let _e1524 = other_idx;
-                let _e1532 = grad_state[((_e1524 * 8u) + 0u)].y;
-                let _e1538 = other_center.x;
-                let _e1540 = other_center.y;
-                let _e1547 = other_idx;
-                let _e1554 = state[((_e1547 * 8u) + 0u)];
-                let _e1562 = state[((idx * 8u) + 0u)];
-                let _e1563 = other_idx;
-                let _e1570 = state[((_e1563 * 8u) + 0u)];
-                let _e1581 = state[((idx * 8u) + 0u)];
-                let _e1582 = other_idx;
-                let _e1589 = state[((_e1582 * 8u) + 0u)];
-                let _e1601 = state[((idx * 8u) + 0u)];
-                let _e1608 = state[((idx * 8u) + 0u)];
-                let _e1611 = other_idx;
-                let _e1618 = state[((_e1611 * 8u) + 0u)];
-                let _e1629 = grad_state[((idx * 8u) + 0u)].x;
-                let _e1637 = grad_state[((idx * 8u) + 0u)].y;
-                let _e1640 = other_center.x;
-                let _e1642 = other_center.y;
-                let _e1658 = state[((idx * 8u) + 0u)];
-                let _e1660 = other_idx;
-                let _e1667 = state[((_e1660 * 8u) + 0u)];
-                let _e1674 = state[((idx * 8u) + 0u)];
-                let _e1679 = other_idx;
-                let _e1686 = state[((_e1679 * 8u) + 0u)];
-                let _e1693 = state[((idx * 8u) + 0u)];
-                let _e1699 = phi_0_;
-                let _e1705 = constants.scheme;
-                let _e1709 = other_idx;
-                let _e1716 = state[((_e1709 * 8u) + 0u)];
-                let _e1717 = other_idx;
-                let _e1724 = state[((_e1717 * 8u) + 0u)];
-                let _e1733 = state[((idx * 8u) + 0u)];
-                let _e1737 = other_idx;
-                let _e1745 = grad_state[((_e1737 * 8u) + 0u)].x;
-                let _e1746 = other_idx;
-                let _e1754 = grad_state[((_e1746 * 8u) + 0u)].y;
-                let _e1760 = other_center.x;
-                let _e1762 = other_center.y;
-                let _e1769 = other_idx;
-                let _e1776 = state[((_e1769 * 8u) + 0u)];
-                let _e1784 = state[((idx * 8u) + 0u)];
-                let _e1785 = other_idx;
-                let _e1792 = state[((_e1785 * 8u) + 0u)];
-                let _e1802 = state[((idx * 8u) + 0u)];
-                let _e1803 = other_idx;
-                let _e1810 = state[((_e1803 * 8u) + 0u)];
-                let _e1813 = other_idx;
-                let _e1820 = state[((_e1813 * 8u) + 0u)];
-                let _e1829 = state[((idx * 8u) + 0u)];
-                let _e1833 = other_idx;
-                let _e1841 = grad_state[((_e1833 * 8u) + 0u)].x;
-                let _e1842 = other_idx;
-                let _e1850 = grad_state[((_e1842 * 8u) + 0u)].y;
-                let _e1856 = other_center.x;
-                let _e1858 = other_center.y;
-                let _e1865 = other_idx;
-                let _e1872 = state[((_e1865 * 8u) + 0u)];
-                let _e1885 = state[((idx * 8u) + 0u)];
-                let _e1886 = other_idx;
-                let _e1893 = state[((_e1886 * 8u) + 0u)];
-                let _e1895 = other_idx;
-                let _e1902 = state[((_e1895 * 8u) + 0u)];
-                let _e1911 = state[((idx * 8u) + 0u)];
-                let _e1915 = other_idx;
-                let _e1923 = grad_state[((_e1915 * 8u) + 0u)].x;
-                let _e1924 = other_idx;
-                let _e1932 = grad_state[((_e1924 * 8u) + 0u)].y;
-                let _e1938 = other_center.x;
-                let _e1940 = other_center.y;
-                let _e1947 = other_idx;
-                let _e1954 = state[((_e1947 * 8u) + 0u)];
-                let _e1966 = state[((idx * 8u) + 0u)];
-                let _e1967 = other_idx;
-                let _e1974 = state[((_e1967 * 8u) + 0u)];
-                let _e1976 = other_idx;
-                let _e1983 = state[((_e1976 * 8u) + 0u)];
-                let _e1992 = state[((idx * 8u) + 0u)];
-                let _e1996 = other_idx;
-                let _e2004 = grad_state[((_e1996 * 8u) + 0u)].x;
-                let _e2005 = other_idx;
-                let _e2013 = grad_state[((_e2005 * 8u) + 0u)].y;
-                let _e2019 = other_center.x;
-                let _e2021 = other_center.y;
-                let _e2028 = other_idx;
-                let _e2035 = state[((_e2028 * 8u) + 0u)];
-                let _e2049 = state[((idx * 8u) + 0u)];
-                let _e2056 = state[((idx * 8u) + 0u)];
-                let _e2059 = other_idx;
-                let _e2066 = state[((_e2059 * 8u) + 0u)];
-                let _e2077 = grad_state[((idx * 8u) + 0u)].x;
-                let _e2085 = grad_state[((idx * 8u) + 0u)].y;
-                let _e2088 = other_center.x;
-                let _e2090 = other_center.y;
-                let _e2106 = state[((idx * 8u) + 0u)];
-                let _e2108 = other_idx;
-                let _e2115 = state[((_e2108 * 8u) + 0u)];
-                let _e2122 = state[((idx * 8u) + 0u)];
-                let _e2126 = other_idx;
-                let _e2133 = state[((_e2126 * 8u) + 0u)];
-                let _e2140 = state[((idx * 8u) + 0u)];
-                let _e2149 = state[((idx * 8u) + 0u)];
-                let _e2152 = other_idx;
-                let _e2159 = state[((_e2152 * 8u) + 0u)];
-                let _e2170 = grad_state[((idx * 8u) + 0u)].x;
-                let _e2178 = grad_state[((idx * 8u) + 0u)].y;
-                let _e2181 = other_center.x;
-                let _e2183 = other_center.y;
-                let _e2199 = state[((idx * 8u) + 0u)];
-                let _e2206 = other_idx;
-                let _e2213 = state[((_e2206 * 8u) + 0u)];
-                let _e2220 = state[((idx * 8u) + 0u)];
-                let _e2228 = state[((idx * 8u) + 0u)];
-                let _e2231 = other_idx;
-                let _e2238 = state[((_e2231 * 8u) + 0u)];
-                let _e2249 = grad_state[((idx * 8u) + 0u)].x;
-                let _e2257 = grad_state[((idx * 8u) + 0u)].y;
-                let _e2260 = other_center.x;
-                let _e2262 = other_center.y;
-                let _e2278 = state[((idx * 8u) + 0u)];
-                let _e2284 = other_idx;
-                let _e2291 = state[((_e2284 * 8u) + 0u)];
-                let _e2298 = state[((idx * 8u) + 0u)];
-                let _e2306 = state[((idx * 8u) + 0u)];
-                let _e2309 = other_idx;
-                let _e2316 = state[((_e2309 * 8u) + 0u)];
-                let _e2327 = grad_state[((idx * 8u) + 0u)].x;
-                let _e2335 = grad_state[((idx * 8u) + 0u)].y;
-                let _e2338 = other_center.x;
-                let _e2340 = other_center.y;
-                let _e2356 = state[((idx * 8u) + 0u)];
-                let _e2364 = phi_0_;
-                let _e2370 = constants.scheme;
-                let _e2380 = state[((idx * 8u) + 0u)];
-                let _e2381 = other_idx;
-                let _e2388 = state[((_e2381 * 8u) + 0u)];
-                let _e2389 = phi_0_;
-                let _e2395 = rhs_0_;
-                rhs_0_ = (_e2395 - (_e678 * (select(select(select(select(select(select(select(_e685, _e693, (_e694 < 0f)), select((_e705 + dot(vec2<f32>(_e714, _e723), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e729, _e731)))), (_e742 + dot(vec2<f32>(_e750, _e758), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e769 > 0f)), (_e775 == 1u)), select(((((_e786 + (_e794 * 0.625f)) + (_e804 * 0.375f)) + (dot(vec2<f32>(_e816, _e825), (vec2<f32>(center.x, center.y) - vec2<f32>(_e831, _e833))) * 0.125f)) - _e847), ((((_e855 + (_e862 * 0.625f)) + (_e873 * 0.375f)) + (dot(vec2<f32>(_e884, _e892), (vec2<f32>(_e895, _e897) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e913), (_e915 > 0f)), (_e921 == 2u)), select((_e932 + min(max(dot(vec2<f32>(_e941, _e950), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e956, _e958))), min((_e968 - _e976), 0f)), max((_e987 - _e995), 0f))), (_e1007 + min(max(dot(vec2<f32>(_e1015, _e1023), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), min((_e1040 - _e1047), 0f)), max((_e1059 - _e1066), 0f))), (_e1072 > 0f)), (_e1078 == 3u)), select((_e1089 + ((((dot(vec2<f32>(_e1098, _e1107), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e1113, _e1115))) * abs((_e1125 - _e1133))) / max(abs((_e1143 - _e1151)), (abs(dot(vec2<f32>(_e1162, _e1171), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e1177, _e1179)))) + 0.00000001f))) * max(((_e1194 - _e1202) * dot(vec2<f32>(_e1212, _e1221), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e1227, _e1229)))), 0f)) / max(abs(((_e1243 - _e1251) * dot(vec2<f32>(_e1261, _e1270), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e1276, _e1278))))), 0.00000001f))), (_e1294 + ((((dot(vec2<f32>(_e1302, _e1310), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) * abs((_e1327 - _e1334))) / max(abs((_e1345 - _e1352)), (abs(dot(vec2<f32>(_e1362, _e1370), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))) + 0.00000001f))) * max(((_e1392 - _e1399) * dot(vec2<f32>(_e1408, _e1416), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), 0f)) / max(abs(((_e1437 - _e1444) * dot(vec2<f32>(_e1453, _e1461), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))))), 0.00000001f))), (_e1477 > 0f)), (_e1483 == 4u)), select((_e1494 + min(max(((((_e1502 * 0.625f) + (_e1511 * 0.375f)) + (dot(vec2<f32>(_e1523, _e1532), (vec2<f32>(center.x, center.y) - vec2<f32>(_e1538, _e1540))) * 0.125f)) - _e1554), min((_e1562 - _e1570), 0f)), max((_e1581 - _e1589), 0f))), (_e1601 + min(max(((((_e1608 * 0.625f) + (_e1618 * 0.375f)) + (dot(vec2<f32>(_e1629, _e1637), (vec2<f32>(_e1640, _e1642) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e1658), min((_e1667 - _e1674), 0f)), max((_e1686 - _e1693), 0f))), (_e1699 > 0f)), (_e1705 == 5u)), select((_e1716 + ((((((((_e1724 * 0.625f) + (_e1733 * 0.375f)) + (dot(vec2<f32>(_e1745, _e1754), (vec2<f32>(center.x, center.y) - vec2<f32>(_e1760, _e1762))) * 0.125f)) - _e1776) * abs((_e1784 - _e1792))) / max(abs((_e1802 - _e1810)), (abs(((((_e1820 * 0.625f) + (_e1829 * 0.375f)) + (dot(vec2<f32>(_e1841, _e1850), (vec2<f32>(center.x, center.y) - vec2<f32>(_e1856, _e1858))) * 0.125f)) - _e1872)) + 0.00000001f))) * max(((_e1885 - _e1893) * ((((_e1902 * 0.625f) + (_e1911 * 0.375f)) + (dot(vec2<f32>(_e1923, _e1932), (vec2<f32>(center.x, center.y) - vec2<f32>(_e1938, _e1940))) * 0.125f)) - _e1954)), 0f)) / max(abs(((_e1966 - _e1974) * ((((_e1983 * 0.625f) + (_e1992 * 0.375f)) + (dot(vec2<f32>(_e2004, _e2013), (vec2<f32>(center.x, center.y) - vec2<f32>(_e2019, _e2021))) * 0.125f)) - _e2035))), 0.00000001f))), (_e2049 + ((((((((_e2056 * 0.625f) + (_e2066 * 0.375f)) + (dot(vec2<f32>(_e2077, _e2085), (vec2<f32>(_e2088, _e2090) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2106) * abs((_e2115 - _e2122))) / max(abs((_e2133 - _e2140)), (abs(((((_e2149 * 0.625f) + (_e2159 * 0.375f)) + (dot(vec2<f32>(_e2170, _e2178), (vec2<f32>(_e2181, _e2183) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2199)) + 0.00000001f))) * max(((_e2213 - _e2220) * ((((_e2228 * 0.625f) + (_e2238 * 0.375f)) + (dot(vec2<f32>(_e2249, _e2257), (vec2<f32>(_e2260, _e2262) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2278)), 0f)) / max(abs(((_e2291 - _e2298) * ((((_e2306 * 0.625f) + (_e2316 * 0.375f)) + (dot(vec2<f32>(_e2327, _e2335), (vec2<f32>(_e2338, _e2340) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2356))), 0.00000001f))), (_e2364 > 0f)), (_e2370 == 6u)) - select(_e2380, _e2388, (_e2389 < 0f)))));
-            } else {
-                let _e2403 = bc_kind[((face_idx * 3u) + 0u)];
-                if (_e2403 == 1u) {
-                    let _e2406 = phi_0_;
-                    let _e2409 = diag_0_;
-                    diag_0_ = (_e2409 + max(_e2406, 0f));
-                    let _e2411 = phi_0_;
-                    let _e2420 = bc_value[((face_idx * 3u) + 0u)];
-                    let _e2422 = rhs_0_;
-                    rhs_0_ = (_e2422 - (min(_e2411, 0f) * _e2420));
-                } else {
-                    let _e2424 = phi_0_;
-                    let _e2425 = diag_0_;
-                    diag_0_ = (_e2425 + _e2424);
-                }
-            }
-            let _e2433 = fluxes[((face_idx * 3u) + 1u)];
-            phi_1_ = _e2433;
-            if (owner != idx) {
-                let _e2436 = phi_1_;
-                let _e2439 = phi_1_;
-                phi_1_ = (_e2439 - (_e2436 * 2f));
-            }
-            let _e2441 = is_boundary;
-            if !(_e2441) {
-                let _e2443 = phi_1_;
-                let _e2446 = diag_1_;
-                diag_1_ = (_e2446 + max(_e2443, 0f));
-                let _e2455 = phi_1_;
-                let _e2458 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
-                matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e2458 + min(_e2455, 0f));
-                let _e2460 = phi_1_;
-                let _e2467 = state[((idx * 8u) + 1u)];
-                let _e2468 = other_idx;
-                let _e2475 = state[((_e2468 * 8u) + 1u)];
-                let _e2476 = phi_1_;
-                let _e2480 = other_idx;
-                let _e2487 = state[((_e2480 * 8u) + 1u)];
-                let _e2488 = other_idx;
-                let _e2496 = grad_state[((_e2488 * 8u) + 1u)].x;
-                let _e2497 = other_idx;
-                let _e2505 = grad_state[((_e2497 * 8u) + 1u)].y;
-                let _e2511 = other_center.x;
-                let _e2513 = other_center.y;
-                let _e2524 = state[((idx * 8u) + 1u)];
-                let _e2532 = grad_state[((idx * 8u) + 1u)].x;
-                let _e2540 = grad_state[((idx * 8u) + 1u)].y;
-                let _e2551 = phi_1_;
-                let _e2557 = constants.scheme;
-                let _e2561 = other_idx;
-                let _e2568 = state[((_e2561 * 8u) + 1u)];
-                let _e2569 = other_idx;
-                let _e2576 = state[((_e2569 * 8u) + 1u)];
-                let _e2586 = state[((idx * 8u) + 1u)];
-                let _e2590 = other_idx;
-                let _e2598 = grad_state[((_e2590 * 8u) + 1u)].x;
-                let _e2599 = other_idx;
-                let _e2607 = grad_state[((_e2599 * 8u) + 1u)].y;
-                let _e2613 = other_center.x;
-                let _e2615 = other_center.y;
-                let _e2622 = other_idx;
-                let _e2629 = state[((_e2622 * 8u) + 1u)];
-                let _e2637 = state[((idx * 8u) + 1u)];
-                let _e2644 = state[((idx * 8u) + 1u)];
-                let _e2648 = other_idx;
-                let _e2655 = state[((_e2648 * 8u) + 1u)];
-                let _e2666 = grad_state[((idx * 8u) + 1u)].x;
-                let _e2674 = grad_state[((idx * 8u) + 1u)].y;
-                let _e2677 = other_center.x;
-                let _e2679 = other_center.y;
-                let _e2695 = state[((idx * 8u) + 1u)];
-                let _e2697 = phi_1_;
-                let _e2703 = constants.scheme;
-                let _e2707 = other_idx;
-                let _e2714 = state[((_e2707 * 8u) + 1u)];
-                let _e2715 = other_idx;
-                let _e2723 = grad_state[((_e2715 * 8u) + 1u)].x;
-                let _e2724 = other_idx;
-                let _e2732 = grad_state[((_e2724 * 8u) + 1u)].y;
-                let _e2738 = other_center.x;
-                let _e2740 = other_center.y;
-                let _e2750 = state[((idx * 8u) + 1u)];
-                let _e2751 = other_idx;
-                let _e2758 = state[((_e2751 * 8u) + 1u)];
-                let _e2769 = state[((idx * 8u) + 1u)];
-                let _e2770 = other_idx;
-                let _e2777 = state[((_e2770 * 8u) + 1u)];
-                let _e2789 = state[((idx * 8u) + 1u)];
-                let _e2797 = grad_state[((idx * 8u) + 1u)].x;
-                let _e2805 = grad_state[((idx * 8u) + 1u)].y;
-                let _e2815 = other_idx;
-                let _e2822 = state[((_e2815 * 8u) + 1u)];
-                let _e2829 = state[((idx * 8u) + 1u)];
-                let _e2834 = other_idx;
-                let _e2841 = state[((_e2834 * 8u) + 1u)];
-                let _e2848 = state[((idx * 8u) + 1u)];
-                let _e2854 = phi_1_;
-                let _e2860 = constants.scheme;
-                let _e2864 = other_idx;
-                let _e2871 = state[((_e2864 * 8u) + 1u)];
-                let _e2872 = other_idx;
-                let _e2880 = grad_state[((_e2872 * 8u) + 1u)].x;
-                let _e2881 = other_idx;
-                let _e2889 = grad_state[((_e2881 * 8u) + 1u)].y;
-                let _e2895 = other_center.x;
-                let _e2897 = other_center.y;
-                let _e2907 = state[((idx * 8u) + 1u)];
-                let _e2908 = other_idx;
-                let _e2915 = state[((_e2908 * 8u) + 1u)];
-                let _e2925 = state[((idx * 8u) + 1u)];
-                let _e2926 = other_idx;
-                let _e2933 = state[((_e2926 * 8u) + 1u)];
-                let _e2936 = other_idx;
-                let _e2944 = grad_state[((_e2936 * 8u) + 1u)].x;
-                let _e2945 = other_idx;
-                let _e2953 = grad_state[((_e2945 * 8u) + 1u)].y;
-                let _e2959 = other_center.x;
-                let _e2961 = other_center.y;
-                let _e2976 = state[((idx * 8u) + 1u)];
-                let _e2977 = other_idx;
-                let _e2984 = state[((_e2977 * 8u) + 1u)];
-                let _e2986 = other_idx;
-                let _e2994 = grad_state[((_e2986 * 8u) + 1u)].x;
-                let _e2995 = other_idx;
-                let _e3003 = grad_state[((_e2995 * 8u) + 1u)].y;
-                let _e3009 = other_center.x;
-                let _e3011 = other_center.y;
-                let _e3025 = state[((idx * 8u) + 1u)];
-                let _e3026 = other_idx;
-                let _e3033 = state[((_e3026 * 8u) + 1u)];
-                let _e3035 = other_idx;
-                let _e3043 = grad_state[((_e3035 * 8u) + 1u)].x;
-                let _e3044 = other_idx;
-                let _e3052 = grad_state[((_e3044 * 8u) + 1u)].y;
-                let _e3058 = other_center.x;
-                let _e3060 = other_center.y;
-                let _e3076 = state[((idx * 8u) + 1u)];
-                let _e3084 = grad_state[((idx * 8u) + 1u)].x;
-                let _e3092 = grad_state[((idx * 8u) + 1u)].y;
-                let _e3102 = other_idx;
-                let _e3109 = state[((_e3102 * 8u) + 1u)];
-                let _e3116 = state[((idx * 8u) + 1u)];
-                let _e3120 = other_idx;
-                let _e3127 = state[((_e3120 * 8u) + 1u)];
-                let _e3134 = state[((idx * 8u) + 1u)];
-                let _e3144 = grad_state[((idx * 8u) + 1u)].x;
-                let _e3152 = grad_state[((idx * 8u) + 1u)].y;
-                let _e3167 = other_idx;
-                let _e3174 = state[((_e3167 * 8u) + 1u)];
-                let _e3181 = state[((idx * 8u) + 1u)];
-                let _e3190 = grad_state[((idx * 8u) + 1u)].x;
-                let _e3198 = grad_state[((idx * 8u) + 1u)].y;
-                let _e3212 = other_idx;
-                let _e3219 = state[((_e3212 * 8u) + 1u)];
-                let _e3226 = state[((idx * 8u) + 1u)];
-                let _e3235 = grad_state[((idx * 8u) + 1u)].x;
-                let _e3243 = grad_state[((idx * 8u) + 1u)].y;
-                let _e3259 = phi_1_;
-                let _e3265 = constants.scheme;
-                let _e3269 = other_idx;
-                let _e3276 = state[((_e3269 * 8u) + 1u)];
-                let _e3277 = other_idx;
-                let _e3284 = state[((_e3277 * 8u) + 1u)];
-                let _e3293 = state[((idx * 8u) + 1u)];
-                let _e3297 = other_idx;
-                let _e3305 = grad_state[((_e3297 * 8u) + 1u)].x;
-                let _e3306 = other_idx;
-                let _e3314 = grad_state[((_e3306 * 8u) + 1u)].y;
-                let _e3320 = other_center.x;
-                let _e3322 = other_center.y;
-                let _e3329 = other_idx;
-                let _e3336 = state[((_e3329 * 8u) + 1u)];
-                let _e3344 = state[((idx * 8u) + 1u)];
-                let _e3345 = other_idx;
-                let _e3352 = state[((_e3345 * 8u) + 1u)];
-                let _e3363 = state[((idx * 8u) + 1u)];
-                let _e3364 = other_idx;
-                let _e3371 = state[((_e3364 * 8u) + 1u)];
-                let _e3383 = state[((idx * 8u) + 1u)];
-                let _e3390 = state[((idx * 8u) + 1u)];
-                let _e3393 = other_idx;
-                let _e3400 = state[((_e3393 * 8u) + 1u)];
-                let _e3411 = grad_state[((idx * 8u) + 1u)].x;
-                let _e3419 = grad_state[((idx * 8u) + 1u)].y;
-                let _e3422 = other_center.x;
-                let _e3424 = other_center.y;
-                let _e3440 = state[((idx * 8u) + 1u)];
-                let _e3442 = other_idx;
-                let _e3449 = state[((_e3442 * 8u) + 1u)];
-                let _e3456 = state[((idx * 8u) + 1u)];
-                let _e3461 = other_idx;
-                let _e3468 = state[((_e3461 * 8u) + 1u)];
-                let _e3475 = state[((idx * 8u) + 1u)];
-                let _e3481 = phi_1_;
-                let _e3487 = constants.scheme;
-                let _e3491 = other_idx;
-                let _e3498 = state[((_e3491 * 8u) + 1u)];
-                let _e3499 = other_idx;
-                let _e3506 = state[((_e3499 * 8u) + 1u)];
-                let _e3515 = state[((idx * 8u) + 1u)];
-                let _e3519 = other_idx;
-                let _e3527 = grad_state[((_e3519 * 8u) + 1u)].x;
-                let _e3528 = other_idx;
-                let _e3536 = grad_state[((_e3528 * 8u) + 1u)].y;
-                let _e3542 = other_center.x;
-                let _e3544 = other_center.y;
-                let _e3551 = other_idx;
-                let _e3558 = state[((_e3551 * 8u) + 1u)];
-                let _e3566 = state[((idx * 8u) + 1u)];
-                let _e3567 = other_idx;
-                let _e3574 = state[((_e3567 * 8u) + 1u)];
-                let _e3584 = state[((idx * 8u) + 1u)];
-                let _e3585 = other_idx;
-                let _e3592 = state[((_e3585 * 8u) + 1u)];
-                let _e3595 = other_idx;
-                let _e3602 = state[((_e3595 * 8u) + 1u)];
-                let _e3611 = state[((idx * 8u) + 1u)];
-                let _e3615 = other_idx;
-                let _e3623 = grad_state[((_e3615 * 8u) + 1u)].x;
-                let _e3624 = other_idx;
-                let _e3632 = grad_state[((_e3624 * 8u) + 1u)].y;
-                let _e3638 = other_center.x;
-                let _e3640 = other_center.y;
-                let _e3647 = other_idx;
-                let _e3654 = state[((_e3647 * 8u) + 1u)];
-                let _e3667 = state[((idx * 8u) + 1u)];
-                let _e3668 = other_idx;
-                let _e3675 = state[((_e3668 * 8u) + 1u)];
-                let _e3677 = other_idx;
-                let _e3684 = state[((_e3677 * 8u) + 1u)];
-                let _e3693 = state[((idx * 8u) + 1u)];
-                let _e3697 = other_idx;
-                let _e3705 = grad_state[((_e3697 * 8u) + 1u)].x;
-                let _e3706 = other_idx;
-                let _e3714 = grad_state[((_e3706 * 8u) + 1u)].y;
-                let _e3720 = other_center.x;
-                let _e3722 = other_center.y;
-                let _e3729 = other_idx;
-                let _e3736 = state[((_e3729 * 8u) + 1u)];
-                let _e3748 = state[((idx * 8u) + 1u)];
-                let _e3749 = other_idx;
-                let _e3756 = state[((_e3749 * 8u) + 1u)];
-                let _e3758 = other_idx;
-                let _e3765 = state[((_e3758 * 8u) + 1u)];
-                let _e3774 = state[((idx * 8u) + 1u)];
-                let _e3778 = other_idx;
-                let _e3786 = grad_state[((_e3778 * 8u) + 1u)].x;
-                let _e3787 = other_idx;
-                let _e3795 = grad_state[((_e3787 * 8u) + 1u)].y;
-                let _e3801 = other_center.x;
-                let _e3803 = other_center.y;
-                let _e3810 = other_idx;
-                let _e3817 = state[((_e3810 * 8u) + 1u)];
-                let _e3831 = state[((idx * 8u) + 1u)];
-                let _e3838 = state[((idx * 8u) + 1u)];
-                let _e3841 = other_idx;
-                let _e3848 = state[((_e3841 * 8u) + 1u)];
-                let _e3859 = grad_state[((idx * 8u) + 1u)].x;
-                let _e3867 = grad_state[((idx * 8u) + 1u)].y;
-                let _e3870 = other_center.x;
-                let _e3872 = other_center.y;
-                let _e3888 = state[((idx * 8u) + 1u)];
-                let _e3890 = other_idx;
-                let _e3897 = state[((_e3890 * 8u) + 1u)];
-                let _e3904 = state[((idx * 8u) + 1u)];
-                let _e3908 = other_idx;
-                let _e3915 = state[((_e3908 * 8u) + 1u)];
-                let _e3922 = state[((idx * 8u) + 1u)];
-                let _e3931 = state[((idx * 8u) + 1u)];
-                let _e3934 = other_idx;
-                let _e3941 = state[((_e3934 * 8u) + 1u)];
-                let _e3952 = grad_state[((idx * 8u) + 1u)].x;
-                let _e3960 = grad_state[((idx * 8u) + 1u)].y;
-                let _e3963 = other_center.x;
-                let _e3965 = other_center.y;
-                let _e3981 = state[((idx * 8u) + 1u)];
-                let _e3988 = other_idx;
-                let _e3995 = state[((_e3988 * 8u) + 1u)];
-                let _e4002 = state[((idx * 8u) + 1u)];
-                let _e4010 = state[((idx * 8u) + 1u)];
-                let _e4013 = other_idx;
-                let _e4020 = state[((_e4013 * 8u) + 1u)];
-                let _e4031 = grad_state[((idx * 8u) + 1u)].x;
-                let _e4039 = grad_state[((idx * 8u) + 1u)].y;
-                let _e4042 = other_center.x;
-                let _e4044 = other_center.y;
-                let _e4060 = state[((idx * 8u) + 1u)];
-                let _e4066 = other_idx;
-                let _e4073 = state[((_e4066 * 8u) + 1u)];
-                let _e4080 = state[((idx * 8u) + 1u)];
-                let _e4088 = state[((idx * 8u) + 1u)];
-                let _e4091 = other_idx;
-                let _e4098 = state[((_e4091 * 8u) + 1u)];
-                let _e4109 = grad_state[((idx * 8u) + 1u)].x;
-                let _e4117 = grad_state[((idx * 8u) + 1u)].y;
-                let _e4120 = other_center.x;
-                let _e4122 = other_center.y;
-                let _e4138 = state[((idx * 8u) + 1u)];
-                let _e4146 = phi_1_;
-                let _e4152 = constants.scheme;
-                let _e4162 = state[((idx * 8u) + 1u)];
-                let _e4163 = other_idx;
-                let _e4170 = state[((_e4163 * 8u) + 1u)];
-                let _e4171 = phi_1_;
-                let _e4177 = rhs_1_;
-                rhs_1_ = (_e4177 - (_e2460 * (select(select(select(select(select(select(select(_e2467, _e2475, (_e2476 < 0f)), select((_e2487 + dot(vec2<f32>(_e2496, _e2505), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e2511, _e2513)))), (_e2524 + dot(vec2<f32>(_e2532, _e2540), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e2551 > 0f)), (_e2557 == 1u)), select(((((_e2568 + (_e2576 * 0.625f)) + (_e2586 * 0.375f)) + (dot(vec2<f32>(_e2598, _e2607), (vec2<f32>(center.x, center.y) - vec2<f32>(_e2613, _e2615))) * 0.125f)) - _e2629), ((((_e2637 + (_e2644 * 0.625f)) + (_e2655 * 0.375f)) + (dot(vec2<f32>(_e2666, _e2674), (vec2<f32>(_e2677, _e2679) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2695), (_e2697 > 0f)), (_e2703 == 2u)), select((_e2714 + min(max(dot(vec2<f32>(_e2723, _e2732), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e2738, _e2740))), min((_e2750 - _e2758), 0f)), max((_e2769 - _e2777), 0f))), (_e2789 + min(max(dot(vec2<f32>(_e2797, _e2805), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), min((_e2822 - _e2829), 0f)), max((_e2841 - _e2848), 0f))), (_e2854 > 0f)), (_e2860 == 3u)), select((_e2871 + ((((dot(vec2<f32>(_e2880, _e2889), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e2895, _e2897))) * abs((_e2907 - _e2915))) / max(abs((_e2925 - _e2933)), (abs(dot(vec2<f32>(_e2944, _e2953), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e2959, _e2961)))) + 0.00000001f))) * max(((_e2976 - _e2984) * dot(vec2<f32>(_e2994, _e3003), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e3009, _e3011)))), 0f)) / max(abs(((_e3025 - _e3033) * dot(vec2<f32>(_e3043, _e3052), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e3058, _e3060))))), 0.00000001f))), (_e3076 + ((((dot(vec2<f32>(_e3084, _e3092), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) * abs((_e3109 - _e3116))) / max(abs((_e3127 - _e3134)), (abs(dot(vec2<f32>(_e3144, _e3152), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))) + 0.00000001f))) * max(((_e3174 - _e3181) * dot(vec2<f32>(_e3190, _e3198), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), 0f)) / max(abs(((_e3219 - _e3226) * dot(vec2<f32>(_e3235, _e3243), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))))), 0.00000001f))), (_e3259 > 0f)), (_e3265 == 4u)), select((_e3276 + min(max(((((_e3284 * 0.625f) + (_e3293 * 0.375f)) + (dot(vec2<f32>(_e3305, _e3314), (vec2<f32>(center.x, center.y) - vec2<f32>(_e3320, _e3322))) * 0.125f)) - _e3336), min((_e3344 - _e3352), 0f)), max((_e3363 - _e3371), 0f))), (_e3383 + min(max(((((_e3390 * 0.625f) + (_e3400 * 0.375f)) + (dot(vec2<f32>(_e3411, _e3419), (vec2<f32>(_e3422, _e3424) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3440), min((_e3449 - _e3456), 0f)), max((_e3468 - _e3475), 0f))), (_e3481 > 0f)), (_e3487 == 5u)), select((_e3498 + ((((((((_e3506 * 0.625f) + (_e3515 * 0.375f)) + (dot(vec2<f32>(_e3527, _e3536), (vec2<f32>(center.x, center.y) - vec2<f32>(_e3542, _e3544))) * 0.125f)) - _e3558) * abs((_e3566 - _e3574))) / max(abs((_e3584 - _e3592)), (abs(((((_e3602 * 0.625f) + (_e3611 * 0.375f)) + (dot(vec2<f32>(_e3623, _e3632), (vec2<f32>(center.x, center.y) - vec2<f32>(_e3638, _e3640))) * 0.125f)) - _e3654)) + 0.00000001f))) * max(((_e3667 - _e3675) * ((((_e3684 * 0.625f) + (_e3693 * 0.375f)) + (dot(vec2<f32>(_e3705, _e3714), (vec2<f32>(center.x, center.y) - vec2<f32>(_e3720, _e3722))) * 0.125f)) - _e3736)), 0f)) / max(abs(((_e3748 - _e3756) * ((((_e3765 * 0.625f) + (_e3774 * 0.375f)) + (dot(vec2<f32>(_e3786, _e3795), (vec2<f32>(center.x, center.y) - vec2<f32>(_e3801, _e3803))) * 0.125f)) - _e3817))), 0.00000001f))), (_e3831 + ((((((((_e3838 * 0.625f) + (_e3848 * 0.375f)) + (dot(vec2<f32>(_e3859, _e3867), (vec2<f32>(_e3870, _e3872) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3888) * abs((_e3897 - _e3904))) / max(abs((_e3915 - _e3922)), (abs(((((_e3931 * 0.625f) + (_e3941 * 0.375f)) + (dot(vec2<f32>(_e3952, _e3960), (vec2<f32>(_e3963, _e3965) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3981)) + 0.00000001f))) * max(((_e3995 - _e4002) * ((((_e4010 * 0.625f) + (_e4020 * 0.375f)) + (dot(vec2<f32>(_e4031, _e4039), (vec2<f32>(_e4042, _e4044) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e4060)), 0f)) / max(abs(((_e4073 - _e4080) * ((((_e4088 * 0.625f) + (_e4098 * 0.375f)) + (dot(vec2<f32>(_e4109, _e4117), (vec2<f32>(_e4120, _e4122) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e4138))), 0.00000001f))), (_e4146 > 0f)), (_e4152 == 6u)) - select(_e4162, _e4170, (_e4171 < 0f)))));
-            } else {
-                let _e4185 = bc_kind[((face_idx * 3u) + 1u)];
-                if (_e4185 == 1u) {
-                    let _e4188 = phi_1_;
-                    let _e4191 = diag_1_;
-                    diag_1_ = (_e4191 + max(_e4188, 0f));
-                    let _e4193 = phi_1_;
-                    let _e4202 = bc_value[((face_idx * 3u) + 1u)];
-                    let _e4204 = rhs_1_;
-                    rhs_1_ = (_e4204 - (min(_e4193, 0f) * _e4202));
-                } else {
-                    let _e4206 = phi_1_;
-                    let _e4207 = diag_1_;
-                    diag_1_ = (_e4207 + _e4206);
-                }
-            }
-            let _e4219 = normal.x;
-            let _e4221 = matrix_values[((start_row_0_ + (diag_rank * 3u)) + 2u)];
-            matrix_values[((start_row_0_ + (diag_rank * 3u)) + 2u)] = (_e4221 + ((0.5f * area) * _e4219));
-            let _e4233 = normal.x;
-            let _e4235 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 2u)];
-            matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 2u)] = (_e4235 + ((0.5f * area) * _e4233));
-            let _e4247 = normal.y;
-            let _e4249 = matrix_values[((start_row_1_ + (diag_rank * 3u)) + 2u)];
-            matrix_values[((start_row_1_ + (diag_rank * 3u)) + 2u)] = (_e4249 + ((0.5f * area) * _e4247));
-            let _e4261 = normal.y;
-            let _e4263 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 2u)];
-            matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 2u)] = (_e4263 + ((0.5f * area) * _e4261));
-            let _e4267 = constants.density;
-            let _e4274 = state[((idx * 8u) + 3u)];
-            let _e4277 = dist;
-            let diff_coeff_p = (((_e4267 * _e4274) * area) / _e4277);
-            let _e4279 = is_boundary;
-            if !(_e4279) {
-                let _e4282 = diag_2_;
-                diag_2_ = (_e4282 + diff_coeff_p);
-                let _e4291 = matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)];
-                matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)] = (_e4291 - diff_coeff_p);
-            } else {
-                let _e4299 = bc_kind[((face_idx * 3u) + 2u)];
-                if (_e4299 == 1u) {
-                    let _e4302 = diag_2_;
-                    diag_2_ = (_e4302 + diff_coeff_p);
-                    let _e4311 = bc_value[((face_idx * 3u) + 2u)];
-                    let _e4313 = rhs_2_;
-                    rhs_2_ = (_e4313 + (diff_coeff_p * _e4311));
-                } else {
-                    let _e4321 = bc_kind[((face_idx * 3u) + 2u)];
-                    if (_e4321 == 2u) {
-                        let _e4326 = constants.density;
-                        let _e4333 = state[((idx * 8u) + 3u)];
-                        let _e4342 = bc_value[((face_idx * 3u) + 2u)];
-                        let _e4345 = rhs_2_;
-                        rhs_2_ = (_e4345 + -((((_e4326 * _e4333) * area) * _e4342)));
-                    }
-                }
-            }
-            let _e4353 = fluxes[((face_idx * 3u) + 2u)];
-            phi_2_ = _e4353;
-            if (owner != idx) {
-                let _e4356 = phi_2_;
-                let _e4359 = phi_2_;
-                phi_2_ = (_e4359 - (_e4356 * 2f));
-            }
-            let _e4361 = phi_2_;
-            let _e4362 = rhs_2_;
-            rhs_2_ = (_e4362 - _e4361);
-        }
-        continuing {
-            let _e4365 = k;
-            k = (_e4365 + 1u);
-        }
-    }
-    let _e4374 = diag_0_;
-    let _e4375 = matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)];
-    matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)] = (_e4375 + _e4374);
-    let _e4383 = rhs_0_;
-    rhs[((idx * 3u) + 0u)] = _e4383;
-    let _e4391 = diag_1_;
-    let _e4392 = matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)];
-    matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)] = (_e4392 + _e4391);
-    let _e4400 = rhs_1_;
-    rhs[((idx * 3u) + 1u)] = _e4400;
-    let _e4408 = diag_2_;
-    let _e4409 = matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)];
-    matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)] = (_e4409 + _e4408);
-    let _e4417 = rhs_2_;
-    rhs[((idx * 3u) + 2u)] = _e4417;
-    return;
-}
-"#;
-    }
     pub mod generic_coupled_assembly_incompressible_momentum {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
@@ -21879,1664 +17885,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let source = std::borrow::Cow::Borrowed(SHADER_STRING);
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("generic_coupled_assembly_incompressible_momentum.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(source),
-            })
-        }
-        pub const SHADER_STRING: &str = r#"
-struct Vector2_ {
-    x: f32,
-    y: f32,
-}
-
-struct Constants {
-    dt: f32,
-    dt_old: f32,
-    dtau: f32,
-    time: f32,
-    viscosity: f32,
-    density: f32,
-    component: u32,
-    alpha_p: f32,
-    scheme: u32,
-    alpha_u: f32,
-    stride_x: u32,
-    time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
-}
-
-@group(0) @binding(0) 
-var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
-var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
-var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
-var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
-var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
-var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
-var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
-var<storage> cell_faces: array<u32>;
-@group(0) @binding(10) 
-var<storage> cell_face_matrix_indices: array<u32>;
-@group(0) @binding(11) 
-var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(12) 
-var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
-var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
-var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
-var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
-var<uniform> constants: Constants;
-@group(1) @binding(4) 
-var<storage> state_iter: array<f32>;
-@group(1) @binding(6) 
-var<storage, read_write> fluxes: array<f32>;
-@group(2) @binding(0) 
-var<storage, read_write> matrix_values: array<f32>;
-@group(2) @binding(1) 
-var<storage, read_write> rhs: array<f32>;
-@group(2) @binding(2) 
-var<storage> scalar_row_offsets: array<u32>;
-@group(3) @binding(0) 
-var<storage> bc_kind: array<u32>;
-@group(3) @binding(1) 
-var<storage> bc_value: array<f32>;
-
-@compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var rank: u32 = 0u;
-    var diag_0_: f32 = 0f;
-    var rhs_0_: f32 = 0f;
-    var diag_1_: f32 = 0f;
-    var rhs_1_: f32 = 0f;
-    var diag_2_: f32 = 0f;
-    var rhs_2_: f32 = 0f;
-    var k: u32;
-    var normal: Vector2_;
-    var is_boundary: bool;
-    var other_idx: u32;
-    var other_center: Vector2_;
-    var dist: f32;
-    var phi_0_: f32;
-    var phi_1_: f32;
-    var phi_2_: f32;
-
-    let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
-    if (idx >= arrayLength((&cell_vols))) {
-        return;
-    }
-    let center = cell_centers[idx];
-    let vol = cell_vols[idx];
-    let start = cell_face_offsets[idx];
-    let end = cell_face_offsets[(idx + 1u)];
-    let scalar_offset = scalar_row_offsets[idx];
-    let _e32 = diagonal_indices[idx];
-    let diag_rank = (_e32 - scalar_offset);
-    let _e38 = scalar_row_offsets[(idx + 1u)];
-    let num_neighbors = (_e38 - scalar_offset);
-    let start_row_0_ = (scalar_offset * 9u);
-    let start_row_1_ = (start_row_0_ + ((num_neighbors * 3u) * 1u));
-    let start_row_2_ = (start_row_0_ + ((num_neighbors * 3u) * 2u));
-    loop {
-        let _e53 = rank;
-        if (_e53 < num_neighbors) {
-        } else {
-            break;
-        }
-        {
-            let _e55 = rank;
-            matrix_values[((start_row_0_ + (_e55 * 3u)) + 0u)] = 0f;
-            let _e64 = rank;
-            matrix_values[((start_row_0_ + (_e64 * 3u)) + 1u)] = 0f;
-            let _e73 = rank;
-            matrix_values[((start_row_0_ + (_e73 * 3u)) + 2u)] = 0f;
-            let _e82 = rank;
-            matrix_values[((start_row_1_ + (_e82 * 3u)) + 0u)] = 0f;
-            let _e91 = rank;
-            matrix_values[((start_row_1_ + (_e91 * 3u)) + 1u)] = 0f;
-            let _e100 = rank;
-            matrix_values[((start_row_1_ + (_e100 * 3u)) + 2u)] = 0f;
-            let _e109 = rank;
-            matrix_values[((start_row_2_ + (_e109 * 3u)) + 0u)] = 0f;
-            let _e118 = rank;
-            matrix_values[((start_row_2_ + (_e118 * 3u)) + 1u)] = 0f;
-            let _e127 = rank;
-            matrix_values[((start_row_2_ + (_e127 * 3u)) + 2u)] = 0f;
-        }
-        continuing {
-            let _e137 = rank;
-            rank = (_e137 + 1u);
-        }
-    }
-    let _e141 = constants.density;
-    let _e146 = constants.dt;
-    let _e148 = diag_0_;
-    diag_0_ = (_e148 + ((vol * _e141) / _e146));
-    let _e152 = constants.density;
-    let _e156 = constants.dt;
-    let _e165 = state_old[((idx * 8u) + 0u)];
-    let _e167 = rhs_0_;
-    rhs_0_ = (_e167 + (((vol * _e152) / _e156) * _e165));
-    let _e171 = constants.time_scheme;
-    if (_e171 == 1u) {
-        let _e176 = constants.dt;
-        let _e179 = constants.dt_old;
-        let r = (_e176 / _e179);
-        let _e183 = constants.density;
-        let _e187 = constants.dt;
-        let diag_bdf2_ = ((((vol * _e183) / _e187) * ((r * 2f) + 1f)) / (r + 1f));
-        let factor_n = (r + 1f);
-        let factor_nm1_ = ((r * r) / (r + 1f));
-        let _e203 = diag_0_;
-        let _e206 = constants.density;
-        let _e210 = constants.dt;
-        diag_0_ = ((_e203 - ((vol * _e206) / _e210)) + diag_bdf2_);
-        let _e214 = rhs_0_;
-        let _e217 = constants.density;
-        let _e221 = constants.dt;
-        let _e229 = state_old[((idx * 8u) + 0u)];
-        let _e234 = constants.density;
-        let _e238 = constants.dt;
-        let _e246 = state_old[((idx * 8u) + 0u)];
-        let _e254 = state_old_old[((idx * 8u) + 0u)];
-        rhs_0_ = ((_e214 - (((vol * _e217) / _e221) * _e229)) + (((vol * _e234) / _e238) * ((factor_n * _e246) - (factor_nm1_ * _e254))));
-    }
-    let _e261 = constants.dtau;
-    if (_e261 > 0f) {
-        let _e266 = constants.density;
-        let _e270 = constants.dtau;
-        let _e272 = diag_0_;
-        diag_0_ = (_e272 + ((vol * _e266) / _e270));
-        let _e276 = constants.density;
-        let _e280 = constants.dtau;
-        let _e288 = state_iter[((idx * 8u) + 0u)];
-        let _e290 = rhs_0_;
-        rhs_0_ = (_e290 + (((vol * _e276) / _e280) * _e288));
-    }
-    let _e294 = constants.density;
-    let _e299 = constants.dt;
-    let _e301 = diag_1_;
-    diag_1_ = (_e301 + ((vol * _e294) / _e299));
-    let _e305 = constants.density;
-    let _e309 = constants.dt;
-    let _e318 = state_old[((idx * 8u) + 1u)];
-    let _e320 = rhs_1_;
-    rhs_1_ = (_e320 + (((vol * _e305) / _e309) * _e318));
-    let _e324 = constants.time_scheme;
-    if (_e324 == 1u) {
-        let _e329 = constants.dt;
-        let _e332 = constants.dt_old;
-        let r_1 = (_e329 / _e332);
-        let _e336 = constants.density;
-        let _e340 = constants.dt;
-        let diag_bdf2_1 = ((((vol * _e336) / _e340) * ((r_1 * 2f) + 1f)) / (r_1 + 1f));
-        let factor_n_1 = (r_1 + 1f);
-        let factor_nm1_1 = ((r_1 * r_1) / (r_1 + 1f));
-        let _e356 = diag_1_;
-        let _e359 = constants.density;
-        let _e363 = constants.dt;
-        diag_1_ = ((_e356 - ((vol * _e359) / _e363)) + diag_bdf2_1);
-        let _e367 = rhs_1_;
-        let _e370 = constants.density;
-        let _e374 = constants.dt;
-        let _e382 = state_old[((idx * 8u) + 1u)];
-        let _e387 = constants.density;
-        let _e391 = constants.dt;
-        let _e399 = state_old[((idx * 8u) + 1u)];
-        let _e407 = state_old_old[((idx * 8u) + 1u)];
-        rhs_1_ = ((_e367 - (((vol * _e370) / _e374) * _e382)) + (((vol * _e387) / _e391) * ((factor_n_1 * _e399) - (factor_nm1_1 * _e407))));
-    }
-    let _e414 = constants.dtau;
-    if (_e414 > 0f) {
-        let _e419 = constants.density;
-        let _e423 = constants.dtau;
-        let _e425 = diag_1_;
-        diag_1_ = (_e425 + ((vol * _e419) / _e423));
-        let _e429 = constants.density;
-        let _e433 = constants.dtau;
-        let _e441 = state_iter[((idx * 8u) + 1u)];
-        let _e443 = rhs_1_;
-        rhs_1_ = (_e443 + (((vol * _e429) / _e433) * _e441));
-    }
-    k = start;
-    loop {
-        let _e446 = k;
-        if (_e446 < end) {
-        } else {
-            break;
-        }
-        {
-            let _e449 = k;
-            let face_idx = cell_faces[_e449];
-            let owner = face_owner[face_idx];
-            let neighbor_raw = face_neighbor[face_idx];
-            let boundary_type = face_boundary[face_idx];
-            let area = face_areas[face_idx];
-            let f_center = face_centers[face_idx];
-            let _e469 = face_normals[face_idx];
-            normal = _e469;
-            is_boundary = false;
-            other_idx = idx;
-            if (owner != idx) {
-                let _e477 = normal.x;
-                normal.x = -(_e477);
-                let _e481 = normal.y;
-                normal.y = -(_e481);
-            }
-            if (neighbor_raw != -1i) {
-                let neighbor = u32(neighbor_raw);
-                other_idx = neighbor;
-                if (owner != idx) {
-                    other_idx = owner;
-                }
-                let _e488 = other_idx;
-                let _e490 = cell_centers[_e488];
-                other_center = _e490;
-            } else {
-                is_boundary = true;
-                other_idx = idx;
-                other_center = f_center;
-            }
-            let _e494 = other_center.x;
-            let dx = (_e494 - center.x);
-            let _e498 = other_center.y;
-            let dy = (_e498 - center.y);
-            let _e502 = normal.x;
-            let _e505 = normal.y;
-            let dist_proj = abs(((dx * _e502) + (dy * _e505)));
-            let dist_euc = sqrt(((dx * dx) + (dy * dy)));
-            dist = max(dist_euc, 0.000001f);
-            if (dist_proj > 0.000001f) {
-                dist = dist_proj;
-            }
-            let _e519 = k;
-            let scalar_mat_idx = cell_face_matrix_indices[_e519];
-            let neighbor_rank = (scalar_mat_idx - scalar_offset);
-            let _e525 = constants.viscosity;
-            let _e527 = dist;
-            let diff_coeff_U = ((_e525 * area) / _e527);
-            let _e529 = is_boundary;
-            if !(_e529) {
-                let _e531 = diag_0_;
-                diag_0_ = (_e531 + diff_coeff_U);
-                let _e540 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
-                matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e540 - diff_coeff_U);
-            } else {
-                let _e548 = bc_kind[((face_idx * 3u) + 0u)];
-                if (_e548 == 1u) {
-                    let _e551 = diag_0_;
-                    diag_0_ = (_e551 + diff_coeff_U);
-                    let _e559 = bc_value[((face_idx * 3u) + 0u)];
-                    let _e561 = rhs_0_;
-                    rhs_0_ = (_e561 + (diff_coeff_U * _e559));
-                } else {
-                    let _e569 = bc_kind[((face_idx * 3u) + 0u)];
-                    if (_e569 == 2u) {
-                        let _e574 = constants.viscosity;
-                        let _e582 = bc_value[((face_idx * 3u) + 0u)];
-                        let _e585 = rhs_0_;
-                        rhs_0_ = (_e585 + -(((_e574 * area) * _e582)));
-                    }
-                }
-            }
-            let _e587 = is_boundary;
-            if !(_e587) {
-                let _e589 = diag_1_;
-                diag_1_ = (_e589 + diff_coeff_U);
-                let _e598 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
-                matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e598 - diff_coeff_U);
-            } else {
-                let _e606 = bc_kind[((face_idx * 3u) + 1u)];
-                if (_e606 == 1u) {
-                    let _e609 = diag_1_;
-                    diag_1_ = (_e609 + diff_coeff_U);
-                    let _e617 = bc_value[((face_idx * 3u) + 1u)];
-                    let _e619 = rhs_1_;
-                    rhs_1_ = (_e619 + (diff_coeff_U * _e617));
-                } else {
-                    let _e627 = bc_kind[((face_idx * 3u) + 1u)];
-                    if (_e627 == 2u) {
-                        let _e632 = constants.viscosity;
-                        let _e640 = bc_value[((face_idx * 3u) + 1u)];
-                        let _e643 = rhs_1_;
-                        rhs_1_ = (_e643 + -(((_e632 * area) * _e640)));
-                    }
-                }
-            }
-            let _e651 = fluxes[((face_idx * 3u) + 0u)];
-            phi_0_ = _e651;
-            if (owner != idx) {
-                let _e654 = phi_0_;
-                let _e657 = phi_0_;
-                phi_0_ = (_e657 - (_e654 * 2f));
-            }
-            let _e659 = is_boundary;
-            if !(_e659) {
-                let _e661 = phi_0_;
-                let _e664 = diag_0_;
-                diag_0_ = (_e664 + max(_e661, 0f));
-                let _e673 = phi_0_;
-                let _e676 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
-                matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e676 + min(_e673, 0f));
-                let _e678 = phi_0_;
-                let _e685 = state[((idx * 8u) + 0u)];
-                let _e686 = other_idx;
-                let _e693 = state[((_e686 * 8u) + 0u)];
-                let _e694 = phi_0_;
-                let _e698 = other_idx;
-                let _e705 = state[((_e698 * 8u) + 0u)];
-                let _e706 = other_idx;
-                let _e713 = state[((_e706 * 8u) + 0u)];
-                let _e720 = state[((idx * 8u) + 0u)];
-                let _e729 = other_idx;
-                let _e736 = state[((_e729 * 8u) + 0u)];
-                let _e743 = state[((idx * 8u) + 0u)];
-                let _e757 = other_center.x;
-                let _e759 = other_center.y;
-                let _e770 = state[((idx * 8u) + 0u)];
-                let _e771 = other_idx;
-                let _e778 = state[((_e771 * 8u) + 0u)];
-                let _e785 = state[((idx * 8u) + 0u)];
-                let _e794 = other_idx;
-                let _e801 = state[((_e794 * 8u) + 0u)];
-                let _e808 = state[((idx * 8u) + 0u)];
-                let _e827 = phi_0_;
-                let _e833 = constants.scheme;
-                let _e837 = other_idx;
-                let _e844 = state[((_e837 * 8u) + 0u)];
-                let _e845 = other_idx;
-                let _e852 = state[((_e845 * 8u) + 0u)];
-                let _e862 = state[((idx * 8u) + 0u)];
-                let _e866 = other_idx;
-                let _e873 = state[((_e866 * 8u) + 0u)];
-                let _e880 = state[((idx * 8u) + 0u)];
-                let _e889 = other_idx;
-                let _e896 = state[((_e889 * 8u) + 0u)];
-                let _e903 = state[((idx * 8u) + 0u)];
-                let _e917 = other_center.x;
-                let _e919 = other_center.y;
-                let _e926 = other_idx;
-                let _e933 = state[((_e926 * 8u) + 0u)];
-                let _e941 = state[((idx * 8u) + 0u)];
-                let _e948 = state[((idx * 8u) + 0u)];
-                let _e952 = other_idx;
-                let _e959 = state[((_e952 * 8u) + 0u)];
-                let _e963 = other_idx;
-                let _e970 = state[((_e963 * 8u) + 0u)];
-                let _e977 = state[((idx * 8u) + 0u)];
-                let _e986 = other_idx;
-                let _e993 = state[((_e986 * 8u) + 0u)];
-                let _e1000 = state[((idx * 8u) + 0u)];
-                let _e1011 = other_center.x;
-                let _e1013 = other_center.y;
-                let _e1029 = state[((idx * 8u) + 0u)];
-                let _e1031 = phi_0_;
-                let _e1037 = constants.scheme;
-                let _e1041 = other_idx;
-                let _e1048 = state[((_e1041 * 8u) + 0u)];
-                let _e1049 = other_idx;
-                let _e1056 = state[((_e1049 * 8u) + 0u)];
-                let _e1063 = state[((idx * 8u) + 0u)];
-                let _e1072 = other_idx;
-                let _e1079 = state[((_e1072 * 8u) + 0u)];
-                let _e1086 = state[((idx * 8u) + 0u)];
-                let _e1100 = other_center.x;
-                let _e1102 = other_center.y;
-                let _e1112 = state[((idx * 8u) + 0u)];
-                let _e1113 = other_idx;
-                let _e1120 = state[((_e1113 * 8u) + 0u)];
-                let _e1131 = state[((idx * 8u) + 0u)];
-                let _e1132 = other_idx;
-                let _e1139 = state[((_e1132 * 8u) + 0u)];
-                let _e1151 = state[((idx * 8u) + 0u)];
-                let _e1152 = other_idx;
-                let _e1159 = state[((_e1152 * 8u) + 0u)];
-                let _e1166 = state[((idx * 8u) + 0u)];
-                let _e1175 = other_idx;
-                let _e1182 = state[((_e1175 * 8u) + 0u)];
-                let _e1189 = state[((idx * 8u) + 0u)];
-                let _e1207 = other_idx;
-                let _e1214 = state[((_e1207 * 8u) + 0u)];
-                let _e1221 = state[((idx * 8u) + 0u)];
-                let _e1226 = other_idx;
-                let _e1233 = state[((_e1226 * 8u) + 0u)];
-                let _e1240 = state[((idx * 8u) + 0u)];
-                let _e1246 = phi_0_;
-                let _e1252 = constants.scheme;
-                let _e1256 = other_idx;
-                let _e1263 = state[((_e1256 * 8u) + 0u)];
-                let _e1264 = other_idx;
-                let _e1271 = state[((_e1264 * 8u) + 0u)];
-                let _e1278 = state[((idx * 8u) + 0u)];
-                let _e1287 = other_idx;
-                let _e1294 = state[((_e1287 * 8u) + 0u)];
-                let _e1301 = state[((idx * 8u) + 0u)];
-                let _e1315 = other_center.x;
-                let _e1317 = other_center.y;
-                let _e1327 = state[((idx * 8u) + 0u)];
-                let _e1328 = other_idx;
-                let _e1335 = state[((_e1328 * 8u) + 0u)];
-                let _e1345 = state[((idx * 8u) + 0u)];
-                let _e1346 = other_idx;
-                let _e1353 = state[((_e1346 * 8u) + 0u)];
-                let _e1356 = other_idx;
-                let _e1363 = state[((_e1356 * 8u) + 0u)];
-                let _e1370 = state[((idx * 8u) + 0u)];
-                let _e1379 = other_idx;
-                let _e1386 = state[((_e1379 * 8u) + 0u)];
-                let _e1393 = state[((idx * 8u) + 0u)];
-                let _e1407 = other_center.x;
-                let _e1409 = other_center.y;
-                let _e1424 = state[((idx * 8u) + 0u)];
-                let _e1425 = other_idx;
-                let _e1432 = state[((_e1425 * 8u) + 0u)];
-                let _e1434 = other_idx;
-                let _e1441 = state[((_e1434 * 8u) + 0u)];
-                let _e1448 = state[((idx * 8u) + 0u)];
-                let _e1457 = other_idx;
-                let _e1464 = state[((_e1457 * 8u) + 0u)];
-                let _e1471 = state[((idx * 8u) + 0u)];
-                let _e1485 = other_center.x;
-                let _e1487 = other_center.y;
-                let _e1501 = state[((idx * 8u) + 0u)];
-                let _e1502 = other_idx;
-                let _e1509 = state[((_e1502 * 8u) + 0u)];
-                let _e1511 = other_idx;
-                let _e1518 = state[((_e1511 * 8u) + 0u)];
-                let _e1525 = state[((idx * 8u) + 0u)];
-                let _e1534 = other_idx;
-                let _e1541 = state[((_e1534 * 8u) + 0u)];
-                let _e1548 = state[((idx * 8u) + 0u)];
-                let _e1562 = other_center.x;
-                let _e1564 = other_center.y;
-                let _e1580 = state[((idx * 8u) + 0u)];
-                let _e1581 = other_idx;
-                let _e1588 = state[((_e1581 * 8u) + 0u)];
-                let _e1595 = state[((idx * 8u) + 0u)];
-                let _e1604 = other_idx;
-                let _e1611 = state[((_e1604 * 8u) + 0u)];
-                let _e1618 = state[((idx * 8u) + 0u)];
-                let _e1636 = other_idx;
-                let _e1643 = state[((_e1636 * 8u) + 0u)];
-                let _e1650 = state[((idx * 8u) + 0u)];
-                let _e1654 = other_idx;
-                let _e1661 = state[((_e1654 * 8u) + 0u)];
-                let _e1668 = state[((idx * 8u) + 0u)];
-                let _e1671 = other_idx;
-                let _e1678 = state[((_e1671 * 8u) + 0u)];
-                let _e1685 = state[((idx * 8u) + 0u)];
-                let _e1694 = other_idx;
-                let _e1701 = state[((_e1694 * 8u) + 0u)];
-                let _e1708 = state[((idx * 8u) + 0u)];
-                let _e1731 = other_idx;
-                let _e1738 = state[((_e1731 * 8u) + 0u)];
-                let _e1745 = state[((idx * 8u) + 0u)];
-                let _e1747 = other_idx;
-                let _e1754 = state[((_e1747 * 8u) + 0u)];
-                let _e1761 = state[((idx * 8u) + 0u)];
-                let _e1770 = other_idx;
-                let _e1777 = state[((_e1770 * 8u) + 0u)];
-                let _e1784 = state[((idx * 8u) + 0u)];
-                let _e1806 = other_idx;
-                let _e1813 = state[((_e1806 * 8u) + 0u)];
-                let _e1820 = state[((idx * 8u) + 0u)];
-                let _e1822 = other_idx;
-                let _e1829 = state[((_e1822 * 8u) + 0u)];
-                let _e1836 = state[((idx * 8u) + 0u)];
-                let _e1845 = other_idx;
-                let _e1852 = state[((_e1845 * 8u) + 0u)];
-                let _e1859 = state[((idx * 8u) + 0u)];
-                let _e1883 = phi_0_;
-                let _e1889 = constants.scheme;
-                let _e1893 = other_idx;
-                let _e1900 = state[((_e1893 * 8u) + 0u)];
-                let _e1901 = other_idx;
-                let _e1908 = state[((_e1901 * 8u) + 0u)];
-                let _e1917 = state[((idx * 8u) + 0u)];
-                let _e1921 = other_idx;
-                let _e1928 = state[((_e1921 * 8u) + 0u)];
-                let _e1935 = state[((idx * 8u) + 0u)];
-                let _e1944 = other_idx;
-                let _e1951 = state[((_e1944 * 8u) + 0u)];
-                let _e1958 = state[((idx * 8u) + 0u)];
-                let _e1972 = other_center.x;
-                let _e1974 = other_center.y;
-                let _e1981 = other_idx;
-                let _e1988 = state[((_e1981 * 8u) + 0u)];
-                let _e1996 = state[((idx * 8u) + 0u)];
-                let _e1997 = other_idx;
-                let _e2004 = state[((_e1997 * 8u) + 0u)];
-                let _e2015 = state[((idx * 8u) + 0u)];
-                let _e2016 = other_idx;
-                let _e2023 = state[((_e2016 * 8u) + 0u)];
-                let _e2035 = state[((idx * 8u) + 0u)];
-                let _e2042 = state[((idx * 8u) + 0u)];
-                let _e2045 = other_idx;
-                let _e2052 = state[((_e2045 * 8u) + 0u)];
-                let _e2056 = other_idx;
-                let _e2063 = state[((_e2056 * 8u) + 0u)];
-                let _e2070 = state[((idx * 8u) + 0u)];
-                let _e2079 = other_idx;
-                let _e2086 = state[((_e2079 * 8u) + 0u)];
-                let _e2093 = state[((idx * 8u) + 0u)];
-                let _e2104 = other_center.x;
-                let _e2106 = other_center.y;
-                let _e2122 = state[((idx * 8u) + 0u)];
-                let _e2124 = other_idx;
-                let _e2131 = state[((_e2124 * 8u) + 0u)];
-                let _e2138 = state[((idx * 8u) + 0u)];
-                let _e2143 = other_idx;
-                let _e2150 = state[((_e2143 * 8u) + 0u)];
-                let _e2157 = state[((idx * 8u) + 0u)];
-                let _e2163 = phi_0_;
-                let _e2169 = constants.scheme;
-                let _e2173 = other_idx;
-                let _e2180 = state[((_e2173 * 8u) + 0u)];
-                let _e2181 = other_idx;
-                let _e2188 = state[((_e2181 * 8u) + 0u)];
-                let _e2197 = state[((idx * 8u) + 0u)];
-                let _e2201 = other_idx;
-                let _e2208 = state[((_e2201 * 8u) + 0u)];
-                let _e2215 = state[((idx * 8u) + 0u)];
-                let _e2224 = other_idx;
-                let _e2231 = state[((_e2224 * 8u) + 0u)];
-                let _e2238 = state[((idx * 8u) + 0u)];
-                let _e2252 = other_center.x;
-                let _e2254 = other_center.y;
-                let _e2261 = other_idx;
-                let _e2268 = state[((_e2261 * 8u) + 0u)];
-                let _e2276 = state[((idx * 8u) + 0u)];
-                let _e2277 = other_idx;
-                let _e2284 = state[((_e2277 * 8u) + 0u)];
-                let _e2294 = state[((idx * 8u) + 0u)];
-                let _e2295 = other_idx;
-                let _e2302 = state[((_e2295 * 8u) + 0u)];
-                let _e2305 = other_idx;
-                let _e2312 = state[((_e2305 * 8u) + 0u)];
-                let _e2321 = state[((idx * 8u) + 0u)];
-                let _e2325 = other_idx;
-                let _e2332 = state[((_e2325 * 8u) + 0u)];
-                let _e2339 = state[((idx * 8u) + 0u)];
-                let _e2348 = other_idx;
-                let _e2355 = state[((_e2348 * 8u) + 0u)];
-                let _e2362 = state[((idx * 8u) + 0u)];
-                let _e2376 = other_center.x;
-                let _e2378 = other_center.y;
-                let _e2385 = other_idx;
-                let _e2392 = state[((_e2385 * 8u) + 0u)];
-                let _e2405 = state[((idx * 8u) + 0u)];
-                let _e2406 = other_idx;
-                let _e2413 = state[((_e2406 * 8u) + 0u)];
-                let _e2415 = other_idx;
-                let _e2422 = state[((_e2415 * 8u) + 0u)];
-                let _e2431 = state[((idx * 8u) + 0u)];
-                let _e2435 = other_idx;
-                let _e2442 = state[((_e2435 * 8u) + 0u)];
-                let _e2449 = state[((idx * 8u) + 0u)];
-                let _e2458 = other_idx;
-                let _e2465 = state[((_e2458 * 8u) + 0u)];
-                let _e2472 = state[((idx * 8u) + 0u)];
-                let _e2486 = other_center.x;
-                let _e2488 = other_center.y;
-                let _e2495 = other_idx;
-                let _e2502 = state[((_e2495 * 8u) + 0u)];
-                let _e2514 = state[((idx * 8u) + 0u)];
-                let _e2515 = other_idx;
-                let _e2522 = state[((_e2515 * 8u) + 0u)];
-                let _e2524 = other_idx;
-                let _e2531 = state[((_e2524 * 8u) + 0u)];
-                let _e2540 = state[((idx * 8u) + 0u)];
-                let _e2544 = other_idx;
-                let _e2551 = state[((_e2544 * 8u) + 0u)];
-                let _e2558 = state[((idx * 8u) + 0u)];
-                let _e2567 = other_idx;
-                let _e2574 = state[((_e2567 * 8u) + 0u)];
-                let _e2581 = state[((idx * 8u) + 0u)];
-                let _e2595 = other_center.x;
-                let _e2597 = other_center.y;
-                let _e2604 = other_idx;
-                let _e2611 = state[((_e2604 * 8u) + 0u)];
-                let _e2625 = state[((idx * 8u) + 0u)];
-                let _e2632 = state[((idx * 8u) + 0u)];
-                let _e2635 = other_idx;
-                let _e2642 = state[((_e2635 * 8u) + 0u)];
-                let _e2646 = other_idx;
-                let _e2653 = state[((_e2646 * 8u) + 0u)];
-                let _e2660 = state[((idx * 8u) + 0u)];
-                let _e2669 = other_idx;
-                let _e2676 = state[((_e2669 * 8u) + 0u)];
-                let _e2683 = state[((idx * 8u) + 0u)];
-                let _e2694 = other_center.x;
-                let _e2696 = other_center.y;
-                let _e2712 = state[((idx * 8u) + 0u)];
-                let _e2714 = other_idx;
-                let _e2721 = state[((_e2714 * 8u) + 0u)];
-                let _e2728 = state[((idx * 8u) + 0u)];
-                let _e2732 = other_idx;
-                let _e2739 = state[((_e2732 * 8u) + 0u)];
-                let _e2746 = state[((idx * 8u) + 0u)];
-                let _e2755 = state[((idx * 8u) + 0u)];
-                let _e2758 = other_idx;
-                let _e2765 = state[((_e2758 * 8u) + 0u)];
-                let _e2769 = other_idx;
-                let _e2776 = state[((_e2769 * 8u) + 0u)];
-                let _e2783 = state[((idx * 8u) + 0u)];
-                let _e2792 = other_idx;
-                let _e2799 = state[((_e2792 * 8u) + 0u)];
-                let _e2806 = state[((idx * 8u) + 0u)];
-                let _e2817 = other_center.x;
-                let _e2819 = other_center.y;
-                let _e2835 = state[((idx * 8u) + 0u)];
-                let _e2842 = other_idx;
-                let _e2849 = state[((_e2842 * 8u) + 0u)];
-                let _e2856 = state[((idx * 8u) + 0u)];
-                let _e2864 = state[((idx * 8u) + 0u)];
-                let _e2867 = other_idx;
-                let _e2874 = state[((_e2867 * 8u) + 0u)];
-                let _e2878 = other_idx;
-                let _e2885 = state[((_e2878 * 8u) + 0u)];
-                let _e2892 = state[((idx * 8u) + 0u)];
-                let _e2901 = other_idx;
-                let _e2908 = state[((_e2901 * 8u) + 0u)];
-                let _e2915 = state[((idx * 8u) + 0u)];
-                let _e2926 = other_center.x;
-                let _e2928 = other_center.y;
-                let _e2944 = state[((idx * 8u) + 0u)];
-                let _e2950 = other_idx;
-                let _e2957 = state[((_e2950 * 8u) + 0u)];
-                let _e2964 = state[((idx * 8u) + 0u)];
-                let _e2972 = state[((idx * 8u) + 0u)];
-                let _e2975 = other_idx;
-                let _e2982 = state[((_e2975 * 8u) + 0u)];
-                let _e2986 = other_idx;
-                let _e2993 = state[((_e2986 * 8u) + 0u)];
-                let _e3000 = state[((idx * 8u) + 0u)];
-                let _e3009 = other_idx;
-                let _e3016 = state[((_e3009 * 8u) + 0u)];
-                let _e3023 = state[((idx * 8u) + 0u)];
-                let _e3034 = other_center.x;
-                let _e3036 = other_center.y;
-                let _e3052 = state[((idx * 8u) + 0u)];
-                let _e3060 = phi_0_;
-                let _e3066 = constants.scheme;
-                let _e3076 = state[((idx * 8u) + 0u)];
-                let _e3077 = other_idx;
-                let _e3084 = state[((_e3077 * 8u) + 0u)];
-                let _e3085 = phi_0_;
-                let _e3091 = rhs_0_;
-                rhs_0_ = (_e3091 - (_e678 * (select(select(select(select(select(select(select(_e685, _e693, (_e694 < 0f)), select((_e705 + dot(vec2<f32>((((_e713 - _e720) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e736 - _e743) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e757, _e759)))), (_e770 + dot(vec2<f32>((((_e778 - _e785) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e801 - _e808) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e827 > 0f)), (_e833 == 1u)), select(((((_e844 + (_e852 * 0.625f)) + (_e862 * 0.375f)) + (dot(vec2<f32>((((_e873 - _e880) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e896 - _e903) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(_e917, _e919))) * 0.125f)) - _e933), ((((_e941 + (_e948 * 0.625f)) + (_e959 * 0.375f)) + (dot(vec2<f32>((((_e970 - _e977) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e993 - _e1000) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(_e1011, _e1013) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e1029), (_e1031 > 0f)), (_e1037 == 2u)), select((_e1048 + min(max(dot(vec2<f32>((((_e1056 - _e1063) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1079 - _e1086) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e1100, _e1102))), min((_e1112 - _e1120), 0f)), max((_e1131 - _e1139), 0f))), (_e1151 + min(max(dot(vec2<f32>((((_e1159 - _e1166) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1182 - _e1189) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), min((_e1214 - _e1221), 0f)), max((_e1233 - _e1240), 0f))), (_e1246 > 0f)), (_e1252 == 3u)), select((_e1263 + ((((dot(vec2<f32>((((_e1271 - _e1278) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1294 - _e1301) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e1315, _e1317))) * abs((_e1327 - _e1335))) / max(abs((_e1345 - _e1353)), (abs(dot(vec2<f32>((((_e1363 - _e1370) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1386 - _e1393) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e1407, _e1409)))) + 0.00000001f))) * max(((_e1424 - _e1432) * dot(vec2<f32>((((_e1441 - _e1448) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1464 - _e1471) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e1485, _e1487)))), 0f)) / max(abs(((_e1501 - _e1509) * dot(vec2<f32>((((_e1518 - _e1525) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1541 - _e1548) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e1562, _e1564))))), 0.00000001f))), (_e1580 + ((((dot(vec2<f32>((((_e1588 - _e1595) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1611 - _e1618) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) * abs((_e1643 - _e1650))) / max(abs((_e1661 - _e1668)), (abs(dot(vec2<f32>((((_e1678 - _e1685) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1701 - _e1708) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))) + 0.00000001f))) * max(((_e1738 - _e1745) * dot(vec2<f32>((((_e1754 - _e1761) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1777 - _e1784) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), 0f)) / max(abs(((_e1813 - _e1820) * dot(vec2<f32>((((_e1829 - _e1836) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1852 - _e1859) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))))), 0.00000001f))), (_e1883 > 0f)), (_e1889 == 4u)), select((_e1900 + min(max(((((_e1908 * 0.625f) + (_e1917 * 0.375f)) + (dot(vec2<f32>((((_e1928 - _e1935) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1951 - _e1958) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(_e1972, _e1974))) * 0.125f)) - _e1988), min((_e1996 - _e2004), 0f)), max((_e2015 - _e2023), 0f))), (_e2035 + min(max(((((_e2042 * 0.625f) + (_e2052 * 0.375f)) + (dot(vec2<f32>((((_e2063 - _e2070) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2086 - _e2093) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(_e2104, _e2106) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2122), min((_e2131 - _e2138), 0f)), max((_e2150 - _e2157), 0f))), (_e2163 > 0f)), (_e2169 == 5u)), select((_e2180 + ((((((((_e2188 * 0.625f) + (_e2197 * 0.375f)) + (dot(vec2<f32>((((_e2208 - _e2215) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2231 - _e2238) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(_e2252, _e2254))) * 0.125f)) - _e2268) * abs((_e2276 - _e2284))) / max(abs((_e2294 - _e2302)), (abs(((((_e2312 * 0.625f) + (_e2321 * 0.375f)) + (dot(vec2<f32>((((_e2332 - _e2339) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2355 - _e2362) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(_e2376, _e2378))) * 0.125f)) - _e2392)) + 0.00000001f))) * max(((_e2405 - _e2413) * ((((_e2422 * 0.625f) + (_e2431 * 0.375f)) + (dot(vec2<f32>((((_e2442 - _e2449) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2465 - _e2472) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(_e2486, _e2488))) * 0.125f)) - _e2502)), 0f)) / max(abs(((_e2514 - _e2522) * ((((_e2531 * 0.625f) + (_e2540 * 0.375f)) + (dot(vec2<f32>((((_e2551 - _e2558) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2574 - _e2581) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(_e2595, _e2597))) * 0.125f)) - _e2611))), 0.00000001f))), (_e2625 + ((((((((_e2632 * 0.625f) + (_e2642 * 0.375f)) + (dot(vec2<f32>((((_e2653 - _e2660) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2676 - _e2683) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(_e2694, _e2696) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2712) * abs((_e2721 - _e2728))) / max(abs((_e2739 - _e2746)), (abs(((((_e2755 * 0.625f) + (_e2765 * 0.375f)) + (dot(vec2<f32>((((_e2776 - _e2783) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2799 - _e2806) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(_e2817, _e2819) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2835)) + 0.00000001f))) * max(((_e2849 - _e2856) * ((((_e2864 * 0.625f) + (_e2874 * 0.375f)) + (dot(vec2<f32>((((_e2885 - _e2892) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2908 - _e2915) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(_e2926, _e2928) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2944)), 0f)) / max(abs(((_e2957 - _e2964) * ((((_e2972 * 0.625f) + (_e2982 * 0.375f)) + (dot(vec2<f32>((((_e2993 - _e3000) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3016 - _e3023) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(_e3034, _e3036) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3052))), 0.00000001f))), (_e3060 > 0f)), (_e3066 == 6u)) - select(_e3076, _e3084, (_e3085 < 0f)))));
-            } else {
-                let _e3099 = bc_kind[((face_idx * 3u) + 0u)];
-                if (_e3099 == 1u) {
-                    let _e3102 = phi_0_;
-                    let _e3105 = diag_0_;
-                    diag_0_ = (_e3105 + max(_e3102, 0f));
-                    let _e3107 = phi_0_;
-                    let _e3116 = bc_value[((face_idx * 3u) + 0u)];
-                    let _e3118 = rhs_0_;
-                    rhs_0_ = (_e3118 - (min(_e3107, 0f) * _e3116));
-                } else {
-                    let _e3120 = phi_0_;
-                    let _e3121 = diag_0_;
-                    diag_0_ = (_e3121 + _e3120);
-                }
-            }
-            let _e3129 = fluxes[((face_idx * 3u) + 1u)];
-            phi_1_ = _e3129;
-            if (owner != idx) {
-                let _e3132 = phi_1_;
-                let _e3135 = phi_1_;
-                phi_1_ = (_e3135 - (_e3132 * 2f));
-            }
-            let _e3137 = is_boundary;
-            if !(_e3137) {
-                let _e3139 = phi_1_;
-                let _e3142 = diag_1_;
-                diag_1_ = (_e3142 + max(_e3139, 0f));
-                let _e3151 = phi_1_;
-                let _e3154 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
-                matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e3154 + min(_e3151, 0f));
-                let _e3156 = phi_1_;
-                let _e3163 = state[((idx * 8u) + 1u)];
-                let _e3164 = other_idx;
-                let _e3171 = state[((_e3164 * 8u) + 1u)];
-                let _e3172 = phi_1_;
-                let _e3176 = other_idx;
-                let _e3183 = state[((_e3176 * 8u) + 1u)];
-                let _e3184 = other_idx;
-                let _e3191 = state[((_e3184 * 8u) + 1u)];
-                let _e3198 = state[((idx * 8u) + 1u)];
-                let _e3207 = other_idx;
-                let _e3214 = state[((_e3207 * 8u) + 1u)];
-                let _e3221 = state[((idx * 8u) + 1u)];
-                let _e3235 = other_center.x;
-                let _e3237 = other_center.y;
-                let _e3248 = state[((idx * 8u) + 1u)];
-                let _e3249 = other_idx;
-                let _e3256 = state[((_e3249 * 8u) + 1u)];
-                let _e3263 = state[((idx * 8u) + 1u)];
-                let _e3272 = other_idx;
-                let _e3279 = state[((_e3272 * 8u) + 1u)];
-                let _e3286 = state[((idx * 8u) + 1u)];
-                let _e3305 = phi_1_;
-                let _e3311 = constants.scheme;
-                let _e3315 = other_idx;
-                let _e3322 = state[((_e3315 * 8u) + 1u)];
-                let _e3323 = other_idx;
-                let _e3330 = state[((_e3323 * 8u) + 1u)];
-                let _e3340 = state[((idx * 8u) + 1u)];
-                let _e3344 = other_idx;
-                let _e3351 = state[((_e3344 * 8u) + 1u)];
-                let _e3358 = state[((idx * 8u) + 1u)];
-                let _e3367 = other_idx;
-                let _e3374 = state[((_e3367 * 8u) + 1u)];
-                let _e3381 = state[((idx * 8u) + 1u)];
-                let _e3395 = other_center.x;
-                let _e3397 = other_center.y;
-                let _e3404 = other_idx;
-                let _e3411 = state[((_e3404 * 8u) + 1u)];
-                let _e3419 = state[((idx * 8u) + 1u)];
-                let _e3426 = state[((idx * 8u) + 1u)];
-                let _e3430 = other_idx;
-                let _e3437 = state[((_e3430 * 8u) + 1u)];
-                let _e3441 = other_idx;
-                let _e3448 = state[((_e3441 * 8u) + 1u)];
-                let _e3455 = state[((idx * 8u) + 1u)];
-                let _e3464 = other_idx;
-                let _e3471 = state[((_e3464 * 8u) + 1u)];
-                let _e3478 = state[((idx * 8u) + 1u)];
-                let _e3489 = other_center.x;
-                let _e3491 = other_center.y;
-                let _e3507 = state[((idx * 8u) + 1u)];
-                let _e3509 = phi_1_;
-                let _e3515 = constants.scheme;
-                let _e3519 = other_idx;
-                let _e3526 = state[((_e3519 * 8u) + 1u)];
-                let _e3527 = other_idx;
-                let _e3534 = state[((_e3527 * 8u) + 1u)];
-                let _e3541 = state[((idx * 8u) + 1u)];
-                let _e3550 = other_idx;
-                let _e3557 = state[((_e3550 * 8u) + 1u)];
-                let _e3564 = state[((idx * 8u) + 1u)];
-                let _e3578 = other_center.x;
-                let _e3580 = other_center.y;
-                let _e3590 = state[((idx * 8u) + 1u)];
-                let _e3591 = other_idx;
-                let _e3598 = state[((_e3591 * 8u) + 1u)];
-                let _e3609 = state[((idx * 8u) + 1u)];
-                let _e3610 = other_idx;
-                let _e3617 = state[((_e3610 * 8u) + 1u)];
-                let _e3629 = state[((idx * 8u) + 1u)];
-                let _e3630 = other_idx;
-                let _e3637 = state[((_e3630 * 8u) + 1u)];
-                let _e3644 = state[((idx * 8u) + 1u)];
-                let _e3653 = other_idx;
-                let _e3660 = state[((_e3653 * 8u) + 1u)];
-                let _e3667 = state[((idx * 8u) + 1u)];
-                let _e3685 = other_idx;
-                let _e3692 = state[((_e3685 * 8u) + 1u)];
-                let _e3699 = state[((idx * 8u) + 1u)];
-                let _e3704 = other_idx;
-                let _e3711 = state[((_e3704 * 8u) + 1u)];
-                let _e3718 = state[((idx * 8u) + 1u)];
-                let _e3724 = phi_1_;
-                let _e3730 = constants.scheme;
-                let _e3734 = other_idx;
-                let _e3741 = state[((_e3734 * 8u) + 1u)];
-                let _e3742 = other_idx;
-                let _e3749 = state[((_e3742 * 8u) + 1u)];
-                let _e3756 = state[((idx * 8u) + 1u)];
-                let _e3765 = other_idx;
-                let _e3772 = state[((_e3765 * 8u) + 1u)];
-                let _e3779 = state[((idx * 8u) + 1u)];
-                let _e3793 = other_center.x;
-                let _e3795 = other_center.y;
-                let _e3805 = state[((idx * 8u) + 1u)];
-                let _e3806 = other_idx;
-                let _e3813 = state[((_e3806 * 8u) + 1u)];
-                let _e3823 = state[((idx * 8u) + 1u)];
-                let _e3824 = other_idx;
-                let _e3831 = state[((_e3824 * 8u) + 1u)];
-                let _e3834 = other_idx;
-                let _e3841 = state[((_e3834 * 8u) + 1u)];
-                let _e3848 = state[((idx * 8u) + 1u)];
-                let _e3857 = other_idx;
-                let _e3864 = state[((_e3857 * 8u) + 1u)];
-                let _e3871 = state[((idx * 8u) + 1u)];
-                let _e3885 = other_center.x;
-                let _e3887 = other_center.y;
-                let _e3902 = state[((idx * 8u) + 1u)];
-                let _e3903 = other_idx;
-                let _e3910 = state[((_e3903 * 8u) + 1u)];
-                let _e3912 = other_idx;
-                let _e3919 = state[((_e3912 * 8u) + 1u)];
-                let _e3926 = state[((idx * 8u) + 1u)];
-                let _e3935 = other_idx;
-                let _e3942 = state[((_e3935 * 8u) + 1u)];
-                let _e3949 = state[((idx * 8u) + 1u)];
-                let _e3963 = other_center.x;
-                let _e3965 = other_center.y;
-                let _e3979 = state[((idx * 8u) + 1u)];
-                let _e3980 = other_idx;
-                let _e3987 = state[((_e3980 * 8u) + 1u)];
-                let _e3989 = other_idx;
-                let _e3996 = state[((_e3989 * 8u) + 1u)];
-                let _e4003 = state[((idx * 8u) + 1u)];
-                let _e4012 = other_idx;
-                let _e4019 = state[((_e4012 * 8u) + 1u)];
-                let _e4026 = state[((idx * 8u) + 1u)];
-                let _e4040 = other_center.x;
-                let _e4042 = other_center.y;
-                let _e4058 = state[((idx * 8u) + 1u)];
-                let _e4059 = other_idx;
-                let _e4066 = state[((_e4059 * 8u) + 1u)];
-                let _e4073 = state[((idx * 8u) + 1u)];
-                let _e4082 = other_idx;
-                let _e4089 = state[((_e4082 * 8u) + 1u)];
-                let _e4096 = state[((idx * 8u) + 1u)];
-                let _e4114 = other_idx;
-                let _e4121 = state[((_e4114 * 8u) + 1u)];
-                let _e4128 = state[((idx * 8u) + 1u)];
-                let _e4132 = other_idx;
-                let _e4139 = state[((_e4132 * 8u) + 1u)];
-                let _e4146 = state[((idx * 8u) + 1u)];
-                let _e4149 = other_idx;
-                let _e4156 = state[((_e4149 * 8u) + 1u)];
-                let _e4163 = state[((idx * 8u) + 1u)];
-                let _e4172 = other_idx;
-                let _e4179 = state[((_e4172 * 8u) + 1u)];
-                let _e4186 = state[((idx * 8u) + 1u)];
-                let _e4209 = other_idx;
-                let _e4216 = state[((_e4209 * 8u) + 1u)];
-                let _e4223 = state[((idx * 8u) + 1u)];
-                let _e4225 = other_idx;
-                let _e4232 = state[((_e4225 * 8u) + 1u)];
-                let _e4239 = state[((idx * 8u) + 1u)];
-                let _e4248 = other_idx;
-                let _e4255 = state[((_e4248 * 8u) + 1u)];
-                let _e4262 = state[((idx * 8u) + 1u)];
-                let _e4284 = other_idx;
-                let _e4291 = state[((_e4284 * 8u) + 1u)];
-                let _e4298 = state[((idx * 8u) + 1u)];
-                let _e4300 = other_idx;
-                let _e4307 = state[((_e4300 * 8u) + 1u)];
-                let _e4314 = state[((idx * 8u) + 1u)];
-                let _e4323 = other_idx;
-                let _e4330 = state[((_e4323 * 8u) + 1u)];
-                let _e4337 = state[((idx * 8u) + 1u)];
-                let _e4361 = phi_1_;
-                let _e4367 = constants.scheme;
-                let _e4371 = other_idx;
-                let _e4378 = state[((_e4371 * 8u) + 1u)];
-                let _e4379 = other_idx;
-                let _e4386 = state[((_e4379 * 8u) + 1u)];
-                let _e4395 = state[((idx * 8u) + 1u)];
-                let _e4399 = other_idx;
-                let _e4406 = state[((_e4399 * 8u) + 1u)];
-                let _e4413 = state[((idx * 8u) + 1u)];
-                let _e4422 = other_idx;
-                let _e4429 = state[((_e4422 * 8u) + 1u)];
-                let _e4436 = state[((idx * 8u) + 1u)];
-                let _e4450 = other_center.x;
-                let _e4452 = other_center.y;
-                let _e4459 = other_idx;
-                let _e4466 = state[((_e4459 * 8u) + 1u)];
-                let _e4474 = state[((idx * 8u) + 1u)];
-                let _e4475 = other_idx;
-                let _e4482 = state[((_e4475 * 8u) + 1u)];
-                let _e4493 = state[((idx * 8u) + 1u)];
-                let _e4494 = other_idx;
-                let _e4501 = state[((_e4494 * 8u) + 1u)];
-                let _e4513 = state[((idx * 8u) + 1u)];
-                let _e4520 = state[((idx * 8u) + 1u)];
-                let _e4523 = other_idx;
-                let _e4530 = state[((_e4523 * 8u) + 1u)];
-                let _e4534 = other_idx;
-                let _e4541 = state[((_e4534 * 8u) + 1u)];
-                let _e4548 = state[((idx * 8u) + 1u)];
-                let _e4557 = other_idx;
-                let _e4564 = state[((_e4557 * 8u) + 1u)];
-                let _e4571 = state[((idx * 8u) + 1u)];
-                let _e4582 = other_center.x;
-                let _e4584 = other_center.y;
-                let _e4600 = state[((idx * 8u) + 1u)];
-                let _e4602 = other_idx;
-                let _e4609 = state[((_e4602 * 8u) + 1u)];
-                let _e4616 = state[((idx * 8u) + 1u)];
-                let _e4621 = other_idx;
-                let _e4628 = state[((_e4621 * 8u) + 1u)];
-                let _e4635 = state[((idx * 8u) + 1u)];
-                let _e4641 = phi_1_;
-                let _e4647 = constants.scheme;
-                let _e4651 = other_idx;
-                let _e4658 = state[((_e4651 * 8u) + 1u)];
-                let _e4659 = other_idx;
-                let _e4666 = state[((_e4659 * 8u) + 1u)];
-                let _e4675 = state[((idx * 8u) + 1u)];
-                let _e4679 = other_idx;
-                let _e4686 = state[((_e4679 * 8u) + 1u)];
-                let _e4693 = state[((idx * 8u) + 1u)];
-                let _e4702 = other_idx;
-                let _e4709 = state[((_e4702 * 8u) + 1u)];
-                let _e4716 = state[((idx * 8u) + 1u)];
-                let _e4730 = other_center.x;
-                let _e4732 = other_center.y;
-                let _e4739 = other_idx;
-                let _e4746 = state[((_e4739 * 8u) + 1u)];
-                let _e4754 = state[((idx * 8u) + 1u)];
-                let _e4755 = other_idx;
-                let _e4762 = state[((_e4755 * 8u) + 1u)];
-                let _e4772 = state[((idx * 8u) + 1u)];
-                let _e4773 = other_idx;
-                let _e4780 = state[((_e4773 * 8u) + 1u)];
-                let _e4783 = other_idx;
-                let _e4790 = state[((_e4783 * 8u) + 1u)];
-                let _e4799 = state[((idx * 8u) + 1u)];
-                let _e4803 = other_idx;
-                let _e4810 = state[((_e4803 * 8u) + 1u)];
-                let _e4817 = state[((idx * 8u) + 1u)];
-                let _e4826 = other_idx;
-                let _e4833 = state[((_e4826 * 8u) + 1u)];
-                let _e4840 = state[((idx * 8u) + 1u)];
-                let _e4854 = other_center.x;
-                let _e4856 = other_center.y;
-                let _e4863 = other_idx;
-                let _e4870 = state[((_e4863 * 8u) + 1u)];
-                let _e4883 = state[((idx * 8u) + 1u)];
-                let _e4884 = other_idx;
-                let _e4891 = state[((_e4884 * 8u) + 1u)];
-                let _e4893 = other_idx;
-                let _e4900 = state[((_e4893 * 8u) + 1u)];
-                let _e4909 = state[((idx * 8u) + 1u)];
-                let _e4913 = other_idx;
-                let _e4920 = state[((_e4913 * 8u) + 1u)];
-                let _e4927 = state[((idx * 8u) + 1u)];
-                let _e4936 = other_idx;
-                let _e4943 = state[((_e4936 * 8u) + 1u)];
-                let _e4950 = state[((idx * 8u) + 1u)];
-                let _e4964 = other_center.x;
-                let _e4966 = other_center.y;
-                let _e4973 = other_idx;
-                let _e4980 = state[((_e4973 * 8u) + 1u)];
-                let _e4992 = state[((idx * 8u) + 1u)];
-                let _e4993 = other_idx;
-                let _e5000 = state[((_e4993 * 8u) + 1u)];
-                let _e5002 = other_idx;
-                let _e5009 = state[((_e5002 * 8u) + 1u)];
-                let _e5018 = state[((idx * 8u) + 1u)];
-                let _e5022 = other_idx;
-                let _e5029 = state[((_e5022 * 8u) + 1u)];
-                let _e5036 = state[((idx * 8u) + 1u)];
-                let _e5045 = other_idx;
-                let _e5052 = state[((_e5045 * 8u) + 1u)];
-                let _e5059 = state[((idx * 8u) + 1u)];
-                let _e5073 = other_center.x;
-                let _e5075 = other_center.y;
-                let _e5082 = other_idx;
-                let _e5089 = state[((_e5082 * 8u) + 1u)];
-                let _e5103 = state[((idx * 8u) + 1u)];
-                let _e5110 = state[((idx * 8u) + 1u)];
-                let _e5113 = other_idx;
-                let _e5120 = state[((_e5113 * 8u) + 1u)];
-                let _e5124 = other_idx;
-                let _e5131 = state[((_e5124 * 8u) + 1u)];
-                let _e5138 = state[((idx * 8u) + 1u)];
-                let _e5147 = other_idx;
-                let _e5154 = state[((_e5147 * 8u) + 1u)];
-                let _e5161 = state[((idx * 8u) + 1u)];
-                let _e5172 = other_center.x;
-                let _e5174 = other_center.y;
-                let _e5190 = state[((idx * 8u) + 1u)];
-                let _e5192 = other_idx;
-                let _e5199 = state[((_e5192 * 8u) + 1u)];
-                let _e5206 = state[((idx * 8u) + 1u)];
-                let _e5210 = other_idx;
-                let _e5217 = state[((_e5210 * 8u) + 1u)];
-                let _e5224 = state[((idx * 8u) + 1u)];
-                let _e5233 = state[((idx * 8u) + 1u)];
-                let _e5236 = other_idx;
-                let _e5243 = state[((_e5236 * 8u) + 1u)];
-                let _e5247 = other_idx;
-                let _e5254 = state[((_e5247 * 8u) + 1u)];
-                let _e5261 = state[((idx * 8u) + 1u)];
-                let _e5270 = other_idx;
-                let _e5277 = state[((_e5270 * 8u) + 1u)];
-                let _e5284 = state[((idx * 8u) + 1u)];
-                let _e5295 = other_center.x;
-                let _e5297 = other_center.y;
-                let _e5313 = state[((idx * 8u) + 1u)];
-                let _e5320 = other_idx;
-                let _e5327 = state[((_e5320 * 8u) + 1u)];
-                let _e5334 = state[((idx * 8u) + 1u)];
-                let _e5342 = state[((idx * 8u) + 1u)];
-                let _e5345 = other_idx;
-                let _e5352 = state[((_e5345 * 8u) + 1u)];
-                let _e5356 = other_idx;
-                let _e5363 = state[((_e5356 * 8u) + 1u)];
-                let _e5370 = state[((idx * 8u) + 1u)];
-                let _e5379 = other_idx;
-                let _e5386 = state[((_e5379 * 8u) + 1u)];
-                let _e5393 = state[((idx * 8u) + 1u)];
-                let _e5404 = other_center.x;
-                let _e5406 = other_center.y;
-                let _e5422 = state[((idx * 8u) + 1u)];
-                let _e5428 = other_idx;
-                let _e5435 = state[((_e5428 * 8u) + 1u)];
-                let _e5442 = state[((idx * 8u) + 1u)];
-                let _e5450 = state[((idx * 8u) + 1u)];
-                let _e5453 = other_idx;
-                let _e5460 = state[((_e5453 * 8u) + 1u)];
-                let _e5464 = other_idx;
-                let _e5471 = state[((_e5464 * 8u) + 1u)];
-                let _e5478 = state[((idx * 8u) + 1u)];
-                let _e5487 = other_idx;
-                let _e5494 = state[((_e5487 * 8u) + 1u)];
-                let _e5501 = state[((idx * 8u) + 1u)];
-                let _e5512 = other_center.x;
-                let _e5514 = other_center.y;
-                let _e5530 = state[((idx * 8u) + 1u)];
-                let _e5538 = phi_1_;
-                let _e5544 = constants.scheme;
-                let _e5554 = state[((idx * 8u) + 1u)];
-                let _e5555 = other_idx;
-                let _e5562 = state[((_e5555 * 8u) + 1u)];
-                let _e5563 = phi_1_;
-                let _e5569 = rhs_1_;
-                rhs_1_ = (_e5569 - (_e3156 * (select(select(select(select(select(select(select(_e3163, _e3171, (_e3172 < 0f)), select((_e3183 + dot(vec2<f32>((((_e3191 - _e3198) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3214 - _e3221) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e3235, _e3237)))), (_e3248 + dot(vec2<f32>((((_e3256 - _e3263) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3279 - _e3286) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e3305 > 0f)), (_e3311 == 1u)), select(((((_e3322 + (_e3330 * 0.625f)) + (_e3340 * 0.375f)) + (dot(vec2<f32>((((_e3351 - _e3358) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3374 - _e3381) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(_e3395, _e3397))) * 0.125f)) - _e3411), ((((_e3419 + (_e3426 * 0.625f)) + (_e3437 * 0.375f)) + (dot(vec2<f32>((((_e3448 - _e3455) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3471 - _e3478) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(_e3489, _e3491) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3507), (_e3509 > 0f)), (_e3515 == 2u)), select((_e3526 + min(max(dot(vec2<f32>((((_e3534 - _e3541) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3557 - _e3564) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e3578, _e3580))), min((_e3590 - _e3598), 0f)), max((_e3609 - _e3617), 0f))), (_e3629 + min(max(dot(vec2<f32>((((_e3637 - _e3644) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3660 - _e3667) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), min((_e3692 - _e3699), 0f)), max((_e3711 - _e3718), 0f))), (_e3724 > 0f)), (_e3730 == 3u)), select((_e3741 + ((((dot(vec2<f32>((((_e3749 - _e3756) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3772 - _e3779) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e3793, _e3795))) * abs((_e3805 - _e3813))) / max(abs((_e3823 - _e3831)), (abs(dot(vec2<f32>((((_e3841 - _e3848) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3864 - _e3871) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e3885, _e3887)))) + 0.00000001f))) * max(((_e3902 - _e3910) * dot(vec2<f32>((((_e3919 - _e3926) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3942 - _e3949) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e3963, _e3965)))), 0f)) / max(abs(((_e3979 - _e3987) * dot(vec2<f32>((((_e3996 - _e4003) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4019 - _e4026) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(_e4040, _e4042))))), 0.00000001f))), (_e4058 + ((((dot(vec2<f32>((((_e4066 - _e4073) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4089 - _e4096) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) * abs((_e4121 - _e4128))) / max(abs((_e4139 - _e4146)), (abs(dot(vec2<f32>((((_e4156 - _e4163) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4179 - _e4186) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))) + 0.00000001f))) * max(((_e4216 - _e4223) * dot(vec2<f32>((((_e4232 - _e4239) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4255 - _e4262) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), 0f)) / max(abs(((_e4291 - _e4298) * dot(vec2<f32>((((_e4307 - _e4314) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4330 - _e4337) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))))), 0.00000001f))), (_e4361 > 0f)), (_e4367 == 4u)), select((_e4378 + min(max(((((_e4386 * 0.625f) + (_e4395 * 0.375f)) + (dot(vec2<f32>((((_e4406 - _e4413) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4429 - _e4436) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(_e4450, _e4452))) * 0.125f)) - _e4466), min((_e4474 - _e4482), 0f)), max((_e4493 - _e4501), 0f))), (_e4513 + min(max(((((_e4520 * 0.625f) + (_e4530 * 0.375f)) + (dot(vec2<f32>((((_e4541 - _e4548) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4564 - _e4571) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(_e4582, _e4584) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e4600), min((_e4609 - _e4616), 0f)), max((_e4628 - _e4635), 0f))), (_e4641 > 0f)), (_e4647 == 5u)), select((_e4658 + ((((((((_e4666 * 0.625f) + (_e4675 * 0.375f)) + (dot(vec2<f32>((((_e4686 - _e4693) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4709 - _e4716) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(_e4730, _e4732))) * 0.125f)) - _e4746) * abs((_e4754 - _e4762))) / max(abs((_e4772 - _e4780)), (abs(((((_e4790 * 0.625f) + (_e4799 * 0.375f)) + (dot(vec2<f32>((((_e4810 - _e4817) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4833 - _e4840) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(_e4854, _e4856))) * 0.125f)) - _e4870)) + 0.00000001f))) * max(((_e4883 - _e4891) * ((((_e4900 * 0.625f) + (_e4909 * 0.375f)) + (dot(vec2<f32>((((_e4920 - _e4927) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4943 - _e4950) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(_e4964, _e4966))) * 0.125f)) - _e4980)), 0f)) / max(abs(((_e4992 - _e5000) * ((((_e5009 * 0.625f) + (_e5018 * 0.375f)) + (dot(vec2<f32>((((_e5029 - _e5036) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5052 - _e5059) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(_e5073, _e5075))) * 0.125f)) - _e5089))), 0.00000001f))), (_e5103 + ((((((((_e5110 * 0.625f) + (_e5120 * 0.375f)) + (dot(vec2<f32>((((_e5131 - _e5138) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5154 - _e5161) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(_e5172, _e5174) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e5190) * abs((_e5199 - _e5206))) / max(abs((_e5217 - _e5224)), (abs(((((_e5233 * 0.625f) + (_e5243 * 0.375f)) + (dot(vec2<f32>((((_e5254 - _e5261) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5277 - _e5284) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(_e5295, _e5297) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e5313)) + 0.00000001f))) * max(((_e5327 - _e5334) * ((((_e5342 * 0.625f) + (_e5352 * 0.375f)) + (dot(vec2<f32>((((_e5363 - _e5370) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5386 - _e5393) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(_e5404, _e5406) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e5422)), 0f)) / max(abs(((_e5435 - _e5442) * ((((_e5450 * 0.625f) + (_e5460 * 0.375f)) + (dot(vec2<f32>((((_e5471 - _e5478) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5494 - _e5501) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(_e5512, _e5514) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e5530))), 0.00000001f))), (_e5538 > 0f)), (_e5544 == 6u)) - select(_e5554, _e5562, (_e5563 < 0f)))));
-            } else {
-                let _e5577 = bc_kind[((face_idx * 3u) + 1u)];
-                if (_e5577 == 1u) {
-                    let _e5580 = phi_1_;
-                    let _e5583 = diag_1_;
-                    diag_1_ = (_e5583 + max(_e5580, 0f));
-                    let _e5585 = phi_1_;
-                    let _e5594 = bc_value[((face_idx * 3u) + 1u)];
-                    let _e5596 = rhs_1_;
-                    rhs_1_ = (_e5596 - (min(_e5585, 0f) * _e5594));
-                } else {
-                    let _e5598 = phi_1_;
-                    let _e5599 = diag_1_;
-                    diag_1_ = (_e5599 + _e5598);
-                }
-            }
-            let _e5611 = normal.x;
-            let _e5613 = matrix_values[((start_row_0_ + (diag_rank * 3u)) + 2u)];
-            matrix_values[((start_row_0_ + (diag_rank * 3u)) + 2u)] = (_e5613 + ((0.5f * area) * _e5611));
-            let _e5625 = normal.x;
-            let _e5627 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 2u)];
-            matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 2u)] = (_e5627 + ((0.5f * area) * _e5625));
-            let _e5639 = normal.y;
-            let _e5641 = matrix_values[((start_row_1_ + (diag_rank * 3u)) + 2u)];
-            matrix_values[((start_row_1_ + (diag_rank * 3u)) + 2u)] = (_e5641 + ((0.5f * area) * _e5639));
-            let _e5653 = normal.y;
-            let _e5655 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 2u)];
-            matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 2u)] = (_e5655 + ((0.5f * area) * _e5653));
-            let _e5659 = constants.density;
-            let _e5666 = state[((idx * 8u) + 3u)];
-            let _e5669 = dist;
-            let diff_coeff_p = (((_e5659 * _e5666) * area) / _e5669);
-            let _e5671 = is_boundary;
-            if !(_e5671) {
-                let _e5674 = diag_2_;
-                diag_2_ = (_e5674 + diff_coeff_p);
-                let _e5683 = matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)];
-                matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)] = (_e5683 - diff_coeff_p);
-            } else {
-                let _e5691 = bc_kind[((face_idx * 3u) + 2u)];
-                if (_e5691 == 1u) {
-                    let _e5694 = diag_2_;
-                    diag_2_ = (_e5694 + diff_coeff_p);
-                    let _e5703 = bc_value[((face_idx * 3u) + 2u)];
-                    let _e5705 = rhs_2_;
-                    rhs_2_ = (_e5705 + (diff_coeff_p * _e5703));
-                } else {
-                    let _e5713 = bc_kind[((face_idx * 3u) + 2u)];
-                    if (_e5713 == 2u) {
-                        let _e5718 = constants.density;
-                        let _e5725 = state[((idx * 8u) + 3u)];
-                        let _e5734 = bc_value[((face_idx * 3u) + 2u)];
-                        let _e5737 = rhs_2_;
-                        rhs_2_ = (_e5737 + -((((_e5718 * _e5725) * area) * _e5734)));
-                    }
-                }
-            }
-            let _e5745 = fluxes[((face_idx * 3u) + 2u)];
-            phi_2_ = _e5745;
-            if (owner != idx) {
-                let _e5748 = phi_2_;
-                let _e5751 = phi_2_;
-                phi_2_ = (_e5751 - (_e5748 * 2f));
-            }
-            let _e5753 = phi_2_;
-            let _e5754 = rhs_2_;
-            rhs_2_ = (_e5754 - _e5753);
-        }
-        continuing {
-            let _e5757 = k;
-            k = (_e5757 + 1u);
-        }
-    }
-    let _e5766 = diag_0_;
-    let _e5767 = matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)];
-    matrix_values[((start_row_0_ + (diag_rank * 3u)) + 0u)] = (_e5767 + _e5766);
-    let _e5775 = rhs_0_;
-    rhs[((idx * 3u) + 0u)] = _e5775;
-    let _e5783 = diag_1_;
-    let _e5784 = matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)];
-    matrix_values[((start_row_1_ + (diag_rank * 3u)) + 1u)] = (_e5784 + _e5783);
-    let _e5792 = rhs_1_;
-    rhs[((idx * 3u) + 1u)] = _e5792;
-    let _e5800 = diag_2_;
-    let _e5801 = matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)];
-    matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)] = (_e5801 + _e5800);
-    let _e5809 = rhs_2_;
-    rhs[((idx * 3u) + 2u)] = _e5809;
-    return;
-}
-"#;
-    }
-    pub mod generic_coupled_assembly_incompressible_momentum_generic {
-        use super::{_root, _root::*};
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Vector2 {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub x: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub y: f32,
-        }
-        impl Vector2 {
-            pub const fn new(x: f32, y: f32) -> Self {
-                Self { x, y }
-            }
-        }
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Constants {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub dt: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub dt_old: f32,
-            #[doc = "offset: 8, size: 4, type: `f32`"]
-            pub dtau: f32,
-            #[doc = "offset: 12, size: 4, type: `f32`"]
-            pub time: f32,
-            #[doc = "offset: 16, size: 4, type: `f32`"]
-            pub viscosity: f32,
-            #[doc = "offset: 20, size: 4, type: `f32`"]
-            pub density: f32,
-            #[doc = "offset: 24, size: 4, type: `u32`"]
-            pub component: u32,
-            #[doc = "offset: 28, size: 4, type: `f32`"]
-            pub alpha_p: f32,
-            #[doc = "offset: 32, size: 4, type: `u32`"]
-            pub scheme: u32,
-            #[doc = "offset: 36, size: 4, type: `f32`"]
-            pub alpha_u: f32,
-            #[doc = "offset: 40, size: 4, type: `u32`"]
-            pub stride_x: u32,
-            #[doc = "offset: 44, size: 4, type: `u32`"]
-            pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
-        }
-        impl Constants {
-            pub const fn new(
-                dt: f32,
-                dt_old: f32,
-                dtau: f32,
-                time: f32,
-                viscosity: f32,
-                density: f32,
-                component: u32,
-                alpha_p: f32,
-                scheme: u32,
-                alpha_u: f32,
-                stride_x: u32,
-                time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
-            ) -> Self {
-                Self {
-                    dt,
-                    dt_old,
-                    dtau,
-                    time,
-                    viscosity,
-                    density,
-                    component,
-                    alpha_p,
-                    scheme,
-                    alpha_u,
-                    stride_x,
-                    time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
-                }
-            }
-        }
-        pub mod compute {
-            use super::{_root, _root::*};
-            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-            pub fn create_main_pipeline_embed_source(
-                device: &wgpu::Device,
-            ) -> wgpu::ComputePipeline {
-                let module = super::create_shader_module_embed_source(device);
-                let layout = super::create_pipeline_layout(device);
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("Compute Pipeline main"),
-                    layout: Some(&layout),
-                    module: &module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            }
-        }
-        pub const ENTRY_MAIN: &str = "main";
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub face_owner: wgpu::BufferBinding<'a>,
-            pub face_neighbor: wgpu::BufferBinding<'a>,
-            pub face_areas: wgpu::BufferBinding<'a>,
-            pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
-            pub cell_centers: wgpu::BufferBinding<'a>,
-            pub cell_vols: wgpu::BufferBinding<'a>,
-            pub cell_face_offsets: wgpu::BufferBinding<'a>,
-            pub cell_faces: wgpu::BufferBinding<'a>,
-            pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
-            pub diagonal_indices: wgpu::BufferBinding<'a>,
-            pub face_boundary: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup0Entries<'a> {
-            pub face_owner: wgpu::BindGroupEntry<'a>,
-            pub face_neighbor: wgpu::BindGroupEntry<'a>,
-            pub face_areas: wgpu::BindGroupEntry<'a>,
-            pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_vols: wgpu::BindGroupEntry<'a>,
-            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
-            pub cell_faces: wgpu::BindGroupEntry<'a>,
-            pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
-            pub diagonal_indices: wgpu::BindGroupEntry<'a>,
-            pub face_boundary: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup0Entries<'a> {
-            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-                Self {
-                    face_owner: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.face_owner),
-                    },
-                    face_neighbor: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
-                    },
-                    face_areas: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.face_areas),
-                    },
-                    face_normals: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
-                    },
-                    cell_centers: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
-                    },
-                    cell_vols: wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
-                    },
-                    cell_face_offsets: wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
-                    },
-                    cell_faces: wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
-                    },
-                    cell_face_matrix_indices: wgpu::BindGroupEntry {
-                        binding: 10,
-                        resource: wgpu::BindingResource::Buffer(params.cell_face_matrix_indices),
-                    },
-                    diagonal_indices: wgpu::BindGroupEntry {
-                        binding: 11,
-                        resource: wgpu::BindingResource::Buffer(params.diagonal_indices),
-                    },
-                    face_boundary: wgpu::BindGroupEntry {
-                        binding: 12,
-                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
-                [
-                    self.face_owner,
-                    self.face_neighbor,
-                    self.face_areas,
-                    self.face_normals,
-                    self.face_centers,
-                    self.cell_centers,
-                    self.cell_vols,
-                    self.cell_face_offsets,
-                    self.cell_faces,
-                    self.cell_face_matrix_indices,
-                    self.diagonal_indices,
-                    self.face_boundary,
-                ]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0(wgpu::BindGroup);
-        impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric::BindGroup0",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(0, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1EntriesParams<'a> {
-            pub state: wgpu::BufferBinding<'a>,
-            pub state_old: wgpu::BufferBinding<'a>,
-            pub state_old_old: wgpu::BufferBinding<'a>,
-            pub constants: wgpu::BufferBinding<'a>,
-            pub state_iter: wgpu::BufferBinding<'a>,
-            pub fluxes: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup1Entries<'a> {
-            pub state: wgpu::BindGroupEntry<'a>,
-            pub state_old: wgpu::BindGroupEntry<'a>,
-            pub state_old_old: wgpu::BindGroupEntry<'a>,
-            pub constants: wgpu::BindGroupEntry<'a>,
-            pub state_iter: wgpu::BindGroupEntry<'a>,
-            pub fluxes: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup1Entries<'a> {
-            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
-                Self {
-                    state: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.state),
-                    },
-                    state_old: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.state_old),
-                    },
-                    state_old_old: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.state_old_old),
-                    },
-                    constants: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.constants),
-                    },
-                    state_iter: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.state_iter),
-                    },
-                    fluxes: wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Buffer(params.fluxes),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 6] {
-                [
-                    self.state,
-                    self.state_old,
-                    self.state_old_old,
-                    self.constants,
-                    self.state_iter,
-                    self.fluxes,
-                ]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1(wgpu::BindGroup);
-        impl WgpuBindGroup1 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_assembly_incompressible_momentum_generic :: Constants > () as _) , } , count : None , } , # [doc = " @binding(4): \"state_iter\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric::BindGroup1",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(1, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup2EntriesParams<'a> {
-            pub matrix_values: wgpu::BufferBinding<'a>,
-            pub rhs: wgpu::BufferBinding<'a>,
-            pub scalar_row_offsets: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup2Entries<'a> {
-            pub matrix_values: wgpu::BindGroupEntry<'a>,
-            pub rhs: wgpu::BindGroupEntry<'a>,
-            pub scalar_row_offsets: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup2Entries<'a> {
-            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
-                Self {
-                    matrix_values: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.matrix_values),
-                    },
-                    rhs: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.rhs),
-                    },
-                    scalar_row_offsets: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.scalar_row_offsets),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
-                [self.matrix_values, self.rhs, self.scalar_row_offsets]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup2(wgpu::BindGroup);
-        impl WgpuBindGroup2 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"matrix_values\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"rhs\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"scalar_row_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric::BindGroup2",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(2, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup3EntriesParams<'a> {
-            pub bc_kind: wgpu::BufferBinding<'a>,
-            pub bc_value: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup3Entries<'a> {
-            pub bc_kind: wgpu::BindGroupEntry<'a>,
-            pub bc_value: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup3Entries<'a> {
-            pub fn new(params: WgpuBindGroup3EntriesParams<'a>) -> Self {
-                Self {
-                    bc_kind: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
-                    },
-                    bc_value: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.bc_value),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-                [self.bc_kind, self.bc_value]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup3(wgpu::BindGroup);
-        impl WgpuBindGroup3 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric::BindGroup3::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup3Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric::BindGroup3",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(3, &self.0, &[]);
-            }
-        }
-        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-        #[doc = "   - Bind group 1: More frequent updates"]
-        #[doc = "   - Bind group 2: More frequent updates"]
-        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-        #[derive(Debug, Copy, Clone)]
-        pub struct WgpuBindGroups<'a> {
-            pub bind_group0: &'a WgpuBindGroup0,
-            pub bind_group1: &'a WgpuBindGroup1,
-            pub bind_group2: &'a WgpuBindGroup2,
-            pub bind_group3: &'a WgpuBindGroup3,
-        }
-        impl<'a> WgpuBindGroups<'a> {
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                self.bind_group0.set(pass);
-                self.bind_group1.set(pass);
-                self.bind_group2.set(pass);
-                self.bind_group3.set(pass);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuPipelineLayout;
-        impl WgpuPipelineLayout {
-            pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 4],
-            ) -> [wgpu::BindGroupLayout; 4] {
-                entries
-            }
-        }
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(
-                    "GeneratedGenericCoupledAssemblyIncompressibleMomentumGeneric::PipelineLayout",
-                ),
-                bind_group_layouts: &[
-                    &WgpuBindGroup0::get_bind_group_layout(device),
-                    &WgpuBindGroup1::get_bind_group_layout(device),
-                    &WgpuBindGroup2::get_bind_group_layout(device),
-                    &WgpuBindGroup3::get_bind_group_layout(device),
-                ],
-                push_constant_ranges: &[],
-            })
-        }
-        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("generic_coupled_assembly_incompressible_momentum_generic.wgsl"),
                 source: wgpu::ShaderSource::Wgsl(source),
             })
         }
@@ -26212,373 +20560,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
-    pub mod generic_coupled_update_incompressible_momentum_generic {
-        use super::{_root, _root::*};
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Constants {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub dt: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub dt_old: f32,
-            #[doc = "offset: 8, size: 4, type: `f32`"]
-            pub dtau: f32,
-            #[doc = "offset: 12, size: 4, type: `f32`"]
-            pub time: f32,
-            #[doc = "offset: 16, size: 4, type: `f32`"]
-            pub viscosity: f32,
-            #[doc = "offset: 20, size: 4, type: `f32`"]
-            pub density: f32,
-            #[doc = "offset: 24, size: 4, type: `u32`"]
-            pub component: u32,
-            #[doc = "offset: 28, size: 4, type: `f32`"]
-            pub alpha_p: f32,
-            #[doc = "offset: 32, size: 4, type: `u32`"]
-            pub scheme: u32,
-            #[doc = "offset: 36, size: 4, type: `f32`"]
-            pub alpha_u: f32,
-            #[doc = "offset: 40, size: 4, type: `u32`"]
-            pub stride_x: u32,
-            #[doc = "offset: 44, size: 4, type: `u32`"]
-            pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
-        }
-        impl Constants {
-            pub const fn new(
-                dt: f32,
-                dt_old: f32,
-                dtau: f32,
-                time: f32,
-                viscosity: f32,
-                density: f32,
-                component: u32,
-                alpha_p: f32,
-                scheme: u32,
-                alpha_u: f32,
-                stride_x: u32,
-                time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
-            ) -> Self {
-                Self {
-                    dt,
-                    dt_old,
-                    dtau,
-                    time,
-                    viscosity,
-                    density,
-                    component,
-                    alpha_p,
-                    scheme,
-                    alpha_u,
-                    stride_x,
-                    time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
-                }
-            }
-        }
-        pub mod compute {
-            use super::{_root, _root::*};
-            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-            pub fn create_main_pipeline_embed_source(
-                device: &wgpu::Device,
-            ) -> wgpu::ComputePipeline {
-                let module = super::create_shader_module_embed_source(device);
-                let layout = super::create_pipeline_layout(device);
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("Compute Pipeline main"),
-                    layout: Some(&layout),
-                    module: &module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            }
-        }
-        pub const ENTRY_MAIN: &str = "main";
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub state: wgpu::BufferBinding<'a>,
-            pub constants: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup0Entries<'a> {
-            pub state: wgpu::BindGroupEntry<'a>,
-            pub constants: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup0Entries<'a> {
-            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-                Self {
-                    state: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.state),
-                    },
-                    constants: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.constants),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-                [self.state, self.constants]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0(wgpu::BindGroup);
-        impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_update_incompressible_momentum_generic :: Constants > () as _) , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric::BindGroup0",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(0, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1EntriesParams<'a> {
-            pub x: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup1Entries<'a> {
-            pub x: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup1Entries<'a> {
-            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
-                Self {
-                    x: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.x),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 1] {
-                [self.x]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1(wgpu::BindGroup);
-        impl WgpuBindGroup1 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"x\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric::BindGroup1",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(1, &self.0, &[]);
-            }
-        }
-        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-        #[doc = "   - Bind group 1: More frequent updates"]
-        #[doc = "   - Bind group 2: More frequent updates"]
-        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-        #[derive(Debug, Copy, Clone)]
-        pub struct WgpuBindGroups<'a> {
-            pub bind_group0: &'a WgpuBindGroup0,
-            pub bind_group1: &'a WgpuBindGroup1,
-        }
-        impl<'a> WgpuBindGroups<'a> {
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                self.bind_group0.set(pass);
-                self.bind_group1.set(pass);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuPipelineLayout;
-        impl WgpuPipelineLayout {
-            pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 2],
-            ) -> [wgpu::BindGroupLayout; 2] {
-                entries
-            }
-        }
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(
-                    "GeneratedGenericCoupledUpdateIncompressibleMomentumGeneric::PipelineLayout",
-                ),
-                bind_group_layouts: &[
-                    &WgpuBindGroup0::get_bind_group_layout(device),
-                    &WgpuBindGroup1::get_bind_group_layout(device),
-                ],
-                push_constant_ranges: &[],
-            })
-        }
-        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("generic_coupled_update_incompressible_momentum_generic.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(source),
-            })
-        }
-        pub const SHADER_STRING: &str = r#"
-struct Vector2_ {
-    x: f32,
-    y: f32,
-}
-
-struct Constants {
-    dt: f32,
-    dt_old: f32,
-    dtau: f32,
-    time: f32,
-    viscosity: f32,
-    density: f32,
-    component: u32,
-    alpha_p: f32,
-    scheme: u32,
-    alpha_u: f32,
-    stride_x: u32,
-    time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
-}
-
-@group(0) @binding(0) 
-var<storage, read_write> state: array<f32>;
-@group(0) @binding(1) 
-var<uniform> constants: Constants;
-@group(1) @binding(0) 
-var<storage, read_write> x: array<f32>;
-
-@compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let _e4 = constants.stride_x;
-    let idx = ((global_id.y * _e4) + global_id.x);
-    let num_cells = (arrayLength((&state)) / 8u);
-    if (idx >= num_cells) {
-        return;
-    }
-    let _e25 = state[((idx * 8u) + 0u)];
-    let _e32 = x[((idx * 3u) + 0u)];
-    let _e39 = state[((idx * 8u) + 0u)];
-    let _e46 = x[((idx * 3u) + 0u)];
-    let _e49 = constants.alpha_u;
-    let _e57 = state[((idx * 8u) + 0u)];
-    let _e64 = state[((idx * 8u) + 0u)];
-    let _e72 = state[((idx * 8u) + 0u)];
-    let _e84 = x[((idx * 3u) + 0u)];
-    let _e91 = x[((idx * 3u) + 0u)];
-    let _e99 = x[((idx * 3u) + 0u)];
-    state[((idx * 8u) + 0u)] = select(_e25, select(_e32, mix(_e39, _e46, _e49), ((_e57 == _e64) && (abs(_e72) < 340000000000000000000000000000000000000f))), ((_e84 == _e91) && (abs(_e99) < 340000000000000000000000000000000000000f)));
-    let _e117 = state[((idx * 8u) + 0u)];
-    let _e124 = x[((idx * 3u) + 0u)];
-    let _e131 = state[((idx * 8u) + 0u)];
-    let _e138 = x[((idx * 3u) + 0u)];
-    let _e141 = constants.alpha_u;
-    let _e149 = state[((idx * 8u) + 0u)];
-    let _e156 = state[((idx * 8u) + 0u)];
-    let _e164 = state[((idx * 8u) + 0u)];
-    let _e176 = x[((idx * 3u) + 0u)];
-    let _e183 = x[((idx * 3u) + 0u)];
-    let _e191 = x[((idx * 3u) + 0u)];
-    x[((idx * 3u) + 0u)] = select(_e117, select(_e124, mix(_e131, _e138, _e141), ((_e149 == _e156) && (abs(_e164) < 340000000000000000000000000000000000000f))), ((_e176 == _e183) && (abs(_e191) < 340000000000000000000000000000000000000f)));
-    let _e209 = state[((idx * 8u) + 1u)];
-    let _e216 = x[((idx * 3u) + 1u)];
-    let _e223 = state[((idx * 8u) + 1u)];
-    let _e230 = x[((idx * 3u) + 1u)];
-    let _e233 = constants.alpha_u;
-    let _e241 = state[((idx * 8u) + 1u)];
-    let _e248 = state[((idx * 8u) + 1u)];
-    let _e256 = state[((idx * 8u) + 1u)];
-    let _e268 = x[((idx * 3u) + 1u)];
-    let _e275 = x[((idx * 3u) + 1u)];
-    let _e283 = x[((idx * 3u) + 1u)];
-    state[((idx * 8u) + 1u)] = select(_e209, select(_e216, mix(_e223, _e230, _e233), ((_e241 == _e248) && (abs(_e256) < 340000000000000000000000000000000000000f))), ((_e268 == _e275) && (abs(_e283) < 340000000000000000000000000000000000000f)));
-    let _e301 = state[((idx * 8u) + 1u)];
-    let _e308 = x[((idx * 3u) + 1u)];
-    let _e315 = state[((idx * 8u) + 1u)];
-    let _e322 = x[((idx * 3u) + 1u)];
-    let _e325 = constants.alpha_u;
-    let _e333 = state[((idx * 8u) + 1u)];
-    let _e340 = state[((idx * 8u) + 1u)];
-    let _e348 = state[((idx * 8u) + 1u)];
-    let _e360 = x[((idx * 3u) + 1u)];
-    let _e367 = x[((idx * 3u) + 1u)];
-    let _e375 = x[((idx * 3u) + 1u)];
-    x[((idx * 3u) + 1u)] = select(_e301, select(_e308, mix(_e315, _e322, _e325), ((_e333 == _e340) && (abs(_e348) < 340000000000000000000000000000000000000f))), ((_e360 == _e367) && (abs(_e375) < 340000000000000000000000000000000000000f)));
-    let _e393 = state[((idx * 8u) + 2u)];
-    let _e400 = x[((idx * 3u) + 2u)];
-    let _e407 = state[((idx * 8u) + 2u)];
-    let _e414 = x[((idx * 3u) + 2u)];
-    let _e417 = constants.alpha_p;
-    let _e425 = state[((idx * 8u) + 2u)];
-    let _e432 = state[((idx * 8u) + 2u)];
-    let _e440 = state[((idx * 8u) + 2u)];
-    let _e452 = x[((idx * 3u) + 2u)];
-    let _e459 = x[((idx * 3u) + 2u)];
-    let _e467 = x[((idx * 3u) + 2u)];
-    state[((idx * 8u) + 2u)] = select(_e393, select(_e400, mix(_e407, _e414, _e417), ((_e425 == _e432) && (abs(_e440) < 340000000000000000000000000000000000000f))), ((_e452 == _e459) && (abs(_e467) < 340000000000000000000000000000000000000f)));
-    let _e485 = state[((idx * 8u) + 2u)];
-    let _e492 = x[((idx * 3u) + 2u)];
-    let _e499 = state[((idx * 8u) + 2u)];
-    let _e506 = x[((idx * 3u) + 2u)];
-    let _e509 = constants.alpha_p;
-    let _e517 = state[((idx * 8u) + 2u)];
-    let _e524 = state[((idx * 8u) + 2u)];
-    let _e532 = state[((idx * 8u) + 2u)];
-    let _e544 = x[((idx * 3u) + 2u)];
-    let _e551 = x[((idx * 3u) + 2u)];
-    let _e559 = x[((idx * 3u) + 2u)];
-    x[((idx * 3u) + 2u)] = select(_e485, select(_e492, mix(_e499, _e506, _e509), ((_e517 == _e524) && (abs(_e532) < 340000000000000000000000000000000000000f))), ((_e544 == _e551) && (abs(_e559) < 340000000000000000000000000000000000000f)));
-    return;
-}
-"#;
-    }
     pub mod packed_state_gradients_compressible {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
@@ -28988,576 +22969,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
-    pub mod packed_state_gradients_incompressible_momentum_generic {
-        use super::{_root, _root::*};
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Vector2 {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub x: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub y: f32,
-        }
-        impl Vector2 {
-            pub const fn new(x: f32, y: f32) -> Self {
-                Self { x, y }
-            }
-        }
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Constants {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub dt: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub dt_old: f32,
-            #[doc = "offset: 8, size: 4, type: `f32`"]
-            pub dtau: f32,
-            #[doc = "offset: 12, size: 4, type: `f32`"]
-            pub time: f32,
-            #[doc = "offset: 16, size: 4, type: `f32`"]
-            pub viscosity: f32,
-            #[doc = "offset: 20, size: 4, type: `f32`"]
-            pub density: f32,
-            #[doc = "offset: 24, size: 4, type: `u32`"]
-            pub component: u32,
-            #[doc = "offset: 28, size: 4, type: `f32`"]
-            pub alpha_p: f32,
-            #[doc = "offset: 32, size: 4, type: `u32`"]
-            pub scheme: u32,
-            #[doc = "offset: 36, size: 4, type: `f32`"]
-            pub alpha_u: f32,
-            #[doc = "offset: 40, size: 4, type: `u32`"]
-            pub stride_x: u32,
-            #[doc = "offset: 44, size: 4, type: `u32`"]
-            pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
-        }
-        impl Constants {
-            pub const fn new(
-                dt: f32,
-                dt_old: f32,
-                dtau: f32,
-                time: f32,
-                viscosity: f32,
-                density: f32,
-                component: u32,
-                alpha_p: f32,
-                scheme: u32,
-                alpha_u: f32,
-                stride_x: u32,
-                time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
-            ) -> Self {
-                Self {
-                    dt,
-                    dt_old,
-                    dtau,
-                    time,
-                    viscosity,
-                    density,
-                    component,
-                    alpha_p,
-                    scheme,
-                    alpha_u,
-                    stride_x,
-                    time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
-                }
-            }
-        }
-        pub mod compute {
-            use super::{_root, _root::*};
-            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-            pub fn create_main_pipeline_embed_source(
-                device: &wgpu::Device,
-            ) -> wgpu::ComputePipeline {
-                let module = super::create_shader_module_embed_source(device);
-                let layout = super::create_pipeline_layout(device);
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("Compute Pipeline main"),
-                    layout: Some(&layout),
-                    module: &module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            }
-        }
-        pub const ENTRY_MAIN: &str = "main";
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub face_owner: wgpu::BufferBinding<'a>,
-            pub face_neighbor: wgpu::BufferBinding<'a>,
-            pub face_areas: wgpu::BufferBinding<'a>,
-            pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
-            pub cell_centers: wgpu::BufferBinding<'a>,
-            pub cell_vols: wgpu::BufferBinding<'a>,
-            pub cell_face_offsets: wgpu::BufferBinding<'a>,
-            pub cell_faces: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup0Entries<'a> {
-            pub face_owner: wgpu::BindGroupEntry<'a>,
-            pub face_neighbor: wgpu::BindGroupEntry<'a>,
-            pub face_areas: wgpu::BindGroupEntry<'a>,
-            pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_vols: wgpu::BindGroupEntry<'a>,
-            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
-            pub cell_faces: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup0Entries<'a> {
-            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-                Self {
-                    face_owner: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.face_owner),
-                    },
-                    face_neighbor: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
-                    },
-                    face_areas: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.face_areas),
-                    },
-                    face_normals: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
-                    },
-                    cell_centers: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
-                    },
-                    cell_vols: wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
-                    },
-                    cell_face_offsets: wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
-                    },
-                    cell_faces: wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 9] {
-                [
-                    self.face_owner,
-                    self.face_neighbor,
-                    self.face_areas,
-                    self.face_normals,
-                    self.face_centers,
-                    self.cell_centers,
-                    self.cell_vols,
-                    self.cell_face_offsets,
-                    self.cell_faces,
-                ]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0(wgpu::BindGroup);
-        impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsIncompressibleMomentumGeneric::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedPackedStateGradientsIncompressibleMomentumGeneric::BindGroup0",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(0, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1EntriesParams<'a> {
-            pub state: wgpu::BufferBinding<'a>,
-            pub constants: wgpu::BufferBinding<'a>,
-            pub grad_state: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup1Entries<'a> {
-            pub state: wgpu::BindGroupEntry<'a>,
-            pub constants: wgpu::BindGroupEntry<'a>,
-            pub grad_state: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup1Entries<'a> {
-            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
-                Self {
-                    state: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.state),
-                    },
-                    constants: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.constants),
-                    },
-                    grad_state: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.grad_state),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
-                [self.state, self.constants, self.grad_state]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1(wgpu::BindGroup);
-        impl WgpuBindGroup1 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsIncompressibleMomentumGeneric::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: packed_state_gradients_incompressible_momentum_generic :: Constants > () as _) , } , count : None , } , # [doc = " @binding(4): \"grad_state\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedPackedStateGradientsIncompressibleMomentumGeneric::BindGroup1",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(1, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup2EntriesParams<'a> {
-            pub bc_kind: wgpu::BufferBinding<'a>,
-            pub bc_value: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup2Entries<'a> {
-            pub bc_kind: wgpu::BindGroupEntry<'a>,
-            pub bc_value: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup2Entries<'a> {
-            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
-                Self {
-                    bc_kind: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
-                    },
-                    bc_value: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.bc_value),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-                [self.bc_kind, self.bc_value]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup2(wgpu::BindGroup);
-        impl WgpuBindGroup2 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsIncompressibleMomentumGeneric::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedPackedStateGradientsIncompressibleMomentumGeneric::BindGroup2",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(2, &self.0, &[]);
-            }
-        }
-        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-        #[doc = "   - Bind group 1: More frequent updates"]
-        #[doc = "   - Bind group 2: More frequent updates"]
-        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-        #[derive(Debug, Copy, Clone)]
-        pub struct WgpuBindGroups<'a> {
-            pub bind_group0: &'a WgpuBindGroup0,
-            pub bind_group1: &'a WgpuBindGroup1,
-            pub bind_group2: &'a WgpuBindGroup2,
-        }
-        impl<'a> WgpuBindGroups<'a> {
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                self.bind_group0.set(pass);
-                self.bind_group1.set(pass);
-                self.bind_group2.set(pass);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuPipelineLayout;
-        impl WgpuPipelineLayout {
-            pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 3],
-            ) -> [wgpu::BindGroupLayout; 3] {
-                entries
-            }
-        }
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(
-                    "GeneratedPackedStateGradientsIncompressibleMomentumGeneric::PipelineLayout",
-                ),
-                bind_group_layouts: &[
-                    &WgpuBindGroup0::get_bind_group_layout(device),
-                    &WgpuBindGroup1::get_bind_group_layout(device),
-                    &WgpuBindGroup2::get_bind_group_layout(device),
-                ],
-                push_constant_ranges: &[],
-            })
-        }
-        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("packed_state_gradients_incompressible_momentum_generic.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(source),
-            })
-        }
-        pub const SHADER_STRING: &str = r#"
-struct Vector2_ {
-    x: f32,
-    y: f32,
-}
-
-struct Constants {
-    dt: f32,
-    dt_old: f32,
-    dtau: f32,
-    time: f32,
-    viscosity: f32,
-    density: f32,
-    component: u32,
-    alpha_p: f32,
-    scheme: u32,
-    alpha_u: f32,
-    stride_x: u32,
-    time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
-}
-
-@group(0) @binding(0) 
-var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
-var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
-var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
-var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
-var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
-var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
-var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
-var<storage> cell_faces: array<u32>;
-@group(1) @binding(0) 
-var<storage> state: array<f32>;
-@group(1) @binding(3) 
-var<uniform> constants: Constants;
-@group(1) @binding(4) 
-var<storage, read_write> grad_state: array<Vector2_>;
-@group(2) @binding(0) 
-var<storage> bc_kind: array<u32>;
-@group(2) @binding(1) 
-var<storage> bc_value: array<f32>;
-
-@compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var grad_acc_0_: vec2<f32> = vec2<f32>(0f, 0f);
-    var grad_acc_1_: vec2<f32> = vec2<f32>(0f, 0f);
-    var grad_acc_2_: vec2<f32> = vec2<f32>(0f, 0f);
-    var k: u32;
-    var normal_vec: vec2<f32>;
-    var other_idx: u32;
-    var other_center_vec: vec2<f32>;
-    var lambda: f32;
-
-    let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
-    if (idx >= arrayLength((&cell_vols))) {
-        return;
-    }
-    let _e15 = constants.scheme;
-    if (_e15 == 0u) {
-        return;
-    }
-    let cell_center = cell_centers[idx];
-    let cell_center_vec = vec2<f32>(cell_center.x, cell_center.y);
-    let vol = cell_vols[idx];
-    let start = cell_face_offsets[idx];
-    let end = cell_face_offsets[(idx + 1u)];
-    k = start;
-    loop {
-        let _e36 = k;
-        if (_e36 < end) {
-        } else {
-            break;
-        }
-        {
-            let _e39 = k;
-            let face_idx = cell_faces[_e39];
-            let owner = face_owner[face_idx];
-            let neighbor_raw = face_neighbor[face_idx];
-            let is_boundary = (neighbor_raw == -1i);
-            let area = face_areas[face_idx];
-            let face_center = face_centers[face_idx];
-            let face_center_vec = vec2<f32>(face_center.x, face_center.y);
-            let _e62 = face_normals[face_idx].x;
-            let _e66 = face_normals[face_idx].y;
-            normal_vec = vec2<f32>(_e62, _e66);
-            let _e70 = normal_vec;
-            if (dot((face_center_vec - cell_center_vec), _e70) < 0f) {
-                let _e74 = normal_vec;
-                normal_vec = -(_e74);
-            }
-            other_idx = idx;
-            other_center_vec = face_center_vec;
-            if (neighbor_raw != -1i) {
-                let neighbor = u32(neighbor_raw);
-                other_idx = neighbor;
-                if (owner != idx) {
-                    other_idx = owner;
-                }
-                let _e83 = other_idx;
-                let other_center = cell_centers[_e83];
-                other_center_vec = vec2<f32>(other_center.x, other_center.y);
-            }
-            let d_own = distance(cell_center_vec, face_center_vec);
-            let _e90 = other_center_vec;
-            let d_neigh = distance(_e90, face_center_vec);
-            let total_dist = (d_own + d_neigh);
-            lambda = 0.5f;
-            if (total_dist > 0.000001f) {
-                lambda = (d_neigh / total_dist);
-            }
-            let _e98 = lambda;
-            let lambda_other = (1f - _e98);
-            let _e101 = normal_vec;
-            let _e108 = state[((idx * 8u) + 0u)];
-            let _e109 = lambda;
-            let _e111 = other_idx;
-            let _e118 = state[((_e111 * 8u) + 0u)];
-            let _e125 = state[((idx * 8u) + 0u)];
-            let _e132 = bc_value[((face_idx * 3u) + 0u)];
-            let _e139 = bc_kind[((face_idx * 3u) + 0u)];
-            let _e149 = state[((idx * 8u) + 0u)];
-            let _e156 = bc_value[((face_idx * 3u) + 0u)];
-            let _e165 = bc_kind[((face_idx * 3u) + 0u)];
-            let _e175 = grad_acc_0_;
-            grad_acc_0_ = (_e175 + ((_e101 * ((_e108 * _e109) + (select(_e118, select(select(_e125, _e132, (_e139 == 1u)), (_e149 + (_e156 * d_own)), (_e165 == 2u)), is_boundary) * lambda_other))) * area));
-            let _e177 = normal_vec;
-            let _e184 = state[((idx * 8u) + 1u)];
-            let _e185 = lambda;
-            let _e187 = other_idx;
-            let _e194 = state[((_e187 * 8u) + 1u)];
-            let _e201 = state[((idx * 8u) + 1u)];
-            let _e208 = bc_value[((face_idx * 3u) + 1u)];
-            let _e215 = bc_kind[((face_idx * 3u) + 1u)];
-            let _e225 = state[((idx * 8u) + 1u)];
-            let _e232 = bc_value[((face_idx * 3u) + 1u)];
-            let _e241 = bc_kind[((face_idx * 3u) + 1u)];
-            let _e251 = grad_acc_1_;
-            grad_acc_1_ = (_e251 + ((_e177 * ((_e184 * _e185) + (select(_e194, select(select(_e201, _e208, (_e215 == 1u)), (_e225 + (_e232 * d_own)), (_e241 == 2u)), is_boundary) * lambda_other))) * area));
-            let _e253 = normal_vec;
-            let _e260 = state[((idx * 8u) + 2u)];
-            let _e261 = lambda;
-            let _e263 = other_idx;
-            let _e270 = state[((_e263 * 8u) + 2u)];
-            let _e277 = state[((idx * 8u) + 2u)];
-            let _e284 = bc_value[((face_idx * 3u) + 2u)];
-            let _e291 = bc_kind[((face_idx * 3u) + 2u)];
-            let _e301 = state[((idx * 8u) + 2u)];
-            let _e308 = bc_value[((face_idx * 3u) + 2u)];
-            let _e317 = bc_kind[((face_idx * 3u) + 2u)];
-            let _e327 = grad_acc_2_;
-            grad_acc_2_ = (_e327 + ((_e253 * ((_e260 * _e261) + (select(_e270, select(select(_e277, _e284, (_e291 == 1u)), (_e301 + (_e308 * d_own)), (_e317 == 2u)), is_boundary) * lambda_other))) * area));
-        }
-        continuing {
-            let _e330 = k;
-            k = (_e330 + 1u);
-        }
-    }
-    let _e332 = grad_acc_0_;
-    let grad_out_0_ = ((_e332 * 1f) / vec2(max(vol, 0.000000000001f)));
-    grad_state[((idx * 8u) + 0u)].x = grad_out_0_.x;
-    grad_state[((idx * 8u) + 0u)].y = grad_out_0_.y;
-    let _e355 = grad_acc_1_;
-    let grad_out_1_ = ((_e355 * 1f) / vec2(max(vol, 0.000000000001f)));
-    grad_state[((idx * 8u) + 1u)].x = grad_out_1_.x;
-    grad_state[((idx * 8u) + 1u)].y = grad_out_1_.y;
-    let _e378 = grad_acc_2_;
-    let grad_out_2_ = ((_e378 * 1f) / vec2(max(vol, 0.000000000001f)));
-    grad_state[((idx * 8u) + 2u)].x = grad_out_2_.x;
-    grad_state[((idx * 8u) + 2u)].y = grad_out_2_.y;
-    return;
-}
-"#;
-    }
     pub mod rhie_chow_correct_velocity_incompressible_momentum {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
@@ -29734,233 +23145,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let source = std::borrow::Cow::Borrowed(SHADER_STRING);
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("rhie_chow_correct_velocity_incompressible_momentum.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(source),
-            })
-        }
-        pub const SHADER_STRING: &str = r#"
-struct Constants {
-    dt: f32,
-    dt_old: f32,
-    dtau: f32,
-    time: f32,
-    viscosity: f32,
-    density: f32,
-    component: u32,
-    alpha_p: f32,
-    scheme: u32,
-    alpha_u: f32,
-    stride_x: u32,
-    time_scheme: u32,
-}
-
-const STATE_STRIDE: u32 = 8u;
-const U_X_OFFSET: u32 = 0u;
-const U_Y_OFFSET: u32 = 1u;
-const D_P_OFFSET: u32 = 3u;
-const GRAD_P_X_OFFSET: u32 = 4u;
-const GRAD_P_Y_OFFSET: u32 = 5u;
-
-@group(0) @binding(0) 
-var<storage, read_write> state: array<f32>;
-@group(0) @binding(1) 
-var<uniform> constants: Constants;
-
-@compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let _e4 = constants.stride_x;
-    let idx = ((global_id.y * _e4) + global_id.x);
-    let num_cells = (arrayLength((&state)) / 8u);
-    if (idx >= num_cells) {
-        return;
-    }
-    let base = (idx * STATE_STRIDE);
-    let d_p = state[(base + D_P_OFFSET)];
-    let grad_px = state[(base + GRAD_P_X_OFFSET)];
-    let grad_py = state[(base + GRAD_P_Y_OFFSET)];
-    let _e38 = state[(base + U_X_OFFSET)];
-    state[(base + U_X_OFFSET)] = (_e38 - (d_p * grad_px));
-    let _e49 = state[(base + U_Y_OFFSET)];
-    state[(base + U_Y_OFFSET)] = (_e49 - (d_p * grad_py));
-    return;
-}
-"#;
-    }
-    pub mod rhie_chow_correct_velocity_incompressible_momentum_generic {
-        use super::{_root, _root::*};
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Constants {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub dt: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub dt_old: f32,
-            #[doc = "offset: 8, size: 4, type: `f32`"]
-            pub dtau: f32,
-            #[doc = "offset: 12, size: 4, type: `f32`"]
-            pub time: f32,
-            #[doc = "offset: 16, size: 4, type: `f32`"]
-            pub viscosity: f32,
-            #[doc = "offset: 20, size: 4, type: `f32`"]
-            pub density: f32,
-            #[doc = "offset: 24, size: 4, type: `u32`"]
-            pub component: u32,
-            #[doc = "offset: 28, size: 4, type: `f32`"]
-            pub alpha_p: f32,
-            #[doc = "offset: 32, size: 4, type: `u32`"]
-            pub scheme: u32,
-            #[doc = "offset: 36, size: 4, type: `f32`"]
-            pub alpha_u: f32,
-            #[doc = "offset: 40, size: 4, type: `u32`"]
-            pub stride_x: u32,
-            #[doc = "offset: 44, size: 4, type: `u32`"]
-            pub time_scheme: u32,
-        }
-        impl Constants {
-            pub const fn new(
-                dt: f32,
-                dt_old: f32,
-                dtau: f32,
-                time: f32,
-                viscosity: f32,
-                density: f32,
-                component: u32,
-                alpha_p: f32,
-                scheme: u32,
-                alpha_u: f32,
-                stride_x: u32,
-                time_scheme: u32,
-            ) -> Self {
-                Self {
-                    dt,
-                    dt_old,
-                    dtau,
-                    time,
-                    viscosity,
-                    density,
-                    component,
-                    alpha_p,
-                    scheme,
-                    alpha_u,
-                    stride_x,
-                    time_scheme,
-                }
-            }
-        }
-        pub const STATE_STRIDE: u32 = 8u32;
-        pub const U_X_OFFSET: u32 = 0u32;
-        pub const U_Y_OFFSET: u32 = 1u32;
-        pub const D_P_OFFSET: u32 = 3u32;
-        pub const GRAD_P_X_OFFSET: u32 = 4u32;
-        pub const GRAD_P_Y_OFFSET: u32 = 5u32;
-        pub mod compute {
-            use super::{_root, _root::*};
-            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-            pub fn create_main_pipeline_embed_source(
-                device: &wgpu::Device,
-            ) -> wgpu::ComputePipeline {
-                let module = super::create_shader_module_embed_source(device);
-                let layout = super::create_pipeline_layout(device);
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("Compute Pipeline main"),
-                    layout: Some(&layout),
-                    module: &module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            }
-        }
-        pub const ENTRY_MAIN: &str = "main";
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub state: wgpu::BufferBinding<'a>,
-            pub constants: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup0Entries<'a> {
-            pub state: wgpu::BindGroupEntry<'a>,
-            pub constants: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup0Entries<'a> {
-            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-                Self {
-                    state: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.state),
-                    },
-                    constants: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.constants),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-                [self.state, self.constants]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0(wgpu::BindGroup);
-        impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowCorrectVelocityIncompressibleMomentumGeneric::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: rhie_chow_correct_velocity_incompressible_momentum_generic :: Constants > () as _) , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some(
-                        "GeneratedRhieChowCorrectVelocityIncompressibleMomentumGeneric::BindGroup0",
-                    ),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(0, &self.0, &[]);
-            }
-        }
-        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-        #[doc = "   - Bind group 1: More frequent updates"]
-        #[doc = "   - Bind group 2: More frequent updates"]
-        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-        #[derive(Debug, Copy, Clone)]
-        pub struct WgpuBindGroups<'a> {
-            pub bind_group0: &'a WgpuBindGroup0,
-        }
-        impl<'a> WgpuBindGroups<'a> {
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                self.bind_group0.set(pass);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuPipelineLayout;
-        impl WgpuPipelineLayout {
-            pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 1],
-            ) -> [wgpu::BindGroupLayout; 1] {
-                entries
-            }
-        }
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(
-                    "GeneratedRhieChowCorrectVelocityIncompressibleMomentumGeneric::PipelineLayout",
-                ),
-                bind_group_layouts: &[&WgpuBindGroup0::get_bind_group_layout(device)],
-                push_constant_ranges: &[],
-            })
-        }
-        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("rhie_chow_correct_velocity_incompressible_momentum_generic.wgsl"),
                 source: wgpu::ShaderSource::Wgsl(source),
             })
         }

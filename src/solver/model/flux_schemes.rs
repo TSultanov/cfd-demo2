@@ -202,10 +202,10 @@ fn euler_central_upwind(
 
     let rho_raw = |side: FaceSide| S::state(side, rho_name);
     let rho_e_raw = |side: FaceSide| S::state(side, rho_e_name);
-    let rho_u_raw = |side: FaceSide| V::state_vec2(side, rho_u_name);
-    let rho_u_x_raw = |side: FaceSide| S::Dot(Box::new(rho_u_raw(side)), Box::new(ex.clone()));
-    let rho_u_y_raw = |side: FaceSide| S::Dot(Box::new(rho_u_raw(side)), Box::new(ey.clone()));
-    let p_raw = |side: FaceSide| S::state(side, "p");
+    let u_raw = |side: FaceSide| V::state_vec2(side, "u");
+    let u_x_raw = |side: FaceSide| S::Dot(Box::new(u_raw(side)), Box::new(ex.clone()));
+    let u_y_raw = |side: FaceSide| S::Dot(Box::new(u_raw(side)), Box::new(ey.clone()));
+    let t_raw = |side: FaceSide| S::state(side, "T");
 
     let rho = |side: FaceSide| {
         reconstruct_scalar(side, rho_raw(side), rho_raw(other_side(side)))
@@ -215,22 +215,34 @@ fn euler_central_upwind(
         reconstruct_scalar(side, rho_e_raw(side), rho_e_raw(other_side(side)))
     };
 
-    let rho_u_x = |side: FaceSide| {
-        reconstruct_scalar(side, rho_u_x_raw(side), rho_u_x_raw(other_side(side)))
+    // Match OpenFOAM's rhoCentralFoam reconstruction choices more closely by reconstructing the
+    // primitive velocity components and deriving momentum from rho*U.
+    let u_x = |side: FaceSide| {
+        reconstruct_scalar(side, u_x_raw(side), u_x_raw(other_side(side)))
     };
-
-    let rho_u_y = |side: FaceSide| {
-        reconstruct_scalar(side, rho_u_y_raw(side), rho_u_y_raw(other_side(side)))
+    let u_y = |side: FaceSide| {
+        reconstruct_scalar(side, u_y_raw(side), u_y_raw(other_side(side)))
     };
+    let u_vec = |side: FaceSide| V::vec2(u_x(side), u_y(side));
 
-    let rho_u = |side: FaceSide| V::vec2(rho_u_x(side), rho_u_y(side));
+    // Temperature reconstruction (used to compute face pressure for ideal-gas closures).
+    let t = |side: FaceSide| reconstruct_scalar(side, t_raw(side), t_raw(other_side(side)));
 
+    // Ideal-gas pressure from reconstructed rho and T: p = rho * R * T.
+    // (For barotropic closures, the model still enforces p = rho * R * T via the temperature
+    // recovery constraint, so this remains consistent.)
     let p = |side: FaceSide| {
-        reconstruct_scalar(side, p_raw(side), p_raw(other_side(side)))
+        S::Mul(
+            Box::new(S::Mul(
+                Box::new(rho(side)),
+                Box::new(S::constant("eos_r")),
+            )),
+            Box::new(t(side)),
+        )
     };
 
-    let inv_rho = |side: FaceSide| S::Div(Box::new(S::lit(1.0)), Box::new(rho(side)));
-    let u_vec = |side: FaceSide| V::MulScalar(Box::new(rho_u(side)), Box::new(inv_rho(side)));
+    let rho_u_x = |side: FaceSide| S::Mul(Box::new(rho(side)), Box::new(u_x(side)));
+    let rho_u_y = |side: FaceSide| S::Mul(Box::new(rho(side)), Box::new(u_y(side)));
     let u_n = |side: FaceSide| S::Dot(Box::new(u_vec(side)), Box::new(V::normal()));
 
     let c2 = |side: FaceSide| {
@@ -316,29 +328,6 @@ fn euler_central_upwind(
     let pressure_coupling_alpha = S::low_mach_pressure_coupling_alpha();
     let low_mach_enabled = S::Sub(Box::new(S::lit(1.0)), Box::new(w_off.clone()));
 
-    let p_base = |side: FaceSide| {
-        // Base thermodynamic pressure used to form a perturbation:
-        // - Ideal gas: p_base = rho * theta_ref
-        // - Linear compressibility: p_base = dp_drho * rho - p_offset (since theta_ref = 0)
-        let rho_side = rho(side);
-        let p_base = S::Sub(
-            Box::new(S::Add(
-                Box::new(S::Mul(
-                    Box::new(rho_side.clone()),
-                    Box::new(S::constant("eos_theta_ref")),
-                )),
-                Box::new(S::Mul(
-                    Box::new(rho_side),
-                    Box::new(S::constant("eos_dp_drho")),
-                )),
-            )),
-            Box::new(S::constant("eos_p_offset")),
-        );
-        p_base
-    };
-
-    let p_pert = |side: FaceSide| S::Sub(Box::new(p(side)), Box::new(p_base(side)));
-
     // Convert a pressure perturbation to an equivalent density perturbation using the *physical*
     // compressibility (ρ' ≈ p'/c^2).
     //
@@ -346,32 +335,19 @@ fn euler_central_upwind(
     // low Mach numbers (since c_eff^2 ~ O(|u|^2)), causing unphysical density states and solver
     // instability.
     let c_couple2_safe = |side: FaceSide| S::Max(Box::new(c2(side)), Box::new(S::lit(1e-12)));
-    let mach2_gate = |side: FaceSide| {
-        // Enable coupling automatically once Mach becomes small, even if the user keeps the
-        // low-Mach model "off". This avoids pressure checkerboarding for low-Mach flows without
-        // perturbing genuinely compressible regimes.
-        let mach2_limit = S::lit(0.04); // Mach ≈ 0.2
-        let mach2 = S::Div(Box::new(u_n2(side)), Box::new(c_couple2_safe(side)));
-        let raw = S::Div(
-            Box::new(S::Sub(Box::new(mach2_limit.clone()), Box::new(mach2))),
-            Box::new(mach2_limit),
-        );
-        S::Max(
-            Box::new(S::lit(0.0)),
-            Box::new(S::Min(Box::new(S::lit(1.0)), Box::new(raw))),
-        )
-    };
-
     let rho_diss = |side: FaceSide| {
-        let coupling_gate = S::Max(Box::new(low_mach_enabled.clone()), Box::new(mach2_gate(side)));
-        let coupling =
-            S::Mul(Box::new(coupling_gate), Box::new(pressure_coupling_alpha.clone()));
+        // Only apply the pressure-coupling fix when low-Mach preconditioning is explicitly enabled.
+        // This keeps the default (low_mach_model=Off) behavior aligned with OpenFOAM's rhoCentralFoam.
+        let coupling = S::Mul(
+            Box::new(low_mach_enabled.clone()),
+            Box::new(pressure_coupling_alpha.clone()),
+        );
         S::Add(
             Box::new(rho(side)),
             Box::new(S::Mul(
                 Box::new(coupling),
                 Box::new(S::Div(
-                    Box::new(p_pert(side)),
+                    Box::new(p(side)),
                     Box::new(c_couple2_safe(side)),
                 )),
             )),

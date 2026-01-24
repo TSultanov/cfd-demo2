@@ -19,6 +19,7 @@ use crate::ui::{cfd_renderer, fluid::Fluid};
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};
 use nalgebra::{Point2, Vector2};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
@@ -145,14 +146,16 @@ struct SolverInitOutcome {
     cached_p: Vec<f64>,
     model_caps: ModelUiCaps,
     renderer: Option<cfd_renderer::CfdRenderResources>,
-    viz_field: Option<VizFieldBuffer>,
+    viz_field: Option<VizFieldBuffers>,
     trace_init_events: Vec<tracefmt::TraceInitEvent>,
 }
 
 #[derive(Clone)]
-struct VizFieldBuffer {
-    buffer: wgpu::Buffer,
+struct VizFieldBuffers {
+    buffers: [wgpu::Buffer; 3],
     size_bytes: u64,
+    front_idx: Arc<AtomicUsize>,
+    ready_idx: Arc<AtomicUsize>,
 }
 
 struct SolverInitResponse {
@@ -181,7 +184,7 @@ enum SolverWorkerCommand {
     SetSolver {
         solver: UnifiedSolver,
         min_cell_size: f64,
-        viz_field: Option<VizFieldBuffer>,
+        viz_field: Option<VizFieldBuffers>,
     },
     ClearSolver,
     SetRunning(bool),
@@ -299,6 +302,8 @@ pub struct CFDApp {
     wgpu_queue: Option<wgpu::Queue>,
     target_format: wgpu::TextureFormat,
     cfd_renderer: Option<Arc<Mutex<cfd_renderer::CfdRenderResources>>>,
+    viz_field: Option<VizFieldBuffers>,
+    viz_field_front: usize,
 }
 
 struct CfdRenderCallback {
@@ -428,6 +433,8 @@ impl CFDApp {
             wgpu_queue,
             target_format,
             cfd_renderer: None,
+            viz_field: None,
+            viz_field_front: 0,
         };
         app.refresh_model_caps();
         app.sync_worker_params();
@@ -979,6 +986,8 @@ impl CFDApp {
                         self.mesh = None;
                         self.cached_cells.clear();
                         self.cfd_renderer = None;
+                        self.viz_field = None;
+                        self.viz_field_front = 0;
                         self.cached_u.clear();
                         self.cached_p.clear();
                         self.snapshot_seq = 0;
@@ -1025,6 +1034,20 @@ impl CFDApp {
                 }
             }
         }
+
+        if let (Some(viz), Some(renderer), Some(device)) = (
+            self.viz_field.as_ref(),
+            self.cfd_renderer.as_ref(),
+            self.wgpu_device.as_ref(),
+        ) {
+            let ready = viz.ready_idx.load(Ordering::Acquire) % viz.buffers.len();
+            if ready != self.viz_field_front {
+                let mut renderer = renderer.lock().unwrap();
+                renderer.update_bind_group(device, &viz.buffers[ready]);
+                self.viz_field_front = ready;
+                viz.front_idx.store(ready, Ordering::Release);
+            }
+        }
     }
 
     fn apply_init_outcome(&mut self, outcome: SolverInitOutcome) {
@@ -1055,6 +1078,12 @@ impl CFDApp {
         self.mesh = Some(mesh);
 
         self.cfd_renderer = renderer.map(|r| Arc::new(Mutex::new(r)));
+        self.viz_field = viz_field.clone();
+        self.viz_field_front = 0;
+        if let Some(viz) = self.viz_field.as_ref() {
+            viz.front_idx.store(0, Ordering::Release);
+            viz.ready_idx.store(0, Ordering::Release);
+        }
         self.last_init_trace_events = trace_init_events;
 
         self.cached_gpu_stats = CachedGpuStats::default();
@@ -1272,8 +1301,20 @@ impl CFDApp {
             if let (Some(device), Some(queue)) = (&request.wgpu_device, &request.wgpu_queue) {
                 let state_size_bytes =
                     mesh.num_cells() as u64 * model_caps.plot_stride as u64 * 4;
-                let viz_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("CFD Viz Field Buffer"),
+            let viz_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("CFD Viz Field Buffer 0"),
+                    size: state_size_bytes.max(4),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let viz_buffer_1 = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("CFD Viz Field Buffer 1"),
+                    size: state_size_bytes.max(4),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let viz_buffer_2 = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("CFD Viz Field Buffer 2"),
                     size: state_size_bytes.max(4),
                     usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
@@ -1287,6 +1328,20 @@ impl CFDApp {
                         gpu_solver.state_buffer(),
                         0,
                         &viz_buffer,
+                        0,
+                        state_size_bytes,
+                    );
+                    encoder.copy_buffer_to_buffer(
+                        gpu_solver.state_buffer(),
+                        0,
+                        &viz_buffer_1,
+                        0,
+                        state_size_bytes,
+                    );
+                    encoder.copy_buffer_to_buffer(
+                        gpu_solver.state_buffer(),
+                        0,
+                        &viz_buffer_2,
                         0,
                         state_size_bytes,
                     );
@@ -1304,9 +1359,11 @@ impl CFDApp {
                 renderer.update_bind_group(device, &viz_buffer);
                 (
                     Some(renderer),
-                    Some(VizFieldBuffer {
-                        buffer: viz_buffer,
+                    Some(VizFieldBuffers {
+                        buffers: [viz_buffer, viz_buffer_1, viz_buffer_2],
                         size_bytes: state_size_bytes,
+                        front_idx: Arc::new(AtomicUsize::new(0)),
+                        ready_idx: Arc::new(AtomicUsize::new(0)),
                     }),
                 )
             } else {
@@ -2644,7 +2701,7 @@ fn solver_worker_main(
     let mut model_id: &'static str = "<uninitialized>";
     let mut supports_sound_speed = false;
     let mut min_cell_size = 0.0_f64;
-    let mut viz_field: Option<VizFieldBuffer> = None;
+    let mut viz_field: Option<VizFieldBuffers> = None;
     let mut params = RuntimeParams {
         adaptive_dt: false,
         target_cfl: 0.9,
@@ -2784,7 +2841,23 @@ fn solver_worker_main(
 
         if let Some(viz_field) = viz_field.as_ref() {
             if viz_field.size_bytes > 0 {
-                solver.copy_state_to_buffer(&viz_field.buffer);
+                let n = viz_field.buffers.len().max(1);
+                let front = viz_field.front_idx.load(Ordering::Acquire) % n;
+                let ready = viz_field.ready_idx.load(Ordering::Acquire) % n;
+
+                let mut write_idx = (ready + 1) % n;
+                for _ in 0..n {
+                    if write_idx != front && write_idx != ready {
+                        break;
+                    }
+                    write_idx = (write_idx + 1) % n;
+                }
+                if write_idx == front || write_idx == ready {
+                    // Should be unreachable with n>=3, but keep a safe fallback.
+                    write_idx = (front + 1) % n;
+                }
+                solver.copy_state_to_buffer(&viz_field.buffers[write_idx]);
+                viz_field.ready_idx.store(write_idx, Ordering::Release);
             }
         }
 
@@ -2995,7 +3068,7 @@ fn solver_worker_handle_cmd(
     model_id: &mut &'static str,
     supports_sound_speed: &mut bool,
     min_cell_size: &mut f64,
-    viz_field: &mut Option<VizFieldBuffer>,
+    viz_field: &mut Option<VizFieldBuffers>,
     params: &mut RuntimeParams,
     running: &mut bool,
     step_idx: &mut u64,

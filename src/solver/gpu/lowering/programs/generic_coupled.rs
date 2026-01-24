@@ -96,7 +96,9 @@ struct OuterConvergenceMonitor {
     #[allow(dead_code)]
     _b_params_x: wgpu::Buffer,
     b_params_state: wgpu::Buffer,
-    b_descs: wgpu::Buffer,
+    #[allow(dead_code)]
+    _b_descs_x: wgpu::Buffer,
+    b_descs_state: wgpu::Buffer,
     b_out_bits: wgpu::Buffer,
     bg_x: wgpu::BindGroup,
     zero_out_words: Vec<u32>,
@@ -120,8 +122,10 @@ impl OuterConvergenceMonitor {
 
         let layout = &model.state_layout;
         let mut target_names: Vec<String> = Vec::new();
-        let mut target_descs: Vec<GpuOuterConvergenceTargetDesc> = Vec::new();
+        let mut target_descs_x: Vec<GpuOuterConvergenceTargetDesc> = Vec::new();
+        let mut target_descs_state: Vec<GpuOuterConvergenceTargetDesc> = Vec::new();
 
+        let mut unknown_offset_cursor: u32 = 0;
         for eqn in model.system.equations() {
             let target = eqn.target();
             let name = target.name();
@@ -137,39 +141,57 @@ impl OuterConvergenceMonitor {
                 ));
             }
 
-            let mut offsets = [0u32; 4];
+            let mut offsets_x = [0u32; 4];
+            for comp in 0..comps {
+                offsets_x[comp] = unknown_offset_cursor + comp as u32;
+            }
+            unknown_offset_cursor += comps as u32;
+
+            let mut offsets_state = [0u32; 4];
             match kind {
                 FieldKind::Scalar => {
                     let Some(off) = layout.offset_for(name) else {
                         continue;
                     };
-                    offsets[0] = off;
+                    offsets_state[0] = off;
                 }
                 _ => {
                     for comp in 0..comps {
                         let Some(off) = layout.component_offset(name, comp as u32) else {
-                            offsets = [0u32; 4];
+                            offsets_state = [0u32; 4];
                             break;
                         };
-                        offsets[comp] = off;
+                        offsets_state[comp] = off;
                     }
-                    if offsets == [0u32; 4] {
+                    if offsets_state == [0u32; 4] {
                         continue;
                     }
                 }
-            }
+            };
 
             target_names.push(name.to_string());
-            target_descs.push(GpuOuterConvergenceTargetDesc {
-                offsets,
+            target_descs_x.push(GpuOuterConvergenceTargetDesc {
+                offsets: offsets_x,
+                num_comps: comps as u32,
+                _pad0: [0u32; 3],
+            });
+            target_descs_state.push(GpuOuterConvergenceTargetDesc {
+                offsets: offsets_state,
                 num_comps: comps as u32,
                 _pad0: [0u32; 3],
             });
         }
 
-        let num_targets = target_descs.len() as u32;
+        let num_targets = target_descs_x.len() as u32;
         if num_targets == 0 {
             return Ok(None);
+        }
+        if target_descs_state.len() != target_descs_x.len() {
+            return Err(format!(
+                "outer convergence monitor target count mismatch: x_descs={} state_descs={}",
+                target_descs_x.len(),
+                target_descs_state.len()
+            ));
         }
 
         let pipeline = {
@@ -209,13 +231,27 @@ impl OuterConvergenceMonitor {
         };
         queue.write_buffer(&b_params_state, 0, bytemuck::bytes_of(&params_state));
 
-        let b_descs = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("outer_convergence:target_descs"),
-            size: (target_descs.len() as u64) * std::mem::size_of::<GpuOuterConvergenceTargetDesc>() as u64,
+        let b_descs_x = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_convergence:target_descs_x"),
+            size: (target_descs_x.len() as u64)
+                * std::mem::size_of::<GpuOuterConvergenceTargetDesc>() as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        queue.write_buffer(&b_descs, 0, bytemuck::cast_slice(&target_descs));
+        queue.write_buffer(&b_descs_x, 0, bytemuck::cast_slice(&target_descs_x));
+
+        let b_descs_state = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_convergence:target_descs_state"),
+            size: (target_descs_state.len() as u64)
+                * std::mem::size_of::<GpuOuterConvergenceTargetDesc>() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(
+            &b_descs_state,
+            0,
+            bytemuck::cast_slice(&target_descs_state),
+        );
 
         let b_out_bits = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outer_convergence:out_bits"),
@@ -236,7 +272,7 @@ impl OuterConvergenceMonitor {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: b_descs.as_entire_binding(),
+                    resource: b_descs_x.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -249,7 +285,7 @@ impl OuterConvergenceMonitor {
             ],
         });
 
-        let zero_out_words = vec![0u32; target_descs.len()];
+        let zero_out_words = vec![0u32; target_descs_x.len()];
         let dispatch_cells = (num_cells + OUTER_CONVERGENCE_WORKGROUP_SIZE - 1)
             / OUTER_CONVERGENCE_WORKGROUP_SIZE;
 
@@ -258,7 +294,8 @@ impl OuterConvergenceMonitor {
             pipeline,
             _b_params_x: b_params,
             b_params_state,
-            b_descs,
+            _b_descs_x: b_descs_x,
+            b_descs_state,
             b_out_bits,
             bg_x,
             zero_out_words,
@@ -279,9 +316,10 @@ impl OuterConvergenceMonitor {
         if self.state_scale.is_some() {
             return Ok(());
         }
-        let scale = self.compute_maxima_with_params(
+        let scale = self.compute_maxima_with_params_and_descs(
             plan,
             state,
+            &self.b_descs_state,
             &self.b_params_state,
             "outer_convergence:state",
         )?;
@@ -293,10 +331,11 @@ impl OuterConvergenceMonitor {
         self.compute_maxima_from_bind_group(plan, &self.bg_x, "outer_convergence:delta")
     }
 
-    fn compute_maxima_with_params(
+    fn compute_maxima_with_params_and_descs(
         &self,
         plan: &GpuProgramPlan,
         input: &wgpu::Buffer,
+        descs: &wgpu::Buffer,
         params: &wgpu::Buffer,
         label_prefix: &'static str,
     ) -> Result<Vec<f32>, String> {
@@ -311,7 +350,7 @@ impl OuterConvergenceMonitor {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: self.b_descs.as_entire_binding(),
+                    resource: descs.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,

@@ -162,11 +162,17 @@ impl SolverCompressibleInletExt for GpuUnifiedSolver {
         let dp_drho = eos_params.dp_drho;
         let p_offset = eos_params.p_offset;
         let theta_ref = eos_params.theta_ref;
+        let r_gas = eos_params.r;
 
         let p0 = if gm1 > 0.0 {
             rho * theta_ref
         } else {
             dp_drho * rho - p_offset
+        };
+        let t0 = if r_gas.abs() > 1e-12 {
+            p0 / (rho.max(1e-12) * r_gas)
+        } else {
+            0.0
         };
 
         let u = [u_x, 0.0f32];
@@ -178,6 +184,8 @@ impl SolverCompressibleInletExt for GpuUnifiedSolver {
         self.set_boundary_vec2(GpuBoundaryType::Inlet, "u", u)?;
         self.set_boundary_vec2(GpuBoundaryType::Inlet, "rho_u", rho_u)?;
         self.set_boundary_scalar(GpuBoundaryType::Inlet, "rho_e", rho_e)?;
+        let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, "p", p0);
+        let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, "T", t0);
         Ok(())
     }
 }

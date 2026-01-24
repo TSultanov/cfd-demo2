@@ -43,7 +43,8 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
             temperature: 300.0,
         }),
         SolverConfig {
-            advection_scheme: Scheme::Upwind,
+            // OpenFOAM uses vanLeer reconstruction for rho/U/T with the Kurganov flux.
+            advection_scheme: Scheme::SecondOrderUpwindVanLeer,
             time_scheme: TimeScheme::Euler,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Implicit { outer_iters: 1 },

@@ -1566,7 +1566,7 @@ fn state_component_at_side(
             Expr::ident("idx") * Expr::from(flux_layout.stride) + Expr::from(unknown_offset);
         let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
         let value = dsl::array_access("bc_value", bc_table_idx);
-        return Expr::call_named(
+        let base = Expr::call_named(
             "bc_neighbor_scalar",
             vec![
                 interior,
@@ -1577,9 +1577,59 @@ fn state_component_at_side(
                 Expr::ident("is_boundary"),
             ],
         );
+        return apply_slipwall_velocity_reflection(layout, buffer, field, component, base);
     }
 
-    dsl::select(interior, owner, Expr::ident("is_boundary"))
+    let base = dsl::select(interior, owner, Expr::ident("is_boundary"));
+    apply_slipwall_velocity_reflection(layout, buffer, field, component, base)
+}
+
+fn apply_slipwall_velocity_reflection(
+    layout: &StateLayout,
+    buffer: &str,
+    field: &str,
+    component: u32,
+    base: Expr,
+) -> Expr {
+    // SlipWall boundary conditions are not representable as per-component Dirichlet/Neumann.
+    // Emulate OpenFOAM-style "slip" by reflecting the normal velocity component at boundary faces:
+    //   u_ghost = u_owner - 2 (u_owner · n) n
+    //
+    // This ensures no-penetration (zero normal mass flux) while preserving tangential velocity.
+    let is_velocity_field = matches!(field, "u" | "U");
+    if !is_velocity_field || component > 1 {
+        return base;
+    }
+
+    let is_boundary = Expr::ident("is_boundary");
+    let boundary_type = Expr::ident("boundary_type");
+
+    // Slip wall: reflect only the normal component of the interior velocity.
+    //
+    // For compressible convective fluxes, apply the same no-penetration reflection for solid
+    // walls as well (OpenFOAM enforces zero normal flux on no-slip walls via the Riemann
+    // boundary treatment; viscous terms still enforce tangential no-slip).
+    let is_slipwall = if field == "u" {
+        let is_solid = boundary_type.clone().eq(Expr::from(3u32));
+        let is_slip = boundary_type.clone().eq(Expr::from(4u32));
+        is_boundary.clone() & (is_solid | is_slip)
+    } else {
+        is_boundary.clone() & boundary_type.clone().eq(Expr::from(4u32))
+    };
+    let ux = state_component_at(layout, buffer, Expr::ident("owner"), field, 0);
+    let uy = state_component_at(layout, buffer, Expr::ident("owner"), field, 1);
+    let nx = Expr::ident("normal_vec").field("x");
+    let ny = Expr::ident("normal_vec").field("y");
+    let un = ux.clone() * nx.clone() + uy.clone() * ny.clone();
+    let two_un = Expr::from(2.0) * un;
+
+    let slip_reflected = match component {
+        0 => ux.clone() - two_un.clone() * nx.clone(),
+        1 => uy.clone() - two_un.clone() * ny.clone(),
+        _ => return base,
+    };
+
+    dsl::select(base, slip_reflected, is_slipwall)
 }
 
 fn lower_scalar<'a>(expr: &'a FaceScalarExpr, ctx: &LowerCtx<'a>) -> Expr {

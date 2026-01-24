@@ -297,6 +297,57 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
                 BoundaryCondition::zero_gradient(si::ENERGY_DENSITY / si::LENGTH),
             ),
     );
+    boundaries.set_field(
+        "p",
+        FieldBoundarySpec::new()
+            // Inlet pressure is Dirichlet (placeholder value); update via the solver's boundary
+            // table API to match the chosen inlet thermodynamic state.
+            .set_uniform(
+                GpuBoundaryType::Inlet,
+                1,
+                BoundaryCondition::dirichlet(0.0, si::PRESSURE),
+            )
+            .set_uniform(
+                GpuBoundaryType::Outlet,
+                1,
+                BoundaryCondition::zero_gradient(si::PRESSURE / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::Wall,
+                1,
+                BoundaryCondition::zero_gradient(si::PRESSURE / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::SlipWall,
+                1,
+                BoundaryCondition::zero_gradient(si::PRESSURE / si::LENGTH),
+            ),
+    );
+    boundaries.set_field(
+        "T",
+        FieldBoundarySpec::new()
+            // Isothermal inlet temperature (placeholder value); update via boundary table API.
+            .set_uniform(
+                GpuBoundaryType::Inlet,
+                1,
+                BoundaryCondition::dirichlet(0.0, si::DIMENSIONLESS),
+            )
+            .set_uniform(
+                GpuBoundaryType::Outlet,
+                1,
+                BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::Wall,
+                1,
+                BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::SlipWall,
+                1,
+                BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
+            ),
+    );
 
     let method = crate::solver::model::method::MethodSpec::Coupled(
         crate::solver::model::method::CoupledCapabilities {

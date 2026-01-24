@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 933c9465ad8ca332bb64dd3eaf2ccca867d6573aeaa651c32b479213a4c8c8c2
+// SourceHash: cb89a1c0c2a056e5a04cbcb3045b045809fa33a03856b577f629d3bec9d1648e
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -6839,7 +6839,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let s_own_rho = state[((owner_1 * 8u) + 0u)];
     let s_own_rho_e = state[((owner_1 * 8u) + 3u)];
     let _cse_1610_ = state[((owner_1 * 8u) + 6u)];
-    let _cse_1619_ = state[((owner_1 * 8u) + 7u)];
+    let _cse_1620_ = state[((owner_1 * 8u) + 7u)];
     let _e122 = neigh_idx;
     let _e129 = state[((_e122 * 8u) + 5u)];
     let _e136 = state[((owner_1 * 8u) + 5u)];
@@ -6883,8 +6883,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e336 = state[((owner_1 * 8u) + 7u)];
     let _e338 = normal_vec.y;
     let _e344 = normal_vec.y;
-    let _cse_1622_ = select(_e312, (_e319 - ((2f * ((_e326 * _e328) + (_e336 * _e338))) * _e344)), (is_boundary_1 && ((boundary_type == 3u) || (boundary_type == 4u))));
-    let _cse_1_ = vec2<f32>(_cse_1610_, _cse_1619_);
+    let _cse_1623_ = select(_e312, (_e319 - ((2f * ((_e326 * _e328) + (_e336 * _e338))) * _e344)), (is_boundary_1 && ((boundary_type == 3u) || (boundary_type == 4u))));
+    let _cse_1_ = vec2<f32>(_cse_1610_, _cse_1620_);
     let _e355 = normal_vec;
     let _cse_0_ = dot(_cse_1_, _e355);
     let _e359 = low_mach_params.model;
@@ -6921,7 +6921,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _cse_23_ = (_cse_24_ * _cse_28_);
     let _cse_5_ = (_cse_6_ + _cse_23_);
     let _cse_4_ = sqrt(_cse_5_);
-    let _cse_32_ = vec2<f32>(_cse_1613_, _cse_1622_);
+    let _cse_32_ = vec2<f32>(_cse_1613_, _cse_1623_);
     let _e417 = normal_vec;
     let _cse_31_ = dot(_cse_32_, _e417);
     let _e421 = constants.eos_r;
@@ -6953,10 +6953,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_55_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_56_);
         let _cse_54_ = dot(_cse_55_, (face_center_vec - c_owner_vec));
         let _cse_52_ = (_cse_1610_ + _cse_54_);
-        let _cse_64_ = ((_cse_1622_ - _cse_1619_) / _cse_58_);
+        let _cse_64_ = ((_cse_1623_ - _cse_1620_) / _cse_58_);
         let _cse_63_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_64_);
         let _cse_62_ = dot(_cse_63_, (face_center_vec - c_owner_vec));
-        let _cse_60_ = (_cse_1619_ + _cse_62_);
+        let _cse_60_ = (_cse_1620_ + _cse_62_);
         let _cse_51_ = vec2<f32>(_cse_52_, _cse_60_);
         let _e486 = normal_vec;
         let _cse_50_ = dot(_cse_51_, _e486);
@@ -6991,10 +6991,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_88_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_89_);
         let _cse_87_ = dot(_cse_88_, (face_center_vec - c_neigh_cell_vec));
         let _cse_86_ = (_cse_1613_ + _cse_87_);
-        let _cse_95_ = ((_cse_1619_ - _cse_1622_) / _cse_90_);
+        let _cse_95_ = ((_cse_1620_ - _cse_1623_) / _cse_90_);
         let _cse_94_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_95_);
         let _cse_93_ = dot(_cse_94_, (face_center_vec - c_neigh_cell_vec));
-        let _cse_92_ = (_cse_1622_ + _cse_93_);
+        let _cse_92_ = (_cse_1623_ + _cse_93_);
         let _cse_85_ = vec2<f32>(_cse_86_, _cse_92_);
         let _e582 = normal_vec;
         let _cse_84_ = dot(_cse_85_, _e582);
@@ -7034,11 +7034,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_119_ = (((_cse_1610_ * 0.625f) + (_cse_1613_ * 0.375f)) + _cse_121_);
         let _cse_118_ = (_cse_119_ - _cse_1610_);
         let _cse_116_ = (_cse_1610_ + _cse_118_);
-        let _cse_130_ = dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1622_ - _cse_1619_)) / vec2(_cse_123_)), (c_neigh_cell_vec - c_owner_vec));
+        let _cse_130_ = dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1623_ - _cse_1620_)) / vec2(_cse_123_)), (c_neigh_cell_vec - c_owner_vec));
         let _cse_129_ = (_cse_130_ * 0.125f);
-        let _cse_127_ = (((_cse_1619_ * 0.625f) + (_cse_1622_ * 0.375f)) + _cse_129_);
-        let _cse_126_ = (_cse_127_ - _cse_1619_);
-        let _cse_124_ = (_cse_1619_ + _cse_126_);
+        let _cse_127_ = (((_cse_1620_ * 0.625f) + (_cse_1623_ * 0.375f)) + _cse_129_);
+        let _cse_126_ = (_cse_127_ - _cse_1620_);
+        let _cse_124_ = (_cse_1620_ + _cse_126_);
         let _cse_115_ = vec2<f32>(_cse_116_, _cse_124_);
         let _e715 = normal_vec;
         let _cse_114_ = dot(_cse_115_, _e715);
@@ -7072,11 +7072,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_152_ = (((_cse_1613_ * 0.625f) + (_cse_1610_ * 0.375f)) + _cse_153_);
         let _cse_151_ = (_cse_152_ - _cse_1613_);
         let _cse_150_ = (_cse_1613_ + _cse_151_);
-        let _cse_160_ = dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1619_ - _cse_1622_)) / vec2(_cse_155_)), (c_owner_vec - c_neigh_cell_vec));
+        let _cse_160_ = dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1620_ - _cse_1623_)) / vec2(_cse_155_)), (c_owner_vec - c_neigh_cell_vec));
         let _cse_159_ = (_cse_160_ * 0.125f);
-        let _cse_158_ = (((_cse_1622_ * 0.625f) + (_cse_1619_ * 0.375f)) + _cse_159_);
-        let _cse_157_ = (_cse_158_ - _cse_1622_);
-        let _cse_156_ = (_cse_1622_ + _cse_157_);
+        let _cse_158_ = (((_cse_1623_ * 0.625f) + (_cse_1620_ * 0.375f)) + _cse_159_);
+        let _cse_157_ = (_cse_158_ - _cse_1623_);
+        let _cse_156_ = (_cse_1623_ + _cse_157_);
         let _cse_149_ = vec2<f32>(_cse_150_, _cse_156_);
         let _e850 = normal_vec;
         let _cse_148_ = dot(_cse_149_, _e850);
@@ -7115,11 +7115,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_183_ = max(_cse_184_, min(_cse_185_, 0f));
         let _cse_182_ = min(_cse_183_, max(_cse_185_, 0f));
         let _cse_180_ = (_cse_1610_ + _cse_182_);
-        let _cse_193_ = (_cse_1622_ - _cse_1619_);
+        let _cse_193_ = (_cse_1623_ - _cse_1620_);
         let _cse_192_ = dot((((c_neigh_cell_vec - c_owner_vec) * _cse_193_) / vec2(_cse_187_)), (face_center_vec - c_owner_vec));
         let _cse_191_ = max(_cse_192_, min(_cse_193_, 0f));
         let _cse_190_ = min(_cse_191_, max(_cse_193_, 0f));
-        let _cse_188_ = (_cse_1619_ + _cse_190_);
+        let _cse_188_ = (_cse_1620_ + _cse_190_);
         let _cse_179_ = vec2<f32>(_cse_180_, _cse_188_);
         let _e996 = normal_vec;
         let _cse_178_ = dot(_cse_179_, _e996);
@@ -7153,11 +7153,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_216_ = max(_cse_217_, min(_cse_218_, 0f));
         let _cse_215_ = min(_cse_216_, max(_cse_218_, 0f));
         let _cse_214_ = (_cse_1613_ + _cse_215_);
-        let _cse_224_ = (_cse_1619_ - _cse_1622_);
+        let _cse_224_ = (_cse_1620_ - _cse_1623_);
         let _cse_223_ = dot((((c_owner_vec - c_neigh_cell_vec) * _cse_224_) / vec2(_cse_219_)), (face_center_vec - c_neigh_cell_vec));
         let _cse_222_ = max(_cse_223_, min(_cse_224_, 0f));
         let _cse_221_ = min(_cse_222_, max(_cse_224_, 0f));
-        let _cse_220_ = (_cse_1622_ + _cse_221_);
+        let _cse_220_ = (_cse_1623_ + _cse_221_);
         let _cse_213_ = vec2<f32>(_cse_214_, _cse_220_);
         let _e1123 = normal_vec;
         let _cse_212_ = dot(_cse_213_, _e1123);
@@ -7197,11 +7197,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_247_ = dot(_cse_248_, (face_center_vec - c_owner_vec));
         let _cse_246_ = ((((_cse_247_ * abs(_cse_249_)) / max(abs(_cse_249_), (abs(_cse_247_) + 0.00000001f))) * max((_cse_249_ * _cse_247_), 0f)) / max(abs((_cse_249_ * _cse_247_)), 0.00000001f));
         let _cse_244_ = (_cse_1610_ + _cse_246_);
-        let _cse_258_ = (_cse_1622_ - _cse_1619_);
+        let _cse_258_ = (_cse_1623_ - _cse_1620_);
         let _cse_257_ = (((c_neigh_cell_vec - c_owner_vec) * _cse_258_) / vec2(_cse_251_));
         let _cse_256_ = dot(_cse_257_, (face_center_vec - c_owner_vec));
         let _cse_255_ = ((((_cse_256_ * abs(_cse_258_)) / max(abs(_cse_258_), (abs(_cse_256_) + 0.00000001f))) * max((_cse_258_ * _cse_256_), 0f)) / max(abs((_cse_258_ * _cse_256_)), 0.00000001f));
-        let _cse_253_ = (_cse_1619_ + _cse_255_);
+        let _cse_253_ = (_cse_1620_ + _cse_255_);
         let _cse_243_ = vec2<f32>(_cse_244_, _cse_253_);
         let _e1289 = normal_vec;
         let _cse_242_ = dot(_cse_243_, _e1289);
@@ -7235,11 +7235,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_280_ = dot(_cse_281_, (face_center_vec - c_neigh_cell_vec));
         let _cse_279_ = ((((_cse_280_ * abs(_cse_282_)) / max(abs(_cse_282_), (abs(_cse_280_) + 0.00000001f))) * max((_cse_282_ * _cse_280_), 0f)) / max(abs((_cse_282_ * _cse_280_)), 0.00000001f));
         let _cse_278_ = (_cse_1613_ + _cse_279_);
-        let _cse_289_ = (_cse_1619_ - _cse_1622_);
+        let _cse_289_ = (_cse_1620_ - _cse_1623_);
         let _cse_288_ = (((c_owner_vec - c_neigh_cell_vec) * _cse_289_) / vec2(_cse_283_));
         let _cse_287_ = dot(_cse_288_, (face_center_vec - c_neigh_cell_vec));
         let _cse_286_ = ((((_cse_287_ * abs(_cse_289_)) / max(abs(_cse_289_), (abs(_cse_287_) + 0.00000001f))) * max((_cse_289_ * _cse_287_), 0f)) / max(abs((_cse_289_ * _cse_287_)), 0.00000001f));
-        let _cse_285_ = (_cse_1622_ + _cse_286_);
+        let _cse_285_ = (_cse_1623_ + _cse_286_);
         let _cse_277_ = vec2<f32>(_cse_278_, _cse_285_);
         let _e1485 = normal_vec;
         let _cse_276_ = dot(_cse_277_, _e1485);
@@ -7277,12 +7277,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_311_ = max(_cse_312_, min(_cse_315_, 0f));
         let _cse_310_ = min(_cse_311_, max(_cse_315_, 0f));
         let _cse_308_ = (_cse_1610_ + _cse_310_);
-        let _cse_323_ = (_cse_1622_ - _cse_1619_);
-        let _cse_321_ = (((_cse_1619_ * 0.625f) + (_cse_1622_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_323_) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_320_ = (_cse_321_ - _cse_1619_);
+        let _cse_323_ = (_cse_1623_ - _cse_1620_);
+        let _cse_321_ = (((_cse_1620_ * 0.625f) + (_cse_1623_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_323_) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_320_ = (_cse_321_ - _cse_1620_);
         let _cse_319_ = max(_cse_320_, min(_cse_323_, 0f));
         let _cse_318_ = min(_cse_319_, max(_cse_323_, 0f));
-        let _cse_316_ = (_cse_1619_ + _cse_318_);
+        let _cse_316_ = (_cse_1620_ + _cse_318_);
         let _cse_307_ = vec2<f32>(_cse_308_, _cse_316_);
         let _e1699 = normal_vec;
         let _cse_306_ = dot(_cse_307_, _e1699);
@@ -7315,12 +7315,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_344_ = max(_cse_345_, min(_cse_347_, 0f));
         let _cse_343_ = min(_cse_344_, max(_cse_347_, 0f));
         let _cse_342_ = (_cse_1613_ + _cse_343_);
-        let _cse_353_ = (_cse_1619_ - _cse_1622_);
-        let _cse_352_ = (((_cse_1622_ * 0.625f) + (_cse_1619_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_353_) / vec2(max(dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec)), 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
-        let _cse_351_ = (_cse_352_ - _cse_1622_);
+        let _cse_353_ = (_cse_1620_ - _cse_1623_);
+        let _cse_352_ = (((_cse_1623_ * 0.625f) + (_cse_1620_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_353_) / vec2(max(dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec)), 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_351_ = (_cse_352_ - _cse_1623_);
         let _cse_350_ = max(_cse_351_, min(_cse_353_, 0f));
         let _cse_349_ = min(_cse_350_, max(_cse_353_, 0f));
-        let _cse_348_ = (_cse_1622_ + _cse_349_);
+        let _cse_348_ = (_cse_1623_ + _cse_349_);
         let _cse_341_ = vec2<f32>(_cse_342_, _cse_348_);
         let _e1877 = normal_vec;
         let _cse_340_ = dot(_cse_341_, _e1877);
@@ -7352,58 +7352,58 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let _e2010 = constants.scheme;
     if ((_e2010 == 6u) && !(is_boundary_1)) {
-        let _cse_376_ = (((_cse_1610_ * 0.625f) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1613_ - _cse_1610_)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_375_ = (_cse_376_ - _cse_1610_);
-        let _cse_378_ = ((_cse_1613_ - _cse_1610_) * _cse_375_);
-        let _cse_374_ = ((((_cse_375_ * abs((_cse_1613_ - _cse_1610_))) / max(abs((_cse_1613_ - _cse_1610_)), (abs(_cse_375_) + 0.00000001f))) * max(_cse_378_, 0f)) / max(abs(_cse_378_), 0.00000001f));
+        let _cse_377_ = (((_cse_1610_ * 0.625f) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1613_ - _cse_1610_)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_376_ = (_cse_377_ - _cse_1610_);
+        let _cse_375_ = ((_cse_376_ * abs((_cse_1613_ - _cse_1610_))) / max(abs((_cse_1613_ - _cse_1610_)), (abs(_cse_376_) + 0.00000001f)));
+        let _cse_379_ = ((_cse_1613_ - _cse_1610_) * _cse_376_);
+        let _cse_374_ = ((_cse_375_ * max(_cse_379_, 0f)) / max(abs(_cse_379_), 0.00000001f));
         let _cse_372_ = (_cse_1610_ + _cse_374_);
-        let _cse_383_ = (((_cse_1619_ * 0.625f) + (_cse_1622_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1622_ - _cse_1619_)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_382_ = (_cse_383_ - _cse_1619_);
-        let _cse_385_ = ((_cse_1622_ - _cse_1619_) * _cse_382_);
-        let _cse_381_ = ((((_cse_382_ * abs((_cse_1622_ - _cse_1619_))) / max(abs((_cse_1622_ - _cse_1619_)), (abs(_cse_382_) + 0.00000001f))) * max(_cse_385_, 0f)) / max(abs(_cse_385_), 0.00000001f));
-        let _cse_379_ = (_cse_1619_ + _cse_381_);
-        let _cse_371_ = vec2<f32>(_cse_372_, _cse_379_);
+        let _cse_385_ = (((_cse_1620_ * 0.625f) + (_cse_1623_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1623_ - _cse_1620_)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_384_ = (_cse_385_ - _cse_1620_);
+        let _cse_383_ = ((_cse_384_ * abs((_cse_1623_ - _cse_1620_))) / max(abs((_cse_1623_ - _cse_1620_)), (abs(_cse_384_) + 0.00000001f)));
+        let _cse_387_ = ((_cse_1623_ - _cse_1620_) * _cse_384_);
+        let _cse_382_ = ((_cse_383_ * max(_cse_387_, 0f)) / max(abs(_cse_387_), 0.00000001f));
+        let _cse_380_ = (_cse_1620_ + _cse_382_);
+        let _cse_371_ = vec2<f32>(_cse_372_, _cse_380_);
         let _e2098 = normal_vec;
         let _cse_370_ = dot(_cse_371_, _e2098);
-        let _cse_396_ = (((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_395_ = (_cse_396_ - s_own_rho);
-        let _cse_394_ = ((((_cse_395_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_395_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_395_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_395_)), 0.00000001f));
-        let _cse_393_ = (s_own_rho + _cse_394_);
+        let _cse_398_ = (((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_397_ = (_cse_398_ - s_own_rho);
+        let _cse_396_ = ((((_cse_397_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_397_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_397_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_397_)), 0.00000001f));
+        let _cse_395_ = (s_own_rho + _cse_396_);
         let _e2145 = constants.eos_r;
-        let _cse_392_ = ((_cse_393_ * _e2145) * (s_own_T + ((((((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T) * abs((_e151 - s_own_T))) / max(abs((_e151 - s_own_T)), (abs(((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T)) + 0.00000001f))) * max(((_e151 - s_own_T) * ((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T)), 0f)) / max(abs(((_e151 - s_own_T) * ((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T))), 0.00000001f))));
+        let _cse_394_ = ((_cse_395_ * _e2145) * (s_own_T + ((((((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T) * abs((_e151 - s_own_T))) / max(abs((_e151 - s_own_T)), (abs(((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T)) + 0.00000001f))) * max(((_e151 - s_own_T) * ((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T)), 0f)) / max(abs(((_e151 - s_own_T) * ((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T))), 0.00000001f))));
         let _e2256 = constants.eos_gamma;
-        let _cse_391_ = (_e2256 * _cse_392_);
-        let _cse_390_ = (_cse_391_ / _cse_393_);
+        let _cse_393_ = (_e2256 * _cse_394_);
+        let _cse_392_ = (_cse_393_ / _cse_395_);
         let _e2261 = constants.eos_dp_drho;
-        let _cse_389_ = (_cse_390_ + _e2261);
-        let _cse_399_ = (_cse_370_ * _cse_370_);
-        let _cse_398_ = min(_cse_399_, _cse_389_);
+        let _cse_391_ = (_cse_392_ + _e2261);
+        let _cse_401_ = (_cse_370_ * _cse_370_);
+        let _cse_400_ = min(_cse_401_, _cse_391_);
         let _e2267 = low_mach_params.model;
-        let _cse_397_ = (max(0f, (1f - abs(f32(_e2267)))) * _cse_398_);
+        let _cse_399_ = (max(0f, (1f - abs(f32(_e2267)))) * _cse_400_);
         let _e2277 = low_mach_params.model;
-        let _cse_388_ = ((max(0f, (1f - abs((f32(_e2277) - 2f)))) * _cse_389_) + _cse_397_);
+        let _cse_390_ = ((max(0f, (1f - abs((f32(_e2277) - 2f)))) * _cse_391_) + _cse_399_);
         let _e2290 = low_mach_params.theta_floor;
-        let _cse_402_ = max(_cse_399_, (_e2290 * _cse_389_));
-        let _cse_401_ = min(_cse_402_, _cse_389_);
+        let _cse_404_ = max(_cse_401_, (_e2290 * _cse_391_));
+        let _cse_403_ = min(_cse_404_, _cse_391_);
         let _e2296 = low_mach_params.model;
-        let _cse_400_ = (max(0f, (1f - abs((f32(_e2296) - 1f)))) * _cse_401_);
-        let _cse_387_ = (_cse_388_ + _cse_400_);
-        let _cse_386_ = sqrt(_cse_387_);
-        let _cse_409_ = (((_cse_1613_ * 0.625f) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1610_ - _cse_1613_)) / vec2(max(dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec)), 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
-        let _cse_408_ = (_cse_409_ - _cse_1613_);
-        let _cse_407_ = ((_cse_408_ * abs((_cse_1610_ - _cse_1613_))) / max(abs((_cse_1610_ - _cse_1613_)), (abs(_cse_408_) + 0.00000001f)));
-        let _cse_410_ = ((_cse_1610_ - _cse_1613_) * _cse_408_);
-        let _cse_406_ = ((_cse_407_ * max(_cse_410_, 0f)) / max(abs(_cse_410_), 0.00000001f));
-        let _cse_405_ = (_cse_1613_ + _cse_406_);
-        let _cse_415_ = (((_cse_1622_ * 0.625f) + (_cse_1619_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1619_ - _cse_1622_)) / vec2(max(dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec)), 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
-        let _cse_414_ = (_cse_415_ - _cse_1622_);
-        let _cse_413_ = ((_cse_414_ * abs((_cse_1619_ - _cse_1622_))) / max(abs((_cse_1619_ - _cse_1622_)), (abs(_cse_414_) + 0.00000001f)));
-        let _cse_416_ = ((_cse_1619_ - _cse_1622_) * _cse_414_);
-        let _cse_412_ = ((_cse_413_ * max(_cse_416_, 0f)) / max(abs(_cse_416_), 0.00000001f));
-        let _cse_411_ = (_cse_1622_ + _cse_412_);
-        let _cse_404_ = vec2<f32>(_cse_405_, _cse_411_);
+        let _cse_402_ = (max(0f, (1f - abs((f32(_e2296) - 1f)))) * _cse_403_);
+        let _cse_389_ = (_cse_390_ + _cse_402_);
+        let _cse_388_ = sqrt(_cse_389_);
+        let _cse_410_ = (((_cse_1613_ * 0.625f) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1610_ - _cse_1613_)) / vec2(max(dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec)), 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_409_ = (_cse_410_ - _cse_1613_);
+        let _cse_411_ = ((_cse_1610_ - _cse_1613_) * _cse_409_);
+        let _cse_408_ = ((((_cse_409_ * abs((_cse_1610_ - _cse_1613_))) / max(abs((_cse_1610_ - _cse_1613_)), (abs(_cse_409_) + 0.00000001f))) * max(_cse_411_, 0f)) / max(abs(_cse_411_), 0.00000001f));
+        let _cse_407_ = (_cse_1613_ + _cse_408_);
+        let _cse_415_ = (((_cse_1623_ * 0.625f) + (_cse_1620_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1620_ - _cse_1623_)) / vec2(max(dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec)), 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_414_ = (_cse_415_ - _cse_1623_);
+        let _cse_416_ = ((_cse_1620_ - _cse_1623_) * _cse_414_);
+        let _cse_413_ = ((((_cse_414_ * abs((_cse_1620_ - _cse_1623_))) / max(abs((_cse_1620_ - _cse_1623_)), (abs(_cse_414_) + 0.00000001f))) * max(_cse_416_, 0f)) / max(abs(_cse_416_), 0.00000001f));
+        let _cse_412_ = (_cse_1623_ + _cse_413_);
+        let _cse_406_ = vec2<f32>(_cse_407_, _cse_412_);
         let _e2391 = normal_vec;
-        let _cse_403_ = dot(_cse_404_, _e2391);
+        let _cse_405_ = dot(_cse_406_, _e2391);
         let _cse_427_ = (((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(max(dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec)), 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_426_ = (_cse_427_ - _e181);
         let _cse_425_ = ((((_cse_426_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_426_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_426_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_426_)), 0.00000001f));
@@ -7415,7 +7415,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_421_ = (_cse_422_ / _cse_424_);
         let _e2554 = constants.eos_dp_drho;
         let _cse_420_ = (_cse_421_ + _e2554);
-        let _cse_430_ = (_cse_403_ * _cse_403_);
+        let _cse_430_ = (_cse_405_ * _cse_405_);
         let _cse_429_ = min(_cse_430_, _cse_420_);
         let _e2560 = low_mach_params.model;
         let _cse_428_ = (max(0f, (1f - abs(f32(_e2560)))) * _cse_429_);
@@ -7428,8 +7428,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_431_ = (max(0f, (1f - abs((f32(_e2589) - 1f)))) * _cse_432_);
         let _cse_418_ = (_cse_419_ + _cse_431_);
         let _cse_417_ = sqrt(_cse_418_);
-        a_plus = max(0f, max((_cse_370_ + _cse_386_), (_cse_403_ + _cse_417_)));
-        a_minus = min(0f, min((_cse_370_ - _cse_386_), (_cse_403_ - _cse_417_)));
+        a_plus = max(0f, max((_cse_370_ + _cse_388_), (_cse_405_ + _cse_417_)));
+        a_minus = min(0f, min((_cse_370_ - _cse_388_), (_cse_405_ - _cse_417_)));
     }
     let _e2611 = a_plus;
     let _e2612 = a_minus;
@@ -7453,9 +7453,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e2666 = constants.eos_dp_drho;
     u_r_0_ = (_e181 + ((_cse_434_ * _cse_441_) / max((((_e2661 * _cse_441_) / _e181) + _e2666), 0.000000000001f)));
     let _e2674 = normal_vec;
-    f_l_0_ = (s_own_rho * dot(vec2<f32>(_cse_1610_, _cse_1619_), _e2674));
+    f_l_0_ = (s_own_rho * dot(vec2<f32>(_cse_1610_, _cse_1620_), _e2674));
     let _e2679 = normal_vec;
-    f_r_0_ = (_e181 * dot(vec2<f32>(_cse_1613_, _cse_1622_), _e2679));
+    f_r_0_ = (_e181 * dot(vec2<f32>(_cse_1613_, _cse_1623_), _e2679));
     let _e2685 = constants.scheme;
     if ((_e2685 == 1u) && !(is_boundary_1)) {
         let _cse_447_ = dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec));
@@ -7499,9 +7499,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e2777 = constants.eos_dp_drho;
         u_r_0_ = (_cse_460_ + ((_cse_448_ * _cse_466_) / max((((_e2772 * _cse_466_) / _cse_460_) + _e2777), 0.000000000001f)));
         let _e2800 = normal_vec;
-        f_l_0_ = (_cse_442_ * dot(vec2<f32>((_cse_1610_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1613_ - _cse_1610_)) / vec2(_cse_446_)), (face_center_vec - c_owner_vec))), (_cse_1619_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1622_ - _cse_1619_)) / vec2(_cse_446_)), (face_center_vec - c_owner_vec)))), _e2800));
+        f_l_0_ = (_cse_442_ * dot(vec2<f32>((_cse_1610_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1613_ - _cse_1610_)) / vec2(_cse_446_)), (face_center_vec - c_owner_vec))), (_cse_1620_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1623_ - _cse_1620_)) / vec2(_cse_446_)), (face_center_vec - c_owner_vec)))), _e2800));
         let _e2820 = normal_vec;
-        f_r_0_ = (_cse_460_ * dot(vec2<f32>((_cse_1613_ + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1610_ - _cse_1613_)) / vec2(_cse_464_)), (face_center_vec - c_neigh_cell_vec))), (_cse_1622_ + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1619_ - _cse_1622_)) / vec2(_cse_464_)), (face_center_vec - c_neigh_cell_vec)))), _e2820));
+        f_r_0_ = (_cse_460_ * dot(vec2<f32>((_cse_1613_ + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1610_ - _cse_1613_)) / vec2(_cse_464_)), (face_center_vec - c_neigh_cell_vec))), (_cse_1623_ + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1620_ - _cse_1623_)) / vec2(_cse_464_)), (face_center_vec - c_neigh_cell_vec)))), _e2820));
     }
     let _e2825 = constants.scheme;
     if ((_e2825 == 2u) && !(is_boundary_1)) {
@@ -7562,9 +7562,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e2953 = constants.eos_dp_drho;
         u_r_0_ = (_cse_502_ + ((_cse_486_ * _cse_512_) / max((((_e2948 * _cse_512_) / _cse_502_) + _e2953), 0.000000000001f)));
         let _e2994 = normal_vec;
-        f_l_0_ = (_cse_476_ * dot(vec2<f32>(((((_cse_1610_ + (_cse_1610_ * 0.625f)) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1613_ - _cse_1610_)) / vec2(_cse_484_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1610_), ((((_cse_1619_ + (_cse_1619_ * 0.625f)) + (_cse_1622_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1622_ - _cse_1619_)) / vec2(_cse_484_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1619_)), _e2994));
+        f_l_0_ = (_cse_476_ * dot(vec2<f32>(((((_cse_1610_ + (_cse_1610_ * 0.625f)) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1613_ - _cse_1610_)) / vec2(_cse_484_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1610_), ((((_cse_1620_ + (_cse_1620_ * 0.625f)) + (_cse_1623_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1623_ - _cse_1620_)) / vec2(_cse_484_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1620_)), _e2994));
         let _e3032 = normal_vec;
-        f_r_0_ = (_cse_502_ * dot(vec2<f32>(((((_cse_1613_ + (_cse_1613_ * 0.625f)) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1610_ - _cse_1613_)) / vec2(_cse_510_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1613_), ((((_cse_1622_ + (_cse_1622_ * 0.625f)) + (_cse_1619_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1619_ - _cse_1622_)) / vec2(_cse_510_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1622_)), _e3032));
+        f_r_0_ = (_cse_502_ * dot(vec2<f32>(((((_cse_1613_ + (_cse_1613_ * 0.625f)) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1610_ - _cse_1613_)) / vec2(_cse_510_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1613_), ((((_cse_1623_ + (_cse_1623_ * 0.625f)) + (_cse_1620_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1620_ - _cse_1623_)) / vec2(_cse_510_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1623_)), _e3032));
     }
     let _e3037 = constants.scheme;
     if ((_e3037 == 3u) && !(is_boundary_1)) {
@@ -7619,9 +7619,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_564_ = (_e151 + _cse_565_);
         let _cse_562_ = (_cse_563_ * _cse_564_);
         let _cse_573_ = (_cse_1613_ - _cse_1610_);
-        let _cse_576_ = (_cse_1622_ - _cse_1619_);
+        let _cse_576_ = (_cse_1623_ - _cse_1620_);
         let _cse_578_ = (_cse_1610_ - _cse_1613_);
-        let _cse_579_ = (_cse_1619_ - _cse_1622_);
+        let _cse_579_ = (_cse_1620_ - _cse_1623_);
         let _e3146 = constants.eos_gamma;
         let _e3151 = constants.eos_dp_drho;
         u_l_0_ = (_cse_526_ + ((_cse_536_ * _cse_542_) / max((((_e3146 * _cse_542_) / _cse_526_) + _e3151), 0.000000000001f)));
@@ -7629,9 +7629,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e3165 = constants.eos_dp_drho;
         u_r_0_ = (_cse_552_ + ((_cse_536_ * _cse_562_) / max((((_e3160 * _cse_562_) / _cse_552_) + _e3165), 0.000000000001f)));
         let _e3198 = normal_vec;
-        f_l_0_ = (_cse_526_ * dot(vec2<f32>((_cse_1610_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_573_) / vec2(_cse_532_)), (face_center_vec - c_owner_vec)), min(_cse_573_, 0f)), max(_cse_573_, 0f))), (_cse_1619_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_576_) / vec2(_cse_532_)), (face_center_vec - c_owner_vec)), min(_cse_576_, 0f)), max(_cse_576_, 0f)))), _e3198));
+        f_l_0_ = (_cse_526_ * dot(vec2<f32>((_cse_1610_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_573_) / vec2(_cse_532_)), (face_center_vec - c_owner_vec)), min(_cse_573_, 0f)), max(_cse_573_, 0f))), (_cse_1620_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_576_) / vec2(_cse_532_)), (face_center_vec - c_owner_vec)), min(_cse_576_, 0f)), max(_cse_576_, 0f)))), _e3198));
         let _e3228 = normal_vec;
-        f_r_0_ = (_cse_552_ * dot(vec2<f32>((_cse_1613_ + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_578_) / vec2(_cse_558_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_578_, 0f)), max(_cse_578_, 0f))), (_cse_1622_ + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_579_) / vec2(_cse_558_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_579_, 0f)), max(_cse_579_, 0f)))), _e3228));
+        f_r_0_ = (_cse_552_ * dot(vec2<f32>((_cse_1613_ + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_578_) / vec2(_cse_558_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_578_, 0f)), max(_cse_578_, 0f))), (_cse_1623_ + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_579_) / vec2(_cse_558_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_579_, 0f)), max(_cse_579_, 0f)))), _e3228));
     }
     let _e3233 = constants.scheme;
     if ((_e3233 == 4u) && !(is_boundary_1)) {
@@ -7688,13 +7688,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_631_ = (_cse_1613_ - _cse_1610_);
         let _cse_630_ = (((c_neigh_cell_vec - c_owner_vec) * _cse_631_) / vec2(_cse_586_));
         let _cse_629_ = dot(_cse_630_, (face_center_vec - c_owner_vec));
-        let _cse_636_ = (_cse_1622_ - _cse_1619_);
+        let _cse_636_ = (_cse_1623_ - _cse_1620_);
         let _cse_635_ = (((c_neigh_cell_vec - c_owner_vec) * _cse_636_) / vec2(_cse_586_));
         let _cse_634_ = dot(_cse_635_, (face_center_vec - c_owner_vec));
         let _cse_640_ = (_cse_1610_ - _cse_1613_);
         let _cse_639_ = (((c_owner_vec - c_neigh_cell_vec) * _cse_640_) / vec2(_cse_610_));
         let _cse_638_ = dot(_cse_639_, (face_center_vec - c_neigh_cell_vec));
-        let _cse_643_ = (_cse_1619_ - _cse_1622_);
+        let _cse_643_ = (_cse_1620_ - _cse_1623_);
         let _cse_642_ = (((c_owner_vec - c_neigh_cell_vec) * _cse_643_) / vec2(_cse_610_));
         let _cse_641_ = dot(_cse_642_, (face_center_vec - c_neigh_cell_vec));
         let _e3396 = low_mach_params.model;
@@ -7708,9 +7708,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e3450 = constants.eos_dp_drho;
         u_r_0_ = (_cse_604_ + ((((1f - max(0f, (1f - abs((f32(_e3427) - 2f))))) * _e3440) * _cse_621_) / max((((_e3445 * _cse_621_) / _cse_604_) + _e3450), 0.000000000001f)));
         let _e3493 = normal_vec;
-        f_l_0_ = (_cse_580_ * dot(vec2<f32>((_cse_1610_ + ((((_cse_629_ * abs(_cse_631_)) / max(abs(_cse_631_), (abs(_cse_629_) + 0.00000001f))) * max((_cse_631_ * _cse_629_), 0f)) / max(abs((_cse_631_ * _cse_629_)), 0.00000001f))), (_cse_1619_ + ((((_cse_634_ * abs(_cse_636_)) / max(abs(_cse_636_), (abs(_cse_634_) + 0.00000001f))) * max((_cse_636_ * _cse_634_), 0f)) / max(abs((_cse_636_ * _cse_634_)), 0.00000001f)))), _e3493));
+        f_l_0_ = (_cse_580_ * dot(vec2<f32>((_cse_1610_ + ((((_cse_629_ * abs(_cse_631_)) / max(abs(_cse_631_), (abs(_cse_629_) + 0.00000001f))) * max((_cse_631_ * _cse_629_), 0f)) / max(abs((_cse_631_ * _cse_629_)), 0.00000001f))), (_cse_1620_ + ((((_cse_634_ * abs(_cse_636_)) / max(abs(_cse_636_), (abs(_cse_634_) + 0.00000001f))) * max((_cse_636_ * _cse_634_), 0f)) / max(abs((_cse_636_ * _cse_634_)), 0.00000001f)))), _e3493));
         let _e3533 = normal_vec;
-        f_r_0_ = (_cse_604_ * dot(vec2<f32>((_cse_1613_ + ((((_cse_638_ * abs(_cse_640_)) / max(abs(_cse_640_), (abs(_cse_638_) + 0.00000001f))) * max((_cse_640_ * _cse_638_), 0f)) / max(abs((_cse_640_ * _cse_638_)), 0.00000001f))), (_cse_1622_ + ((((_cse_641_ * abs(_cse_643_)) / max(abs(_cse_643_), (abs(_cse_641_) + 0.00000001f))) * max((_cse_643_ * _cse_641_), 0f)) / max(abs((_cse_643_ * _cse_641_)), 0.00000001f)))), _e3533));
+        f_r_0_ = (_cse_604_ * dot(vec2<f32>((_cse_1613_ + ((((_cse_638_ * abs(_cse_640_)) / max(abs(_cse_640_), (abs(_cse_638_) + 0.00000001f))) * max((_cse_640_ * _cse_638_), 0f)) / max(abs((_cse_640_ * _cse_638_)), 0.00000001f))), (_cse_1623_ + ((((_cse_641_ * abs(_cse_643_)) / max(abs(_cse_643_), (abs(_cse_641_) + 0.00000001f))) * max((_cse_643_ * _cse_641_), 0f)) / max(abs((_cse_643_ * _cse_641_)), 0.00000001f)))), _e3533));
     }
     let _e3538 = constants.scheme;
     if ((_e3538 == 5u) && !(is_boundary_1)) {
@@ -7775,9 +7775,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_691_ = (_e151 + _cse_692_);
         let _cse_689_ = (_cse_690_ * _cse_691_);
         let _cse_702_ = (_cse_1613_ - _cse_1610_);
-        let _cse_705_ = (_cse_1622_ - _cse_1619_);
+        let _cse_705_ = (_cse_1623_ - _cse_1620_);
         let _cse_706_ = (_cse_1610_ - _cse_1613_);
-        let _cse_707_ = (_cse_1619_ - _cse_1622_);
+        let _cse_707_ = (_cse_1620_ - _cse_1623_);
         let _e3683 = constants.eos_gamma;
         let _e3688 = constants.eos_dp_drho;
         u_l_0_ = (_cse_644_ + ((_cse_658_ * _cse_663_) / max((((_e3683 * _cse_663_) / _cse_644_) + _e3688), 0.000000000001f)));
@@ -7785,9 +7785,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e3702 = constants.eos_dp_drho;
         u_r_0_ = (_cse_675_ + ((_cse_658_ * _cse_689_) / max((((_e3697 * _cse_689_) / _cse_675_) + _e3702), 0.000000000001f)));
         let _e3753 = normal_vec;
-        f_l_0_ = (_cse_644_ * dot(vec2<f32>((_cse_1610_ + min(max(((((_cse_1610_ * 0.625f) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_702_) / vec2(_cse_654_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1610_), min(_cse_702_, 0f)), max(_cse_702_, 0f))), (_cse_1619_ + min(max(((((_cse_1619_ * 0.625f) + (_cse_1622_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_705_) / vec2(_cse_654_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1619_), min(_cse_705_, 0f)), max(_cse_705_, 0f)))), _e3753));
+        f_l_0_ = (_cse_644_ * dot(vec2<f32>((_cse_1610_ + min(max(((((_cse_1610_ * 0.625f) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_702_) / vec2(_cse_654_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1610_), min(_cse_702_, 0f)), max(_cse_702_, 0f))), (_cse_1620_ + min(max(((((_cse_1620_ * 0.625f) + (_cse_1623_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_705_) / vec2(_cse_654_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1620_), min(_cse_705_, 0f)), max(_cse_705_, 0f)))), _e3753));
         let _e3801 = normal_vec;
-        f_r_0_ = (_cse_675_ * dot(vec2<f32>((_cse_1613_ + min(max(((((_cse_1613_ * 0.625f) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_706_) / vec2(_cse_685_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1613_), min(_cse_706_, 0f)), max(_cse_706_, 0f))), (_cse_1622_ + min(max(((((_cse_1622_ * 0.625f) + (_cse_1619_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_707_) / vec2(_cse_685_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1622_), min(_cse_707_, 0f)), max(_cse_707_, 0f)))), _e3801));
+        f_r_0_ = (_cse_675_ * dot(vec2<f32>((_cse_1613_ + min(max(((((_cse_1613_ * 0.625f) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_706_) / vec2(_cse_685_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1613_), min(_cse_706_, 0f)), max(_cse_706_, 0f))), (_cse_1623_ + min(max(((((_cse_1623_ * 0.625f) + (_cse_1620_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_707_) / vec2(_cse_685_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1623_), min(_cse_707_, 0f)), max(_cse_707_, 0f)))), _e3801));
     }
     let _e3806 = constants.scheme;
     if ((_e3806 == 6u) && !(is_boundary_1)) {
@@ -7847,12 +7847,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_752_ = (_cse_753_ * _cse_754_);
         let _cse_762_ = (((_cse_1610_ * 0.625f) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1613_ - _cse_1610_)) / vec2(_cse_717_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
         let _cse_761_ = (_cse_762_ - _cse_1610_);
-        let _cse_766_ = (((_cse_1619_ * 0.625f) + (_cse_1622_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1622_ - _cse_1619_)) / vec2(_cse_717_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_765_ = (_cse_766_ - _cse_1619_);
+        let _cse_766_ = (((_cse_1620_ * 0.625f) + (_cse_1623_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1623_ - _cse_1620_)) / vec2(_cse_717_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_765_ = (_cse_766_ - _cse_1620_);
         let _cse_769_ = (((_cse_1613_ * 0.625f) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1610_ - _cse_1613_)) / vec2(_cse_743_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_768_ = (_cse_769_ - _cse_1613_);
-        let _cse_771_ = (((_cse_1622_ * 0.625f) + (_cse_1619_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1619_ - _cse_1622_)) / vec2(_cse_743_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
-        let _cse_770_ = (_cse_771_ - _cse_1622_);
+        let _cse_771_ = (((_cse_1623_ * 0.625f) + (_cse_1620_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1620_ - _cse_1623_)) / vec2(_cse_743_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_770_ = (_cse_771_ - _cse_1623_);
         let _e4043 = low_mach_params.model;
         let _e4056 = low_mach_params.pressure_coupling_alpha;
         let _e4061 = constants.eos_gamma;
@@ -7864,9 +7864,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e4097 = constants.eos_dp_drho;
         u_r_0_ = (_cse_734_ + ((((1f - max(0f, (1f - abs((f32(_e4074) - 2f))))) * _e4087) * _cse_752_) / max((((_e4092 * _cse_752_) / _cse_734_) + _e4097), 0.000000000001f)));
         let _e4148 = normal_vec;
-        f_l_0_ = (_cse_708_ * dot(vec2<f32>((_cse_1610_ + ((((_cse_761_ * abs((_cse_1613_ - _cse_1610_))) / max(abs((_cse_1613_ - _cse_1610_)), (abs(_cse_761_) + 0.00000001f))) * max(((_cse_1613_ - _cse_1610_) * _cse_761_), 0f)) / max(abs(((_cse_1613_ - _cse_1610_) * _cse_761_)), 0.00000001f))), (_cse_1619_ + ((((_cse_765_ * abs((_cse_1622_ - _cse_1619_))) / max(abs((_cse_1622_ - _cse_1619_)), (abs(_cse_765_) + 0.00000001f))) * max(((_cse_1622_ - _cse_1619_) * _cse_765_), 0f)) / max(abs(((_cse_1622_ - _cse_1619_) * _cse_765_)), 0.00000001f)))), _e4148));
+        f_l_0_ = (_cse_708_ * dot(vec2<f32>((_cse_1610_ + ((((_cse_761_ * abs((_cse_1613_ - _cse_1610_))) / max(abs((_cse_1613_ - _cse_1610_)), (abs(_cse_761_) + 0.00000001f))) * max(((_cse_1613_ - _cse_1610_) * _cse_761_), 0f)) / max(abs(((_cse_1613_ - _cse_1610_) * _cse_761_)), 0.00000001f))), (_cse_1620_ + ((((_cse_765_ * abs((_cse_1623_ - _cse_1620_))) / max(abs((_cse_1623_ - _cse_1620_)), (abs(_cse_765_) + 0.00000001f))) * max(((_cse_1623_ - _cse_1620_) * _cse_765_), 0f)) / max(abs(((_cse_1623_ - _cse_1620_) * _cse_765_)), 0.00000001f)))), _e4148));
         let _e4196 = normal_vec;
-        f_r_0_ = (_cse_734_ * dot(vec2<f32>((_cse_1613_ + ((((_cse_768_ * abs((_cse_1610_ - _cse_1613_))) / max(abs((_cse_1610_ - _cse_1613_)), (abs(_cse_768_) + 0.00000001f))) * max(((_cse_1610_ - _cse_1613_) * _cse_768_), 0f)) / max(abs(((_cse_1610_ - _cse_1613_) * _cse_768_)), 0.00000001f))), (_cse_1622_ + ((((_cse_770_ * abs((_cse_1619_ - _cse_1622_))) / max(abs((_cse_1619_ - _cse_1622_)), (abs(_cse_770_) + 0.00000001f))) * max(((_cse_1619_ - _cse_1622_) * _cse_770_), 0f)) / max(abs(((_cse_1619_ - _cse_1622_) * _cse_770_)), 0.00000001f)))), _e4196));
+        f_r_0_ = (_cse_734_ * dot(vec2<f32>((_cse_1613_ + ((((_cse_768_ * abs((_cse_1610_ - _cse_1613_))) / max(abs((_cse_1610_ - _cse_1613_)), (abs(_cse_768_) + 0.00000001f))) * max(((_cse_1610_ - _cse_1613_) * _cse_768_), 0f)) / max(abs(((_cse_1610_ - _cse_1613_) * _cse_768_)), 0.00000001f))), (_cse_1623_ + ((((_cse_770_ * abs((_cse_1620_ - _cse_1623_))) / max(abs((_cse_1620_ - _cse_1623_)), (abs(_cse_770_) + 0.00000001f))) * max(((_cse_1620_ - _cse_1623_) * _cse_770_), 0f)) / max(abs(((_cse_1620_ - _cse_1623_) * _cse_770_)), 0.00000001f)))), _e4196));
     }
     let _e4205 = a_plus;
     let _e4206 = f_l_0_;
@@ -7884,10 +7884,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     u_r_1_ = _cse_774_;
     let _e4229 = normal_vec;
     let _e4234 = constants.eos_r;
-    f_l_1_ = ((_cse_772_ * dot(vec2<f32>(_cse_1610_, _cse_1619_), _e4229)) + (((s_own_rho * _e4234) * s_own_T) * _cse_776_));
+    f_l_1_ = ((_cse_772_ * dot(vec2<f32>(_cse_1610_, _cse_1620_), _e4229)) + (((s_own_rho * _e4234) * s_own_T) * _cse_776_));
     let _e4241 = normal_vec;
     let _e4246 = constants.eos_r;
-    f_r_1_ = ((_cse_774_ * dot(vec2<f32>(_cse_1613_, _cse_1622_), _e4241)) + (((_e181 * _e4246) * _e151) * _cse_776_));
+    f_r_1_ = ((_cse_774_ * dot(vec2<f32>(_cse_1613_, _cse_1623_), _e4241)) + (((_e181 * _e4246) * _e151) * _cse_776_));
     let _e4254 = constants.scheme;
     if ((_e4254 == 1u) && !(is_boundary_1)) {
         let _cse_783_ = dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec));
@@ -7919,10 +7919,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         u_r_1_ = _cse_791_;
         let _e4310 = normal_vec;
         let _e4315 = constants.eos_r;
-        f_l_1_ = ((_cse_777_ * dot(vec2<f32>(_cse_784_, (_cse_1619_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1622_ - _cse_1619_)) / vec2(_cse_782_)), (face_center_vec - c_owner_vec)))), _e4310)) + (((_cse_778_ * _e4315) * (s_own_T + dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_782_)), (face_center_vec - c_owner_vec)))) * _cse_805_));
+        f_l_1_ = ((_cse_777_ * dot(vec2<f32>(_cse_784_, (_cse_1620_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1623_ - _cse_1620_)) / vec2(_cse_782_)), (face_center_vec - c_owner_vec)))), _e4310)) + (((_cse_778_ * _e4315) * (s_own_T + dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_782_)), (face_center_vec - c_owner_vec)))) * _cse_805_));
         let _e4337 = normal_vec;
         let _e4342 = constants.eos_r;
-        f_r_1_ = ((_cse_791_ * dot(vec2<f32>(_cse_798_, (_cse_1622_ + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1619_ - _cse_1622_)) / vec2(_cse_796_)), (face_center_vec - c_neigh_cell_vec)))), _e4337)) + (((_cse_792_ * _e4342) * (_e151 + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_796_)), (face_center_vec - c_neigh_cell_vec)))) * _cse_805_));
+        f_r_1_ = ((_cse_791_ * dot(vec2<f32>(_cse_798_, (_cse_1623_ + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1620_ - _cse_1623_)) / vec2(_cse_796_)), (face_center_vec - c_neigh_cell_vec)))), _e4337)) + (((_cse_792_ * _e4342) * (_e151 + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_796_)), (face_center_vec - c_neigh_cell_vec)))) * _cse_805_));
     }
     let _e4357 = constants.scheme;
     if ((_e4357 == 2u) && !(is_boundary_1)) {
@@ -7975,10 +7975,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         u_r_1_ = _cse_830_;
         let _e4458 = normal_vec;
         let _e4463 = constants.eos_r;
-        f_l_1_ = ((_cse_806_ * dot(vec2<f32>(_cse_817_, ((((_cse_1619_ + (_cse_1619_ * 0.625f)) + (_cse_1622_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1622_ - _cse_1619_)) / vec2(_cse_815_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1619_)), _e4458)) + (((_cse_807_ * _e4463) * ((((s_own_T + (s_own_T * 0.625f)) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_815_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T)) * _cse_854_));
+        f_l_1_ = ((_cse_806_ * dot(vec2<f32>(_cse_817_, ((((_cse_1620_ + (_cse_1620_ * 0.625f)) + (_cse_1623_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1623_ - _cse_1620_)) / vec2(_cse_815_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1620_)), _e4458)) + (((_cse_807_ * _e4463) * ((((s_own_T + (s_own_T * 0.625f)) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_815_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T)) * _cse_854_));
         let _e4503 = normal_vec;
         let _e4508 = constants.eos_r;
-        f_r_1_ = ((_cse_830_ * dot(vec2<f32>(_cse_841_, ((((_cse_1622_ + (_cse_1622_ * 0.625f)) + (_cse_1619_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1619_ - _cse_1622_)) / vec2(_cse_839_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1622_)), _e4503)) + (((_cse_831_ * _e4508) * ((((_e151 + (_e151 * 0.625f)) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_839_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)) * _cse_854_));
+        f_r_1_ = ((_cse_830_ * dot(vec2<f32>(_cse_841_, ((((_cse_1623_ + (_cse_1623_ * 0.625f)) + (_cse_1620_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1620_ - _cse_1623_)) / vec2(_cse_839_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1623_)), _e4503)) + (((_cse_831_ * _e4508) * ((((_e151 + (_e151 * 0.625f)) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_839_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)) * _cse_854_));
     }
     let _e4532 = constants.scheme;
     if ((_e4532 == 3u) && !(is_boundary_1)) {
@@ -8022,17 +8022,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_889_ = min(_cse_890_, _cse_896_);
         let _cse_888_ = (_cse_1613_ + _cse_889_);
         let _cse_877_ = (_cse_878_ * _cse_888_);
-        let _cse_898_ = (_cse_1622_ - _cse_1619_);
+        let _cse_898_ = (_cse_1623_ - _cse_1620_);
         let _cse_900_ = normal_vec.x;
-        let _cse_901_ = (_cse_1619_ - _cse_1622_);
+        let _cse_901_ = (_cse_1620_ - _cse_1623_);
         u_l_1_ = _cse_855_;
         u_r_1_ = _cse_877_;
         let _e4623 = normal_vec;
         let _e4628 = constants.eos_r;
-        f_l_1_ = ((_cse_855_ * dot(vec2<f32>(_cse_866_, (_cse_1619_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_898_) / vec2(_cse_862_)), (face_center_vec - c_owner_vec)), min(_cse_898_, 0f)), max(_cse_898_, 0f)))), _e4623)) + (((_cse_856_ * _e4628) * (s_own_T + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_862_)), (face_center_vec - c_owner_vec)), min((_e151 - s_own_T), 0f)), max((_e151 - s_own_T), 0f)))) * _cse_900_));
+        f_l_1_ = ((_cse_855_ * dot(vec2<f32>(_cse_866_, (_cse_1620_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_898_) / vec2(_cse_862_)), (face_center_vec - c_owner_vec)), min(_cse_898_, 0f)), max(_cse_898_, 0f)))), _e4623)) + (((_cse_856_ * _e4628) * (s_own_T + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_862_)), (face_center_vec - c_owner_vec)), min((_e151 - s_own_T), 0f)), max((_e151 - s_own_T), 0f)))) * _cse_900_));
         let _e4663 = normal_vec;
         let _e4668 = constants.eos_r;
-        f_r_1_ = ((_cse_877_ * dot(vec2<f32>(_cse_888_, (_cse_1622_ + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_901_) / vec2(_cse_884_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_901_, 0f)), max(_cse_901_, 0f)))), _e4663)) + (((_cse_878_ * _e4668) * (_e151 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_884_)), (face_center_vec - c_neigh_cell_vec)), min((s_own_T - _e151), 0f)), max((s_own_T - _e151), 0f)))) * _cse_900_));
+        f_r_1_ = ((_cse_877_ * dot(vec2<f32>(_cse_888_, (_cse_1623_ + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_901_) / vec2(_cse_884_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_901_, 0f)), max(_cse_901_, 0f)))), _e4663)) + (((_cse_878_ * _e4668) * (_e151 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_884_)), (face_center_vec - c_neigh_cell_vec)), min((s_own_T - _e151), 0f)), max((s_own_T - _e151), 0f)))) * _cse_900_));
     }
     let _e4691 = constants.scheme;
     if ((_e4691 == 4u) && !(is_boundary_1)) {
@@ -8088,11 +8088,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_942_ = (_cse_943_ * _cse_951_);
         let _cse_941_ = (_cse_1613_ + _cse_942_);
         let _cse_930_ = (_cse_931_ * _cse_941_);
-        let _cse_960_ = (_cse_1622_ - _cse_1619_);
+        let _cse_960_ = (_cse_1623_ - _cse_1620_);
         let _cse_959_ = (_cse_960_ / _cse_909_);
         let _cse_958_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_959_);
         let _cse_957_ = dot(_cse_958_, (face_center_vec - c_owner_vec));
-        let _cse_965_ = (_cse_1619_ - _cse_1622_);
+        let _cse_965_ = (_cse_1620_ - _cse_1623_);
         let _cse_964_ = (_cse_965_ / _cse_937_);
         let _cse_963_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_964_);
         let _cse_962_ = dot(_cse_963_, (face_center_vec - c_neigh_cell_vec));
@@ -8101,11 +8101,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e4835 = normal_vec;
         let _e4840 = constants.eos_r;
         let _e4894 = normal_vec.x;
-        f_l_1_ = ((_cse_902_ * dot(vec2<f32>(_cse_913_, (_cse_1619_ + ((((_cse_957_ * abs(_cse_960_)) / max(abs(_cse_960_), (abs(_cse_957_) + 0.00000001f))) * max((_cse_960_ * _cse_957_), 0f)) / max(abs((_cse_960_ * _cse_957_)), 0.00000001f)))), _e4835)) + (((_cse_903_ * _e4840) * (s_own_T + ((((dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_909_)), (face_center_vec - c_owner_vec)) * abs((_e151 - s_own_T))) / max(abs((_e151 - s_own_T)), (abs(dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_909_)), (face_center_vec - c_owner_vec))) + 0.00000001f))) * max(((_e151 - s_own_T) * dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_909_)), (face_center_vec - c_owner_vec))), 0f)) / max(abs(((_e151 - s_own_T) * dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_909_)), (face_center_vec - c_owner_vec)))), 0.00000001f)))) * _e4894));
+        f_l_1_ = ((_cse_902_ * dot(vec2<f32>(_cse_913_, (_cse_1620_ + ((((_cse_957_ * abs(_cse_960_)) / max(abs(_cse_960_), (abs(_cse_957_) + 0.00000001f))) * max((_cse_960_ * _cse_957_), 0f)) / max(abs((_cse_960_ * _cse_957_)), 0.00000001f)))), _e4835)) + (((_cse_903_ * _e4840) * (s_own_T + ((((dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_909_)), (face_center_vec - c_owner_vec)) * abs((_e151 - s_own_T))) / max(abs((_e151 - s_own_T)), (abs(dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_909_)), (face_center_vec - c_owner_vec))) + 0.00000001f))) * max(((_e151 - s_own_T) * dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_909_)), (face_center_vec - c_owner_vec))), 0f)) / max(abs(((_e151 - s_own_T) * dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_909_)), (face_center_vec - c_owner_vec)))), 0.00000001f)))) * _e4894));
         let _e4916 = normal_vec;
         let _e4921 = constants.eos_r;
         let _e4975 = normal_vec.x;
-        f_r_1_ = ((_cse_930_ * dot(vec2<f32>(_cse_941_, (_cse_1622_ + ((((_cse_962_ * abs(_cse_965_)) / max(abs(_cse_965_), (abs(_cse_962_) + 0.00000001f))) * max((_cse_965_ * _cse_962_), 0f)) / max(abs((_cse_965_ * _cse_962_)), 0.00000001f)))), _e4916)) + (((_cse_931_ * _e4921) * (_e151 + ((((dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_937_)), (face_center_vec - c_neigh_cell_vec)) * abs((s_own_T - _e151))) / max(abs((s_own_T - _e151)), (abs(dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_937_)), (face_center_vec - c_neigh_cell_vec))) + 0.00000001f))) * max(((s_own_T - _e151) * dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_937_)), (face_center_vec - c_neigh_cell_vec))), 0f)) / max(abs(((s_own_T - _e151) * dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_937_)), (face_center_vec - c_neigh_cell_vec)))), 0.00000001f)))) * _e4975));
+        f_r_1_ = ((_cse_930_ * dot(vec2<f32>(_cse_941_, (_cse_1623_ + ((((_cse_962_ * abs(_cse_965_)) / max(abs(_cse_965_), (abs(_cse_962_) + 0.00000001f))) * max((_cse_965_ * _cse_962_), 0f)) / max(abs((_cse_965_ * _cse_962_)), 0.00000001f)))), _e4916)) + (((_cse_931_ * _e4921) * (_e151 + ((((dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_937_)), (face_center_vec - c_neigh_cell_vec)) * abs((s_own_T - _e151))) / max(abs((s_own_T - _e151)), (abs(dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_937_)), (face_center_vec - c_neigh_cell_vec))) + 0.00000001f))) * max(((s_own_T - _e151) * dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_937_)), (face_center_vec - c_neigh_cell_vec))), 0f)) / max(abs(((s_own_T - _e151) * dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_937_)), (face_center_vec - c_neigh_cell_vec)))), 0.00000001f)))) * _e4975));
     }
     let _e4980 = constants.scheme;
     if ((_e4980 == 5u) && !(is_boundary_1)) {
@@ -8167,18 +8167,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1012_ = min(_cse_1013_, _cse_1025_);
         let _cse_1011_ = (_cse_1613_ + _cse_1012_);
         let _cse_998_ = (_cse_999_ * _cse_1011_);
-        let _cse_1028_ = (_cse_1622_ - _cse_1619_);
-        let _cse_1029_ = (_cse_1619_ - _cse_1622_);
+        let _cse_1028_ = (_cse_1623_ - _cse_1620_);
+        let _cse_1029_ = (_cse_1620_ - _cse_1623_);
         u_l_1_ = _cse_966_;
         u_r_1_ = _cse_998_;
         let _e5114 = normal_vec;
         let _e5119 = constants.eos_r;
         let _e5148 = normal_vec.x;
-        f_l_1_ = ((_cse_966_ * dot(vec2<f32>(_cse_981_, (_cse_1619_ + min(max(((((_cse_1619_ * 0.625f) + (_cse_1622_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1028_) / vec2(_cse_977_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1619_), min(_cse_1028_, 0f)), max(_cse_1028_, 0f)))), _e5114)) + (((_cse_967_ * _e5119) * (s_own_T + min(max(((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_977_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T), min((_e151 - s_own_T), 0f)), max((_e151 - s_own_T), 0f)))) * _e5148));
+        f_l_1_ = ((_cse_966_ * dot(vec2<f32>(_cse_981_, (_cse_1620_ + min(max(((((_cse_1620_ * 0.625f) + (_cse_1623_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1028_) / vec2(_cse_977_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1620_), min(_cse_1028_, 0f)), max(_cse_1028_, 0f)))), _e5114)) + (((_cse_967_ * _e5119) * (s_own_T + min(max(((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_977_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T), min((_e151 - s_own_T), 0f)), max((_e151 - s_own_T), 0f)))) * _e5148));
         let _e5174 = normal_vec;
         let _e5179 = constants.eos_r;
         let _e5208 = normal_vec.x;
-        f_r_1_ = ((_cse_998_ * dot(vec2<f32>(_cse_1011_, (_cse_1622_ + min(max(((((_cse_1622_ * 0.625f) + (_cse_1619_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1029_) / vec2(_cse_1009_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1622_), min(_cse_1029_, 0f)), max(_cse_1029_, 0f)))), _e5174)) + (((_cse_999_ * _e5179) * (_e151 + min(max(((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1009_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151), min((s_own_T - _e151), 0f)), max((s_own_T - _e151), 0f)))) * _e5208));
+        f_r_1_ = ((_cse_998_ * dot(vec2<f32>(_cse_1011_, (_cse_1623_ + min(max(((((_cse_1623_ * 0.625f) + (_cse_1620_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1029_) / vec2(_cse_1009_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1623_), min(_cse_1029_, 0f)), max(_cse_1029_, 0f)))), _e5174)) + (((_cse_999_ * _e5179) * (_e151 + min(max(((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1009_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151), min((s_own_T - _e151), 0f)), max((s_own_T - _e151), 0f)))) * _e5208));
     }
     let _e5213 = constants.scheme;
     if ((_e5213 == 6u) && !(is_boundary_1)) {
@@ -8238,20 +8238,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1071_ = (_cse_1072_ * _cse_1083_);
         let _cse_1070_ = (_cse_1613_ + _cse_1071_);
         let _cse_1060_ = (_cse_1061_ * _cse_1070_);
-        let _cse_1090_ = (((_cse_1619_ * 0.625f) + (_cse_1622_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1622_ - _cse_1619_)) / vec2(_cse_1038_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_1089_ = (_cse_1090_ - _cse_1619_);
-        let _cse_1093_ = (((_cse_1622_ * 0.625f) + (_cse_1619_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1619_ - _cse_1622_)) / vec2(_cse_1068_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
-        let _cse_1092_ = (_cse_1093_ - _cse_1622_);
+        let _cse_1090_ = (((_cse_1620_ * 0.625f) + (_cse_1623_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1623_ - _cse_1620_)) / vec2(_cse_1038_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_1089_ = (_cse_1090_ - _cse_1620_);
+        let _cse_1093_ = (((_cse_1623_ * 0.625f) + (_cse_1620_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1620_ - _cse_1623_)) / vec2(_cse_1068_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_1092_ = (_cse_1093_ - _cse_1623_);
         u_l_1_ = _cse_1030_;
         u_r_1_ = _cse_1060_;
         let _e5425 = normal_vec;
         let _e5430 = constants.eos_r;
         let _e5520 = normal_vec.x;
-        f_l_1_ = ((_cse_1030_ * dot(vec2<f32>(_cse_1040_, (_cse_1619_ + ((((_cse_1089_ * abs((_cse_1622_ - _cse_1619_))) / max(abs((_cse_1622_ - _cse_1619_)), (abs(_cse_1089_) + 0.00000001f))) * max(((_cse_1622_ - _cse_1619_) * _cse_1089_), 0f)) / max(abs(((_cse_1622_ - _cse_1619_) * _cse_1089_)), 0.00000001f)))), _e5425)) + (((_cse_1031_ * _e5430) * (s_own_T + ((((((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1038_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T) * abs((_e151 - s_own_T))) / max(abs((_e151 - s_own_T)), (abs(((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1038_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T)) + 0.00000001f))) * max(((_e151 - s_own_T) * ((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1038_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T)), 0f)) / max(abs(((_e151 - s_own_T) * ((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1038_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T))), 0.00000001f)))) * _e5520));
+        f_l_1_ = ((_cse_1030_ * dot(vec2<f32>(_cse_1040_, (_cse_1620_ + ((((_cse_1089_ * abs((_cse_1623_ - _cse_1620_))) / max(abs((_cse_1623_ - _cse_1620_)), (abs(_cse_1089_) + 0.00000001f))) * max(((_cse_1623_ - _cse_1620_) * _cse_1089_), 0f)) / max(abs(((_cse_1623_ - _cse_1620_) * _cse_1089_)), 0.00000001f)))), _e5425)) + (((_cse_1031_ * _e5430) * (s_own_T + ((((((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1038_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T) * abs((_e151 - s_own_T))) / max(abs((_e151 - s_own_T)), (abs(((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1038_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T)) + 0.00000001f))) * max(((_e151 - s_own_T) * ((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1038_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T)), 0f)) / max(abs(((_e151 - s_own_T) * ((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1038_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T))), 0.00000001f)))) * _e5520));
         let _e5546 = normal_vec;
         let _e5551 = constants.eos_r;
         let _e5641 = normal_vec.x;
-        f_r_1_ = ((_cse_1060_ * dot(vec2<f32>(_cse_1070_, (_cse_1622_ + ((((_cse_1092_ * abs((_cse_1619_ - _cse_1622_))) / max(abs((_cse_1619_ - _cse_1622_)), (abs(_cse_1092_) + 0.00000001f))) * max(((_cse_1619_ - _cse_1622_) * _cse_1092_), 0f)) / max(abs(((_cse_1619_ - _cse_1622_) * _cse_1092_)), 0.00000001f)))), _e5546)) + (((_cse_1061_ * _e5551) * (_e151 + ((((((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1068_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151) * abs((s_own_T - _e151))) / max(abs((s_own_T - _e151)), (abs(((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1068_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)) + 0.00000001f))) * max(((s_own_T - _e151) * ((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1068_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)), 0f)) / max(abs(((s_own_T - _e151) * ((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1068_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151))), 0.00000001f)))) * _e5641));
+        f_r_1_ = ((_cse_1060_ * dot(vec2<f32>(_cse_1070_, (_cse_1623_ + ((((_cse_1092_ * abs((_cse_1620_ - _cse_1623_))) / max(abs((_cse_1620_ - _cse_1623_)), (abs(_cse_1092_) + 0.00000001f))) * max(((_cse_1620_ - _cse_1623_) * _cse_1092_), 0f)) / max(abs(((_cse_1620_ - _cse_1623_) * _cse_1092_)), 0.00000001f)))), _e5546)) + (((_cse_1061_ * _e5551) * (_e151 + ((((((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1068_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151) * abs((s_own_T - _e151))) / max(abs((s_own_T - _e151)), (abs(((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1068_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)) + 0.00000001f))) * max(((s_own_T - _e151) * ((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1068_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)), 0f)) / max(abs(((s_own_T - _e151) * ((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1068_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151))), 0.00000001f)))) * _e5641));
     }
     let _e5650 = a_plus;
     let _e5651 = f_l_1_;
@@ -8262,17 +8262,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e5660 = u_r_1_;
     let _e5661 = u_l_1_;
     fluxes[((idx * 8u) + 1u)] = (((((_e5650 * _e5651) - (_e5653 * _e5654)) + ((_e5657 * _e5658) * (_e5660 - _e5661))) / denom) * area);
-    let _cse_1094_ = (s_own_rho * _cse_1619_);
-    let _cse_1096_ = (_e181 * _cse_1622_);
+    let _cse_1094_ = (s_own_rho * _cse_1620_);
+    let _cse_1096_ = (_e181 * _cse_1623_);
     let _cse_1098_ = normal_vec.y;
     u_l_2_ = _cse_1094_;
     u_r_2_ = _cse_1096_;
     let _e5674 = normal_vec;
     let _e5679 = constants.eos_r;
-    f_l_2_ = ((_cse_1094_ * dot(vec2<f32>(_cse_1610_, _cse_1619_), _e5674)) + (((s_own_rho * _e5679) * s_own_T) * _cse_1098_));
+    f_l_2_ = ((_cse_1094_ * dot(vec2<f32>(_cse_1610_, _cse_1620_), _e5674)) + (((s_own_rho * _e5679) * s_own_T) * _cse_1098_));
     let _e5686 = normal_vec;
     let _e5691 = constants.eos_r;
-    f_r_2_ = ((_cse_1096_ * dot(vec2<f32>(_cse_1613_, _cse_1622_), _e5686)) + (((_e181 * _e5691) * _e151) * _cse_1098_));
+    f_r_2_ = ((_cse_1096_ * dot(vec2<f32>(_cse_1613_, _cse_1623_), _e5686)) + (((_e181 * _e5691) * _e151) * _cse_1098_));
     let _e5699 = constants.scheme;
     if ((_e5699 == 1u) && !(is_boundary_1)) {
         let _cse_1105_ = dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec));
@@ -8281,11 +8281,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1102_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1103_);
         let _cse_1101_ = dot(_cse_1102_, (face_center_vec - c_owner_vec));
         let _cse_1100_ = (s_own_rho + _cse_1101_);
-        let _cse_1111_ = (_cse_1622_ - _cse_1619_);
+        let _cse_1111_ = (_cse_1623_ - _cse_1620_);
         let _cse_1110_ = (_cse_1111_ / _cse_1104_);
         let _cse_1109_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1110_);
         let _cse_1108_ = dot(_cse_1109_, (face_center_vec - c_owner_vec));
-        let _cse_1106_ = (_cse_1619_ + _cse_1108_);
+        let _cse_1106_ = (_cse_1620_ + _cse_1108_);
         let _cse_1099_ = (_cse_1100_ * _cse_1106_);
         let _cse_1119_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
         let _cse_1118_ = max(_cse_1119_, 0.000000000001f);
@@ -8293,11 +8293,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1116_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1117_);
         let _cse_1115_ = dot(_cse_1116_, (face_center_vec - c_neigh_cell_vec));
         let _cse_1114_ = (_e181 + _cse_1115_);
-        let _cse_1124_ = (_cse_1619_ - _cse_1622_);
+        let _cse_1124_ = (_cse_1620_ - _cse_1623_);
         let _cse_1123_ = (_cse_1124_ / _cse_1118_);
         let _cse_1122_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1123_);
         let _cse_1121_ = dot(_cse_1122_, (face_center_vec - c_neigh_cell_vec));
-        let _cse_1120_ = (_cse_1622_ + _cse_1121_);
+        let _cse_1120_ = (_cse_1623_ + _cse_1121_);
         let _cse_1113_ = (_cse_1114_ * _cse_1120_);
         let _cse_1127_ = normal_vec.y;
         u_l_2_ = _cse_1099_;
@@ -8321,17 +8321,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1131_ = (_cse_1132_ + _cse_1133_);
         let _cse_1130_ = (_cse_1131_ - s_own_rho);
         let _cse_1129_ = (s_own_rho + _cse_1130_);
-        let _cse_1144_ = (_cse_1619_ * 0.625f);
-        let _cse_1145_ = (_cse_1622_ * 0.375f);
+        let _cse_1144_ = (_cse_1620_ * 0.625f);
+        let _cse_1145_ = (_cse_1623_ * 0.375f);
         let _cse_1143_ = (_cse_1144_ + _cse_1145_);
-        let _cse_1151_ = (_cse_1622_ - _cse_1619_);
+        let _cse_1151_ = (_cse_1623_ - _cse_1620_);
         let _cse_1150_ = (_cse_1151_ / _cse_1137_);
         let _cse_1149_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1150_);
         let _cse_1148_ = dot(_cse_1149_, (c_neigh_cell_vec - c_owner_vec));
         let _cse_1147_ = (_cse_1148_ * 0.125f);
         let _cse_1142_ = (_cse_1143_ + _cse_1147_);
-        let _cse_1141_ = (_cse_1142_ - _cse_1619_);
-        let _cse_1139_ = (_cse_1619_ + _cse_1141_);
+        let _cse_1141_ = (_cse_1142_ - _cse_1620_);
+        let _cse_1139_ = (_cse_1620_ + _cse_1141_);
         let _cse_1128_ = (_cse_1129_ * _cse_1139_);
         let _cse_1156_ = ((_e181 * 0.625f) + (s_own_rho * 0.375f));
         let _cse_1162_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
@@ -8343,17 +8343,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1155_ = (_cse_1156_ + _cse_1157_);
         let _cse_1154_ = (_cse_1155_ - _e181);
         let _cse_1153_ = (_e181 + _cse_1154_);
-        let _cse_1167_ = (_cse_1622_ * 0.625f);
-        let _cse_1168_ = (_cse_1619_ * 0.375f);
+        let _cse_1167_ = (_cse_1623_ * 0.625f);
+        let _cse_1168_ = (_cse_1620_ * 0.375f);
         let _cse_1166_ = (_cse_1167_ + _cse_1168_);
-        let _cse_1173_ = (_cse_1619_ - _cse_1622_);
+        let _cse_1173_ = (_cse_1620_ - _cse_1623_);
         let _cse_1172_ = (_cse_1173_ / _cse_1161_);
         let _cse_1171_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1172_);
         let _cse_1170_ = dot(_cse_1171_, (c_owner_vec - c_neigh_cell_vec));
         let _cse_1169_ = (_cse_1170_ * 0.125f);
         let _cse_1165_ = (_cse_1166_ + _cse_1169_);
-        let _cse_1164_ = (_cse_1165_ - _cse_1622_);
-        let _cse_1163_ = (_cse_1622_ + _cse_1164_);
+        let _cse_1164_ = (_cse_1165_ - _cse_1623_);
+        let _cse_1163_ = (_cse_1623_ + _cse_1164_);
         let _cse_1152_ = (_cse_1153_ * _cse_1163_);
         let _cse_1176_ = normal_vec.y;
         u_l_2_ = _cse_1128_;
@@ -8377,7 +8377,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1187_ = max((_e181 - s_own_rho), 0f);
         let _cse_1179_ = min(_cse_1180_, _cse_1187_);
         let _cse_1178_ = (s_own_rho + _cse_1179_);
-        let _cse_1195_ = (_cse_1622_ - _cse_1619_);
+        let _cse_1195_ = (_cse_1623_ - _cse_1620_);
         let _cse_1194_ = (_cse_1195_ / _cse_1184_);
         let _cse_1193_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1194_);
         let _cse_1192_ = dot(_cse_1193_, (face_center_vec - c_owner_vec));
@@ -8385,7 +8385,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1191_ = max(_cse_1192_, _cse_1197_);
         let _cse_1198_ = max(_cse_1195_, 0f);
         let _cse_1190_ = min(_cse_1191_, _cse_1198_);
-        let _cse_1188_ = (_cse_1619_ + _cse_1190_);
+        let _cse_1188_ = (_cse_1620_ + _cse_1190_);
         let _cse_1177_ = (_cse_1178_ * _cse_1188_);
         let _cse_1207_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
         let _cse_1206_ = max(_cse_1207_, 0.000000000001f);
@@ -8397,7 +8397,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1209_ = max((s_own_rho - _e181), 0f);
         let _cse_1201_ = min(_cse_1202_, _cse_1209_);
         let _cse_1200_ = (_e181 + _cse_1201_);
-        let _cse_1216_ = (_cse_1619_ - _cse_1622_);
+        let _cse_1216_ = (_cse_1620_ - _cse_1623_);
         let _cse_1215_ = (_cse_1216_ / _cse_1206_);
         let _cse_1214_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1215_);
         let _cse_1213_ = dot(_cse_1214_, (face_center_vec - c_neigh_cell_vec));
@@ -8405,7 +8405,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1212_ = max(_cse_1213_, _cse_1217_);
         let _cse_1218_ = max(_cse_1216_, 0f);
         let _cse_1211_ = min(_cse_1212_, _cse_1218_);
-        let _cse_1210_ = (_cse_1622_ + _cse_1211_);
+        let _cse_1210_ = (_cse_1623_ + _cse_1211_);
         let _cse_1199_ = (_cse_1200_ * _cse_1210_);
         let _cse_1220_ = (_cse_1613_ - _cse_1610_);
         let _cse_1222_ = normal_vec.y;
@@ -8431,7 +8431,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1233_ = (max(_cse_1234_, 0f) / max(abs(_cse_1234_), 0.00000001f));
         let _cse_1226_ = (_cse_1227_ * _cse_1233_);
         let _cse_1225_ = (s_own_rho + _cse_1226_);
-        let _cse_1242_ = (_cse_1622_ - _cse_1619_);
+        let _cse_1242_ = (_cse_1623_ - _cse_1620_);
         let _cse_1241_ = (_cse_1242_ / _cse_1231_);
         let _cse_1240_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1241_);
         let _cse_1239_ = dot(_cse_1240_, (face_center_vec - c_owner_vec));
@@ -8445,7 +8445,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1250_ = max(_cse_1251_, 0.00000001f);
         let _cse_1247_ = (_cse_1248_ / _cse_1250_);
         let _cse_1237_ = (_cse_1238_ * _cse_1247_);
-        let _cse_1235_ = (_cse_1619_ + _cse_1237_);
+        let _cse_1235_ = (_cse_1620_ + _cse_1237_);
         let _cse_1224_ = (_cse_1225_ * _cse_1235_);
         let _cse_1260_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
         let _cse_1259_ = max(_cse_1260_, 0.000000000001f);
@@ -8457,7 +8457,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1261_ = (max(_cse_1262_, 0f) / max(abs(_cse_1262_), 0.00000001f));
         let _cse_1254_ = (_cse_1255_ * _cse_1261_);
         let _cse_1253_ = (_e181 + _cse_1254_);
-        let _cse_1269_ = (_cse_1619_ - _cse_1622_);
+        let _cse_1269_ = (_cse_1620_ - _cse_1623_);
         let _cse_1268_ = (_cse_1269_ / _cse_1259_);
         let _cse_1267_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1268_);
         let _cse_1266_ = dot(_cse_1267_, (face_center_vec - c_neigh_cell_vec));
@@ -8471,7 +8471,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1276_ = max(_cse_1277_, 0.00000001f);
         let _cse_1273_ = (_cse_1274_ / _cse_1276_);
         let _cse_1264_ = (_cse_1265_ * _cse_1273_);
-        let _cse_1263_ = (_cse_1622_ + _cse_1264_);
+        let _cse_1263_ = (_cse_1623_ + _cse_1264_);
         let _cse_1252_ = (_cse_1253_ * _cse_1263_);
         let _cse_1282_ = (_cse_1613_ - _cse_1610_);
         let _cse_1281_ = (_cse_1282_ / _cse_1231_);
@@ -8505,65 +8505,65 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1292_ = (_cse_1293_ - s_own_rho);
         let _cse_1301_ = min((_e181 - s_own_rho), 0f);
         let _cse_1291_ = max(_cse_1292_, _cse_1301_);
-        let _cse_1290_ = min(_cse_1291_, max((_e181 - s_own_rho), 0f));
+        let _cse_1302_ = max((_e181 - s_own_rho), 0f);
+        let _cse_1290_ = min(_cse_1291_, _cse_1302_);
         let _cse_1289_ = (s_own_rho + _cse_1290_);
-        let _cse_1309_ = (_cse_1619_ * 0.625f);
-        let _cse_1310_ = (_cse_1622_ * 0.375f);
-        let _cse_1308_ = (_cse_1309_ + _cse_1310_);
-        let _cse_1316_ = (_cse_1622_ - _cse_1619_);
-        let _cse_1315_ = (_cse_1316_ / _cse_1299_);
-        let _cse_1314_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1315_);
-        let _cse_1313_ = dot(_cse_1314_, (c_neigh_cell_vec - c_owner_vec));
-        let _cse_1312_ = (_cse_1313_ * 0.125f);
-        let _cse_1307_ = (_cse_1308_ + _cse_1312_);
-        let _cse_1306_ = (_cse_1307_ - _cse_1619_);
-        let _cse_1317_ = min(_cse_1316_, 0f);
-        let _cse_1305_ = max(_cse_1306_, _cse_1317_);
-        let _cse_1318_ = max(_cse_1316_, 0f);
-        let _cse_1304_ = min(_cse_1305_, _cse_1318_);
-        let _cse_1302_ = (_cse_1619_ + _cse_1304_);
-        let _cse_1288_ = (_cse_1289_ * _cse_1302_);
-        let _cse_1325_ = ((_e181 * 0.625f) + (s_own_rho * 0.375f));
-        let _cse_1331_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
-        let _cse_1330_ = max(_cse_1331_, 0.000000000001f);
-        let _cse_1329_ = ((s_own_rho - _e181) / _cse_1330_);
-        let _cse_1328_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1329_);
-        let _cse_1327_ = dot(_cse_1328_, (c_owner_vec - c_neigh_cell_vec));
-        let _cse_1326_ = (_cse_1327_ * 0.125f);
-        let _cse_1324_ = (_cse_1325_ + _cse_1326_);
-        let _cse_1323_ = (_cse_1324_ - _e181);
-        let _cse_1322_ = max(_cse_1323_, min((s_own_rho - _e181), 0f));
-        let _cse_1332_ = max((s_own_rho - _e181), 0f);
-        let _cse_1321_ = min(_cse_1322_, _cse_1332_);
-        let _cse_1320_ = (_e181 + _cse_1321_);
-        let _cse_1339_ = (_cse_1622_ * 0.625f);
-        let _cse_1340_ = (_cse_1619_ * 0.375f);
+        let _cse_1310_ = (_cse_1620_ * 0.625f);
+        let _cse_1311_ = (_cse_1623_ * 0.375f);
+        let _cse_1309_ = (_cse_1310_ + _cse_1311_);
+        let _cse_1317_ = (_cse_1623_ - _cse_1620_);
+        let _cse_1316_ = (_cse_1317_ / _cse_1299_);
+        let _cse_1315_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1316_);
+        let _cse_1314_ = dot(_cse_1315_, (c_neigh_cell_vec - c_owner_vec));
+        let _cse_1313_ = (_cse_1314_ * 0.125f);
+        let _cse_1308_ = (_cse_1309_ + _cse_1313_);
+        let _cse_1307_ = (_cse_1308_ - _cse_1620_);
+        let _cse_1318_ = min(_cse_1317_, 0f);
+        let _cse_1306_ = max(_cse_1307_, _cse_1318_);
+        let _cse_1319_ = max(_cse_1317_, 0f);
+        let _cse_1305_ = min(_cse_1306_, _cse_1319_);
+        let _cse_1303_ = (_cse_1620_ + _cse_1305_);
+        let _cse_1288_ = (_cse_1289_ * _cse_1303_);
+        let _cse_1326_ = ((_e181 * 0.625f) + (s_own_rho * 0.375f));
+        let _cse_1332_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
+        let _cse_1331_ = max(_cse_1332_, 0.000000000001f);
+        let _cse_1330_ = ((s_own_rho - _e181) / _cse_1331_);
+        let _cse_1329_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1330_);
+        let _cse_1328_ = dot(_cse_1329_, (c_owner_vec - c_neigh_cell_vec));
+        let _cse_1327_ = (_cse_1328_ * 0.125f);
+        let _cse_1325_ = (_cse_1326_ + _cse_1327_);
+        let _cse_1324_ = (_cse_1325_ - _e181);
+        let _cse_1323_ = max(_cse_1324_, min((s_own_rho - _e181), 0f));
+        let _cse_1322_ = min(_cse_1323_, max((s_own_rho - _e181), 0f));
+        let _cse_1321_ = (_e181 + _cse_1322_);
+        let _cse_1339_ = (_cse_1623_ * 0.625f);
+        let _cse_1340_ = (_cse_1620_ * 0.375f);
         let _cse_1338_ = (_cse_1339_ + _cse_1340_);
-        let _cse_1345_ = (_cse_1619_ - _cse_1622_);
-        let _cse_1344_ = (_cse_1345_ / _cse_1330_);
+        let _cse_1345_ = (_cse_1620_ - _cse_1623_);
+        let _cse_1344_ = (_cse_1345_ / _cse_1331_);
         let _cse_1343_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1344_);
         let _cse_1342_ = dot(_cse_1343_, (c_owner_vec - c_neigh_cell_vec));
         let _cse_1341_ = (_cse_1342_ * 0.125f);
         let _cse_1337_ = (_cse_1338_ + _cse_1341_);
-        let _cse_1336_ = (_cse_1337_ - _cse_1622_);
+        let _cse_1336_ = (_cse_1337_ - _cse_1623_);
         let _cse_1346_ = min(_cse_1345_, 0f);
         let _cse_1335_ = max(_cse_1336_, _cse_1346_);
         let _cse_1347_ = max(_cse_1345_, 0f);
         let _cse_1334_ = min(_cse_1335_, _cse_1347_);
-        let _cse_1333_ = (_cse_1622_ + _cse_1334_);
-        let _cse_1319_ = (_cse_1320_ * _cse_1333_);
+        let _cse_1333_ = (_cse_1623_ + _cse_1334_);
+        let _cse_1320_ = (_cse_1321_ * _cse_1333_);
         let _cse_1350_ = (_cse_1613_ - _cse_1610_);
         let _cse_1351_ = (_cse_1610_ - _cse_1613_);
         u_l_2_ = _cse_1288_;
-        u_r_2_ = _cse_1319_;
+        u_r_2_ = _cse_1320_;
         let _e6559 = normal_vec;
         let _e6564 = constants.eos_r;
         let _e6593 = normal_vec.y;
-        f_l_2_ = ((_cse_1288_ * dot(vec2<f32>((_cse_1610_ + min(max(((((_cse_1610_ * 0.625f) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1350_) / vec2(_cse_1299_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1610_), min(_cse_1350_, 0f)), max(_cse_1350_, 0f))), _cse_1302_), _e6559)) + (((_cse_1289_ * _e6564) * (s_own_T + min(max(((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1299_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T), min((_e151 - s_own_T), 0f)), max((_e151 - s_own_T), 0f)))) * _e6593));
+        f_l_2_ = ((_cse_1288_ * dot(vec2<f32>((_cse_1610_ + min(max(((((_cse_1610_ * 0.625f) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1350_) / vec2(_cse_1299_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1610_), min(_cse_1350_, 0f)), max(_cse_1350_, 0f))), _cse_1303_), _e6559)) + (((_cse_1289_ * _e6564) * (s_own_T + min(max(((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1299_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T), min((_e151 - s_own_T), 0f)), max((_e151 - s_own_T), 0f)))) * _e6593));
         let _e6619 = normal_vec;
         let _e6624 = constants.eos_r;
         let _e6653 = normal_vec.y;
-        f_r_2_ = ((_cse_1319_ * dot(vec2<f32>((_cse_1613_ + min(max(((((_cse_1613_ * 0.625f) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1351_) / vec2(_cse_1330_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1613_), min(_cse_1351_, 0f)), max(_cse_1351_, 0f))), _cse_1333_), _e6619)) + (((_cse_1320_ * _e6624) * (_e151 + min(max(((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1330_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151), min((s_own_T - _e151), 0f)), max((s_own_T - _e151), 0f)))) * _e6653));
+        f_r_2_ = ((_cse_1320_ * dot(vec2<f32>((_cse_1613_ + min(max(((((_cse_1613_ * 0.625f) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1351_) / vec2(_cse_1331_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1613_), min(_cse_1351_, 0f)), max(_cse_1351_, 0f))), _cse_1333_), _e6619)) + (((_cse_1321_ * _e6624) * (_e151 + min(max(((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1331_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151), min((s_own_T - _e151), 0f)), max((s_own_T - _e151), 0f)))) * _e6653));
     }
     let _e6658 = constants.scheme;
     if ((_e6658 == 6u) && !(is_boundary_1)) {
@@ -8576,14 +8576,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1355_ = (_cse_1356_ - s_own_rho);
         let _cse_1354_ = ((((_cse_1355_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_1355_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_1355_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_1355_)), 0.00000001f));
         let _cse_1353_ = (s_own_rho + _cse_1354_);
-        let _cse_1368_ = ((_cse_1619_ * 0.625f) + (_cse_1622_ * 0.375f));
-        let _cse_1374_ = (_cse_1622_ - _cse_1619_);
+        let _cse_1368_ = ((_cse_1620_ * 0.625f) + (_cse_1623_ * 0.375f));
+        let _cse_1374_ = (_cse_1623_ - _cse_1620_);
         let _cse_1373_ = (_cse_1374_ / _cse_1360_);
         let _cse_1372_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1373_);
         let _cse_1371_ = dot(_cse_1372_, (c_neigh_cell_vec - c_owner_vec));
         let _cse_1370_ = (_cse_1371_ * 0.125f);
         let _cse_1367_ = (_cse_1368_ + _cse_1370_);
-        let _cse_1366_ = (_cse_1367_ - _cse_1619_);
+        let _cse_1366_ = (_cse_1367_ - _cse_1620_);
         let _cse_1376_ = max(abs(_cse_1374_), (abs(_cse_1366_) + 0.00000001f));
         let _cse_1375_ = (abs(_cse_1374_) / _cse_1376_);
         let _cse_1365_ = (_cse_1366_ * _cse_1375_);
@@ -8593,7 +8593,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1380_ = max(_cse_1381_, 0.00000001f);
         let _cse_1377_ = (_cse_1378_ / _cse_1380_);
         let _cse_1364_ = (_cse_1365_ * _cse_1377_);
-        let _cse_1362_ = (_cse_1619_ + _cse_1364_);
+        let _cse_1362_ = (_cse_1620_ + _cse_1364_);
         let _cse_1352_ = (_cse_1353_ * _cse_1362_);
         let _cse_1391_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
         let _cse_1390_ = max(_cse_1391_, 0.000000000001f);
@@ -8604,14 +8604,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1385_ = (_cse_1386_ - _e181);
         let _cse_1384_ = ((((_cse_1385_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_1385_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_1385_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_1385_)), 0.00000001f));
         let _cse_1383_ = (_e181 + _cse_1384_);
-        let _cse_1397_ = ((_cse_1622_ * 0.625f) + (_cse_1619_ * 0.375f));
-        let _cse_1402_ = (_cse_1619_ - _cse_1622_);
+        let _cse_1397_ = ((_cse_1623_ * 0.625f) + (_cse_1620_ * 0.375f));
+        let _cse_1402_ = (_cse_1620_ - _cse_1623_);
         let _cse_1401_ = (_cse_1402_ / _cse_1390_);
         let _cse_1400_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1401_);
         let _cse_1399_ = dot(_cse_1400_, (c_owner_vec - c_neigh_cell_vec));
         let _cse_1398_ = (_cse_1399_ * 0.125f);
         let _cse_1396_ = (_cse_1397_ + _cse_1398_);
-        let _cse_1395_ = (_cse_1396_ - _cse_1622_);
+        let _cse_1395_ = (_cse_1396_ - _cse_1623_);
         let _cse_1404_ = max(abs(_cse_1402_), (abs(_cse_1395_) + 0.00000001f));
         let _cse_1403_ = (abs(_cse_1402_) / _cse_1404_);
         let _cse_1394_ = (_cse_1395_ * _cse_1403_);
@@ -8621,7 +8621,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1408_ = max(_cse_1409_, 0.00000001f);
         let _cse_1405_ = (_cse_1406_ / _cse_1408_);
         let _cse_1393_ = (_cse_1394_ * _cse_1405_);
-        let _cse_1392_ = (_cse_1622_ + _cse_1393_);
+        let _cse_1392_ = (_cse_1623_ + _cse_1393_);
         let _cse_1382_ = (_cse_1383_ * _cse_1392_);
         let _cse_1412_ = (((_cse_1610_ * 0.625f) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1613_ - _cse_1610_)) / vec2(_cse_1360_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
         let _cse_1411_ = (_cse_1412_ - _cse_1610_);
@@ -8651,10 +8651,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     u_r_3_ = _e211;
     let _e7116 = constants.eos_r;
     let _e7121 = normal_vec;
-    f_l_3_ = ((s_own_rho_e + ((s_own_rho * _e7116) * s_own_T)) * dot(vec2<f32>(_cse_1610_, _cse_1619_), _e7121));
+    f_l_3_ = ((s_own_rho_e + ((s_own_rho * _e7116) * s_own_T)) * dot(vec2<f32>(_cse_1610_, _cse_1620_), _e7121));
     let _e7127 = constants.eos_r;
     let _e7132 = normal_vec;
-    f_r_3_ = ((_e211 + ((_e181 * _e7127) * _e151)) * dot(vec2<f32>(_cse_1613_, _cse_1622_), _e7132));
+    f_r_3_ = ((_e211 + ((_e181 * _e7127) * _e151)) * dot(vec2<f32>(_cse_1613_, _cse_1623_), _e7132));
     let _e7138 = constants.scheme;
     if ((_e7138 == 1u) && !(is_boundary_1)) {
         let _cse_1421_ = dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec));
@@ -8673,10 +8673,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         u_r_3_ = _cse_1422_;
         let _e7177 = constants.eos_r;
         let _e7206 = normal_vec;
-        f_l_3_ = ((_cse_1416_ + (((s_own_rho + dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1420_)), (face_center_vec - c_owner_vec))) * _e7177) * (s_own_T + dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1420_)), (face_center_vec - c_owner_vec))))) * dot(vec2<f32>((_cse_1610_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1613_ - _cse_1610_)) / vec2(_cse_1420_)), (face_center_vec - c_owner_vec))), (_cse_1619_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1622_ - _cse_1619_)) / vec2(_cse_1420_)), (face_center_vec - c_owner_vec)))), _e7206));
+        f_l_3_ = ((_cse_1416_ + (((s_own_rho + dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1420_)), (face_center_vec - c_owner_vec))) * _e7177) * (s_own_T + dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1420_)), (face_center_vec - c_owner_vec))))) * dot(vec2<f32>((_cse_1610_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1613_ - _cse_1610_)) / vec2(_cse_1420_)), (face_center_vec - c_owner_vec))), (_cse_1620_ + dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1623_ - _cse_1620_)) / vec2(_cse_1420_)), (face_center_vec - c_owner_vec)))), _e7206));
         let _e7219 = constants.eos_r;
         let _e7248 = normal_vec;
-        f_r_3_ = ((_cse_1422_ + (((_e181 + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1426_)), (face_center_vec - c_neigh_cell_vec))) * _e7219) * (_e151 + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1426_)), (face_center_vec - c_neigh_cell_vec))))) * dot(vec2<f32>((_cse_1613_ + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1610_ - _cse_1613_)) / vec2(_cse_1426_)), (face_center_vec - c_neigh_cell_vec))), (_cse_1622_ + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1619_ - _cse_1622_)) / vec2(_cse_1426_)), (face_center_vec - c_neigh_cell_vec)))), _e7248));
+        f_r_3_ = ((_cse_1422_ + (((_e181 + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1426_)), (face_center_vec - c_neigh_cell_vec))) * _e7219) * (_e151 + dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1426_)), (face_center_vec - c_neigh_cell_vec))))) * dot(vec2<f32>((_cse_1613_ + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1610_ - _cse_1613_)) / vec2(_cse_1426_)), (face_center_vec - c_neigh_cell_vec))), (_cse_1623_ + dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1620_ - _cse_1623_)) / vec2(_cse_1426_)), (face_center_vec - c_neigh_cell_vec)))), _e7248));
     }
     let _e7253 = constants.scheme;
     if ((_e7253 == 2u) && !(is_boundary_1)) {
@@ -8704,10 +8704,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         u_r_3_ = _cse_1442_;
         let _e7319 = constants.eos_r;
         let _e7375 = normal_vec;
-        f_l_3_ = ((_cse_1432_ + ((((((s_own_rho + (s_own_rho * 0.625f)) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1440_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho) * _e7319) * ((((s_own_T + (s_own_T * 0.625f)) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1440_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T))) * dot(vec2<f32>(((((_cse_1610_ + (_cse_1610_ * 0.625f)) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1613_ - _cse_1610_)) / vec2(_cse_1440_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1610_), ((((_cse_1619_ + (_cse_1619_ * 0.625f)) + (_cse_1622_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1622_ - _cse_1619_)) / vec2(_cse_1440_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1619_)), _e7375));
+        f_l_3_ = ((_cse_1432_ + ((((((s_own_rho + (s_own_rho * 0.625f)) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1440_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho) * _e7319) * ((((s_own_T + (s_own_T * 0.625f)) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1440_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T))) * dot(vec2<f32>(((((_cse_1610_ + (_cse_1610_ * 0.625f)) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1613_ - _cse_1610_)) / vec2(_cse_1440_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1610_), ((((_cse_1620_ + (_cse_1620_ * 0.625f)) + (_cse_1623_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_cse_1623_ - _cse_1620_)) / vec2(_cse_1440_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1620_)), _e7375));
         let _e7397 = constants.eos_r;
         let _e7453 = normal_vec;
-        f_r_3_ = ((_cse_1442_ + ((((((_e181 + (_e181 * 0.625f)) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1450_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181) * _e7397) * ((((_e151 + (_e151 * 0.625f)) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1450_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151))) * dot(vec2<f32>(((((_cse_1613_ + (_cse_1613_ * 0.625f)) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1610_ - _cse_1613_)) / vec2(_cse_1450_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1613_), ((((_cse_1622_ + (_cse_1622_ * 0.625f)) + (_cse_1619_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1619_ - _cse_1622_)) / vec2(_cse_1450_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1622_)), _e7453));
+        f_r_3_ = ((_cse_1442_ + ((((((_e181 + (_e181 * 0.625f)) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1450_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181) * _e7397) * ((((_e151 + (_e151 * 0.625f)) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1450_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151))) * dot(vec2<f32>(((((_cse_1613_ + (_cse_1613_ * 0.625f)) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1610_ - _cse_1613_)) / vec2(_cse_1450_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1613_), ((((_cse_1623_ + (_cse_1623_ * 0.625f)) + (_cse_1620_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1620_ - _cse_1623_)) / vec2(_cse_1450_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1623_)), _e7453));
     }
     let _e7458 = constants.scheme;
     if ((_e7458 == 3u) && !(is_boundary_1)) {
@@ -8732,17 +8732,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1467_ = min(_cse_1468_, _cse_1475_);
         let _cse_1466_ = (_e211 + _cse_1467_);
         let _cse_1477_ = (_cse_1613_ - _cse_1610_);
-        let _cse_1480_ = (_cse_1622_ - _cse_1619_);
+        let _cse_1480_ = (_cse_1623_ - _cse_1620_);
         let _cse_1482_ = (_cse_1610_ - _cse_1613_);
-        let _cse_1483_ = (_cse_1619_ - _cse_1622_);
+        let _cse_1483_ = (_cse_1620_ - _cse_1623_);
         u_l_3_ = _cse_1456_;
         u_r_3_ = _cse_1466_;
         let _e7525 = constants.eos_r;
         let _e7572 = normal_vec;
-        f_l_3_ = ((_cse_1456_ + (((s_own_rho + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1462_)), (face_center_vec - c_owner_vec)), min((_e181 - s_own_rho), 0f)), max((_e181 - s_own_rho), 0f))) * _e7525) * (s_own_T + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1462_)), (face_center_vec - c_owner_vec)), min((_e151 - s_own_T), 0f)), max((_e151 - s_own_T), 0f))))) * dot(vec2<f32>((_cse_1610_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1477_) / vec2(_cse_1462_)), (face_center_vec - c_owner_vec)), min(_cse_1477_, 0f)), max(_cse_1477_, 0f))), (_cse_1619_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1480_) / vec2(_cse_1462_)), (face_center_vec - c_owner_vec)), min(_cse_1480_, 0f)), max(_cse_1480_, 0f)))), _e7572));
+        f_l_3_ = ((_cse_1456_ + (((s_own_rho + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1462_)), (face_center_vec - c_owner_vec)), min((_e181 - s_own_rho), 0f)), max((_e181 - s_own_rho), 0f))) * _e7525) * (s_own_T + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1462_)), (face_center_vec - c_owner_vec)), min((_e151 - s_own_T), 0f)), max((_e151 - s_own_T), 0f))))) * dot(vec2<f32>((_cse_1610_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1477_) / vec2(_cse_1462_)), (face_center_vec - c_owner_vec)), min(_cse_1477_, 0f)), max(_cse_1477_, 0f))), (_cse_1620_ + min(max(dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1480_) / vec2(_cse_1462_)), (face_center_vec - c_owner_vec)), min(_cse_1480_, 0f)), max(_cse_1480_, 0f)))), _e7572));
         let _e7593 = constants.eos_r;
         let _e7640 = normal_vec;
-        f_r_3_ = ((_cse_1466_ + (((_e181 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1472_)), (face_center_vec - c_neigh_cell_vec)), min((s_own_rho - _e181), 0f)), max((s_own_rho - _e181), 0f))) * _e7593) * (_e151 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1472_)), (face_center_vec - c_neigh_cell_vec)), min((s_own_T - _e151), 0f)), max((s_own_T - _e151), 0f))))) * dot(vec2<f32>((_cse_1613_ + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1482_) / vec2(_cse_1472_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_1482_, 0f)), max(_cse_1482_, 0f))), (_cse_1622_ + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1483_) / vec2(_cse_1472_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_1483_, 0f)), max(_cse_1483_, 0f)))), _e7640));
+        f_r_3_ = ((_cse_1466_ + (((_e181 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1472_)), (face_center_vec - c_neigh_cell_vec)), min((s_own_rho - _e181), 0f)), max((s_own_rho - _e181), 0f))) * _e7593) * (_e151 + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1472_)), (face_center_vec - c_neigh_cell_vec)), min((s_own_T - _e151), 0f)), max((s_own_T - _e151), 0f))))) * dot(vec2<f32>((_cse_1613_ + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1482_) / vec2(_cse_1472_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_1482_, 0f)), max(_cse_1482_, 0f))), (_cse_1623_ + min(max(dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1483_) / vec2(_cse_1472_)), (face_center_vec - c_neigh_cell_vec)), min(_cse_1483_, 0f)), max(_cse_1483_, 0f)))), _e7640));
     }
     let _e7645 = constants.scheme;
     if ((_e7645 == 4u) && !(is_boundary_1)) {
@@ -8785,7 +8785,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1520_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1521_);
         let _cse_1519_ = dot(_cse_1520_, (face_center_vec - c_owner_vec));
         let _cse_1524_ = (_cse_1522_ * _cse_1519_);
-        let _cse_1529_ = (_cse_1622_ - _cse_1619_);
+        let _cse_1529_ = (_cse_1623_ - _cse_1620_);
         let _cse_1528_ = (_cse_1529_ / _cse_1490_);
         let _cse_1527_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1528_);
         let _cse_1526_ = dot(_cse_1527_, (face_center_vec - c_owner_vec));
@@ -8801,7 +8801,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1539_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1540_);
         let _cse_1538_ = dot(_cse_1539_, (face_center_vec - c_neigh_cell_vec));
         let _cse_1542_ = (_cse_1541_ * _cse_1538_);
-        let _cse_1546_ = (_cse_1619_ - _cse_1622_);
+        let _cse_1546_ = (_cse_1620_ - _cse_1623_);
         let _cse_1545_ = (_cse_1546_ / _cse_1504_);
         let _cse_1544_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1545_);
         let _cse_1543_ = dot(_cse_1544_, (face_center_vec - c_neigh_cell_vec));
@@ -8810,10 +8810,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         u_r_3_ = _cse_1498_;
         let _e7788 = constants.eos_r;
         let _e7847 = normal_vec;
-        f_l_3_ = ((_cse_1484_ + (((s_own_rho + ((((_cse_1512_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_1512_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_1512_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_1512_)), 0.00000001f))) * _e7788) * (s_own_T + ((((_cse_1515_ * abs((_e151 - s_own_T))) / max(abs((_e151 - s_own_T)), (abs(_cse_1515_) + 0.00000001f))) * max(((_e151 - s_own_T) * _cse_1515_), 0f)) / max(abs(((_e151 - s_own_T) * _cse_1515_)), 0.00000001f))))) * dot(vec2<f32>((_cse_1610_ + ((((_cse_1519_ * abs(_cse_1522_)) / max(abs(_cse_1522_), (abs(_cse_1519_) + 0.00000001f))) * max(_cse_1524_, 0f)) / max(abs(_cse_1524_), 0.00000001f))), (_cse_1619_ + ((((_cse_1526_ * abs(_cse_1529_)) / max(abs(_cse_1529_), (abs(_cse_1526_) + 0.00000001f))) * max(_cse_1531_, 0f)) / max(abs(_cse_1531_), 0.00000001f)))), _e7847));
+        f_l_3_ = ((_cse_1484_ + (((s_own_rho + ((((_cse_1512_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_1512_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_1512_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_1512_)), 0.00000001f))) * _e7788) * (s_own_T + ((((_cse_1515_ * abs((_e151 - s_own_T))) / max(abs((_e151 - s_own_T)), (abs(_cse_1515_) + 0.00000001f))) * max(((_e151 - s_own_T) * _cse_1515_), 0f)) / max(abs(((_e151 - s_own_T) * _cse_1515_)), 0.00000001f))))) * dot(vec2<f32>((_cse_1610_ + ((((_cse_1519_ * abs(_cse_1522_)) / max(abs(_cse_1522_), (abs(_cse_1519_) + 0.00000001f))) * max(_cse_1524_, 0f)) / max(abs(_cse_1524_), 0.00000001f))), (_cse_1620_ + ((((_cse_1526_ * abs(_cse_1529_)) / max(abs(_cse_1529_), (abs(_cse_1526_) + 0.00000001f))) * max(_cse_1531_, 0f)) / max(abs(_cse_1531_), 0.00000001f)))), _e7847));
         let _e7874 = constants.eos_r;
         let _e7933 = normal_vec;
-        f_r_3_ = ((_cse_1498_ + (((_e181 + ((((_cse_1532_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_1532_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_1532_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_1532_)), 0.00000001f))) * _e7874) * (_e151 + ((((_cse_1535_ * abs((s_own_T - _e151))) / max(abs((s_own_T - _e151)), (abs(_cse_1535_) + 0.00000001f))) * max(((s_own_T - _e151) * _cse_1535_), 0f)) / max(abs(((s_own_T - _e151) * _cse_1535_)), 0.00000001f))))) * dot(vec2<f32>((_cse_1613_ + ((((_cse_1538_ * abs(_cse_1541_)) / max(abs(_cse_1541_), (abs(_cse_1538_) + 0.00000001f))) * max(_cse_1542_, 0f)) / max(abs(_cse_1542_), 0.00000001f))), (_cse_1622_ + ((((_cse_1543_ * abs(_cse_1546_)) / max(abs(_cse_1546_), (abs(_cse_1543_) + 0.00000001f))) * max(_cse_1547_, 0f)) / max(abs(_cse_1547_), 0.00000001f)))), _e7933));
+        f_r_3_ = ((_cse_1498_ + (((_e181 + ((((_cse_1532_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_1532_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_1532_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_1532_)), 0.00000001f))) * _e7874) * (_e151 + ((((_cse_1535_ * abs((s_own_T - _e151))) / max(abs((s_own_T - _e151)), (abs(_cse_1535_) + 0.00000001f))) * max(((s_own_T - _e151) * _cse_1535_), 0f)) / max(abs(((s_own_T - _e151) * _cse_1535_)), 0.00000001f))))) * dot(vec2<f32>((_cse_1613_ + ((((_cse_1538_ * abs(_cse_1541_)) / max(abs(_cse_1541_), (abs(_cse_1538_) + 0.00000001f))) * max(_cse_1542_, 0f)) / max(abs(_cse_1542_), 0.00000001f))), (_cse_1623_ + ((((_cse_1543_ * abs(_cse_1546_)) / max(abs(_cse_1546_), (abs(_cse_1543_) + 0.00000001f))) * max(_cse_1547_, 0f)) / max(abs(_cse_1547_), 0.00000001f)))), _e7933));
     }
     let _e7938 = constants.scheme;
     if ((_e7938 == 5u) && !(is_boundary_1)) {
@@ -8846,17 +8846,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1563_ = min(_cse_1564_, _cse_1575_);
         let _cse_1562_ = (_e211 + _cse_1563_);
         let _cse_1578_ = (_cse_1613_ - _cse_1610_);
-        let _cse_1581_ = (_cse_1622_ - _cse_1619_);
+        let _cse_1581_ = (_cse_1623_ - _cse_1620_);
         let _cse_1582_ = (_cse_1610_ - _cse_1613_);
-        let _cse_1583_ = (_cse_1619_ - _cse_1622_);
+        let _cse_1583_ = (_cse_1620_ - _cse_1623_);
         u_l_3_ = _cse_1548_;
         u_r_3_ = _cse_1562_;
         let _e8032 = constants.eos_r;
         let _e8106 = normal_vec;
-        f_l_3_ = ((_cse_1548_ + (((s_own_rho + min(max(((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1558_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho), min((_e181 - s_own_rho), 0f)), max((_e181 - s_own_rho), 0f))) * _e8032) * (s_own_T + min(max(((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1558_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T), min((_e151 - s_own_T), 0f)), max((_e151 - s_own_T), 0f))))) * dot(vec2<f32>((_cse_1610_ + min(max(((((_cse_1610_ * 0.625f) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1578_) / vec2(_cse_1558_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1610_), min(_cse_1578_, 0f)), max(_cse_1578_, 0f))), (_cse_1619_ + min(max(((((_cse_1619_ * 0.625f) + (_cse_1622_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1581_) / vec2(_cse_1558_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1619_), min(_cse_1581_, 0f)), max(_cse_1581_, 0f)))), _e8106));
+        f_l_3_ = ((_cse_1548_ + (((s_own_rho + min(max(((((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_1558_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_rho), min((_e181 - s_own_rho), 0f)), max((_e181 - s_own_rho), 0f))) * _e8032) * (s_own_T + min(max(((((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1558_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_T), min((_e151 - s_own_T), 0f)), max((_e151 - s_own_T), 0f))))) * dot(vec2<f32>((_cse_1610_ + min(max(((((_cse_1610_ * 0.625f) + (_cse_1613_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1578_) / vec2(_cse_1558_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1610_), min(_cse_1578_, 0f)), max(_cse_1578_, 0f))), (_cse_1620_ + min(max(((((_cse_1620_ * 0.625f) + (_cse_1623_ * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * _cse_1581_) / vec2(_cse_1558_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_1620_), min(_cse_1581_, 0f)), max(_cse_1581_, 0f)))), _e8106));
         let _e8136 = constants.eos_r;
         let _e8210 = normal_vec;
-        f_r_3_ = ((_cse_1562_ + (((_e181 + min(max(((((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1572_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181), min((s_own_rho - _e181), 0f)), max((s_own_rho - _e181), 0f))) * _e8136) * (_e151 + min(max(((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1572_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151), min((s_own_T - _e151), 0f)), max((s_own_T - _e151), 0f))))) * dot(vec2<f32>((_cse_1613_ + min(max(((((_cse_1613_ * 0.625f) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1582_) / vec2(_cse_1572_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1613_), min(_cse_1582_, 0f)), max(_cse_1582_, 0f))), (_cse_1622_ + min(max(((((_cse_1622_ * 0.625f) + (_cse_1619_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1583_) / vec2(_cse_1572_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1622_), min(_cse_1583_, 0f)), max(_cse_1583_, 0f)))), _e8210));
+        f_r_3_ = ((_cse_1562_ + (((_e181 + min(max(((((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1572_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e181), min((s_own_rho - _e181), 0f)), max((s_own_rho - _e181), 0f))) * _e8136) * (_e151 + min(max(((((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1572_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151), min((s_own_T - _e151), 0f)), max((s_own_T - _e151), 0f))))) * dot(vec2<f32>((_cse_1613_ + min(max(((((_cse_1613_ * 0.625f) + (_cse_1610_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1582_) / vec2(_cse_1572_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1613_), min(_cse_1582_, 0f)), max(_cse_1582_, 0f))), (_cse_1623_ + min(max(((((_cse_1623_ * 0.625f) + (_cse_1620_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * _cse_1583_) / vec2(_cse_1572_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _cse_1623_), min(_cse_1583_, 0f)), max(_cse_1583_, 0f)))), _e8210));
     }
     let _e8215 = constants.scheme;
     if ((_e8215 == 6u) && !(is_boundary_1)) {
@@ -8886,48 +8886,48 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1606_ = (_cse_1607_ - s_own_rho);
         let _cse_1609_ = (((s_own_T * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_T)) / vec2(_cse_1592_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
         let _cse_1608_ = (_cse_1609_ - s_own_T);
-        let _cse_1617_ = (_cse_1613_ - _cse_1610_);
-        let _cse_1616_ = (((c_neigh_cell_vec - c_owner_vec) * _cse_1617_) / vec2(_cse_1592_));
+        let _cse_1618_ = (_cse_1613_ - _cse_1610_);
+        let _cse_1617_ = (_cse_1618_ / _cse_1592_);
+        let _cse_1616_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1617_);
         let _cse_1615_ = dot(_cse_1616_, (c_neigh_cell_vec - c_owner_vec));
         let _cse_1614_ = (_cse_1615_ * 0.125f);
         let _cse_1612_ = (((_cse_1610_ * 0.625f) + (_cse_1613_ * 0.375f)) + _cse_1614_);
         let _cse_1611_ = (_cse_1612_ - _cse_1610_);
-        let _cse_1618_ = (_cse_1617_ * _cse_1611_);
-        let _cse_1627_ = (_cse_1622_ - _cse_1619_);
-        let _cse_1626_ = (_cse_1627_ / _cse_1592_);
-        let _cse_1625_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1626_);
-        let _cse_1624_ = dot(_cse_1625_, (c_neigh_cell_vec - c_owner_vec));
-        let _cse_1623_ = (_cse_1624_ * 0.125f);
-        let _cse_1621_ = (((_cse_1619_ * 0.625f) + (_cse_1622_ * 0.375f)) + _cse_1623_);
-        let _cse_1620_ = (_cse_1621_ - _cse_1619_);
-        let _cse_1628_ = (_cse_1627_ * _cse_1620_);
-        let _cse_1630_ = (((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1603_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
-        let _cse_1629_ = (_cse_1630_ - _e181);
-        let _cse_1632_ = (((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1603_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
-        let _cse_1631_ = (_cse_1632_ - _e151);
+        let _cse_1619_ = (_cse_1618_ * _cse_1611_);
+        let _cse_1628_ = (_cse_1623_ - _cse_1620_);
+        let _cse_1627_ = (_cse_1628_ / _cse_1592_);
+        let _cse_1626_ = ((c_neigh_cell_vec - c_owner_vec) * _cse_1627_);
+        let _cse_1625_ = dot(_cse_1626_, (c_neigh_cell_vec - c_owner_vec));
+        let _cse_1624_ = (_cse_1625_ * 0.125f);
+        let _cse_1622_ = (((_cse_1620_ * 0.625f) + (_cse_1623_ * 0.375f)) + _cse_1624_);
+        let _cse_1621_ = (_cse_1622_ - _cse_1620_);
+        let _cse_1629_ = (_cse_1628_ * _cse_1621_);
+        let _cse_1631_ = (((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1603_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_1630_ = (_cse_1631_ - _e181);
+        let _cse_1633_ = (((_e151 * 0.625f) + (s_own_T * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_T - _e151)) / vec2(_cse_1603_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_1632_ = (_cse_1633_ - _e151);
         let _cse_1639_ = (_cse_1610_ - _cse_1613_);
-        let _cse_1638_ = (_cse_1639_ / _cse_1603_);
-        let _cse_1637_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1638_);
-        let _cse_1636_ = dot(_cse_1637_, (c_owner_vec - c_neigh_cell_vec));
-        let _cse_1635_ = (_cse_1636_ * 0.125f);
-        let _cse_1634_ = (((_cse_1613_ * 0.625f) + (_cse_1610_ * 0.375f)) + _cse_1635_);
-        let _cse_1633_ = (_cse_1634_ - _cse_1613_);
-        let _cse_1640_ = (_cse_1639_ * _cse_1633_);
-        let _cse_1646_ = (_cse_1619_ - _cse_1622_);
+        let _cse_1638_ = (((c_owner_vec - c_neigh_cell_vec) * _cse_1639_) / vec2(_cse_1603_));
+        let _cse_1637_ = dot(_cse_1638_, (c_owner_vec - c_neigh_cell_vec));
+        let _cse_1636_ = (_cse_1637_ * 0.125f);
+        let _cse_1635_ = (((_cse_1613_ * 0.625f) + (_cse_1610_ * 0.375f)) + _cse_1636_);
+        let _cse_1634_ = (_cse_1635_ - _cse_1613_);
+        let _cse_1640_ = (_cse_1639_ * _cse_1634_);
+        let _cse_1646_ = (_cse_1620_ - _cse_1623_);
         let _cse_1645_ = (((c_owner_vec - c_neigh_cell_vec) * _cse_1646_) / vec2(_cse_1603_));
         let _cse_1644_ = dot(_cse_1645_, (c_owner_vec - c_neigh_cell_vec));
         let _cse_1643_ = (_cse_1644_ * 0.125f);
-        let _cse_1642_ = (((_cse_1622_ * 0.625f) + (_cse_1619_ * 0.375f)) + _cse_1643_);
-        let _cse_1641_ = (_cse_1642_ - _cse_1622_);
+        let _cse_1642_ = (((_cse_1623_ * 0.625f) + (_cse_1620_ * 0.375f)) + _cse_1643_);
+        let _cse_1641_ = (_cse_1642_ - _cse_1623_);
         let _cse_1647_ = (_cse_1646_ * _cse_1641_);
         u_l_3_ = _cse_1584_;
         u_r_3_ = _cse_1595_;
         let _e8454 = constants.eos_r;
         let _e8513 = normal_vec;
-        f_l_3_ = ((_cse_1584_ + (((s_own_rho + ((((_cse_1606_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_1606_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_1606_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_1606_)), 0.00000001f))) * _e8454) * (s_own_T + ((((_cse_1608_ * abs((_e151 - s_own_T))) / max(abs((_e151 - s_own_T)), (abs(_cse_1608_) + 0.00000001f))) * max(((_e151 - s_own_T) * _cse_1608_), 0f)) / max(abs(((_e151 - s_own_T) * _cse_1608_)), 0.00000001f))))) * dot(vec2<f32>((_cse_1610_ + ((((_cse_1611_ * abs(_cse_1617_)) / max(abs(_cse_1617_), (abs(_cse_1611_) + 0.00000001f))) * max(_cse_1618_, 0f)) / max(abs(_cse_1618_), 0.00000001f))), (_cse_1619_ + ((((_cse_1620_ * abs(_cse_1627_)) / max(abs(_cse_1627_), (abs(_cse_1620_) + 0.00000001f))) * max(_cse_1628_, 0f)) / max(abs(_cse_1628_), 0.00000001f)))), _e8513));
+        f_l_3_ = ((_cse_1584_ + (((s_own_rho + ((((_cse_1606_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_1606_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_1606_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_1606_)), 0.00000001f))) * _e8454) * (s_own_T + ((((_cse_1608_ * abs((_e151 - s_own_T))) / max(abs((_e151 - s_own_T)), (abs(_cse_1608_) + 0.00000001f))) * max(((_e151 - s_own_T) * _cse_1608_), 0f)) / max(abs(((_e151 - s_own_T) * _cse_1608_)), 0.00000001f))))) * dot(vec2<f32>((_cse_1610_ + ((((_cse_1611_ * abs(_cse_1618_)) / max(abs(_cse_1618_), (abs(_cse_1611_) + 0.00000001f))) * max(_cse_1619_, 0f)) / max(abs(_cse_1619_), 0.00000001f))), (_cse_1620_ + ((((_cse_1621_ * abs(_cse_1628_)) / max(abs(_cse_1628_), (abs(_cse_1621_) + 0.00000001f))) * max(_cse_1629_, 0f)) / max(abs(_cse_1629_), 0.00000001f)))), _e8513));
         let _e8540 = constants.eos_r;
         let _e8599 = normal_vec;
-        f_r_3_ = ((_cse_1595_ + (((_e181 + ((((_cse_1629_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_1629_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_1629_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_1629_)), 0.00000001f))) * _e8540) * (_e151 + ((((_cse_1631_ * abs((s_own_T - _e151))) / max(abs((s_own_T - _e151)), (abs(_cse_1631_) + 0.00000001f))) * max(((s_own_T - _e151) * _cse_1631_), 0f)) / max(abs(((s_own_T - _e151) * _cse_1631_)), 0.00000001f))))) * dot(vec2<f32>((_cse_1613_ + ((((_cse_1633_ * abs(_cse_1639_)) / max(abs(_cse_1639_), (abs(_cse_1633_) + 0.00000001f))) * max(_cse_1640_, 0f)) / max(abs(_cse_1640_), 0.00000001f))), (_cse_1622_ + ((((_cse_1641_ * abs(_cse_1646_)) / max(abs(_cse_1646_), (abs(_cse_1641_) + 0.00000001f))) * max(_cse_1647_, 0f)) / max(abs(_cse_1647_), 0.00000001f)))), _e8599));
+        f_r_3_ = ((_cse_1595_ + (((_e181 + ((((_cse_1630_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_1630_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_1630_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_1630_)), 0.00000001f))) * _e8540) * (_e151 + ((((_cse_1632_ * abs((s_own_T - _e151))) / max(abs((s_own_T - _e151)), (abs(_cse_1632_) + 0.00000001f))) * max(((s_own_T - _e151) * _cse_1632_), 0f)) / max(abs(((s_own_T - _e151) * _cse_1632_)), 0.00000001f))))) * dot(vec2<f32>((_cse_1613_ + ((((_cse_1634_ * abs(_cse_1639_)) / max(abs(_cse_1639_), (abs(_cse_1634_) + 0.00000001f))) * max(_cse_1640_, 0f)) / max(abs(_cse_1640_), 0.00000001f))), (_cse_1623_ + ((((_cse_1641_ * abs(_cse_1646_)) / max(abs(_cse_1646_), (abs(_cse_1641_) + 0.00000001f))) * max(_cse_1647_, 0f)) / max(abs(_cse_1647_), 0.00000001f)))), _e8599));
     }
     let _e8608 = a_plus;
     let _e8609 = f_l_3_;

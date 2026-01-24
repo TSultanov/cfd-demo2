@@ -1,6 +1,7 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 use std::fmt;
+
+use indexmap::{IndexMap, IndexSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Module {
@@ -1525,8 +1526,8 @@ impl CseBuilder {
 
         #[derive(Default)]
         struct Canonicalizer {
-            memo: HashMap<Expr, Expr>,
-            intern: HashMap<NodeKey, Expr>,
+            memo: IndexMap<Expr, Expr>,
+            intern: IndexMap<NodeKey, Expr>,
         }
 
         impl Canonicalizer {
@@ -1571,7 +1572,7 @@ impl CseBuilder {
             expr.with_node(|node| matches!(node, ExprNode::Literal(_) | ExprNode::Ident(_)))
         }
 
-        fn expr_size(expr: Expr, canon: &mut Canonicalizer, memo: &mut HashMap<Expr, usize>) -> usize {
+        fn expr_size(expr: Expr, canon: &mut Canonicalizer, memo: &mut IndexMap<Expr, usize>) -> usize {
             let rep = canon.canon(expr);
             if let Some(size) = memo.get(&rep).copied() {
                 return size;
@@ -1599,7 +1600,7 @@ impl CseBuilder {
             size
         }
 
-        fn count_subexprs(expr: Expr, canon: &mut Canonicalizer, counts: &mut HashMap<Expr, usize>) {
+        fn count_subexprs(expr: Expr, canon: &mut Canonicalizer, counts: &mut IndexMap<Expr, usize>) {
             let rep = canon.canon(expr);
             *counts.entry(rep).or_insert(0) += 1;
             expr.with_node(|node| match node {
@@ -1624,12 +1625,12 @@ impl CseBuilder {
         }
 
         let mut canon = Canonicalizer::default();
-        let mut counts = HashMap::<Expr, usize>::new();
+        let mut counts = IndexMap::<Expr, usize>::new();
         for root in roots {
             count_subexprs(*root, &mut canon, &mut counts);
         }
 
-        let mut sizes = HashMap::<Expr, usize>::new();
+        let mut sizes = IndexMap::<Expr, usize>::new();
         let mut candidates = Vec::new();
         for (rep, count) in &counts {
             if *count < self.config.min_occurrences {
@@ -1648,15 +1649,16 @@ impl CseBuilder {
             candidates.push((*rep, benefit));
         }
 
-        candidates.sort_by(|a, b| b.1.cmp(&a.1));
+        // Sort by benefit descending, then by expr id ascending for determinism.
+        candidates.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0 .0.cmp(&b.0 .0)));
         candidates.truncate(self.config.max_bindings);
 
-        let extract: HashSet<Expr> = candidates.into_iter().map(|(rep, _)| rep).collect();
+        let extract: IndexSet<Expr> = candidates.into_iter().map(|(rep, _)| rep).collect();
 
         struct Rewriter<'a> {
             canon: &'a mut Canonicalizer,
-            extract: &'a HashSet<Expr>,
-            names: HashMap<Expr, String>,
+            extract: &'a IndexSet<Expr>,
+            names: IndexMap<Expr, String>,
             stmts: Vec<Stmt>,
             prefix: &'a str,
             next_id: &'a mut u32,
@@ -1766,7 +1768,7 @@ impl CseBuilder {
         let mut rw = Rewriter {
             canon: &mut canon,
             extract: &extract,
-            names: HashMap::new(),
+            names: IndexMap::new(),
             stmts: Vec::new(),
             prefix: &self.prefix,
             next_id: &mut self.next_id,

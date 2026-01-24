@@ -784,6 +784,7 @@ name = "cfd2_codegen"
 version = "0.1.0"
 dependencies = [
  "cfd2_ir",
+ "indexmap",
 ]
 
 [[package]]

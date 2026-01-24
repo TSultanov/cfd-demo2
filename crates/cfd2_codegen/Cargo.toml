@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 cfd2_ir = { path = "../cfd2_ir" }
+indexmap = "2"
 

@@ -244,3 +244,8 @@ required-features = ["meshgen"]
 name = "voronoi_benchmark"
 harness = false
 required-features = ["meshgen"]
+
+[[bench]]
+name = "compressible_solver_benchmark"
+harness = false
+required-features = ["meshgen"]

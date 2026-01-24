@@ -7,6 +7,7 @@ use cfd2::solver::gpu::structs::PreconditionerType;
 use cfd2::solver::gpu::unified_solver::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::model::helpers::SolverRuntimeParamsExt;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use nalgebra::Vector2;
 
@@ -31,10 +32,10 @@ fn setup_solver(cell_size: f64) -> (GpuUnifiedSolver, usize) {
     let mut solver = pollster::block_on(GpuUnifiedSolver::new(&mesh, model, config, None, None))
         .expect("should create solver");
     solver.set_dt(0.001);
-    solver.set_viscosity(0.001);
-    solver.set_density(1.0);
-    solver.set_alpha_p(0.3);
-    solver.set_alpha_u(0.7);
+    solver.set_viscosity(0.001).unwrap();
+    solver.set_density(1.0).unwrap();
+    solver.set_alpha_p(0.3).unwrap();
+    solver.set_alpha_u(0.7).unwrap();
     // Note: scheme is set via config in the new API
 
     solver.initialize_history();
@@ -139,17 +140,17 @@ fn bench_with_profiling(c: &mut Criterion) {
     group.throughput(Throughput::Elements(num_cells as u64));
     group.bench_function(BenchmarkId::new("step_profiled", num_cells), |b| {
         b.iter(|| {
-            solver.start_profiling_session();
+            let _ = solver.start_profiling_session();
             solver.step();
-            solver.end_profiling_session();
+            let _ = solver.end_profiling_session();
         });
     });
 
     // Print final profiling stats after benchmark
-    solver.start_profiling_session();
+    let _ = solver.start_profiling_session();
     solver.step();
-    solver.end_profiling_session();
-    solver.print_profiling_report();
+    let _ = solver.end_profiling_session();
+    let _ = solver.print_profiling_report();
 
     group.finish();
 }

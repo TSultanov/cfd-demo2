@@ -1182,6 +1182,10 @@ pub fn read_scalar(core: &FgmresCore<'_>) -> f32 {
         });
     encoder.copy_buffer_to_buffer(core.b_scalars, 0, core.b_staging_scalar, 0, 4);
     let submission_index = core.queue.submit(Some(encoder.finish()));
+    read_scalar_after_submit(core, submission_index)
+}
+
+pub fn read_scalar_after_submit(core: &FgmresCore<'_>, submission_index: wgpu::SubmissionIndex) -> f32 {
 
     let slice = core.b_staging_scalar.slice(..);
     let (tx, rx) = std::sync::mpsc::channel();
@@ -1241,35 +1245,42 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         let vj = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j);
         precondition(j, vj, z_buf);
 
-        // w = A * z_j
-        let spmv_bg = create_vector_bind_group(
-            core.device,
-            core.bgl_vectors,
-            core.vector_bindings,
-            z_buf.as_entire_binding(),
-            core.b_w.as_entire_binding(),
-            core.b_temp.as_entire_binding(),
-            "FGMRES SpMV BG",
-        );
-        dispatch_vector_pipeline(
-            core,
-            core.pipeline_spmv,
-            &spmv_bg,
-            dispatch_x,
-            dispatch_y,
-            "FGMRES SpMV",
-        );
-
-        // CGS (writes H[i,j] for i=0..j)
+        // Update solver params for this iteration.
         params.num_iters = j as u32;
-        params.dispatch_x = core.num_dot_groups;
         write_params(core, &params);
+
+        // (1) w = A * z_j, then CGS, then norm partial reduction.
         {
             let mut encoder = core
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("FGMRES CGS"),
+                    label: Some("FGMRES Iter: SpMV+CGS+NormPartial"),
                 });
+
+            // w = A * z_j
+            let spmv_bg = create_vector_bind_group(
+                core.device,
+                core.bgl_vectors,
+                core.vector_bindings,
+                z_buf.as_entire_binding(),
+                core.b_w.as_entire_binding(),
+                core.b_temp.as_entire_binding(),
+                "FGMRES SpMV BG",
+            );
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FGMRES SpMV"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(core.pipeline_spmv);
+                pass.set_bind_group(0, &spmv_bg, &[]);
+                pass.set_bind_group(1, core.bg_matrix, &[]);
+                pass.set_bind_group(2, core.bg_precond, &[]);
+                pass.set_bind_group(3, core.bg_params, &[]);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            }
+
+            // CGS (writes H[i,j] for i=0..j)
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("FGMRES CGS Calc"),
@@ -1297,35 +1308,37 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
                 pass.set_bind_group(0, core.bg_cgs, &[]);
                 pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
             }
+
+            // Partial reduction of ||w||^2 into dot_partial.
+            let norm_bg = create_vector_bind_group(
+                core.device,
+                core.bgl_vectors,
+                core.vector_bindings,
+                core.b_w.as_entire_binding(),
+                core.b_temp.as_entire_binding(),
+                core.b_dot_partial.as_entire_binding(),
+                "FGMRES Norm BG",
+            );
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FGMRES Norm Partial"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(core.pipeline_norm_sq);
+                pass.set_bind_group(0, &norm_bg, &[]);
+                pass.set_bind_group(1, core.bg_matrix, &[]);
+                pass.set_bind_group(2, core.bg_precond, &[]);
+                pass.set_bind_group(3, core.bg_params, &[]);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            }
+
             core.queue.submit(Some(encoder.finish()));
         }
-
-        // Restore vector params
-        params.dispatch_x = dispatch_x_threads;
-        write_params(core, &params);
 
         // Compute norm of w and write H[j+1,j] plus scalars[0]=1/norm.
         let h_idx = (j as u32) * (max_restart as u32 + 1) + (j as u32 + 1);
         iter_params.current_idx = h_idx;
         write_iter_params(core, &iter_params);
-
-        let norm_bg = create_vector_bind_group(
-            core.device,
-            core.bgl_vectors,
-            core.vector_bindings,
-            core.b_w.as_entire_binding(),
-            core.b_temp.as_entire_binding(),
-            core.b_dot_partial.as_entire_binding(),
-            "FGMRES Norm BG",
-        );
-        dispatch_vector_pipeline(
-            core,
-            core.pipeline_norm_sq,
-            &norm_bg,
-            dispatch_x,
-            dispatch_y,
-            "FGMRES Norm Partial",
-        );
 
         // Reduce + finish norm (single thread); hack params.n=num_dot_groups for this dispatch.
         let reduce_params = RawFgmresParams {
@@ -1356,37 +1369,58 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         // Restore params for vector ops
         write_params(core, &params);
 
-        // v_{j+1} = (1/||w||) * w
-        let v_next = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j + 1);
-        let scale_bg = create_vector_bind_group(
-            core.device,
-            core.bgl_vectors,
-            core.vector_bindings,
-            core.b_w.as_entire_binding(),
-            v_next,
-            core.b_temp.as_entire_binding(),
-            "FGMRES Normalize Basis BG",
-        );
-        dispatch_vector_pipeline(
-            core,
-            core.pipeline_scale,
-            &scale_bg,
-            dispatch_x,
-            dispatch_y,
-            "FGMRES Normalize & Copy",
-        );
-
-        // Update Hessenberg/Givens and residual estimate.
+        // (3) v_{j+1} = (1/||w||) * w, update Hessenberg/Givens, and stage residual estimate.
         iter_params.current_idx = j as u32;
         write_iter_params(core, &iter_params);
-        dispatch_logic_pipeline(
-            core,
-            core.pipeline_update_hessenberg,
-            1,
-            "FGMRES Update Hessenberg",
-        );
 
-        final_residual = read_scalar(core);
+        let submission_index = {
+            let mut encoder = core
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("FGMRES Iter: Scale+Update+Residual"),
+                });
+
+            // v_{j+1} = (1/||w||) * w
+            let v_next = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j + 1);
+            let scale_bg = create_vector_bind_group(
+                core.device,
+                core.bgl_vectors,
+                core.vector_bindings,
+                core.b_w.as_entire_binding(),
+                v_next,
+                core.b_temp.as_entire_binding(),
+                "FGMRES Normalize Basis BG",
+            );
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FGMRES Normalize & Copy"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(core.pipeline_scale);
+                pass.set_bind_group(0, &scale_bg, &[]);
+                pass.set_bind_group(1, core.bg_matrix, &[]);
+                pass.set_bind_group(2, core.bg_precond, &[]);
+                pass.set_bind_group(3, core.bg_params, &[]);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            }
+
+            // Update Hessenberg/Givens and residual estimate.
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FGMRES Update Hessenberg"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(core.pipeline_update_hessenberg);
+                pass.set_bind_group(0, core.bg_logic, &[]);
+                pass.set_bind_group(1, core.bg_logic_params, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+
+            encoder.copy_buffer_to_buffer(core.b_scalars, 0, core.b_staging_scalar, 0, 4);
+            core.queue.submit(Some(encoder.finish()))
+        };
+
+        final_residual = read_scalar_after_submit(core, submission_index);
         if final_residual <= config.tol_rel * rhs_norm || final_residual <= tol_abs {
             converged = true;
             break;

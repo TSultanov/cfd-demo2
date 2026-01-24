@@ -1,6 +1,7 @@
 use cfd2::solver::model::{all_models, compressible_model_with_eos};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
+use cfd2::solver::model::helpers::SolverCompressibleIdealGasExt;
 use cfd2::trace as tracefmt;
 use std::collections::BTreeMap;
 use std::io::BufRead;
@@ -105,6 +106,32 @@ fn build_model(case: &tracefmt::TraceCase) -> Result<cfd2::solver::model::ModelS
         .ok_or_else(|| format!("unknown model id '{}'", case.model_id))
 }
 
+#[derive(Default, Clone, Copy)]
+struct StatsAgg {
+    count: u64,
+    total: f64,
+    min: f64,
+    max: f64,
+}
+
+impl StatsAgg {
+    fn push(&mut self, value: f64) {
+        if self.count == 0 {
+            self.min = value;
+            self.max = value;
+        } else {
+            self.min = self.min.min(value);
+            self.max = self.max.max(value);
+        }
+        self.count += 1;
+        self.total += value;
+    }
+
+    fn mean(&self) -> Option<f64> {
+        (self.count > 0).then(|| self.total / self.count as f64)
+    }
+}
+
 fn build_config(
     trace: &LoadedTrace,
     model: &cfd2::solver::model::ModelSpec,
@@ -184,10 +211,127 @@ fn cmd_info(path: &str) -> Result<(), String> {
         }
     }
     if !trace.step_meta.is_empty() {
+        let mut wall_ms = StatsAgg::default();
+        let mut outer_iters = StatsAgg::default();
+        let mut linear_solve_ms = StatsAgg::default();
+        let mut linear_iters = StatsAgg::default();
+        let mut linear_residual = StatsAgg::default();
+        let mut linear_converged = 0u64;
+        let mut linear_diverged = 0u64;
+
+        let mut graph_label_total_s: BTreeMap<String, f64> = BTreeMap::new();
+        let mut graph_node_total_s: BTreeMap<String, f64> = BTreeMap::new();
+
+        for step in &trace.step_meta {
+            wall_ms.push(step.wall_time_ms as f64);
+            let iters = step
+                .graph
+                .iter()
+                .filter(|g| g.label.ends_with(":assembly"))
+                .count() as f64;
+            if iters > 0.0 {
+                outer_iters.push(iters);
+            }
+
+            for solve in &step.linear_solves {
+                linear_solve_ms.push(solve.time_ms as f64);
+                linear_iters.push(solve.iterations as f64);
+                linear_residual.push(solve.residual as f64);
+                if solve.converged {
+                    linear_converged += 1;
+                }
+                if solve.diverged {
+                    linear_diverged += 1;
+                }
+            }
+
+            for timing in &step.graph {
+                *graph_label_total_s.entry(timing.label.clone()).or_insert(0.0) += timing.seconds;
+                if let Some(nodes) = &timing.nodes {
+                    for node in nodes {
+                        *graph_node_total_s.entry(node.label.clone()).or_insert(0.0) += node.seconds;
+                    }
+                }
+            }
+        }
+
+        let total_linear_ms = linear_solve_ms.total;
+        let total_wall_ms = wall_ms.total;
+
         println!(
             "  recorded_total_wall_ms: {:.3}",
             trace.recorded_total_wall_ms
         );
+        if let Some(mean) = wall_ms.mean() {
+            println!(
+                "  step_wall_ms: avg={:.3} min={:.3} max={:.3}",
+                mean, wall_ms.min, wall_ms.max
+            );
+        }
+        if outer_iters.count > 0 {
+            println!(
+                "  outer_iters: avg={:.2} min={:.0} max={:.0}",
+                outer_iters.mean().unwrap_or(0.0),
+                outer_iters.min,
+                outer_iters.max
+            );
+        }
+        if linear_solve_ms.count > 0 {
+            let pct_wall = if total_wall_ms > 0.0 {
+                total_linear_ms / total_wall_ms * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "  linear_solves: count={} total_ms={:.3} ({:.1}% wall) avg_ms={:.3}",
+                linear_solve_ms.count,
+                total_linear_ms,
+                pct_wall,
+                linear_solve_ms.mean().unwrap_or(0.0)
+            );
+            println!(
+                "  linear_iters: avg={:.2} min={:.0} max={:.0}  converged={} diverged={}",
+                linear_iters.mean().unwrap_or(0.0),
+                linear_iters.min,
+                linear_iters.max,
+                linear_converged,
+                linear_diverged
+            );
+            println!(
+                "  linear_residual: avg={:.3e} min={:.3e} max={:.3e}",
+                linear_residual.mean().unwrap_or(0.0),
+                linear_residual.min,
+                linear_residual.max
+            );
+        }
+
+        if !graph_label_total_s.is_empty() {
+            let mut totals: Vec<(String, f64)> = graph_label_total_s.into_iter().collect();
+            totals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            println!("  graph_top:");
+            for (label, seconds) in totals.into_iter().take(10) {
+                let pct = if total_wall_ms > 0.0 {
+                    seconds * 1000.0 / total_wall_ms * 100.0
+                } else {
+                    0.0
+                };
+                println!("    {:10.3} ms ({:5.1}%)  {}", seconds * 1000.0, pct, label);
+            }
+        }
+
+        if !graph_node_total_s.is_empty() {
+            let mut totals: Vec<(String, f64)> = graph_node_total_s.into_iter().collect();
+            totals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            println!("  graph_nodes_top:");
+            for (label, seconds) in totals.into_iter().take(10) {
+                let pct = if total_wall_ms > 0.0 {
+                    seconds * 1000.0 / total_wall_ms * 100.0
+                } else {
+                    0.0
+                };
+                println!("    {:10.3} ms ({:5.1}%)  {}", seconds * 1000.0, pct, label);
+            }
+        }
     }
     println!(
         "  profiling_enabled (original build): {}",
@@ -276,6 +420,14 @@ fn cmd_replay(path: &str, opts: ReplayOpts) -> Result<(), String> {
     trace.header
         .initial_params
         .apply_to_solver(&mut solver);
+
+    if trace.header.case.model_id == "compressible" {
+        let eos: cfd2::solver::model::EosSpec = trace.header.initial_params.eos.clone().into();
+        let rho = trace.header.initial_params.density;
+        let p_ref = eos.pressure_for_density(rho as f64) as f32;
+        solver.set_uniform_state(rho, [0.0, 0.0], p_ref);
+    }
+    solver.initialize_history();
 
     let wants_profiling = opts.profiling && trace.header.ui.profiling_enabled;
     if wants_profiling && !cfg!(feature = "profiling") {

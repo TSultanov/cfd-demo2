@@ -370,6 +370,7 @@ pub(crate) struct GpuProgramPlan {
     pub outer_residual_u: Option<f32>,
     pub outer_residual_p: Option<f32>,
     pub outer_field_residuals: Vec<(String, f32)>,
+    pub repeat_break: bool,
 }
 
 impl GpuProgramPlan {
@@ -396,6 +397,7 @@ impl GpuProgramPlan {
             outer_residual_u: None,
             outer_residual_p: None,
             outer_field_residuals: Vec::new(),
+            repeat_break: false,
         }
     }
 
@@ -561,6 +563,10 @@ impl GpuProgramPlan {
                     let times = self.spec.ops.eval_count(times, &*self);
                     for _ in 0..times {
                         self.execute_block(body);
+                        if self.repeat_break {
+                            self.repeat_break = false;
+                            break;
+                        }
                     }
                 }
             }

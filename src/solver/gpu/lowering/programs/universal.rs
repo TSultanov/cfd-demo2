@@ -6,7 +6,6 @@ use crate::solver::gpu::program::plan::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::program::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanStepStats};
 use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
 use crate::solver::gpu::structs::LinearSolverStats;
-use crate::solver::model::backend::ast::FieldKind;
 
 // --- Single universal program resource ---
 
@@ -201,112 +200,7 @@ fn host_implicit_solve_fgmres(plan: &mut GpuProgramPlan) {
 }
 
 fn host_implicit_record_stats(plan: &mut GpuProgramPlan) {
-    let iters_done = plan.step_linear_stats.len();
-    plan.outer_iterations = iters_done as u32;
-
-    if !plan.collect_convergence_stats {
-        return;
-    }
-
-    // Avoid expensive readbacks for every outer iteration: only report residuals from the
-    // final corrector (which is what the UI log line captures per step).
-    let iters_total = generic_coupled_program::count_outer_iters(plan);
-    if iters_done != iters_total {
-        return;
-    }
-
-    let x = {
-        let Some(debug) = plan.linear_system_debug() else {
-            return;
-        };
-
-        match pollster::block_on(debug.get_linear_solution()) {
-            Ok(v) => v,
-            Err(err) => {
-                eprintln!("[cfd2][convergence] failed to read linear solution: {err}");
-                return;
-            }
-        }
-    };
-
-    let stride = plan.model.system.unknowns_per_cell() as usize;
-    if stride == 0 {
-        return;
-    }
-    let num_cells = plan.num_cells() as usize;
-    if x.len() != num_cells * stride {
-        eprintln!(
-            "[cfd2][convergence] unexpected solution length: got {} expected {} (= num_cells {} * stride {})",
-            x.len(),
-            num_cells * stride,
-            num_cells,
-            stride
-        );
-        return;
-    }
-
-    let layout = &plan.model.state_layout;
-    let mut residuals: Vec<(String, f32)> = Vec::new();
-    let mut residual_u: Option<f32> = None;
-    let mut residual_p: Option<f32> = None;
-
-    for eqn in plan.model.system.equations() {
-        let target = eqn.target();
-        let name = target.name();
-
-        let mut max_val = 0.0f32;
-        match target.kind() {
-            FieldKind::Scalar => {
-                let Some(off) = layout.offset_for(name) else {
-                    continue;
-                };
-                let off = off as usize;
-                for cell in 0..num_cells {
-                    let v = x[cell * stride + off].abs();
-                    if v > max_val {
-                        max_val = v;
-                    }
-                }
-            }
-            kind => {
-                let comps = kind.component_count() as usize;
-                let mut comp_offsets = Vec::with_capacity(comps);
-                for comp in 0..comps {
-                    let Some(off) = layout.component_offset(name, comp as u32) else {
-                        comp_offsets.clear();
-                        break;
-                    };
-                    comp_offsets.push(off as usize);
-                }
-                if comp_offsets.is_empty() {
-                    continue;
-                }
-                for cell in 0..num_cells {
-                    let base = cell * stride;
-                    let mut mag2 = 0.0f32;
-                    for &off in &comp_offsets {
-                        let dv = x[base + off];
-                        mag2 += dv * dv;
-                    }
-                    let v = mag2.sqrt();
-                    if v > max_val {
-                        max_val = v;
-                    }
-                }
-            }
-        }
-
-        if name == "p" {
-            residual_p = Some(max_val);
-        } else if name == "u" || name == "U" {
-            residual_u = Some(max_val);
-        }
-        residuals.push((name.to_string(), max_val));
-    }
-
-    plan.outer_field_residuals = residuals;
-    plan.outer_residual_u = residual_u;
-    plan.outer_residual_p = residual_p;
+    generic_coupled_program::host_after_solve(plan);
 }
 
 fn implicit_snapshot_run(
@@ -376,6 +270,7 @@ fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
 
 fn host_coupled_solve(plan: &mut GpuProgramPlan) {
     generic_coupled_program::host_solve_linear_system(plan);
+    generic_coupled_program::host_after_solve(plan);
 }
 
 fn host_coupled_finalize_step(plan: &mut GpuProgramPlan) {

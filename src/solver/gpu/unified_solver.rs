@@ -123,6 +123,27 @@ impl GpuUnifiedSolver {
         self.plan.state_buffer()
     }
 
+    pub fn state_size_bytes(&self) -> u64 {
+        self.num_cells() as u64
+            * self.model.state_layout.stride() as u64
+            * std::mem::size_of::<f32>() as u64
+    }
+
+    pub fn copy_state_to_buffer(&self, dst: &wgpu::Buffer) {
+        let size_bytes = self.state_size_bytes();
+        if size_bytes == 0 {
+            return;
+        }
+
+        let device = &self.plan.context.device;
+        let queue = &self.plan.context.queue;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("GpuUnifiedSolver:copy_state_to_buffer"),
+        });
+        encoder.copy_buffer_to_buffer(self.state_buffer(), 0, dst, 0, size_bytes);
+        queue.submit(Some(encoder.finish()));
+    }
+
     pub(crate) fn set_plan_named_param(
         &mut self,
         name: &str,

@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 2a6742d028ce66dc489c19238fb601e18c353a95a1c24ab24f3b6fe56ea5b3e0
+// SourceHash: d43c3222f267bec69592ca3855559a6ff7fef0318d72a31e07c2754bba6f26fd
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -40,16 +40,17 @@ pub enum ShaderEntry {
     GmresLogic,
     GmresOps,
     LinearSolver,
+    OuterConvergence,
     Scalars,
     SchurPrecond,
     SchurPrecondGeneric,
 }
 impl ShaderEntry {
     pub fn create_pipeline_layout(&self, device: &wgpu::Device) -> wgpu::PipelineLayout {
-        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityIncompressibleMomentum => generated :: rhie_chow_correct_velocity_incompressible_momentum :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
+        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityIncompressibleMomentum => generated :: rhie_chow_correct_velocity_incompressible_momentum :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: OuterConvergence => outer_convergence :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
     }
     pub fn create_shader_module_embed_source(&self, device: &wgpu::Device) -> wgpu::ShaderModule {
-        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
+        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: OuterConvergence => { outer_convergence :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
     }
 }
 mod _root {
@@ -2520,6 +2521,19 @@ pub mod layout_asserts {
         assert!(std::mem::offset_of!(linear_solver::SolverParams, n) == 0);
         assert!(std::mem::size_of::<linear_solver::SolverParams>() == 4);
     };
+    const OUTER_CONVERGENCE_PARAMS_ASSERTS: () = {
+        assert!(std::mem::offset_of!(outer_convergence::Params, num_cells) == 0);
+        assert!(std::mem::offset_of!(outer_convergence::Params, stride) == 4);
+        assert!(std::mem::offset_of!(outer_convergence::Params, num_targets) == 8);
+        assert!(std::mem::offset_of!(outer_convergence::Params, _pad0) == 12);
+        assert!(std::mem::size_of::<outer_convergence::Params>() == 16);
+    };
+    const OUTER_CONVERGENCE_TARGET_DESC_ASSERTS: () = {
+        assert!(std::mem::offset_of!(outer_convergence::TargetDesc, offsets) == 0);
+        assert!(std::mem::offset_of!(outer_convergence::TargetDesc, num_comps) == 16);
+        assert!(std::mem::offset_of!(outer_convergence::TargetDesc, _pad0) == 20);
+        assert!(std::mem::size_of::<outer_convergence::TargetDesc>() == 32);
+    };
     const SCALARS_GPU_SCALARS_ASSERTS: () = {
         assert!(std::mem::offset_of!(scalars::GpuScalars, rho_old) == 0);
         assert!(std::mem::offset_of!(scalars::GpuScalars, rho_new) == 4);
@@ -3475,6 +3489,10 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for linear_solver::GpuScalars {}
     unsafe impl bytemuck::Zeroable for linear_solver::SolverParams {}
     unsafe impl bytemuck::Pod for linear_solver::SolverParams {}
+    unsafe impl bytemuck::Zeroable for outer_convergence::Params {}
+    unsafe impl bytemuck::Pod for outer_convergence::Params {}
+    unsafe impl bytemuck::Zeroable for outer_convergence::TargetDesc {}
+    unsafe impl bytemuck::Pod for outer_convergence::TargetDesc {}
     unsafe impl bytemuck::Zeroable for scalars::GpuScalars {}
     unsafe impl bytemuck::Pod for scalars::GpuScalars {}
     unsafe impl bytemuck::Zeroable for scalars::ReduceParams {}
@@ -7306,68 +7324,68 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let _e1912 = constants.scheme;
     if ((_e1912 == 6u) && !(is_boundary_1)) {
-        let _cse_377_ = max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f);
-        let _cse_375_ = (((_cse_1450_ * 0.625f) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_374_ = (_cse_375_ - _cse_1450_);
-        let _cse_378_ = ((_e241 - _cse_1450_) * _cse_374_);
-        let _cse_373_ = ((((_cse_374_ * abs((_e241 - _cse_1450_))) / max(abs((_e241 - _cse_1450_)), (abs(_cse_374_) + 0.00000001f))) * max(_cse_378_, 0f)) / max(abs(_cse_378_), 0.00000001f));
+        let _cse_378_ = max(dot((c_neigh_cell_vec - c_owner_vec), (c_neigh_cell_vec - c_owner_vec)), 0.000000000001f);
+        let _cse_376_ = (((_cse_1450_ * 0.625f) + (_e241 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e241 - _cse_1450_)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_375_ = (_cse_376_ - _cse_1450_);
+        let _cse_374_ = ((_cse_375_ * abs((_e241 - _cse_1450_))) / max(abs((_e241 - _cse_1450_)), (abs(_cse_375_) + 0.00000001f)));
+        let _cse_379_ = ((_e241 - _cse_1450_) * _cse_375_);
+        let _cse_373_ = ((_cse_374_ * max(_cse_379_, 0f)) / max(abs(_cse_379_), 0.00000001f));
         let _cse_371_ = (_cse_1450_ + _cse_373_);
-        let _cse_384_ = (((_cse_1459_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1459_)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_383_ = (_cse_384_ - _cse_1459_);
-        let _cse_382_ = ((_cse_383_ * abs((_e271 - _cse_1459_))) / max(abs((_e271 - _cse_1459_)), (abs(_cse_383_) + 0.00000001f)));
-        let _cse_386_ = ((_e271 - _cse_1459_) * _cse_383_);
-        let _cse_381_ = ((_cse_382_ * max(_cse_386_, 0f)) / max(abs(_cse_386_), 0.00000001f));
-        let _cse_379_ = (_cse_1459_ + _cse_381_);
-        let _cse_370_ = vec2<f32>(_cse_371_, _cse_379_);
-        let _cse_390_ = (((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
-        let _cse_389_ = (_cse_390_ - s_own_rho);
-        let _cse_388_ = ((((_cse_389_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_389_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_389_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_389_)), 0.00000001f));
-        let _cse_387_ = (s_own_rho + _cse_388_);
-        let _cse_369_ = ((_cse_370_ * 1f) / vec2(_cse_387_));
+        let _cse_385_ = (((_cse_1459_ * 0.625f) + (_e271 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e271 - _cse_1459_)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_384_ = (_cse_385_ - _cse_1459_);
+        let _cse_383_ = ((_cse_384_ * abs((_e271 - _cse_1459_))) / max(abs((_e271 - _cse_1459_)), (abs(_cse_384_) + 0.00000001f)));
+        let _cse_387_ = ((_e271 - _cse_1459_) * _cse_384_);
+        let _cse_382_ = ((_cse_383_ * max(_cse_387_, 0f)) / max(abs(_cse_387_), 0.00000001f));
+        let _cse_380_ = (_cse_1459_ + _cse_382_);
+        let _cse_370_ = vec2<f32>(_cse_371_, _cse_380_);
+        let _cse_391_ = (((s_own_rho * 0.625f) + (_e181 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e181 - s_own_rho)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _cse_390_ = (_cse_391_ - s_own_rho);
+        let _cse_389_ = ((((_cse_390_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_390_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_390_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_390_)), 0.00000001f));
+        let _cse_388_ = (s_own_rho + _cse_389_);
+        let _cse_369_ = ((_cse_370_ * 1f) / vec2(_cse_388_));
         let _e2037 = normal_vec;
         let _cse_368_ = dot(_cse_369_, _e2037);
         let _e2041 = constants.eos_gamma;
-        let _cse_395_ = ((_e2041 * (s_own_p + ((((((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p) * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p)) + 0.00000001f))) * max(((_e151 - s_own_p) * ((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p)), 0f)) / max(abs(((_e151 - s_own_p) * ((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_377_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p))), 0.00000001f)))) / _cse_387_);
+        let _cse_396_ = ((_e2041 * (s_own_p + ((((((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p) * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p)) + 0.00000001f))) * max(((_e151 - s_own_p) * ((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p)), 0f)) / max(abs(((_e151 - s_own_p) * ((((s_own_p * 0.625f) + (_e151 * 0.375f)) + (dot((((c_neigh_cell_vec - c_owner_vec) * (_e151 - s_own_p)) / vec2(_cse_378_)), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - s_own_p))), 0.00000001f)))) / _cse_388_);
         let _e2132 = constants.eos_dp_drho;
-        let _cse_394_ = (_cse_395_ + _e2132);
-        let _cse_398_ = (_cse_368_ * _cse_368_);
-        let _cse_397_ = min(_cse_398_, _cse_394_);
+        let _cse_395_ = (_cse_396_ + _e2132);
+        let _cse_399_ = (_cse_368_ * _cse_368_);
+        let _cse_398_ = min(_cse_399_, _cse_395_);
         let _e2138 = low_mach_params.model;
-        let _cse_396_ = (max(0f, (1f - abs(f32(_e2138)))) * _cse_397_);
+        let _cse_397_ = (max(0f, (1f - abs(f32(_e2138)))) * _cse_398_);
         let _e2148 = low_mach_params.model;
-        let _cse_393_ = ((max(0f, (1f - abs((f32(_e2148) - 2f)))) * _cse_394_) + _cse_396_);
+        let _cse_394_ = ((max(0f, (1f - abs((f32(_e2148) - 2f)))) * _cse_395_) + _cse_397_);
         let _e2161 = low_mach_params.theta_floor;
-        let _cse_401_ = max(_cse_398_, (_e2161 * _cse_394_));
-        let _cse_400_ = min(_cse_401_, _cse_394_);
+        let _cse_402_ = max(_cse_399_, (_e2161 * _cse_395_));
+        let _cse_401_ = min(_cse_402_, _cse_395_);
         let _e2167 = low_mach_params.model;
-        let _cse_399_ = (max(0f, (1f - abs((f32(_e2167) - 1f)))) * _cse_400_);
-        let _cse_392_ = (_cse_393_ + _cse_399_);
-        let _cse_391_ = sqrt(_cse_392_);
+        let _cse_400_ = (max(0f, (1f - abs((f32(_e2167) - 1f)))) * _cse_401_);
+        let _cse_393_ = (_cse_394_ + _cse_400_);
+        let _cse_392_ = sqrt(_cse_393_);
         let _cse_410_ = max(dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec)), 0.000000000001f);
         let _cse_409_ = (((_e241 * 0.625f) + (_cse_1450_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1450_ - _e241)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_408_ = (_cse_409_ - _e241);
-        let _cse_407_ = ((_cse_408_ * abs((_cse_1450_ - _e241))) / max(abs((_cse_1450_ - _e241)), (abs(_cse_408_) + 0.00000001f)));
         let _cse_411_ = ((_cse_1450_ - _e241) * _cse_408_);
-        let _cse_406_ = ((_cse_407_ * max(_cse_411_, 0f)) / max(abs(_cse_411_), 0.00000001f));
-        let _cse_405_ = (_e241 + _cse_406_);
+        let _cse_407_ = ((((_cse_408_ * abs((_cse_1450_ - _e241))) / max(abs((_cse_1450_ - _e241)), (abs(_cse_408_) + 0.00000001f))) * max(_cse_411_, 0f)) / max(abs(_cse_411_), 0.00000001f));
+        let _cse_406_ = (_e241 + _cse_407_);
         let _cse_415_ = (((_e271 * 0.625f) + (_cse_1459_ * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (_cse_1459_ - _e271)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_414_ = (_cse_415_ - _e271);
         let _cse_416_ = ((_cse_1459_ - _e271) * _cse_414_);
         let _cse_413_ = ((((_cse_414_ * abs((_cse_1459_ - _e271))) / max(abs((_cse_1459_ - _e271)), (abs(_cse_414_) + 0.00000001f))) * max(_cse_416_, 0f)) / max(abs(_cse_416_), 0.00000001f));
         let _cse_412_ = (_e271 + _cse_413_);
-        let _cse_404_ = vec2<f32>(_cse_405_, _cse_412_);
+        let _cse_405_ = vec2<f32>(_cse_406_, _cse_412_);
         let _cse_420_ = (((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_419_ = (_cse_420_ - _e181);
         let _cse_418_ = ((((_cse_419_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_419_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_419_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_419_)), 0.00000001f));
         let _cse_417_ = (_e181 + _cse_418_);
-        let _cse_403_ = ((_cse_404_ * 1f) / vec2(_cse_417_));
+        let _cse_404_ = ((_cse_405_ * 1f) / vec2(_cse_417_));
         let _e2299 = normal_vec;
-        let _cse_402_ = dot(_cse_403_, _e2299);
+        let _cse_403_ = dot(_cse_404_, _e2299);
         let _e2303 = constants.eos_gamma;
         let _cse_425_ = ((_e2303 * (_e151 + ((((((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151) * abs((s_own_p - _e151))) / max(abs((s_own_p - _e151)), (abs(((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)) + 0.00000001f))) * max(((s_own_p - _e151) * ((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151)), 0f)) / max(abs(((s_own_p - _e151) * ((((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_410_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e151))), 0.00000001f)))) / _cse_417_);
         let _e2394 = constants.eos_dp_drho;
         let _cse_424_ = (_cse_425_ + _e2394);
-        let _cse_428_ = (_cse_402_ * _cse_402_);
+        let _cse_428_ = (_cse_403_ * _cse_403_);
         let _cse_427_ = min(_cse_428_, _cse_424_);
         let _e2400 = low_mach_params.model;
         let _cse_426_ = (max(0f, (1f - abs(f32(_e2400)))) * _cse_427_);
@@ -7380,8 +7398,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_429_ = (max(0f, (1f - abs((f32(_e2429) - 1f)))) * _cse_430_);
         let _cse_422_ = (_cse_423_ + _cse_429_);
         let _cse_421_ = sqrt(_cse_422_);
-        a_plus = max(0f, max((_cse_368_ + _cse_391_), (_cse_402_ + _cse_421_)));
-        a_minus = min(0f, min((_cse_368_ - _cse_391_), (_cse_402_ - _cse_421_)));
+        a_plus = max(0f, max((_cse_368_ + _cse_392_), (_cse_403_ + _cse_421_)));
+        a_minus = min(0f, min((_cse_368_ - _cse_392_), (_cse_403_ - _cse_421_)));
     }
     let _e2451 = a_plus;
     let _e2452 = a_minus;
@@ -7700,9 +7718,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_653_ = (_cse_654_ * 0.125f);
         let _cse_651_ = (_cse_652_ + _cse_653_);
         let _cse_650_ = (_cse_651_ - s_own_p);
-        let _cse_657_ = min((_e151 - s_own_p), 0f);
-        let _cse_649_ = max(_cse_650_, _cse_657_);
-        let _cse_648_ = min(_cse_649_, max((_e151 - s_own_p), 0f));
+        let _cse_649_ = max(_cse_650_, min((_e151 - s_own_p), 0f));
+        let _cse_657_ = max((_e151 - s_own_p), 0f);
+        let _cse_648_ = min(_cse_649_, _cse_657_);
         let _cse_647_ = (s_own_p + _cse_648_);
         let _cse_663_ = ((_e181 * 0.625f) + (s_own_rho * 0.375f));
         let _cse_669_ = dot((c_owner_vec - c_neigh_cell_vec), (c_owner_vec - c_neigh_cell_vec));
@@ -8683,21 +8701,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_1469_ = (_cse_1470_ - s_own_rho);
         let _cse_1472_ = (((_e151 * 0.625f) + (s_own_p * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_p - _e151)) / vec2(_cse_1445_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_1471_ = (_cse_1472_ - _e151);
-        let _cse_1479_ = (_cse_1450_ - _e241);
-        let _cse_1478_ = (_cse_1479_ / _cse_1445_);
-        let _cse_1477_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1478_);
+        let _cse_1478_ = (_cse_1450_ - _e241);
+        let _cse_1477_ = (((c_owner_vec - c_neigh_cell_vec) * _cse_1478_) / vec2(_cse_1445_));
         let _cse_1476_ = dot(_cse_1477_, (c_owner_vec - c_neigh_cell_vec));
         let _cse_1475_ = (_cse_1476_ * 0.125f);
         let _cse_1474_ = (((_e241 * 0.625f) + (_cse_1450_ * 0.375f)) + _cse_1475_);
         let _cse_1473_ = (_cse_1474_ - _e241);
-        let _cse_1480_ = (_cse_1479_ * _cse_1473_);
+        let _cse_1479_ = (_cse_1478_ * _cse_1473_);
         let _cse_1486_ = (_cse_1459_ - _e271);
-        let _cse_1485_ = (((c_owner_vec - c_neigh_cell_vec) * _cse_1486_) / vec2(_cse_1445_));
-        let _cse_1484_ = dot(_cse_1485_, (c_owner_vec - c_neigh_cell_vec));
-        let _cse_1483_ = (_cse_1484_ * 0.125f);
-        let _cse_1482_ = (((_e271 * 0.625f) + (_cse_1459_ * 0.375f)) + _cse_1483_);
-        let _cse_1481_ = (_cse_1482_ - _e271);
-        let _cse_1487_ = (_cse_1486_ * _cse_1481_);
+        let _cse_1485_ = (_cse_1486_ / _cse_1445_);
+        let _cse_1484_ = ((c_owner_vec - c_neigh_cell_vec) * _cse_1485_);
+        let _cse_1483_ = dot(_cse_1484_, (c_owner_vec - c_neigh_cell_vec));
+        let _cse_1482_ = (_cse_1483_ * 0.125f);
+        let _cse_1481_ = (((_e271 * 0.625f) + (_cse_1459_ * 0.375f)) + _cse_1482_);
+        let _cse_1480_ = (_cse_1481_ - _e271);
+        let _cse_1487_ = (_cse_1486_ * _cse_1480_);
         let _cse_1489_ = (((_e181 * 0.625f) + (s_own_rho * 0.375f)) + (dot((((c_owner_vec - c_neigh_cell_vec) * (s_own_rho - _e181)) / vec2(_cse_1445_)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_1488_ = (_cse_1489_ - _e181);
         u_l_3_ = _cse_1426_;
@@ -8705,7 +8723,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _e8562 = normal_vec;
         f_l_3_ = (((_cse_1426_ + s_own_p) + ((((_cse_1448_ * abs((_e151 - s_own_p))) / max(abs((_e151 - s_own_p)), (abs(_cse_1448_) + 0.00000001f))) * max(((_e151 - s_own_p) * _cse_1448_), 0f)) / max(abs(((_e151 - s_own_p) * _cse_1448_)), 0.00000001f))) * dot(((vec2<f32>((_cse_1450_ + ((((_cse_1451_ * abs(_cse_1457_)) / max(abs(_cse_1457_), (abs(_cse_1451_) + 0.00000001f))) * max(_cse_1458_, 0f)) / max(abs(_cse_1458_), 0.00000001f))), (_cse_1459_ + ((((_cse_1460_ * abs(_cse_1467_)) / max(abs(_cse_1467_), (abs(_cse_1460_) + 0.00000001f))) * max(_cse_1468_, 0f)) / max(abs(_cse_1468_), 0.00000001f)))) * 1f) / vec2((s_own_rho + ((((_cse_1469_ * abs((_e181 - s_own_rho))) / max(abs((_e181 - s_own_rho)), (abs(_cse_1469_) + 0.00000001f))) * max(((_e181 - s_own_rho) * _cse_1469_), 0f)) / max(abs(((_e181 - s_own_rho) * _cse_1469_)), 0.00000001f))))), _e8562));
         let _e8647 = normal_vec;
-        f_r_3_ = (((_cse_1437_ + _e151) + ((((_cse_1471_ * abs((s_own_p - _e151))) / max(abs((s_own_p - _e151)), (abs(_cse_1471_) + 0.00000001f))) * max(((s_own_p - _e151) * _cse_1471_), 0f)) / max(abs(((s_own_p - _e151) * _cse_1471_)), 0.00000001f))) * dot(((vec2<f32>((_e241 + ((((_cse_1473_ * abs(_cse_1479_)) / max(abs(_cse_1479_), (abs(_cse_1473_) + 0.00000001f))) * max(_cse_1480_, 0f)) / max(abs(_cse_1480_), 0.00000001f))), (_e271 + ((((_cse_1481_ * abs(_cse_1486_)) / max(abs(_cse_1486_), (abs(_cse_1481_) + 0.00000001f))) * max(_cse_1487_, 0f)) / max(abs(_cse_1487_), 0.00000001f)))) * 1f) / vec2((_e181 + ((((_cse_1488_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_1488_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_1488_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_1488_)), 0.00000001f))))), _e8647));
+        f_r_3_ = (((_cse_1437_ + _e151) + ((((_cse_1471_ * abs((s_own_p - _e151))) / max(abs((s_own_p - _e151)), (abs(_cse_1471_) + 0.00000001f))) * max(((s_own_p - _e151) * _cse_1471_), 0f)) / max(abs(((s_own_p - _e151) * _cse_1471_)), 0.00000001f))) * dot(((vec2<f32>((_e241 + ((((_cse_1473_ * abs(_cse_1478_)) / max(abs(_cse_1478_), (abs(_cse_1473_) + 0.00000001f))) * max(_cse_1479_, 0f)) / max(abs(_cse_1479_), 0.00000001f))), (_e271 + ((((_cse_1480_ * abs(_cse_1486_)) / max(abs(_cse_1486_), (abs(_cse_1480_) + 0.00000001f))) * max(_cse_1487_, 0f)) / max(abs(_cse_1487_), 0.00000001f)))) * 1f) / vec2((_e181 + ((((_cse_1488_ * abs((s_own_rho - _e181))) / max(abs((s_own_rho - _e181)), (abs(_cse_1488_) + 0.00000001f))) * max(((s_own_rho - _e181) * _cse_1488_), 0f)) / max(abs(((s_own_rho - _e181) * _cse_1488_)), 0.00000001f))))), _e8647));
     }
     let _e8656 = a_plus;
     let _e8657 = f_l_3_;
@@ -26351,6 +26369,301 @@ fn cg_update_p(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(n
     let _e37 = beta;
     let _e40 = p[_e3];
     p[_e3] = (_e36 + (_e37 * _e40));
+    return;
+}
+"#;
+}
+pub mod outer_convergence {
+    use super::{_root, _root::*};
+    #[repr(C, align(4))]
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    pub struct Params {
+        #[doc = "offset: 0, size: 4, type: `u32`"]
+        pub num_cells: u32,
+        #[doc = "offset: 4, size: 4, type: `u32`"]
+        pub stride: u32,
+        #[doc = "offset: 8, size: 4, type: `u32`"]
+        pub num_targets: u32,
+        #[doc = "offset: 12, size: 4, type: `u32`"]
+        pub _pad0: u32,
+    }
+    impl Params {
+        pub const fn new(num_cells: u32, stride: u32, num_targets: u32, _pad0: u32) -> Self {
+            Self {
+                num_cells,
+                stride,
+                num_targets,
+                _pad0,
+            }
+        }
+    }
+    #[repr(C, align(4))]
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    pub struct TargetDesc {
+        #[doc = "offset: 0, size: 16, type: `array<u32, 4>`"]
+        pub offsets: [u32; 4],
+        #[doc = "offset: 16, size: 4, type: `u32`"]
+        pub num_comps: u32,
+        #[doc = "offset: 20, size: 12, type: `array<u32, 3>`"]
+        pub _pad0: [u32; 3],
+    }
+    impl TargetDesc {
+        pub const fn new(offsets: [u32; 4], num_comps: u32, _pad0: [u32; 3]) -> Self {
+            Self {
+                offsets,
+                num_comps,
+                _pad0,
+            }
+        }
+    }
+    pub mod compute {
+        use super::{_root, _root::*};
+        pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [256, 1, 1];
+        pub fn create_main_pipeline_embed_source(device: &wgpu::Device) -> wgpu::ComputePipeline {
+            let module = super::create_shader_module_embed_source(device);
+            let layout = super::create_pipeline_layout(device);
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Compute Pipeline main"),
+                layout: Some(&layout),
+                module: &module,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        }
+    }
+    pub const ENTRY_MAIN: &str = "main";
+    #[derive(Debug)]
+    pub struct WgpuBindGroup0EntriesParams<'a> {
+        pub input: wgpu::BufferBinding<'a>,
+        pub targets: wgpu::BufferBinding<'a>,
+        pub out_bits: wgpu::BufferBinding<'a>,
+        pub params: wgpu::BufferBinding<'a>,
+    }
+    #[derive(Clone, Debug)]
+    pub struct WgpuBindGroup0Entries<'a> {
+        pub input: wgpu::BindGroupEntry<'a>,
+        pub targets: wgpu::BindGroupEntry<'a>,
+        pub out_bits: wgpu::BindGroupEntry<'a>,
+        pub params: wgpu::BindGroupEntry<'a>,
+    }
+    impl<'a> WgpuBindGroup0Entries<'a> {
+        pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+            Self {
+                input: wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(params.input),
+                },
+                targets: wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(params.targets),
+                },
+                out_bits: wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(params.out_bits),
+                },
+                params: wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Buffer(params.params),
+                },
+            }
+        }
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 4] {
+            [self.input, self.targets, self.out_bits, self.params]
+        }
+        pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+            self.into_array().into_iter().collect()
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuBindGroup0(wgpu::BindGroup);
+    impl WgpuBindGroup0 {
+        pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+            wgpu::BindGroupLayoutDescriptor {
+                label: Some("OuterConvergence::BindGroup0::LayoutDescriptor"),
+                entries: &[
+                    #[doc = " @binding(0): \"input\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(1): \"targets\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(2): \"out_bits\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(3): \"params\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                                _root::outer_convergence::Params,
+                            >(
+                            )
+                                as _),
+                        },
+                        count: None,
+                    },
+                ],
+            };
+        pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+            device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+        }
+        pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+            let bind_group_layout = Self::get_bind_group_layout(device);
+            let entries = bindings.into_array();
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("OuterConvergence::BindGroup0"),
+                layout: &bind_group_layout,
+                entries: &entries,
+            });
+            Self(bind_group)
+        }
+        pub fn set(&self, pass: &mut impl SetBindGroup) {
+            pass.set_bind_group(0, &self.0, &[]);
+        }
+    }
+    #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+    #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+    #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+    #[doc = "   - Bind group 1: More frequent updates"]
+    #[doc = "   - Bind group 2: More frequent updates"]
+    #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+    #[derive(Debug, Copy, Clone)]
+    pub struct WgpuBindGroups<'a> {
+        pub bind_group0: &'a WgpuBindGroup0,
+    }
+    impl<'a> WgpuBindGroups<'a> {
+        pub fn set(&self, pass: &mut impl SetBindGroup) {
+            self.bind_group0.set(pass);
+        }
+    }
+    #[derive(Debug)]
+    pub struct WgpuPipelineLayout;
+    impl WgpuPipelineLayout {
+        pub fn bind_group_layout_entries(
+            entries: [wgpu::BindGroupLayout; 1],
+        ) -> [wgpu::BindGroupLayout; 1] {
+            entries
+        }
+    }
+    pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("OuterConvergence::PipelineLayout"),
+            bind_group_layouts: &[&WgpuBindGroup0::get_bind_group_layout(device)],
+            push_constant_ranges: &[],
+        })
+    }
+    pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+        let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+        device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("outer_convergence.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(source),
+        })
+    }
+    pub const SHADER_STRING: &str = r#"
+struct Params {
+    num_cells: u32,
+    stride: u32,
+    num_targets: u32,
+    _pad0_: u32,
+}
+
+struct TargetDesc {
+    offsets: array<u32, 4>,
+    num_comps: u32,
+    _pad0_: array<u32, 3>,
+}
+
+@group(0) @binding(0) 
+var<storage> input: array<f32>;
+@group(0) @binding(1) 
+var<storage> targets: array<TargetDesc>;
+@group(0) @binding(2) 
+var<storage, read_write> out_bits: array<atomic<u32>>;
+@group(0) @binding(3) 
+var<uniform> params: Params;
+
+@compute @workgroup_size(256, 1, 1) 
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    var t: u32 = 0u;
+    var mag2_: f32;
+    var c: u32;
+
+    let cell = gid.x;
+    let _e5 = params.num_cells;
+    if (cell >= _e5) {
+        return;
+    }
+    let _e9 = params.stride;
+    let base = (cell * _e9);
+    loop {
+        let _e12 = t;
+        let _e15 = params.num_targets;
+        if (_e12 < _e15) {
+        } else {
+            break;
+        }
+        {
+            let _e18 = t;
+            let desc = targets[_e18];
+            mag2_ = 0f;
+            c = 0u;
+            loop {
+                let _e25 = c;
+                if (_e25 < desc.num_comps) {
+                } else {
+                    break;
+                }
+                {
+                    let _e29 = c;
+                    let off = desc.offsets[_e29];
+                    let v = input[(base + off)];
+                    let _e35 = mag2_;
+                    mag2_ = (_e35 + (v * v));
+                }
+                continuing {
+                    let _e38 = c;
+                    c = (_e38 + 1u);
+                }
+            }
+            let _e41 = mag2_;
+            let mag = sqrt(_e41);
+            let bits = bitcast<u32>(mag);
+            let _e45 = t;
+            let _e47 = atomicMax((&out_bits[_e45]), bits);
+        }
+        continuing {
+            let _e48 = t;
+            t = (_e48 + 1u);
+        }
+    }
     return;
 }
 "#;

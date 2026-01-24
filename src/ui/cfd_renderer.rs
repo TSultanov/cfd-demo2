@@ -53,6 +53,7 @@ pub struct CfdRenderResources {
     pub uniform_buffer: wgpu::Buffer,
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub bind_group: wgpu::BindGroup,
+    pub field_buffer: wgpu::Buffer,
     pub num_vertices: u32,
     pub num_line_vertices: u32,
 }
@@ -236,7 +237,7 @@ impl CfdRenderResources {
         });
 
         // Create dummy storage buffer for initial bind group
-        let dummy_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        let field_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Dummy Field Buffer"),
             size: 4,
             usage: wgpu::BufferUsages::STORAGE,
@@ -254,7 +255,7 @@ impl CfdRenderResources {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: dummy_buffer.as_entire_binding(),
+                    resource: field_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -267,6 +268,7 @@ impl CfdRenderResources {
             uniform_buffer,
             bind_group_layout,
             bind_group,
+            field_buffer,
             num_vertices: 0,
             num_line_vertices: 0,
         }
@@ -297,6 +299,7 @@ impl CfdRenderResources {
 
     /// Update the bind group with a new field buffer
     pub fn update_bind_group(&mut self, device: &wgpu::Device, field_buffer: &wgpu::Buffer) {
+        self.field_buffer = field_buffer.clone();
         self.bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("CFD Bind Group"),
             layout: &self.bind_group_layout,
@@ -307,7 +310,7 @@ impl CfdRenderResources {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: field_buffer.as_entire_binding(),
+                    resource: self.field_buffer.as_entire_binding(),
                 },
             ],
         });

@@ -145,7 +145,14 @@ struct SolverInitOutcome {
     cached_p: Vec<f64>,
     model_caps: ModelUiCaps,
     renderer: Option<cfd_renderer::CfdRenderResources>,
+    viz_field: Option<VizFieldBuffer>,
     trace_init_events: Vec<tracefmt::TraceInitEvent>,
+}
+
+#[derive(Clone)]
+struct VizFieldBuffer {
+    buffer: wgpu::Buffer,
+    size_bytes: u64,
 }
 
 struct SolverInitResponse {
@@ -174,6 +181,7 @@ enum SolverWorkerCommand {
     SetSolver {
         solver: UnifiedSolver,
         min_cell_size: f64,
+        viz_field: Option<VizFieldBuffer>,
     },
     ClearSolver,
     SetRunning(bool),
@@ -671,8 +679,8 @@ impl CFDApp {
     }
 
     fn update_renderer_field(&self) {
-        // No-op: the renderer bind group is created at solver init time and always points at the
-        // solver's state buffer; field selection is driven by uniforms (stride/offset/mode).
+        // No-op: the renderer bind group is created at solver init time and points at the
+        // visualization buffer. Field selection is driven by uniforms (stride/offset/mode).
     }
 
     fn init_solver(&mut self) {
@@ -1029,6 +1037,7 @@ impl CFDApp {
             cached_p,
             model_caps,
             renderer,
+            viz_field,
             trace_init_events,
         } = outcome;
 
@@ -1055,6 +1064,7 @@ impl CFDApp {
         self.solver_worker.send(SolverWorkerCommand::SetSolver {
             solver,
             min_cell_size: self.actual_min_cell_size,
+            viz_field,
         });
         self.sync_worker_params();
 
@@ -1258,8 +1268,31 @@ impl CFDApp {
         );
 
         let renderer_start = std::time::Instant::now();
-        let renderer =
+        let (renderer, viz_field) =
             if let (Some(device), Some(queue)) = (&request.wgpu_device, &request.wgpu_queue) {
+                let state_size_bytes =
+                    mesh.num_cells() as u64 * model_caps.plot_stride as u64 * 4;
+                let viz_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("CFD Viz Field Buffer"),
+                    size: state_size_bytes.max(4),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                if state_size_bytes > 0 {
+                    let mut encoder =
+                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("cfd_viz:init_copy_state"),
+                        });
+                    encoder.copy_buffer_to_buffer(
+                        gpu_solver.state_buffer(),
+                        0,
+                        &viz_buffer,
+                        0,
+                        state_size_bytes,
+                    );
+                    queue.submit(Some(encoder.finish()));
+                }
+
                 let mut renderer = cfd_renderer::CfdRenderResources::new(
                     device,
                     request.target_format,
@@ -1268,10 +1301,16 @@ impl CFDApp {
                 let vertices = cfd_renderer::build_mesh_vertices(&cached_cells);
                 let line_vertices = cfd_renderer::build_line_vertices(&cached_cells);
                 renderer.update_mesh(queue, &vertices, &line_vertices);
-                renderer.update_bind_group(device, gpu_solver.state_buffer());
-                Some(renderer)
+                renderer.update_bind_group(device, &viz_buffer);
+                (
+                    Some(renderer),
+                    Some(VizFieldBuffer {
+                        buffer: viz_buffer,
+                        size_bytes: state_size_bytes,
+                    }),
+                )
             } else {
-                None
+                (None, None)
             };
         CFDApp::push_trace_init_event(
             &mut trace_init_events,
@@ -1313,6 +1352,7 @@ impl CFDApp {
             cached_p,
             model_caps,
             renderer,
+            viz_field,
             trace_init_events,
         })
     }
@@ -2604,6 +2644,7 @@ fn solver_worker_main(
     let mut model_id: &'static str = "<uninitialized>";
     let mut supports_sound_speed = false;
     let mut min_cell_size = 0.0_f64;
+    let mut viz_field: Option<VizFieldBuffer> = None;
     let mut params = RuntimeParams {
         adaptive_dt: false,
         target_cfl: 0.9,
@@ -2643,6 +2684,7 @@ fn solver_worker_main(
                 &mut model_id,
                 &mut supports_sound_speed,
                 &mut min_cell_size,
+                &mut viz_field,
                 &mut params,
                 &mut running,
                 &mut step_idx,
@@ -2665,6 +2707,7 @@ fn solver_worker_main(
                         &mut model_id,
                         &mut supports_sound_speed,
                         &mut min_cell_size,
+                        &mut viz_field,
                         &mut params,
                         &mut running,
                         &mut step_idx,
@@ -2738,6 +2781,12 @@ fn solver_worker_main(
             }
         };
         let step_time_ms = start.elapsed().as_secs_f32() * 1000.0;
+
+        if let Some(viz_field) = viz_field.as_ref() {
+            if viz_field.size_bytes > 0 {
+                solver.copy_state_to_buffer(&viz_field.buffer);
+            }
+        }
 
         if solver.incompressible_should_stop() {
             running = false;
@@ -2946,6 +2995,7 @@ fn solver_worker_handle_cmd(
     model_id: &mut &'static str,
     supports_sound_speed: &mut bool,
     min_cell_size: &mut f64,
+    viz_field: &mut Option<VizFieldBuffer>,
     params: &mut RuntimeParams,
     running: &mut bool,
     step_idx: &mut u64,
@@ -2958,6 +3008,7 @@ fn solver_worker_handle_cmd(
         SolverWorkerCommand::SetSolver {
             solver: next,
             min_cell_size: next_min_cell_size,
+            viz_field: next_viz_field,
         } => {
             if trace.is_some() {
                 solver_worker_stop_trace(trace, solver);
@@ -2970,6 +3021,7 @@ fn solver_worker_handle_cmd(
                 .any(|&k| k == "eos.gamma");
             *solver = Some(next);
             *min_cell_size = next_min_cell_size;
+            *viz_field = next_viz_field;
             *running = false;
             *step_idx = 0;
             *prev_max_vel = 0.0;
@@ -2990,6 +3042,7 @@ fn solver_worker_handle_cmd(
             *running = false;
             *step_idx = 0;
             *prev_max_vel = 0.0;
+            *viz_field = None;
             let now = std::time::Instant::now();
             *last_stats_publish = now;
             *last_snapshot_publish = now;

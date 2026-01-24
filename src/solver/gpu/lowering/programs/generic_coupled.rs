@@ -15,15 +15,18 @@ use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::unified_graph::{
     build_graph_for_phases, build_optional_graph_for_phase, build_optional_graph_for_phases,
 };
+use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::program::plan::{GpuProgramPlan, ProgramParamHandler};
 use crate::solver::gpu::program::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
+use crate::solver::gpu::readback::read_buffer_cached;
 use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::structs::{
     GpuGenericCoupledSchurSetupParams, GpuSchurPrecondGenericParams, LinearSolverStats,
 };
 use crate::solver::model::{ModelPreconditionerSpec, ModelSpec};
-use bytemuck::bytes_of;
+use crate::solver::model::backend::ast::FieldKind;
+use bytemuck::{bytes_of, Pod, Zeroable};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -45,6 +48,7 @@ pub(crate) struct GenericCoupledProgramResources {
     linear_solver: crate::solver::gpu::recipe::LinearSolverSpec,
     schur: Option<GenericCoupledSchurResources>,
     krylov: Option<GenericCoupledKrylovResources>,
+    outer_convergence: Option<OuterConvergenceMonitor>,
     _b_bc_kind: wgpu::Buffer,
     _b_bc_value: wgpu::Buffer,
     boundary_faces: Vec<Vec<u32>>,
@@ -65,6 +69,323 @@ struct GenericCoupledKrylovResources {
     _b_diag_u: wgpu::Buffer,
     _b_diag_v: wgpu::Buffer,
     _b_diag_p: wgpu::Buffer,
+}
+
+const OUTER_CONVERGENCE_WORKGROUP_SIZE: u32 = 256;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GpuOuterConvergenceParams {
+    num_cells: u32,
+    stride: u32,
+    num_targets: u32,
+    _pad0: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GpuOuterConvergenceTargetDesc {
+    offsets: [u32; 4],
+    num_comps: u32,
+    _pad0: [u32; 3],
+}
+
+struct OuterConvergenceMonitor {
+    target_names: Vec<String>,
+    pipeline: wgpu::ComputePipeline,
+    #[allow(dead_code)]
+    _b_params_x: wgpu::Buffer,
+    b_params_state: wgpu::Buffer,
+    b_descs: wgpu::Buffer,
+    b_out_bits: wgpu::Buffer,
+    bg_x: wgpu::BindGroup,
+    zero_out_words: Vec<u32>,
+    dispatch_cells: u32,
+    state_scale: Option<Vec<f32>>,
+}
+
+impl OuterConvergenceMonitor {
+    fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        model: &ModelSpec,
+        num_cells: u32,
+        x: &wgpu::Buffer,
+    ) -> Result<Option<Self>, String> {
+        let stride_x = model.system.unknowns_per_cell();
+        let stride_state = model.state_layout.stride();
+        if stride_x == 0 || stride_state == 0 || num_cells == 0 {
+            return Ok(None);
+        }
+
+        let layout = &model.state_layout;
+        let mut target_names: Vec<String> = Vec::new();
+        let mut target_descs: Vec<GpuOuterConvergenceTargetDesc> = Vec::new();
+
+        for eqn in model.system.equations() {
+            let target = eqn.target();
+            let name = target.name();
+
+            let kind = target.kind();
+            let comps = kind.component_count() as usize;
+            if comps == 0 {
+                continue;
+            }
+            if comps > 4 {
+                return Err(format!(
+                    "outer convergence monitor only supports up to 4 components per target (got {comps} for '{name}')"
+                ));
+            }
+
+            let mut offsets = [0u32; 4];
+            match kind {
+                FieldKind::Scalar => {
+                    let Some(off) = layout.offset_for(name) else {
+                        continue;
+                    };
+                    offsets[0] = off;
+                }
+                _ => {
+                    for comp in 0..comps {
+                        let Some(off) = layout.component_offset(name, comp as u32) else {
+                            offsets = [0u32; 4];
+                            break;
+                        };
+                        offsets[comp] = off;
+                    }
+                    if offsets == [0u32; 4] {
+                        continue;
+                    }
+                }
+            }
+
+            target_names.push(name.to_string());
+            target_descs.push(GpuOuterConvergenceTargetDesc {
+                offsets,
+                num_comps: comps as u32,
+                _pad0: [0u32; 3],
+            });
+        }
+
+        let num_targets = target_descs.len() as u32;
+        if num_targets == 0 {
+            return Ok(None);
+        }
+
+        let pipeline = {
+            let src = kernel_registry::kernel_source_by_id(
+                "",
+                crate::solver::model::KernelId::OUTER_CONVERGENCE,
+            )?;
+            (src.create_pipeline)(device)
+        };
+        let bgl = pipeline.get_bind_group_layout(0);
+
+        let b_params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_convergence:params_x"),
+            size: std::mem::size_of::<GpuOuterConvergenceParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let params_x = GpuOuterConvergenceParams {
+            num_cells,
+            stride: stride_x,
+            num_targets,
+            _pad0: 0,
+        };
+        queue.write_buffer(&b_params, 0, bytemuck::bytes_of(&params_x));
+
+        let b_params_state = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_convergence:params_state"),
+            size: std::mem::size_of::<GpuOuterConvergenceParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let params_state = GpuOuterConvergenceParams {
+            num_cells,
+            stride: stride_state,
+            num_targets,
+            _pad0: 0,
+        };
+        queue.write_buffer(&b_params_state, 0, bytemuck::bytes_of(&params_state));
+
+        let b_descs = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_convergence:target_descs"),
+            size: (target_descs.len() as u64) * std::mem::size_of::<GpuOuterConvergenceTargetDesc>() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&b_descs, 0, bytemuck::cast_slice(&target_descs));
+
+        let b_out_bits = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_convergence:out_bits"),
+            size: (num_targets as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let bg_x = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("outer_convergence:bg_x"),
+            layout: &bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: x.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_descs.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_out_bits.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_params.as_entire_binding(),
+                },
+            ],
+        });
+
+        let zero_out_words = vec![0u32; target_descs.len()];
+        let dispatch_cells = (num_cells + OUTER_CONVERGENCE_WORKGROUP_SIZE - 1)
+            / OUTER_CONVERGENCE_WORKGROUP_SIZE;
+
+        Ok(Some(Self {
+            target_names,
+            pipeline,
+            _b_params_x: b_params,
+            b_params_state,
+            b_descs,
+            b_out_bits,
+            bg_x,
+            zero_out_words,
+            dispatch_cells,
+            state_scale: None,
+        }))
+    }
+
+    fn reset_step(&mut self) {
+        self.state_scale = None;
+    }
+
+    fn ensure_state_scale(
+        &mut self,
+        plan: &GpuProgramPlan,
+        state: &wgpu::Buffer,
+    ) -> Result<(), String> {
+        if self.state_scale.is_some() {
+            return Ok(());
+        }
+        let scale = self.compute_maxima_with_params(
+            plan,
+            state,
+            &self.b_params_state,
+            "outer_convergence:state",
+        )?;
+        self.state_scale = Some(scale);
+        Ok(())
+    }
+
+    fn delta_maxima(&self, plan: &GpuProgramPlan) -> Result<Vec<f32>, String> {
+        self.compute_maxima_from_bind_group(plan, &self.bg_x, "outer_convergence:delta")
+    }
+
+    fn compute_maxima_with_params(
+        &self,
+        plan: &GpuProgramPlan,
+        input: &wgpu::Buffer,
+        params: &wgpu::Buffer,
+        label_prefix: &'static str,
+    ) -> Result<Vec<f32>, String> {
+        let bgl = self.pipeline.get_bind_group_layout(0);
+        let bg = plan.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label_prefix),
+            layout: &bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: input.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.b_descs.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.b_out_bits.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params.as_entire_binding(),
+                },
+            ],
+        });
+        self.compute_maxima_from_bind_group(plan, &bg, label_prefix)
+    }
+
+    fn compute_maxima_from_bind_group(
+        &self,
+        plan: &GpuProgramPlan,
+        bind_group: &wgpu::BindGroup,
+        label_prefix: &'static str,
+    ) -> Result<Vec<f32>, String> {
+        if self.zero_out_words.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        plan.context.queue.write_buffer(
+            &self.b_out_bits,
+            0,
+            bytemuck::cast_slice(&self.zero_out_words),
+        );
+
+        let mut encoder = plan
+            .context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some(label_prefix),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some(label_prefix),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, bind_group, &[]);
+            pass.dispatch_workgroups(self.dispatch_cells.max(1), 1, 1);
+        }
+        plan.context.queue.submit(Some(encoder.finish()));
+
+        let out_bytes = (self.zero_out_words.len() as u64) * 4;
+        let raw = pollster::block_on(read_buffer_cached(
+            &plan.context,
+            &plan.staging_cache,
+            &plan.profiling_stats,
+            &self.b_out_bits,
+            out_bytes,
+            "outer_convergence:out_bits (cached)",
+        ));
+        if raw.len() != out_bytes as usize {
+            return Err(format!(
+                "outer convergence readback size mismatch: got {} expected {}",
+                raw.len(),
+                out_bytes
+            ));
+        }
+        let words: &[u32] = bytemuck::cast_slice(&raw);
+        Ok(words.iter().map(|&w| f32::from_bits(w)).collect())
+    }
+
+    fn target_names(&self) -> &[String] {
+        &self.target_names
+    }
+
+    fn state_scale(&self) -> Option<&[f32]> {
+        self.state_scale.as_deref()
+    }
 }
 
 impl GenericCoupledProgramResources {
@@ -160,6 +481,14 @@ impl GenericCoupledProgramResources {
             build_generic_krylov(recipe, &runtime)?
         };
 
+        let outer_convergence = OuterConvergenceMonitor::new(
+            &runtime.common.context.device,
+            &runtime.common.context.queue,
+            model,
+            runtime.common.num_cells,
+            runtime.linear_port_space.buffer(runtime.linear_ports.x),
+        )?;
+
         Ok(Self {
             runtime,
             fields,
@@ -178,6 +507,7 @@ impl GenericCoupledProgramResources {
             linear_solver,
             schur,
             krylov,
+            outer_convergence,
             _b_bc_kind: b_bc_kind,
             _b_bc_value: b_bc_value,
             boundary_faces,
@@ -713,10 +1043,14 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     plan.outer_residual_u = None;
     plan.outer_residual_p = None;
     plan.outer_field_residuals.clear();
+    plan.repeat_break = false;
 
     let device = plan.context.device.clone();
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
+    if let Some(monitor) = r.outer_convergence.as_mut() {
+        monitor.reset_step();
+    }
     r.fields.advance_step();
     // Seed the writable `state` buffer with the previous state so kernels that
     // read from `state` (e.g. gradient/flux stages during implicit outer
@@ -818,6 +1152,115 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
         .solve_linear_system_cg(r.linear_solver.max_iters, r.linear_solver.tolerance);
     plan.last_linear_stats = stats;
     plan.step_linear_stats.push(stats);
+}
+
+pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
+    let iters_done = plan.step_linear_stats.len();
+    plan.outer_iterations = iters_done as u32;
+
+    let outer_iters = res(plan).outer_iters;
+    if outer_iters <= 1 && !plan.collect_convergence_stats {
+        return;
+    }
+
+    let (lin_tol, lin_tol_abs, state, monitor) = {
+        let r = res_mut(plan);
+        (
+            r.linear_solver.tolerance,
+            r.linear_solver.tolerance_abs,
+            r.fields.current_state().clone(),
+            r.outer_convergence.take(),
+        )
+    };
+
+    let Some(mut monitor) = monitor else {
+        return;
+    };
+
+    if outer_iters > 1 {
+        if let Err(err) = monitor.ensure_state_scale(plan, &state) {
+            eprintln!("[cfd2][outer] failed to compute state scale: {err}");
+        }
+    }
+
+    let delta = match monitor.delta_maxima(plan) {
+        Ok(v) => v,
+        Err(err) => {
+            eprintln!("[cfd2][outer] failed to compute correction norms: {err}");
+            res_mut(plan).outer_convergence = Some(monitor);
+            return;
+        }
+    };
+
+    if delta.len() != monitor.target_names().len() {
+        eprintln!(
+            "[cfd2][outer] correction norm length mismatch: got {} expected {}",
+            delta.len(),
+            monitor.target_names().len()
+        );
+        res_mut(plan).outer_convergence = Some(monitor);
+        return;
+    }
+
+    plan.outer_field_residuals.clear();
+    plan.outer_field_residuals.extend(
+        monitor
+            .target_names()
+            .iter()
+            .cloned()
+            .zip(delta.iter().copied()),
+    );
+
+    let mut residual_u: Option<f32> = None;
+    let mut residual_p: Option<f32> = None;
+    for (name, &v) in monitor.target_names().iter().zip(delta.iter()) {
+        if name == "p" {
+            residual_p = Some(v);
+        } else if name == "u" || name == "U" {
+            residual_u = Some(v);
+        }
+    }
+    plan.outer_residual_u = residual_u;
+    plan.outer_residual_p = residual_p;
+
+    if outer_iters <= 1 || !plan.last_linear_stats.converged || plan.repeat_break {
+        res_mut(plan).outer_convergence = Some(monitor);
+        return;
+    }
+
+    let Some(scale) = monitor.state_scale() else {
+        res_mut(plan).outer_convergence = Some(monitor);
+        return;
+    };
+    if scale.len() != delta.len() {
+        res_mut(plan).outer_convergence = Some(monitor);
+        return;
+    }
+
+    // Outer-loop convergence: stop iterating once the maximum correction magnitude is
+    // sufficiently small relative to the current state scale.
+    let tol_rel = (lin_tol * 10.0).clamp(1e-8, 1e-2);
+    let tol_abs = (lin_tol_abs * 10.0).max(0.0);
+
+    let mut converged = true;
+    for (&d, &s) in delta.iter().zip(scale.iter()) {
+        if !d.is_finite() || !s.is_finite() {
+            converged = false;
+            break;
+        }
+        let s = s.max(1.0);
+        let tol = tol_abs + tol_rel * s;
+        if d > tol {
+            converged = false;
+            break;
+        }
+    }
+
+    if converged {
+        plan.repeat_break = true;
+    }
+
+    res_mut(plan).outer_convergence = Some(monitor);
 }
 
 pub(crate) fn host_implicit_set_alpha_for_apply(plan: &mut GpuProgramPlan) {
@@ -938,6 +1381,9 @@ pub(crate) fn implicit_snapshot_run(
     _mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     let r = res(plan);
+    if plan.repeat_break {
+        return (0.0, None);
+    }
     if r.fields.constants.values().dtau <= 0.0 {
         return (0.0, None);
     }

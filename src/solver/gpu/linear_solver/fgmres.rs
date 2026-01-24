@@ -1239,8 +1239,10 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
     iter_params.max_restart = max_restart as u32;
 
     let tol_abs = config.tol_abs;
+    let tol_rel_rhs = config.tol_rel * rhs_norm;
 
     let mut basis_size = 0usize;
+    let mut residual_est = f32::INFINITY;
     let mut converged = false;
 
     // Ensure vector ops see correct dispatch width and problem size.
@@ -1386,55 +1388,67 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         write_iter_params(core, &iter_params);
 
         {
-            let mut encoder = core
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("FGMRES Iter: Scale+Update"),
-                });
+            let submission_index = {
+                let mut encoder =
+                    core.device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("FGMRES Iter: Scale+Update"),
+                        });
 
-            // v_{j+1} = (1/||w||) * w
-            let v_next = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j + 1);
-            let scale_bg = create_vector_bind_group(
-                core.device,
-                core.bgl_vectors,
-                core.vector_bindings,
-                core.b_w.as_entire_binding(),
-                v_next,
-                core.b_temp.as_entire_binding(),
-                "FGMRES Normalize Basis BG",
-            );
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("FGMRES Normalize & Copy"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(core.pipeline_scale);
-                pass.set_bind_group(0, &scale_bg, &[]);
-                pass.set_bind_group(1, core.bg_matrix, &[]);
-                pass.set_bind_group(2, core.bg_precond, &[]);
-                pass.set_bind_group(3, core.bg_params, &[]);
-                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
-            }
+                // v_{j+1} = (1/||w||) * w
+                let v_next = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j + 1);
+                let scale_bg = create_vector_bind_group(
+                    core.device,
+                    core.bgl_vectors,
+                    core.vector_bindings,
+                    core.b_w.as_entire_binding(),
+                    v_next,
+                    core.b_temp.as_entire_binding(),
+                    "FGMRES Normalize Basis BG",
+                );
+                {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("FGMRES Normalize & Copy"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(core.pipeline_scale);
+                    pass.set_bind_group(0, &scale_bg, &[]);
+                    pass.set_bind_group(1, core.bg_matrix, &[]);
+                    pass.set_bind_group(2, core.bg_precond, &[]);
+                    pass.set_bind_group(3, core.bg_params, &[]);
+                    pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+                }
 
-            // Update Hessenberg/Givens and residual estimate.
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("FGMRES Update Hessenberg"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(core.pipeline_update_hessenberg);
-                pass.set_bind_group(0, core.bg_logic, &[]);
-                pass.set_bind_group(1, core.bg_logic_params, &[]);
-                pass.dispatch_workgroups(1, 1, 1);
-            }
+                // Update Hessenberg/Givens and residual estimate.
+                {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("FGMRES Update Hessenberg"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(core.pipeline_update_hessenberg);
+                    pass.set_bind_group(0, core.bg_logic, &[]);
+                    pass.set_bind_group(1, core.bg_logic_params, &[]);
+                    pass.dispatch_workgroups(1, 1, 1);
+                }
 
-            core.queue.submit(Some(encoder.finish()));
+                // IMPORTANT: `update_hessenberg_givens` writes the current residual estimate to
+                // `scalars[0]`. We read it back *every iteration* to support early exit.
+                //
+                // Do not remove this readback without providing an alternative early-exit
+                // mechanism (or a benchmarked check interval). Only checking at the end forces
+                // `max_restart` iterations even when GMRES converges early, which is a major
+                // performance regression for many flows.
+                encoder.copy_buffer_to_buffer(core.b_scalars, 0, core.b_staging_scalar, 0, 4);
+                core.queue.submit(Some(encoder.finish()))
+            };
+
+            residual_est = read_scalar_after_submit(core, submission_index);
         }
-    }
 
-    let final_residual = read_scalar(core);
-    if final_residual <= config.tol_rel * rhs_norm || final_residual <= tol_abs {
-        converged = true;
+        if residual_est <= tol_rel_rhs || residual_est <= tol_abs {
+            converged = true;
+            break;
+        }
     }
 
     // Solve upper triangular system for y (size=basis_size)
@@ -1477,7 +1491,7 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
 
     FgmresSolveOnceResult {
         basis_size,
-        residual_est: final_residual,
+        residual_est,
         converged,
     }
 }

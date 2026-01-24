@@ -346,11 +346,26 @@ fn euler_central_upwind(
     // low Mach numbers (since c_eff^2 ~ O(|u|^2)), causing unphysical density states and solver
     // instability.
     let c_couple2_safe = |side: FaceSide| S::Max(Box::new(c2(side)), Box::new(S::lit(1e-12)));
-    let rho_diss = |side: FaceSide| {
-        let coupling = S::Mul(
-            Box::new(low_mach_enabled.clone()),
-            Box::new(pressure_coupling_alpha.clone()),
+    let mach2_gate = |side: FaceSide| {
+        // Enable coupling automatically once Mach becomes small, even if the user keeps the
+        // low-Mach model "off". This avoids pressure checkerboarding for low-Mach flows without
+        // perturbing genuinely compressible regimes.
+        let mach2_limit = S::lit(0.04); // Mach ≈ 0.2
+        let mach2 = S::Div(Box::new(u_n2(side)), Box::new(c_couple2_safe(side)));
+        let raw = S::Div(
+            Box::new(S::Sub(Box::new(mach2_limit.clone()), Box::new(mach2))),
+            Box::new(mach2_limit),
         );
+        S::Max(
+            Box::new(S::lit(0.0)),
+            Box::new(S::Min(Box::new(S::lit(1.0)), Box::new(raw))),
+        )
+    };
+
+    let rho_diss = |side: FaceSide| {
+        let coupling_gate = S::Max(Box::new(low_mach_enabled.clone()), Box::new(mach2_gate(side)));
+        let coupling =
+            S::Mul(Box::new(coupling_gate), Box::new(pressure_coupling_alpha.clone()));
         S::Add(
             Box::new(rho(side)),
             Box::new(S::Mul(

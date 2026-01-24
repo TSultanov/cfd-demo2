@@ -903,7 +903,15 @@ impl FgmresWorkspace {
         z: wgpu::BindingResource<'a>,
         label: &str,
     ) -> wgpu::BindGroup {
-        create_vector_bind_group(device, &self.bgl_vectors, self.vector_bindings, x, y, z, label)
+        create_vector_bind_group(
+            device,
+            &self.bgl_vectors,
+            self.vector_bindings,
+            x,
+            y,
+            z,
+            label,
+        )
     }
 
     pub fn gpu_norm<'a>(
@@ -1185,8 +1193,10 @@ pub fn read_scalar(core: &FgmresCore<'_>) -> f32 {
     read_scalar_after_submit(core, submission_index)
 }
 
-pub fn read_scalar_after_submit(core: &FgmresCore<'_>, submission_index: wgpu::SubmissionIndex) -> f32 {
-
+pub fn read_scalar_after_submit(
+    core: &FgmresCore<'_>,
+    submission_index: wgpu::SubmissionIndex,
+) -> f32 {
     let slice = core.b_staging_scalar.slice(..);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |v| {
@@ -1212,7 +1222,12 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
     mut params: RawFgmresParams,
     mut iter_params: IterParams,
     config: FgmresSolveOnceConfig,
-    mut precondition: impl FnMut(usize, wgpu::BindingResource<'a>, &'a wgpu::Buffer),
+    mut precondition: impl FnMut(
+        usize,
+        &mut wgpu::CommandEncoder,
+        wgpu::BindingResource<'a>,
+        &'a wgpu::Buffer,
+    ),
 ) -> FgmresSolveOnceResult {
     let n = core.n;
     let vector_bytes = (n as u64) * 4;
@@ -1220,16 +1235,12 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
     let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
     let dispatch_x_threads = dispatch_x_threads(workgroups);
 
-    let max_restart = iter_params
-        .max_restart
-        .max(1)
-        .min(core.max_restart as u32) as usize;
+    let max_restart = iter_params.max_restart.max(1).min(core.max_restart as u32) as usize;
     iter_params.max_restart = max_restart as u32;
 
     let tol_abs = config.tol_abs;
 
     let mut basis_size = 0usize;
-    let mut final_residual = f32::INFINITY;
     let mut converged = false;
 
     // Ensure vector ops see correct dispatch width and problem size.
@@ -1243,19 +1254,20 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
 
         let z_buf = &core.z_vectors[j];
         let vj = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j);
-        precondition(j, vj, z_buf);
 
         // Update solver params for this iteration.
         params.num_iters = j as u32;
         write_params(core, &params);
 
-        // (1) w = A * z_j, then CGS, then norm partial reduction.
+        // (1) Precondition, then w = A * z_j, then CGS, then norm partial reduction.
         {
             let mut encoder = core
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("FGMRES Iter: SpMV+CGS+NormPartial"),
                 });
+
+            precondition(j, &mut encoder, vj, z_buf);
 
             // w = A * z_j
             let spmv_bg = create_vector_bind_group(
@@ -1369,15 +1381,15 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         // Restore params for vector ops
         write_params(core, &params);
 
-        // (3) v_{j+1} = (1/||w||) * w, update Hessenberg/Givens, and stage residual estimate.
+        // (3) v_{j+1} = (1/||w||) * w, update Hessenberg/Givens.
         iter_params.current_idx = j as u32;
         write_iter_params(core, &iter_params);
 
-        let submission_index = {
+        {
             let mut encoder = core
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("FGMRES Iter: Scale+Update+Residual"),
+                    label: Some("FGMRES Iter: Scale+Update"),
                 });
 
             // v_{j+1} = (1/||w||) * w
@@ -1416,15 +1428,13 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
                 pass.dispatch_workgroups(1, 1, 1);
             }
 
-            encoder.copy_buffer_to_buffer(core.b_scalars, 0, core.b_staging_scalar, 0, 4);
-            core.queue.submit(Some(encoder.finish()))
-        };
-
-        final_residual = read_scalar_after_submit(core, submission_index);
-        if final_residual <= config.tol_rel * rhs_norm || final_residual <= tol_abs {
-            converged = true;
-            break;
+            core.queue.submit(Some(encoder.finish()));
         }
+    }
+
+    let final_residual = read_scalar(core);
+    if final_residual <= config.tol_rel * rhs_norm || final_residual <= tol_abs {
+        converged = true;
     }
 
     // Solve upper triangular system for y (size=basis_size)

@@ -46,22 +46,17 @@ impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {
             params,
             iter_params,
             config,
-            |_j, vj, z_buf| {
-                let mut encoder =
-                    context
-                        .device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some(precond_label),
-                        });
+            |_j, encoder, vj, z_buf| {
+                encoder.push_debug_group(precond_label);
                 self.precond.encode_apply(
                     &context.device,
-                    &mut encoder,
+                    encoder,
                     &self.fgmres,
                     vj,
                     z_buf,
                     dispatch,
                 );
-                context.queue.submit(Some(encoder.finish()));
+                encoder.pop_debug_group();
             },
         )
     }

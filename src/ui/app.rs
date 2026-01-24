@@ -1796,7 +1796,7 @@ impl eframe::App for CFDApp {
                                         // Provide conservative defaults if the UI is still at the
                                         // typical incompressible starting point.
                                         if (self.alpha_u - 0.7).abs() < 1e-12 {
-                                            self.alpha_u = 0.2;
+                                            self.alpha_u = 0.7;
                                             self.update_gpu_alpha_u();
                                         }
                                     }

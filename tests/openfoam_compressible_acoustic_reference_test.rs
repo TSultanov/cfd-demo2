@@ -82,7 +82,7 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
     solver.set_dtau(0.0).unwrap();
     solver.set_viscosity(1.81e-5).unwrap();
     solver.set_inlet_velocity(0.0).unwrap();
-    solver.set_outer_iters(20).unwrap();
+    solver.set_outer_iters(1).unwrap();
     solver.set_state_fields(&rho, &u, &p);
     solver.initialize_history();
 
@@ -146,18 +146,12 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
     assert!(p_out_dp_max > 5.0 && ux_out_max > 0.001, "solver appears trivial: max_abs(dp_out)={p_out_dp_max:.3e} max_abs(u_x_out)={ux_out_max:.3e}");
 
     if common::diag_enabled() {
-        let ux_ref_min = ux_ref
-            .iter()
-            .copied()
-            .fold(f64::INFINITY, |a, b| a.min(b));
+        let ux_ref_min = ux_ref.iter().copied().fold(f64::INFINITY, |a, b| a.min(b));
         let ux_ref_max_v = ux_ref
             .iter()
             .copied()
             .fold(f64::NEG_INFINITY, |a, b| a.max(b));
-        let ux_out_min = ux_out
-            .iter()
-            .copied()
-            .fold(f64::INFINITY, |a, b| a.min(b));
+        let ux_out_min = ux_out.iter().copied().fold(f64::INFINITY, |a, b| a.min(b));
         let ux_out_max_v = ux_out
             .iter()
             .copied()
@@ -258,7 +252,9 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
                 );
             }
         } else {
-            eprintln!("[openfoam][compressible_acoustic] could not fetch rho/rho_u for u diagnostics");
+            eprintln!(
+                "[openfoam][compressible_acoustic] could not fetch rho/rho_u for u diagnostics"
+            );
         }
     }
 

@@ -2,12 +2,12 @@
 mod common;
 
 use cfd2::solver::mesh::generate_structured_backwards_step_mesh;
+use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
     SolverRuntimeParamsExt,
 };
-use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 
@@ -24,7 +24,14 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
     let height_inlet = 0.5;
     let step_x = 1.0;
 
-    let mesh = generate_structured_backwards_step_mesh(nx, ny, length, height_outlet, height_inlet, step_x);
+    let mesh = generate_structured_backwards_step_mesh(
+        nx,
+        ny,
+        length,
+        height_outlet,
+        height_inlet,
+        step_x,
+    );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
@@ -64,7 +71,7 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
     solver
         .set_compressible_inlet_isothermal_x(rho0, u0, &eos)
         .unwrap();
-    solver.set_outer_iters(20).unwrap();
+    solver.set_outer_iters(1).unwrap();
     solver.set_uniform_state(rho0, [u0, 0.0], p0);
     solver.initialize_history();
 
@@ -75,7 +82,9 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
     let u = pollster::block_on(solver.get_u());
     let p = pollster::block_on(solver.get_p());
 
-    let table = common::load_csv(&common::data_path("compressible_backwards_step_full_field.csv"));
+    let table = common::load_csv(&common::data_path(
+        "compressible_backwards_step_full_field.csv",
+    ));
     let x_idx = common::column_idx(&table.header, "x");
     let y_idx = common::column_idx(&table.header, "y");
     let p_idx = common::column_idx(&table.header, "p");
@@ -114,8 +123,14 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
     for (i, (sol, rf)) in sol_rows.iter().zip(ref_rows.iter()).enumerate() {
         let (sx, sy, _, _, _) = *sol;
         let (rx, ry, _, _, _) = *rf;
-        assert!((sx - rx).abs() < 1e-12, "x mismatch at sorted row {i}: solver={sx} ref={rx}");
-        assert!((sy - ry).abs() < 1e-12, "y mismatch at sorted row {i}: solver={sy} ref={ry}");
+        assert!(
+            (sx - rx).abs() < 1e-12,
+            "x mismatch at sorted row {i}: solver={sx} ref={rx}"
+        );
+        assert!(
+            (sy - ry).abs() < 1e-12,
+            "y mismatch at sorted row {i}: solver={sy} ref={ry}"
+        );
     }
 
     let p_sol: Vec<f64> = sol_rows.iter().map(|r| r.2).collect();
@@ -125,16 +140,8 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
     let ux_ref: Vec<f64> = ref_rows.iter().map(|r| r.3).collect();
     let uy_ref: Vec<f64> = ref_rows.iter().map(|r| r.4).collect();
 
-    let u_sol: Vec<(f64, f64)> = ux_sol
-        .iter()
-        .copied()
-        .zip(uy_sol.iter().copied())
-        .collect();
-    let u_ref: Vec<(f64, f64)> = ux_ref
-        .iter()
-        .copied()
-        .zip(uy_ref.iter().copied())
-        .collect();
+    let u_sol: Vec<(f64, f64)> = ux_sol.iter().copied().zip(uy_sol.iter().copied()).collect();
+    let u_ref: Vec<(f64, f64)> = ux_ref.iter().copied().zip(uy_ref.iter().copied()).collect();
 
     let u_scale = common::rms_vec2_mag(&u_ref).max(1e-12);
     let p_scale = common::rms(&p_ref).max(1e-12);

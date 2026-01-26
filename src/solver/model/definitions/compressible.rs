@@ -394,7 +394,6 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
                 BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
             ),
     );
-
     let method = crate::solver::model::method::MethodSpec::Coupled(
         crate::solver::model::method::CoupledCapabilities {
             // Dual-time stepping can require under-relaxation to stabilize pseudo-time iterations
@@ -406,7 +405,9 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
         },
     );
     let flux = crate::solver::model::flux_module::FluxModuleSpec::Scheme {
-        gradients: Some(crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout),
+        gradients: Some(
+            crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout,
+        ),
         scheme: crate::solver::model::flux_module::FluxSchemeSpec::EulerCentralUpwind,
     };
 

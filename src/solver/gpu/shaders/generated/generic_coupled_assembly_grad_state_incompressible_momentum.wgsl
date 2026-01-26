@@ -212,12 +212,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             diag_0 += diff_coeff_U;
             matrix_values[start_row_0 + neighbor_rank * 3u + 0u] -= diff_coeff_U;
         } else {
-            if (bc_kind[face_idx * 3u + 0u] == 1u) {
+            if (boundary_type == 4u) {
                 diag_0 += diff_coeff_U;
-                rhs_0 += diff_coeff_U * bc_value[face_idx * 3u + 0u];
+                rhs_0 += diff_coeff_U * (state[idx * 8u + 0u] - (state[idx * 8u + 0u] * normal.x + state[idx * 8u + 1u] * normal.y) * normal.x);
             } else {
-                if (bc_kind[face_idx * 3u + 0u] == 2u) {
-                    rhs_0 += -(select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area * bc_value[face_idx * 3u + 0u]);
+                if (bc_kind[face_idx * 3u + 0u] == 1u) {
+                    diag_0 += diff_coeff_U;
+                    rhs_0 += diff_coeff_U * bc_value[face_idx * 3u + 0u];
+                } else {
+                    if (bc_kind[face_idx * 3u + 0u] == 2u) {
+                        rhs_0 += -(select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area * bc_value[face_idx * 3u + 0u]);
+                    }
                 }
             }
         }
@@ -225,12 +230,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             diag_1 += diff_coeff_U;
             matrix_values[start_row_1 + neighbor_rank * 3u + 1u] -= diff_coeff_U;
         } else {
-            if (bc_kind[face_idx * 3u + 1u] == 1u) {
+            if (boundary_type == 4u) {
                 diag_1 += diff_coeff_U;
-                rhs_1 += diff_coeff_U * bc_value[face_idx * 3u + 1u];
+                rhs_1 += diff_coeff_U * (state[idx * 8u + 1u] - (state[idx * 8u + 0u] * normal.x + state[idx * 8u + 1u] * normal.y) * normal.y);
             } else {
-                if (bc_kind[face_idx * 3u + 1u] == 2u) {
-                    rhs_1 += -(select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area * bc_value[face_idx * 3u + 1u]);
+                if (bc_kind[face_idx * 3u + 1u] == 1u) {
+                    diag_1 += diff_coeff_U;
+                    rhs_1 += diff_coeff_U * bc_value[face_idx * 3u + 1u];
+                } else {
+                    if (bc_kind[face_idx * 3u + 1u] == 2u) {
+                        rhs_1 += -(select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area * bc_value[face_idx * 3u + 1u]);
+                    }
                 }
             }
         }

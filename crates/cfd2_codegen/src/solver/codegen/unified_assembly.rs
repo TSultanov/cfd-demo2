@@ -436,8 +436,13 @@ fn main_assembly_fn(
                 equation.target.name(),
                 component,
             );
-            let phi_iter =
-                state_component(layout, "state_iter", "idx", equation.target.name(), component);
+            let phi_iter = state_component(
+                layout,
+                "state_iter",
+                "idx",
+                equation.target.name(),
+                component,
+            );
 
             // Default BDF1
             stmts.push(dsl::assign_op_expr(
@@ -804,38 +809,88 @@ fn main_assembly_fn(
 
                     let neumann_rhs =
                         -(kappa.clone() * Expr::ident("area") * bc_value_expr.clone());
-                    let boundary_contrib = dsl::block(vec![dsl::if_block_expr(
-                        bc_kind_expr.eq(GpuBcKind::Dirichlet),
-                        dsl::block(vec![
-                            if row_u_idx == col_u_idx {
-                                dsl::assign_op_expr(
-                                    AssignOp::Add,
-                                    Expr::ident(format!("diag_{row_u_idx}")),
-                                    Expr::ident(&diff_coeff_name),
-                                )
+                    let boundary_contrib = {
+                        let is_velocity_field = matches!(field_name, "u" | "U" | "rho_u" | "rhoU");
+                        let is_slipwall = Expr::ident("boundary_type").eq(Expr::from(4u32));
+
+                        // SlipWall: emulate OpenFOAM `type slip` by projecting out the normal
+                        // component at the boundary. This cannot be represented by the scalar
+                        // per-component BC table, so handle it here (diffusion terms only).
+                        let slip_bc_value = if is_velocity_field
+                            && equation.target.kind().component_count() >= 2
+                            && component <= 1
+                        {
+                            let vx = state_component(layout, "state", "idx", field_name, 0);
+                            let vy = state_component(layout, "state", "idx", field_name, 1);
+                            let nx = Expr::ident("normal").field("x");
+                            let ny = Expr::ident("normal").field("y");
+                            let un = vx.clone() * nx.clone() + vy.clone() * ny.clone();
+
+                            Some(if component == 0 {
+                                vx - un.clone() * nx
                             } else {
-                                dsl::assign_op_expr(
-                                    AssignOp::Add,
-                                    diag_block.entry(row_u_idx as u8, col_u_idx as u8).expr,
-                                    Expr::ident(&diff_coeff_name),
-                                )
-                            },
+                                vy - un * ny
+                            })
+                        } else {
+                            None
+                        };
+
+                        let diag_add = if row_u_idx == col_u_idx {
                             dsl::assign_op_expr(
                                 AssignOp::Add,
-                                Expr::ident(format!("rhs_{row_u_idx}")),
-                                Expr::ident(&diff_coeff_name) * bc_value_expr.clone(),
-                            ),
-                        ]),
-                        Some(dsl::block(vec![dsl::if_block_expr(
-                            bc_kind_expr.eq(GpuBcKind::Neumann),
-                            dsl::block(vec![dsl::assign_op_expr(
+                                Expr::ident(format!("diag_{row_u_idx}")),
+                                Expr::ident(&diff_coeff_name),
+                            )
+                        } else {
+                            dsl::assign_op_expr(
                                 AssignOp::Add,
-                                Expr::ident(format!("rhs_{row_u_idx}")),
-                                neumann_rhs,
-                            )]),
-                            None,
-                        )])),
-                    )]);
+                                diag_block.entry(row_u_idx as u8, col_u_idx as u8).expr,
+                                Expr::ident(&diff_coeff_name),
+                            )
+                        };
+
+                        let slip_block = slip_bc_value.map(|value| {
+                            dsl::block(vec![
+                                diag_add.clone(),
+                                dsl::assign_op_expr(
+                                    AssignOp::Add,
+                                    Expr::ident(format!("rhs_{row_u_idx}")),
+                                    Expr::ident(&diff_coeff_name) * value,
+                                ),
+                            ])
+                        });
+
+                        let default_block = dsl::block(vec![dsl::if_block_expr(
+                            bc_kind_expr.eq(GpuBcKind::Dirichlet),
+                            dsl::block(vec![
+                                diag_add,
+                                dsl::assign_op_expr(
+                                    AssignOp::Add,
+                                    Expr::ident(format!("rhs_{row_u_idx}")),
+                                    Expr::ident(&diff_coeff_name) * bc_value_expr.clone(),
+                                ),
+                            ]),
+                            Some(dsl::block(vec![dsl::if_block_expr(
+                                bc_kind_expr.eq(GpuBcKind::Neumann),
+                                dsl::block(vec![dsl::assign_op_expr(
+                                    AssignOp::Add,
+                                    Expr::ident(format!("rhs_{row_u_idx}")),
+                                    neumann_rhs,
+                                )]),
+                                None,
+                            )])),
+                        )]);
+
+                        if let Some(slip_block) = slip_block {
+                            dsl::block(vec![dsl::if_block_expr(
+                                is_slipwall,
+                                slip_block,
+                                Some(default_block),
+                            )])
+                        } else {
+                            default_block
+                        }
+                    };
 
                     body.push(dsl::if_block_expr(
                         !Expr::ident("is_boundary"),

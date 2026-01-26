@@ -1,8 +1,8 @@
 #[path = "openfoam_reference/common.rs"]
 mod common;
 
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::gpu::enums::GpuBoundaryType;
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
@@ -74,17 +74,13 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     solver.set_dtau(0.0).unwrap();
     solver.set_viscosity(1.0).unwrap();
     solver.set_density(rho0).unwrap();
-    solver.set_outer_iters(20).unwrap();
+    solver.set_outer_iters(1).unwrap();
     solver.set_uniform_state(rho0, [0.0, 0.0], p0);
     solver
         .set_boundary_vec2(GpuBoundaryType::MovingWall, "u", [u_lid, 0.0])
         .unwrap();
     solver
-        .set_boundary_vec2(
-            GpuBoundaryType::MovingWall,
-            "rho_u",
-            [rho0 * u_lid, 0.0],
-        )
+        .set_boundary_vec2(GpuBoundaryType::MovingWall, "rho_u", [rho0 * u_lid, 0.0])
         .unwrap();
     solver.initialize_history();
 
@@ -153,16 +149,8 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     let ux_ref: Vec<f64> = ref_rows.iter().map(|r| r.3).collect();
     let uy_ref: Vec<f64> = ref_rows.iter().map(|r| r.4).collect();
 
-    let u_sol: Vec<(f64, f64)> = ux_sol
-        .iter()
-        .copied()
-        .zip(uy_sol.iter().copied())
-        .collect();
-    let u_ref: Vec<(f64, f64)> = ux_ref
-        .iter()
-        .copied()
-        .zip(uy_ref.iter().copied())
-        .collect();
+    let u_sol: Vec<(f64, f64)> = ux_sol.iter().copied().zip(uy_sol.iter().copied()).collect();
+    let u_ref: Vec<(f64, f64)> = ux_ref.iter().copied().zip(uy_ref.iter().copied()).collect();
 
     let u_scale = common::rms_vec2_mag(&u_ref).max(1e-12);
     let p_scale = common::rms(&p_ref).max(1e-12);
@@ -186,6 +174,10 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     if common::diag_enabled() {
         let (x_u, y_u) = (sol_rows[u_max.idx].0, sol_rows[u_max.idx].1);
         let (x_p, y_p) = (sol_rows[p_max.idx].0, sol_rows[p_max.idx].1);
+        let (u_sol_x, u_sol_y) = u_sol[u_max.idx];
+        let (u_ref_x, u_ref_y) = u_ref[u_max.idx];
+        let p_sol_v = p_sol[p_max.idx];
+        let p_ref_v = p_ref[p_max.idx];
         eprintln!(
             "[openfoam][compressible_lid] max_cell rel u={:.6} abs={:.6} at (x={:.4}, y={:.4}) | max_cell rel p={:.6} abs={:.3} at (x={:.4}, y={:.4}) | scales u_rms={:.3e} p_rms={:.3e}",
             u_max.rel,
@@ -199,6 +191,10 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
             u_scale,
             p_scale,
         );
+        eprintln!(
+            "[openfoam][compressible_lid] u@max: sol=({u_sol_x:.6},{u_sol_y:.6}) ref=({u_ref_x:.6},{u_ref_y:.6})"
+        );
+        eprintln!("[openfoam][compressible_lid] p@max: sol={p_sol_v:.6} ref={p_ref_v:.6}");
     }
 
     assert!(

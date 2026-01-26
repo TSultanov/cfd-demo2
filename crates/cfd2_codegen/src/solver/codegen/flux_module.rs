@@ -164,7 +164,7 @@ mod tests {
         // gradient on boundary faces), so we can assert boundary-specific zeroing exists.
         let phi_expr = FaceScalarExpr::Dot(
             Box::new(FaceVec2Expr::state_vec2(FaceSide::Neighbor, "grad_phi")),
-            Box::new(FaceVec2Expr::normal()),
+            Box::new(FaceVec2Expr::cell_to_face(FaceSide::Neighbor)),
         );
         let spec = FluxModuleKernelSpec::ScalarReplicated { phi: phi_expr };
 
@@ -1457,18 +1457,30 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
             // Boundary regression guard for MUSCL reconstruction:
             //
             // When higher-order reconstruction is enabled, models conventionally use `grad_*`
-            // state fields to reconstruct face states. On boundary faces, neighbor-side
-            // state reads are replaced with Dirichlet/Neumann "ghost" values via `bc_kind/bc_value`.
+            // state fields to reconstruct face states. On boundary faces, neighbor-side state
+            // reads are replaced with Dirichlet/Neumann "ghost" values via `bc_kind/bc_value`.
             // If we also use non-zero neighbor-side gradients, the reconstruction step can modify
             // those ghost values and violate boundary semantics.
             //
             // To keep the IR PDE-agnostic and preserve existing BC semantics, treat neighbor-side
             // `grad_*` vectors as zero on boundary faces.
+            //
+            // Exception: for Rhie–Chow-style mass fluxes, `grad_p` participates in the HbyA
+            // predictor. On outlet faces (zero-gradient velocity), we allow `grad_p` to be
+            // non-zero so the pressure equation sees the same predictor term OpenFOAM uses,
+            // while still forcing it to zero on other boundary types (e.g. walls/inlets) to
+            // avoid injecting normal flux where the velocity BC is Dirichlet.
             if *side == FaceSide::Neighbor && field.starts_with("grad_") {
                 let is_boundary = Expr::ident("is_boundary");
+                let zero_cond = if field == "grad_p" {
+                    let is_outlet = Expr::ident("boundary_type").eq(Expr::from(2u32));
+                    is_boundary.clone() & !is_outlet
+                } else {
+                    is_boundary.clone()
+                };
                 return typed::VecExpr::<2>::from_components([
-                    dsl::select(x, Expr::from(0.0), is_boundary.clone()),
-                    dsl::select(y, Expr::from(0.0), is_boundary),
+                    dsl::select(x, Expr::from(0.0), zero_cond.clone()),
+                    dsl::select(y, Expr::from(0.0), zero_cond),
                 ]);
             }
 

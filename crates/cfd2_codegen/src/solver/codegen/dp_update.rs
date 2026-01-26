@@ -70,15 +70,6 @@ var<storage, read_write> state: array<f32>;\n\n",
     out.push_str("@group(0) @binding(4)\nvar<uniform> constants: Constants;\n\n");
 
     out.push_str(
-        "fn safe_inverse(val: f32) -> f32 {\n\
-    if (abs(val) > 1e-14) {\n\
-        return 1.0 / val;\n\
-    }\n\
-    return 0.0;\n\
-}\n\n",
-    );
-
-    out.push_str(
         "@compute\n\
 @workgroup_size(64)\n\
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {\n\
@@ -88,34 +79,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {\n\
         return;\n\
     }\n\
 \n\
-    let scalar_offset = scalar_row_offsets[idx];\n\
-    let scalar_end = scalar_row_offsets[idx + 1u];\n\
-    let num_neighbors = scalar_end - scalar_offset;\n\
-    let diag_rank = diagonal_indices[idx] - scalar_offset;\n\
-\n\
-    let block_stride = UNKNOWNS_PER_CELL * UNKNOWNS_PER_CELL;\n\
-    let start_row_0 = scalar_offset * block_stride;\n\
-    let row_stride = num_neighbors * UNKNOWNS_PER_CELL;\n\
-\n\
-    var sum_u_inv: f32 = 0.0;\n",
-    );
-
-    for (i, _) in u_indices.iter().enumerate() {
-        out.push_str(&format!(
-            "    {{\n\
-        let u = U_{i};\n\
-        let start_row_u = start_row_0 + u * row_stride;\n\
-        let diag_u = matrix_values[start_row_u + diag_rank * UNKNOWNS_PER_CELL + u];\n\
-        sum_u_inv += safe_inverse(diag_u);\n\
-    }}\n"
-        ));
-    }
-
-    out.push_str(
-        "\n\
-    // Match SIMPLE-style under-relaxation applied in the update stage:\n\
-    // use d_p ≈ alpha_u / A_U.\n\
-    let d_p = constants.alpha_u * (sum_u_inv / max(f32(U_LEN), 1.0));\n\
+    // Transient-scale approximation: d_p ≈ alpha_u * dt / rho.\n\
+    //\n\
+    // This is the mobility used by the Rhie–Chow flux and pressure correction equation for\n\
+    // incompressible pseudo-time marching.\n\
+    let rho = max(constants.density, 0.000000000001);\n\
+    let dt = max(constants.dt, 0.0);\n\
+    let d_p = constants.alpha_u * dt / rho;\n\
     state[idx * STATE_STRIDE + D_P_OFFSET] = d_p;\n\
 }\n",
     );

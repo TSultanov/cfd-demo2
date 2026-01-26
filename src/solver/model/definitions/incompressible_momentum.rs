@@ -17,7 +17,7 @@ pub struct IncompressibleMomentumFields {
     pub rho: FieldRef,
     pub d_p: FieldRef,
     pub grad_p: FieldRef,
-    pub grad_component: FieldRef,
+    pub grad_p_old: FieldRef,
 }
 
 impl IncompressibleMomentumFields {
@@ -30,7 +30,7 @@ impl IncompressibleMomentumFields {
             rho: vol_scalar("rho", si::DENSITY),
             d_p: vol_scalar("d_p", si::D_P),
             grad_p: vol_vector("grad_p", si::PRESSURE_GRADIENT),
-            grad_component: vol_vector("grad_component", si::INV_TIME),
+            grad_p_old: vol_vector("grad_p_old", si::PRESSURE_GRADIENT),
         }
     }
 }
@@ -81,7 +81,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         fields.p,
         fields.d_p,
         fields.grad_p,
-        fields.grad_component,
+        fields.grad_p_old,
     ]);
     let flux_kernel = rhie_chow_flux_module_kernel(&system, &layout)
         .expect("failed to derive Rhie–Chow flux formula from model system/layout");

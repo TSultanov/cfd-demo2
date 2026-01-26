@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: d011ecba06bf6377d0b40590326d36319ff684a60a79a83654a70a2fda0d83e7
+// SourceHash: 64e769c0707b2f1ccb92e9c012f11d36de4b855d2007c7efd472dbd3dc97c363
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -34,7 +34,9 @@ pub enum ShaderEntry {
     GeneratedPackedStateGradientsGenericDiffusionDemo,
     GeneratedPackedStateGradientsGenericDiffusionDemoNeumann,
     GeneratedPackedStateGradientsIncompressibleMomentum,
-    GeneratedRhieChowCorrectVelocityIncompressibleMomentum,
+    GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum,
+    GeneratedRhieChowGradPUpdateIncompressibleMomentum,
+    GeneratedRhieChowStoreGradPIncompressibleMomentum,
     GenericCoupledSchurSetup,
     GmresCgs,
     GmresLogic,
@@ -47,10 +49,10 @@ pub enum ShaderEntry {
 }
 impl ShaderEntry {
     pub fn create_pipeline_layout(&self, device: &wgpu::Device) -> wgpu::PipelineLayout {
-        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityIncompressibleMomentum => generated :: rhie_chow_correct_velocity_incompressible_momentum :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: OuterConvergence => outer_convergence :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
+        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: OuterConvergence => outer_convergence :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
     }
     pub fn create_shader_module_embed_source(&self, device: &wgpu::Device) -> wgpu::ShaderModule {
-        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: OuterConvergence => { outer_convergence :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
+        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: OuterConvergence => { outer_convergence :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
     }
 }
 mod _root {
@@ -2382,83 +2384,258 @@ pub mod layout_asserts {
             ) == 72
         );
     };
-    const GENERATED_RHIE_CHOW_CORRECT_VELOCITY_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS: () = {
+    const GENERATED_RHIE_CHOW_CORRECT_VELOCITY_DELTA_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
                 dt
             ) == 0
         );
         assert!(
             std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
                 dt_old
             ) == 4
         );
         assert!(
             std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
                 dtau
             ) == 8
         );
         assert!(
             std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
                 time
             ) == 12
         );
         assert!(
             std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
                 viscosity
             ) == 16
         );
         assert!(
             std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
                 density
             ) == 20
         );
         assert!(
             std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
                 component
             ) == 24
         );
         assert!(
             std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
                 alpha_p
             ) == 28
         );
         assert!(
             std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
                 scheme
             ) == 32
         );
         assert!(
             std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
                 alpha_u
             ) == 36
         );
         assert!(
             std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
                 stride_x
             ) == 40
         );
         assert!(
             std::mem::offset_of!(
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
                 time_scheme
             ) == 44
         );
         assert!(
             std::mem::size_of::<
-                generated::rhie_chow_correct_velocity_incompressible_momentum::Constants,
+                generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants,
             >() == 48
+        );
+    };
+    const GENERATED_RHIE_CHOW_GRAD_P_UPDATE_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Vector2,
+                x
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Vector2,
+                y
+            ) == 4
+        );
+        assert!(
+            std::mem::size_of::<generated::rhie_chow_grad_p_update_incompressible_momentum::Vector2>(
+            ) == 8
+        );
+    };
+    const GENERATED_RHIE_CHOW_GRAD_P_UPDATE_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+                dt
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+                dt_old
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+                dtau
+            ) == 8
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+                time
+            ) == 12
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+                viscosity
+            ) == 16
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+                density
+            ) == 20
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+                component
+            ) == 24
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+                alpha_p
+            ) == 28
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+                scheme
+            ) == 32
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+                alpha_u
+            ) == 36
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+                stride_x
+            ) == 40
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+                time_scheme
+            ) == 44
+        );
+        assert!(
+            std::mem::size_of::<
+                generated::rhie_chow_grad_p_update_incompressible_momentum::Constants,
+            >() == 48
+        );
+    };
+    const GENERATED_RHIE_CHOW_STORE_GRAD_P_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum::Constants,
+                dt
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum::Constants,
+                dt_old
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum::Constants,
+                dtau
+            ) == 8
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum::Constants,
+                time
+            ) == 12
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum::Constants,
+                viscosity
+            ) == 16
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum::Constants,
+                density
+            ) == 20
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum::Constants,
+                component
+            ) == 24
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum::Constants,
+                alpha_p
+            ) == 28
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum::Constants,
+                scheme
+            ) == 32
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum::Constants,
+                alpha_u
+            ) == 36
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum::Constants,
+                stride_x
+            ) == 40
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum::Constants,
+                time_scheme
+            ) == 44
+        );
+        assert!(
+            std::mem::size_of::<generated::rhie_chow_store_grad_p_incompressible_momentum::Constants>(
+            ) == 48
         );
     };
     const GENERIC_COUPLED_SCHUR_SETUP_SETUP_PARAMS_ASSERTS: () = {
@@ -3468,13 +3645,31 @@ pub mod bytemuck_impls {
     }
     unsafe impl bytemuck::Pod for generated::packed_state_gradients_incompressible_momentum::Constants {}
     unsafe impl bytemuck::Zeroable
-        for generated::rhie_chow_correct_velocity_incompressible_momentum::Constants
+        for generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants
     {
     }
     unsafe impl bytemuck::Pod
-        for generated::rhie_chow_correct_velocity_incompressible_momentum::Constants
+        for generated::rhie_chow_correct_velocity_delta_incompressible_momentum::Constants
     {
     }
+    unsafe impl bytemuck::Zeroable
+        for generated::rhie_chow_grad_p_update_incompressible_momentum::Vector2
+    {
+    }
+    unsafe impl bytemuck::Pod for generated::rhie_chow_grad_p_update_incompressible_momentum::Vector2 {}
+    unsafe impl bytemuck::Zeroable
+        for generated::rhie_chow_grad_p_update_incompressible_momentum::Constants
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::rhie_chow_grad_p_update_incompressible_momentum::Constants
+    {
+    }
+    unsafe impl bytemuck::Zeroable
+        for generated::rhie_chow_store_grad_p_incompressible_momentum::Constants
+    {
+    }
+    unsafe impl bytemuck::Pod for generated::rhie_chow_store_grad_p_incompressible_momentum::Constants {}
     unsafe impl bytemuck::Zeroable for generic_coupled_schur_setup::SetupParams {}
     unsafe impl bytemuck::Pod for generic_coupled_schur_setup::SetupParams {}
     unsafe impl bytemuck::Zeroable for gmres_cgs::Params {}
@@ -5785,7 +5980,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e25 = cell_vols[idx];
     let vol = max(_e25, 0.000000000001f);
     let _e30 = constants.alpha_u;
-    let d_p = ((_e30 * dt) / (rho * vol));
+    let d_p = ((_e30 * dt) / rho);
     state[((idx * STATE_STRIDE) + D_P_OFFSET)] = d_p;
     return;
 }
@@ -6024,47 +6219,20 @@ var<storage, read_write> state: array<f32>;
 @group(0) @binding(4) 
 var<uniform> constants: Constants;
 
-fn safe_inverse(val: f32) -> f32 {
-    if (abs(val) > 0.00000000000001f) {
-        return (1f / val);
-    }
-    return 0f;
-}
-
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    var sum_u_inv: f32 = 0f;
-
-    let _e5 = constants.stride_x;
-    let idx = ((global_id.y * _e5) + global_id.x);
+    let _e4 = constants.stride_x;
+    let idx = ((global_id.y * _e4) + global_id.x);
     let num_cells = (arrayLength((&scalar_row_offsets)) - 1u);
     if (idx >= num_cells) {
         return;
     }
-    let scalar_offset = scalar_row_offsets[idx];
-    let scalar_end = scalar_row_offsets[(idx + 1u)];
-    let num_neighbors = (scalar_end - scalar_offset);
-    let _e25 = diagonal_indices[idx];
-    let diag_rank = (_e25 - scalar_offset);
-    let start_row_0_ = (scalar_offset * 9u);
-    let row_stride = (num_neighbors * UNKNOWNS_PER_CELL);
-    {
-        let start_row_u = (start_row_0_ + (U_0_ * row_stride));
-        let diag_u = matrix_values[((start_row_u + (diag_rank * UNKNOWNS_PER_CELL)) + U_0_)];
-        let _e41 = safe_inverse(diag_u);
-        let _e43 = sum_u_inv;
-        sum_u_inv = (_e43 + _e41);
-    }
-    {
-        let start_row_u_1 = (start_row_0_ + (U_1_ * row_stride));
-        let diag_u_1 = matrix_values[((start_row_u_1 + (diag_rank * UNKNOWNS_PER_CELL)) + U_1_)];
-        let _e55 = safe_inverse(diag_u_1);
-        let _e56 = sum_u_inv;
-        sum_u_inv = (_e56 + _e55);
-    }
-    let _e60 = constants.alpha_u;
-    let _e61 = sum_u_inv;
-    let d_p = (_e60 * (_e61 / 2f));
+    let _e15 = constants.density;
+    let rho = max(_e15, 0.000000000001f);
+    let _e20 = constants.dt;
+    let dt = max(_e20, 0f);
+    let _e25 = constants.alpha_u;
+    let d_p = ((_e25 * dt) / rho);
     state[((idx * STATE_STRIDE) + D_P_OFFSET)] = d_p;
     return;
 }
@@ -10310,25 +10478,25 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e350 = constants.density;
     let _e352 = lambda;
     let _e358 = lambda;
-    let _e367 = lambda;
-    let _e373 = normal_vec;
-    let _e379 = constants.density;
-    let _e380 = lambda;
-    fluxes[((idx * 3u) + 0u)] = (((_e350 * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e352) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e358) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, is_boundary_1), select(s_neigh_grad_p_y, 0f, is_boundary_1)) * lambda_other)) * ((s_own_d_p * _e367) + (s_neigh_d_p * lambda_other)))), _e373)) * area) - ((((_e379 * ((s_own_d_p * _e380) + (s_neigh_d_p * lambda_other))) * (_e341 - s_own_p)) / dist) * area));
-    let _e398 = constants.density;
-    let _e400 = lambda;
-    let _e406 = lambda;
-    let _e415 = lambda;
-    let _e421 = normal_vec;
-    let _e427 = constants.density;
-    let _e428 = lambda;
-    fluxes[((idx * 3u) + 1u)] = (((_e398 * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e400) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e406) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, is_boundary_1), select(s_neigh_grad_p_y, 0f, is_boundary_1)) * lambda_other)) * ((s_own_d_p * _e415) + (s_neigh_d_p * lambda_other)))), _e421)) * area) - ((((_e427 * ((s_own_d_p * _e428) + (s_neigh_d_p * lambda_other))) * (_e341 - s_own_p)) / dist) * area));
-    let _e446 = constants.density;
-    let _e448 = lambda;
-    let _e454 = lambda;
-    let _e463 = lambda;
-    let _e469 = normal_vec;
-    fluxes[((idx * 3u) + 2u)] = ((_e446 * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e448) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e454) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, is_boundary_1), select(s_neigh_grad_p_y, 0f, is_boundary_1)) * lambda_other)) * ((s_own_d_p * _e463) + (s_neigh_d_p * lambda_other)))), _e469)) * area);
+    let _e375 = lambda;
+    let _e381 = normal_vec;
+    let _e387 = constants.density;
+    let _e388 = lambda;
+    fluxes[((idx * 3u) + 0u)] = (((_e350 * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e352) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e358) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e375) + (s_neigh_d_p * lambda_other)))), _e381)) * area) - ((((_e387 * ((s_own_d_p * _e388) + (s_neigh_d_p * lambda_other))) * (_e341 - s_own_p)) / dist) * area));
+    let _e406 = constants.density;
+    let _e408 = lambda;
+    let _e414 = lambda;
+    let _e431 = lambda;
+    let _e437 = normal_vec;
+    let _e443 = constants.density;
+    let _e444 = lambda;
+    fluxes[((idx * 3u) + 1u)] = (((_e406 * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e408) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e414) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e431) + (s_neigh_d_p * lambda_other)))), _e437)) * area) - ((((_e443 * ((s_own_d_p * _e444) + (s_neigh_d_p * lambda_other))) * (_e341 - s_own_p)) / dist) * area));
+    let _e462 = constants.density;
+    let _e464 = lambda;
+    let _e470 = lambda;
+    let _e487 = lambda;
+    let _e493 = normal_vec;
+    fluxes[((idx * 3u) + 2u)] = ((_e462 * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e464) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e470) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e487) + (s_neigh_d_p * lambda_other)))), _e493)) * area);
     return;
 }
 "#;
@@ -23294,7 +23462,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
-    pub mod rhie_chow_correct_velocity_incompressible_momentum {
+    pub mod rhie_chow_correct_velocity_delta_incompressible_momentum {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
         #[derive(Debug, PartialEq, Clone, Copy)]
@@ -23361,6 +23529,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub const D_P_OFFSET: u32 = 3u32;
         pub const GRAD_P_X_OFFSET: u32 = 4u32;
         pub const GRAD_P_Y_OFFSET: u32 = 5u32;
+        pub const GRAD_OLD_X_OFFSET: u32 = 6u32;
+        pub const GRAD_OLD_Y_OFFSET: u32 = 7u32;
         pub mod compute {
             use super::{_root, _root::*};
             pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -23413,7 +23583,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowCorrectVelocityIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: rhie_chow_correct_velocity_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -23422,7 +23592,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let entries = bindings.into_array();
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some(
-                        "GeneratedRhieChowCorrectVelocityIncompressibleMomentum::BindGroup0",
+                        "GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum::BindGroup0",
                     ),
                     layout: &bind_group_layout,
                     entries: &entries,
@@ -23460,7 +23630,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(
-                    "GeneratedRhieChowCorrectVelocityIncompressibleMomentum::PipelineLayout",
+                    "GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum::PipelineLayout",
                 ),
                 bind_group_layouts: &[&WgpuBindGroup0::get_bind_group_layout(device)],
                 push_constant_ranges: &[],
@@ -23469,7 +23639,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
             let source = std::borrow::Cow::Borrowed(SHADER_STRING);
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("rhie_chow_correct_velocity_incompressible_momentum.wgsl"),
+                label: Some("rhie_chow_correct_velocity_delta_incompressible_momentum.wgsl"),
                 source: wgpu::ShaderSource::Wgsl(source),
             })
         }
@@ -23495,6 +23665,8 @@ const U_Y_OFFSET: u32 = 1u;
 const D_P_OFFSET: u32 = 3u;
 const GRAD_P_X_OFFSET: u32 = 4u;
 const GRAD_P_Y_OFFSET: u32 = 5u;
+const GRAD_OLD_X_OFFSET: u32 = 6u;
+const GRAD_OLD_Y_OFFSET: u32 = 7u;
 
 @group(0) @binding(0) 
 var<storage, read_write> state: array<f32>;
@@ -23513,10 +23685,726 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let d_p = state[(base + D_P_OFFSET)];
     let grad_px = state[(base + GRAD_P_X_OFFSET)];
     let grad_py = state[(base + GRAD_P_Y_OFFSET)];
-    let _e38 = state[(base + U_X_OFFSET)];
-    state[(base + U_X_OFFSET)] = (_e38 - (d_p * grad_px));
-    let _e49 = state[(base + U_Y_OFFSET)];
-    state[(base + U_Y_OFFSET)] = (_e49 - (d_p * grad_py));
+    let grad_old_x = state[(base + GRAD_OLD_X_OFFSET)];
+    let grad_old_y = state[(base + GRAD_OLD_Y_OFFSET)];
+    let corr_x = (d_p * (grad_px - grad_old_x));
+    let corr_y = (d_p * (grad_py - grad_old_y));
+    let _e52 = state[(base + U_X_OFFSET)];
+    state[(base + U_X_OFFSET)] = (_e52 - corr_x);
+    let _e62 = state[(base + U_Y_OFFSET)];
+    state[(base + U_Y_OFFSET)] = (_e62 - corr_y);
+    return;
+}
+"#;
+    }
+    pub mod rhie_chow_grad_p_update_incompressible_momentum {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub face_owner: wgpu::BufferBinding<'a>,
+            pub face_neighbor: wgpu::BufferBinding<'a>,
+            pub face_areas: wgpu::BufferBinding<'a>,
+            pub face_normals: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
+            pub cell_centers: wgpu::BufferBinding<'a>,
+            pub cell_vols: wgpu::BufferBinding<'a>,
+            pub cell_face_offsets: wgpu::BufferBinding<'a>,
+            pub cell_faces: wgpu::BufferBinding<'a>,
+            pub face_boundary: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub face_owner: wgpu::BindGroupEntry<'a>,
+            pub face_neighbor: wgpu::BindGroupEntry<'a>,
+            pub face_areas: wgpu::BindGroupEntry<'a>,
+            pub face_normals: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
+            pub cell_centers: wgpu::BindGroupEntry<'a>,
+            pub cell_vols: wgpu::BindGroupEntry<'a>,
+            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
+            pub cell_faces: wgpu::BindGroupEntry<'a>,
+            pub face_boundary: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    face_owner: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.face_owner),
+                    },
+                    face_neighbor: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
+                    },
+                    face_areas: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.face_areas),
+                    },
+                    face_normals: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.face_normals),
+                    },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
+                    cell_centers: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
+                    },
+                    cell_vols: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
+                    },
+                    cell_face_offsets: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
+                    },
+                    cell_faces: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
+                    },
+                    face_boundary: wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+                [
+                    self.face_owner,
+                    self.face_neighbor,
+                    self.face_areas,
+                    self.face_normals,
+                    self.face_centers,
+                    self.cell_centers,
+                    self.cell_vols,
+                    self.cell_face_offsets,
+                    self.cell_faces,
+                    self.face_boundary,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowGradPUpdateIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedRhieChowGradPUpdateIncompressibleMomentum::BindGroup0"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowGradPUpdateIncompressibleMomentum::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: rhie_chow_grad_p_update_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedRhieChowGradPUpdateIncompressibleMomentum::BindGroup1"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowGradPUpdateIncompressibleMomentum::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedRhieChowGradPUpdateIncompressibleMomentum::BindGroup2"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 3],
+            ) -> [wgpu::BindGroupLayout; 3] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("GeneratedRhieChowGradPUpdateIncompressibleMomentum::PipelineLayout"),
+                bind_group_layouts: &[
+                    &WgpuBindGroup0::get_bind_group_layout(device),
+                    &WgpuBindGroup1::get_bind_group_layout(device),
+                    &WgpuBindGroup2::get_bind_group_layout(device),
+                ],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("rhie_chow_grad_p_update_incompressible_momentum.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+}
+
+@group(0) @binding(0) 
+var<storage> face_owner: array<u32>;
+@group(0) @binding(1) 
+var<storage> face_neighbor: array<i32>;
+@group(0) @binding(2) 
+var<storage> face_areas: array<f32>;
+@group(0) @binding(3) 
+var<storage> face_normals: array<Vector2_>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
+@group(0) @binding(4) 
+var<storage> cell_centers: array<Vector2_>;
+@group(0) @binding(5) 
+var<storage> cell_vols: array<f32>;
+@group(0) @binding(6) 
+var<storage> cell_face_offsets: array<u32>;
+@group(0) @binding(7) 
+var<storage> cell_faces: array<u32>;
+@group(0) @binding(12) 
+var<storage> face_boundary: array<u32>;
+@group(1) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(1) @binding(1) 
+var<uniform> constants: Constants;
+@group(2) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(2) @binding(1) 
+var<storage> bc_value: array<f32>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var grad_acc_p: vec2<f32> = vec2<f32>(0f, 0f);
+    var k: u32;
+    var normal_vec: vec2<f32>;
+    var other_idx: u32;
+    var other_center_vec: vec2<f32>;
+    var lambda: f32;
+
+    let _e6 = constants.stride_x;
+    let idx = ((global_id.y * _e6) + global_id.x);
+    if (idx >= arrayLength((&cell_vols))) {
+        return;
+    }
+    let cell_center = cell_centers[idx];
+    let cell_center_vec = vec2<f32>(cell_center.x, cell_center.y);
+    let vol = cell_vols[idx];
+    let start = cell_face_offsets[idx];
+    let end = cell_face_offsets[(idx + 1u)];
+    k = start;
+    loop {
+        let _e31 = k;
+        if (_e31 < end) {
+        } else {
+            break;
+        }
+        {
+            let _e34 = k;
+            let face_idx = cell_faces[_e34];
+            let owner = face_owner[face_idx];
+            let neighbor_raw = face_neighbor[face_idx];
+            let is_boundary = (neighbor_raw == -1i);
+            let boundary_type = face_boundary[face_idx];
+            let area = face_areas[face_idx];
+            let face_center = face_centers[face_idx];
+            let face_center_vec = vec2<f32>(face_center.x, face_center.y);
+            let _e60 = face_normals[face_idx].x;
+            let _e64 = face_normals[face_idx].y;
+            normal_vec = vec2<f32>(_e60, _e64);
+            let _e68 = normal_vec;
+            if (dot((face_center_vec - cell_center_vec), _e68) < 0f) {
+                let _e72 = normal_vec;
+                normal_vec = -(_e72);
+            }
+            other_idx = idx;
+            other_center_vec = face_center_vec;
+            if (neighbor_raw != -1i) {
+                let neighbor = u32(neighbor_raw);
+                other_idx = neighbor;
+                if (owner != idx) {
+                    other_idx = owner;
+                }
+                let _e81 = other_idx;
+                let other_center = cell_centers[_e81];
+                other_center_vec = vec2<f32>(other_center.x, other_center.y);
+            }
+            let d_own = distance(cell_center_vec, face_center_vec);
+            let _e88 = other_center_vec;
+            let d_neigh = distance(_e88, face_center_vec);
+            let total_dist = (d_own + d_neigh);
+            lambda = 0.5f;
+            if (total_dist > 0.000001f) {
+                lambda = (d_neigh / total_dist);
+            }
+            let _e96 = lambda;
+            let lambda_other = (1f - _e96);
+            let _e99 = normal_vec;
+            let _e106 = state[((idx * 8u) + 2u)];
+            let _e107 = lambda;
+            let _e109 = other_idx;
+            let _e116 = state[((_e109 * 8u) + 2u)];
+            let _e123 = state[((idx * 8u) + 2u)];
+            let _e130 = bc_value[((face_idx * 3u) + 2u)];
+            let _e137 = bc_kind[((face_idx * 3u) + 2u)];
+            let _e147 = state[((idx * 8u) + 2u)];
+            let _e154 = bc_value[((face_idx * 3u) + 2u)];
+            let _e163 = bc_kind[((face_idx * 3u) + 2u)];
+            let _e173 = grad_acc_p;
+            grad_acc_p = (_e173 + ((_e99 * ((_e106 * _e107) + (select(_e116, select(select(_e123, _e130, (_e137 == 1u)), (_e147 + (_e154 * d_own)), (_e163 == 2u)), is_boundary) * lambda_other))) * area));
+        }
+        continuing {
+            let _e176 = k;
+            k = (_e176 + 1u);
+        }
+    }
+    let _e178 = grad_acc_p;
+    let grad_out_p = ((_e178 * 1f) / vec2(max(vol, 0.000000000001f)));
+    state[((idx * 8u) + 4u)] = grad_out_p.x;
+    state[((idx * 8u) + 5u)] = grad_out_p.y;
+    return;
+}
+"#;
+    }
+    pub mod rhie_chow_store_grad_p_incompressible_momentum {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                }
+            }
+        }
+        pub const STATE_STRIDE: u32 = 8u32;
+        pub const GRAD_P_X_OFFSET: u32 = 4u32;
+        pub const GRAD_P_Y_OFFSET: u32 = 5u32;
+        pub const GRAD_OLD_X_OFFSET: u32 = 6u32;
+        pub const GRAD_OLD_Y_OFFSET: u32 = 7u32;
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowStoreGradPIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: rhie_chow_store_grad_p_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedRhieChowStoreGradPIncompressibleMomentum::BindGroup0"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 1],
+            ) -> [wgpu::BindGroupLayout; 1] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("GeneratedRhieChowStoreGradPIncompressibleMomentum::PipelineLayout"),
+                bind_group_layouts: &[&WgpuBindGroup0::get_bind_group_layout(device)],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("rhie_chow_store_grad_p_incompressible_momentum.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+}
+
+const STATE_STRIDE: u32 = 8u;
+const GRAD_P_X_OFFSET: u32 = 4u;
+const GRAD_P_Y_OFFSET: u32 = 5u;
+const GRAD_OLD_X_OFFSET: u32 = 6u;
+const GRAD_OLD_Y_OFFSET: u32 = 7u;
+
+@group(0) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(0) @binding(1) 
+var<uniform> constants: Constants;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let _e4 = constants.stride_x;
+    let idx = ((global_id.y * _e4) + global_id.x);
+    let num_cells = (arrayLength((&state)) / 8u);
+    if (idx >= num_cells) {
+        return;
+    }
+    let base = (idx * STATE_STRIDE);
+    let _e23 = state[(base + GRAD_P_X_OFFSET)];
+    state[(base + GRAD_OLD_X_OFFSET)] = _e23;
+    let _e32 = state[(base + GRAD_P_Y_OFFSET)];
+    state[(base + GRAD_OLD_Y_OFFSET)] = _e32;
     return;
 }
 "#;

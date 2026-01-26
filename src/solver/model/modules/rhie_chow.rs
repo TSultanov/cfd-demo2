@@ -10,44 +10,69 @@ pub fn rhie_chow_aux_module(
 ) -> KernelBundleModule {
     let kernel_dp_init = KernelId("dp_init");
     let kernel_dp_update_from_diag = KernelId("dp_update_from_diag");
-    let kernel_rhie_chow_correct_velocity = KernelId("rhie_chow/correct_velocity");
+    let kernel_store_grad_p = KernelId("rhie_chow/store_grad_p");
+    let kernel_grad_p_update = KernelId("rhie_chow/grad_p_update");
+    let kernel_rhie_chow_correct_velocity_delta = KernelId("rhie_chow/correct_velocity_delta");
+
+    let kernels = vec![
+        ModelKernelSpec {
+            id: kernel_dp_init,
+            phase: KernelPhaseId::Preparation,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        },
+        ModelKernelSpec {
+            id: kernel_dp_update_from_diag,
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        },
+        // Snapshot the pressure gradient before it is recomputed so velocity correction can use
+        // the change in pressure gradient within the same nonlinear iteration.
+        ModelKernelSpec {
+            id: kernel_store_grad_p,
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        },
+        // Recompute `grad(p)` after the pressure update so velocity correction can use the
+        // change in pressure gradient within the same nonlinear iteration.
+        ModelKernelSpec {
+            id: kernel_grad_p_update,
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        },
+        ModelKernelSpec {
+            id: kernel_rhie_chow_correct_velocity_delta,
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        },
+    ];
+
+    let generators = vec![
+        ModelKernelGeneratorSpec::new(kernel_dp_init, move |model, _schemes| {
+            generate_dp_init_kernel_wgsl(model, dp_field)
+        }),
+        ModelKernelGeneratorSpec::new(kernel_dp_update_from_diag, move |model, _schemes| {
+            generate_dp_update_from_diag_kernel_wgsl(model, dp_field)
+        }),
+        ModelKernelGeneratorSpec::new(kernel_store_grad_p, move |model, _schemes| {
+            generate_rhie_chow_store_grad_p_kernel_wgsl(model, dp_field)
+        }),
+        ModelKernelGeneratorSpec::new(kernel_grad_p_update, move |model, _schemes| {
+            generate_rhie_chow_grad_p_update_kernel_wgsl(model)
+        }),
+        ModelKernelGeneratorSpec::new(kernel_rhie_chow_correct_velocity_delta, move |model, _schemes| {
+            generate_rhie_chow_correct_velocity_delta_kernel_wgsl(model, dp_field)
+        }),
+    ];
 
     KernelBundleModule {
         name: "rhie_chow_aux",
-        kernels: vec![
-            ModelKernelSpec {
-                id: kernel_dp_init,
-                phase: KernelPhaseId::Preparation,
-                dispatch: DispatchKindId::Cells,
-                condition: KernelConditionId::Always,
-            },
-            ModelKernelSpec {
-                id: kernel_rhie_chow_correct_velocity,
-                phase: KernelPhaseId::Gradients,
-                dispatch: DispatchKindId::Cells,
-                condition: KernelConditionId::Always,
-            },
-            ModelKernelSpec {
-                id: kernel_dp_update_from_diag,
-                phase: KernelPhaseId::Update,
-                dispatch: DispatchKindId::Cells,
-                condition: KernelConditionId::Always,
-            },
-        ],
-        generators: vec![
-            ModelKernelGeneratorSpec::new(kernel_dp_init, move |model, _schemes| {
-                generate_dp_init_kernel_wgsl(model, dp_field)
-            }),
-            ModelKernelGeneratorSpec::new(kernel_dp_update_from_diag, move |model, _schemes| {
-                generate_dp_update_from_diag_kernel_wgsl(model, dp_field)
-            }),
-            ModelKernelGeneratorSpec::new(
-                kernel_rhie_chow_correct_velocity,
-                move |model, _schemes| {
-                    generate_rhie_chow_correct_velocity_kernel_wgsl(model, dp_field)
-                },
-            ),
-        ],
+        kernels,
+        generators,
         manifest: ModuleManifest {
             invariants: vec![
                 ModuleInvariant::RequireUniqueMomentumPressureCouplingReferencingDp {
@@ -128,7 +153,73 @@ fn generate_dp_update_from_diag_kernel_wgsl(
     )
 }
 
-fn generate_rhie_chow_correct_velocity_kernel_wgsl(
+fn generate_rhie_chow_grad_p_update_kernel_wgsl(
+    model: &crate::solver::model::ModelSpec,
+) -> Result<String, String> {
+    let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
+    cfd2_codegen::solver::codegen::generate_flux_module_gradients_wgsl(&model.state_layout, &flux_layout)
+        .map_err(|e| e.to_string())
+}
+
+fn generate_rhie_chow_store_grad_p_kernel_wgsl(
+    model: &crate::solver::model::ModelSpec,
+    dp_field: &str,
+) -> Result<String, String> {
+    let stride = model.state_layout.stride();
+
+    let coupling = crate::solver::model::invariants::infer_unique_momentum_pressure_coupling_referencing_dp(
+        model,
+        dp_field,
+    )
+    .map_err(|e| format!("rhie_chow/store_grad_p {e}"))?;
+    let pressure = coupling.pressure;
+
+    let grad_name = format!("grad_{}", pressure.name());
+    let grad_old_name = format!("grad_{}_old", pressure.name());
+
+    let grad_p_x = model
+        .state_layout
+        .component_offset(&grad_name, 0)
+        .ok_or_else(|| {
+            format!(
+                "rhie_chow/store_grad_p requires '{}[0]' in state layout",
+                grad_name
+            )
+        })?;
+    let grad_p_y = model
+        .state_layout
+        .component_offset(&grad_name, 1)
+        .ok_or_else(|| {
+            format!(
+                "rhie_chow/store_grad_p requires '{}[1]' in state layout",
+                grad_name
+            )
+        })?;
+    let grad_old_x = model
+        .state_layout
+        .component_offset(&grad_old_name, 0)
+        .ok_or_else(|| {
+            format!(
+                "rhie_chow/store_grad_p requires '{}[0]' in state layout",
+                grad_old_name
+            )
+        })?;
+    let grad_old_y = model
+        .state_layout
+        .component_offset(&grad_old_name, 1)
+        .ok_or_else(|| {
+            format!(
+                "rhie_chow/store_grad_p requires '{}[1]' in state layout",
+                grad_old_name
+            )
+        })?;
+
+    Ok(cfd2_codegen::solver::codegen::generate_rhie_chow_store_grad_p_wgsl(
+        stride, grad_p_x, grad_p_y, grad_old_x, grad_old_y,
+    ))
+}
+
+fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
 ) -> Result<String, String> {
@@ -139,43 +230,52 @@ fn generate_rhie_chow_correct_velocity_kernel_wgsl(
         .state_layout
         .offset_for(dp_field)
         .ok_or_else(|| {
-            format!("rhie_chow/correct_velocity requires '{dp_field}' in state layout")
+            format!("rhie_chow/correct_velocity_delta requires '{dp_field}' in state layout")
         })?;
 
     let coupling = crate::solver::model::invariants::infer_unique_momentum_pressure_coupling_referencing_dp(
         model,
         dp_field,
     )
-    .map_err(|e| format!("rhie_chow/correct_velocity {e}"))?;
+    .map_err(|e| format!("rhie_chow/correct_velocity_delta {e}"))?;
     let momentum = coupling.momentum;
     let pressure = coupling.pressure;
 
     if momentum.kind() != FieldKind::Vector2 {
         return Err(
-            "rhie_chow/correct_velocity currently supports only Vector2 momentum fields".to_string(),
+            "rhie_chow/correct_velocity_delta currently supports only Vector2 momentum fields"
+                .to_string(),
         );
     }
 
-    let u_x = model.state_layout.component_offset(momentum.name(), 0).ok_or_else(|| {
-        format!(
-            "rhie_chow/correct_velocity requires '{}[0]' in state layout",
-            momentum.name()
-        )
-    })?;
-    let u_y = model.state_layout.component_offset(momentum.name(), 1).ok_or_else(|| {
-        format!(
-            "rhie_chow/correct_velocity requires '{}[1]' in state layout",
-            momentum.name()
-        )
-    })?;
+    let u_x = model
+        .state_layout
+        .component_offset(momentum.name(), 0)
+        .ok_or_else(|| {
+            format!(
+                "rhie_chow/correct_velocity_delta requires '{}[0]' in state layout",
+                momentum.name()
+            )
+        })?;
+    let u_y = model
+        .state_layout
+        .component_offset(momentum.name(), 1)
+        .ok_or_else(|| {
+            format!(
+                "rhie_chow/correct_velocity_delta requires '{}[1]' in state layout",
+                momentum.name()
+            )
+        })?;
 
     let grad_name = format!("grad_{}", pressure.name());
+    let grad_old_name = format!("grad_{}_old", pressure.name());
+
     let grad_p_x = model
         .state_layout
         .component_offset(&grad_name, 0)
         .ok_or_else(|| {
             format!(
-                "rhie_chow/correct_velocity requires '{}[0]' in state layout",
+                "rhie_chow/correct_velocity_delta requires '{}[0]' in state layout",
                 grad_name
             )
         })?;
@@ -184,13 +284,32 @@ fn generate_rhie_chow_correct_velocity_kernel_wgsl(
         .component_offset(&grad_name, 1)
         .ok_or_else(|| {
             format!(
-                "rhie_chow/correct_velocity requires '{}[1]' in state layout",
+                "rhie_chow/correct_velocity_delta requires '{}[1]' in state layout",
                 grad_name
             )
         })?;
 
-    Ok(cfd2_codegen::solver::codegen::generate_rhie_chow_correct_velocity_wgsl(
-        stride, u_x, u_y, d_p, grad_p_x, grad_p_y,
+    let grad_old_x = model
+        .state_layout
+        .component_offset(&grad_old_name, 0)
+        .ok_or_else(|| {
+            format!(
+                "rhie_chow/correct_velocity_delta requires '{}[0]' in state layout",
+                grad_old_name
+            )
+        })?;
+    let grad_old_y = model
+        .state_layout
+        .component_offset(&grad_old_name, 1)
+        .ok_or_else(|| {
+            format!(
+                "rhie_chow/correct_velocity_delta requires '{}[1]' in state layout",
+                grad_old_name
+            )
+        })?;
+
+    Ok(cfd2_codegen::solver::codegen::generate_rhie_chow_correct_velocity_delta_wgsl(
+        stride, u_x, u_y, d_p, grad_p_x, grad_p_y, grad_old_x, grad_old_y,
     ))
 }
 
@@ -211,7 +330,7 @@ mod tests {
         let rho = vol_scalar("rho", si::DENSITY);
         let dp_custom = vol_scalar("dp_custom", si::D_P);
         let grad_p = vol_vector("grad_p", si::PRESSURE_GRADIENT);
-        let grad_component = vol_vector("grad_component", si::INV_TIME);
+        let grad_p_old = vol_vector("grad_p_old", si::PRESSURE_GRADIENT);
 
         let momentum = (fvm::ddt_coeff(
             Coefficient::field(rho).expect("rho must be scalar"),
@@ -238,7 +357,7 @@ mod tests {
         system.add_equation(momentum);
         system.add_equation(pressure);
 
-        let layout = StateLayout::new(vec![u, p, dp_custom, grad_p, grad_component]);
+        let layout = StateLayout::new(vec![u, p, dp_custom, grad_p, grad_p_old]);
 
         let model = crate::solver::model::ModelSpec {
             id: "rhie_chow_dp_custom_test",
@@ -254,7 +373,9 @@ mod tests {
         for kernel_id in [
             KernelId("dp_init"),
             KernelId("dp_update_from_diag"),
-            KernelId("rhie_chow/correct_velocity"),
+            KernelId("rhie_chow/store_grad_p"),
+            KernelId("rhie_chow/grad_p_update"),
+            KernelId("rhie_chow/correct_velocity_delta"),
         ] {
             crate::solver::model::kernel::generate_kernel_wgsl_for_model_by_id(&model, &schemes, kernel_id)
                 .unwrap_or_else(|e| panic!("generator missing or failed for {}: {e}", kernel_id.as_str()));

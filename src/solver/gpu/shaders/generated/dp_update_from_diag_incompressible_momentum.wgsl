@@ -40,13 +40,6 @@ var<storage, read_write> state: array<f32>;
 @group(0) @binding(4)
 var<uniform> constants: Constants;
 
-fn safe_inverse(val: f32) -> f32 {
-if (abs(val) > 1e-14) {
-return 1.0 / val;
-}
-return 0.0;
-}
-
 @compute
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -56,31 +49,12 @@ if (idx >= num_cells) {
 return;
 }
 
-let scalar_offset = scalar_row_offsets[idx];
-let scalar_end = scalar_row_offsets[idx + 1u];
-let num_neighbors = scalar_end - scalar_offset;
-let diag_rank = diagonal_indices[idx] - scalar_offset;
-
-let block_stride = UNKNOWNS_PER_CELL * UNKNOWNS_PER_CELL;
-let start_row_0 = scalar_offset * block_stride;
-let row_stride = num_neighbors * UNKNOWNS_PER_CELL;
-
-var sum_u_inv: f32 = 0.0;
-    {
-let u = U_0;
-let start_row_u = start_row_0 + u * row_stride;
-let diag_u = matrix_values[start_row_u + diag_rank * UNKNOWNS_PER_CELL + u];
-sum_u_inv += safe_inverse(diag_u);
-}
-    {
-let u = U_1;
-let start_row_u = start_row_0 + u * row_stride;
-let diag_u = matrix_values[start_row_u + diag_rank * UNKNOWNS_PER_CELL + u];
-sum_u_inv += safe_inverse(diag_u);
-}
-
-// Match SIMPLE-style under-relaxation applied in the update stage:
-// use d_p ≈ alpha_u / A_U.
-let d_p = constants.alpha_u * (sum_u_inv / max(f32(U_LEN), 1.0));
+// Transient-scale approximation: d_p ≈ alpha_u * dt / rho.
+//
+// This is the mobility used by the Rhie–Chow flux and pressure correction equation for
+// incompressible pseudo-time marching.
+let rho = max(constants.density, 0.000000000001);
+let dt = max(constants.dt, 0.0);
+let d_p = constants.alpha_u * dt / rho;
 state[idx * STATE_STRIDE + D_P_OFFSET] = d_p;
 }

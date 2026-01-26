@@ -120,15 +120,15 @@ mod tests {
         let p = vol_scalar("p", si::PRESSURE);
         let d_p = vol_scalar("d_p", si::D_P);
         let grad_p = vol_vector("grad_p", si::PRESSURE_GRADIENT);
-        let grad_comp = vol_vector("grad_component", si::INV_TIME);
+        let grad_p_old = vol_vector("grad_p_old", si::PRESSURE_GRADIENT);
 
-        let layout = StateLayout::new(vec![u, p, d_p, grad_p, grad_comp]);
+        let layout = StateLayout::new(vec![u, p, d_p, grad_p, grad_p_old]);
         assert_eq!(layout.stride(), 8);
         assert_eq!(layout.offset_for("U"), Some(0));
         assert_eq!(layout.offset_for("p"), Some(2));
         assert_eq!(layout.offset_for("d_p"), Some(3));
         assert_eq!(layout.offset_for("grad_p"), Some(4));
-        assert_eq!(layout.offset_for("grad_component"), Some(6));
+        assert_eq!(layout.offset_for("grad_p_old"), Some(6));
         assert_eq!(layout.component_offset("U", 1), Some(1));
         assert_eq!(layout.component_offset("U", 2), None);
     }

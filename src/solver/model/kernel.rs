@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use cfd2_codegen::solver::codegen::KernelWgsl;
+
 /// Stable identifier for a compute kernel.
 ///
 /// This is used by the unified solver orchestration to decouple scheduling and lookup
@@ -138,7 +140,7 @@ pub struct ModelKernelSpec {
 }
 
 pub(crate) type ModelKernelWgslGenerator = Arc<
-    dyn Fn(&crate::solver::model::ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<String, String>
+    dyn Fn(&crate::solver::model::ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<KernelWgsl, String>
         + Send
         + Sync
         + 'static,
@@ -160,7 +162,7 @@ pub struct ModelKernelGeneratorSpec {
 impl ModelKernelGeneratorSpec {
     pub fn new(
         id: KernelId,
-        generator: impl Fn(&crate::solver::model::ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<String, String>
+        generator: impl Fn(&crate::solver::model::ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<KernelWgsl, String>
             + Send
             + Sync
             + 'static,
@@ -174,7 +176,7 @@ impl ModelKernelGeneratorSpec {
 
     pub fn new_shared(
         id: KernelId,
-        generator: impl Fn(&crate::solver::model::ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<String, String>
+        generator: impl Fn(&crate::solver::model::ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<KernelWgsl, String>
             + Send
             + Sync
             + 'static,
@@ -219,7 +221,7 @@ pub fn kernel_output_name_for_model(model_id: &str, kernel_id: KernelId) -> Resu
 pub(crate) fn generate_flux_module_gradients_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     _schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     let flux = model
         .flux_module()
         .map_err(|e| e.to_string())?
@@ -248,7 +250,7 @@ pub(crate) fn generate_flux_module_gradients_kernel_wgsl(
 pub(crate) fn generate_flux_module_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     _schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
     let flux_stride = model.system.unknowns_per_cell();
     let prims = model
@@ -309,7 +311,7 @@ pub(crate) fn generate_flux_module_kernel_wgsl(
 pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     let discrete = cfd2_codegen::solver::codegen::lower_system(&model.system, schemes)
         .map_err(|e| e.to_string())?;
 
@@ -332,7 +334,7 @@ pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
 pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     use crate::solver::model::GradientStorage;
 
     let method = model.method().map_err(|e| e.to_string())?;
@@ -367,7 +369,7 @@ pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_wgsl(
 pub(crate) fn generate_packed_state_gradients_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     _schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     cfd2_codegen::solver::codegen::generate_packed_state_gradients_wgsl(
         &model.state_layout,
         model.system.unknowns_per_cell(),
@@ -378,7 +380,7 @@ pub(crate) fn generate_packed_state_gradients_kernel_wgsl(
 pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     let discrete = cfd2_codegen::solver::codegen::lower_system(&model.system, schemes)
         .map_err(|e| e.to_string())?;
     let prims = model
@@ -420,7 +422,8 @@ pub fn generate_kernel_wgsl_for_model_by_id(
     kernel_id: KernelId,
 ) -> Result<String, String> {
     if let Some(gen) = kernel_generator_for_model_by_id(model, kernel_id) {
-        return gen.generator.as_ref()(model, schemes);
+        let kernel = gen.generator.as_ref()(model, schemes)?;
+        return Ok(kernel.to_wgsl());
     }
 
     Err(format!(
@@ -465,10 +468,11 @@ pub fn emit_shared_kernels_wgsl_with_ids_for_models(
                     continue;
                 }
 
-                let wgsl = spec
+                let kernel = spec
                     .generator
                     .as_ref()(model, schemes)
                     .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+                let wgsl = kernel.to_wgsl();
 
                 if let Some(prev) = wgsl_by_id.insert(spec.id, wgsl.clone()) {
                     if prev != wgsl {
@@ -568,8 +572,12 @@ mod contract_tests {
     fn contract_kernel_generator(
         _model: &ModelSpec,
         _schemes: &crate::solver::ir::SchemeRegistry,
-    ) -> Result<String, String> {
-        Ok("// contract: module-defined kernel generator\n".to_string())
+    ) -> Result<KernelWgsl, String> {
+        let mut module = cfd2_codegen::solver::codegen::wgsl_ast::Module::new();
+        module.push(cfd2_codegen::solver::codegen::wgsl_ast::Item::Comment(
+            "contract: module-defined kernel generator".to_string(),
+        ));
+        Ok(KernelWgsl::from(module))
     }
 
     #[test]

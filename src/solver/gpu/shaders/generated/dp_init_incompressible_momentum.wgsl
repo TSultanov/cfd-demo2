@@ -2,55 +2,48 @@
 
 // DO NOT EDIT MANUALLY
 
-const STATE_STRIDE: u32 = 8u;
-const D_P_OFFSET: u32 = 3u;
-
 struct Constants {
-dt: f32,
-dt_old: f32,
-dtau: f32,
-time: f32,
-viscosity: f32,
-density: f32,
-component: u32,
-alpha_p: f32,
-scheme: u32,
-alpha_u: f32,
-stride_x: u32,
-time_scheme: u32,
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
 }
 
-@group(0) @binding(0)
+@group(0) @binding(0) 
 var<storage, read> cell_vols: array<f32>;
 
-@group(0) @binding(1)
+@group(0) @binding(1) 
 var<storage, read_write> state: array<f32>;
 
-@group(0) @binding(2)
+@group(0) @binding(2) 
 var<uniform> constants: Constants;
 
 @compute
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-let idx = global_id.y * constants.stride_x + global_id.x;
-let num_cells = arrayLength(&state) / max(STATE_STRIDE, 1u);
-if (idx >= num_cells) {
-return;
-}
-
-let rho = max(constants.density, 0.000000000001);
-let dt = max(constants.dt, 0.0);
-
-let vol = max(cell_vols[idx], 0.000000000001);
-
-// Seed Rhie–Chow mobility with a transient-scale approximation.
-// For integrated momentum diagonals A_U ~ rho*vol/dt (units: kg/s), a good first guess for
-// the mobility-like coefficient is:
-//   d_p ≈ vol / A_U ≈ dt / rho
-//
-// Note: the solver applies velocity under-relaxation in the update stage rather than
-// modifying the assembled momentum diagonal. Match SIMPLE-like behavior by folding the
-// relaxation factor into the mobility: d_p ≈ alpha_u / A_U.
-let d_p = constants.alpha_u * dt / rho;
-state[idx * STATE_STRIDE + D_P_OFFSET] = d_p;
+    let idx = global_id.y * constants.stride_x + global_id.x;
+    let num_cells = arrayLength(&state) / max(8u, 1u);
+    if (idx >= num_cells) {
+        return;
+    }
+    let rho = max(constants.density, 0.000000000001);
+    let dt = max(constants.dt, 0.0);
+    let vol = max(cell_vols[idx], 0.000000000001);
+    // Seed Rhie–Chow mobility with a transient-scale approximation.
+    // For integrated momentum diagonals A_U ~ rho*vol/dt (units: kg/s), a good first guess for
+    // the mobility-like coefficient is:
+    //   d_p ≈ vol / A_U ≈ dt / rho
+    // Note: the solver applies velocity under-relaxation in the update stage rather than
+    // modifying the assembled momentum diagonal. Match SIMPLE-like behavior by folding the
+    // relaxation factor into the mobility: d_p ≈ alpha_u / A_U.
+    let d_p = constants.alpha_u * dt / rho;
+    state[idx * 8u + 3u] = d_p;
 }

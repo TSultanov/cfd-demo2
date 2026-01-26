@@ -2,59 +2,49 @@
 
 // DO NOT EDIT MANUALLY
 
-const STATE_STRIDE: u32 = 8u;
-const D_P_OFFSET: u32 = 3u;
-const UNKNOWNS_PER_CELL: u32 = 3u;
-const U_LEN: u32 = 2u;
-
-const U_0: u32 = 0u;
-const U_1: u32 = 1u;
-
 struct Constants {
-dt: f32,
-dt_old: f32,
-dtau: f32,
-time: f32,
-viscosity: f32,
-density: f32,
-component: u32,
-alpha_p: f32,
-scheme: u32,
-alpha_u: f32,
-stride_x: u32,
-time_scheme: u32,
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
 }
 
-@group(0) @binding(0)
+@group(0) @binding(0) 
 var<storage, read> scalar_row_offsets: array<u32>;
 
-@group(0) @binding(1)
+@group(0) @binding(1) 
 var<storage, read> diagonal_indices: array<u32>;
 
-@group(0) @binding(2)
+@group(0) @binding(2) 
 var<storage, read> matrix_values: array<f32>;
 
-@group(0) @binding(3)
+@group(0) @binding(3) 
 var<storage, read_write> state: array<f32>;
 
-@group(0) @binding(4)
+@group(0) @binding(4) 
 var<uniform> constants: Constants;
 
 @compute
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-let idx = global_id.y * constants.stride_x + global_id.x;
-let num_cells = arrayLength(&scalar_row_offsets) - 1u;
-if (idx >= num_cells) {
-return;
-}
-
-// Transient-scale approximation: d_p ≈ alpha_u * dt / rho.
-//
-// This is the mobility used by the Rhie–Chow flux and pressure correction equation for
-// incompressible pseudo-time marching.
-let rho = max(constants.density, 0.000000000001);
-let dt = max(constants.dt, 0.0);
-let d_p = constants.alpha_u * dt / rho;
-state[idx * STATE_STRIDE + D_P_OFFSET] = d_p;
+    let idx = global_id.y * constants.stride_x + global_id.x;
+    let num_cells = arrayLength(&scalar_row_offsets) - 1u;
+    if (idx >= num_cells) {
+        return;
+    }
+    // Transient-scale approximation: d_p ≈ alpha_u * dt / rho.
+    // This is the mobility used by the Rhie–Chow flux and pressure correction equation for
+    // incompressible pseudo-time marching.
+    let rho = max(constants.density, 0.000000000001);
+    let dt = max(constants.dt, 0.0);
+    let d_p = constants.alpha_u * dt / rho;
+    state[idx * 8u + 3u] = d_p;
 }

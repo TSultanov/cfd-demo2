@@ -3,6 +3,8 @@ use crate::solver::model::module::{KernelBundleModule, ModuleInvariant, ModuleMa
 use crate::solver::model::KernelId;
 use crate::solver::model::kernel::{DispatchKindId, KernelPhaseId};
 
+use cfd2_codegen::solver::codegen::KernelWgsl;
+
 pub fn rhie_chow_aux_module(
     dp_field: &'static str,
     require_vector2_momentum: bool,
@@ -90,7 +92,7 @@ pub fn rhie_chow_aux_module(
 fn generate_dp_init_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     use crate::solver::model::backend::FieldKind;
 
     let stride = model.state_layout.stride();
@@ -111,7 +113,7 @@ fn generate_dp_init_kernel_wgsl(
 fn generate_dp_update_from_diag_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     use crate::solver::model::backend::FieldKind;
 
     let stride = model.state_layout.stride();
@@ -155,7 +157,7 @@ fn generate_dp_update_from_diag_kernel_wgsl(
 
 fn generate_rhie_chow_grad_p_update_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
     cfd2_codegen::solver::codegen::generate_flux_module_gradients_wgsl(&model.state_layout, &flux_layout)
         .map_err(|e| e.to_string())
@@ -164,7 +166,7 @@ fn generate_rhie_chow_grad_p_update_kernel_wgsl(
 fn generate_rhie_chow_store_grad_p_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     let stride = model.state_layout.stride();
 
     let coupling = crate::solver::model::invariants::infer_unique_momentum_pressure_coupling_referencing_dp(
@@ -222,7 +224,7 @@ fn generate_rhie_chow_store_grad_p_kernel_wgsl(
 fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     use crate::solver::model::backend::FieldKind;
 
     let stride = model.state_layout.stride();

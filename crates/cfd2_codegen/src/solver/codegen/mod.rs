@@ -6,6 +6,7 @@ pub mod flux_module;
 pub mod flux_module_gradients;
 pub mod generic_coupled_kernels;
 pub mod ir;
+pub mod kernel_wgsl;
 pub mod packed_state_gradients;
 pub mod plan;
 pub mod primitive_expr;
@@ -17,6 +18,7 @@ pub mod wgsl;
 pub mod wgsl_ast;
 pub mod wgsl_dsl;
 
+pub use kernel_wgsl::KernelWgsl;
 pub use dp_init::generate_dp_init_wgsl;
 pub use dp_update::generate_dp_update_from_diag_wgsl;
 pub use flux_module::generate_flux_module_wgsl;

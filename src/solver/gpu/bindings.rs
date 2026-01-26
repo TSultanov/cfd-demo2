@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 64e769c0707b2f1ccb92e9c012f11d36de4b855d2007c7efd472dbd3dc97c363
+// SourceHash: 70e45ca31f4041cf8977fa43650f7cc59e804e36b379682f82bae2ad068d84d1
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -5779,8 +5779,6 @@ pub mod generated {
                 }
             }
         }
-        pub const STATE_STRIDE: u32 = 8u32;
-        pub const D_P_OFFSET: u32 = 3u32;
         pub mod compute {
             use super::{_root, _root::*};
             pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -5955,9 +5953,6 @@ struct Constants {
     time_scheme: u32,
 }
 
-const STATE_STRIDE: u32 = 8u;
-const D_P_OFFSET: u32 = 3u;
-
 @group(0) @binding(0) 
 var<storage> cell_vols: array<f32>;
 @group(0) @binding(1) 
@@ -5981,7 +5976,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let vol = max(_e25, 0.000000000001f);
     let _e30 = constants.alpha_u;
     let d_p = ((_e30 * dt) / rho);
-    state[((idx * STATE_STRIDE) + D_P_OFFSET)] = d_p;
+    state[((idx * 8u) + 3u)] = d_p;
     return;
 }
 "#;
@@ -6047,12 +6042,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        pub const STATE_STRIDE: u32 = 8u32;
-        pub const D_P_OFFSET: u32 = 3u32;
-        pub const UNKNOWNS_PER_CELL: u32 = 3u32;
-        pub const U_LEN: u32 = 2u32;
-        pub const U_0: u32 = 0u32;
-        pub const U_1: u32 = 1u32;
         pub mod compute {
             use super::{_root, _root::*};
             pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -6201,13 +6190,6 @@ struct Constants {
     time_scheme: u32,
 }
 
-const STATE_STRIDE: u32 = 8u;
-const D_P_OFFSET: u32 = 3u;
-const UNKNOWNS_PER_CELL: u32 = 3u;
-const U_LEN: u32 = 2u;
-const U_0_: u32 = 0u;
-const U_1_: u32 = 1u;
-
 @group(0) @binding(0) 
 var<storage> scalar_row_offsets: array<u32>;
 @group(0) @binding(1) 
@@ -6233,7 +6215,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let dt = max(_e20, 0f);
     let _e25 = constants.alpha_u;
     let d_p = ((_e25 * dt) / rho);
-    state[((idx * STATE_STRIDE) + D_P_OFFSET)] = d_p;
+    state[((idx * 8u) + 3u)] = d_p;
     return;
 }
 "#;
@@ -23523,14 +23505,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        pub const STATE_STRIDE: u32 = 8u32;
-        pub const U_X_OFFSET: u32 = 0u32;
-        pub const U_Y_OFFSET: u32 = 1u32;
-        pub const D_P_OFFSET: u32 = 3u32;
-        pub const GRAD_P_X_OFFSET: u32 = 4u32;
-        pub const GRAD_P_Y_OFFSET: u32 = 5u32;
-        pub const GRAD_OLD_X_OFFSET: u32 = 6u32;
-        pub const GRAD_OLD_Y_OFFSET: u32 = 7u32;
         pub mod compute {
             use super::{_root, _root::*};
             pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -23659,15 +23633,6 @@ struct Constants {
     time_scheme: u32,
 }
 
-const STATE_STRIDE: u32 = 8u;
-const U_X_OFFSET: u32 = 0u;
-const U_Y_OFFSET: u32 = 1u;
-const D_P_OFFSET: u32 = 3u;
-const GRAD_P_X_OFFSET: u32 = 4u;
-const GRAD_P_Y_OFFSET: u32 = 5u;
-const GRAD_OLD_X_OFFSET: u32 = 6u;
-const GRAD_OLD_Y_OFFSET: u32 = 7u;
-
 @group(0) @binding(0) 
 var<storage, read_write> state: array<f32>;
 @group(0) @binding(1) 
@@ -23681,18 +23646,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (idx >= num_cells) {
         return;
     }
-    let base = (idx * STATE_STRIDE);
-    let d_p = state[(base + D_P_OFFSET)];
-    let grad_px = state[(base + GRAD_P_X_OFFSET)];
-    let grad_py = state[(base + GRAD_P_Y_OFFSET)];
-    let grad_old_x = state[(base + GRAD_OLD_X_OFFSET)];
-    let grad_old_y = state[(base + GRAD_OLD_Y_OFFSET)];
+    let base = (idx * 8u);
+    let d_p = state[(base + 3u)];
+    let grad_px = state[(base + 4u)];
+    let grad_py = state[(base + 5u)];
+    let grad_old_x = state[(base + 6u)];
+    let grad_old_y = state[(base + 7u)];
     let corr_x = (d_p * (grad_px - grad_old_x));
     let corr_y = (d_p * (grad_py - grad_old_y));
-    let _e52 = state[(base + U_X_OFFSET)];
-    state[(base + U_X_OFFSET)] = (_e52 - corr_x);
-    let _e62 = state[(base + U_Y_OFFSET)];
-    state[(base + U_Y_OFFSET)] = (_e62 - corr_y);
+    let _e52 = state[(base + 0u)];
+    state[(base + 0u)] = (_e52 - corr_x);
+    let _e62 = state[(base + 1u)];
+    state[(base + 1u)] = (_e62 - corr_y);
     return;
 }
 "#;
@@ -24252,11 +24217,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        pub const STATE_STRIDE: u32 = 8u32;
-        pub const GRAD_P_X_OFFSET: u32 = 4u32;
-        pub const GRAD_P_Y_OFFSET: u32 = 5u32;
-        pub const GRAD_OLD_X_OFFSET: u32 = 6u32;
-        pub const GRAD_OLD_Y_OFFSET: u32 = 7u32;
         pub mod compute {
             use super::{_root, _root::*};
             pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -24381,12 +24341,6 @@ struct Constants {
     time_scheme: u32,
 }
 
-const STATE_STRIDE: u32 = 8u;
-const GRAD_P_X_OFFSET: u32 = 4u;
-const GRAD_P_Y_OFFSET: u32 = 5u;
-const GRAD_OLD_X_OFFSET: u32 = 6u;
-const GRAD_OLD_Y_OFFSET: u32 = 7u;
-
 @group(0) @binding(0) 
 var<storage, read_write> state: array<f32>;
 @group(0) @binding(1) 
@@ -24400,11 +24354,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (idx >= num_cells) {
         return;
     }
-    let base = (idx * STATE_STRIDE);
-    let _e23 = state[(base + GRAD_P_X_OFFSET)];
-    state[(base + GRAD_OLD_X_OFFSET)] = _e23;
-    let _e32 = state[(base + GRAD_P_Y_OFFSET)];
-    state[(base + GRAD_OLD_Y_OFFSET)] = _e32;
+    let base = (idx * 8u);
+    let _e23 = state[(base + 4u)];
+    state[(base + 6u)] = _e23;
+    let _e32 = state[(base + 5u)];
+    state[(base + 7u)] = _e32;
     return;
 }
 "#;

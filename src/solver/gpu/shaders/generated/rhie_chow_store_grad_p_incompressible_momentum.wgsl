@@ -2,43 +2,36 @@
 
 // DO NOT EDIT MANUALLY
 
-const STATE_STRIDE: u32 = 8u;
-const GRAD_P_X_OFFSET: u32 = 4u;
-const GRAD_P_Y_OFFSET: u32 = 5u;
-const GRAD_OLD_X_OFFSET: u32 = 6u;
-const GRAD_OLD_Y_OFFSET: u32 = 7u;
-
 struct Constants {
-dt: f32,
-dt_old: f32,
-dtau: f32,
-time: f32,
-viscosity: f32,
-density: f32,
-component: u32,
-alpha_p: f32,
-scheme: u32,
-alpha_u: f32,
-stride_x: u32,
-time_scheme: u32,
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
 }
 
-@group(0) @binding(0)
+@group(0) @binding(0) 
 var<storage, read_write> state: array<f32>;
 
-@group(0) @binding(1)
+@group(0) @binding(1) 
 var<uniform> constants: Constants;
 
 @compute
 @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-let idx = global_id.y * constants.stride_x + global_id.x;
-let num_cells = arrayLength(&state) / max(STATE_STRIDE, 1u);
-if (idx >= num_cells) {
-return;
-}
-
-let base = idx * STATE_STRIDE;
-state[base + GRAD_OLD_X_OFFSET] = state[base + GRAD_P_X_OFFSET];
-state[base + GRAD_OLD_Y_OFFSET] = state[base + GRAD_P_Y_OFFSET];
+    let idx = global_id.y * constants.stride_x + global_id.x;
+    let num_cells = arrayLength(&state) / max(8u, 1u);
+    if (idx >= num_cells) {
+        return;
+    }
+    let base = idx * 8u;
+    state[base + 6u] = state[base + 4u];
+    state[base + 7u] = state[base + 5u];
 }

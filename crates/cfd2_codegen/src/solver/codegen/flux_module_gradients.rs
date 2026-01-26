@@ -4,12 +4,13 @@ use super::wgsl_ast::{
     StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use super::KernelWgsl;
 use crate::solver::ir::{FieldKind, FluxLayout, StateLayout};
 
 pub fn generate_flux_module_gradients_wgsl(
     layout: &StateLayout,
     flux_layout: &FluxLayout,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     let gradients = collect_gradients(layout)?;
     let specs = build_specs(layout, flux_layout, &gradients)?;
 
@@ -20,7 +21,7 @@ pub fn generate_flux_module_gradients_wgsl(
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_items());
     module.push(Item::Function(main_fn(layout, flux_layout, &specs)));
-    Ok(module.to_wgsl())
+    Ok(KernelWgsl::from(module))
 }
 
 #[cfg(test)]
@@ -58,7 +59,8 @@ mod tests {
         };
 
         let wgsl = generate_flux_module_gradients_wgsl(&layout, &flux_layout)
-            .expect("should generate gradients kernel");
+            .expect("should generate gradients kernel")
+            .to_wgsl();
         assert!(wgsl.contains("grad_acc_rho"));
         assert!(wgsl.contains("grad_acc_rho_u_x"));
         assert!(wgsl.contains("grad_acc_rho_u_y"));

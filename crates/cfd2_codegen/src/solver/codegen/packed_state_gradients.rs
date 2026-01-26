@@ -4,12 +4,13 @@ use super::wgsl_ast::{
     StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use super::KernelWgsl;
 use crate::solver::ir::StateLayout;
 
 pub fn generate_packed_state_gradients_wgsl(
     layout: &StateLayout,
     unknown_stride: u32,
-) -> Result<String, String> {
+) -> Result<KernelWgsl, String> {
     let stride = layout.stride();
     if unknown_stride == 0 {
         return Err("packed_state_gradients requires unknown_stride > 0".to_string());
@@ -27,7 +28,7 @@ pub fn generate_packed_state_gradients_wgsl(
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_items());
     module.push(Item::Function(main_fn(layout, unknown_stride)));
-    Ok(module.to_wgsl())
+    Ok(KernelWgsl::from(module))
 }
 
 fn base_items() -> Vec<Item> {

@@ -6,6 +6,7 @@ use super::wgsl_ast::{
     Stmt, StorageClass, StructDef, StructField, Type,
 };
 use super::wgsl_dsl as dsl;
+use super::KernelWgsl;
 use crate::solver::ir::{
     FaceScalarBuiltin, FaceScalarExpr, FaceSide, FaceVec2Builtin, FaceVec2Expr, FieldKind,
     FluxLayout, FluxModuleKernelSpec, LowMachParam, StateLayout,
@@ -19,7 +20,7 @@ pub fn generate_flux_module_wgsl(
     flux_stride: u32,
     primitives: &[(String, PrimitiveExpr)],
     spec: &FluxModuleKernelSpec,
-) -> String {
+) -> KernelWgsl {
     assert!(flux_stride > 0, "flux_module requires flux_stride > 0");
     assert_eq!(
         flux_stride, flux_layout.stride,
@@ -42,7 +43,7 @@ pub fn generate_flux_module_wgsl(
         &primitive_map,
         spec,
     )));
-    module.to_wgsl()
+    KernelWgsl::from(module)
 }
 
 /// Generate a flux module WGSL kernel that selects reconstruction at runtime via
@@ -57,7 +58,7 @@ pub fn generate_flux_module_wgsl_runtime_scheme(
     flux_stride: u32,
     primitives: &[(String, PrimitiveExpr)],
     variants: &[(Scheme, FluxModuleKernelSpec)],
-) -> String {
+) -> KernelWgsl {
     assert!(flux_stride > 0, "flux_module requires flux_stride > 0");
     assert_eq!(
         flux_stride, flux_layout.stride,
@@ -84,7 +85,7 @@ pub fn generate_flux_module_wgsl_runtime_scheme(
         &primitive_map,
         variants,
     )));
-    module.to_wgsl()
+    KernelWgsl::from(module)
 }
 
 #[cfg(test)]
@@ -137,7 +138,7 @@ mod tests {
             a_minus: FaceScalarExpr::lit(-1.0),
         };
 
-        let wgsl = generate_flux_module_wgsl(&layout, &flux_layout, 1, &[], &spec);
+        let wgsl = generate_flux_module_wgsl(&layout, &flux_layout, 1, &[], &spec).to_wgsl();
         assert!(wgsl.contains("cell_centers"));
         assert!(wgsl.contains("face_centers"));
     }
@@ -168,7 +169,7 @@ mod tests {
         );
         let spec = FluxModuleKernelSpec::ScalarReplicated { phi: phi_expr };
 
-        let wgsl = generate_flux_module_wgsl(&layout, &flux_layout, 1, &[], &spec);
+        let wgsl = generate_flux_module_wgsl(&layout, &flux_layout, 1, &[], &spec).to_wgsl();
 
         // `phi`(scalar) + `grad_phi`(vec2) => stride=3; grad_phi.x is at offset 1.
         assert!(wgsl.contains("state[neigh_idx * 3u + 1u]"));

@@ -1,10 +1,10 @@
-use super::dsl as typed;
-use super::wgsl_ast::{
+use cfd2_codegen::solver::codegen::dsl as typed;
+use cfd2_codegen::solver::codegen::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
     StorageClass, StructDef, StructField, Type,
 };
-use super::wgsl_dsl as dsl;
-use super::KernelWgsl;
+use cfd2_codegen::solver::codegen::wgsl_dsl as dsl;
+use cfd2_codegen::solver::codegen::KernelWgsl;
 use crate::solver::ir::{FieldKind, FluxLayout, StateLayout};
 
 pub fn generate_flux_module_gradients_wgsl(

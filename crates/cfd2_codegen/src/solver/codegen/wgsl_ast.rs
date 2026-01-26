@@ -1460,7 +1460,7 @@ impl<'a> RenderContext<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct CseConfig {
+pub struct CseConfig {
     pub min_occurrences: usize,
     pub min_nodes: usize,
     pub max_bindings: usize,
@@ -1485,7 +1485,7 @@ impl Default for CseConfig {
 ///
 /// Note: this is purely a codegen size/compile-time optimization; expressions are assumed to be
 /// side-effect free.
-pub(crate) struct CseBuilder {
+pub struct CseBuilder {
     prefix: String,
     next_id: u32,
     config: CseConfig,

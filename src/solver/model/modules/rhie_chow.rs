@@ -5,6 +5,10 @@ use crate::solver::model::kernel::{DispatchKindId, KernelPhaseId};
 
 use cfd2_codegen::solver::codegen::KernelWgsl;
 
+mod wgsl {
+    include!("rhie_chow_wgsl.rs");
+}
+
 pub fn rhie_chow_aux_module(
     dp_field: &'static str,
     require_vector2_momentum: bool,
@@ -105,9 +109,7 @@ fn generate_dp_init_kernel_wgsl(
         return Err(format!("dp_init requires '{dp_field}' to be a scalar field"));
     }
     let d_p_offset = d_p.offset();
-    Ok(cfd2_codegen::solver::codegen::generate_dp_init_wgsl(
-        stride, d_p_offset,
-    ))
+    Ok(wgsl::generate_dp_init_wgsl(stride, d_p_offset))
 }
 
 fn generate_dp_update_from_diag_kernel_wgsl(
@@ -147,7 +149,7 @@ fn generate_dp_update_from_diag_kernel_wgsl(
         u_indices.push(offset);
     }
 
-    cfd2_codegen::solver::codegen::generate_dp_update_from_diag_wgsl(
+    wgsl::generate_dp_update_from_diag_wgsl(
         stride,
         d_p_offset,
         model.system.unknowns_per_cell(),
@@ -159,8 +161,10 @@ fn generate_rhie_chow_grad_p_update_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
 ) -> Result<KernelWgsl, String> {
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
-    cfd2_codegen::solver::codegen::generate_flux_module_gradients_wgsl(&model.state_layout, &flux_layout)
-        .map_err(|e| e.to_string())
+    crate::solver::model::modules::flux_module::generate_flux_module_gradients_wgsl(
+        &model.state_layout,
+        &flux_layout,
+    )
 }
 
 fn generate_rhie_chow_store_grad_p_kernel_wgsl(
@@ -216,8 +220,12 @@ fn generate_rhie_chow_store_grad_p_kernel_wgsl(
             )
         })?;
 
-    Ok(cfd2_codegen::solver::codegen::generate_rhie_chow_store_grad_p_wgsl(
-        stride, grad_p_x, grad_p_y, grad_old_x, grad_old_y,
+    Ok(wgsl::generate_rhie_chow_store_grad_p_wgsl(
+        stride,
+        grad_p_x,
+        grad_p_y,
+        grad_old_x,
+        grad_old_y,
     ))
 }
 
@@ -310,8 +318,15 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
             )
         })?;
 
-    Ok(cfd2_codegen::solver::codegen::generate_rhie_chow_correct_velocity_delta_wgsl(
-        stride, u_x, u_y, d_p, grad_p_x, grad_p_y, grad_old_x, grad_old_y,
+    Ok(wgsl::generate_rhie_chow_correct_velocity_delta_wgsl(
+        stride,
+        u_x,
+        u_y,
+        d_p,
+        grad_p_x,
+        grad_p_y,
+        grad_old_x,
+        grad_old_y,
     ))
 }
 

@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use super::dsl as typed;
-use super::wgsl_ast::{
+use cfd2_codegen::solver::codegen::dsl as typed;
+use cfd2_codegen::solver::codegen::wgsl_ast::{
     AccessMode, Attribute, Block, CseBuilder, Expr, Function, GlobalVar, Item, Module, Param,
     Stmt, StorageClass, StructDef, StructField, Type,
 };
-use super::wgsl_dsl as dsl;
-use super::KernelWgsl;
+use cfd2_codegen::solver::codegen::wgsl_dsl as dsl;
+use cfd2_codegen::solver::codegen::KernelWgsl;
 use crate::solver::ir::{
     FaceScalarBuiltin, FaceScalarExpr, FaceSide, FaceVec2Builtin, FaceVec2Expr, FieldKind,
     FluxLayout, FluxModuleKernelSpec, LowMachParam, StateLayout,

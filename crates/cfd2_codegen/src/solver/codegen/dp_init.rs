@@ -48,7 +48,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {\n\
     // Seed Rhie–Chow mobility with a transient-scale approximation.\n\
     // For integrated momentum diagonals A_U ~ rho*vol/dt, a good first guess is:\n\
     //   d_p ≈ 1/A_U ≈ dt/(rho*vol)\n\
-    let d_p = dt / (rho * vol);\n\
+    //\n\
+    // Note: the solver applies velocity under-relaxation in the update stage rather than\n\
+    // modifying the assembled momentum diagonal. Match SIMPLE-like behavior by folding the\n\
+    // relaxation factor into the mobility: d_p ≈ alpha_u / A_U.\n\
+    let d_p = constants.alpha_u * dt / (rho * vol);\n\
     state[idx * STATE_STRIDE + D_P_OFFSET] = d_p;\n\
 }\n",
     );

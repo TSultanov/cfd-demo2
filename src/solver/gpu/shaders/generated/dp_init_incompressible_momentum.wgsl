@@ -46,6 +46,10 @@ let vol = max(cell_vols[idx], 0.000000000001);
 // Seed Rhie–Chow mobility with a transient-scale approximation.
 // For integrated momentum diagonals A_U ~ rho*vol/dt, a good first guess is:
 //   d_p ≈ 1/A_U ≈ dt/(rho*vol)
-let d_p = dt / (rho * vol);
+//
+// Note: the solver applies velocity under-relaxation in the update stage rather than
+// modifying the assembled momentum diagonal. Match SIMPLE-like behavior by folding the
+// relaxation factor into the mobility: d_p ≈ alpha_u / A_U.
+let d_p = constants.alpha_u * dt / (rho * vol);
 state[idx * STATE_STRIDE + D_P_OFFSET] = d_p;
 }

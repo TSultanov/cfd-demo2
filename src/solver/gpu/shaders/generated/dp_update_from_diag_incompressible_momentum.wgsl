@@ -79,6 +79,8 @@ let diag_u = matrix_values[start_row_u + diag_rank * UNKNOWNS_PER_CELL + u];
 sum_u_inv += safe_inverse(diag_u);
 }
 
-let d_p = sum_u_inv / max(f32(U_LEN), 1.0);
+// Match SIMPLE-style under-relaxation applied in the update stage:
+// use d_p ≈ alpha_u / A_U.
+let d_p = constants.alpha_u * (sum_u_inv / max(f32(U_LEN), 1.0));
 state[idx * STATE_STRIDE + D_P_OFFSET] = d_p;
 }

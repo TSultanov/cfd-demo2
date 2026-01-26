@@ -46,25 +46,15 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
         }
         return stats;
     }
-    if rhs_norm <= tol_abs {
-        let stats = LinearSolverStats {
-            iterations: 0,
-            residual: rhs_norm,
-            converged: true,
-            diverged: false,
-            time: start.elapsed(),
-        };
-        if debug_fgmres {
-            eprintln!("[cfd2][fgmres] early-exit: rhs_norm <= tol_abs");
-        }
-        return stats;
-    }
 
-    // 1. Zero initial guess (assuming x0 = 0 for now).
+    // Use the existing `x` buffer contents as the initial guess.
     //
-    // IMPORTANT: this must happen *after* any early-exit checks so we don't clobber the last
-    // solution estimate in cases where the RHS is non-finite or already converged.
-    zero_buffer(context, system.x(), n);
+    // This is important for coupled solvers where `x` stores the current iterate (absolute
+    // unknown values, not a correction). Starting from a good initial guess can dramatically
+    // reduce the number of Krylov iterations needed to reach tight tolerances.
+    //
+    // Note: wgpu ensures newly-created buffers are initialized before use, so the first solve
+    // still effectively starts from x0=0 unless something has written into `x`.
 
     let max_iters = max_iters.max(1);
     let capacity = krylov.fgmres.max_restart();
@@ -99,6 +89,7 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
     let mut total_iters: u32 = 0;
     let mut residual = rhs_norm;
     let mut converged = false;
+    let mut rel_scale: Option<f32> = None;
 
     while total_iters < max_iters {
         // Seed basis0 with the current residual (rhs - A*x).
@@ -124,7 +115,16 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
             }
             return stats;
         }
-        if residual <= tol * rhs_norm || residual <= tol_abs {
+        if rel_scale.is_none() {
+            // Avoid declaring convergence purely because the RHS happens to have a much larger
+            // norm than the current residual (e.g., when `x` is already close for the
+            // dominant-magnitude unknowns). Use the smaller of ||b|| and ||r0|| for the
+            // relative tolerance scale.
+            rel_scale = Some(rhs_norm.min(residual));
+        }
+        let rel_scale = rel_scale.unwrap();
+
+        if residual <= tol * rel_scale || residual <= tol_abs {
             converged = true;
             break;
         }
@@ -157,7 +157,7 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
         let solve = krylov.solve_once(
             context,
             system,
-            rhs_norm,
+            rel_scale,
             params,
             iter_params,
             FgmresSolveOnceConfig {
@@ -198,19 +198,13 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
         time: start.elapsed(),
     };
     if debug_fgmres {
+        let rel_scale = rel_scale.unwrap_or(rhs_norm);
         eprintln!(
-            "[cfd2][fgmres] done: iters={} rhs_norm={:.3e} residual={:.3e} converged={}",
-            stats.iterations, rhs_norm, stats.residual, stats.converged
+            "[cfd2][fgmres] done: iters={} rhs_norm={:.3e} rel_scale={:.3e} residual={:.3e} converged={}",
+            stats.iterations, rhs_norm, rel_scale, stats.residual, stats.converged
         );
     }
     stats
-}
-
-fn zero_buffer(context: &GpuContext, buffer: &wgpu::Buffer, n: u32) {
-    let zeros = vec![0.0f32; n as usize];
-    context
-        .queue
-        .write_buffer(buffer, 0, bytemuck::cast_slice(&zeros));
 }
 
 // NOTE: Prefer `CFD2_DEBUG_FGMRES=1` over hardcoded debug logging.

@@ -1,6 +1,7 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{
-    fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, EquationSystem, FieldRef, FluxRef,
+    fvc, fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, EquationSystem, FieldRef,
+    FluxRef,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::units::si;
@@ -43,7 +44,7 @@ fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -
             Coefficient::field(fields.mu).expect("mu must be scalar"),
             fields.u,
         )
-        + fvm::grad(fields.p))
+        + fvc::grad(fields.p))
     .eqn(fields.u);
 
     let pressure = (fvm::laplacian(
@@ -350,20 +351,35 @@ fn rhie_chow_flux_module_kernel(
     //
     // This definition is intentionally "general": it only relies on the model-declared
     // momentum/pressure coupling and the presence of `(d_p, grad_p)` in the state layout.
-    let u_face = V::Lerp(
-        Box::new(V::state_vec2(FaceSide::Owner, fields.momentum.clone())),
-        Box::new(V::state_vec2(FaceSide::Neighbor, fields.momentum.clone())),
-    );
-    let u_n = S::Dot(Box::new(u_face), Box::new(V::normal()));
     let rho_face = density_face_expr(layout);
-    let phi_pred = S::Mul(
-        Box::new(S::Mul(Box::new(rho_face.clone()), Box::new(u_n))),
-        Box::new(S::area()),
-    );
 
     let d_p_face = S::Lerp(
         Box::new(S::state(FaceSide::Owner, fields.d_p.clone())),
         Box::new(S::state(FaceSide::Neighbor, fields.d_p.clone())),
+    );
+
+    // Rhie–Chow uses the momentum predictor `HbyA` for the "predicted" mass flux on the RHS
+    // of the pressure equation, then subtracts an explicit pressure correction flux.
+    //
+    // Approximate `HbyA` from the current cell-centered velocity and pressure gradient:
+    //   HbyA ≈ U + d_p * grad(p)
+    let grad_p_field = format!("grad_{}", fields.pressure);
+    let u_face = V::Lerp(
+        Box::new(V::state_vec2(FaceSide::Owner, fields.momentum.clone())),
+        Box::new(V::state_vec2(FaceSide::Neighbor, fields.momentum.clone())),
+    );
+    let grad_p_face = V::Lerp(
+        Box::new(V::state_vec2(FaceSide::Owner, grad_p_field.clone())),
+        Box::new(V::state_vec2(FaceSide::Neighbor, grad_p_field)),
+    );
+    let hby_a_face = V::Add(
+        Box::new(u_face),
+        Box::new(V::MulScalar(Box::new(grad_p_face), Box::new(d_p_face.clone()))),
+    );
+    let u_n = S::Dot(Box::new(hby_a_face), Box::new(V::normal()));
+    let phi_pred = S::Mul(
+        Box::new(S::Mul(Box::new(rho_face.clone()), Box::new(u_n))),
+        Box::new(S::area()),
     );
     let dp = S::Sub(
         Box::new(S::state(FaceSide::Neighbor, fields.pressure.clone())),
@@ -377,7 +393,32 @@ fn rhie_chow_flux_module_kernel(
         )),
         Box::new(S::area()),
     );
-    let phi = S::Sub(Box::new(phi_pred), Box::new(phi_p));
+    let phi_corr = S::Sub(Box::new(phi_pred.clone()), Box::new(phi_p));
 
-    Ok(FluxModuleKernelSpec::ScalarReplicated { phi })
+    // Pressure equation needs the *predicted* mass flux (phi_pred) on the RHS:
+    //   -div(rho*d_p*grad(p)) + div(phi_pred) = 0
+    //
+    // Momentum equation convection uses the corrected mass flux (phi_corr) to reduce
+    // pressure–velocity decoupling on collocated grids (Rhie–Chow).
+    //
+    // The flux buffer is indexed by coupled unknown component, so we can provide different
+    // values for `p` vs `U` while still using a single scalar flux module kernel.
+    let flux_layout = crate::solver::ir::FluxLayout::from_system(system);
+    let components: Vec<String> = flux_layout
+        .components
+        .iter()
+        .map(|c| c.name.clone())
+        .collect();
+    let flux: Vec<S> = components
+        .iter()
+        .map(|name| {
+            if name == &fields.pressure {
+                phi_pred.clone()
+            } else {
+                phi_corr.clone()
+            }
+        })
+        .collect();
+
+    Ok(FluxModuleKernelSpec::ScalarPerComponent { components, flux })
 }

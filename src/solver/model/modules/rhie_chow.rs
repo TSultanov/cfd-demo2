@@ -43,7 +43,9 @@ pub fn rhie_chow_aux_module(
             }),
             ModelKernelGeneratorSpec::new(
                 kernel_rhie_chow_correct_velocity,
-                move |model, _schemes| generate_rhie_chow_correct_velocity_kernel_wgsl(model, dp_field),
+                move |model, _schemes| {
+                    generate_rhie_chow_correct_velocity_kernel_wgsl(model, dp_field)
+                },
             ),
         ],
         manifest: ModuleManifest {
@@ -149,7 +151,9 @@ fn generate_rhie_chow_correct_velocity_kernel_wgsl(
     let pressure = coupling.pressure;
 
     if momentum.kind() != FieldKind::Vector2 {
-        return Err("rhie_chow/correct_velocity currently supports only Vector2 momentum fields".to_string());
+        return Err(
+            "rhie_chow/correct_velocity currently supports only Vector2 momentum fields".to_string(),
+        );
     }
 
     let u_x = model.state_layout.component_offset(momentum.name(), 0).ok_or_else(|| {

@@ -113,7 +113,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {\n\
 
     out.push_str(
         "\n\
-    let d_p = sum_u_inv / max(f32(U_LEN), 1.0);\n\
+    // Match SIMPLE-style under-relaxation applied in the update stage:\n\
+    // use d_p ≈ alpha_u / A_U.\n\
+    let d_p = constants.alpha_u * (sum_u_inv / max(f32(U_LEN), 1.0));\n\
     state[idx * STATE_STRIDE + D_P_OFFSET] = d_p;\n\
 }\n",
     );

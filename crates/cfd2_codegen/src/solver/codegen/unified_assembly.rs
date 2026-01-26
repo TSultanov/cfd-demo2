@@ -735,8 +735,21 @@ fn main_assembly_fn(
                         field_name
                     )
                 });
-                let kappa =
+
+                // Face-interpolated coefficient for implicit diffusion.
+                // This is critical for consistency with the Rhie-Chow flux formula:
+                // the pressure Laplacian coefficient (rho * d_p) must match the
+                // face-interpolated d_p used in the momentum flux computation.
+                let kappa_own =
                     coefficient_value_expr(layout, diff_op.coeff.as_ref(), "idx", 1.0.into());
+                let kappa_other =
+                    coefficient_value_expr(layout, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
+                // Use arithmetic mean for interior faces; for boundaries use owner value.
+                let kappa = dsl::select(
+                    kappa_own.clone(),
+                    (kappa_own.clone() + kappa_other) * 0.5,
+                    !Expr::ident("is_boundary"),
+                );
 
                 let diff_coeff_name = format!("diff_coeff_{}", equation.target.name());
                 body.push(dsl::let_expr(
@@ -1200,7 +1213,7 @@ fn main_assembly_fn(
                     } else {
                         let val = term_common.clone() * (phi_own + phi_neigh);
                         body.push(dsl::assign_op_expr(
-                            AssignOp::Add,
+                            AssignOp::Sub,
                             Expr::ident(format!("rhs_{u_idx}")),
                             val,
                         ));

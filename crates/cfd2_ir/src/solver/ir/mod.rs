@@ -288,6 +288,18 @@ pub enum FluxModuleKernelSpec {
     /// Compute a scalar face flux and replicate it into all coupled unknown-component slots.
     ScalarReplicated { phi: FaceScalarExpr },
 
+    /// Compute one scalar face flux per coupled unknown-component slot.
+    ///
+    /// Each entry is written directly into the packed `fluxes[face, component]` table.
+    /// Expressions are expected to already include any geometric factors (e.g. multiply by
+    /// `area` when returning an integrated face flux).
+    ScalarPerComponent {
+        /// Coupled unknown-component names in packed order.
+        components: Vec<String>,
+        /// Integrated face flux per component (same length as `components`).
+        flux: Vec<FaceScalarExpr>,
+    },
+
     /// Central-upwind (Kurganov–Tadmor-style) numerical flux for a conservation law.
     ///
     /// All fluxes are expressed in the *face-normal* direction and are written as integrated

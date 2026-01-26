@@ -753,6 +753,25 @@ fn face_stmts(
                 ));
             }
         }
+        FluxModuleKernelSpec::ScalarPerComponent { components, flux } => {
+            if components.len() != flux_layout.components.len() {
+                panic!("ScalarPerComponent spec component count does not match FluxLayout");
+            }
+            if flux.len() != components.len() {
+                panic!("ScalarPerComponent spec arrays must match component count");
+            }
+
+            for (i, comp_name) in components.iter().enumerate() {
+                let off = flux_layout
+                    .offset_for(comp_name)
+                    .unwrap_or_else(|| panic!("missing flux layout component '{comp_name}'"));
+                let flux_expr = lower_scalar(&flux[i], &ctx);
+                body.push(dsl::assign_expr(
+                    dsl::array_access_linear("fluxes", Expr::ident("idx"), flux_stride, off),
+                    flux_expr,
+                ));
+            }
+        }
         FluxModuleKernelSpec::CentralUpwind {
             reconstruction: _,
             components,
@@ -1200,6 +1219,11 @@ fn collect_state_keys_from_flux_spec<'a>(
     match spec {
         FluxModuleKernelSpec::ScalarReplicated { phi } => {
             collect_state_keys_from_scalar(phi, primitives, state_layout, out);
+        }
+        FluxModuleKernelSpec::ScalarPerComponent { flux, .. } => {
+            for expr in flux {
+                collect_state_keys_from_scalar(expr, primitives, state_layout, out);
+            }
         }
         FluxModuleKernelSpec::CentralUpwind {
             u_left,
@@ -1699,6 +1723,7 @@ fn lower_scalar<'a>(expr: &'a FaceScalarExpr, ctx: &LowerCtx<'a>) -> Expr {
 fn flux_spec_uses_low_mach(spec: &FluxModuleKernelSpec) -> bool {
     match spec {
         FluxModuleKernelSpec::ScalarReplicated { phi } => scalar_uses_low_mach(phi),
+        FluxModuleKernelSpec::ScalarPerComponent { flux, .. } => flux.iter().any(scalar_uses_low_mach),
         FluxModuleKernelSpec::CentralUpwind {
             u_left,
             u_right,

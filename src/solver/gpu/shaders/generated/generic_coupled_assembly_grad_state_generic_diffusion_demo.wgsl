@@ -176,7 +176,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         let scalar_mat_idx = cell_face_matrix_indices[k];
         let neighbor_rank = scalar_mat_idx - scalar_offset;
-        let diff_coeff_phi = area / dist;
+        let diff_coeff_phi = select(1.0, (1.0 + 1.0) * 0.5, !is_boundary) * area / dist;
         if (!is_boundary) {
             diag_0 += diff_coeff_phi;
             matrix_values[start_row_0 + neighbor_rank * 1u + 0u] -= diff_coeff_phi;
@@ -186,7 +186,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 rhs_0 += diff_coeff_phi * bc_value[face_idx * 1u + 0u];
             } else {
                 if (bc_kind[face_idx * 1u + 0u] == 2u) {
-                    rhs_0 += -(area * bc_value[face_idx * 1u + 0u]);
+                    rhs_0 += -(select(1.0, (1.0 + 1.0) * 0.5, !is_boundary) * area * bc_value[face_idx * 1u + 0u]);
                 }
             }
         }

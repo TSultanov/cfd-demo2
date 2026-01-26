@@ -318,7 +318,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             phi_0 -= phi_0 * 2.0;
         }
         rhs_0 -= phi_0;
-        let diff_coeff_rho_u = constants.viscosity * area / dist;
+        let diff_coeff_rho_u = select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area / dist;
         if (!is_boundary) {
             matrix_values[start_row_1 + diag_rank * 8u + 4u] += diff_coeff_rho_u;
             matrix_values[start_row_1 + neighbor_rank * 8u + 4u] -= diff_coeff_rho_u;
@@ -328,7 +328,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 rhs_1 += diff_coeff_rho_u * bc_value[face_idx * 8u + 4u];
             } else {
                 if (bc_kind[face_idx * 8u + 4u] == 2u) {
-                    rhs_1 += -(constants.viscosity * area * bc_value[face_idx * 8u + 4u]);
+                    rhs_1 += -(select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area * bc_value[face_idx * 8u + 4u]);
                 }
             }
         }
@@ -341,7 +341,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 rhs_2 += diff_coeff_rho_u * bc_value[face_idx * 8u + 5u];
             } else {
                 if (bc_kind[face_idx * 8u + 5u] == 2u) {
-                    rhs_2 += -(constants.viscosity * area * bc_value[face_idx * 8u + 5u]);
+                    rhs_2 += -(select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area * bc_value[face_idx * 8u + 5u]);
                 }
             }
         }

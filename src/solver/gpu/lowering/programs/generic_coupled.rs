@@ -1053,7 +1053,7 @@ pub(crate) fn spec_set_bc_value(
         ));
     }
 
-    let boundary_count = 5u32; // None, Inlet, Outlet, Wall, SlipWall
+    let boundary_count = 6u32; // None, Inlet, Outlet, Wall, SlipWall, MovingWall
     let boundary_idx = boundary as u32;
     if boundary_idx >= boundary_count {
         return Err(format!("invalid boundary type index {boundary_idx}"));

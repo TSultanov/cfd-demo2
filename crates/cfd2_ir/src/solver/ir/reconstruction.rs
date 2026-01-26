@@ -152,4 +152,3 @@ impl ReconstructionBuilder for FaceExprBuilder {
         super::FaceScalarExpr::Dot(Box::new(a), Box::new(b))
     }
 }
-

@@ -43,7 +43,7 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
         SolverConfig {
             // OpenFOAM uses vanLeer reconstruction for rho/U/T with the Kurganov flux.
             advection_scheme: Scheme::SecondOrderUpwindVanLeer,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
@@ -191,6 +191,75 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
             ux_scale,
             p_scale,
         );
+
+        if let (Ok(rho), Ok(rho_u)) = (
+            pollster::block_on(solver.get_field_scalar("rho")),
+            pollster::block_on(solver.get_field_vec2("rho_u")),
+        ) {
+            let ux_derived: Vec<f64> = rho_u
+                .iter()
+                .zip(rho.iter())
+                .take(nx)
+                .map(|((mx, _), &r)| mx / r.max(1e-12))
+                .collect();
+            let ux_derived_neg: Vec<f64> = ux_derived.iter().map(|v| -*v).collect();
+            let ux_max_pos = common::max_cell_rel_error_scalar(&ux_derived, &ux_ref, ux_scale);
+            let ux_max_neg = common::max_cell_rel_error_scalar(&ux_derived_neg, &ux_ref, ux_scale);
+            let (ux_max_derived, ux_sign_derived) = if ux_max_neg.rel < ux_max_pos.rel {
+                (ux_max_neg, -1.0)
+            } else {
+                (ux_max_pos, 1.0)
+            };
+
+            let mut max_abs_u_consistency = 0.0;
+            let mut max_abs_u_consistency_x = 0.0;
+            for (i, (&a, &b)) in ux_out.iter().zip(ux_derived.iter()).enumerate() {
+                let abs = (a - b).abs();
+                if abs > max_abs_u_consistency {
+                    max_abs_u_consistency = abs;
+                    max_abs_u_consistency_x = (i as f64 + 0.5) * (length / nx as f64);
+                }
+            }
+
+            eprintln!(
+                "[openfoam][compressible_acoustic] u_x derived(rho_u/rho): max_cell rel(best)={:.6} abs={:.6} at x={:.6} (sign={:+.0}) | max_abs(u_x - rho_u/rho)={:.6} at x={:.6}",
+                ux_max_derived.rel,
+                ux_max_derived.abs,
+                (ux_max_derived.idx as f64 + 0.5) * (length / nx as f64),
+                ux_sign_derived,
+                max_abs_u_consistency,
+                max_abs_u_consistency_x,
+            );
+
+            if let (Ok(rho_e), Ok(p_state), Ok(t_state)) = (
+                pollster::block_on(solver.get_field_scalar("rho_e")),
+                pollster::block_on(solver.get_field_scalar("p")),
+                pollster::block_on(solver.get_field_scalar("T")),
+            ) {
+                let gm1 = 0.4_f64;
+                let r_gas = 287.0_f64;
+                let mut max_abs_p_energy: f64 = 0.0;
+                let mut max_abs_t_ideal: f64 = 0.0;
+                for i in 0..nx {
+                    let rho_i = rho[i].max(1e-12);
+                    let ux = u_out[i].0;
+                    let uy = u_out[i].1;
+                    let ke = 0.5 * rho_i * (ux * ux + uy * uy);
+                    let p_from_energy = gm1 * (rho_e[i] - ke);
+                    max_abs_p_energy = max_abs_p_energy.max((p_state[i] - p_from_energy).abs());
+
+                    let t_from_p = p_state[i] / (rho_i * r_gas);
+                    max_abs_t_ideal = max_abs_t_ideal.max((t_state[i] - t_from_p).abs());
+                }
+                eprintln!(
+                    "[openfoam][compressible_acoustic] thermo consistency: max_abs(p - gm1*(rho_e-0.5*rho*u^2))={:.6} Pa | max_abs(T - p/(rho*R))={:.6}",
+                    max_abs_p_energy,
+                    max_abs_t_ideal,
+                );
+            }
+        } else {
+            eprintln!("[openfoam][compressible_acoustic] could not fetch rho/rho_u for u diagnostics");
+        }
     }
 
     assert!(

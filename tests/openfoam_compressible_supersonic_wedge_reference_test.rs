@@ -46,7 +46,7 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
         SolverConfig {
             // OpenFOAM uses vanLeer reconstruction for rho/U/T with the Kurganov flux.
             advection_scheme: Scheme::SecondOrderUpwindVanLeer,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
@@ -78,8 +78,23 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
     solver.set_uniform_state(rho0, [u0, 0.0], p0);
     solver.initialize_history();
 
-    for _ in 0..200 {
-        solver.step();
+    for step in 0..200 {
+        if common::diag_enabled() && step < 3 {
+            let stats = solver
+                .step_with_stats()
+                .expect("step_with_stats for diagnostics");
+            if let Some(last) = stats.last() {
+                eprintln!(
+                    "[openfoam][compressible_wedge] step={step} lin: iters={} resid={:.3e} converged={} diverged={}",
+                    last.iterations,
+                    last.residual,
+                    last.converged,
+                    last.diverged
+                );
+            }
+        } else {
+            solver.step();
+        }
     }
 
     let u = pollster::block_on(solver.get_u());

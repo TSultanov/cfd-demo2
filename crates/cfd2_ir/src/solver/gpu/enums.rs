@@ -6,6 +6,7 @@ pub enum GpuBoundaryType {
     Outlet = 2,
     Wall = 3,
     SlipWall = 4,
+    MovingWall = 5,
 }
 
 #[repr(u32)]

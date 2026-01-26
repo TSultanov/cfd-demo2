@@ -36,7 +36,7 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
         SolverConfig {
             // OpenFOAM uses vanLeer reconstruction for rho/U/T with the Kurganov flux.
             advection_scheme: Scheme::SecondOrderUpwindVanLeer,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Implicit { outer_iters: 1 },
         },

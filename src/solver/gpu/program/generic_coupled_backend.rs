@@ -56,7 +56,7 @@ pub(crate) async fn build_generic_coupled_backend(
         .map_err(|e| format!("failed to build BC tables: {e}"))?;
 
     let coupled_stride = unknowns_per_cell as usize;
-    let boundary_count = 5usize; // None, Inlet, Outlet, Wall, SlipWall
+    let boundary_count = 6usize; // None, Inlet, Outlet, Wall, SlipWall, MovingWall
 
     let mut boundary_faces: Vec<Vec<u32>> = vec![Vec::new(); boundary_count];
     for (face_idx, neigh) in mesh.face_neighbor.iter().enumerate() {
@@ -69,6 +69,7 @@ pub(crate) async fn build_generic_coupled_backend(
             Some(BoundaryType::Outlet) => 2usize,
             Some(BoundaryType::Wall) => 3usize,
             Some(BoundaryType::SlipWall) => 4usize,
+            Some(BoundaryType::MovingWall) => 5usize,
         };
         boundary_faces[boundary_idx].push(face_idx as u32);
     }
@@ -93,6 +94,7 @@ pub(crate) async fn build_generic_coupled_backend(
             Some(BoundaryType::Outlet) => 2usize,
             Some(BoundaryType::Wall) => 3usize,
             Some(BoundaryType::SlipWall) => 4usize,
+            Some(BoundaryType::MovingWall) => 5usize,
         };
 
         // Only boundary faces use bc_kind/bc_value at runtime; interior entries are ignored.

@@ -107,8 +107,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let other_center = cell_centers[other_idx];
             other_center_vec = vec2<f32>(other_center.x, other_center.y);
         }
-        let d_own = distance(cell_center_vec, face_center_vec);
-        let d_neigh = distance(other_center_vec, face_center_vec);
+        let d_own = abs(dot(face_center_vec - cell_center_vec, normal_vec));
+        let d_neigh = abs(dot(other_center_vec - face_center_vec, normal_vec));
         let total_dist = d_own + d_neigh;
         var lambda: f32 = 0.5;
         if (total_dist > 0.000001) {

@@ -49,6 +49,30 @@ mod tests {
     }
 
     fn contains_sign_guard_for_states(expr: &S, a: &str, b: &str) -> bool {
+        fn contains_state(expr: &S, name: &str) -> bool {
+            match expr {
+                S::State { name: n, .. } => n == name,
+                S::Add(x, y)
+                | S::Sub(x, y)
+                | S::Mul(x, y)
+                | S::Div(x, y)
+                | S::Max(x, y)
+                | S::Min(x, y)
+                | S::Lerp(x, y) => contains_state(x, name) || contains_state(y, name),
+                S::Neg(x) | S::Abs(x) | S::Sqrt(x) => contains_state(x, name),
+                S::Dot(_, _)
+                | S::Literal(_)
+                | S::Builtin(_)
+                | S::Constant { .. }
+                | S::LowMachParam(_)
+                | S::Primitive { .. } => false,
+            }
+        }
+
+        fn depends_on_states(expr: &S, a: &str, b: &str) -> bool {
+            contains_state(expr, a) && contains_state(expr, b)
+        }
+
         fn walk(expr: &S, f: &mut impl FnMut(&S)) {
             f(expr);
             match expr {
@@ -86,7 +110,7 @@ mod tests {
                 }
             }
 
-            let p = |e: &S| is_mul_named_states(e, a, b);
+            let p = |e: &S| depends_on_states(e, a, b);
             let abs_p = |e: &S| matches!(e, S::Abs(inner) if p(inner));
             let num_ok = is_max_of(num, p, |e| is_lit(e, 0.0));
             let denom_ok = is_max_of(denom, abs_p, |e| is_lit(e, crate::solver::ir::VANLEER_EPS));
@@ -150,27 +174,8 @@ fn euler_central_upwind(
         }
     };
 
-    let approximate_gradient = |side: FaceSide, phi_cell: S, phi_other: S| -> V {
-        // Simple two-point gradient estimate based on neighbor differences:
-        //   grad ≈ (phi_other - phi_cell) * d / max(dot(d,d), eps)
-        // where d is the vector from the cell center to the opposite cell center.
-        let d = V::Sub(
-            Box::new(V::cell_to_face(side)),
-            Box::new(V::cell_to_face(other_side(side))),
-        );
-        let diff = S::Sub(Box::new(phi_other), Box::new(phi_cell.clone()));
-        let denom = S::Max(
-            Box::new(S::Dot(Box::new(d.clone()), Box::new(d.clone()))),
-            Box::new(S::lit(1e-12)),
-        );
-        let scale = S::Div(Box::new(diff), Box::new(denom));
-        V::MulScalar(Box::new(d), Box::new(scale))
-    };
-
     let reconstruct_scalar =
-        |side: FaceSide, phi_cell: S, phi_other: S| -> S {
-            let grad = approximate_gradient(side, phi_cell.clone(), phi_other.clone());
-
+        |side: FaceSide, phi_cell: S, phi_other: S, grad: V| -> S {
             match reconstruction {
                 Scheme::Upwind => phi_cell,
 
@@ -201,32 +206,180 @@ fn euler_central_upwind(
         };
 
     let rho_raw = |side: FaceSide| S::state(side, rho_name);
-    let rho_e_raw = |side: FaceSide| S::state(side, rho_e_name);
-    let u_raw = |side: FaceSide| V::state_vec2(side, "u");
-    let u_x_raw = |side: FaceSide| S::Dot(Box::new(u_raw(side)), Box::new(ex.clone()));
-    let u_y_raw = |side: FaceSide| S::Dot(Box::new(u_raw(side)), Box::new(ey.clone()));
     let t_raw = |side: FaceSide| S::state(side, "T");
 
-    let rho = |side: FaceSide| {
-        reconstruct_scalar(side, rho_raw(side), rho_raw(other_side(side)))
+    // OpenFOAM's `vanLeer` / `vanLeerV` reconstruction (as used by rhoCentralFoam) is an NVD/TVD
+    // limited interpolation that blends between central differencing and upwind, driven by a
+    // limiter function:
+    //   psi(r) = (r + |r|) / (1 + |r|)
+    // with r computed from the upwind gradient along the cell-center vector `d`.
+    //
+    // OpenFOAM uses:
+    //   r = 2*(gradcf/gradf) - 1,
+    // guarded by a `1000*` threshold that effectively clamps r to [-2001, 1999].
+    //
+    // We mirror this with a branchless, divide-by-zero-safe ratio:
+    //   gradcf/gradf ≈ (gradcf * gradf) / (gradf^2 + eps2)
+    // which matches the exact ratio for nonzero gradf and yields r=-1 when gradf=0 (=> psi=0).
+    let eps2 = S::lit(1e-30);
+    let vanleer_limiter = |gradf: S, gradcf: S| {
+        let gradf2 = S::Mul(Box::new(gradf.clone()), Box::new(gradf.clone()));
+        let ratio = S::Div(
+            Box::new(S::Mul(Box::new(gradcf), Box::new(gradf.clone()))),
+            Box::new(S::Add(Box::new(gradf2), Box::new(eps2.clone()))),
+        );
+        let r_raw = S::Sub(
+            Box::new(S::Mul(Box::new(S::lit(2.0)), Box::new(ratio))),
+            Box::new(S::lit(1.0)),
+        );
+
+        // OpenFOAM's NVDTVD/NVDVTVDV guards extreme ratios via a `1000*` threshold,
+        // which corresponds to clamping r to [-2001, 1999].
+        let r = S::Max(
+            Box::new(S::lit(-2001.0)),
+            Box::new(S::Min(Box::new(r_raw), Box::new(S::lit(1999.0)))),
+        );
+
+        let abs_r = S::Abs(Box::new(r.clone()));
+        S::Div(
+            Box::new(S::Add(Box::new(r), Box::new(abs_r.clone()))),
+            Box::new(S::Add(Box::new(S::lit(1.0)), Box::new(abs_r))),
+        )
     };
 
-    let rho_e = |side: FaceSide| {
-        reconstruct_scalar(side, rho_e_raw(side), rho_e_raw(other_side(side)))
+    let d = V::Sub(
+        Box::new(V::cell_to_face(FaceSide::Owner)),
+        Box::new(V::cell_to_face(FaceSide::Neighbor)),
+    );
+
+    let reconstruct_vanleer_scalar =
+        |side: FaceSide, phi_p: S, phi_n: S, grad_p: V, grad_n: V| -> S {
+            let gradf = S::Sub(Box::new(phi_n.clone()), Box::new(phi_p.clone()));
+            let grad = if side == FaceSide::Owner { grad_p } else { grad_n };
+            let gradcf = S::Dot(Box::new(d.clone()), Box::new(grad));
+            let limiter = vanleer_limiter(gradf.clone(), gradcf);
+            let delta = match side {
+                FaceSide::Owner => S::Mul(Box::new(limiter), Box::new(S::lambda_other())),
+                FaceSide::Neighbor => S::Mul(Box::new(limiter), Box::new(S::lambda())),
+            };
+            match side {
+                FaceSide::Owner => S::Add(Box::new(phi_p), Box::new(S::Mul(Box::new(delta), Box::new(gradf)))),
+                FaceSide::Neighbor => S::Sub(Box::new(phi_n), Box::new(S::Mul(Box::new(delta), Box::new(gradf)))),
+            }
+        };
+
+    let reconstruct_vanleer_vec2 = |side: FaceSide,
+                                    phi_p: V,
+                                    phi_n: V,
+                                    grad_px: V,
+                                    grad_py: V,
+                                    grad_nx: V,
+                                    grad_ny: V|
+     -> V {
+        let gradf_v = V::Sub(Box::new(phi_n.clone()), Box::new(phi_p.clone()));
+        let gradf = S::Dot(Box::new(gradf_v.clone()), Box::new(gradf_v.clone()));
+
+        let (gx, gy) = if side == FaceSide::Owner {
+            (grad_px, grad_py)
+        } else {
+            (grad_nx, grad_ny)
+        };
+
+        // Match OpenFOAM's `vanLeerV` (NVDVTVDV) form:
+        //   gradcf = gradfV & (d & gradcP)
+        //
+        // With our stored per-component gradients:
+        //   gx = grad(phi_x) = [dphi_x/dx, dphi_x/dy]
+        //   gy = grad(phi_y) = [dphi_y/dx, dphi_y/dy]
+        // and d = [dx, dy], we interpret this as directional derivatives per component:
+        //   gradcf_x = d · gx
+        //   gradcf_y = d · gy
+        //   gradcf   = gradfV · [gradcf_x, gradcf_y]
+        let gradcf_x = S::Dot(Box::new(d.clone()), Box::new(gx.clone()));
+        let gradcf_y = S::Dot(Box::new(d.clone()), Box::new(gy.clone()));
+        let gradcf = S::Dot(
+            Box::new(gradf_v.clone()),
+            Box::new(V::vec2(gradcf_x, gradcf_y)),
+        );
+        let limiter = vanleer_limiter(gradf, gradcf);
+        let delta = match side {
+            FaceSide::Owner => S::Mul(Box::new(limiter), Box::new(S::lambda_other())),
+            FaceSide::Neighbor => S::Mul(Box::new(limiter), Box::new(S::lambda())),
+        };
+        let corr = V::MulScalar(Box::new(gradf_v), Box::new(delta));
+        match side {
+            FaceSide::Owner => V::Add(Box::new(phi_p), Box::new(corr)),
+            FaceSide::Neighbor => V::Sub(Box::new(phi_n), Box::new(corr)),
+        }
     };
 
-    // Match OpenFOAM's rhoCentralFoam reconstruction choices more closely by reconstructing the
-    // primitive velocity components and deriving momentum from rho*U.
-    let u_x = |side: FaceSide| {
-        reconstruct_scalar(side, u_x_raw(side), u_x_raw(other_side(side)))
+    let rho = |side: FaceSide| match reconstruction {
+        Scheme::SecondOrderUpwindVanLeer => reconstruct_vanleer_scalar(
+            side,
+            rho_raw(FaceSide::Owner),
+            rho_raw(FaceSide::Neighbor),
+            V::state_vec2(FaceSide::Owner, "grad_rho"),
+            V::state_vec2(FaceSide::Neighbor, "grad_rho"),
+        ),
+        _ => reconstruct_scalar(
+            side,
+            rho_raw(side),
+            rho_raw(other_side(side)),
+            V::state_vec2(side, "grad_rho"),
+        ),
     };
-    let u_y = |side: FaceSide| {
-        reconstruct_scalar(side, u_y_raw(side), u_y_raw(other_side(side)))
-    };
-    let u_vec = |side: FaceSide| V::vec2(u_x(side), u_y(side));
 
-    // Temperature reconstruction (used to compute face pressure for ideal-gas closures).
-    let t = |side: FaceSide| reconstruct_scalar(side, t_raw(side), t_raw(other_side(side)));
+    let t = |side: FaceSide| match reconstruction {
+        Scheme::SecondOrderUpwindVanLeer => reconstruct_vanleer_scalar(
+            side,
+            t_raw(FaceSide::Owner),
+            t_raw(FaceSide::Neighbor),
+            V::state_vec2(FaceSide::Owner, "grad_T"),
+            V::state_vec2(FaceSide::Neighbor, "grad_T"),
+        ),
+        _ => reconstruct_scalar(
+            side,
+            t_raw(side),
+            t_raw(other_side(side)),
+            V::state_vec2(side, "grad_T"),
+        ),
+    };
+
+    // Match OpenFOAM's rhoCentralFoam: reconstruct conserved momentum `rhoU` using `vanLeerV`
+    // and derive face velocity as `U = rhoU/rho`.
+    let rho_u = |side: FaceSide| match reconstruction {
+        Scheme::SecondOrderUpwindVanLeer => reconstruct_vanleer_vec2(
+            side,
+            V::state_vec2(FaceSide::Owner, rho_u_name),
+            V::state_vec2(FaceSide::Neighbor, rho_u_name),
+            V::state_vec2(FaceSide::Owner, "grad_rho_u_x"),
+            V::state_vec2(FaceSide::Owner, "grad_rho_u_y"),
+            V::state_vec2(FaceSide::Neighbor, "grad_rho_u_x"),
+            V::state_vec2(FaceSide::Neighbor, "grad_rho_u_y"),
+        ),
+        _ => {
+            let rho_u_owner = V::state_vec2(side, rho_u_name);
+            let rho_u_other = V::state_vec2(other_side(side), rho_u_name);
+            let x = reconstruct_scalar(
+                side,
+                S::Dot(Box::new(rho_u_owner.clone()), Box::new(ex.clone())),
+                S::Dot(Box::new(rho_u_other.clone()), Box::new(ex.clone())),
+                V::state_vec2(side, "grad_rho_u_x"),
+            );
+            let y = reconstruct_scalar(
+                side,
+                S::Dot(Box::new(rho_u_owner), Box::new(ey.clone())),
+                S::Dot(Box::new(rho_u_other), Box::new(ey.clone())),
+                V::state_vec2(side, "grad_rho_u_y"),
+            );
+            V::vec2(x, y)
+        }
+    };
+
+    let u_vec = |side: FaceSide| {
+        let inv_rho = S::Div(Box::new(S::lit(1.0)), Box::new(rho(side)));
+        V::MulScalar(Box::new(rho_u(side)), Box::new(inv_rho))
+    };
 
     // Ideal-gas pressure from reconstructed rho and T: p = rho * R * T.
     // (For barotropic closures, the model still enforces p = rho * R * T via the temperature
@@ -241,8 +394,21 @@ fn euler_central_upwind(
         )
     };
 
-    let rho_u_x = |side: FaceSide| S::Mul(Box::new(rho(side)), Box::new(u_x(side)));
-    let rho_u_y = |side: FaceSide| S::Mul(Box::new(rho(side)), Box::new(u_y(side)));
+    // Total energy density reconstructed from primitive variables:
+    //   rho_e = p/(gamma-1) + 0.5 * rho * |u|^2
+    //
+    // OpenFOAM's rhoCentralFoam reconstructs rho/U/T and derives energy/enthalpy consistently
+    // at faces. Doing the same here improves agreement vs OpenFOAM reference cases.
+    let rho_e = |side: FaceSide| {
+        let gm1 = S::Max(Box::new(S::constant("eos_gm1")), Box::new(S::lit(1e-12)));
+        let u = u_vec(side);
+        let u2 = S::Dot(Box::new(u.clone()), Box::new(u));
+        let ke = S::Mul(Box::new(S::Mul(Box::new(S::lit(0.5)), Box::new(rho(side)))), Box::new(u2));
+        S::Add(Box::new(S::Div(Box::new(p(side)), Box::new(gm1))), Box::new(ke))
+    };
+
+    let rho_u_x = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ex.clone()));
+    let rho_u_y = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ey.clone()));
     let u_n = |side: FaceSide| S::Dot(Box::new(u_vec(side)), Box::new(V::normal()));
 
     let c2 = |side: FaceSide| {

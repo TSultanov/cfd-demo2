@@ -6,6 +6,7 @@ pub enum BoundaryType {
     Outlet,
     Wall,
     SlipWall,
+    MovingWall,
 }
 
 #[derive(Default, Clone)]

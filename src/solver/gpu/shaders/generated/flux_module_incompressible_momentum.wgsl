@@ -117,8 +117,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (is_boundary) {
         c_neigh_vec = face_center_vec;
     }
-    let d_own = distance(c_owner_vec, face_center_vec);
-    let d_neigh = distance(c_neigh_vec, face_center_vec);
+    let d_own = abs(dot(face_center_vec - c_owner_vec, normal_vec));
+    let d_neigh = abs(dot(c_neigh_vec - face_center_vec, normal_vec));
     let total_dist = d_own + d_neigh;
     var lambda: f32 = 0.5;
     if (total_dist > 0.000001) {
@@ -128,14 +128,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let d_vec: vec2<f32> = c_neigh_vec - c_owner_vec;
     let dist_proj = abs(dot(d_vec, normal_vec));
     let dist = max(dist_proj, 0.000001);
-    let s_own_U_x = state[owner * 8u + 0u];
-    let s_own_U_y = state[owner * 8u + 1u];
+    let s_own_U_x = select(bc_neighbor_scalar(state[owner * 8u + 0u], state[owner * 8u + 0u], bc_kind[idx * 3u + 0u], bc_value[idx * 3u + 0u], d_own, is_boundary), state[owner * 8u + 0u] - (state[owner * 8u + 0u] * normal_vec.x + state[owner * 8u + 1u] * normal_vec.y) * normal_vec.x, is_boundary && boundary_type == 4u);
+    let s_own_U_y = select(bc_neighbor_scalar(state[owner * 8u + 1u], state[owner * 8u + 1u], bc_kind[idx * 3u + 1u], bc_value[idx * 3u + 1u], d_own, is_boundary), state[owner * 8u + 1u] - (state[owner * 8u + 0u] * normal_vec.x + state[owner * 8u + 1u] * normal_vec.y) * normal_vec.y, is_boundary && boundary_type == 4u);
     let s_own_d_p = state[owner * 8u + 3u];
     let s_own_grad_p_x = state[owner * 8u + 4u];
     let s_own_grad_p_y = state[owner * 8u + 5u];
-    let s_own_p = state[owner * 8u + 2u];
-    let s_neigh_U_x = select(bc_neighbor_scalar(state[neigh_idx * 8u + 0u], state[owner * 8u + 0u], bc_kind[idx * 3u + 0u], bc_value[idx * 3u + 0u], d_own, is_boundary), state[owner * 8u + 0u] - 2.0 * (state[owner * 8u + 0u] * normal_vec.x + state[owner * 8u + 1u] * normal_vec.y) * normal_vec.x, is_boundary && boundary_type == 4u);
-    let s_neigh_U_y = select(bc_neighbor_scalar(state[neigh_idx * 8u + 1u], state[owner * 8u + 1u], bc_kind[idx * 3u + 1u], bc_value[idx * 3u + 1u], d_own, is_boundary), state[owner * 8u + 1u] - 2.0 * (state[owner * 8u + 0u] * normal_vec.x + state[owner * 8u + 1u] * normal_vec.y) * normal_vec.y, is_boundary && boundary_type == 4u);
+    let s_own_p = bc_neighbor_scalar(state[owner * 8u + 2u], state[owner * 8u + 2u], bc_kind[idx * 3u + 2u], bc_value[idx * 3u + 2u], d_own, is_boundary);
+    let s_neigh_U_x = select(bc_neighbor_scalar(state[neigh_idx * 8u + 0u], state[owner * 8u + 0u], bc_kind[idx * 3u + 0u], bc_value[idx * 3u + 0u], d_own, is_boundary), state[owner * 8u + 0u] - (state[owner * 8u + 0u] * normal_vec.x + state[owner * 8u + 1u] * normal_vec.y) * normal_vec.x, is_boundary && boundary_type == 4u);
+    let s_neigh_U_y = select(bc_neighbor_scalar(state[neigh_idx * 8u + 1u], state[owner * 8u + 1u], bc_kind[idx * 3u + 1u], bc_value[idx * 3u + 1u], d_own, is_boundary), state[owner * 8u + 1u] - (state[owner * 8u + 0u] * normal_vec.x + state[owner * 8u + 1u] * normal_vec.y) * normal_vec.y, is_boundary && boundary_type == 4u);
     let s_neigh_d_p = select(state[neigh_idx * 8u + 3u], state[owner * 8u + 3u], is_boundary);
     let s_neigh_grad_p_x = select(state[neigh_idx * 8u + 4u], state[owner * 8u + 4u], is_boundary);
     let s_neigh_grad_p_y = select(state[neigh_idx * 8u + 5u], state[owner * 8u + 5u], is_boundary);

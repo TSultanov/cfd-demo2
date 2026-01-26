@@ -182,13 +182,29 @@ pub fn compressible_model() -> ModelSpec {
 pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> ModelSpec {
     let fields = CompressibleFields::new();
     let system = build_compressible_system(&fields);
+    // Flux module reconstruction uses gradient fields in the state layout when enabled.
+    // These are computed by the optional `flux_module_gradients` stage (Gauss gradients).
+    let grad_rho = vol_vector("grad_rho", si::DENSITY / si::LENGTH);
+    let grad_rho_u_x = vol_vector("grad_rho_u_x", si::MOMENTUM_DENSITY / si::LENGTH);
+    let grad_rho_u_y = vol_vector("grad_rho_u_y", si::MOMENTUM_DENSITY / si::LENGTH);
+    let grad_rho_e = vol_vector("grad_rho_e", si::ENERGY_DENSITY / si::LENGTH);
+    let grad_t = vol_vector("grad_T", si::DIMENSIONLESS / si::LENGTH);
+    let grad_u_x = vol_vector("grad_u_x", si::VELOCITY / si::LENGTH);
+    let grad_u_y = vol_vector("grad_u_y", si::VELOCITY / si::LENGTH);
     let layout = StateLayout::new(vec![
         fields.rho,
         fields.rho_u,
+        grad_rho_u_x,
+        grad_rho_u_y,
         fields.rho_e,
         fields.p,
         fields.t,
         fields.u,
+        grad_rho,
+        grad_rho_e,
+        grad_t,
+        grad_u_x,
+        grad_u_y,
     ]);
 
     let mut boundaries = BoundarySpec::default();
@@ -214,6 +230,11 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
             )
             .set_uniform(
                 GpuBoundaryType::SlipWall,
+                1,
+                BoundaryCondition::zero_gradient(si::DENSITY / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::MovingWall,
                 1,
                 BoundaryCondition::zero_gradient(si::DENSITY / si::LENGTH),
             ),
@@ -242,6 +263,11 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
                 GpuBoundaryType::SlipWall,
                 2,
                 BoundaryCondition::zero_gradient(si::MOMENTUM_DENSITY / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::MovingWall,
+                2,
+                BoundaryCondition::dirichlet(0.0, si::MOMENTUM_DENSITY),
             ),
     );
     boundaries.set_field(
@@ -269,6 +295,11 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
                 GpuBoundaryType::SlipWall,
                 2,
                 BoundaryCondition::zero_gradient(si::INV_TIME),
+            )
+            .set_uniform(
+                GpuBoundaryType::MovingWall,
+                2,
+                BoundaryCondition::dirichlet(0.0, si::VELOCITY),
             ),
     );
     boundaries.set_field(
@@ -293,6 +324,11 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
             )
             .set_uniform(
                 GpuBoundaryType::SlipWall,
+                1,
+                BoundaryCondition::zero_gradient(si::ENERGY_DENSITY / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::MovingWall,
                 1,
                 BoundaryCondition::zero_gradient(si::ENERGY_DENSITY / si::LENGTH),
             ),
@@ -321,6 +357,11 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
                 GpuBoundaryType::SlipWall,
                 1,
                 BoundaryCondition::zero_gradient(si::PRESSURE / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::MovingWall,
+                1,
+                BoundaryCondition::zero_gradient(si::PRESSURE / si::LENGTH),
             ),
     );
     boundaries.set_field(
@@ -346,6 +387,11 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
                 GpuBoundaryType::SlipWall,
                 1,
                 BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
+            )
+            .set_uniform(
+                GpuBoundaryType::MovingWall,
+                1,
+                BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
             ),
     );
 
@@ -360,7 +406,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
         },
     );
     let flux = crate::solver::model::flux_module::FluxModuleSpec::Scheme {
-        gradients: None,
+        gradients: Some(crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout),
         scheme: crate::solver::model::flux_module::FluxSchemeSpec::EulerCentralUpwind,
     };
 

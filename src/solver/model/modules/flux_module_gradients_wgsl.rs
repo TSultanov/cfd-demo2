@@ -70,10 +70,13 @@ mod tests {
 #[derive(Debug, Clone)]
 struct GradientSpec {
     component: String,
+    base_component: u32,
     base_offset: u32,
     grad_x_offset: u32,
     grad_y_offset: u32,
     bc_unknown_offset: Option<u32>,
+    slip_vec2_x_offset: Option<u32>,
+    slip_vec2_y_offset: Option<u32>,
 }
 
 fn collect_gradients(layout: &StateLayout) -> Result<Vec<(String, String)>, String> {
@@ -138,12 +141,27 @@ fn build_specs(
             .ok_or_else(|| format!("state layout missing vector field '{grad}[1]'"))?;
         let bc_unknown_offset = flux_layout.offset_for(component).map(|v| v as u32);
 
+        // SlipWall uses a vector constraint u_patch = u_owner - (u_owner·n)n, which cannot be
+        // represented by scalar per-component BC tables. For velocity-like vec2 fields, keep the
+        // offsets of the full vec2 so the gradients kernel can apply the projection at boundary
+        // faces (matching OpenFOAM's patch-field handling in `fvc::grad`).
+        let (slip_vec2_x_offset, slip_vec2_y_offset) = match base_field.as_str() {
+            "u" | "U" | "rho_u" | "rhoU" => (
+                layout.component_offset(&base_field, 0),
+                layout.component_offset(&base_field, 1),
+            ),
+            _ => (None, None),
+        };
+
         specs.push(GradientSpec {
             component: component.clone(),
+            base_component,
             base_offset,
             grad_x_offset,
             grad_y_offset,
             bc_unknown_offset,
+            slip_vec2_x_offset,
+            slip_vec2_y_offset,
         });
     }
     Ok(specs)
@@ -489,13 +507,23 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, specs: &[GradientSp
             None,
         ));
 
+        // Match OpenFOAM's linear interpolation weights (basicFvGeometryScheme) by using
+        // projected distances along the face normal (area cancels out).
         body.push(dsl::let_expr(
             "d_own",
-            dsl::distance(Expr::ident("cell_center_vec"), Expr::ident("face_center_vec")),
+            dsl::abs(
+                typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec"))
+                    .sub(&typed::VecExpr::<2>::from_expr(Expr::ident("cell_center_vec")))
+                    .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
+            ),
         ));
         body.push(dsl::let_expr(
             "d_neigh",
-            dsl::distance(Expr::ident("other_center_vec"), Expr::ident("face_center_vec")),
+            dsl::abs(
+                typed::VecExpr::<2>::from_expr(Expr::ident("other_center_vec"))
+                    .sub(&typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec")))
+                    .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
+            ),
         ));
         body.push(dsl::let_expr(
             "total_dist",
@@ -519,7 +547,7 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, specs: &[GradientSp
             let cell_val = Expr::ident("state").index(Expr::ident("idx") * stride + spec.base_offset);
             let interior_other = Expr::ident("state").index(Expr::ident("other_idx") * stride + spec.base_offset);
 
-            let other_val = if let Some(off) = spec.bc_unknown_offset {
+            let mut other_val = if let Some(off) = spec.bc_unknown_offset {
                 let bc_table_idx = Expr::ident("face_idx") * Expr::from(unknown_stride) + Expr::from(off);
                 let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
                 let value = dsl::array_access("bc_value", bc_table_idx);
@@ -532,6 +560,31 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, specs: &[GradientSp
             } else {
                 dsl::select(interior_other, cell_val.clone(), Expr::ident("is_boundary"))
             };
+
+            // SlipWall projection for velocity-like vec2 fields: enforce zero normal component at
+            // boundary faces by overriding the boundary face value.
+            if spec.base_component <= 1 {
+                if let (Some(vec_x_off), Some(vec_y_off)) =
+                    (spec.slip_vec2_x_offset, spec.slip_vec2_y_offset)
+                {
+                    let slip_mask = Expr::ident("is_boundary")
+                        & Expr::ident("boundary_type").eq(Expr::from(4u32));
+
+                    let vx = Expr::ident("state").index(Expr::ident("idx") * stride + vec_x_off);
+                    let vy = Expr::ident("state").index(Expr::ident("idx") * stride + vec_y_off);
+                    let nx = Expr::ident("normal_vec").field("x");
+                    let ny = Expr::ident("normal_vec").field("y");
+                    let un = vx.clone() * nx.clone() + vy.clone() * ny.clone();
+
+                    let projected = match spec.base_component {
+                        0 => vx - un.clone() * nx,
+                        1 => vy - un * ny,
+                        _ => unreachable!("base_component <= 1 guarded above"),
+                    };
+
+                    other_val = dsl::select(other_val, projected, slip_mask);
+                }
+            }
 
             let phi_face = cell_val * Expr::ident("lambda") + other_val * Expr::ident("lambda_other");
 

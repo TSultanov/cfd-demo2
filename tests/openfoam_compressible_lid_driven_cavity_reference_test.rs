@@ -2,10 +2,10 @@
 mod common;
 
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
+use cfd2::solver::gpu::enums::GpuBoundaryType;
 use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
-    SolverCompressibleInletExt,
     SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::scheme::Scheme;
@@ -30,9 +30,8 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
         BoundaryType::Wall,
         BoundaryType::Wall,
         BoundaryType::Wall,
-        // Treat the moving lid as an `Inlet` so we can apply a Dirichlet tangential velocity
-        // (with zero normal component) via the boundary table mechanism.
-        BoundaryType::Inlet,
+        // Moving lid with Dirichlet velocity (tangential) while keeping scalars zeroGradient.
+        BoundaryType::MovingWall,
     );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
@@ -45,7 +44,7 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
         SolverConfig {
             // OpenFOAM uses vanLeer reconstruction for rho/U/T with the Kurganov flux.
             advection_scheme: Scheme::SecondOrderUpwindVanLeer,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
@@ -78,7 +77,14 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     solver.set_outer_iters(20).unwrap();
     solver.set_uniform_state(rho0, [0.0, 0.0], p0);
     solver
-        .set_compressible_inlet_isothermal_x(rho0, u_lid, &eos)
+        .set_boundary_vec2(GpuBoundaryType::MovingWall, "u", [u_lid, 0.0])
+        .unwrap();
+    solver
+        .set_boundary_vec2(
+            GpuBoundaryType::MovingWall,
+            "rho_u",
+            [rho0 * u_lid, 0.0],
+        )
         .unwrap();
     solver.initialize_history();
 

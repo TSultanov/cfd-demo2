@@ -17,7 +17,7 @@ fluxScheme          Kurganov;
 
 ddtSchemes
 {
-    default         Euler;
+    default         backward;
 }
 
 gradSchemes
@@ -49,4 +49,3 @@ snGradSchemes
 {
     default         corrected;
 }
-

@@ -696,14 +696,23 @@ fn face_stmts(
         None,
     ));
 
-    body.push(dsl::let_expr(
-        "d_own",
-        dsl::distance("c_owner_vec", "face_center_vec"),
-    ));
-    body.push(dsl::let_expr(
-        "d_neigh",
-        dsl::distance("c_neigh_vec", "face_center_vec"),
-    ));
+    // Match OpenFOAM's `surfaceInterpolation::weights()` (basicFvGeometryScheme):
+    //   w = mag(Sf · (Cf - Cown)) / (mag(Sf · (Cf - Cown)) + mag(Sf · (Cnei - Cf)))
+    //
+    // Since `normal_vec` is unit-length and `Sf = area * normal_vec`, the area cancels.
+    let d_own = dsl::abs(
+        typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec"))
+            .sub(&typed::VecExpr::<2>::from_expr(Expr::ident("c_owner_vec")))
+            .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
+    );
+    body.push(dsl::let_expr("d_own", d_own));
+
+    let d_neigh = dsl::abs(
+        typed::VecExpr::<2>::from_expr(Expr::ident("c_neigh_vec"))
+            .sub(&typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec")))
+            .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
+    );
+    body.push(dsl::let_expr("d_neigh", d_neigh));
     body.push(dsl::let_expr(
         "total_dist",
         Expr::ident("d_own") + Expr::ident("d_neigh"),
@@ -881,14 +890,20 @@ fn face_stmts_runtime_scheme(
         None,
     ));
 
-    body.push(dsl::let_expr(
-        "d_own",
-        dsl::distance("c_owner_vec", "face_center_vec"),
-    ));
-    body.push(dsl::let_expr(
-        "d_neigh",
-        dsl::distance("c_neigh_vec", "face_center_vec"),
-    ));
+    // Match OpenFOAM's `surfaceInterpolation::weights()` (basicFvGeometryScheme).
+    let d_own = dsl::abs(
+        typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec"))
+            .sub(&typed::VecExpr::<2>::from_expr(Expr::ident("c_owner_vec")))
+            .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
+    );
+    body.push(dsl::let_expr("d_own", d_own));
+
+    let d_neigh = dsl::abs(
+        typed::VecExpr::<2>::from_expr(Expr::ident("c_neigh_vec"))
+            .sub(&typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec")))
+            .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
+    );
+    body.push(dsl::let_expr("d_neigh", d_neigh));
     body.push(dsl::let_expr(
         "total_dist",
         Expr::ident("d_own") + Expr::ident("d_neigh"),
@@ -1555,19 +1570,10 @@ fn state_component_at_side(
     component: u32,
     flux_layout: &FluxLayout,
 ) -> Expr {
-    if side == FaceSide::Owner {
-        return state_component_at(layout, buffer, Expr::ident("owner"), field, component);
-    }
-
-    // Interior neighbor value.
-    let interior = state_component_at(layout, buffer, Expr::ident("neigh_idx"), field, component);
-
-    // Boundary neighbor uses BC tables (if the field is an unknown); otherwise fall back to owner.
-    //
-    // Important: for *interior* faces, we always want the true neighbor cell value, even for
-    // auxiliary state fields (e.g. `d_p`, `grad_p`) that are not part of the solved-for unknown
-    // set. Only boundary faces need special handling.
     let owner = state_component_at(layout, buffer, Expr::ident("owner"), field, component);
+
+    // Interior neighbor value (for boundary faces, `neigh_idx` is set to `owner`).
+    let interior = state_component_at(layout, buffer, Expr::ident("neigh_idx"), field, component);
 
     let Some(state_field) = layout.field(field) else {
         panic!("missing field '{field}' in state layout");
@@ -1603,18 +1609,44 @@ fn state_component_at_side(
             Expr::ident("idx") * Expr::from(flux_layout.stride) + Expr::from(unknown_offset);
         let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
         let value = dsl::array_access("bc_value", bc_table_idx);
-        let base = Expr::call_named(
-            "bc_neighbor_scalar",
-            vec![
-                interior,
-                owner,
-                kind,
-                value,
-                Expr::ident("d_own"),
-                Expr::ident("is_boundary"),
-            ],
-        );
+
+        let base = if side == FaceSide::Owner {
+            // OpenFOAM's `fvc::interpolate(...)` sets non-coupled patch face values to the patch
+            // field value directly, independent of the upwind direction. Mirror this by applying
+            // the boundary condition to the owner-side evaluation as well, so that boundary faces
+            // see identical left/right states (and thus no artificial dissipation across the
+            // boundary).
+            Expr::call_named(
+                "bc_neighbor_scalar",
+                vec![
+                    owner.clone(),
+                    owner.clone(),
+                    kind,
+                    value,
+                    Expr::ident("d_own"),
+                    Expr::ident("is_boundary"),
+                ],
+            )
+        } else {
+            Expr::call_named(
+                "bc_neighbor_scalar",
+                vec![
+                    interior,
+                    owner.clone(),
+                    kind,
+                    value,
+                    Expr::ident("d_own"),
+                    Expr::ident("is_boundary"),
+                ],
+            )
+        };
+
         return apply_slipwall_velocity_reflection(layout, buffer, field, component, base);
+    }
+
+    if side == FaceSide::Owner {
+        // No BC entry (auxiliary state): boundary faces use the owner cell value on both sides.
+        return owner;
     }
 
     let base = dsl::select(interior, owner, Expr::ident("is_boundary"));
@@ -1629,11 +1661,12 @@ fn apply_slipwall_velocity_reflection(
     base: Expr,
 ) -> Expr {
     // SlipWall boundary conditions are not representable as per-component Dirichlet/Neumann.
-    // Emulate OpenFOAM-style "slip" by reflecting the normal velocity component at boundary faces:
-    //   u_ghost = u_owner - 2 (u_owner · n) n
+    // Emulate OpenFOAM `type slip` (basicSymmetry) by projecting out the normal component at
+    // boundary faces:
+    //   u_patch = u_owner - (u_owner · n) n
     //
     // This ensures no-penetration (zero normal mass flux) while preserving tangential velocity.
-    let is_velocity_field = matches!(field, "u" | "U");
+    let is_velocity_field = matches!(field, "u" | "U" | "rho_u" | "rhoU");
     if !is_velocity_field || component > 1 {
         return base;
     }
@@ -1643,30 +1676,23 @@ fn apply_slipwall_velocity_reflection(
 
     // Slip wall: reflect only the normal component of the interior velocity.
     //
-    // For compressible convective fluxes, apply the same no-penetration reflection for solid
-    // walls as well (OpenFOAM enforces zero normal flux on no-slip walls via the Riemann
-    // boundary treatment; viscous terms still enforce tangential no-slip).
-    let is_slipwall = if field == "u" {
-        let is_solid = boundary_type.clone().eq(Expr::from(3u32));
-        let is_slip = boundary_type.clone().eq(Expr::from(4u32));
-        is_boundary.clone() & (is_solid | is_slip)
-    } else {
-        is_boundary.clone() & boundary_type.clone().eq(Expr::from(4u32))
-    };
+    // For no-slip walls, use the prescribed boundary values (typically Dirichlet u=0) rather
+    // than applying a slip-style reflection. This matches OpenFOAM's fixedValue wall treatment
+    // for `U` in the reference cases.
+    let is_slipwall = is_boundary.clone() & boundary_type.clone().eq(Expr::from(4u32));
     let ux = state_component_at(layout, buffer, Expr::ident("owner"), field, 0);
     let uy = state_component_at(layout, buffer, Expr::ident("owner"), field, 1);
     let nx = Expr::ident("normal_vec").field("x");
     let ny = Expr::ident("normal_vec").field("y");
     let un = ux.clone() * nx.clone() + uy.clone() * ny.clone();
-    let two_un = Expr::from(2.0) * un;
 
-    let slip_reflected = match component {
-        0 => ux.clone() - two_un.clone() * nx.clone(),
-        1 => uy.clone() - two_un.clone() * ny.clone(),
+    let slip_projected = match component {
+        0 => ux.clone() - un.clone() * nx.clone(),
+        1 => uy.clone() - un.clone() * ny.clone(),
         _ => return base,
     };
 
-    dsl::select(base, slip_reflected, is_slipwall)
+    dsl::select(base, slip_projected, is_slipwall)
 }
 
 fn lower_scalar<'a>(expr: &'a FaceScalarExpr, ctx: &LowerCtx<'a>) -> Expr {

@@ -564,6 +564,7 @@ impl TraceMesh {
                 Some(BoundaryType::Outlet) => 1,
                 Some(BoundaryType::Wall) => 2,
                 Some(BoundaryType::SlipWall) => 3,
+                Some(BoundaryType::MovingWall) => 4,
             })
             .collect();
 
@@ -611,6 +612,7 @@ impl TraceMesh {
                 1 => Ok(Some(BoundaryType::Outlet)),
                 2 => Ok(Some(BoundaryType::Wall)),
                 3 => Ok(Some(BoundaryType::SlipWall)),
+                4 => Ok(Some(BoundaryType::MovingWall)),
                 v => Err(format!("invalid face_boundary value {v}")),
             })
             .collect::<Result<_, _>>()?;

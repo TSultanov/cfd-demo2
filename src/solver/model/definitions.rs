@@ -344,6 +344,7 @@ impl BoundarySpec {
             GpuBoundaryType::Outlet,
             GpuBoundaryType::Wall,
             GpuBoundaryType::SlipWall,
+            GpuBoundaryType::MovingWall,
         ];
 
         let mut kind = vec![GpuBcKind::ZeroGradient as u32; boundary_types.len() * coupled_stride];
@@ -633,8 +634,8 @@ mod tests {
             .boundaries
             .to_gpu_tables(&model.system)
             .expect("gpu tables");
-        assert_eq!(kind.len(), 5);
-        assert_eq!(value.len(), 5);
+        assert_eq!(kind.len(), 6);
+        assert_eq!(value.len(), 6);
         assert_eq!(
             kind[GpuBoundaryType::Inlet as usize],
             GpuBcKind::Dirichlet as u32
@@ -649,6 +650,10 @@ mod tests {
         );
         assert_eq!(
             kind[GpuBoundaryType::SlipWall as usize],
+            GpuBcKind::ZeroGradient as u32
+        );
+        assert_eq!(
+            kind[GpuBoundaryType::MovingWall as usize],
             GpuBcKind::ZeroGradient as u32
         );
     }

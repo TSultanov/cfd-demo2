@@ -524,16 +524,92 @@ fn euler_central_upwind(
     let n_y = S::Dot(Box::new(V::normal()), Box::new(ey.clone()));
 
     let flux_mass = |side: FaceSide| S::Mul(Box::new(rho(side)), Box::new(u_n(side)));
+
+    // OpenFOAM rhoCentralFoam viscous split:
+    //
+    //   - fvm::laplacian(muEff, U)
+    //   - fvc::div(tauMC)
+    //
+    // with:
+    //   tauMC = muEff * dev2(T(grad(U)))
+    //
+    // Important: OpenFOAM's Gauss div-scheme uses `dotInterpolate(Sf, tauMC)`, i.e. `Sf & tauMC`,
+    // which corresponds to a traction based on `tauMC^T`. Since `tauMC` is already constructed
+    // with the transpose gradient, the effective face traction uses `dev2(grad(U))` (not
+    // `dev2(T(grad(U)))`).
+    //
+    // Add this explicit correction to the momentum flux to better match OpenFOAM viscous cases.
+    let visc_mu = S::constant("viscosity");
+    // Note: neighbor-side `grad_*` vectors are forced to zero on boundary faces to preserve
+    // boundary semantics for reconstruction. Flip the lerp order so boundary faces default
+    // to the owner-cell gradient (while interior faces remain unchanged on our symmetric meshes).
+    let grad_u_x_face = V::Lerp(
+        Box::new(V::state_vec2(FaceSide::Neighbor, "grad_u_x")),
+        Box::new(V::state_vec2(FaceSide::Owner, "grad_u_x")),
+    );
+    let grad_u_y_face = V::Lerp(
+        Box::new(V::state_vec2(FaceSide::Neighbor, "grad_u_y")),
+        Box::new(V::state_vec2(FaceSide::Owner, "grad_u_y")),
+    );
+
+    let dux_dx = S::Dot(Box::new(grad_u_x_face.clone()), Box::new(ex.clone()));
+    let dux_dy = S::Dot(Box::new(grad_u_x_face), Box::new(ey.clone()));
+    let duy_dx = S::Dot(Box::new(grad_u_y_face.clone()), Box::new(ex.clone()));
+    let duy_dy = S::Dot(Box::new(grad_u_y_face), Box::new(ey.clone()));
+    let div_u = S::Add(Box::new(dux_dx.clone()), Box::new(duy_dy.clone()));
+    let two_thirds = S::lit(2.0 / 3.0);
+
+    // OpenFOAM details:
+    // - `fvc::grad(U)` returns a tensor `G` with indices `G_ij = ∂u_j/∂x_i` (direction-first).
+    // - `tauMC = muEff*dev2(T(G))` therefore corresponds to `tauMC_ij = ∂u_i/∂x_j - 2/3 δ_ij div(u)`
+    //   (the transpose gradient, with the 2/3 deviatoric correction).
+    // - `fvc::div(tauMC)` uses a Gauss div-scheme based on `Sf & tauMC`, which contracts `Sf_i*tauMC_ij`.
+    //   This produces the `∇(div u)` contribution required for the full Newtonian viscous stress.
+    //
+    // Here we form the corresponding face flux contribution per unit area: (tauMC · n).
+    let tau_mc_dot_n_x = S::Mul(
+        Box::new(visc_mu.clone()),
+        Box::new(S::Add(
+            Box::new(S::Mul(
+                Box::new(S::Sub(
+                    Box::new(dux_dx),
+                    Box::new(S::Mul(Box::new(two_thirds.clone()), Box::new(div_u.clone()))),
+                )),
+                Box::new(n_x.clone()),
+            )),
+            Box::new(S::Mul(Box::new(duy_dx.clone()), Box::new(n_y.clone()))),
+        )),
+    );
+    let tau_mc_dot_n_y = S::Mul(
+        Box::new(visc_mu),
+        Box::new(S::Add(
+            Box::new(S::Mul(Box::new(dux_dy), Box::new(n_x.clone()))),
+            Box::new(S::Mul(
+                Box::new(S::Sub(
+                    Box::new(duy_dy),
+                    Box::new(S::Mul(Box::new(two_thirds), Box::new(div_u))),
+                )),
+                Box::new(n_y.clone()),
+            )),
+        )),
+    );
+
     let flux_mom_x = |side: FaceSide| {
-        S::Add(
-            Box::new(S::Mul(Box::new(rho_u_x(side)), Box::new(u_n(side)))),
-            Box::new(S::Mul(Box::new(p(side)), Box::new(n_x.clone()))),
+        S::Sub(
+            Box::new(S::Add(
+                Box::new(S::Mul(Box::new(rho_u_x(side)), Box::new(u_n(side)))),
+                Box::new(S::Mul(Box::new(p(side)), Box::new(n_x.clone()))),
+            )),
+            Box::new(tau_mc_dot_n_x.clone()),
         )
     };
     let flux_mom_y = |side: FaceSide| {
-        S::Add(
-            Box::new(S::Mul(Box::new(rho_u_y(side)), Box::new(u_n(side)))),
-            Box::new(S::Mul(Box::new(p(side)), Box::new(n_y.clone()))),
+        S::Sub(
+            Box::new(S::Add(
+                Box::new(S::Mul(Box::new(rho_u_y(side)), Box::new(u_n(side)))),
+                Box::new(S::Mul(Box::new(p(side)), Box::new(n_y.clone()))),
+            )),
+            Box::new(tau_mc_dot_n_y.clone()),
         )
     };
     let flux_energy = |side: FaceSide| {

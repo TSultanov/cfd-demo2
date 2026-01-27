@@ -112,8 +112,12 @@ fn diag_incompressible_channel_flux_balance() {
 
         let (u_neigh, p_neigh, grad_p_neigh, d_p_neigh) = match b.unwrap() {
             BoundaryType::Inlet => (u_inlet, p[owner], (0.0, 0.0), d_p[owner]),
-            BoundaryType::Outlet => (u[owner], 0.0, (0.0, 0.0), d_p[owner]),
-            BoundaryType::Wall | BoundaryType::SlipWall => ((0.0, 0.0), p[owner], (0.0, 0.0), d_p[owner]),
+            // Match `flux_module_wgsl` special-casing: neighbor-side `grad_p` is *not* forced to
+            // zero on outlet faces so the HbyA predictor sees the interior pressure gradient.
+            BoundaryType::Outlet => (u[owner], 0.0, grad_p[owner], d_p[owner]),
+            BoundaryType::Wall | BoundaryType::SlipWall | BoundaryType::MovingWall => {
+                ((0.0, 0.0), p[owner], (0.0, 0.0), d_p[owner])
+            }
         };
 
         let u_owner = u[owner];
@@ -173,12 +177,12 @@ fn diag_incompressible_channel_flux_balance() {
         match b.unwrap() {
             BoundaryType::Inlet => m_in += -phi_corr,
             BoundaryType::Outlet => m_out += phi_corr,
-            BoundaryType::Wall | BoundaryType::SlipWall => {}
+            BoundaryType::Wall | BoundaryType::SlipWall | BoundaryType::MovingWall => {}
         }
         match b.unwrap() {
             BoundaryType::Inlet => m_in_u += -flux_u,
             BoundaryType::Outlet => m_out_u += flux_u,
-            BoundaryType::Wall | BoundaryType::SlipWall => {}
+            BoundaryType::Wall | BoundaryType::SlipWall | BoundaryType::MovingWall => {}
         }
         match b.unwrap() {
             BoundaryType::Outlet => {

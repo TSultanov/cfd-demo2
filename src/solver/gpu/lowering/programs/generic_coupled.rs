@@ -34,6 +34,7 @@ pub(crate) struct GenericCoupledProgramResources {
     runtime: GpuCsrRuntime,
     fields: UnifiedFieldResources,
     time_integration: TimeIntegrationModule,
+    requested_time_scheme: crate::solver::gpu::enums::TimeScheme,
     kernels: GeneratedKernelsModule,
     init_prepare_graph: ModuleGraph<GeneratedKernelsModule>,
     dp_init_enabled: bool,
@@ -528,10 +529,17 @@ impl GenericCoupledProgramResources {
             runtime.linear_port_space.buffer(runtime.linear_ports.x),
         )?;
 
+        let requested_time_scheme = match recipe.initial_constants.time_scheme {
+            0 => crate::solver::gpu::enums::TimeScheme::Euler,
+            1 => crate::solver::gpu::enums::TimeScheme::BDF2,
+            other => return Err(format!("unknown time_scheme id {other}")),
+        };
+
         Ok(Self {
             runtime,
             fields,
             time_integration: TimeIntegrationModule::new(),
+            requested_time_scheme,
             kernels,
             init_prepare_graph,
             dp_init_enabled,
@@ -1091,6 +1099,26 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
         monitor.reset_step();
     }
     r.fields.advance_step();
+
+    // OpenFOAM-style `backward` startup: the first step falls back to Euler because the
+    // `n-1` history is not yet meaningful. Once we have advanced at least one step, switch
+    // back to the requested scheme (BDF2).
+    //
+    // This keeps the scheme selection stable for steady runs and only affects `BDF2` at the
+    // very beginning of a simulation.
+    let requested = r.requested_time_scheme;
+    let effective = if requested == crate::solver::gpu::enums::TimeScheme::BDF2
+        && r.time_integration.step_count == 0
+    {
+        crate::solver::gpu::enums::TimeScheme::Euler
+    } else {
+        requested
+    };
+    {
+        let values = r.fields.constants.values_mut();
+        values.time_scheme = effective as u32;
+    }
+
     // Seed the writable `state` buffer with the previous state so kernels that
     // read from `state` (e.g. gradient/flux stages during implicit outer
     // iterations) start from a consistent iterate.
@@ -1115,6 +1143,10 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
 pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.time_scheme = r.requested_time_scheme as u32;
+    }
     r.time_integration
         .finalize_step(&mut r.fields.constants, &queue);
 }
@@ -1516,6 +1548,7 @@ pub(crate) fn param_time_scheme(
     };
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
+    r.requested_time_scheme = scheme;
     {
         let values = r.fields.constants.values_mut();
         values.time_scheme = scheme as u32;

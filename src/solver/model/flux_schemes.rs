@@ -1,6 +1,5 @@
 use crate::solver::ir::{
-    FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec,
-    LimiterSpec,
+    FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec, LimiterSpec,
 };
 use crate::solver::model::backend::ast::EquationSystem;
 use crate::solver::model::flux_module::FluxSchemeSpec;
@@ -103,7 +102,11 @@ mod tests {
                 return;
             };
 
-            fn is_max_of(expr: &S, mut a: impl FnMut(&S) -> bool, mut b: impl FnMut(&S) -> bool) -> bool {
+            fn is_max_of(
+                expr: &S,
+                mut a: impl FnMut(&S) -> bool,
+                mut b: impl FnMut(&S) -> bool,
+            ) -> bool {
                 match expr {
                     S::Max(x, y) => (a(x) && b(y)) || (a(y) && b(x)),
                     _ => false,
@@ -129,8 +132,9 @@ mod tests {
         // VanLeer MUSCL must include a guard that zeros the correction when diff*delta <= 0.
         let diff = S::state(FaceSide::Owner, "diff");
         let delta = S::state(FaceSide::Owner, "delta");
-        let delta_limited =
-            crate::solver::ir::reconstruction::vanleer_delta_limited::<FaceExprBuilder>(diff, delta);
+        let delta_limited = crate::solver::ir::reconstruction::vanleer_delta_limited::<
+            FaceExprBuilder,
+        >(diff, delta);
 
         assert!(
             contains_sign_guard_for_states(&delta_limited, "diff", "delta"),
@@ -174,36 +178,35 @@ fn euler_central_upwind(
         }
     };
 
-    let reconstruct_scalar =
-        |side: FaceSide, phi_cell: S, phi_other: S, grad: V| -> S {
-            match reconstruction {
-                Scheme::Upwind => phi_cell,
+    let reconstruct_scalar = |side: FaceSide, phi_cell: S, phi_other: S, grad: V| -> S {
+        match reconstruction {
+            Scheme::Upwind => phi_cell,
 
-                Scheme::SecondOrderUpwind
-                | Scheme::SecondOrderUpwindMinMod
-                | Scheme::SecondOrderUpwindVanLeer => limited_linear_face_value::<FaceExprBuilder>(
+            Scheme::SecondOrderUpwind
+            | Scheme::SecondOrderUpwindMinMod
+            | Scheme::SecondOrderUpwindVanLeer => limited_linear_face_value::<FaceExprBuilder>(
+                phi_cell,
+                phi_other,
+                grad,
+                V::cell_to_face(side),
+                limiter_for_scheme(reconstruction),
+            ),
+
+            Scheme::QUICK | Scheme::QUICKMinMod | Scheme::QUICKVanLeer => {
+                let d = V::Sub(
+                    Box::new(V::cell_to_face(side)),
+                    Box::new(V::cell_to_face(other_side(side))),
+                );
+                quick_face_value::<FaceExprBuilder>(
                     phi_cell,
                     phi_other,
                     grad,
-                    V::cell_to_face(side),
+                    d,
                     limiter_for_scheme(reconstruction),
-                ),
-
-                Scheme::QUICK | Scheme::QUICKMinMod | Scheme::QUICKVanLeer => {
-                    let d = V::Sub(
-                        Box::new(V::cell_to_face(side)),
-                        Box::new(V::cell_to_face(other_side(side))),
-                    );
-                    quick_face_value::<FaceExprBuilder>(
-                        phi_cell,
-                        phi_other,
-                        grad,
-                        d,
-                        limiter_for_scheme(reconstruction),
-                    )
-                }
+                )
             }
-        };
+        }
+    };
 
     let rho_raw = |side: FaceSide| S::state(side, rho_name);
     let t_raw = |side: FaceSide| S::state(side, "T");
@@ -255,7 +258,11 @@ fn euler_central_upwind(
     let reconstruct_vanleer_scalar =
         |side: FaceSide, phi_p: S, phi_n: S, grad_p: V, grad_n: V| -> S {
             let gradf = S::Sub(Box::new(phi_n.clone()), Box::new(phi_p.clone()));
-            let grad = if side == FaceSide::Owner { grad_p } else { grad_n };
+            let grad = if side == FaceSide::Owner {
+                grad_p
+            } else {
+                grad_n
+            };
             let gradcf = S::Dot(Box::new(d.clone()), Box::new(grad));
             let limiter = vanleer_limiter(gradf.clone(), gradcf);
             let delta = match side {
@@ -263,55 +270,55 @@ fn euler_central_upwind(
                 FaceSide::Neighbor => S::Mul(Box::new(limiter), Box::new(S::lambda())),
             };
             match side {
-                FaceSide::Owner => S::Add(Box::new(phi_p), Box::new(S::Mul(Box::new(delta), Box::new(gradf)))),
-                FaceSide::Neighbor => S::Sub(Box::new(phi_n), Box::new(S::Mul(Box::new(delta), Box::new(gradf)))),
+                FaceSide::Owner => S::Add(
+                    Box::new(phi_p),
+                    Box::new(S::Mul(Box::new(delta), Box::new(gradf))),
+                ),
+                FaceSide::Neighbor => S::Sub(
+                    Box::new(phi_n),
+                    Box::new(S::Mul(Box::new(delta), Box::new(gradf))),
+                ),
             }
         };
 
-    let reconstruct_vanleer_vec2 = |side: FaceSide,
-                                    phi_p: V,
-                                    phi_n: V,
-                                    grad_px: V,
-                                    grad_py: V,
-                                    grad_nx: V,
-                                    grad_ny: V|
-     -> V {
-        let gradf_v = V::Sub(Box::new(phi_n.clone()), Box::new(phi_p.clone()));
-        let gradf = S::Dot(Box::new(gradf_v.clone()), Box::new(gradf_v.clone()));
+    let reconstruct_vanleer_vec2 =
+        |side: FaceSide, phi_p: V, phi_n: V, grad_px: V, grad_py: V, grad_nx: V, grad_ny: V| -> V {
+            let gradf_v = V::Sub(Box::new(phi_n.clone()), Box::new(phi_p.clone()));
+            let gradf = S::Dot(Box::new(gradf_v.clone()), Box::new(gradf_v.clone()));
 
-        let (gx, gy) = if side == FaceSide::Owner {
-            (grad_px, grad_py)
-        } else {
-            (grad_nx, grad_ny)
-        };
+            let (gx, gy) = if side == FaceSide::Owner {
+                (grad_px, grad_py)
+            } else {
+                (grad_nx, grad_ny)
+            };
 
-        // Match OpenFOAM's `vanLeerV` (NVDVTVDV) form:
-        //   gradcf = gradfV & (d & gradcP)
-        //
-        // With our stored per-component gradients:
-        //   gx = grad(phi_x) = [dphi_x/dx, dphi_x/dy]
-        //   gy = grad(phi_y) = [dphi_y/dx, dphi_y/dy]
-        // and d = [dx, dy], we interpret this as directional derivatives per component:
-        //   gradcf_x = d · gx
-        //   gradcf_y = d · gy
-        //   gradcf   = gradfV · [gradcf_x, gradcf_y]
-        let gradcf_x = S::Dot(Box::new(d.clone()), Box::new(gx.clone()));
-        let gradcf_y = S::Dot(Box::new(d.clone()), Box::new(gy.clone()));
-        let gradcf = S::Dot(
-            Box::new(gradf_v.clone()),
-            Box::new(V::vec2(gradcf_x, gradcf_y)),
-        );
-        let limiter = vanleer_limiter(gradf, gradcf);
-        let delta = match side {
-            FaceSide::Owner => S::Mul(Box::new(limiter), Box::new(S::lambda_other())),
-            FaceSide::Neighbor => S::Mul(Box::new(limiter), Box::new(S::lambda())),
+            // Match OpenFOAM's `vanLeerV` (NVDVTVDV) form:
+            //   gradcf = gradfV & (d & gradcP)
+            //
+            // With our stored per-component gradients:
+            //   gx = grad(phi_x) = [dphi_x/dx, dphi_x/dy]
+            //   gy = grad(phi_y) = [dphi_y/dx, dphi_y/dy]
+            // and d = [dx, dy], we interpret this as directional derivatives per component:
+            //   gradcf_x = d · gx
+            //   gradcf_y = d · gy
+            //   gradcf   = gradfV · [gradcf_x, gradcf_y]
+            let gradcf_x = S::Dot(Box::new(d.clone()), Box::new(gx.clone()));
+            let gradcf_y = S::Dot(Box::new(d.clone()), Box::new(gy.clone()));
+            let gradcf = S::Dot(
+                Box::new(gradf_v.clone()),
+                Box::new(V::vec2(gradcf_x, gradcf_y)),
+            );
+            let limiter = vanleer_limiter(gradf, gradcf);
+            let delta = match side {
+                FaceSide::Owner => S::Mul(Box::new(limiter), Box::new(S::lambda_other())),
+                FaceSide::Neighbor => S::Mul(Box::new(limiter), Box::new(S::lambda())),
+            };
+            let corr = V::MulScalar(Box::new(gradf_v), Box::new(delta));
+            match side {
+                FaceSide::Owner => V::Add(Box::new(phi_p), Box::new(corr)),
+                FaceSide::Neighbor => V::Sub(Box::new(phi_n), Box::new(corr)),
+            }
         };
-        let corr = V::MulScalar(Box::new(gradf_v), Box::new(delta));
-        match side {
-            FaceSide::Owner => V::Add(Box::new(phi_p), Box::new(corr)),
-            FaceSide::Neighbor => V::Sub(Box::new(phi_n), Box::new(corr)),
-        }
-    };
 
     let rho = |side: FaceSide| match reconstruction {
         Scheme::SecondOrderUpwindVanLeer => reconstruct_vanleer_scalar(
@@ -386,10 +393,7 @@ fn euler_central_upwind(
     // recovery constraint, so this remains consistent.)
     let p = |side: FaceSide| {
         S::Mul(
-            Box::new(S::Mul(
-                Box::new(rho(side)),
-                Box::new(S::constant("eos_r")),
-            )),
+            Box::new(S::Mul(Box::new(rho(side)), Box::new(S::constant("eos_r")))),
             Box::new(t(side)),
         )
     };
@@ -403,8 +407,14 @@ fn euler_central_upwind(
         let gm1 = S::Max(Box::new(S::constant("eos_gm1")), Box::new(S::lit(1e-12)));
         let u = u_vec(side);
         let u2 = S::Dot(Box::new(u.clone()), Box::new(u));
-        let ke = S::Mul(Box::new(S::Mul(Box::new(S::lit(0.5)), Box::new(rho(side)))), Box::new(u2));
-        S::Add(Box::new(S::Div(Box::new(p(side)), Box::new(gm1))), Box::new(ke))
+        let ke = S::Mul(
+            Box::new(S::Mul(Box::new(S::lit(0.5)), Box::new(rho(side)))),
+            Box::new(u2),
+        );
+        S::Add(
+            Box::new(S::Div(Box::new(p(side)), Box::new(gm1))),
+            Box::new(ke),
+        )
     };
 
     let rho_u_x = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ex.clone()));
@@ -459,7 +469,10 @@ fn euler_central_upwind(
 
     let c_eff2_weiss_smith = |side: FaceSide| {
         let c2_side = c2(side);
-        let floor = S::Mul(Box::new(low_mach_theta_floor.clone()), Box::new(c2_side.clone()));
+        let floor = S::Mul(
+            Box::new(low_mach_theta_floor.clone()),
+            Box::new(c2_side.clone()),
+        );
         S::Min(
             Box::new(S::Max(Box::new(u_n2(side)), Box::new(floor))),
             Box::new(c2_side),
@@ -512,10 +525,7 @@ fn euler_central_upwind(
             Box::new(rho(side)),
             Box::new(S::Mul(
                 Box::new(coupling),
-                Box::new(S::Div(
-                    Box::new(p(side)),
-                    Box::new(c_couple2_safe(side)),
-                )),
+                Box::new(S::Div(Box::new(p(side)), Box::new(c_couple2_safe(side)))),
             )),
         )
     };
@@ -608,9 +618,9 @@ fn euler_central_upwind(
     );
 
     let dux_dx = S::Dot(Box::new(grad_u_x_face.clone()), Box::new(ex.clone()));
-    let dux_dy = S::Dot(Box::new(grad_u_x_face), Box::new(ey.clone()));
+    let dux_dy = S::Dot(Box::new(grad_u_x_face.clone()), Box::new(ey.clone()));
     let duy_dx = S::Dot(Box::new(grad_u_y_face.clone()), Box::new(ex.clone()));
-    let duy_dy = S::Dot(Box::new(grad_u_y_face), Box::new(ey.clone()));
+    let duy_dy = S::Dot(Box::new(grad_u_y_face.clone()), Box::new(ey.clone()));
     let div_u = S::Add(Box::new(dux_dx.clone()), Box::new(duy_dy.clone()));
     let two_thirds = S::lit(2.0 / 3.0);
 
@@ -622,23 +632,33 @@ fn euler_central_upwind(
     //   This produces the `∇(div u)` contribution required for the full Newtonian viscous stress.
     //
     // Here we form the corresponding face flux contribution per unit area: (tauMC · n).
+    // `fvc::div(tauMC)` uses a Gauss div-scheme based on `Sf & tauMC`.
+    // This corresponds to the flux contribution (per unit area): (n · tauMC), i.e.
+    //   (n_i * tauMC_{i j}) for momentum component j.
+    //
+    // With tauMC = muEff * dev2(T(grad(U))) and OpenFOAM's tensor conventions, this yields:
+    //   flux_x = muEff * [ (d u_x/dx - 2/3 divU) n_x + (d u_x/dy) n_y ]
+    //   flux_y = muEff * [ (d u_y/dx) n_x + (d u_y/dy - 2/3 divU) n_y ]
     let tau_mc_dot_n_x = S::Mul(
         Box::new(visc_mu.clone()),
         Box::new(S::Add(
             Box::new(S::Mul(
                 Box::new(S::Sub(
                     Box::new(dux_dx),
-                    Box::new(S::Mul(Box::new(two_thirds.clone()), Box::new(div_u.clone()))),
+                    Box::new(S::Mul(
+                        Box::new(two_thirds.clone()),
+                        Box::new(div_u.clone()),
+                    )),
                 )),
                 Box::new(n_x.clone()),
             )),
-            Box::new(S::Mul(Box::new(duy_dx.clone()), Box::new(n_y.clone()))),
+            Box::new(S::Mul(Box::new(dux_dy.clone()), Box::new(n_y.clone()))),
         )),
     );
     let tau_mc_dot_n_y = S::Mul(
         Box::new(visc_mu),
         Box::new(S::Add(
-            Box::new(S::Mul(Box::new(dux_dy), Box::new(n_x.clone()))),
+            Box::new(S::Mul(Box::new(duy_dx), Box::new(n_x.clone()))),
             Box::new(S::Mul(
                 Box::new(S::Sub(
                     Box::new(duy_dy),
@@ -667,10 +687,78 @@ fn euler_central_upwind(
             Box::new(tau_mc_dot_n_y.clone()),
         )
     };
+
+    // Wave speed bounds (OpenFOAM rhoCentralFoam Kurganov).
+    // These are used by the central-upwind numerical flux and also for the viscous-work
+    // energy correction (sigmaDotU).
+    let a_plus = S::Max(
+        Box::new(S::lit(0.0)),
+        Box::new(S::Max(
+            Box::new(S::Add(
+                Box::new(u_n(FaceSide::Owner)),
+                Box::new(c_eff(FaceSide::Owner)),
+            )),
+            Box::new(S::Add(
+                Box::new(u_n(FaceSide::Neighbor)),
+                Box::new(c_eff(FaceSide::Neighbor)),
+            )),
+        )),
+    );
+    let a_minus = S::Min(
+        Box::new(S::lit(0.0)),
+        Box::new(S::Min(
+            Box::new(S::Sub(
+                Box::new(u_n(FaceSide::Owner)),
+                Box::new(c_eff(FaceSide::Owner)),
+            )),
+            Box::new(S::Sub(
+                Box::new(u_n(FaceSide::Neighbor)),
+                Box::new(c_eff(FaceSide::Neighbor)),
+            )),
+        )),
+    );
+
+    // Viscous work term for total energy (OpenFOAM rhoCentralFoam):
+    //   solve(ddt(rhoE) + div(phiEp) - div(sigmaDotU))
+    // where:
+    //   sigmaDotU = ( muEff*magSf*snGrad(U) + dotInterpolate(Sf, tauMC) ) & (a_pos*U_pos + a_neg*U_neg)
+    //
+    // We add this as a *face-flux correction* (same value on both sides) so it is not
+    // upwinded/dissipated by the central-upwind blending.
+    let denom_speed = S::Max(
+        Box::new(S::Sub(Box::new(a_plus.clone()), Box::new(a_minus.clone()))),
+        Box::new(S::lit(1e-6)),
+    );
+    let a_pos = S::Div(Box::new(a_plus.clone()), Box::new(denom_speed));
+    let a_neg = S::Sub(Box::new(S::lit(1.0)), Box::new(a_pos.clone()));
+    let u_sigma = V::Add(
+        Box::new(V::MulScalar(
+            Box::new(u_vec(FaceSide::Owner)),
+            Box::new(a_pos.clone()),
+        )),
+        Box::new(V::MulScalar(
+            Box::new(u_vec(FaceSide::Neighbor)),
+            Box::new(a_neg.clone()),
+        )),
+    );
+
+    // Approximate `snGrad(U)` via (grad(U) · n) at the face (matches Gauss on orthogonal meshes).
+    let sn_grad_u_x_face = S::Dot(Box::new(grad_u_x_face.clone()), Box::new(V::normal()));
+    let sn_grad_u_y_face = S::Dot(Box::new(grad_u_y_face.clone()), Box::new(V::normal()));
+    let sn_grad_u_face = V::vec2(sn_grad_u_x_face, sn_grad_u_y_face);
+
+    let traction_tau = V::vec2(tau_mc_dot_n_x.clone(), tau_mc_dot_n_y.clone());
+    let traction_lapl = V::MulScalar(Box::new(sn_grad_u_face), Box::new(S::constant("viscosity")));
+    let traction = V::Add(Box::new(traction_lapl), Box::new(traction_tau));
+    let sigma_dot_u_per_area = S::Dot(Box::new(traction), Box::new(u_sigma));
+
     let flux_energy = |side: FaceSide| {
-        S::Mul(
-            Box::new(S::Add(Box::new(rho_e(side)), Box::new(p(side)))),
-            Box::new(u_n(side)),
+        S::Sub(
+            Box::new(S::Mul(
+                Box::new(S::Add(Box::new(rho_e(side)), Box::new(p(side)))),
+                Box::new(u_n(side)),
+            )),
+            Box::new(sigma_dot_u_per_area.clone()),
         )
     };
 
@@ -709,33 +797,6 @@ fn euler_central_upwind(
             flux_right.push(S::lit(0.0));
         }
     }
-
-    let a_plus = S::Max(
-        Box::new(S::lit(0.0)),
-        Box::new(S::Max(
-            Box::new(S::Add(
-                Box::new(u_n(FaceSide::Owner)),
-                Box::new(c_eff(FaceSide::Owner)),
-            )),
-            Box::new(S::Add(
-                Box::new(u_n(FaceSide::Neighbor)),
-                Box::new(c_eff(FaceSide::Neighbor)),
-            )),
-        )),
-    );
-    let a_minus = S::Min(
-        Box::new(S::lit(0.0)),
-        Box::new(S::Min(
-            Box::new(S::Sub(
-                Box::new(u_n(FaceSide::Owner)),
-                Box::new(c_eff(FaceSide::Owner)),
-            )),
-            Box::new(S::Sub(
-                Box::new(u_n(FaceSide::Neighbor)),
-                Box::new(c_eff(FaceSide::Neighbor)),
-            )),
-        )),
-    );
 
     Ok(FluxModuleKernelSpec::CentralUpwind {
         reconstruction,

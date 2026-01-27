@@ -24,15 +24,32 @@ fn coeff_named_expr(name: &str) -> Option<Expr> {
         "inv_dt" => {
             let dt = Expr::ident("constants").field("dt");
             let dtau = Expr::ident("constants").field("dtau");
-            let dt_eff = Expr::call_named(
-                "select",
-                vec![dt, dtau.clone(), dtau.clone().gt(0.0)],
-            );
+            let dt_eff = Expr::call_named("select", vec![dt, dtau.clone(), dtau.clone().gt(0.0)]);
             Some(Expr::from(1.0) / dt_eff)
         }
         // Dynamic viscosity (SI): Pa·s = kg/(m·s). Historically this was called `nu`,
         // but `nu` is conventionally kinematic viscosity; accept both for now.
         "mu" | "nu" => Some(Expr::ident("constants").field("viscosity")),
+
+        // Thermal conductivity for ideal-gas (laminar) OpenFOAM reference alignment:
+        //   kappa = mu * Cp / Pr
+        // with Cp = gamma/(gamma-1) * R.
+        //
+        // Notes:
+        // - kappa has units of W/(m·K) (POWER/(LENGTH*TEMPERATURE)).
+        // - Pr is fixed at the OpenFOAM reference value (0.71) for now.
+        "kappa" => {
+            let mu = Expr::ident("constants").field("viscosity");
+            let gamma = Expr::ident("constants").field("eos_gamma");
+            let r = Expr::ident("constants").field("eos_r");
+            let gm1 = Expr::call_named(
+                "max",
+                vec![Expr::ident("constants").field("eos_gm1"), Expr::from(1e-12)],
+            );
+            let pr = Expr::from(0.71);
+            let cp = gamma * r / gm1;
+            Some(mu * cp / pr)
+        }
         "eos_gamma" => Some(Expr::ident("constants").field("eos_gamma")),
         "eos_gm1" => Some(Expr::ident("constants").field("eos_gm1")),
         "eos_r" => Some(Expr::ident("constants").field("eos_r")),

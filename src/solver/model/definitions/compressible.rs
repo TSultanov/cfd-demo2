@@ -29,7 +29,7 @@ impl CompressibleFields {
             rho_u: vol_vector("rho_u", si::MOMENTUM_DENSITY),
             rho_e: vol_scalar("rho_e", si::ENERGY_DENSITY),
             p: vol_scalar("p", si::PRESSURE),
-            t: vol_scalar("T", si::DIMENSIONLESS),
+            t: vol_scalar("T", si::TEMPERATURE),
             u: vol_vector("u", si::VELOCITY),
             mu: vol_scalar("mu", si::DYNAMIC_VISCOSITY),
             phi_rho: surface_scalar("phi_rho", si::MASS_FLUX),
@@ -51,8 +51,22 @@ fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
             fields.u,
         ))
     .eqn(fields.rho_u);
-    let rho_e_eqn =
-        (fvm::ddt(fields.rho_e) + fvm::div_flux(fields.phi_rho_e, fields.rho_e)).eqn(fields.rho_e);
+    // Total energy (rho_e) equation.
+    //
+    // Match OpenFOAM rhoCentralFoam laminar energy transport more closely by including a
+    // Fourier heat-conduction term:
+    //   -div(kappa * grad(T))
+    //
+    // OpenFOAM solves an internal-energy correction with `alphaEff` (gamma*mu/Pr) and then
+    // reconstructs rhoE. Here we couple conduction directly through the temperature unknown.
+    let kappa = vol_scalar("kappa", si::POWER / (si::LENGTH * si::TEMPERATURE));
+    let rho_e_eqn = (fvm::ddt(fields.rho_e)
+        + fvm::div_flux(fields.phi_rho_e, fields.rho_e)
+        + fvm::laplacian(
+            Coefficient::field(kappa).expect("kappa must be scalar"),
+            fields.t,
+        ))
+    .eqn(fields.rho_e);
 
     // Primitive velocity recovery as an algebraic constraint:
     //   rho_u = rho * u
@@ -139,8 +153,11 @@ fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
     // Scale by `1/dt` for conditioning.
     let t_eqn = {
         let rho = Coefficient::field(fields.rho).expect("rho must be scalar");
-        let r = Coefficient::field(vol_scalar("eos_r", si::PRESSURE / si::DENSITY))
-            .expect("eos_r must be scalar");
+        let r = Coefficient::field(vol_scalar(
+            "eos_r",
+            si::PRESSURE / (si::DENSITY * si::TEMPERATURE),
+        ))
+        .expect("eos_r must be scalar");
         let inv_dt =
             Coefficient::field(vol_scalar("inv_dt", si::INV_TIME)).expect("inv_dt must be scalar");
         let rho_r_over_dt = Coefficient::product(
@@ -188,7 +205,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
     let grad_rho_u_x = vol_vector("grad_rho_u_x", si::MOMENTUM_DENSITY / si::LENGTH);
     let grad_rho_u_y = vol_vector("grad_rho_u_y", si::MOMENTUM_DENSITY / si::LENGTH);
     let grad_rho_e = vol_vector("grad_rho_e", si::ENERGY_DENSITY / si::LENGTH);
-    let grad_t = vol_vector("grad_T", si::DIMENSIONLESS / si::LENGTH);
+    let grad_t = vol_vector("grad_T", si::TEMPERATURE / si::LENGTH);
     let grad_u_x = vol_vector("grad_u_x", si::VELOCITY / si::LENGTH);
     let grad_u_y = vol_vector("grad_u_y", si::VELOCITY / si::LENGTH);
     let layout = StateLayout::new(vec![
@@ -371,27 +388,27 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::dirichlet(0.0, si::DIMENSIONLESS),
+                BoundaryCondition::dirichlet(0.0, si::TEMPERATURE),
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 1,
-                BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
+                BoundaryCondition::zero_gradient(si::TEMPERATURE / si::LENGTH),
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
                 1,
-                BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
+                BoundaryCondition::zero_gradient(si::TEMPERATURE / si::LENGTH),
             )
             .set_uniform(
                 GpuBoundaryType::SlipWall,
                 1,
-                BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
+                BoundaryCondition::zero_gradient(si::TEMPERATURE / si::LENGTH),
             )
             .set_uniform(
                 GpuBoundaryType::MovingWall,
                 1,
-                BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
+                BoundaryCondition::zero_gradient(si::TEMPERATURE / si::LENGTH),
             ),
     );
     let method = crate::solver::model::method::MethodSpec::Coupled(

@@ -1,7 +1,5 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
-use crate::solver::model::backend::ast::{
-    fvm, vol_scalar, Coefficient, EquationSystem,
-};
+use crate::solver::model::backend::ast::{fvm, vol_scalar, Coefficient, EquationSystem};
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::units::si;
 
@@ -43,7 +41,9 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
         boundaries,
 
         modules: vec![
-            crate::solver::model::modules::eos::eos_module(crate::solver::model::eos::EosSpec::Constant),
+            crate::solver::model::modules::eos::eos_module(
+                crate::solver::model::eos::EosSpec::Constant,
+            ),
             crate::solver::model::modules::generic_coupled::generic_coupled_module(
                 crate::solver::model::method::MethodSpec::Coupled(
                     crate::solver::model::method::CoupledCapabilities::default(),
@@ -93,7 +93,9 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
         boundaries,
 
         modules: vec![
-            crate::solver::model::modules::eos::eos_module(crate::solver::model::eos::EosSpec::Constant),
+            crate::solver::model::modules::eos::eos_module(
+                crate::solver::model::eos::EosSpec::Constant,
+            ),
             crate::solver::model::modules::generic_coupled::generic_coupled_module(
                 crate::solver::model::method::MethodSpec::Coupled(
                     crate::solver::model::method::CoupledCapabilities::default(),

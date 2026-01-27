@@ -31,13 +31,13 @@ pub struct EosRuntimeParams {
     pub gamma: f32,
     /// (gamma - 1) used by the calorically-perfect-gas closure p=(gamma-1)*(rho_e - 0.5 rho |u|^2).
     pub gm1: f32,
-    /// Gas constant R in solver units (has units of p/rho).
+    /// Gas constant R in solver units (has units of p/(rho*T)).
     pub r: f32,
     /// dp/drho contribution for barotropic closures (e.g. linear compressibility).
     pub dp_drho: f32,
     /// p offset for barotropic closures: p = dp_drho * rho - p_offset.
     pub p_offset: f32,
-    /// Reference theta = R*T (so that p = rho*theta when imposing an isothermal ideal-gas inlet).
+    /// Reference theta = R*T (units of p/rho) so that p = rho*theta for an isothermal ideal gas.
     pub theta_ref: f32,
 }
 

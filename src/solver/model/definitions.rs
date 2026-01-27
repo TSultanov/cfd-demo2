@@ -92,8 +92,10 @@ impl ModelSpec {
     pub fn flux_module(
         &self,
     ) -> Result<Option<&crate::solver::model::flux_module::FluxModuleSpec>, String> {
-        let mut found: Option<(&'static str, &crate::solver::model::flux_module::FluxModuleSpec)> =
-            None;
+        let mut found: Option<(
+            &'static str,
+            &crate::solver::model::flux_module::FluxModuleSpec,
+        )> = None;
         for module in &self.modules {
             if let Some(spec) = module.manifest.flux_module.as_ref() {
                 match found {
@@ -206,12 +208,14 @@ impl ModelSpec {
 
                     // Ensure the component offsets exist (avoids later codegen errors).
                     for c in 0..2 {
-                        self.state_layout.component_offset(field.name(), c).ok_or_else(|| {
-                            format!(
+                        self.state_layout
+                            .component_offset(field.name(), c)
+                            .ok_or_else(|| {
+                                format!(
                                 "flux_module gradients stage requires '{}[{c}]' in state layout",
                                 field.name()
                             )
-                        })?;
+                            })?;
                     }
 
                     found_target = true;
@@ -226,15 +230,17 @@ impl ModelSpec {
         // Validate typed invariant requirements declared by modules.
         for module in &self.modules {
             for inv in &module.manifest.invariants {
-                use crate::solver::model::module::{FieldKindReq, ModuleInvariant};
                 use crate::solver::model::backend::FieldKind;
+                use crate::solver::model::module::{FieldKindReq, ModuleInvariant};
 
                 let err_prefix = format!("module '{}' invariant failed: ", module.name);
 
                 match *inv {
                     ModuleInvariant::RequireStateField { name, kind } => {
                         let Some(field) = self.state_layout.field(name) else {
-                            return Err(format!("{err_prefix}missing required state field '{name}'"));
+                            return Err(format!(
+                                "{err_prefix}missing required state field '{name}'"
+                            ));
                         };
                         if let Some(req) = kind {
                             let expected = match req {
@@ -273,7 +279,9 @@ impl ModelSpec {
                         )
                         .map_err(|e| format!("{err_prefix}{e}"))?;
 
-                        if require_vector2_momentum && coupling.momentum.kind() != FieldKind::Vector2 {
+                        if require_vector2_momentum
+                            && coupling.momentum.kind() != FieldKind::Vector2
+                        {
                             return Err(format!(
                                 "{err_prefix}requires Vector2 momentum field; got {:?} ('{}')",
                                 coupling.momentum.kind(),
@@ -296,11 +304,13 @@ impl ModelSpec {
 
                             // Ensure the component offsets exist (avoids a later codegen error).
                             for c in 0..2 {
-                                self.state_layout.component_offset(&grad_name, c).ok_or_else(|| {
-                                    format!(
+                                self.state_layout
+                                    .component_offset(&grad_name, c)
+                                    .ok_or_else(|| {
+                                        format!(
                                         "{err_prefix}requires '{grad_name}[{c}]' in state layout"
                                     )
-                                })?;
+                                    })?;
                             }
                         }
                     }
@@ -310,7 +320,6 @@ impl ModelSpec {
 
         Ok(())
     }
-
 }
 
 #[derive(Debug, Clone, Default)]
@@ -573,7 +582,7 @@ mod tests {
 
         assert_eq!(model.system.equations()[0].terms().len(), 2);
         assert_eq!(model.system.equations()[1].terms().len(), 3);
-        assert_eq!(model.system.equations()[2].terms().len(), 2);
+        assert_eq!(model.system.equations()[2].terms().len(), 3);
         assert_eq!(model.system.equations()[3].terms().len(), 2);
         assert_eq!(model.system.equations()[4].terms().len(), 5);
         assert_eq!(model.system.equations()[5].terms().len(), 2);
@@ -621,7 +630,10 @@ mod tests {
                 break;
             }
         }
-        assert!(replaced, "expected compressible_model to include flux_module module");
+        assert!(
+            replaced,
+            "expected compressible_model to include flux_module module"
+        );
 
         let err = model.validate_module_manifests().unwrap_err();
         assert!(err.contains("requires 'grad_rho' to be Vector2"));

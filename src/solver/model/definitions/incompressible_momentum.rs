@@ -164,7 +164,9 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         },
     );
     let flux_module = crate::solver::model::flux_module::FluxModuleSpec::Kernel {
-        gradients: Some(crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout),
+        gradients: Some(
+            crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout,
+        ),
         kernel: flux_kernel,
     };
 
@@ -175,22 +177,23 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         boundaries,
 
         modules: vec![
-            crate::solver::model::modules::eos::eos_module(crate::solver::model::eos::EosSpec::Constant),
+            crate::solver::model::modules::eos::eos_module(
+                crate::solver::model::eos::EosSpec::Constant,
+            ),
             crate::solver::model::modules::flux_module::flux_module_module(flux_module)
                 .expect("failed to build flux_module module"),
             crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
-            crate::solver::model::modules::rhie_chow::rhie_chow_aux_module(
-                "d_p",
-                true,
-                true,
-            ),
+            crate::solver::model::modules::rhie_chow::rhie_chow_aux_module("d_p", true, true),
         ],
         // The generic coupled path needs a saddle-point-capable preconditioner.
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
             preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
                 omega: 1.0,
-                layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(&[u0, u1], p)
-                    .expect("invalid SchurBlockLayout"),
+                layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(
+                    &[u0, u1],
+                    p,
+                )
+                .expect("invalid SchurBlockLayout"),
             },
             ..Default::default()
         }),
@@ -303,14 +306,20 @@ fn rhie_chow_flux_module_kernel(
     let pressure_eq = equations
         .iter()
         .find(|eq| eq.target().name() == pressure)
-        .ok_or_else(|| format!("missing pressure equation for inferred pressure field '{pressure}'"))?;
+        .ok_or_else(|| {
+            format!("missing pressure equation for inferred pressure field '{pressure}'")
+        })?;
     let pressure_laplacian = pressure_eq
         .terms()
         .iter()
         .find(|t| t.op == TermOp::Laplacian)
-        .ok_or_else(|| format!("pressure equation for '{pressure}' must include a laplacian term"))?;
+        .ok_or_else(|| {
+            format!("pressure equation for '{pressure}' must include a laplacian term")
+        })?;
     let Some(coeff) = &pressure_laplacian.coeff else {
-        return Err(format!("pressure laplacian coefficient for '{pressure}' is missing"));
+        return Err(format!(
+            "pressure laplacian coefficient for '{pressure}' is missing"
+        ));
     };
     let mut coeff_fields = Vec::new();
     collect_coeff_fields(coeff, &mut coeff_fields);
@@ -374,7 +383,10 @@ fn rhie_chow_flux_module_kernel(
     );
     let hby_a_face = V::Add(
         Box::new(u_face),
-        Box::new(V::MulScalar(Box::new(grad_p_face), Box::new(d_p_face.clone()))),
+        Box::new(V::MulScalar(
+            Box::new(grad_p_face),
+            Box::new(d_p_face.clone()),
+        )),
     );
     let u_n = S::Dot(Box::new(hby_a_face), Box::new(V::normal()));
     let phi_pred = S::Mul(

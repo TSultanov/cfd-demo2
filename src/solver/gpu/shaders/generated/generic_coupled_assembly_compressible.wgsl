@@ -365,6 +365,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             phi_2 -= phi_2 * 2.0;
         }
         rhs_2 -= phi_2;
+        let diff_coeff_rho_e = select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, (constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71) * 0.5, !is_boundary) * area / dist;
+        if (!is_boundary) {
+            matrix_values[start_row_3 + diag_rank * 8u + 7u] += diff_coeff_rho_e;
+            matrix_values[start_row_3 + neighbor_rank * 8u + 7u] -= diff_coeff_rho_e;
+        } else {
+            if (bc_kind[face_idx * 8u + 7u] == 1u) {
+                matrix_values[start_row_3 + diag_rank * 8u + 7u] += diff_coeff_rho_e;
+                rhs_3 += diff_coeff_rho_e * bc_value[face_idx * 8u + 7u];
+            } else {
+                if (bc_kind[face_idx * 8u + 7u] == 2u) {
+                    rhs_3 += -(select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, (constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71) * 0.5, !is_boundary) * area * bc_value[face_idx * 8u + 7u]);
+                }
+            }
+        }
         var phi_3: f32 = fluxes[face_idx * 8u + 3u];
         if (owner != idx) {
             phi_3 -= phi_3 * 2.0;

@@ -151,6 +151,7 @@ const fn gcd_i32(mut a: i32, mut b: i32) -> i32 {
 /// - `kg` = mass (kilogram)
 /// - `m` = length (meter)
 /// - `s` = time (second)
+/// - `K` = thermodynamic temperature (kelvin)
 ///
 /// This encodes **dimensions only** (no scale factors); values are erased when lowering to WGSL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -158,6 +159,7 @@ pub struct UnitDim {
     m: UnitExp,
     l: UnitExp,
     t: UnitExp,
+    temp: UnitExp,
 }
 
 impl UnitDim {
@@ -166,6 +168,16 @@ impl UnitDim {
             m: UnitExp::from_i32(m as i32),
             l: UnitExp::from_i32(l as i32),
             t: UnitExp::from_i32(t as i32),
+            temp: UnitExp::zero(),
+        }
+    }
+
+    pub const fn new_with_temp(m: i8, l: i8, t: i8, temp: i8) -> Self {
+        Self {
+            m: UnitExp::from_i32(m as i32),
+            l: UnitExp::from_i32(l as i32),
+            t: UnitExp::from_i32(t as i32),
+            temp: UnitExp::from_i32(temp as i32),
         }
     }
 
@@ -174,6 +186,7 @@ impl UnitDim {
             m: UnitExp::zero(),
             l: UnitExp::zero(),
             t: UnitExp::zero(),
+            temp: UnitExp::zero(),
         }
     }
 
@@ -182,6 +195,7 @@ impl UnitDim {
             m: self.m.add_exp(rhs.m),
             l: self.l.add_exp(rhs.l),
             t: self.t.add_exp(rhs.t),
+            temp: self.temp.add_exp(rhs.temp),
         }
     }
 
@@ -190,6 +204,7 @@ impl UnitDim {
             m: self.m.sub_exp(rhs.m),
             l: self.l.sub_exp(rhs.l),
             t: self.t.sub_exp(rhs.t),
+            temp: self.temp.sub_exp(rhs.temp),
         }
     }
 
@@ -199,6 +214,7 @@ impl UnitDim {
             m: self.m.mul_exp(exp),
             l: self.l.mul_exp(exp),
             t: self.t.mul_exp(exp),
+            temp: self.temp.mul_exp(exp),
         }
     }
 
@@ -243,6 +259,7 @@ impl fmt::Display for UnitDim {
         push_dim(&mut parts, "kg", self.m);
         push_dim(&mut parts, "m", self.l);
         push_dim(&mut parts, "s", self.t);
+        push_dim(&mut parts, "K", self.temp);
         write!(f, "{}", parts.join(" "))
     }
 }
@@ -268,6 +285,7 @@ pub mod si {
     pub const MASS: UnitDim = UnitDim::new(1, 0, 0);
     pub const LENGTH: UnitDim = UnitDim::new(0, 1, 0);
     pub const TIME: UnitDim = UnitDim::new(0, 0, 1);
+    pub const TEMPERATURE: UnitDim = UnitDim::new_with_temp(0, 0, 0, 1);
 
     pub const AREA: UnitDim = LENGTH.powi(2);
     pub const VOLUME: UnitDim = AREA.mul_dim(LENGTH);
@@ -311,6 +329,8 @@ mod tests {
 
         assert_eq!(si::INV_TIME, UnitDim::new(0, 0, -1));
 
+        assert_eq!(si::TEMPERATURE, UnitDim::new_with_temp(0, 0, 0, 1));
+
         assert_eq!(si::DENSITY, UnitDim::new(1, -3, 0));
         assert_eq!(si::VELOCITY, UnitDim::new(0, 1, -1));
 
@@ -333,6 +353,7 @@ mod tests {
         assert_eq!(UnitDim::new(0, 1, 0).to_string(), "m");
         assert_eq!(UnitDim::new(1, 0, 0).to_string(), "kg");
         assert_eq!(UnitDim::new(0, 0, 1).to_string(), "s");
+        assert_eq!(UnitDim::new_with_temp(0, 0, 0, 1).to_string(), "K");
 
         assert_eq!(UnitDim::new(1, -3, 0).to_string(), "kg m^-3");
         assert_eq!(UnitDim::new(1, 1, -2).to_string(), "kg m s^-2");

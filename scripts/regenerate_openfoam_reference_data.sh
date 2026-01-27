@@ -22,9 +22,9 @@ gen_probes_all() {
 
 echo "==> OpenFOAM version: $(openfoam -show-api)"
 
-echo "==> Incompressible channel (simpleFoam)"
+echo "==> Incompressible channel (pimpleFoam)"
 cp -R "${ROOT_DIR}/reference/openfoam/incompressible_channel" "${WORK_DIR}/"
-run_openfoam "cd '${WORK_DIR}/incompressible_channel' && blockMesh > log.blockMesh && simpleFoam > log.simpleFoam"
+run_openfoam "cd '${WORK_DIR}/incompressible_channel' && blockMesh > log.blockMesh && pimpleFoam > log.pimpleFoam"
 python3 "${ROOT_DIR}/scripts/openfoam/extract_probes_to_csv.py" \
   --case "${WORK_DIR}/incompressible_channel" \
   --probes-name probes \
@@ -50,26 +50,26 @@ python3 "${ROOT_DIR}/scripts/openfoam/extract_probes_to_csv.py" \
   --mode compressible_acoustic \
   --out "${OUT_DIR}/compressible_acoustic_full_field.csv"
 
-echo "==> Incompressible backwards step (simpleFoam)"
+echo "==> Incompressible backwards step (pimpleFoam)"
 cp -R "${ROOT_DIR}/reference/openfoam/incompressible_backwards_step" "${WORK_DIR}/"
 gen_probes_all "${WORK_DIR}/incompressible_backwards_step/system/probes_all.cfg" \
   --write-interval 1 \
   --fields U,p \
   backwards-step --nx 30 --ny 10 --length 3 --height-outlet 1 --height-inlet 0.5 --step-x 1
-run_openfoam "cd '${WORK_DIR}/incompressible_backwards_step' && blockMesh > log.blockMesh && simpleFoam > log.simpleFoam"
+run_openfoam "cd '${WORK_DIR}/incompressible_backwards_step' && blockMesh > log.blockMesh && pimpleFoam > log.pimpleFoam"
 python3 "${ROOT_DIR}/scripts/openfoam/extract_probes_to_csv.py" \
   --case "${WORK_DIR}/incompressible_backwards_step" \
   --probes-name probesAll \
   --mode incompressible_channel \
   --out "${OUT_DIR}/incompressible_backwards_step_full_field.csv"
 
-echo "==> Incompressible lid-driven cavity (simpleFoam)"
+echo "==> Incompressible lid-driven cavity (pimpleFoam)"
 cp -R "${ROOT_DIR}/reference/openfoam/incompressible_lid_driven_cavity" "${WORK_DIR}/"
 gen_probes_all "${WORK_DIR}/incompressible_lid_driven_cavity/system/probes_all.cfg" \
   --write-interval 1 \
   --fields U,p \
   rect --nx 20 --ny 20 --length 1 --height 1
-run_openfoam "cd '${WORK_DIR}/incompressible_lid_driven_cavity' && blockMesh > log.blockMesh && simpleFoam > log.simpleFoam"
+run_openfoam "cd '${WORK_DIR}/incompressible_lid_driven_cavity' && blockMesh > log.blockMesh && pimpleFoam > log.pimpleFoam"
 python3 "${ROOT_DIR}/scripts/openfoam/extract_probes_to_csv.py" \
   --case "${WORK_DIR}/incompressible_lid_driven_cavity" \
   --probes-name probesAll \

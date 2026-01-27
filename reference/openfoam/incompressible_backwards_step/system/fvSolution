@@ -23,6 +23,12 @@ solvers
         smoother        GaussSeidel;
     }
 
+    pFinal
+    {
+        $p;
+        relTol          0;
+    }
+
     U
     {
         solver          smoothSolver;
@@ -30,18 +36,20 @@ solvers
         tolerance       1e-12;
         relTol          0;
     }
+
+    UFinal
+    {
+        $U;
+        relTol          0;
+    }
 }
 
-SIMPLE
+PIMPLE
 {
+    nOuterCorrectors 1;
+    nCorrectors     2;
     nNonOrthogonalCorrectors 0;
-    consistent      yes;
-
-    residualControl
-    {
-        p               1e-12;
-        U               1e-12;
-    }
+    momentumPredictor yes;
 }
 
 relaxationFactors
@@ -52,4 +60,3 @@ relaxationFactors
         p               0.3;
     }
 }
-

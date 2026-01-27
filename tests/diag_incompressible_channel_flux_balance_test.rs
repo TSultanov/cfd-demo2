@@ -135,12 +135,15 @@ fn diag_incompressible_channel_flux_balance() {
             u_owner.1 * lambda + u_neigh.1 * lambda_other,
         );
         let d_p_face = d_p_owner * lambda + d_p_neigh * lambda_other;
+
         let grad_p_face = (
             grad_p_owner.0 * lambda + grad_p_neigh.0 * lambda_other,
             grad_p_owner.1 * lambda + grad_p_neigh.1 * lambda_other,
         );
-
-        let hby_a_face = (u_face.0 + d_p_face * grad_p_face.0, u_face.1 + d_p_face * grad_p_face.1);
+        let hby_a_face = (
+            u_face.0 + d_p_face * grad_p_face.0,
+            u_face.1 + d_p_face * grad_p_face.1,
+        );
         let u_n = hby_a_face.0 * nx + hby_a_face.1 * ny;
         let phi_pred = rho * u_n * area;
 

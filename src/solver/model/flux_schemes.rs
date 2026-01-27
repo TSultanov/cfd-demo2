@@ -543,13 +543,68 @@ fn euler_central_upwind(
     // Note: neighbor-side `grad_*` vectors are forced to zero on boundary faces to preserve
     // boundary semantics for reconstruction. Flip the lerp order so boundary faces default
     // to the owner-cell gradient (while interior faces remain unchanged on our symmetric meshes).
-    let grad_u_x_face = V::Lerp(
+    let grad_u_x_face_raw = V::Lerp(
         Box::new(V::state_vec2(FaceSide::Neighbor, "grad_u_x")),
         Box::new(V::state_vec2(FaceSide::Owner, "grad_u_x")),
     );
-    let grad_u_y_face = V::Lerp(
+    let grad_u_y_face_raw = V::Lerp(
         Box::new(V::state_vec2(FaceSide::Neighbor, "grad_u_y")),
         Box::new(V::state_vec2(FaceSide::Owner, "grad_u_y")),
+    );
+
+    // Match OpenFOAM's Gauss gradient boundary correction.
+    //
+    // OpenFOAM computes cell-centered gradients via Gauss' theorem and then corrects the
+    // *boundary* gradient field so that the normal component matches `snGrad(U)`:
+    //   grad += n ⊗ (snGrad(U) - (n & grad))
+    //
+    // Our `grad_*` fields are cell-centered. Apply the equivalent correction on boundary faces
+    // when forming the face gradient used by the `div(tauMC)` correction.
+    let n = V::normal();
+    let is_boundary = S::is_boundary();
+    let dist_safe = S::Max(Box::new(S::dist()), Box::new(S::lit(1e-6)));
+
+    let u_face = V::state_vec2(FaceSide::Owner, "u");
+    let u_cell = V::cell_state_vec2(FaceSide::Owner, "u");
+    let u_face_x = S::Dot(Box::new(u_face.clone()), Box::new(ex.clone()));
+    let u_face_y = S::Dot(Box::new(u_face), Box::new(ey.clone()));
+    let u_cell_x = S::Dot(Box::new(u_cell.clone()), Box::new(ex.clone()));
+    let u_cell_y = S::Dot(Box::new(u_cell), Box::new(ey.clone()));
+
+    let sn_grad_u_x = S::Div(
+        Box::new(S::Sub(Box::new(u_face_x), Box::new(u_cell_x))),
+        Box::new(dist_safe.clone()),
+    );
+    let sn_grad_u_y = S::Div(
+        Box::new(S::Sub(Box::new(u_face_y), Box::new(u_cell_y))),
+        Box::new(dist_safe),
+    );
+
+    let grad_u_x_face = V::Add(
+        Box::new(grad_u_x_face_raw.clone()),
+        Box::new(V::MulScalar(
+            Box::new(n.clone()),
+            Box::new(S::Mul(
+                Box::new(is_boundary.clone()),
+                Box::new(S::Sub(
+                    Box::new(sn_grad_u_x),
+                    Box::new(S::Dot(Box::new(n.clone()), Box::new(grad_u_x_face_raw))),
+                )),
+            )),
+        )),
+    );
+    let grad_u_y_face = V::Add(
+        Box::new(grad_u_y_face_raw.clone()),
+        Box::new(V::MulScalar(
+            Box::new(n.clone()),
+            Box::new(S::Mul(
+                Box::new(is_boundary),
+                Box::new(S::Sub(
+                    Box::new(sn_grad_u_y),
+                    Box::new(S::Dot(Box::new(n), Box::new(grad_u_y_face_raw))),
+                )),
+            )),
+        )),
     );
 
     let dux_dx = S::Dot(Box::new(grad_u_x_face.clone()), Box::new(ex.clone()));

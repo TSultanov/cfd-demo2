@@ -1276,6 +1276,7 @@ fn collect_state_keys_from_vec2<'a>(
 ) {
     match expr {
         FaceVec2Expr::Builtin(_) => {}
+        FaceVec2Expr::CellStateVec2 { .. } => {}
         FaceVec2Expr::Vec2(x, y) => {
             collect_state_keys_from_scalar(x, primitives, state_layout, out);
             collect_state_keys_from_scalar(y, primitives, state_layout, out);
@@ -1502,6 +1503,16 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
 
             typed::VecExpr::<2>::from_components([x, y])
         }
+        FaceVec2Expr::CellStateVec2 { side, field } => {
+            let idx = match side {
+                FaceSide::Owner => Expr::ident("owner"),
+                FaceSide::Neighbor => Expr::ident("neigh_idx"),
+            };
+            typed::VecExpr::<2>::from_components([
+                state_component_at(ctx.layout, "state", idx.clone(), field.as_str(), 0),
+                state_component_at(ctx.layout, "state", idx, field.as_str(), 1),
+            ])
+        }
         FaceVec2Expr::Add(a, b) => {
             let a = lower_vec2(a, ctx);
             let b = lower_vec2(b, ctx);
@@ -1703,6 +1714,7 @@ fn lower_scalar<'a>(expr: &'a FaceScalarExpr, ctx: &LowerCtx<'a>) -> Expr {
             FaceScalarBuiltin::Dist => Expr::ident("dist"),
             FaceScalarBuiltin::Lambda => Expr::ident("lambda"),
             FaceScalarBuiltin::LambdaOther => Expr::ident("lambda_other"),
+            FaceScalarBuiltin::IsBoundary => dsl::select(0.0, 1.0, Expr::ident("is_boundary")),
         },
         FaceScalarExpr::Constant { name } => Expr::ident("constants").field(name.clone()),
         FaceScalarExpr::LowMachParam(param) => match param {
@@ -1785,7 +1797,8 @@ fn flux_spec_uses_low_mach(spec: &FluxModuleKernelSpec) -> bool {
 fn vec2_uses_low_mach(expr: &FaceVec2Expr) -> bool {
     match expr {
         FaceVec2Expr::Builtin(_)
-        | FaceVec2Expr::StateVec2 { .. } => false,
+        | FaceVec2Expr::StateVec2 { .. }
+        | FaceVec2Expr::CellStateVec2 { .. } => false,
         FaceVec2Expr::Vec2(x, y) => scalar_uses_low_mach(x) || scalar_uses_low_mach(y),
         FaceVec2Expr::Add(a, b)
         | FaceVec2Expr::Sub(a, b)

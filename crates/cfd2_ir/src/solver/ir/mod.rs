@@ -153,6 +153,8 @@ pub enum FaceScalarBuiltin {
     Dist,
     Lambda,
     LambdaOther,
+    /// 1.0 for boundary faces, 0.0 for interior faces.
+    IsBoundary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -177,6 +179,9 @@ pub enum FaceVec2Expr {
     Builtin(FaceVec2Builtin),
     Vec2(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
     StateVec2 { side: FaceSide, field: String },
+    /// Read a vec2 from the state buffer at the given side's cell index, without applying
+    /// boundary conditions (raw cell-centered values).
+    CellStateVec2 { side: FaceSide, field: String },
     Add(Box<FaceVec2Expr>, Box<FaceVec2Expr>),
     Sub(Box<FaceVec2Expr>, Box<FaceVec2Expr>),
     Neg(Box<FaceVec2Expr>),
@@ -231,6 +236,10 @@ impl FaceScalarExpr {
         FaceScalarExpr::Builtin(FaceScalarBuiltin::LambdaOther)
     }
 
+    pub fn is_boundary() -> Self {
+        FaceScalarExpr::Builtin(FaceScalarBuiltin::IsBoundary)
+    }
+
     pub fn state(side: FaceSide, name: impl Into<String>) -> Self {
         FaceScalarExpr::State {
             side,
@@ -277,6 +286,13 @@ impl FaceVec2Expr {
 
     pub fn state_vec2(side: FaceSide, field: impl Into<String>) -> Self {
         FaceVec2Expr::StateVec2 {
+            side,
+            field: field.into(),
+        }
+    }
+
+    pub fn cell_state_vec2(side: FaceSide, field: impl Into<String>) -> Self {
+        FaceVec2Expr::CellStateVec2 {
             side,
             field: field.into(),
         }

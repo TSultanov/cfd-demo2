@@ -76,7 +76,19 @@ impl SolverRuntimeParamsExt for GpuUnifiedSolver {
     }
 
     fn set_viscosity(&mut self, mu: f32) -> Result<(), String> {
-        self.set_named_param("viscosity", PlanParamValue::F32(mu))
+        self.set_named_param("viscosity", PlanParamValue::F32(mu))?;
+
+        // Keep the optional `mu` state field (used by implicit laplacian terms) in sync with the
+        // runtime `viscosity` parameter when present.
+        //
+        // Many models treat viscosity as a constant named param, but the discretized system may
+        // still reference a `mu` field coefficient.
+        let n = self.num_cells() as usize;
+        let mu64 = mu as f64;
+        let mu_field: Vec<f64> = vec![mu64; n];
+        let _ = self.set_field_scalar("mu", &mu_field);
+
+        Ok(())
     }
 
     fn set_density(&mut self, rho: f32) -> Result<(), String> {
@@ -234,7 +246,12 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
         let rho_e = if gm1 > 0.0 { p / gm1 + ke } else { ke };
 
-        let mut state = vec![0.0f32; self.num_cells() as usize * stride];
+        // Preserve unrelated state fields (e.g. mu, gradients) when seeding initial conditions.
+        // Tests and callers often set runtime params (like viscosity) before initializing state.
+        let mut state = pollster::block_on(async { self.read_state_f32().await });
+        if state.len() != self.num_cells() as usize * stride {
+            state.resize(self.num_cells() as usize * stride, 0.0);
+        }
         for cell in 0..self.num_cells() as usize {
             let base = cell * stride;
             state[base + off_rho] = rho;
@@ -301,7 +318,11 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             .or_else(|| self.model().state_layout.offset_for("U"))
             .map(|v| v as usize);
 
-        let mut state = vec![0.0f32; self.num_cells() as usize * stride];
+        // Preserve unrelated state fields (e.g. mu, gradients) when seeding initial conditions.
+        let mut state = pollster::block_on(async { self.read_state_f32().await });
+        if state.len() != self.num_cells() as usize * stride {
+            state.resize(self.num_cells() as usize * stride, 0.0);
+        }
         for cell in 0..self.num_cells() as usize {
             let base = cell * stride;
             let rho_val = rho[cell];

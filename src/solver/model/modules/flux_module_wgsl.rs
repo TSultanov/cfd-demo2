@@ -954,6 +954,127 @@ fn face_stmts_runtime_scheme(
         panic!("runtime scheme flux module requires at least one variant spec");
     }
 
+    // Fast-path for runtime scheme selection with pre-integrated per-component fluxes.
+    //
+    // This is used by the compressible Kurganov/rhoCentralFoam-style flux lowering, which
+    // computes integrated face fluxes directly and does not use the CentralUpwind KT form.
+    if matches!(
+        &variants[0].1,
+        FluxModuleKernelSpec::ScalarPerComponent { .. }
+    ) {
+        #[derive(Clone, Copy)]
+        struct ScalarPerComponentVariant<'a> {
+            components: &'a [String],
+            flux: &'a [FaceScalarExpr],
+        }
+
+        let mut by_gpu_id: Vec<Option<ScalarPerComponentVariant<'_>>> = vec![None; 7];
+        for (scheme, spec) in variants {
+            let FluxModuleKernelSpec::ScalarPerComponent { components, flux } = spec else {
+                panic!("runtime scheme flux module requires ScalarPerComponent variants");
+            };
+
+            let idx = scheme.gpu_id() as usize;
+            if idx >= by_gpu_id.len() {
+                continue;
+            }
+            if by_gpu_id[idx].is_some() {
+                panic!("duplicate ScalarPerComponent variant for scheme {scheme:?}");
+            }
+            by_gpu_id[idx] = Some(ScalarPerComponentVariant { components, flux });
+        }
+
+        let upwind = by_gpu_id[Scheme::Upwind.gpu_id() as usize]
+            .unwrap_or_else(|| panic!("runtime scheme flux module requires an Upwind variant"));
+
+        if upwind.components.len() != flux_layout.components.len() {
+            panic!("ScalarPerComponent spec component count does not match FluxLayout");
+        }
+        if upwind.flux.len() != upwind.components.len() {
+            panic!("ScalarPerComponent spec arrays must match component count");
+        }
+
+        // Ensure all variants share the same component list/order.
+        for v in by_gpu_id.iter().flatten() {
+            if v.components != upwind.components {
+                panic!("ScalarPerComponent variant components must match across schemes");
+            }
+            if v.flux.len() != v.components.len() {
+                panic!("ScalarPerComponent spec arrays must match component count");
+            }
+        }
+
+        let scheme_lit =
+            typed::EnumExpr::<Scheme>::from_expr(Expr::ident("constants").field("scheme"));
+        let is_interior = !Expr::ident("is_boundary");
+        let cond_for = |scheme: Scheme| scheme_lit.eq(scheme) & is_interior;
+
+        // Declare one mutable flux var per component, initialized from the Upwind variant.
+        let mut var_names: Vec<String> = Vec::with_capacity(upwind.components.len());
+        let mut upwind_flux_exprs: Vec<Expr> = Vec::with_capacity(upwind.components.len());
+        for (i, comp_name) in upwind.components.iter().enumerate() {
+            let off = flux_layout
+                .offset_for(comp_name)
+                .unwrap_or_else(|| panic!("missing flux layout component '{comp_name}'"));
+            var_names.push(format!("phi_{off}"));
+            upwind_flux_exprs.push(lower_scalar(&upwind.flux[i], &ctx));
+        }
+
+        let (cse_stmts, upwind_flux_exprs) = cse.eliminate(&upwind_flux_exprs);
+        body.extend(cse_stmts);
+        for (name, expr) in var_names.iter().zip(upwind_flux_exprs.into_iter()) {
+            body.push(dsl::var_typed_expr(name, Type::F32, Some(expr)));
+        }
+
+        for scheme in [
+            Scheme::SecondOrderUpwind,
+            Scheme::QUICK,
+            Scheme::SecondOrderUpwindMinMod,
+            Scheme::SecondOrderUpwindVanLeer,
+            Scheme::QUICKMinMod,
+            Scheme::QUICKVanLeer,
+        ] {
+            let Some(v) = by_gpu_id.get(scheme.gpu_id() as usize).and_then(|v| *v) else {
+                continue;
+            };
+
+            let cond = cond_for(scheme);
+            let mut scheme_flux_exprs: Vec<Expr> = Vec::with_capacity(v.components.len());
+            for i in 0..v.components.len() {
+                scheme_flux_exprs.push(lower_scalar(&v.flux[i], &ctx));
+            }
+            let (cse_stmts, scheme_flux_exprs) = cse.eliminate(&scheme_flux_exprs);
+
+            body.push(dsl::if_block_expr(
+                cond,
+                dsl::block(
+                    cse_stmts
+                        .into_iter()
+                        .chain(
+                            var_names.iter().zip(scheme_flux_exprs.into_iter()).map(
+                                |(name, expr)| dsl::assign_expr(Expr::ident(name.clone()), expr),
+                            ),
+                        )
+                        .collect(),
+                ),
+                None,
+            ));
+        }
+
+        // Write the selected component fluxes into the packed flux table.
+        for (name, comp_name) in var_names.iter().zip(upwind.components.iter()) {
+            let off = flux_layout
+                .offset_for(comp_name)
+                .unwrap_or_else(|| panic!("missing flux layout component '{comp_name}'"));
+            body.push(dsl::assign_expr(
+                dsl::array_access_linear("fluxes", Expr::ident("idx"), flux_stride, off),
+                Expr::ident(name.clone()),
+            ));
+        }
+
+        return body;
+    }
+
     let mut by_gpu_id: Vec<Option<CentralUpwindVariant<'_>>> = vec![None; 7];
     for (scheme, spec) in variants {
         let FluxModuleKernelSpec::CentralUpwind {
@@ -1673,14 +1794,14 @@ fn apply_slipwall_velocity_reflection(
     let is_boundary = Expr::ident("is_boundary");
     let boundary_type = Expr::ident("boundary_type");
 
-    // Wall and SlipWall: enforce no-penetration for convective fluxes by projecting out the
+    // SlipWall: enforce no-penetration for convective fluxes by projecting out the
     // normal component at boundary faces:
     //   u_patch = u_owner - (u_owner · n) n
     //
-    // Note: No-slip (Wall) tangential constraints are enforced by the diffusion terms via the
-    // BC table; the flux module focuses on preventing spurious normal mass flux.
-    let is_wall_or_slipwall = is_boundary.clone()
-        & (boundary_type.clone().eq(Expr::from(3u32)) | boundary_type.clone().eq(Expr::from(4u32)));
+    // For Wall (no-slip) boundaries, respect the scalar BC table (typically Dirichlet=0 for
+    // both components). Projecting the owner-cell velocity would incorrectly introduce
+    // tangential slip into the convective flux.
+    let is_slipwall = is_boundary.clone() & boundary_type.clone().eq(Expr::from(4u32));
     let ux = state_component_at(layout, buffer, Expr::ident("owner"), field, 0);
     let uy = state_component_at(layout, buffer, Expr::ident("owner"), field, 1);
     let nx = Expr::ident("normal_vec").field("x");
@@ -1693,7 +1814,7 @@ fn apply_slipwall_velocity_reflection(
         _ => return base,
     };
 
-    dsl::select(base, slip_projected, is_wall_or_slipwall)
+    dsl::select(base, slip_projected, is_slipwall)
 }
 
 fn lower_scalar<'a>(expr: &'a FaceScalarExpr, ctx: &LowerCtx<'a>) -> Expr {

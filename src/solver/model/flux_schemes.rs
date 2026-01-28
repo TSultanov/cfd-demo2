@@ -398,25 +398,6 @@ fn euler_central_upwind(
         )
     };
 
-    // Total energy density reconstructed from primitive variables:
-    //   rho_e = p/(gamma-1) + 0.5 * rho * |u|^2
-    //
-    // OpenFOAM's rhoCentralFoam reconstructs rho/U/T and derives energy/enthalpy consistently
-    // at faces. Doing the same here improves agreement vs OpenFOAM reference cases.
-    let rho_e = |side: FaceSide| {
-        let gm1 = S::Max(Box::new(S::constant("eos_gm1")), Box::new(S::lit(1e-12)));
-        let u = u_vec(side);
-        let u2 = S::Dot(Box::new(u.clone()), Box::new(u));
-        let ke = S::Mul(
-            Box::new(S::Mul(Box::new(S::lit(0.5)), Box::new(rho(side)))),
-            Box::new(u2),
-        );
-        S::Add(
-            Box::new(S::Div(Box::new(p(side)), Box::new(gm1))),
-            Box::new(ke),
-        )
-    };
-
     let rho_u_x = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ex.clone()));
     let rho_u_y = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ey.clone()));
     let u_n = |side: FaceSide| S::Dot(Box::new(u_vec(side)), Box::new(V::normal()));
@@ -496,8 +477,6 @@ fn euler_central_upwind(
         )
     };
 
-    let c_eff = |side: FaceSide| S::Sqrt(Box::new(c_eff2(side)));
-
     // --- Low-Mach pressure coupling ---
     //
     // At low Mach numbers, a purely density-based continuity flux can decouple pressure on
@@ -514,26 +493,8 @@ fn euler_central_upwind(
     // low Mach numbers (since c_eff^2 ~ O(|u|^2)), causing unphysical density states and solver
     // instability.
     let c_couple2_safe = |side: FaceSide| S::Max(Box::new(c2(side)), Box::new(S::lit(1e-12)));
-    let rho_diss = |side: FaceSide| {
-        // Only apply the pressure-coupling fix when low-Mach preconditioning is explicitly enabled.
-        // This keeps the default (low_mach_model=Off) behavior aligned with OpenFOAM's rhoCentralFoam.
-        let coupling = S::Mul(
-            Box::new(low_mach_enabled.clone()),
-            Box::new(pressure_coupling_alpha.clone()),
-        );
-        S::Add(
-            Box::new(rho(side)),
-            Box::new(S::Mul(
-                Box::new(coupling),
-                Box::new(S::Div(Box::new(p(side)), Box::new(c_couple2_safe(side)))),
-            )),
-        )
-    };
-
     let n_x = S::Dot(Box::new(V::normal()), Box::new(ex.clone()));
     let n_y = S::Dot(Box::new(V::normal()), Box::new(ey.clone()));
-
-    let flux_mass = |side: FaceSide| S::Mul(Box::new(rho(side)), Box::new(u_n(side)));
 
     // OpenFOAM rhoCentralFoam viscous split:
     //
@@ -617,195 +578,335 @@ fn euler_central_upwind(
         )),
     );
 
-    let dux_dx = S::Dot(Box::new(grad_u_x_face.clone()), Box::new(ex.clone()));
-    let dux_dy = S::Dot(Box::new(grad_u_x_face.clone()), Box::new(ey.clone()));
-    let duy_dx = S::Dot(Box::new(grad_u_y_face.clone()), Box::new(ex.clone()));
-    let duy_dy = S::Dot(Box::new(grad_u_y_face.clone()), Box::new(ey.clone()));
-    let div_u = S::Add(Box::new(dux_dx.clone()), Box::new(duy_dy.clone()));
     let two_thirds = S::lit(2.0 / 3.0);
 
-    // OpenFOAM details:
-    // - `fvc::grad(U)` returns a tensor `G` with indices `G_ij = ∂u_j/∂x_i` (direction-first).
-    // - `tauMC = muEff*dev2(T(G))` therefore corresponds to `tauMC_ij = ∂u_i/∂x_j - 2/3 δ_ij div(u)`
-    //   (the transpose gradient, with the 2/3 deviatoric correction).
-    // - `fvc::div(tauMC)` uses a Gauss div-scheme based on `Sf & tauMC`, which contracts `Sf_i*tauMC_ij`.
-    //   This produces the `∇(div u)` contribution required for the full Newtonian viscous stress.
+    // OpenFOAM rhoCentralFoam viscous split uses:
+    //   tauMC = muEff*dev2(T(fvc::grad(U)))
+    //   - fvm::laplacian(muEff, U)
+    //   - fvc::div(tauMC)
     //
-    // Here we form the corresponding face flux contribution per unit area: (tauMC · n).
-    // `fvc::div(tauMC)` uses a Gauss div-scheme based on `Sf & tauMC`.
-    // This corresponds to the flux contribution (per unit area): (n · tauMC), i.e.
-    //   (n_i * tauMC_{i j}) for momentum component j.
+    // `dev2(T(grad(U)))` corresponds to the full deviatoric Newtonian stress:
+    //   tau = mu * (grad(U) + grad(U)^T - 2/3 I div(U))
     //
-    // With tauMC = muEff * dev2(T(grad(U))) and OpenFOAM's tensor conventions, this yields:
-    //   flux_x = muEff * [ (d u_x/dx - 2/3 divU) n_x + (d u_x/dy) n_y ]
-    //   flux_y = muEff * [ (d u_y/dx) n_x + (d u_y/dy - 2/3 divU) n_y ]
-    let tau_mc_dot_n_x = S::Mul(
-        Box::new(visc_mu.clone()),
-        Box::new(S::Add(
-            Box::new(S::Mul(
-                Box::new(S::Sub(
-                    Box::new(dux_dx),
-                    Box::new(S::Mul(
-                        Box::new(two_thirds.clone()),
-                        Box::new(div_u.clone()),
-                    )),
-                )),
-                Box::new(n_x.clone()),
-            )),
-            Box::new(S::Mul(Box::new(dux_dy.clone()), Box::new(n_y.clone()))),
-        )),
-    );
-    let tau_mc_dot_n_y = S::Mul(
-        Box::new(visc_mu),
-        Box::new(S::Add(
-            Box::new(S::Mul(Box::new(duy_dx), Box::new(n_x.clone()))),
-            Box::new(S::Mul(
-                Box::new(S::Sub(
-                    Box::new(duy_dy),
-                    Box::new(S::Mul(Box::new(two_thirds), Box::new(div_u))),
-                )),
-                Box::new(n_y.clone()),
-            )),
-        )),
-    );
+    // The Gauss div scheme forms the face traction via `Sf & tauMC` (units: force).
+    // Here we build the equivalent traction per unit area (tau · n) from face gradients,
+    // then multiply by area when assembling integrated fluxes.
+    // OpenFOAM's `dotInterpolate(Sf, tauMC)` interpolates the *cell-centered* tauMC tensor to
+    // faces and then contracts with Sf. Mirror that by building tauMC from each side's stored
+    // cell gradient and linearly interpolating the resulting traction.
+    let tau_mc_dot_n_components = |side: FaceSide| {
+        let grad_u_x_side = V::state_vec2(side, "grad_u_x");
+        let grad_u_y_side = V::state_vec2(side, "grad_u_y");
 
-    let flux_mom_x = |side: FaceSide| {
-        S::Sub(
-            Box::new(S::Add(
-                Box::new(S::Mul(Box::new(rho_u_x(side)), Box::new(u_n(side)))),
-                Box::new(S::Mul(Box::new(p(side)), Box::new(n_x.clone()))),
+        let dux_dx_s = S::Dot(Box::new(grad_u_x_side.clone()), Box::new(ex.clone()));
+        let dux_dy_s = S::Dot(Box::new(grad_u_x_side), Box::new(ey.clone()));
+        let duy_dx_s = S::Dot(Box::new(grad_u_y_side.clone()), Box::new(ex.clone()));
+        let duy_dy_s = S::Dot(Box::new(grad_u_y_side), Box::new(ey.clone()));
+
+        let div_u_s = S::Add(Box::new(dux_dx_s.clone()), Box::new(duy_dy_s.clone()));
+        let tau_xy_s = S::Add(Box::new(dux_dy_s), Box::new(duy_dx_s));
+        let tau_xx_s = S::Sub(
+            Box::new(S::Mul(Box::new(S::lit(2.0)), Box::new(dux_dx_s))),
+            Box::new(S::Mul(
+                Box::new(two_thirds.clone()),
+                Box::new(div_u_s.clone()),
             )),
-            Box::new(tau_mc_dot_n_x.clone()),
-        )
-    };
-    let flux_mom_y = |side: FaceSide| {
-        S::Sub(
+        );
+        let tau_yy_s = S::Sub(
+            Box::new(S::Mul(Box::new(S::lit(2.0)), Box::new(duy_dy_s))),
+            Box::new(S::Mul(Box::new(two_thirds.clone()), Box::new(div_u_s))),
+        );
+
+        let traction_x = S::Mul(
+            Box::new(visc_mu.clone()),
             Box::new(S::Add(
-                Box::new(S::Mul(Box::new(rho_u_y(side)), Box::new(u_n(side)))),
-                Box::new(S::Mul(Box::new(p(side)), Box::new(n_y.clone()))),
+                Box::new(S::Mul(Box::new(tau_xx_s.clone()), Box::new(n_x.clone()))),
+                Box::new(S::Mul(Box::new(tau_xy_s.clone()), Box::new(n_y.clone()))),
             )),
-            Box::new(tau_mc_dot_n_y.clone()),
-        )
+        );
+        let traction_y = S::Mul(
+            Box::new(visc_mu.clone()),
+            Box::new(S::Add(
+                Box::new(S::Mul(Box::new(tau_xy_s), Box::new(n_x.clone()))),
+                Box::new(S::Mul(Box::new(tau_yy_s), Box::new(n_y.clone()))),
+            )),
+        );
+
+        (traction_x, traction_y)
     };
 
-    // Wave speed bounds (OpenFOAM rhoCentralFoam Kurganov).
-    // These are used by the central-upwind numerical flux and also for the viscous-work
-    // energy correction (sigmaDotU).
-    let a_plus = S::Max(
-        Box::new(S::lit(0.0)),
-        Box::new(S::Max(
-            Box::new(S::Add(
-                Box::new(u_n(FaceSide::Owner)),
-                Box::new(c_eff(FaceSide::Owner)),
-            )),
-            Box::new(S::Add(
-                Box::new(u_n(FaceSide::Neighbor)),
-                Box::new(c_eff(FaceSide::Neighbor)),
-            )),
-        )),
-    );
-    let a_minus = S::Min(
-        Box::new(S::lit(0.0)),
-        Box::new(S::Min(
-            Box::new(S::Sub(
-                Box::new(u_n(FaceSide::Owner)),
-                Box::new(c_eff(FaceSide::Owner)),
-            )),
-            Box::new(S::Sub(
-                Box::new(u_n(FaceSide::Neighbor)),
-                Box::new(c_eff(FaceSide::Neighbor)),
-            )),
-        )),
-    );
+    let (tau_mc_dot_n_x_own, tau_mc_dot_n_y_own) = tau_mc_dot_n_components(FaceSide::Owner);
+    let (tau_mc_dot_n_x_neigh, tau_mc_dot_n_y_neigh) = tau_mc_dot_n_components(FaceSide::Neighbor);
+
+    let tau_mc_dot_n_x = S::Lerp(Box::new(tau_mc_dot_n_x_neigh), Box::new(tau_mc_dot_n_x_own));
+    let tau_mc_dot_n_y = S::Lerp(Box::new(tau_mc_dot_n_y_neigh), Box::new(tau_mc_dot_n_y_own));
 
     // Viscous work term for total energy (OpenFOAM rhoCentralFoam):
     //   solve(ddt(rhoE) + div(phiEp) - div(sigmaDotU))
     // where:
-    //   sigmaDotU = ( muEff*magSf*snGrad(U) + dotInterpolate(Sf, tauMC) ) & (a_pos*U_pos + a_neg*U_neg)
+    //   sigmaDotU = ( interpolate(muEff)*magSf*snGrad(U) + dotInterpolate(Sf, tauMC) )
+    //              & (a_pos*U_pos + a_neg*U_neg)
     //
-    // We add this as a *face-flux correction* (same value on both sides) so it is not
-    // upwinded/dissipated by the central-upwind blending.
-    let denom_speed = S::Max(
-        Box::new(S::Sub(Box::new(a_plus.clone()), Box::new(a_minus.clone()))),
+    // We compute `sigmaDotU` later in the integrated-flux section using the same `a_pos/a_neg`
+    // weights as OpenFOAM's Kurganov flux split.
+
+    // --- OpenFOAM rhoCentralFoam-style integrated Kurganov fluxes ---
+    //
+    // OpenFOAM forms Kurganov fluxes using Sf-weighted wave speeds and blends the pos/neg
+    // directed-interpolated states:
+    //   phi   = aphiv_pos*rho_pos + aphiv_neg*rho_neg
+    //   phiUp = aphiv_pos*rhoU_pos + aphiv_neg*rhoU_neg + (a_pos*p_pos + a_neg*p_neg)*Sf
+    //   phiEp = aphiv_pos*(rhoE_pos + p_pos) + aphiv_neg*(rhoE_neg + p_neg) + aSf*(p_pos - p_neg)
+    // and solves energy with an explicit viscous-work correction -div(sigmaDotU).
+    //
+    // We compute the same integrated face fluxes directly and return them as
+    // `ScalarPerComponent` entries so WGSL writes them verbatim into the packed flux table.
+    let sf = V::MulScalar(Box::new(V::normal()), Box::new(S::area()));
+    let sf_x = S::Mul(Box::new(S::area()), Box::new(n_x.clone()));
+    let sf_y = S::Mul(Box::new(S::area()), Box::new(n_y.clone()));
+
+    let phiv_pos = S::Dot(Box::new(u_vec(FaceSide::Owner)), Box::new(sf.clone()));
+    let phiv_neg = S::Dot(Box::new(u_vec(FaceSide::Neighbor)), Box::new(sf));
+
+    // Match OpenFOAM: reconstruct the acoustic speed `c` as a scalar field using the same
+    // `reconstruct(T)` scheme (vanLeer) and then multiply by `magSf`.
+    //
+    // For a perfect gas with constant gamma and R:
+    //   c = sqrt(gamma * R * T)
+    // and:
+    //   grad(c) = 0.5 * (gamma * R / c) * grad(T)
+    let c_cell = |side: FaceSide| {
+        S::Sqrt(Box::new(S::Mul(
+            Box::new(S::Mul(
+                Box::new(S::constant("eos_gamma")),
+                Box::new(S::constant("eos_r")),
+            )),
+            Box::new(t_raw(side)),
+        )))
+    };
+    let grad_c = |side: FaceSide| {
+        let denom = S::Max(Box::new(c_cell(side)), Box::new(S::lit(1e-12)));
+        let factor = S::Div(
+            Box::new(S::Mul(
+                Box::new(S::lit(0.5)),
+                Box::new(S::Mul(
+                    Box::new(S::constant("eos_gamma")),
+                    Box::new(S::constant("eos_r")),
+                )),
+            )),
+            Box::new(denom),
+        );
+        V::MulScalar(Box::new(V::state_vec2(side, "grad_T")), Box::new(factor))
+    };
+    let c_face = |side: FaceSide| match reconstruction {
+        Scheme::SecondOrderUpwindVanLeer => reconstruct_vanleer_scalar(
+            side,
+            c_cell(FaceSide::Owner),
+            c_cell(FaceSide::Neighbor),
+            grad_c(FaceSide::Owner),
+            grad_c(FaceSide::Neighbor),
+        ),
+        _ => reconstruct_scalar(side, c_cell(side), c_cell(other_side(side)), grad_c(side)),
+    };
+
+    let c_sf_pos = S::Mul(Box::new(c_face(FaceSide::Owner)), Box::new(S::area()));
+    let c_sf_neg = S::Mul(Box::new(c_face(FaceSide::Neighbor)), Box::new(S::area()));
+
+    let ap = S::Max(
+        Box::new(S::Max(
+            Box::new(S::Add(
+                Box::new(phiv_pos.clone()),
+                Box::new(c_sf_pos.clone()),
+            )),
+            Box::new(S::Add(
+                Box::new(phiv_neg.clone()),
+                Box::new(c_sf_neg.clone()),
+            )),
+        )),
+        Box::new(S::lit(0.0)),
+    );
+    let am = S::Min(
+        Box::new(S::Min(
+            Box::new(S::Sub(
+                Box::new(phiv_pos.clone()),
+                Box::new(c_sf_pos.clone()),
+            )),
+            Box::new(S::Sub(
+                Box::new(phiv_neg.clone()),
+                Box::new(c_sf_neg.clone()),
+            )),
+        )),
+        Box::new(S::lit(0.0)),
+    );
+
+    let denom_sf = S::Max(
+        Box::new(S::Sub(Box::new(ap.clone()), Box::new(am.clone()))),
         Box::new(S::lit(1e-6)),
     );
-    let a_pos = S::Div(Box::new(a_plus.clone()), Box::new(denom_speed));
-    let a_neg = S::Sub(Box::new(S::lit(1.0)), Box::new(a_pos.clone()));
-    let u_sigma = V::Add(
-        Box::new(V::MulScalar(
-            Box::new(u_vec(FaceSide::Owner)),
-            Box::new(a_pos.clone()),
-        )),
-        Box::new(V::MulScalar(
-            Box::new(u_vec(FaceSide::Neighbor)),
-            Box::new(a_neg.clone()),
-        )),
-    );
+    let a_pos_sf = S::Div(Box::new(ap.clone()), Box::new(denom_sf.clone()));
+    let a_neg_sf = S::Sub(Box::new(S::lit(1.0)), Box::new(a_pos_sf.clone()));
+    let a_sf = S::Mul(Box::new(am.clone()), Box::new(a_pos_sf.clone()));
 
     // Approximate `snGrad(U)` via (grad(U) · n) at the face (matches Gauss on orthogonal meshes).
     let sn_grad_u_x_face = S::Dot(Box::new(grad_u_x_face.clone()), Box::new(V::normal()));
     let sn_grad_u_y_face = S::Dot(Box::new(grad_u_y_face.clone()), Box::new(V::normal()));
     let sn_grad_u_face = V::vec2(sn_grad_u_x_face, sn_grad_u_y_face);
 
+    // OpenFOAM uses the same `a_pos/a_neg` (Sf-weighted split) for `sigmaDotU`.
+    let u_sigma = V::Add(
+        Box::new(V::MulScalar(
+            Box::new(u_vec(FaceSide::Owner)),
+            Box::new(a_pos_sf.clone()),
+        )),
+        Box::new(V::MulScalar(
+            Box::new(u_vec(FaceSide::Neighbor)),
+            Box::new(a_neg_sf.clone()),
+        )),
+    );
+
     let traction_tau = V::vec2(tau_mc_dot_n_x.clone(), tau_mc_dot_n_y.clone());
     let traction_lapl = V::MulScalar(Box::new(sn_grad_u_face), Box::new(S::constant("viscosity")));
     let traction = V::Add(Box::new(traction_lapl), Box::new(traction_tau));
     let sigma_dot_u_per_area = S::Dot(Box::new(traction), Box::new(u_sigma));
 
-    let flux_energy = |side: FaceSide| {
-        S::Sub(
-            Box::new(S::Mul(
-                Box::new(S::Add(Box::new(rho_e(side)), Box::new(p(side)))),
-                Box::new(u_n(side)),
-            )),
-            Box::new(sigma_dot_u_per_area.clone()),
+    let aphiv_pos = S::Sub(
+        Box::new(S::Mul(
+            Box::new(phiv_pos.clone()),
+            Box::new(a_pos_sf.clone()),
+        )),
+        Box::new(a_sf.clone()),
+    );
+    let aphiv_neg = S::Add(
+        Box::new(S::Mul(
+            Box::new(phiv_neg.clone()),
+            Box::new(a_neg_sf.clone()),
+        )),
+        Box::new(a_sf.clone()),
+    );
+
+    let phi = {
+        let rho_pos = rho(FaceSide::Owner);
+        let rho_neg = rho(FaceSide::Neighbor);
+        S::Add(
+            Box::new(S::Mul(Box::new(aphiv_pos.clone()), Box::new(rho_pos))),
+            Box::new(S::Mul(Box::new(aphiv_neg.clone()), Box::new(rho_neg))),
         )
     };
 
-    let mut u_left = Vec::new();
-    let mut u_right = Vec::new();
-    let mut flux_left = Vec::new();
-    let mut flux_right = Vec::new();
+    let phi_u_x = {
+        let rho_u_pos = rho_u_x(FaceSide::Owner);
+        let rho_u_neg = rho_u_x(FaceSide::Neighbor);
+        S::Add(
+            Box::new(S::Mul(Box::new(aphiv_pos.clone()), Box::new(rho_u_pos))),
+            Box::new(S::Mul(Box::new(aphiv_neg.clone()), Box::new(rho_u_neg))),
+        )
+    };
+    let phi_u_y = {
+        let rho_u_pos = rho_u_y(FaceSide::Owner);
+        let rho_u_neg = rho_u_y(FaceSide::Neighbor);
+        S::Add(
+            Box::new(S::Mul(Box::new(aphiv_pos.clone()), Box::new(rho_u_pos))),
+            Box::new(S::Mul(Box::new(aphiv_neg.clone()), Box::new(rho_u_neg))),
+        )
+    };
 
+    let p_pos = p(FaceSide::Owner);
+    let p_neg = p(FaceSide::Neighbor);
+    let p_blend = S::Add(
+        Box::new(S::Mul(Box::new(a_pos_sf.clone()), Box::new(p_pos.clone()))),
+        Box::new(S::Mul(Box::new(a_neg_sf.clone()), Box::new(p_neg.clone()))),
+    );
+
+    let phi_up_x = {
+        let conv = S::Add(
+            Box::new(phi_u_x),
+            Box::new(S::Mul(Box::new(p_blend.clone()), Box::new(sf_x))),
+        );
+        // Subtract the explicit tauMC traction contribution (integrated over face area).
+        S::Sub(
+            Box::new(conv),
+            Box::new(S::Mul(
+                Box::new(tau_mc_dot_n_x.clone()),
+                Box::new(S::area()),
+            )),
+        )
+    };
+    let phi_up_y = {
+        let conv = S::Add(
+            Box::new(phi_u_y),
+            Box::new(S::Mul(Box::new(p_blend), Box::new(sf_y))),
+        );
+        S::Sub(
+            Box::new(conv),
+            Box::new(S::Mul(
+                Box::new(tau_mc_dot_n_y.clone()),
+                Box::new(S::area()),
+            )),
+        )
+    };
+
+    let phi_ep = {
+        let gm1 = S::Max(Box::new(S::constant("eos_gm1")), Box::new(S::lit(1e-12)));
+
+        let rho_pos = rho(FaceSide::Owner);
+        let rho_neg = rho(FaceSide::Neighbor);
+        let u_pos = u_vec(FaceSide::Owner);
+        let u_neg = u_vec(FaceSide::Neighbor);
+        let u2_pos = S::Dot(Box::new(u_pos.clone()), Box::new(u_pos));
+        let u2_neg = S::Dot(Box::new(u_neg.clone()), Box::new(u_neg));
+
+        let rho_e_pos = S::Add(
+            Box::new(S::Div(Box::new(p_pos.clone()), Box::new(gm1.clone()))),
+            Box::new(S::Mul(
+                Box::new(S::Mul(Box::new(S::lit(0.5)), Box::new(rho_pos.clone()))),
+                Box::new(u2_pos),
+            )),
+        );
+        let rho_e_neg = S::Add(
+            Box::new(S::Div(Box::new(p_neg.clone()), Box::new(gm1))),
+            Box::new(S::Mul(
+                Box::new(S::Mul(Box::new(S::lit(0.5)), Box::new(rho_neg.clone()))),
+                Box::new(u2_neg),
+            )),
+        );
+
+        let term_pos = S::Add(Box::new(rho_e_pos), Box::new(p_pos.clone()));
+        let term_neg = S::Add(Box::new(rho_e_neg), Box::new(p_neg.clone()));
+
+        let conv = S::Add(
+            Box::new(S::Mul(Box::new(aphiv_pos), Box::new(term_pos))),
+            Box::new(S::Mul(Box::new(aphiv_neg), Box::new(term_neg))),
+        );
+
+        let pressure_jump = S::Sub(Box::new(p_pos), Box::new(p_neg));
+        let phi_ep_conv = S::Add(
+            Box::new(conv),
+            Box::new(S::Mul(Box::new(a_sf), Box::new(pressure_jump))),
+        );
+
+        // Subtract viscous work (sigmaDotU) as an integrated face-power flux.
+        S::Sub(
+            Box::new(phi_ep_conv),
+            Box::new(S::Mul(Box::new(sigma_dot_u_per_area), Box::new(S::area()))),
+        )
+    };
+
+    let mut flux = Vec::new();
     for name in &components {
         if name == rho_name {
-            u_left.push(rho_diss(FaceSide::Owner));
-            u_right.push(rho_diss(FaceSide::Neighbor));
-            flux_left.push(flux_mass(FaceSide::Owner));
-            flux_right.push(flux_mass(FaceSide::Neighbor));
+            flux.push(phi.clone());
         } else if name == &format!("{rho_u_name}_x") {
-            u_left.push(rho_u_x(FaceSide::Owner));
-            u_right.push(rho_u_x(FaceSide::Neighbor));
-            flux_left.push(flux_mom_x(FaceSide::Owner));
-            flux_right.push(flux_mom_x(FaceSide::Neighbor));
+            flux.push(phi_up_x.clone());
         } else if name == &format!("{rho_u_name}_y") {
-            u_left.push(rho_u_y(FaceSide::Owner));
-            u_right.push(rho_u_y(FaceSide::Neighbor));
-            flux_left.push(flux_mom_y(FaceSide::Owner));
-            flux_right.push(flux_mom_y(FaceSide::Neighbor));
+            flux.push(phi_up_y.clone());
         } else if name == rho_e_name {
-            u_left.push(rho_e(FaceSide::Owner));
-            u_right.push(rho_e(FaceSide::Neighbor));
-            flux_left.push(flux_energy(FaceSide::Owner));
-            flux_right.push(flux_energy(FaceSide::Neighbor));
+            flux.push(phi_ep.clone());
         } else {
             // Auxiliary coupled unknowns (e.g. primitive fields coupled via diffusion/constraints)
             // get zero face flux by default.
-            u_left.push(S::lit(0.0));
-            u_right.push(S::lit(0.0));
-            flux_left.push(S::lit(0.0));
-            flux_right.push(S::lit(0.0));
+            flux.push(S::lit(0.0));
         }
     }
 
-    Ok(FluxModuleKernelSpec::CentralUpwind {
-        reconstruction,
-        components,
-        u_left,
-        u_right,
-        flux_left,
-        flux_right,
-        a_plus,
-        a_minus,
-    })
+    Ok(FluxModuleKernelSpec::ScalarPerComponent { components, flux })
 }

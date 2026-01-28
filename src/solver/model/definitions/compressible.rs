@@ -441,7 +441,20 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
                 .expect("failed to build flux_module module"),
             crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
         ],
-        linear_solver: None,
+        // The compressible model couples conserved and primitive fields in a single solve.
+        // Use tighter defaults than the generic solver so small-magnitude velocity updates are
+        // not lost when residual norms are dominated by large pressure/energy components.
+        linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
+            preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Default,
+            solver: crate::solver::model::linear_solver::ModelLinearSolverSettings {
+                solver_type: crate::solver::model::linear_solver::ModelLinearSolverType::Fgmres {
+                    max_restart: 60,
+                },
+                max_iters: 200,
+                tolerance: 1e-10,
+                tolerance_abs: 1e-12,
+            },
+        }),
         primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
     };
 

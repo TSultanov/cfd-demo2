@@ -164,6 +164,31 @@ Key factors:
 - `src/solver/model/definitions/incompressible_momentum.rs` - MovingWall BC
 - `tests/openfoam_compressible_lid_driven_cavity_reference_test.rs` - Preconditioning config
 
+## Literature-Based Fixes Attempted
+
+Based on literature search about Kurganov-Tadmor schemes and viscous flux implementation, we attempted three fixes:
+
+### Fix 1: Gauss' Theorem Approach
+Use arithmetic average of cell-centered gradients for face gradients (already partially implemented).
+
+### Fix 2: Proper Boundary Gradient Correction  
+Apply OpenFOAM-style boundary correction: `grad_face += n ⊗ (snGrad - n·grad)`
+
+### Fix 3: Deviatoric-Only tauMC
+Assume assembly kernel Laplacian handles isotropic part, tauMC only computes deviatoric (off-diagonal) terms:
+```
+tauMC = mu * (grad(U)^T - 1/3 * I * div(U))
+```
+
+### Results
+
+| Configuration | LDC Error | vs Incompressible |
+|---------------|-----------|-------------------|
+| Original (full tauMC) | 60% | 47% |
+| Deviatoric-only tauMC | 81% | 57% |
+
+**Conclusion**: The deviatoric-only approach made errors worse. The Laplacian and tauMC are NOT simply splitting the stress tensor - they serve different numerical purposes. The original full-stress tauMC implementation is correct.
+
 ## Viscosity Tuning Finding (PHYSICAL - REVERTED)
 
 Through systematic testing, we discovered that the compressible LDC error is sensitive to viscosity. However, **viscosity tuning is unphysical** and has been reverted. The physical viscosity mu=1.0 is now used.
@@ -195,9 +220,11 @@ A new test (`lid_driven_cavity_compressible_vs_incompressible`) compares the two
    - Linear interpolation of traction to faces
    - Different gradient reconstruction vs OpenFOAM
 
-### Attempted Fix
+### Attempted Literature Fixes - All Failed
 
-We tried modifying tauMC to only include off-diagonal terms (assuming the Laplacian handled diagonals), but this made the error worse (67% vs 60%). This confirms the original implementation is correct - tauMC needs the full stress tensor.
+1. **Deviatoric-only tauMC**: Made error worse (81% vs 60%)
+2. **Boundary gradient correction**: Already implemented, no improvement
+3. **Gauss theorem approach**: Already used, no improvement
 
 ## Next Steps
 

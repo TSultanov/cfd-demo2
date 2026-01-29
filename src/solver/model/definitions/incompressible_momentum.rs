@@ -126,6 +126,12 @@ pub fn incompressible_momentum_model() -> ModelSpec {
                 GpuBoundaryType::SlipWall,
                 2,
                 BoundaryCondition::zero_gradient(si::INV_TIME),
+            )
+            // MovingWall: Dirichlet velocity (value set at runtime via boundary table API).
+            .set_uniform(
+                GpuBoundaryType::MovingWall,
+                2,
+                BoundaryCondition::dirichlet(0.0, si::VELOCITY),
             ),
     );
     boundaries.set_field(
@@ -144,6 +150,12 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             )
             .set_uniform(
                 GpuBoundaryType::SlipWall,
+                1,
+                BoundaryCondition::zero_gradient(si::PRESSURE_GRADIENT),
+            )
+            // MovingWall: zero-gradient pressure (same as regular wall).
+            .set_uniform(
+                GpuBoundaryType::MovingWall,
                 1,
                 BoundaryCondition::zero_gradient(si::PRESSURE_GRADIENT),
             )

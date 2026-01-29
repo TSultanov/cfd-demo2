@@ -1,9 +1,10 @@
 #[path = "openfoam_reference/common.rs"]
 mod common;
 
+use cfd2::solver::gpu::enums::GpuBoundaryType;
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::model::helpers::{
-    SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
+    SolverFieldAliasesExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
@@ -20,7 +21,7 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     let length = 1.0;
     let height = 1.0;
 
-    // Use `Inlet` on the moving lid so `set_inlet_velocity` drives the top boundary.
+    // Use `MovingWall` on the moving lid to properly model the lid-driven cavity.
     let mesh = generate_structured_rect_mesh(
         nx,
         ny,
@@ -29,7 +30,7 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
         BoundaryType::Wall,
         BoundaryType::Wall,
         BoundaryType::Wall,
-        BoundaryType::Inlet,
+        BoundaryType::MovingWall,
     );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
@@ -50,7 +51,8 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     solver.set_dtau(0.0).unwrap();
     solver.set_density(1.0).unwrap();
     solver.set_viscosity(0.01).unwrap();
-    solver.set_inlet_velocity(1.0).unwrap();
+    // Set moving wall velocity for the lid (u_x = 1.0, u_y = 0.0)
+    solver.set_boundary_vec2(GpuBoundaryType::MovingWall, "U", [1.0, 0.0]).unwrap();
     solver.set_alpha_u(0.7).unwrap();
     solver.set_alpha_p(0.3).unwrap();
     solver.set_outer_iters(50).unwrap();

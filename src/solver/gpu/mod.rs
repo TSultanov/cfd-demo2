@@ -9,8 +9,11 @@ pub mod linear_solver;
 pub(crate) mod lowering;
 pub mod modules;
 pub(crate) mod program;
+pub mod dispatch_counter;
 pub mod profiling;
 pub mod readback;
+#[cfg(feature = "profiling")]
+pub mod gpu_timestamp_profiler;
 pub mod recipe;
 pub(crate) mod runtime;
 pub(crate) mod runtime_common;

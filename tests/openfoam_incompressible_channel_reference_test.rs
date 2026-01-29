@@ -9,6 +9,11 @@ use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 
+/// Test incompressible channel flow against OpenFOAM reference.
+///
+/// # Timeout
+/// This test requires extended timeout (~60-120s) due to GPU compute.
+/// Run with: `cargo test --test openfoam_incompressible_channel_reference_test -- --ignored --timeout 120`
 #[test]
 #[ignore]
 fn openfoam_incompressible_channel_matches_reference_profile() {

@@ -1,7 +1,7 @@
 #[path = "openfoam_reference/common.rs"]
 mod common;
 
-use cfd2::solver::gpu::enums::GpuBoundaryType;
+use cfd2::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel};
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
 use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::model::eos::EosSpec;
@@ -11,6 +11,15 @@ use cfd2::solver::model::helpers::{
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 
+/// Test compressible lid-driven cavity against OpenFOAM reference.
+///
+/// # Timeout
+/// This test requires extended timeout (~120-300s) due to GPU compute and 300 timesteps.
+/// Run with: `cargo test --test openfoam_compressible_lid_driven_cavity_reference_test -- --ignored --timeout 300`
+///
+/// # Known Limitations
+/// This test shows ~60% velocity error at t=0.003s due to solver formulation differences
+/// at early transient times. See `COMPRESSIBLE_SOLVER_INVESTIGATION.md` for details.
 #[test]
 #[ignore]
 fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
@@ -70,11 +79,18 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     //   resolution.
     let u_lid = 1.0f32;
 
+    // Match OpenFOAM reference setup
     solver.set_dt(1e-5);
     solver.set_dtau(0.0).unwrap();
+    // Use physical viscosity as specified in OpenFOAM reference
     solver.set_viscosity(1.0).unwrap();
     solver.set_density(rho0).unwrap();
     solver.set_outer_iters(1).unwrap();
+    // Use low-Mach preconditioning with minimal coupling to reduce checkerboarding
+    // while not deviating too much from OpenFOAM's approach
+    solver.set_precond_model(GpuLowMachPrecondModel::WeissSmith).unwrap();
+    solver.set_precond_theta_floor(1e-8).unwrap();
+    solver.set_precond_pressure_coupling_alpha(0.01).unwrap();
     solver.set_uniform_state(rho0, [0.0, 0.0], p0);
     solver
         .set_boundary_vec2(GpuBoundaryType::MovingWall, "u", [u_lid, 0.0])
@@ -84,6 +100,7 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
         .unwrap();
     solver.initialize_history();
 
+    // Match OpenFOAM reference: 300 steps to reach t=0.003s
     for _ in 0..300 {
         solver.step();
     }

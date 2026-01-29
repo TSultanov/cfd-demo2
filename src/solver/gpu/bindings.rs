@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: d22bb7dc6bf3622ea291a82f5cc43d389d7788b7af8331443db61c042006e099
+// SourceHash: e716485b9cc3746a0483bba646dd622f00b8ce9d08cbadba2775325bf4b01858
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -320,6 +320,27 @@ pub mod layout_asserts {
             ) == 68
         );
         assert!(std::mem::size_of::<generated::flux_module_compressible::Constants>() == 72);
+    };
+    const GENERATED_FLUX_MODULE_COMPRESSIBLE_LOW_MACH_PARAMS_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::LowMachParams, model) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_compressible::LowMachParams,
+                theta_floor
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_compressible::LowMachParams,
+                pressure_coupling_alpha
+            ) == 8
+        );
+        assert!(
+            std::mem::offset_of!(generated::flux_module_compressible::LowMachParams, _pad0) == 12
+        );
+        assert!(std::mem::size_of::<generated::flux_module_compressible::LowMachParams>() == 16);
     };
     const GENERATED_FLUX_MODULE_GRADIENTS_COMPRESSIBLE_VECTOR2_ASSERTS: () = {
         assert!(
@@ -3522,6 +3543,8 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for generated::flux_module_compressible::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::flux_module_compressible::Constants {}
     unsafe impl bytemuck::Pod for generated::flux_module_compressible::Constants {}
+    unsafe impl bytemuck::Zeroable for generated::flux_module_compressible::LowMachParams {}
+    unsafe impl bytemuck::Pod for generated::flux_module_compressible::LowMachParams {}
     unsafe impl bytemuck::Zeroable for generated::flux_module_gradients_compressible::Vector2 {}
     unsafe impl bytemuck::Pod for generated::flux_module_gradients_compressible::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::flux_module_gradients_compressible::Constants {}
@@ -6383,6 +6406,33 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct LowMachParams {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub model: u32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub theta_floor: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub pressure_coupling_alpha: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub _pad0: f32,
+        }
+        impl LowMachParams {
+            pub const fn new(
+                model: u32,
+                theta_floor: f32,
+                pressure_coupling_alpha: f32,
+                _pad0: f32,
+            ) -> Self {
+                Self {
+                    model,
+                    theta_floor,
+                    pressure_coupling_alpha,
+                    _pad0,
+                }
+            }
+        }
         pub mod compute {
             use super::{_root, _root::*};
             pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -6580,6 +6630,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub state_old_old: wgpu::BufferBinding<'a>,
             pub fluxes: wgpu::BufferBinding<'a>,
             pub constants: wgpu::BufferBinding<'a>,
+            pub low_mach_params: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup1Entries<'a> {
@@ -6588,6 +6639,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub state_old_old: wgpu::BindGroupEntry<'a>,
             pub fluxes: wgpu::BindGroupEntry<'a>,
             pub constants: wgpu::BindGroupEntry<'a>,
+            pub low_mach_params: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup1Entries<'a> {
             pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
@@ -6612,15 +6664,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 4,
                         resource: wgpu::BindingResource::Buffer(params.constants),
                     },
+                    low_mach_params: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.low_mach_params),
+                    },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 5] {
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 6] {
                 [
                     self.state,
                     self.state_old,
                     self.state_old_old,
                     self.fluxes,
                     self.constants,
+                    self.low_mach_params,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -6687,6 +6744,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                                 has_dynamic_offset: false,
                                 min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
                                     _root::generated::flux_module_compressible::Constants,
+                                >(
+                                )
+                                    as _),
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(5): \"low_mach_params\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                                    _root::generated::flux_module_compressible::LowMachParams,
                                 >(
                                 )
                                     as _),
@@ -6863,6 +6935,13 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
+struct LowMachParams {
+    model: u32,
+    theta_floor: f32,
+    pressure_coupling_alpha: f32,
+    _pad0_: f32,
+}
+
 @group(0) @binding(0) 
 var<storage> face_owner: array<u32>;
 @group(0) @binding(1) 
@@ -6887,6 +6966,8 @@ var<storage> state_old_old: array<f32>;
 var<storage, read_write> fluxes: array<f32>;
 @group(1) @binding(4) 
 var<uniform> constants: Constants;
+@group(1) @binding(5) 
+var<uniform> low_mach_params: LowMachParams;
 @group(2) @binding(0) 
 var<storage> bc_kind: array<u32>;
 @group(2) @binding(1) 
@@ -7208,35 +7289,49 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _cse_62_ = (_e1031 * _cse_63_);
     let _cse_61_ = (_cse_62_ * lambda_other);
     let _cse_55_ = (_cse_56_ + _cse_61_);
-    phi_0_ = ((_cse_0_ * _e234) + (_cse_30_ * _e746));
-    let _e1046 = normal_vec.x;
-    phi_1_ = ((((_cse_0_ * _cse_4_.x) + (_cse_30_ * _cse_17_.x)) + ((_cse_33_ * area) * _e1046)) - (_cse_36_ * area));
-    let _e1059 = normal_vec.y;
-    phi_2_ = ((((_cse_0_ * _cse_4_.y) + (_cse_30_ * _cse_17_.y)) + ((_cse_33_ * area) * _e1059)) - (_cse_55_ * area));
-    let _e1067 = constants.eos_r;
-    let _e1072 = constants.eos_gm1_;
-    let _e1083 = constants.eos_r;
-    let _e1090 = constants.eos_r;
-    let _e1095 = constants.eos_gm1_;
-    let _e1106 = constants.eos_r;
-    let _e1114 = constants.eos_r;
-    let _e1119 = constants.eos_r;
-    let _e1125 = lambda;
-    let _e1130 = normal_vec;
-    let _e1141 = state[((owner_1 * 22u) + 10u)];
-    let _e1146 = normal_vec;
-    let _e1147 = lambda;
-    let _e1156 = normal_vec;
-    let _e1158 = lambda;
-    let _e1163 = normal_vec;
-    let _e1174 = state[((owner_1 * 22u) + 11u)];
-    let _e1179 = normal_vec;
-    let _e1180 = lambda;
-    let _e1189 = normal_vec;
-    let _e1194 = constants.viscosity;
-    phi_3_ = ((((_cse_0_ * (((((_e234 * _e1067) * _e121) / max(_e1072, 0.000000000001f)) + ((0.5f * _e234) * dot(_cse_3_, _cse_3_))) + ((_e234 * _e1083) * _e121))) + (_cse_30_ * (((((_e746 * _e1090) * _e524) / max(_e1095, 0.000000000001f)) + ((0.5f * _e746) * dot(_cse_16_, _cse_16_))) + ((_e746 * _e1106) * _e524)))) + (_cse_29_ * (((_e234 * _e1114) * _e121) - ((_e746 * _e1119) * _e524)))) - (dot(((vec2<f32>(dot((((_cse_43_ * _e1125) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e1130 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e1141) / max(dist, 0.000001f)) - dot(_e1146, ((_cse_43_ * _e1147) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e1156), dot((((_cse_47_ * _e1158) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e1163 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e1174) / max(dist, 0.000001f)) - dot(_e1179, ((_cse_47_ * _e1180) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e1189)) * _e1194) + vec2<f32>(_cse_36_, _cse_55_)), ((_cse_3_ * _cse_7_) + (_cse_16_ * _cse_32_))) * area));
-    let _e1207 = constants.scheme;
-    if ((_e1207 == 1u) && !(is_boundary_1)) {
+    let _e1038 = low_mach_params.pressure_coupling_alpha;
+    let _e1041 = constants.eos_r;
+    let _e1046 = constants.eos_r;
+    let _e1053 = constants.eos_gamma;
+    let _e1057 = constants.eos_r;
+    let _e1063 = constants.eos_dp_drho;
+    let _e1070 = low_mach_params.model;
+    let _e1088 = low_mach_params.pressure_coupling_alpha;
+    let _e1091 = constants.eos_r;
+    let _e1096 = constants.eos_r;
+    let _e1103 = constants.eos_gamma;
+    let _e1107 = constants.eos_r;
+    let _e1113 = constants.eos_dp_drho;
+    let _e1120 = low_mach_params.model;
+    phi_0_ = ((((_cse_0_ * _e234) + ((((_e1038 * (((_e234 * _e1041) * _e121) - ((_e746 * _e1046) * _e524))) / max((((((_e1053 * _e234) * _e1057) * _e121) / _e234) + _e1063), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e1070) - 2f)))))) * area)) + (_cse_30_ * _e746)) + ((((_e1088 * (((_e234 * _e1091) * _e121) - ((_e746 * _e1096) * _e524))) / max((((((_e1103 * _e746) * _e1107) * _e524) / _e746) + _e1113), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e1120) - 2f)))))) * area));
+    let _e1142 = normal_vec.x;
+    phi_1_ = ((((_cse_0_ * _cse_4_.x) + (_cse_30_ * _cse_17_.x)) + ((_cse_33_ * area) * _e1142)) - (_cse_36_ * area));
+    let _e1155 = normal_vec.y;
+    phi_2_ = ((((_cse_0_ * _cse_4_.y) + (_cse_30_ * _cse_17_.y)) + ((_cse_33_ * area) * _e1155)) - (_cse_55_ * area));
+    let _e1163 = constants.eos_r;
+    let _e1168 = constants.eos_gm1_;
+    let _e1179 = constants.eos_r;
+    let _e1186 = constants.eos_r;
+    let _e1191 = constants.eos_gm1_;
+    let _e1202 = constants.eos_r;
+    let _e1210 = constants.eos_r;
+    let _e1215 = constants.eos_r;
+    let _e1221 = lambda;
+    let _e1226 = normal_vec;
+    let _e1237 = state[((owner_1 * 22u) + 10u)];
+    let _e1242 = normal_vec;
+    let _e1243 = lambda;
+    let _e1252 = normal_vec;
+    let _e1254 = lambda;
+    let _e1259 = normal_vec;
+    let _e1270 = state[((owner_1 * 22u) + 11u)];
+    let _e1275 = normal_vec;
+    let _e1276 = lambda;
+    let _e1285 = normal_vec;
+    let _e1290 = constants.viscosity;
+    phi_3_ = ((((_cse_0_ * (((((_e234 * _e1163) * _e121) / max(_e1168, 0.000000000001f)) + ((0.5f * _e234) * dot(_cse_3_, _cse_3_))) + ((_e234 * _e1179) * _e121))) + (_cse_30_ * (((((_e746 * _e1186) * _e524) / max(_e1191, 0.000000000001f)) + ((0.5f * _e746) * dot(_cse_16_, _cse_16_))) + ((_e746 * _e1202) * _e524)))) + (_cse_29_ * (((_e234 * _e1210) * _e121) - ((_e746 * _e1215) * _e524)))) - (dot(((vec2<f32>(dot((((_cse_43_ * _e1221) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e1226 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e1237) / max(dist, 0.000001f)) - dot(_e1242, ((_cse_43_ * _e1243) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e1252), dot((((_cse_47_ * _e1254) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e1259 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e1270) / max(dist, 0.000001f)) - dot(_e1275, ((_cse_47_ * _e1276) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e1285)) * _e1290) + vec2<f32>(_cse_36_, _cse_55_)), ((_cse_3_ * _cse_7_) + (_cse_16_ * _cse_32_))) * area));
+    let _e1303 = constants.scheme;
+    if ((_e1303 == 1u) && !(is_boundary_1)) {
         let _cse_71_ = dot(vec2<f32>(s_own_grad_rho_u_x_x, s_own_grad_rho_u_x_y), (face_center_vec - c_owner_vec));
         let _cse_69_ = (_cse_390_ + _cse_71_);
         let _cse_74_ = dot(vec2<f32>(s_own_grad_rho_u_y_x, s_own_grad_rho_u_y_y), (face_center_vec - c_owner_vec));
@@ -7246,15 +7341,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_76_ = (_e234 + _cse_77_);
         let _cse_75_ = (1f / _cse_76_);
         let _cse_67_ = (_cse_68_ * _cse_75_);
-        let _e1228 = normal_vec;
-        let _cse_66_ = dot(_cse_67_, (_e1228 * area));
-        let _e1233 = constants.eos_gamma;
-        let _e1236 = constants.eos_r;
-        let _cse_85_ = ((_e1233 * _e1236) * _e121);
+        let _e1324 = normal_vec;
+        let _cse_66_ = dot(_cse_67_, (_e1324 * area));
+        let _e1329 = constants.eos_gamma;
+        let _e1332 = constants.eos_r;
+        let _cse_85_ = ((_e1329 * _e1332) * _e121);
         let _cse_84_ = sqrt(_cse_85_);
-        let _e1242 = constants.eos_gamma;
-        let _e1247 = constants.eos_r;
-        let _cse_89_ = ((0.5f * _e1242) * _e1247);
+        let _e1338 = constants.eos_gamma;
+        let _e1343 = constants.eos_r;
+        let _cse_89_ = ((0.5f * _e1338) * _e1343);
         let _cse_90_ = max(_cse_84_, 0.000000000001f);
         let _cse_88_ = (_cse_89_ / _cse_90_);
         let _cse_87_ = (vec2<f32>(s_own_grad_T_x, s_own_grad_T_y) * _cse_88_);
@@ -7274,11 +7369,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_104_ = (_e746 + _cse_105_);
         let _cse_103_ = (1f / _cse_104_);
         let _cse_93_ = (_cse_94_ * _cse_103_);
-        let _e1287 = normal_vec;
-        let _cse_92_ = dot(_cse_93_, (_e1287 * area));
-        let _e1292 = constants.eos_gamma;
-        let _e1295 = constants.eos_r;
-        let _cse_110_ = ((_e1292 * _e1295) * _e524);
+        let _e1383 = normal_vec;
+        let _cse_92_ = dot(_cse_93_, (_e1383 * area));
+        let _e1388 = constants.eos_gamma;
+        let _e1391 = constants.eos_r;
+        let _cse_110_ = ((_e1388 * _e1391) * _e524);
         let _cse_109_ = sqrt(_cse_110_);
         let _cse_113_ = vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1));
         let _cse_115_ = max(_cse_109_, 0.000000000001f);
@@ -7303,72 +7398,86 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_125_ = (1f - _cse_78_);
         let _cse_124_ = (_cse_92_ * _cse_125_);
         let _cse_123_ = (_cse_124_ + _cse_122_);
-        let _e1335 = constants.eos_r;
-        let _cse_127_ = (((_cse_125_ * _cse_104_) * _e1335) * (_e524 + dot(_cse_113_, (face_center_vec - c_neigh_cell_vec))));
-        let _e1344 = constants.eos_r;
-        let _cse_126_ = ((((_cse_78_ * _cse_76_) * _e1344) * (_e121 + dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)))) + _cse_127_);
-        phi_0_ = ((_cse_64_ * _cse_76_) + (_cse_123_ * _cse_104_));
-        let _e1362 = normal_vec.x;
-        let _e1367 = constants.viscosity;
-        let _e1381 = normal_vec.x;
-        let _e1389 = normal_vec.y;
-        let _e1393 = lambda;
-        let _e1397 = constants.viscosity;
-        let _e1405 = normal_vec.x;
-        let _e1409 = normal_vec.y;
-        phi_1_ = ((((_cse_64_ * _cse_68_.x) + (_cse_123_ * _cse_94_.x)) + ((_cse_126_ * area) * _e1362)) - ((((_e1367 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e1381) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e1389))) * _e1393) + ((_e1397 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e1405) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e1409))) * lambda_other)) * area));
-        let _e1424 = normal_vec.y;
-        let _e1429 = constants.viscosity;
-        let _e1436 = normal_vec.x;
-        let _e1451 = normal_vec.y;
-        let _e1455 = lambda;
-        let _e1459 = constants.viscosity;
-        let _e1462 = normal_vec.x;
-        let _e1471 = normal_vec.y;
-        phi_2_ = ((((_cse_64_ * _cse_68_.y) + (_cse_123_ * _cse_94_.y)) + ((_cse_126_ * area) * _e1424)) - ((((_e1429 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e1436) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e1451))) * _e1455) + ((_e1459 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e1462) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e1471))) * lambda_other)) * area));
-        let _e1481 = constants.eos_r;
-        let _e1490 = constants.eos_gm1_;
-        let _e1501 = constants.eos_r;
-        let _e1512 = constants.eos_r;
-        let _e1520 = constants.eos_gm1_;
-        let _e1531 = constants.eos_r;
-        let _e1542 = constants.eos_r;
-        let _e1551 = constants.eos_r;
-        let _e1565 = lambda;
-        let _e1570 = normal_vec;
-        let _e1581 = state[((owner_1 * 22u) + 10u)];
-        let _e1586 = normal_vec;
-        let _e1592 = lambda;
-        let _e1601 = normal_vec;
-        let _e1608 = lambda;
-        let _e1613 = normal_vec;
-        let _e1624 = state[((owner_1 * 22u) + 11u)];
-        let _e1629 = normal_vec;
-        let _e1635 = lambda;
-        let _e1644 = normal_vec;
-        let _e1649 = constants.viscosity;
-        let _e1653 = constants.viscosity;
-        let _e1667 = normal_vec.x;
-        let _e1675 = normal_vec.y;
-        let _e1679 = lambda;
-        let _e1683 = constants.viscosity;
-        let _e1691 = normal_vec.x;
-        let _e1695 = normal_vec.y;
-        let _e1703 = constants.viscosity;
-        let _e1710 = normal_vec.x;
-        let _e1725 = normal_vec.y;
-        let _e1729 = lambda;
-        let _e1733 = constants.viscosity;
-        let _e1736 = normal_vec.x;
-        let _e1745 = normal_vec.y;
-        phi_3_ = ((((_cse_64_ * (((((_cse_76_ * _e1481) * (_e121 + dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)))) / max(_e1490, 0.000000000001f)) + ((0.5f * _cse_76_) * dot(_cse_67_, _cse_67_))) + ((_cse_76_ * _e1501) * (_e121 + dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)))))) + (_cse_123_ * (((((_cse_104_ * _e1512) * (_e524 + dot(_cse_113_, (face_center_vec - c_neigh_cell_vec)))) / max(_e1520, 0.000000000001f)) + ((0.5f * _cse_104_) * dot(_cse_93_, _cse_93_))) + ((_cse_104_ * _e1531) * (_e524 + dot(_cse_113_, (face_center_vec - c_neigh_cell_vec))))))) + (_cse_122_ * (((_cse_76_ * _e1542) * (_e121 + dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)))) - ((_cse_104_ * _e1551) * (_e524 + dot(_cse_113_, (face_center_vec - c_neigh_cell_vec))))))) - (dot(((vec2<f32>(dot((((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e1565) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e1570 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e1581) / max(dist, 0.000001f)) - dot(_e1586, ((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e1592) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e1601), dot((((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e1608) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e1613 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e1624) / max(dist, 0.000001f)) - dot(_e1629, ((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e1635) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e1644)) * _e1649) + vec2<f32>((((_e1653 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e1667) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e1675))) * _e1679) + ((_e1683 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e1691) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e1695))) * lambda_other)), (((_e1703 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e1710) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e1725))) * _e1729) + ((_e1733 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e1736) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e1745))) * lambda_other)))), ((_cse_67_ * _cse_78_) + (_cse_93_ * _cse_125_))) * area));
+        let _e1431 = constants.eos_r;
+        let _cse_127_ = (((_cse_125_ * _cse_104_) * _e1431) * (_e524 + dot(_cse_113_, (face_center_vec - c_neigh_cell_vec))));
+        let _e1440 = constants.eos_r;
+        let _cse_126_ = ((((_cse_78_ * _cse_76_) * _e1440) * (_e121 + dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)))) + _cse_127_);
+        let _e1451 = low_mach_params.pressure_coupling_alpha;
+        let _e1454 = constants.eos_r;
+        let _e1463 = constants.eos_r;
+        let _e1473 = constants.eos_gamma;
+        let _e1477 = constants.eos_r;
+        let _e1487 = constants.eos_dp_drho;
+        let _e1494 = low_mach_params.model;
+        let _e1512 = low_mach_params.pressure_coupling_alpha;
+        let _e1515 = constants.eos_r;
+        let _e1524 = constants.eos_r;
+        let _e1534 = constants.eos_gamma;
+        let _e1538 = constants.eos_r;
+        let _e1547 = constants.eos_dp_drho;
+        let _e1554 = low_mach_params.model;
+        phi_0_ = ((((_cse_64_ * _cse_76_) + ((((_e1451 * (((_cse_76_ * _e1454) * (_e121 + dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)))) - ((_cse_104_ * _e1463) * (_e524 + dot(_cse_113_, (face_center_vec - c_neigh_cell_vec)))))) / max((((((_e1473 * _cse_76_) * _e1477) * (_e121 + dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)))) / _cse_76_) + _e1487), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e1494) - 2f)))))) * area)) + (_cse_123_ * _cse_104_)) + ((((_e1512 * (((_cse_76_ * _e1515) * (_e121 + dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)))) - ((_cse_104_ * _e1524) * (_e524 + dot(_cse_113_, (face_center_vec - c_neigh_cell_vec)))))) / max((((((_e1534 * _cse_104_) * _e1538) * (_e524 + dot(_cse_113_, (face_center_vec - c_neigh_cell_vec)))) / _cse_104_) + _e1547), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e1554) - 2f)))))) * area));
+        let _e1575 = normal_vec.x;
+        let _e1580 = constants.viscosity;
+        let _e1594 = normal_vec.x;
+        let _e1602 = normal_vec.y;
+        let _e1606 = lambda;
+        let _e1610 = constants.viscosity;
+        let _e1618 = normal_vec.x;
+        let _e1622 = normal_vec.y;
+        phi_1_ = ((((_cse_64_ * _cse_68_.x) + (_cse_123_ * _cse_94_.x)) + ((_cse_126_ * area) * _e1575)) - ((((_e1580 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e1594) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e1602))) * _e1606) + ((_e1610 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e1618) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e1622))) * lambda_other)) * area));
+        let _e1637 = normal_vec.y;
+        let _e1642 = constants.viscosity;
+        let _e1649 = normal_vec.x;
+        let _e1664 = normal_vec.y;
+        let _e1668 = lambda;
+        let _e1672 = constants.viscosity;
+        let _e1675 = normal_vec.x;
+        let _e1684 = normal_vec.y;
+        phi_2_ = ((((_cse_64_ * _cse_68_.y) + (_cse_123_ * _cse_94_.y)) + ((_cse_126_ * area) * _e1637)) - ((((_e1642 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e1649) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e1664))) * _e1668) + ((_e1672 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e1675) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e1684))) * lambda_other)) * area));
+        let _e1694 = constants.eos_r;
+        let _e1703 = constants.eos_gm1_;
+        let _e1714 = constants.eos_r;
+        let _e1725 = constants.eos_r;
+        let _e1733 = constants.eos_gm1_;
+        let _e1744 = constants.eos_r;
+        let _e1755 = constants.eos_r;
+        let _e1764 = constants.eos_r;
+        let _e1778 = lambda;
+        let _e1783 = normal_vec;
+        let _e1794 = state[((owner_1 * 22u) + 10u)];
+        let _e1799 = normal_vec;
+        let _e1805 = lambda;
+        let _e1814 = normal_vec;
+        let _e1821 = lambda;
+        let _e1826 = normal_vec;
+        let _e1837 = state[((owner_1 * 22u) + 11u)];
+        let _e1842 = normal_vec;
+        let _e1848 = lambda;
+        let _e1857 = normal_vec;
+        let _e1862 = constants.viscosity;
+        let _e1866 = constants.viscosity;
+        let _e1880 = normal_vec.x;
+        let _e1888 = normal_vec.y;
+        let _e1892 = lambda;
+        let _e1896 = constants.viscosity;
+        let _e1904 = normal_vec.x;
+        let _e1908 = normal_vec.y;
+        let _e1916 = constants.viscosity;
+        let _e1923 = normal_vec.x;
+        let _e1938 = normal_vec.y;
+        let _e1942 = lambda;
+        let _e1946 = constants.viscosity;
+        let _e1949 = normal_vec.x;
+        let _e1958 = normal_vec.y;
+        phi_3_ = ((((_cse_64_ * (((((_cse_76_ * _e1694) * (_e121 + dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)))) / max(_e1703, 0.000000000001f)) + ((0.5f * _cse_76_) * dot(_cse_67_, _cse_67_))) + ((_cse_76_ * _e1714) * (_e121 + dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)))))) + (_cse_123_ * (((((_cse_104_ * _e1725) * (_e524 + dot(_cse_113_, (face_center_vec - c_neigh_cell_vec)))) / max(_e1733, 0.000000000001f)) + ((0.5f * _cse_104_) * dot(_cse_93_, _cse_93_))) + ((_cse_104_ * _e1744) * (_e524 + dot(_cse_113_, (face_center_vec - c_neigh_cell_vec))))))) + (_cse_122_ * (((_cse_76_ * _e1755) * (_e121 + dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)))) - ((_cse_104_ * _e1764) * (_e524 + dot(_cse_113_, (face_center_vec - c_neigh_cell_vec))))))) - (dot(((vec2<f32>(dot((((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e1778) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e1783 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e1794) / max(dist, 0.000001f)) - dot(_e1799, ((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e1805) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e1814), dot((((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e1821) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e1826 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e1837) / max(dist, 0.000001f)) - dot(_e1842, ((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e1848) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e1857)) * _e1862) + vec2<f32>((((_e1866 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e1880) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e1888))) * _e1892) + ((_e1896 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e1904) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e1908))) * lambda_other)), (((_e1916 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e1923) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e1938))) * _e1942) + ((_e1946 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e1949) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e1958))) * lambda_other)))), ((_cse_67_ * _cse_78_) + (_cse_93_ * _cse_125_))) * area));
         phi_4_ = 0f;
         phi_5_ = 0f;
         phi_6_ = 0f;
         phi_7_ = 0f;
     }
-    let _e1769 = constants.scheme;
-    if ((_e1769 == 2u) && !(is_boundary_1)) {
+    let _e1982 = constants.scheme;
+    if ((_e1982 == 2u) && !(is_boundary_1)) {
         let _cse_137_ = ((_cse_390_ * 0.625f) + (_cse_393_ * 0.375f));
         let _cse_136_ = (_cse_137_ + (dot(vec2<f32>(s_own_grad_rho_u_x_x, s_own_grad_rho_u_x_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
         let _cse_135_ = (_cse_136_ - _cse_390_);
@@ -7378,131 +7487,145 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_141_ = (_cse_142_ - _cse_395_);
         let _cse_139_ = (_cse_395_ + _cse_141_);
         let _cse_132_ = vec2<f32>(_cse_133_, _cse_139_);
-        let _cse_131_ = ((_cse_132_ * 1f) / vec2(((((_e234 + (_e234 * 0.625f)) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)));
-        let _e1818 = normal_vec;
-        let _cse_130_ = dot(_cse_131_, (_e1818 * area));
-        let _e1823 = constants.eos_gamma;
-        let _e1826 = constants.eos_r;
-        let _cse_152_ = ((_e1823 * _e1826) * _e121);
-        let _cse_151_ = sqrt(_cse_152_);
-        let _e1832 = constants.eos_gamma;
-        let _e1835 = constants.eos_r;
-        let _cse_156_ = ((_e1832 * _e1835) * _e524);
-        let _cse_155_ = sqrt(_cse_156_);
-        let _e1844 = constants.eos_gamma;
-        let _e1848 = constants.eos_r;
-        let _cse_158_ = dot(((((vec2<f32>(s_own_grad_T_x, s_own_grad_T_y) * 0.5f) * _e1844) * _e1848) / vec2(max(_cse_151_, 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec));
-        let _cse_157_ = (_cse_158_ * 0.125f);
-        let _cse_154_ = (((_cse_151_ * 0.625f) + (_cse_155_ * 0.375f)) + _cse_157_);
-        let _cse_153_ = (_cse_154_ - _cse_151_);
-        let _cse_150_ = (_cse_151_ + _cse_153_);
-        let _cse_149_ = (_cse_150_ * area);
-        let _cse_148_ = (_cse_130_ + _cse_149_);
-        let _cse_166_ = ((_cse_393_ * 0.625f) + (_cse_390_ * 0.375f));
-        let _cse_165_ = (_cse_166_ + (dot(vec2<f32>(select(s_neigh_grad_rho_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_rho_u_x_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
-        let _cse_164_ = (_cse_165_ - _cse_393_);
-        let _cse_163_ = (_cse_393_ + _cse_164_);
+        let _cse_145_ = ((((_e234 + (_e234 * 0.625f)) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234);
+        let _cse_131_ = ((_cse_132_ * 1f) / vec2(_cse_145_));
+        let _e2031 = normal_vec;
+        let _cse_130_ = dot(_cse_131_, (_e2031 * area));
+        let _e2036 = constants.eos_gamma;
+        let _e2039 = constants.eos_r;
+        let _cse_153_ = ((_e2036 * _e2039) * _e121);
+        let _cse_152_ = sqrt(_cse_153_);
+        let _e2045 = constants.eos_gamma;
+        let _e2048 = constants.eos_r;
+        let _cse_157_ = ((_e2045 * _e2048) * _e524);
+        let _cse_156_ = sqrt(_cse_157_);
+        let _e2057 = constants.eos_gamma;
+        let _e2061 = constants.eos_r;
+        let _cse_159_ = dot(((((vec2<f32>(s_own_grad_T_x, s_own_grad_T_y) * 0.5f) * _e2057) * _e2061) / vec2(max(_cse_152_, 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec));
+        let _cse_158_ = (_cse_159_ * 0.125f);
+        let _cse_155_ = (((_cse_152_ * 0.625f) + (_cse_156_ * 0.375f)) + _cse_158_);
+        let _cse_154_ = (_cse_155_ - _cse_152_);
+        let _cse_151_ = (_cse_152_ + _cse_154_);
+        let _cse_150_ = (_cse_151_ * area);
+        let _cse_149_ = (_cse_130_ + _cse_150_);
+        let _cse_166_ = (((_cse_393_ * 0.625f) + (_cse_390_ * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_rho_u_x_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_165_ = (_cse_166_ - _cse_393_);
+        let _cse_164_ = (_cse_393_ + _cse_165_);
         let _cse_169_ = (((_cse_398_ * 0.625f) + (_cse_395_ * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_rho_u_y_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_168_ = (_cse_169_ - _cse_398_);
         let _cse_167_ = (_cse_398_ + _cse_168_);
-        let _cse_162_ = vec2<f32>(_cse_163_, _cse_167_);
+        let _cse_163_ = vec2<f32>(_cse_164_, _cse_167_);
         let _cse_173_ = (((_e746 * 0.625f) + (_e234 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_172_ = (_cse_173_ - _e746);
         let _cse_171_ = (_e746 + _cse_172_);
         let _cse_170_ = (1f / _cse_171_);
-        let _cse_161_ = (_cse_162_ * _cse_170_);
-        let _e1923 = normal_vec;
-        let _cse_160_ = dot(_cse_161_, (_e1923 * area));
-        let _e1935 = constants.eos_gamma;
-        let _e1939 = constants.eos_r;
-        let _cse_180_ = ((((vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)) * 0.5f) * _e1935) * _e1939) / vec2(max(_cse_155_, 0.000000000001f)));
+        let _cse_162_ = (_cse_163_ * _cse_170_);
+        let _e2136 = normal_vec;
+        let _cse_161_ = dot(_cse_162_, (_e2136 * area));
+        let _e2148 = constants.eos_gamma;
+        let _e2152 = constants.eos_r;
+        let _cse_180_ = ((((vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)) * 0.5f) * _e2148) * _e2152) / vec2(max(_cse_156_, 0.000000000001f)));
         let _cse_179_ = dot(_cse_180_, (c_owner_vec - c_neigh_cell_vec));
         let _cse_178_ = (_cse_179_ * 0.125f);
-        let _cse_177_ = (((_cse_155_ * 0.625f) + (_cse_151_ * 0.375f)) + _cse_178_);
-        let _cse_176_ = (_cse_177_ - _cse_155_);
-        let _cse_175_ = (_cse_155_ + _cse_176_);
+        let _cse_177_ = (((_cse_156_ * 0.625f) + (_cse_152_ * 0.375f)) + _cse_178_);
+        let _cse_176_ = (_cse_177_ - _cse_156_);
+        let _cse_175_ = (_cse_156_ + _cse_176_);
         let _cse_174_ = (_cse_175_ * area);
-        let _cse_159_ = (_cse_160_ + _cse_174_);
-        let _cse_147_ = max(_cse_148_, _cse_159_);
-        let _cse_146_ = max(_cse_147_, 0f);
-        let _cse_185_ = (_cse_130_ - _cse_149_);
-        let _cse_186_ = (_cse_160_ - _cse_174_);
+        let _cse_160_ = (_cse_161_ + _cse_174_);
+        let _cse_148_ = max(_cse_149_, _cse_160_);
+        let _cse_147_ = max(_cse_148_, 0f);
+        let _cse_185_ = (_cse_130_ - _cse_150_);
+        let _cse_186_ = (_cse_161_ - _cse_174_);
         let _cse_184_ = min(_cse_185_, _cse_186_);
         let _cse_183_ = min(_cse_184_, 0f);
-        let _cse_182_ = (_cse_146_ - _cse_183_);
+        let _cse_182_ = (_cse_147_ - _cse_183_);
         let _cse_181_ = max(_cse_182_, 0.000001f);
-        let _cse_145_ = (_cse_146_ / _cse_181_);
-        let _cse_129_ = (_cse_130_ * _cse_145_);
-        let _cse_187_ = (_cse_183_ * _cse_145_);
+        let _cse_146_ = (_cse_147_ / _cse_181_);
+        let _cse_129_ = (_cse_130_ * _cse_146_);
+        let _cse_187_ = (_cse_183_ * _cse_146_);
         let _cse_128_ = (_cse_129_ - _cse_187_);
-        let _cse_190_ = (1f - _cse_145_);
-        let _cse_189_ = (_cse_160_ * _cse_190_);
+        let _cse_190_ = (1f - _cse_146_);
+        let _cse_189_ = (_cse_161_ * _cse_190_);
         let _cse_188_ = (_cse_189_ + _cse_187_);
-        let _e1994 = constants.eos_r;
-        let _e2013 = constants.eos_r;
-        let _cse_191_ = ((((_cse_145_ * ((((_e234 + (_e234 * 0.625f)) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) * _e1994) * ((((_e121 + (_e121 * 0.625f)) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + (((_cse_190_ * _cse_171_) * _e2013) * ((((_e524 + (_e524 * 0.625f)) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)));
-        phi_0_ = ((_cse_128_ * ((((_e234 + (_e234 * 0.625f)) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + (_cse_188_ * _cse_171_));
-        let _e2057 = normal_vec.x;
-        let _e2062 = constants.viscosity;
-        let _e2076 = normal_vec.x;
-        let _e2084 = normal_vec.y;
-        let _e2088 = lambda;
-        let _e2092 = constants.viscosity;
-        let _e2100 = normal_vec.x;
-        let _e2104 = normal_vec.y;
-        phi_1_ = ((((_cse_128_ * _cse_132_.x) + (_cse_188_ * _cse_162_.x)) + ((_cse_191_ * area) * _e2057)) - ((((_e2062 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e2076) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e2084))) * _e2088) + ((_e2092 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e2100) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e2104))) * lambda_other)) * area));
-        let _e2119 = normal_vec.y;
-        let _e2124 = constants.viscosity;
-        let _e2131 = normal_vec.x;
-        let _e2146 = normal_vec.y;
-        let _e2150 = lambda;
-        let _e2154 = constants.viscosity;
-        let _e2157 = normal_vec.x;
-        let _e2166 = normal_vec.y;
-        phi_2_ = ((((_cse_128_ * _cse_132_.y) + (_cse_188_ * _cse_162_.y)) + ((_cse_191_ * area) * _e2119)) - ((((_e2124 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e2131) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e2146))) * _e2150) + ((_e2154 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e2157) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e2166))) * lambda_other)) * area));
-        let _e2189 = constants.eos_r;
-        let _e2207 = constants.eos_gm1_;
-        let _e2244 = constants.eos_r;
-        let _e2264 = constants.eos_r;
-        let _e2286 = constants.eos_gm1_;
-        let _e2297 = constants.eos_r;
-        let _e2335 = constants.eos_r;
-        let _e2353 = constants.eos_r;
-        let _e2381 = lambda;
-        let _e2386 = normal_vec;
-        let _e2397 = state[((owner_1 * 22u) + 10u)];
-        let _e2402 = normal_vec;
-        let _e2408 = lambda;
-        let _e2417 = normal_vec;
-        let _e2424 = lambda;
-        let _e2429 = normal_vec;
-        let _e2440 = state[((owner_1 * 22u) + 11u)];
-        let _e2445 = normal_vec;
-        let _e2451 = lambda;
-        let _e2460 = normal_vec;
+        let _e2194 = constants.eos_r;
+        let _e2213 = constants.eos_r;
+        let _cse_191_ = ((((_cse_146_ * _cse_145_) * _e2194) * ((((_e121 + (_e121 * 0.625f)) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + (((_cse_190_ * _cse_171_) * _e2213) * ((((_e524 + (_e524 * 0.625f)) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)));
+        let _e2237 = low_mach_params.pressure_coupling_alpha;
+        let _e2240 = constants.eos_r;
+        let _e2258 = constants.eos_r;
+        let _e2282 = constants.eos_gamma;
+        let _e2286 = constants.eos_r;
+        let _e2305 = constants.eos_dp_drho;
+        let _e2312 = low_mach_params.model;
+        let _e2330 = low_mach_params.pressure_coupling_alpha;
+        let _e2333 = constants.eos_r;
+        let _e2351 = constants.eos_r;
+        let _e2375 = constants.eos_gamma;
+        let _e2379 = constants.eos_r;
+        let _e2402 = constants.eos_dp_drho;
+        let _e2409 = low_mach_params.model;
+        phi_0_ = ((((_cse_128_ * _cse_145_) + ((((_e2237 * (((_cse_145_ * _e2240) * ((((_e121 + (_e121 * 0.625f)) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) - ((_cse_171_ * _e2258) * ((((_e524 + (_e524 * 0.625f)) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)))) / max((((((_e2282 * _cse_145_) * _e2286) * ((((_e121 + (_e121 * 0.625f)) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) / _cse_145_) + _e2305), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e2312) - 2f)))))) * area)) + (_cse_188_ * _cse_171_)) + ((((_e2330 * (((_cse_145_ * _e2333) * ((((_e121 + (_e121 * 0.625f)) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) - ((_cse_171_ * _e2351) * ((((_e524 + (_e524 * 0.625f)) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)))) / max((((((_e2375 * _cse_171_) * _e2379) * ((((_e524 + (_e524 * 0.625f)) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) / _cse_171_) + _e2402), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e2409) - 2f)))))) * area));
+        let _e2430 = normal_vec.x;
+        let _e2435 = constants.viscosity;
+        let _e2449 = normal_vec.x;
+        let _e2457 = normal_vec.y;
+        let _e2461 = lambda;
         let _e2465 = constants.viscosity;
-        let _e2469 = constants.viscosity;
-        let _e2483 = normal_vec.x;
-        let _e2491 = normal_vec.y;
-        let _e2495 = lambda;
-        let _e2499 = constants.viscosity;
-        let _e2507 = normal_vec.x;
-        let _e2511 = normal_vec.y;
-        let _e2519 = constants.viscosity;
-        let _e2526 = normal_vec.x;
-        let _e2541 = normal_vec.y;
-        let _e2545 = lambda;
-        let _e2549 = constants.viscosity;
-        let _e2552 = normal_vec.x;
-        let _e2561 = normal_vec.y;
-        phi_3_ = ((((_cse_128_ * (((((((((_e234 + (_e234 * 0.625f)) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * _e2189) * ((((_e121 + (_e121 * 0.625f)) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) / max(_e2207, 0.000000000001f)) + ((0.5f * ((((_e234 + (_e234 * 0.625f)) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) * dot(_cse_131_, _cse_131_))) + ((((((_e234 + (_e234 * 0.625f)) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * _e2244) * ((((_e121 + (_e121 * 0.625f)) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)))) + (_cse_188_ * (((((_cse_171_ * _e2264) * ((((_e524 + (_e524 * 0.625f)) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) / max(_e2286, 0.000000000001f)) + ((0.5f * _cse_171_) * dot(_cse_161_, _cse_161_))) + ((_cse_171_ * _e2297) * ((((_e524 + (_e524 * 0.625f)) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))))) + (_cse_187_ * (((((((_e234 + (_e234 * 0.625f)) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * _e2335) * ((((_e121 + (_e121 * 0.625f)) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) - ((_cse_171_ * _e2353) * ((((_e524 + (_e524 * 0.625f)) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))))) - (dot(((vec2<f32>(dot((((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e2381) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e2386 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e2397) / max(dist, 0.000001f)) - dot(_e2402, ((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e2408) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e2417), dot((((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e2424) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e2429 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e2440) / max(dist, 0.000001f)) - dot(_e2445, ((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e2451) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e2460)) * _e2465) + vec2<f32>((((_e2469 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e2483) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e2491))) * _e2495) + ((_e2499 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e2507) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e2511))) * lambda_other)), (((_e2519 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e2526) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e2541))) * _e2545) + ((_e2549 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e2552) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e2561))) * lambda_other)))), ((_cse_131_ * _cse_145_) + (_cse_161_ * _cse_190_))) * area));
+        let _e2473 = normal_vec.x;
+        let _e2477 = normal_vec.y;
+        phi_1_ = ((((_cse_128_ * _cse_132_.x) + (_cse_188_ * _cse_163_.x)) + ((_cse_191_ * area) * _e2430)) - ((((_e2435 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e2449) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e2457))) * _e2461) + ((_e2465 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e2473) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e2477))) * lambda_other)) * area));
+        let _e2492 = normal_vec.y;
+        let _e2497 = constants.viscosity;
+        let _e2504 = normal_vec.x;
+        let _e2519 = normal_vec.y;
+        let _e2523 = lambda;
+        let _e2527 = constants.viscosity;
+        let _e2530 = normal_vec.x;
+        let _e2539 = normal_vec.y;
+        phi_2_ = ((((_cse_128_ * _cse_132_.y) + (_cse_188_ * _cse_163_.y)) + ((_cse_191_ * area) * _e2492)) - ((((_e2497 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e2504) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e2519))) * _e2523) + ((_e2527 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e2530) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e2539))) * lambda_other)) * area));
+        let _e2549 = constants.eos_r;
+        let _e2567 = constants.eos_gm1_;
+        let _e2578 = constants.eos_r;
+        let _e2598 = constants.eos_r;
+        let _e2620 = constants.eos_gm1_;
+        let _e2631 = constants.eos_r;
+        let _e2656 = constants.eos_r;
+        let _e2674 = constants.eos_r;
+        let _e2702 = lambda;
+        let _e2707 = normal_vec;
+        let _e2718 = state[((owner_1 * 22u) + 10u)];
+        let _e2723 = normal_vec;
+        let _e2729 = lambda;
+        let _e2738 = normal_vec;
+        let _e2745 = lambda;
+        let _e2750 = normal_vec;
+        let _e2761 = state[((owner_1 * 22u) + 11u)];
+        let _e2766 = normal_vec;
+        let _e2772 = lambda;
+        let _e2781 = normal_vec;
+        let _e2786 = constants.viscosity;
+        let _e2790 = constants.viscosity;
+        let _e2804 = normal_vec.x;
+        let _e2812 = normal_vec.y;
+        let _e2816 = lambda;
+        let _e2820 = constants.viscosity;
+        let _e2828 = normal_vec.x;
+        let _e2832 = normal_vec.y;
+        let _e2840 = constants.viscosity;
+        let _e2847 = normal_vec.x;
+        let _e2862 = normal_vec.y;
+        let _e2866 = lambda;
+        let _e2870 = constants.viscosity;
+        let _e2873 = normal_vec.x;
+        let _e2882 = normal_vec.y;
+        phi_3_ = ((((_cse_128_ * (((((_cse_145_ * _e2549) * ((((_e121 + (_e121 * 0.625f)) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) / max(_e2567, 0.000000000001f)) + ((0.5f * _cse_145_) * dot(_cse_131_, _cse_131_))) + ((_cse_145_ * _e2578) * ((((_e121 + (_e121 * 0.625f)) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)))) + (_cse_188_ * (((((_cse_171_ * _e2598) * ((((_e524 + (_e524 * 0.625f)) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) / max(_e2620, 0.000000000001f)) + ((0.5f * _cse_171_) * dot(_cse_162_, _cse_162_))) + ((_cse_171_ * _e2631) * ((((_e524 + (_e524 * 0.625f)) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))))) + (_cse_187_ * (((_cse_145_ * _e2656) * ((((_e121 + (_e121 * 0.625f)) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) - ((_cse_171_ * _e2674) * ((((_e524 + (_e524 * 0.625f)) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))))) - (dot(((vec2<f32>(dot((((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e2702) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e2707 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e2718) / max(dist, 0.000001f)) - dot(_e2723, ((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e2729) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e2738), dot((((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e2745) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e2750 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e2761) / max(dist, 0.000001f)) - dot(_e2766, ((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e2772) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e2781)) * _e2786) + vec2<f32>((((_e2790 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e2804) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e2812))) * _e2816) + ((_e2820 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e2828) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e2832))) * lambda_other)), (((_e2840 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e2847) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e2862))) * _e2866) + ((_e2870 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e2873) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e2882))) * lambda_other)))), ((_cse_131_ * _cse_146_) + (_cse_162_ * _cse_190_))) * area));
         phi_4_ = 0f;
         phi_5_ = 0f;
         phi_6_ = 0f;
         phi_7_ = 0f;
     }
-    let _e2581 = constants.scheme;
-    if ((_e2581 == 3u) && !(is_boundary_1)) {
+    let _e2902 = constants.scheme;
+    if ((_e2902 == 3u) && !(is_boundary_1)) {
         let _cse_201_ = (_cse_393_ - _cse_390_);
         let _cse_200_ = max(dot(vec2<f32>(s_own_grad_rho_u_x_x, s_own_grad_rho_u_x_y), (face_center_vec - c_owner_vec)), min(_cse_201_, 0f));
         let _cse_199_ = min(_cse_200_, max(_cse_201_, 0f));
@@ -7514,20 +7637,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_196_ = vec2<f32>(_cse_197_, _cse_203_);
         let _cse_209_ = (_e234 + min(max(dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (face_center_vec - c_owner_vec)), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f)));
         let _cse_195_ = ((_cse_196_ * 1f) / vec2(_cse_209_));
-        let _e2625 = normal_vec;
-        let _cse_194_ = dot(_cse_195_, (_e2625 * area));
-        let _e2630 = constants.eos_gamma;
-        let _e2633 = constants.eos_r;
-        let _cse_217_ = ((_e2630 * _e2633) * _e121);
+        let _e2946 = normal_vec;
+        let _cse_194_ = dot(_cse_195_, (_e2946 * area));
+        let _e2951 = constants.eos_gamma;
+        let _e2954 = constants.eos_r;
+        let _cse_217_ = ((_e2951 * _e2954) * _e121);
         let _cse_216_ = sqrt(_cse_217_);
-        let _e2639 = constants.eos_gamma;
-        let _e2642 = constants.eos_r;
-        let _cse_222_ = ((_e2639 * _e2642) * _e524);
+        let _e2960 = constants.eos_gamma;
+        let _e2963 = constants.eos_r;
+        let _cse_222_ = ((_e2960 * _e2963) * _e524);
         let _cse_221_ = sqrt(_cse_222_);
         let _cse_220_ = (_cse_221_ - _cse_216_);
-        let _e2652 = constants.eos_gamma;
-        let _e2656 = constants.eos_r;
-        let _cse_219_ = max(dot(((((vec2<f32>(s_own_grad_T_x, s_own_grad_T_y) * 0.5f) * _e2652) * _e2656) / vec2(max(_cse_216_, 0.000000000001f))), (face_center_vec - c_owner_vec)), min(_cse_220_, 0f));
+        let _e2973 = constants.eos_gamma;
+        let _e2977 = constants.eos_r;
+        let _cse_219_ = max(dot(((((vec2<f32>(s_own_grad_T_x, s_own_grad_T_y) * 0.5f) * _e2973) * _e2977) / vec2(max(_cse_216_, 0.000000000001f))), (face_center_vec - c_owner_vec)), min(_cse_220_, 0f));
         let _cse_218_ = min(_cse_219_, max(_cse_220_, 0f));
         let _cse_215_ = (_cse_216_ + _cse_218_);
         let _cse_214_ = (_cse_215_ * area);
@@ -7545,11 +7668,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_236_ = (_e746 + _cse_237_);
         let _cse_235_ = (1f / _cse_236_);
         let _cse_225_ = (_cse_226_ * _cse_235_);
-        let _e2723 = normal_vec;
-        let _cse_224_ = dot(_cse_225_, (_e2723 * area));
-        let _e2735 = constants.eos_gamma;
-        let _e2739 = constants.eos_r;
-        let _cse_243_ = ((((vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)) * 0.5f) * _e2735) * _e2739) / vec2(max(_cse_221_, 0.000000000001f)));
+        let _e3044 = normal_vec;
+        let _cse_224_ = dot(_cse_225_, (_e3044 * area));
+        let _e3056 = constants.eos_gamma;
+        let _e3060 = constants.eos_r;
+        let _cse_243_ = ((((vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)) * 0.5f) * _e3056) * _e3060) / vec2(max(_cse_221_, 0.000000000001f)));
         let _cse_242_ = dot(_cse_243_, (face_center_vec - c_neigh_cell_vec));
         let _cse_244_ = (_cse_216_ - _cse_221_);
         let _cse_241_ = max(_cse_242_, min(_cse_244_, 0f));
@@ -7572,71 +7695,85 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_254_ = (1f - _cse_210_);
         let _cse_253_ = (_cse_224_ * _cse_254_);
         let _cse_252_ = (_cse_253_ + _cse_251_);
-        let _e2779 = constants.eos_r;
-        let _e2797 = constants.eos_r;
-        let _cse_255_ = ((((_cse_210_ * _cse_209_) * _e2779) * (_e121 + min(max(dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) + (((_cse_254_ * _cse_236_) * _e2797) * (_e524 + min(max(dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (face_center_vec - c_neigh_cell_vec)), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))));
-        phi_0_ = ((_cse_192_ * _cse_209_) + (_cse_252_ * _cse_236_));
-        let _e2827 = normal_vec.x;
-        let _e2832 = constants.viscosity;
-        let _e2846 = normal_vec.x;
-        let _e2854 = normal_vec.y;
-        let _e2858 = lambda;
-        let _e2862 = constants.viscosity;
-        let _e2870 = normal_vec.x;
-        let _e2874 = normal_vec.y;
-        phi_1_ = ((((_cse_192_ * _cse_196_.x) + (_cse_252_ * _cse_226_.x)) + ((_cse_255_ * area) * _e2827)) - ((((_e2832 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e2846) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e2854))) * _e2858) + ((_e2862 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e2870) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e2874))) * lambda_other)) * area));
-        let _e2889 = normal_vec.y;
-        let _e2894 = constants.viscosity;
-        let _e2901 = normal_vec.x;
-        let _e2916 = normal_vec.y;
-        let _e2920 = lambda;
-        let _e2924 = constants.viscosity;
-        let _e2927 = normal_vec.x;
-        let _e2936 = normal_vec.y;
-        phi_2_ = ((((_cse_192_ * _cse_196_.y) + (_cse_252_ * _cse_226_.y)) + ((_cse_255_ * area) * _e2889)) - ((((_e2894 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e2901) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e2916))) * _e2920) + ((_e2924 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e2927) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e2936))) * lambda_other)) * area));
-        let _e2946 = constants.eos_r;
-        let _e2963 = constants.eos_gm1_;
-        let _e2974 = constants.eos_r;
-        let _e2993 = constants.eos_r;
-        let _e3014 = constants.eos_gm1_;
-        let _e3025 = constants.eos_r;
-        let _e3049 = constants.eos_r;
-        let _e3066 = constants.eos_r;
-        let _e3093 = lambda;
-        let _e3098 = normal_vec;
-        let _e3109 = state[((owner_1 * 22u) + 10u)];
-        let _e3114 = normal_vec;
-        let _e3120 = lambda;
-        let _e3129 = normal_vec;
-        let _e3136 = lambda;
-        let _e3141 = normal_vec;
-        let _e3152 = state[((owner_1 * 22u) + 11u)];
-        let _e3157 = normal_vec;
-        let _e3163 = lambda;
-        let _e3172 = normal_vec;
-        let _e3177 = constants.viscosity;
-        let _e3181 = constants.viscosity;
-        let _e3195 = normal_vec.x;
-        let _e3203 = normal_vec.y;
-        let _e3207 = lambda;
-        let _e3211 = constants.viscosity;
-        let _e3219 = normal_vec.x;
-        let _e3223 = normal_vec.y;
-        let _e3231 = constants.viscosity;
-        let _e3238 = normal_vec.x;
-        let _e3253 = normal_vec.y;
-        let _e3257 = lambda;
-        let _e3261 = constants.viscosity;
-        let _e3264 = normal_vec.x;
-        let _e3273 = normal_vec.y;
-        phi_3_ = ((((_cse_192_ * (((((_cse_209_ * _e2946) * (_e121 + min(max(dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) / max(_e2963, 0.000000000001f)) + ((0.5f * _cse_209_) * dot(_cse_195_, _cse_195_))) + ((_cse_209_ * _e2974) * (_e121 + min(max(dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))))) + (_cse_252_ * (((((_cse_236_ * _e2993) * (_e524 + min(max(dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (face_center_vec - c_neigh_cell_vec)), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))) / max(_e3014, 0.000000000001f)) + ((0.5f * _cse_236_) * dot(_cse_225_, _cse_225_))) + ((_cse_236_ * _e3025) * (_e524 + min(max(dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (face_center_vec - c_neigh_cell_vec)), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f))))))) + (_cse_251_ * (((_cse_209_ * _e3049) * (_e121 + min(max(dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) - ((_cse_236_ * _e3066) * (_e524 + min(max(dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (face_center_vec - c_neigh_cell_vec)), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f))))))) - (dot(((vec2<f32>(dot((((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e3093) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e3098 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e3109) / max(dist, 0.000001f)) - dot(_e3114, ((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e3120) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e3129), dot((((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e3136) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e3141 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e3152) / max(dist, 0.000001f)) - dot(_e3157, ((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e3163) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e3172)) * _e3177) + vec2<f32>((((_e3181 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e3195) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e3203))) * _e3207) + ((_e3211 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e3219) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e3223))) * lambda_other)), (((_e3231 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e3238) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e3253))) * _e3257) + ((_e3261 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e3264) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e3273))) * lambda_other)))), ((_cse_195_ * _cse_210_) + (_cse_225_ * _cse_254_))) * area));
+        let _e3100 = constants.eos_r;
+        let _e3118 = constants.eos_r;
+        let _cse_255_ = ((((_cse_210_ * _cse_209_) * _e3100) * (_e121 + min(max(dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) + (((_cse_254_ * _cse_236_) * _e3118) * (_e524 + min(max(dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (face_center_vec - c_neigh_cell_vec)), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))));
+        let _e3141 = low_mach_params.pressure_coupling_alpha;
+        let _e3144 = constants.eos_r;
+        let _e3161 = constants.eos_r;
+        let _e3184 = constants.eos_gamma;
+        let _e3188 = constants.eos_r;
+        let _e3206 = constants.eos_dp_drho;
+        let _e3213 = low_mach_params.model;
+        let _e3231 = low_mach_params.pressure_coupling_alpha;
+        let _e3234 = constants.eos_r;
+        let _e3251 = constants.eos_r;
+        let _e3274 = constants.eos_gamma;
+        let _e3278 = constants.eos_r;
+        let _e3300 = constants.eos_dp_drho;
+        let _e3307 = low_mach_params.model;
+        phi_0_ = ((((_cse_192_ * _cse_209_) + ((((_e3141 * (((_cse_209_ * _e3144) * (_e121 + min(max(dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) - ((_cse_236_ * _e3161) * (_e524 + min(max(dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (face_center_vec - c_neigh_cell_vec)), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))))) / max((((((_e3184 * _cse_209_) * _e3188) * (_e121 + min(max(dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) / _cse_209_) + _e3206), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e3213) - 2f)))))) * area)) + (_cse_252_ * _cse_236_)) + ((((_e3231 * (((_cse_209_ * _e3234) * (_e121 + min(max(dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) - ((_cse_236_ * _e3251) * (_e524 + min(max(dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (face_center_vec - c_neigh_cell_vec)), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))))) / max((((((_e3274 * _cse_236_) * _e3278) * (_e524 + min(max(dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (face_center_vec - c_neigh_cell_vec)), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))) / _cse_236_) + _e3300), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e3307) - 2f)))))) * area));
+        let _e3328 = normal_vec.x;
+        let _e3333 = constants.viscosity;
+        let _e3347 = normal_vec.x;
+        let _e3355 = normal_vec.y;
+        let _e3359 = lambda;
+        let _e3363 = constants.viscosity;
+        let _e3371 = normal_vec.x;
+        let _e3375 = normal_vec.y;
+        phi_1_ = ((((_cse_192_ * _cse_196_.x) + (_cse_252_ * _cse_226_.x)) + ((_cse_255_ * area) * _e3328)) - ((((_e3333 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e3347) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e3355))) * _e3359) + ((_e3363 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e3371) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e3375))) * lambda_other)) * area));
+        let _e3390 = normal_vec.y;
+        let _e3395 = constants.viscosity;
+        let _e3402 = normal_vec.x;
+        let _e3417 = normal_vec.y;
+        let _e3421 = lambda;
+        let _e3425 = constants.viscosity;
+        let _e3428 = normal_vec.x;
+        let _e3437 = normal_vec.y;
+        phi_2_ = ((((_cse_192_ * _cse_196_.y) + (_cse_252_ * _cse_226_.y)) + ((_cse_255_ * area) * _e3390)) - ((((_e3395 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e3402) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e3417))) * _e3421) + ((_e3425 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e3428) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e3437))) * lambda_other)) * area));
+        let _e3447 = constants.eos_r;
+        let _e3464 = constants.eos_gm1_;
+        let _e3475 = constants.eos_r;
+        let _e3494 = constants.eos_r;
+        let _e3515 = constants.eos_gm1_;
+        let _e3526 = constants.eos_r;
+        let _e3550 = constants.eos_r;
+        let _e3567 = constants.eos_r;
+        let _e3594 = lambda;
+        let _e3599 = normal_vec;
+        let _e3610 = state[((owner_1 * 22u) + 10u)];
+        let _e3615 = normal_vec;
+        let _e3621 = lambda;
+        let _e3630 = normal_vec;
+        let _e3637 = lambda;
+        let _e3642 = normal_vec;
+        let _e3653 = state[((owner_1 * 22u) + 11u)];
+        let _e3658 = normal_vec;
+        let _e3664 = lambda;
+        let _e3673 = normal_vec;
+        let _e3678 = constants.viscosity;
+        let _e3682 = constants.viscosity;
+        let _e3696 = normal_vec.x;
+        let _e3704 = normal_vec.y;
+        let _e3708 = lambda;
+        let _e3712 = constants.viscosity;
+        let _e3720 = normal_vec.x;
+        let _e3724 = normal_vec.y;
+        let _e3732 = constants.viscosity;
+        let _e3739 = normal_vec.x;
+        let _e3754 = normal_vec.y;
+        let _e3758 = lambda;
+        let _e3762 = constants.viscosity;
+        let _e3765 = normal_vec.x;
+        let _e3774 = normal_vec.y;
+        phi_3_ = ((((_cse_192_ * (((((_cse_209_ * _e3447) * (_e121 + min(max(dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) / max(_e3464, 0.000000000001f)) + ((0.5f * _cse_209_) * dot(_cse_195_, _cse_195_))) + ((_cse_209_ * _e3475) * (_e121 + min(max(dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))))) + (_cse_252_ * (((((_cse_236_ * _e3494) * (_e524 + min(max(dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (face_center_vec - c_neigh_cell_vec)), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))) / max(_e3515, 0.000000000001f)) + ((0.5f * _cse_236_) * dot(_cse_225_, _cse_225_))) + ((_cse_236_ * _e3526) * (_e524 + min(max(dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (face_center_vec - c_neigh_cell_vec)), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f))))))) + (_cse_251_ * (((_cse_209_ * _e3550) * (_e121 + min(max(dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (face_center_vec - c_owner_vec)), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) - ((_cse_236_ * _e3567) * (_e524 + min(max(dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (face_center_vec - c_neigh_cell_vec)), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f))))))) - (dot(((vec2<f32>(dot((((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e3594) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e3599 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e3610) / max(dist, 0.000001f)) - dot(_e3615, ((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e3621) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e3630), dot((((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e3637) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e3642 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e3653) / max(dist, 0.000001f)) - dot(_e3658, ((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e3664) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e3673)) * _e3678) + vec2<f32>((((_e3682 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e3696) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e3704))) * _e3708) + ((_e3712 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e3720) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e3724))) * lambda_other)), (((_e3732 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e3739) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e3754))) * _e3758) + ((_e3762 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e3765) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e3774))) * lambda_other)))), ((_cse_195_ * _cse_210_) + (_cse_225_ * _cse_254_))) * area));
         phi_4_ = 0f;
         phi_5_ = 0f;
         phi_6_ = 0f;
         phi_7_ = 0f;
     }
-    let _e3293 = constants.scheme;
-    if ((_e3293 == 4u) && !(is_boundary_1)) {
+    let _e3794 = constants.scheme;
+    if ((_e3794 == 4u) && !(is_boundary_1)) {
         let _cse_261_ = (vec2<f32>(_cse_393_, _cse_398_) - vec2<f32>(_cse_390_, _cse_395_));
         let _cse_269_ = dot(_cse_261_, _cse_261_);
         let _cse_271_ = (_cse_269_ * _cse_269_);
@@ -7651,18 +7788,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_260_ = (_cse_261_ * _cse_262_);
         let _cse_259_ = (vec2<f32>(_cse_390_, _cse_395_) + _cse_260_);
         let _cse_258_ = ((_cse_259_ * 1f) / vec2((_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234)))));
-        let _e3404 = normal_vec;
-        let _cse_257_ = dot(_cse_258_, (_e3404 * area));
-        let _e3409 = constants.eos_gamma;
-        let _e3412 = constants.eos_r;
-        let _e3418 = constants.eos_gamma;
-        let _e3421 = constants.eos_r;
-        let _cse_286_ = (sqrt(((_e3409 * _e3412) * _e524)) - sqrt(((_e3418 * _e3421) * _e121)));
-        let _e3432 = constants.eos_gamma;
-        let _e3436 = constants.eos_r;
-        let _e3440 = constants.eos_gamma;
-        let _e3443 = constants.eos_r;
-        let _cse_285_ = ((dot((c_neigh_cell_vec - c_owner_vec), ((((vec2<f32>(s_own_grad_T_x, s_own_grad_T_y) * 0.5f) * _e3432) * _e3436) / vec2(max(sqrt(((_e3440 * _e3443) * _e121)), 0.000000000001f)))) * _cse_286_) / ((_cse_286_ * _cse_286_) + 0.000000000000000000000000000001f));
+        let _e3905 = normal_vec;
+        let _cse_257_ = dot(_cse_258_, (_e3905 * area));
+        let _e3910 = constants.eos_gamma;
+        let _e3913 = constants.eos_r;
+        let _e3919 = constants.eos_gamma;
+        let _e3922 = constants.eos_r;
+        let _cse_286_ = (sqrt(((_e3910 * _e3913) * _e524)) - sqrt(((_e3919 * _e3922) * _e121)));
+        let _e3933 = constants.eos_gamma;
+        let _e3937 = constants.eos_r;
+        let _e3941 = constants.eos_gamma;
+        let _e3944 = constants.eos_r;
+        let _cse_285_ = ((dot((c_neigh_cell_vec - c_owner_vec), ((((vec2<f32>(s_own_grad_T_x, s_own_grad_T_y) * 0.5f) * _e3933) * _e3937) / vec2(max(sqrt(((_e3941 * _e3944) * _e121)), 0.000000000001f)))) * _cse_286_) / ((_cse_286_ * _cse_286_) + 0.000000000000000000000000000001f));
         let _cse_284_ = (2f * _cse_285_);
         let _cse_283_ = (_cse_284_ - 1f);
         let _cse_282_ = min(_cse_283_, 1999f);
@@ -7670,9 +7807,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_280_ = ((_cse_281_ + abs(_cse_281_)) / (1f + abs(_cse_281_)));
         let _cse_279_ = (_cse_280_ * lambda_other);
         let _cse_278_ = (_cse_279_ * _cse_286_);
-        let _e3475 = constants.eos_gamma;
-        let _e3478 = constants.eos_r;
-        let _cse_277_ = (sqrt(((_e3475 * _e3478) * _e121)) + _cse_278_);
+        let _e3976 = constants.eos_gamma;
+        let _e3979 = constants.eos_r;
+        let _cse_277_ = (sqrt(((_e3976 * _e3979) * _e121)) + _cse_278_);
         let _cse_276_ = (_cse_277_ * area);
         let _cse_275_ = (_cse_257_ + _cse_276_);
         let _cse_299_ = ((dot(_cse_261_, vec2<f32>(dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_rho_u_x_y, 0f, is_boundary_1))), dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_rho_u_y_y, 0f, is_boundary_1))))) * _cse_269_) / _cse_270_);
@@ -7683,30 +7820,30 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_300_ = abs(_cse_295_);
         let _cse_294_ = (_cse_295_ + _cse_300_);
         let _cse_293_ = (_cse_294_ / (1f + _cse_300_));
-        let _e3516 = lambda;
-        let _cse_292_ = (_cse_293_ * _e3516);
+        let _e4017 = lambda;
+        let _cse_292_ = (_cse_293_ * _e4017);
         let _cse_291_ = (_cse_261_ * _cse_292_);
         let _cse_290_ = (vec2<f32>(_cse_393_, _cse_398_) - _cse_291_);
-        let _e3598 = lambda;
-        let _cse_289_ = ((_cse_290_ * 1f) / vec2((_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e3598) * (_e746 - _e234)))));
-        let _e3605 = normal_vec;
-        let _cse_288_ = dot(_cse_289_, (_e3605 * area));
-        let _e3618 = constants.eos_gamma;
-        let _e3622 = constants.eos_r;
-        let _e3626 = constants.eos_gamma;
-        let _e3629 = constants.eos_r;
-        let _cse_310_ = ((dot((c_neigh_cell_vec - c_owner_vec), ((((vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)) * 0.5f) * _e3618) * _e3622) / vec2(max(sqrt(((_e3626 * _e3629) * _e524)), 0.000000000001f)))) * _cse_286_) / ((_cse_286_ * _cse_286_) + 0.000000000000000000000000000001f));
+        let _e4099 = lambda;
+        let _cse_289_ = ((_cse_290_ * 1f) / vec2((_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e4099) * (_e746 - _e234)))));
+        let _e4106 = normal_vec;
+        let _cse_288_ = dot(_cse_289_, (_e4106 * area));
+        let _e4119 = constants.eos_gamma;
+        let _e4123 = constants.eos_r;
+        let _e4127 = constants.eos_gamma;
+        let _e4130 = constants.eos_r;
+        let _cse_310_ = ((dot((c_neigh_cell_vec - c_owner_vec), ((((vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)) * 0.5f) * _e4119) * _e4123) / vec2(max(sqrt(((_e4127 * _e4130) * _e524)), 0.000000000001f)))) * _cse_286_) / ((_cse_286_ * _cse_286_) + 0.000000000000000000000000000001f));
         let _cse_309_ = (2f * _cse_310_);
         let _cse_308_ = (_cse_309_ - 1f);
         let _cse_307_ = min(_cse_308_, 1999f);
         let _cse_306_ = max(-2001f, _cse_307_);
         let _cse_305_ = ((_cse_306_ + abs(_cse_306_)) / (1f + abs(_cse_306_)));
-        let _e3657 = lambda;
-        let _cse_304_ = (_cse_305_ * _e3657);
+        let _e4158 = lambda;
+        let _cse_304_ = (_cse_305_ * _e4158);
         let _cse_303_ = (_cse_304_ * _cse_286_);
-        let _e3662 = constants.eos_gamma;
-        let _e3665 = constants.eos_r;
-        let _cse_302_ = (sqrt(((_e3662 * _e3665) * _e524)) - _cse_303_);
+        let _e4163 = constants.eos_gamma;
+        let _e4166 = constants.eos_r;
+        let _cse_302_ = (sqrt(((_e4163 * _e4166) * _e524)) - _cse_303_);
         let _cse_301_ = (_cse_302_ * area);
         let _cse_287_ = (_cse_288_ + _cse_301_);
         let _cse_274_ = max(_cse_275_, _cse_287_);
@@ -7722,84 +7859,105 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_256_ = ((_cse_257_ * _cse_272_) - _cse_317_);
         let _cse_319_ = (1f - _cse_272_);
         let _cse_318_ = ((_cse_288_ * _cse_319_) + _cse_317_);
-        let _e3834 = lambda;
-        phi_0_ = ((_cse_256_ * (_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234)))) + (_cse_318_ * (_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e3834) * (_e746 - _e234)))));
-        let _e3916 = constants.eos_r;
-        let _e4061 = lambda;
-        let _e4069 = constants.eos_r;
-        let _e4146 = lambda;
-        let _e4155 = normal_vec.x;
-        let _e4160 = constants.viscosity;
-        let _e4174 = normal_vec.x;
-        let _e4182 = normal_vec.y;
-        let _e4186 = lambda;
-        let _e4190 = constants.viscosity;
-        let _e4198 = normal_vec.x;
-        let _e4202 = normal_vec.y;
-        phi_1_ = ((((_cse_256_ * _cse_259_.x) + (_cse_318_ * _cse_290_.x)) + ((((((_cse_272_ * (_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234)))) * _e3916) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))) + (((_cse_319_ * (_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e4061) * (_e746 - _e234)))) * _e4069) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e4146) * (_e524 - _e121))))) * area) * _e4155)) - ((((_e4160 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e4174) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e4182))) * _e4186) + ((_e4190 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e4198) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e4202))) * lambda_other)) * area));
-        let _e4285 = constants.eos_r;
-        let _e4430 = lambda;
-        let _e4438 = constants.eos_r;
-        let _e4515 = lambda;
-        let _e4524 = normal_vec.y;
-        let _e4529 = constants.viscosity;
-        let _e4536 = normal_vec.x;
-        let _e4551 = normal_vec.y;
-        let _e4555 = lambda;
-        let _e4559 = constants.viscosity;
-        let _e4562 = normal_vec.x;
-        let _e4571 = normal_vec.y;
-        phi_2_ = ((((_cse_256_ * _cse_259_.y) + (_cse_318_ * _cse_290_.y)) + ((((((_cse_272_ * (_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234)))) * _e4285) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))) + (((_cse_319_ * (_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e4430) * (_e746 - _e234)))) * _e4438) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e4515) * (_e524 - _e121))))) * area) * _e4524)) - ((((_e4529 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e4536) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e4551))) * _e4555) + ((_e4559 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e4562) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e4571))) * lambda_other)) * area));
-        let _e4648 = constants.eos_r;
-        let _e4720 = constants.eos_gm1_;
-        let _e4865 = constants.eos_r;
-        let _e5012 = lambda;
-        let _e5019 = constants.eos_r;
-        let _e5096 = lambda;
-        let _e5104 = constants.eos_gm1_;
-        let _e5183 = lambda;
-        let _e5268 = lambda;
-        let _e5275 = constants.eos_r;
-        let _e5352 = lambda;
-        let _e5430 = constants.eos_r;
-        let _e5575 = lambda;
-        let _e5582 = constants.eos_r;
-        let _e5659 = lambda;
-        let _e5673 = lambda;
-        let _e5678 = normal_vec;
-        let _e5689 = state[((owner_1 * 22u) + 10u)];
-        let _e5694 = normal_vec;
-        let _e5700 = lambda;
-        let _e5709 = normal_vec;
-        let _e5716 = lambda;
-        let _e5721 = normal_vec;
-        let _e5732 = state[((owner_1 * 22u) + 11u)];
-        let _e5737 = normal_vec;
-        let _e5743 = lambda;
-        let _e5752 = normal_vec;
-        let _e5757 = constants.viscosity;
-        let _e5761 = constants.viscosity;
-        let _e5775 = normal_vec.x;
-        let _e5783 = normal_vec.y;
-        let _e5787 = lambda;
-        let _e5791 = constants.viscosity;
-        let _e5799 = normal_vec.x;
-        let _e5803 = normal_vec.y;
-        let _e5811 = constants.viscosity;
-        let _e5818 = normal_vec.x;
-        let _e5833 = normal_vec.y;
-        let _e5837 = lambda;
-        let _e5841 = constants.viscosity;
-        let _e5844 = normal_vec.x;
-        let _e5853 = normal_vec.y;
-        phi_3_ = ((((_cse_256_ * ((((((_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234))) * _e4648) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))) / max(_e4720, 0.000000000001f)) + ((0.5f * (_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234)))) * dot(_cse_258_, _cse_258_))) + (((_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234))) * _e4865) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))))) + (_cse_318_ * ((((((_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5012) * (_e746 - _e234))) * _e5019) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5096) * (_e524 - _e121)))) / max(_e5104, 0.000000000001f)) + ((0.5f * (_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5183) * (_e746 - _e234)))) * dot(_cse_289_, _cse_289_))) + (((_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5268) * (_e746 - _e234))) * _e5275) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5352) * (_e524 - _e121))))))) + (_cse_317_ * ((((_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234))) * _e5430) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))) - (((_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5575) * (_e746 - _e234))) * _e5582) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5659) * (_e524 - _e121))))))) - (dot(((vec2<f32>(dot((((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e5673) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e5678 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e5689) / max(dist, 0.000001f)) - dot(_e5694, ((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e5700) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e5709), dot((((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e5716) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e5721 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e5732) / max(dist, 0.000001f)) - dot(_e5737, ((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e5743) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e5752)) * _e5757) + vec2<f32>((((_e5761 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e5775) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e5783))) * _e5787) + ((_e5791 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e5799) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e5803))) * lambda_other)), (((_e5811 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e5818) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e5833))) * _e5837) + ((_e5841 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e5844) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e5853))) * lambda_other)))), ((_cse_258_ * _cse_272_) + (_cse_289_ * _cse_319_))) * area));
+        let _e4262 = low_mach_params.pressure_coupling_alpha;
+        let _e4332 = constants.eos_r;
+        let _e4477 = lambda;
+        let _e4484 = constants.eos_r;
+        let _e4561 = lambda;
+        let _e4571 = constants.eos_gamma;
+        let _e4642 = constants.eos_r;
+        let _e4782 = constants.eos_dp_drho;
+        let _e4789 = low_mach_params.model;
+        let _e4878 = lambda;
+        let _e4887 = low_mach_params.pressure_coupling_alpha;
+        let _e4957 = constants.eos_r;
+        let _e5102 = lambda;
+        let _e5109 = constants.eos_r;
+        let _e5186 = lambda;
+        let _e5196 = constants.eos_gamma;
+        let _e5272 = lambda;
+        let _e5280 = constants.eos_r;
+        let _e5357 = lambda;
+        let _e5438 = lambda;
+        let _e5446 = constants.eos_dp_drho;
+        let _e5453 = low_mach_params.model;
+        phi_0_ = ((((_cse_256_ * (_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234)))) + ((((_e4262 * ((((_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234))) * _e4332) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))) - (((_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e4477) * (_e746 - _e234))) * _e4484) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e4561) * (_e524 - _e121)))))) / max((((((_e4571 * (_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234)))) * _e4642) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))) / (_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234)))) + _e4782), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e4789) - 2f)))))) * area)) + (_cse_318_ * (_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e4878) * (_e746 - _e234))))) + ((((_e4887 * ((((_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234))) * _e4957) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))) - (((_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5102) * (_e746 - _e234))) * _e5109) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5186) * (_e524 - _e121)))))) / max((((((_e5196 * (_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5272) * (_e746 - _e234)))) * _e5280) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5357) * (_e524 - _e121)))) / (_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5438) * (_e746 - _e234)))) + _e5446), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e5453) - 2f)))))) * area));
+        let _e5542 = constants.eos_r;
+        let _e5687 = lambda;
+        let _e5695 = constants.eos_r;
+        let _e5772 = lambda;
+        let _e5781 = normal_vec.x;
+        let _e5786 = constants.viscosity;
+        let _e5800 = normal_vec.x;
+        let _e5808 = normal_vec.y;
+        let _e5812 = lambda;
+        let _e5816 = constants.viscosity;
+        let _e5824 = normal_vec.x;
+        let _e5828 = normal_vec.y;
+        phi_1_ = ((((_cse_256_ * _cse_259_.x) + (_cse_318_ * _cse_290_.x)) + ((((((_cse_272_ * (_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234)))) * _e5542) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))) + (((_cse_319_ * (_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5687) * (_e746 - _e234)))) * _e5695) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e5772) * (_e524 - _e121))))) * area) * _e5781)) - ((((_e5786 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e5800) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e5808))) * _e5812) + ((_e5816 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e5824) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e5828))) * lambda_other)) * area));
+        let _e5911 = constants.eos_r;
+        let _e6056 = lambda;
+        let _e6064 = constants.eos_r;
+        let _e6141 = lambda;
+        let _e6150 = normal_vec.y;
+        let _e6155 = constants.viscosity;
+        let _e6162 = normal_vec.x;
+        let _e6177 = normal_vec.y;
+        let _e6181 = lambda;
+        let _e6185 = constants.viscosity;
+        let _e6188 = normal_vec.x;
+        let _e6197 = normal_vec.y;
+        phi_2_ = ((((_cse_256_ * _cse_259_.y) + (_cse_318_ * _cse_290_.y)) + ((((((_cse_272_ * (_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234)))) * _e5911) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))) + (((_cse_319_ * (_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e6056) * (_e746 - _e234)))) * _e6064) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e6141) * (_e524 - _e121))))) * area) * _e6150)) - ((((_e6155 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e6162) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e6177))) * _e6181) + ((_e6185 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e6188) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e6197))) * lambda_other)) * area));
+        let _e6274 = constants.eos_r;
+        let _e6346 = constants.eos_gm1_;
+        let _e6491 = constants.eos_r;
+        let _e6638 = lambda;
+        let _e6645 = constants.eos_r;
+        let _e6722 = lambda;
+        let _e6730 = constants.eos_gm1_;
+        let _e6809 = lambda;
+        let _e6894 = lambda;
+        let _e6901 = constants.eos_r;
+        let _e6978 = lambda;
+        let _e7056 = constants.eos_r;
+        let _e7201 = lambda;
+        let _e7208 = constants.eos_r;
+        let _e7285 = lambda;
+        let _e7299 = lambda;
+        let _e7304 = normal_vec;
+        let _e7315 = state[((owner_1 * 22u) + 10u)];
+        let _e7320 = normal_vec;
+        let _e7326 = lambda;
+        let _e7335 = normal_vec;
+        let _e7342 = lambda;
+        let _e7347 = normal_vec;
+        let _e7358 = state[((owner_1 * 22u) + 11u)];
+        let _e7363 = normal_vec;
+        let _e7369 = lambda;
+        let _e7378 = normal_vec;
+        let _e7383 = constants.viscosity;
+        let _e7387 = constants.viscosity;
+        let _e7401 = normal_vec.x;
+        let _e7409 = normal_vec.y;
+        let _e7413 = lambda;
+        let _e7417 = constants.viscosity;
+        let _e7425 = normal_vec.x;
+        let _e7429 = normal_vec.y;
+        let _e7437 = constants.viscosity;
+        let _e7444 = normal_vec.x;
+        let _e7459 = normal_vec.y;
+        let _e7463 = lambda;
+        let _e7467 = constants.viscosity;
+        let _e7470 = normal_vec.x;
+        let _e7479 = normal_vec.y;
+        phi_3_ = ((((_cse_256_ * ((((((_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234))) * _e6274) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))) / max(_e6346, 0.000000000001f)) + ((0.5f * (_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234)))) * dot(_cse_258_, _cse_258_))) + (((_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234))) * _e6491) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))))) + (_cse_318_ * ((((((_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e6638) * (_e746 - _e234))) * _e6645) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e6722) * (_e524 - _e121)))) / max(_e6730, 0.000000000001f)) + ((0.5f * (_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e6809) * (_e746 - _e234)))) * dot(_cse_289_, _cse_289_))) + (((_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e6894) * (_e746 - _e234))) * _e6901) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e6978) * (_e524 - _e121))))))) + (_cse_317_ * ((((_e234 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e746 - _e234))) * _e7056) * (_e121 + ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(s_own_grad_T_x, s_own_grad_T_y))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * lambda_other) * (_e524 - _e121)))) - (((_e746 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)))) * (_e746 - _e234)) / (((_e746 - _e234) * (_e746 - _e234)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e7201) * (_e746 - _e234))) * _e7208) * (_e524 - ((((max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)) + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f)))) / (1f + abs(max(-2001f, min(((((2f * dot((c_neigh_cell_vec - c_owner_vec), vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)))) * (_e524 - _e121)) / (((_e524 - _e121) * (_e524 - _e121)) + 0.000000000000000000000000000001f)) - 1f), 1999f))))) * _e7285) * (_e524 - _e121))))))) - (dot(((vec2<f32>(dot((((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e7299) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e7304 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e7315) / max(dist, 0.000001f)) - dot(_e7320, ((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e7326) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e7335), dot((((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e7342) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e7347 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e7358) / max(dist, 0.000001f)) - dot(_e7363, ((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e7369) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e7378)) * _e7383) + vec2<f32>((((_e7387 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e7401) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e7409))) * _e7413) + ((_e7417 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e7425) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e7429))) * lambda_other)), (((_e7437 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e7444) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e7459))) * _e7463) + ((_e7467 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e7470) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e7479))) * lambda_other)))), ((_cse_258_ * _cse_272_) + (_cse_289_ * _cse_319_))) * area));
         phi_4_ = 0f;
         phi_5_ = 0f;
         phi_6_ = 0f;
         phi_7_ = 0f;
     }
-    let _e5873 = constants.scheme;
-    if ((_e5873 == 5u) && !(is_boundary_1)) {
+    let _e7499 = constants.scheme;
+    if ((_e7499 == 5u) && !(is_boundary_1)) {
         let _cse_329_ = ((((_cse_390_ * 0.625f) + (_cse_393_ * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_u_x_x, s_own_grad_rho_u_x_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_390_);
         let _cse_328_ = max(_cse_329_, min((_cse_393_ - _cse_390_), 0f));
         let _cse_327_ = min(_cse_328_, max((_cse_393_ - _cse_390_), 0f));
@@ -7810,19 +7968,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_331_ = (_cse_395_ + _cse_333_);
         let _cse_324_ = vec2<f32>(_cse_325_, _cse_331_);
         let _cse_323_ = ((_cse_324_ * 1f) / vec2((_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f)))));
-        let _e5946 = normal_vec;
-        let _cse_322_ = dot(_cse_323_, (_e5946 * area));
-        let _e5951 = constants.eos_gamma;
-        let _e5954 = constants.eos_r;
-        let _cse_344_ = ((_e5951 * _e5954) * _e121);
+        let _e7572 = normal_vec;
+        let _cse_322_ = dot(_cse_323_, (_e7572 * area));
+        let _e7577 = constants.eos_gamma;
+        let _e7580 = constants.eos_r;
+        let _cse_344_ = ((_e7577 * _e7580) * _e121);
         let _cse_343_ = sqrt(_cse_344_);
-        let _e5960 = constants.eos_gamma;
-        let _e5963 = constants.eos_r;
-        let _cse_350_ = ((_e5960 * _e5963) * _e524);
+        let _e7586 = constants.eos_gamma;
+        let _e7589 = constants.eos_r;
+        let _cse_350_ = ((_e7586 * _e7589) * _e524);
         let _cse_349_ = sqrt(_cse_350_);
-        let _e5977 = constants.eos_gamma;
-        let _e5981 = constants.eos_r;
-        let _cse_348_ = (((_cse_343_ * 0.625f) + (_cse_349_ * 0.375f)) + (dot(((((vec2<f32>(s_own_grad_T_x, s_own_grad_T_y) * 0.5f) * _e5977) * _e5981) / vec2(max(_cse_343_, 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _e7603 = constants.eos_gamma;
+        let _e7607 = constants.eos_r;
+        let _cse_348_ = (((_cse_343_ * 0.625f) + (_cse_349_ * 0.375f)) + (dot(((((vec2<f32>(s_own_grad_T_x, s_own_grad_T_y) * 0.5f) * _e7603) * _e7607) / vec2(max(_cse_343_, 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
         let _cse_347_ = (_cse_348_ - _cse_343_);
         let _cse_346_ = max(_cse_347_, min((_cse_349_ - _cse_343_), 0f));
         let _cse_345_ = min(_cse_346_, max((_cse_349_ - _cse_343_), 0f));
@@ -7843,11 +8001,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_365_ = (_e746 + _cse_366_);
         let _cse_364_ = (1f / _cse_365_);
         let _cse_353_ = (_cse_354_ * _cse_364_);
-        let _e6083 = normal_vec;
-        let _cse_352_ = dot(_cse_353_, (_e6083 * area));
-        let _e6100 = constants.eos_gamma;
-        let _e6104 = constants.eos_r;
-        let _cse_372_ = (((_cse_349_ * 0.625f) + (_cse_343_ * 0.375f)) + (dot(((((vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)) * 0.5f) * _e6100) * _e6104) / vec2(max(_cse_349_, 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _e7709 = normal_vec;
+        let _cse_352_ = dot(_cse_353_, (_e7709 * area));
+        let _e7726 = constants.eos_gamma;
+        let _e7730 = constants.eos_r;
+        let _cse_372_ = (((_cse_349_ * 0.625f) + (_cse_343_ * 0.375f)) + (dot(((((vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)) * 0.5f) * _e7726) * _e7730) / vec2(max(_cse_349_, 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_371_ = (_cse_372_ - _cse_349_);
         let _cse_370_ = max(_cse_371_, min((_cse_343_ - _cse_349_), 0f));
         let _cse_369_ = min(_cse_370_, max((_cse_343_ - _cse_349_), 0f));
@@ -7869,71 +8027,85 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_382_ = (1f - _cse_337_);
         let _cse_381_ = (_cse_352_ * _cse_382_);
         let _cse_380_ = (_cse_381_ + _cse_379_);
-        let _e6170 = constants.eos_r;
-        let _e6197 = constants.eos_r;
-        let _cse_383_ = ((((_cse_337_ * (_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f)))) * _e6170) * (_e121 + min(max(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) + (((_cse_382_ * _cse_365_) * _e6197) * (_e524 + min(max(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))));
-        phi_0_ = ((_cse_320_ * (_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f)))) + (_cse_380_ * _cse_365_));
-        let _e6257 = normal_vec.x;
-        let _e6262 = constants.viscosity;
-        let _e6276 = normal_vec.x;
-        let _e6284 = normal_vec.y;
-        let _e6288 = lambda;
-        let _e6292 = constants.viscosity;
-        let _e6300 = normal_vec.x;
-        let _e6304 = normal_vec.y;
-        phi_1_ = ((((_cse_320_ * _cse_324_.x) + (_cse_380_ * _cse_354_.x)) + ((_cse_383_ * area) * _e6257)) - ((((_e6262 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e6276) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e6284))) * _e6288) + ((_e6292 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e6300) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e6304))) * lambda_other)) * area));
-        let _e6319 = normal_vec.y;
-        let _e6324 = constants.viscosity;
-        let _e6331 = normal_vec.x;
-        let _e6346 = normal_vec.y;
-        let _e6350 = lambda;
-        let _e6354 = constants.viscosity;
-        let _e6357 = normal_vec.x;
-        let _e6366 = normal_vec.y;
-        phi_2_ = ((((_cse_320_ * _cse_324_.y) + (_cse_380_ * _cse_354_.y)) + ((_cse_383_ * area) * _e6319)) - ((((_e6324 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e6331) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e6346))) * _e6350) + ((_e6354 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e6357) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e6366))) * lambda_other)) * area));
-        let _e6397 = constants.eos_r;
-        let _e6423 = constants.eos_gm1_;
-        let _e6476 = constants.eos_r;
-        let _e6504 = constants.eos_r;
-        let _e6534 = constants.eos_gm1_;
-        let _e6545 = constants.eos_r;
-        let _e6599 = constants.eos_r;
-        let _e6625 = constants.eos_r;
-        let _e6661 = lambda;
-        let _e6666 = normal_vec;
-        let _e6677 = state[((owner_1 * 22u) + 10u)];
-        let _e6682 = normal_vec;
-        let _e6688 = lambda;
-        let _e6697 = normal_vec;
-        let _e6704 = lambda;
-        let _e6709 = normal_vec;
-        let _e6720 = state[((owner_1 * 22u) + 11u)];
-        let _e6725 = normal_vec;
-        let _e6731 = lambda;
-        let _e6740 = normal_vec;
-        let _e6745 = constants.viscosity;
-        let _e6749 = constants.viscosity;
-        let _e6763 = normal_vec.x;
-        let _e6771 = normal_vec.y;
-        let _e6775 = lambda;
-        let _e6779 = constants.viscosity;
-        let _e6787 = normal_vec.x;
-        let _e6791 = normal_vec.y;
-        let _e6799 = constants.viscosity;
-        let _e6806 = normal_vec.x;
-        let _e6821 = normal_vec.y;
-        let _e6825 = lambda;
-        let _e6829 = constants.viscosity;
-        let _e6832 = normal_vec.x;
-        let _e6841 = normal_vec.y;
-        phi_3_ = ((((_cse_320_ * ((((((_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f))) * _e6397) * (_e121 + min(max(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) / max(_e6423, 0.000000000001f)) + ((0.5f * (_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f)))) * dot(_cse_323_, _cse_323_))) + (((_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f))) * _e6476) * (_e121 + min(max(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))))) + (_cse_380_ * (((((_cse_365_ * _e6504) * (_e524 + min(max(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))) / max(_e6534, 0.000000000001f)) + ((0.5f * _cse_365_) * dot(_cse_353_, _cse_353_))) + ((_cse_365_ * _e6545) * (_e524 + min(max(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f))))))) + (_cse_379_ * ((((_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f))) * _e6599) * (_e121 + min(max(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) - ((_cse_365_ * _e6625) * (_e524 + min(max(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f))))))) - (dot(((vec2<f32>(dot((((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e6661) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e6666 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e6677) / max(dist, 0.000001f)) - dot(_e6682, ((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e6688) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e6697), dot((((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e6704) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e6709 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e6720) / max(dist, 0.000001f)) - dot(_e6725, ((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e6731) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e6740)) * _e6745) + vec2<f32>((((_e6749 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e6763) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e6771))) * _e6775) + ((_e6779 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e6787) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e6791))) * lambda_other)), (((_e6799 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e6806) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e6821))) * _e6825) + ((_e6829 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e6832) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e6841))) * lambda_other)))), ((_cse_323_ * _cse_337_) + (_cse_353_ * _cse_382_))) * area));
+        let _e7796 = constants.eos_r;
+        let _e7823 = constants.eos_r;
+        let _cse_383_ = ((((_cse_337_ * (_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f)))) * _e7796) * (_e121 + min(max(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) + (((_cse_382_ * _cse_365_) * _e7823) * (_e524 + min(max(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))));
+        let _e7876 = low_mach_params.pressure_coupling_alpha;
+        let _e7900 = constants.eos_r;
+        let _e7926 = constants.eos_r;
+        let _e7958 = constants.eos_gamma;
+        let _e7983 = constants.eos_r;
+        let _e8031 = constants.eos_dp_drho;
+        let _e8038 = low_mach_params.model;
+        let _e8056 = low_mach_params.pressure_coupling_alpha;
+        let _e8080 = constants.eos_r;
+        let _e8106 = constants.eos_r;
+        let _e8138 = constants.eos_gamma;
+        let _e8142 = constants.eos_r;
+        let _e8173 = constants.eos_dp_drho;
+        let _e8180 = low_mach_params.model;
+        phi_0_ = ((((_cse_320_ * (_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f)))) + ((((_e7876 * ((((_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f))) * _e7900) * (_e121 + min(max(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) - ((_cse_365_ * _e7926) * (_e524 + min(max(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))))) / max((((((_e7958 * (_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f)))) * _e7983) * (_e121 + min(max(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) / (_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f)))) + _e8031), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e8038) - 2f)))))) * area)) + (_cse_380_ * _cse_365_)) + ((((_e8056 * ((((_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f))) * _e8080) * (_e121 + min(max(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) - ((_cse_365_ * _e8106) * (_e524 + min(max(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))))) / max((((((_e8138 * _cse_365_) * _e8142) * (_e524 + min(max(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))) / _cse_365_) + _e8173), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e8180) - 2f)))))) * area));
+        let _e8201 = normal_vec.x;
+        let _e8206 = constants.viscosity;
+        let _e8220 = normal_vec.x;
+        let _e8228 = normal_vec.y;
+        let _e8232 = lambda;
+        let _e8236 = constants.viscosity;
+        let _e8244 = normal_vec.x;
+        let _e8248 = normal_vec.y;
+        phi_1_ = ((((_cse_320_ * _cse_324_.x) + (_cse_380_ * _cse_354_.x)) + ((_cse_383_ * area) * _e8201)) - ((((_e8206 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e8220) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e8228))) * _e8232) + ((_e8236 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e8244) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e8248))) * lambda_other)) * area));
+        let _e8263 = normal_vec.y;
+        let _e8268 = constants.viscosity;
+        let _e8275 = normal_vec.x;
+        let _e8290 = normal_vec.y;
+        let _e8294 = lambda;
+        let _e8298 = constants.viscosity;
+        let _e8301 = normal_vec.x;
+        let _e8310 = normal_vec.y;
+        phi_2_ = ((((_cse_320_ * _cse_324_.y) + (_cse_380_ * _cse_354_.y)) + ((_cse_383_ * area) * _e8263)) - ((((_e8268 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e8275) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e8290))) * _e8294) + ((_e8298 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e8301) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e8310))) * lambda_other)) * area));
+        let _e8341 = constants.eos_r;
+        let _e8367 = constants.eos_gm1_;
+        let _e8420 = constants.eos_r;
+        let _e8448 = constants.eos_r;
+        let _e8478 = constants.eos_gm1_;
+        let _e8489 = constants.eos_r;
+        let _e8543 = constants.eos_r;
+        let _e8569 = constants.eos_r;
+        let _e8605 = lambda;
+        let _e8610 = normal_vec;
+        let _e8621 = state[((owner_1 * 22u) + 10u)];
+        let _e8626 = normal_vec;
+        let _e8632 = lambda;
+        let _e8641 = normal_vec;
+        let _e8648 = lambda;
+        let _e8653 = normal_vec;
+        let _e8664 = state[((owner_1 * 22u) + 11u)];
+        let _e8669 = normal_vec;
+        let _e8675 = lambda;
+        let _e8684 = normal_vec;
+        let _e8689 = constants.viscosity;
+        let _e8693 = constants.viscosity;
+        let _e8707 = normal_vec.x;
+        let _e8715 = normal_vec.y;
+        let _e8719 = lambda;
+        let _e8723 = constants.viscosity;
+        let _e8731 = normal_vec.x;
+        let _e8735 = normal_vec.y;
+        let _e8743 = constants.viscosity;
+        let _e8750 = normal_vec.x;
+        let _e8765 = normal_vec.y;
+        let _e8769 = lambda;
+        let _e8773 = constants.viscosity;
+        let _e8776 = normal_vec.x;
+        let _e8785 = normal_vec.y;
+        phi_3_ = ((((_cse_320_ * ((((((_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f))) * _e8341) * (_e121 + min(max(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) / max(_e8367, 0.000000000001f)) + ((0.5f * (_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f)))) * dot(_cse_323_, _cse_323_))) + (((_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f))) * _e8420) * (_e121 + min(max(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))))) + (_cse_380_ * (((((_cse_365_ * _e8448) * (_e524 + min(max(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f)))) / max(_e8478, 0.000000000001f)) + ((0.5f * _cse_365_) * dot(_cse_353_, _cse_353_))) + ((_cse_365_ * _e8489) * (_e524 + min(max(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f))))))) + (_cse_379_ * ((((_e234 + min(max(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234), min((_e746 - _e234), 0f)), max((_e746 - _e234), 0f))) * _e8543) * (_e121 + min(max(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121), min((_e524 - _e121), 0f)), max((_e524 - _e121), 0f)))) - ((_cse_365_ * _e8569) * (_e524 + min(max(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524), min((_e121 - _e524), 0f)), max((_e121 - _e524), 0f))))))) - (dot(((vec2<f32>(dot((((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e8605) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e8610 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e8621) / max(dist, 0.000001f)) - dot(_e8626, ((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e8632) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e8641), dot((((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e8648) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e8653 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e8664) / max(dist, 0.000001f)) - dot(_e8669, ((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e8675) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e8684)) * _e8689) + vec2<f32>((((_e8693 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e8707) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e8715))) * _e8719) + ((_e8723 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e8731) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e8735))) * lambda_other)), (((_e8743 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e8750) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e8765))) * _e8769) + ((_e8773 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e8776) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e8785))) * lambda_other)))), ((_cse_323_ * _cse_337_) + (_cse_353_ * _cse_382_))) * area));
         phi_4_ = 0f;
         phi_5_ = 0f;
         phi_6_ = 0f;
         phi_7_ = 0f;
     }
-    let _e6861 = constants.scheme;
-    if ((_e6861 == 6u) && !(is_boundary_1)) {
+    let _e8805 = constants.scheme;
+    if ((_e8805 == 6u) && !(is_boundary_1)) {
         let _cse_392_ = ((((_cse_390_ * 0.625f) + (_cse_393_ * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_u_x_x, s_own_grad_rho_u_x_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _cse_390_);
         let _cse_391_ = ((((_cse_392_ * abs((_cse_393_ - _cse_390_))) / max(abs((_cse_393_ - _cse_390_)), (abs(_cse_392_) + 0.00000001f))) * max(((_cse_393_ - _cse_390_) * _cse_392_), 0f)) / max(abs(((_cse_393_ - _cse_390_) * _cse_392_)), 0.00000001f));
         let _cse_389_ = (_cse_390_ + _cse_391_);
@@ -7942,44 +8114,44 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_394_ = (_cse_395_ + _cse_396_);
         let _cse_388_ = vec2<f32>(_cse_389_, _cse_394_);
         let _cse_387_ = ((_cse_388_ * 1f) / vec2((_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f)))));
-        let _e7009 = normal_vec;
-        let _cse_386_ = dot(_cse_387_, (_e7009 * area));
-        let _e7014 = constants.eos_gamma;
-        let _e7017 = constants.eos_r;
-        let _cse_405_ = sqrt(((_e7014 * _e7017) * _e121));
-        let _e7023 = constants.eos_gamma;
-        let _e7026 = constants.eos_r;
-        let _cse_410_ = sqrt(((_e7023 * _e7026) * _e524));
-        let _e7040 = constants.eos_gamma;
-        let _e7044 = constants.eos_r;
-        let _cse_409_ = (((_cse_405_ * 0.625f) + (_cse_410_ * 0.375f)) + (dot(((((vec2<f32>(s_own_grad_T_x, s_own_grad_T_y) * 0.5f) * _e7040) * _e7044) / vec2(max(_cse_405_, 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
+        let _e8953 = normal_vec;
+        let _cse_386_ = dot(_cse_387_, (_e8953 * area));
+        let _e8958 = constants.eos_gamma;
+        let _e8961 = constants.eos_r;
+        let _cse_405_ = sqrt(((_e8958 * _e8961) * _e121));
+        let _e8967 = constants.eos_gamma;
+        let _e8970 = constants.eos_r;
+        let _cse_410_ = sqrt(((_e8967 * _e8970) * _e524));
+        let _e8984 = constants.eos_gamma;
+        let _e8988 = constants.eos_r;
+        let _cse_409_ = (((_cse_405_ * 0.625f) + (_cse_410_ * 0.375f)) + (dot(((((vec2<f32>(s_own_grad_T_x, s_own_grad_T_y) * 0.5f) * _e8984) * _e8988) / vec2(max(_cse_405_, 0.000000000001f))), (c_neigh_cell_vec - c_owner_vec)) * 0.125f));
         let _cse_408_ = (_cse_409_ - _cse_405_);
         let _cse_407_ = ((_cse_408_ * abs((_cse_410_ - _cse_405_))) / max(abs((_cse_410_ - _cse_405_)), (abs(_cse_408_) + 0.00000001f)));
-        let _cse_411_ = (max(((_cse_410_ - _cse_405_) * _cse_408_), 0f) / max(abs(((_cse_410_ - _cse_405_) * _cse_408_)), 0.00000001f));
-        let _cse_406_ = (_cse_407_ * _cse_411_);
+        let _cse_406_ = ((_cse_407_ * max(((_cse_410_ - _cse_405_) * _cse_408_), 0f)) / max(abs(((_cse_410_ - _cse_405_) * _cse_408_)), 0.00000001f));
         let _cse_404_ = (_cse_405_ + _cse_406_);
         let _cse_403_ = (_cse_404_ * area);
         let _cse_402_ = (_cse_386_ + _cse_403_);
-        let _cse_420_ = (((_cse_393_ * 0.625f) + (_cse_390_ * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_rho_u_x_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
-        let _cse_419_ = (_cse_420_ - _cse_393_);
-        let _cse_418_ = ((_cse_419_ * abs((_cse_390_ - _cse_393_))) / max(abs((_cse_390_ - _cse_393_)), (abs(_cse_419_) + 0.00000001f)));
-        let _cse_421_ = (max(((_cse_390_ - _cse_393_) * _cse_419_), 0f) / max(abs(((_cse_390_ - _cse_393_) * _cse_419_)), 0.00000001f));
-        let _cse_417_ = (_cse_418_ * _cse_421_);
-        let _cse_416_ = (_cse_393_ + _cse_417_);
-        let _cse_426_ = (((_cse_398_ * 0.625f) + (_cse_395_ * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_rho_u_y_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
-        let _cse_425_ = (_cse_426_ - _cse_398_);
-        let _cse_424_ = ((_cse_425_ * abs((_cse_395_ - _cse_398_))) / max(abs((_cse_395_ - _cse_398_)), (abs(_cse_425_) + 0.00000001f)));
-        let _cse_427_ = (max(((_cse_395_ - _cse_398_) * _cse_425_), 0f) / max(abs(((_cse_395_ - _cse_398_) * _cse_425_)), 0.00000001f));
-        let _cse_423_ = (_cse_424_ * _cse_427_);
-        let _cse_422_ = (_cse_398_ + _cse_423_);
-        let _cse_415_ = vec2<f32>(_cse_416_, _cse_422_);
-        let _cse_428_ = (_e746 + ((((((((_e746 * 0.625f) + (_e234 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e746) * abs((_e234 - _e746))) / max(abs((_e234 - _e746)), (abs(((((_e746 * 0.625f) + (_e234 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e746)) + 0.00000001f))) * max(((_e234 - _e746) * ((((_e746 * 0.625f) + (_e234 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e746)), 0f)) / max(abs(((_e234 - _e746) * ((((_e746 * 0.625f) + (_e234 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e746))), 0.00000001f)));
-        let _cse_414_ = ((_cse_415_ * 1f) / vec2(_cse_428_));
-        let _e7247 = normal_vec;
-        let _cse_413_ = dot(_cse_414_, (_e7247 * area));
-        let _e7264 = constants.eos_gamma;
-        let _e7268 = constants.eos_r;
-        let _cse_434_ = (((_cse_410_ * 0.625f) + (_cse_405_ * 0.375f)) + (dot(((((vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)) * 0.5f) * _e7264) * _e7268) / vec2(max(_cse_410_, 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_419_ = (((_cse_393_ * 0.625f) + (_cse_390_ * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_rho_u_x_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_418_ = (_cse_419_ - _cse_393_);
+        let _cse_417_ = ((_cse_418_ * abs((_cse_390_ - _cse_393_))) / max(abs((_cse_390_ - _cse_393_)), (abs(_cse_418_) + 0.00000001f)));
+        let _cse_420_ = (max(((_cse_390_ - _cse_393_) * _cse_418_), 0f) / max(abs(((_cse_390_ - _cse_393_) * _cse_418_)), 0.00000001f));
+        let _cse_416_ = (_cse_417_ * _cse_420_);
+        let _cse_415_ = (_cse_393_ + _cse_416_);
+        let _cse_425_ = (((_cse_398_ * 0.625f) + (_cse_395_ * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_rho_u_y_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
+        let _cse_424_ = (_cse_425_ - _cse_398_);
+        let _cse_423_ = ((_cse_424_ * abs((_cse_395_ - _cse_398_))) / max(abs((_cse_395_ - _cse_398_)), (abs(_cse_424_) + 0.00000001f)));
+        let _cse_426_ = (max(((_cse_395_ - _cse_398_) * _cse_424_), 0f) / max(abs(((_cse_395_ - _cse_398_) * _cse_424_)), 0.00000001f));
+        let _cse_422_ = (_cse_423_ * _cse_426_);
+        let _cse_421_ = (_cse_398_ + _cse_422_);
+        let _cse_414_ = vec2<f32>(_cse_415_, _cse_421_);
+        let _cse_428_ = ((((((((_e746 * 0.625f) + (_e234 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e746) * abs((_e234 - _e746))) / max(abs((_e234 - _e746)), (abs(((((_e746 * 0.625f) + (_e234 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e746)) + 0.00000001f))) * max(((_e234 - _e746) * ((((_e746 * 0.625f) + (_e234 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e746)), 0f)) / max(abs(((_e234 - _e746) * ((((_e746 * 0.625f) + (_e234 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_rho_x, 0f, is_boundary_1), select(s_neigh_grad_rho_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e746))), 0.00000001f));
+        let _cse_427_ = (_e746 + _cse_428_);
+        let _cse_413_ = ((_cse_414_ * 1f) / vec2(_cse_427_));
+        let _e9191 = normal_vec;
+        let _cse_412_ = dot(_cse_413_, (_e9191 * area));
+        let _e9208 = constants.eos_gamma;
+        let _e9212 = constants.eos_r;
+        let _cse_434_ = (((_cse_410_ * 0.625f) + (_cse_405_ * 0.375f)) + (dot(((((vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)) * 0.5f) * _e9208) * _e9212) / vec2(max(_cse_410_, 0.000000000001f))), (c_owner_vec - c_neigh_cell_vec)) * 0.125f));
         let _cse_433_ = (_cse_434_ - _cse_410_);
         let _cse_432_ = ((_cse_433_ * abs((_cse_405_ - _cse_410_))) / max(abs((_cse_405_ - _cse_410_)), (abs(_cse_433_) + 0.00000001f)));
         let _cse_436_ = ((_cse_405_ - _cse_410_) * _cse_433_);
@@ -7987,11 +8159,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_431_ = (_cse_432_ * _cse_435_);
         let _cse_430_ = (_cse_410_ + _cse_431_);
         let _cse_429_ = (_cse_430_ * area);
-        let _cse_412_ = (_cse_413_ + _cse_429_);
-        let _cse_401_ = max(_cse_402_, _cse_412_);
+        let _cse_411_ = (_cse_412_ + _cse_429_);
+        let _cse_401_ = max(_cse_402_, _cse_411_);
         let _cse_400_ = max(_cse_401_, 0f);
         let _cse_441_ = (_cse_386_ - _cse_403_);
-        let _cse_442_ = (_cse_413_ - _cse_429_);
+        let _cse_442_ = (_cse_412_ - _cse_429_);
         let _cse_440_ = min(_cse_441_, _cse_442_);
         let _cse_439_ = min(_cse_440_, 0f);
         let _cse_438_ = (_cse_400_ - _cse_439_);
@@ -8001,87 +8173,101 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let _cse_443_ = (_cse_439_ * _cse_399_);
         let _cse_384_ = (_cse_385_ - _cse_443_);
         let _cse_446_ = (1f - _cse_399_);
-        let _cse_445_ = (_cse_413_ * _cse_446_);
+        let _cse_445_ = (_cse_412_ * _cse_446_);
         let _cse_444_ = (_cse_445_ + _cse_443_);
-        let _e7394 = constants.eos_r;
-        let _e7470 = constants.eos_r;
-        let _cse_447_ = ((((_cse_399_ * (_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f)))) * _e7394) * (_e121 + ((((((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121) * abs((_e524 - _e121))) / max(abs((_e524 - _e121)), (abs(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + 0.00000001f))) * max(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)), 0f)) / max(abs(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121))), 0.00000001f)))) + (((_cse_446_ * _cse_428_) * _e7470) * (_e524 + ((((((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524) * abs((_e121 - _e524))) / max(abs((_e121 - _e524)), (abs(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) + 0.00000001f))) * max(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)), 0f)) / max(abs(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))), 0.00000001f)))));
-        phi_0_ = ((_cse_384_ * (_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f)))) + (_cse_444_ * _cse_428_));
-        let _e7640 = normal_vec.x;
-        let _e7645 = constants.viscosity;
-        let _e7659 = normal_vec.x;
-        let _e7667 = normal_vec.y;
-        let _e7671 = lambda;
-        let _e7675 = constants.viscosity;
-        let _e7683 = normal_vec.x;
-        let _e7687 = normal_vec.y;
-        phi_1_ = ((((_cse_384_ * _cse_388_.x) + (_cse_444_ * _cse_415_.x)) + ((_cse_447_ * area) * _e7640)) - ((((_e7645 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e7659) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e7667))) * _e7671) + ((_e7675 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e7683) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e7687))) * lambda_other)) * area));
-        let _e7702 = normal_vec.y;
-        let _e7707 = constants.viscosity;
-        let _e7714 = normal_vec.x;
-        let _e7729 = normal_vec.y;
-        let _e7733 = lambda;
-        let _e7737 = constants.viscosity;
-        let _e7740 = normal_vec.x;
-        let _e7749 = normal_vec.y;
-        phi_2_ = ((((_cse_384_ * _cse_388_.y) + (_cse_444_ * _cse_415_.y)) + ((_cse_447_ * area) * _e7702)) - ((((_e7707 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e7714) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e7729))) * _e7733) + ((_e7737 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e7740) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e7749))) * lambda_other)) * area));
-        let _e7829 = constants.eos_r;
-        let _e7904 = constants.eos_gm1_;
-        let _e8055 = constants.eos_r;
-        let _e8132 = constants.eos_r;
-        let _e8223 = constants.eos_gm1_;
-        let _e8234 = constants.eos_r;
-        let _e8398 = constants.eos_r;
-        let _e8473 = constants.eos_r;
-        let _e8570 = lambda;
-        let _e8575 = normal_vec;
-        let _e8586 = state[((owner_1 * 22u) + 10u)];
-        let _e8591 = normal_vec;
-        let _e8597 = lambda;
-        let _e8606 = normal_vec;
-        let _e8613 = lambda;
-        let _e8618 = normal_vec;
-        let _e8629 = state[((owner_1 * 22u) + 11u)];
-        let _e8634 = normal_vec;
-        let _e8640 = lambda;
-        let _e8649 = normal_vec;
-        let _e8654 = constants.viscosity;
-        let _e8658 = constants.viscosity;
-        let _e8672 = normal_vec.x;
-        let _e8680 = normal_vec.y;
-        let _e8684 = lambda;
-        let _e8688 = constants.viscosity;
-        let _e8696 = normal_vec.x;
-        let _e8700 = normal_vec.y;
-        let _e8708 = constants.viscosity;
-        let _e8715 = normal_vec.x;
-        let _e8730 = normal_vec.y;
-        let _e8734 = lambda;
-        let _e8738 = constants.viscosity;
-        let _e8741 = normal_vec.x;
-        let _e8750 = normal_vec.y;
-        phi_3_ = ((((_cse_384_ * ((((((_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f))) * _e7829) * (_e121 + ((((((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121) * abs((_e524 - _e121))) / max(abs((_e524 - _e121)), (abs(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + 0.00000001f))) * max(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)), 0f)) / max(abs(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121))), 0.00000001f)))) / max(_e7904, 0.000000000001f)) + ((0.5f * (_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f)))) * dot(_cse_387_, _cse_387_))) + (((_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f))) * _e8055) * (_e121 + ((((((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121) * abs((_e524 - _e121))) / max(abs((_e524 - _e121)), (abs(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + 0.00000001f))) * max(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)), 0f)) / max(abs(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121))), 0.00000001f)))))) + (_cse_444_ * (((((_cse_428_ * _e8132) * (_e524 + ((((((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524) * abs((_e121 - _e524))) / max(abs((_e121 - _e524)), (abs(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) + 0.00000001f))) * max(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)), 0f)) / max(abs(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))), 0.00000001f)))) / max(_e8223, 0.000000000001f)) + ((0.5f * _cse_428_) * dot(_cse_414_, _cse_414_))) + ((_cse_428_ * _e8234) * (_e524 + ((((((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524) * abs((_e121 - _e524))) / max(abs((_e121 - _e524)), (abs(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) + 0.00000001f))) * max(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)), 0f)) / max(abs(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))), 0.00000001f))))))) + (_cse_443_ * ((((_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f))) * _e8398) * (_e121 + ((((((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121) * abs((_e524 - _e121))) / max(abs((_e524 - _e121)), (abs(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + 0.00000001f))) * max(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)), 0f)) / max(abs(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121))), 0.00000001f)))) - ((_cse_428_ * _e8473) * (_e524 + ((((((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524) * abs((_e121 - _e524))) / max(abs((_e121 - _e524)), (abs(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) + 0.00000001f))) * max(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)), 0f)) / max(abs(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))), 0.00000001f))))))) - (dot(((vec2<f32>(dot((((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e8570) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e8575 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e8586) / max(dist, 0.000001f)) - dot(_e8591, ((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e8597) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e8606), dot((((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e8613) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e8618 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e8629) / max(dist, 0.000001f)) - dot(_e8634, ((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e8640) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e8649)) * _e8654) + vec2<f32>((((_e8658 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e8672) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e8680))) * _e8684) + ((_e8688 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e8696) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e8700))) * lambda_other)), (((_e8708 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e8715) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e8730))) * _e8734) + ((_e8738 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e8741) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e8750))) * lambda_other)))), ((_cse_387_ * _cse_399_) + (_cse_414_ * _cse_446_))) * area));
+        let _e9338 = constants.eos_r;
+        let _e9414 = constants.eos_r;
+        let _cse_447_ = ((((_cse_399_ * (_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f)))) * _e9338) * (_e121 + ((((((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121) * abs((_e524 - _e121))) / max(abs((_e524 - _e121)), (abs(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + 0.00000001f))) * max(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)), 0f)) / max(abs(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121))), 0.00000001f)))) + (((_cse_446_ * _cse_427_) * _e9414) * (_e524 + ((((((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524) * abs((_e121 - _e524))) / max(abs((_e121 - _e524)), (abs(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) + 0.00000001f))) * max(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)), 0f)) / max(abs(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))), 0.00000001f)))));
+        let _e9577 = low_mach_params.pressure_coupling_alpha;
+        let _e9650 = constants.eos_r;
+        let _e9725 = constants.eos_r;
+        let _e9818 = constants.eos_gamma;
+        let _e9892 = constants.eos_r;
+        let _e10038 = constants.eos_dp_drho;
+        let _e10045 = low_mach_params.model;
+        let _e10063 = low_mach_params.pressure_coupling_alpha;
+        let _e10136 = constants.eos_r;
+        let _e10211 = constants.eos_r;
+        let _e10304 = constants.eos_gamma;
+        let _e10308 = constants.eos_r;
+        let _e10400 = constants.eos_dp_drho;
+        let _e10407 = low_mach_params.model;
+        phi_0_ = ((((_cse_384_ * (_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f)))) + ((((_e9577 * ((((_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f))) * _e9650) * (_e121 + ((((((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121) * abs((_e524 - _e121))) / max(abs((_e524 - _e121)), (abs(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + 0.00000001f))) * max(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)), 0f)) / max(abs(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121))), 0.00000001f)))) - ((_cse_427_ * _e9725) * (_e524 + ((((((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524) * abs((_e121 - _e524))) / max(abs((_e121 - _e524)), (abs(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) + 0.00000001f))) * max(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)), 0f)) / max(abs(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))), 0.00000001f)))))) / max((((((_e9818 * (_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f)))) * _e9892) * (_e121 + ((((((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121) * abs((_e524 - _e121))) / max(abs((_e524 - _e121)), (abs(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + 0.00000001f))) * max(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)), 0f)) / max(abs(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121))), 0.00000001f)))) / (_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f)))) + _e10038), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e10045) - 2f)))))) * area)) + (_cse_444_ * _cse_427_)) + ((((_e10063 * ((((_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f))) * _e10136) * (_e121 + ((((((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121) * abs((_e524 - _e121))) / max(abs((_e524 - _e121)), (abs(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + 0.00000001f))) * max(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)), 0f)) / max(abs(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121))), 0.00000001f)))) - ((_cse_427_ * _e10211) * (_e524 + ((((((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524) * abs((_e121 - _e524))) / max(abs((_e121 - _e524)), (abs(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) + 0.00000001f))) * max(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)), 0f)) / max(abs(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))), 0.00000001f)))))) / max((((((_e10304 * _cse_427_) * _e10308) * (_e524 + ((((((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524) * abs((_e121 - _e524))) / max(abs((_e121 - _e524)), (abs(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) + 0.00000001f))) * max(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)), 0f)) / max(abs(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))), 0.00000001f)))) / _cse_427_) + _e10400), 0.000000000001f)) * (1f - max(0f, (1f - abs((f32(_e10407) - 2f)))))) * area));
+        let _e10428 = normal_vec.x;
+        let _e10433 = constants.viscosity;
+        let _e10447 = normal_vec.x;
+        let _e10455 = normal_vec.y;
+        let _e10459 = lambda;
+        let _e10463 = constants.viscosity;
+        let _e10471 = normal_vec.x;
+        let _e10475 = normal_vec.y;
+        phi_1_ = ((((_cse_384_ * _cse_388_.x) + (_cse_444_ * _cse_414_.x)) + ((_cse_447_ * area) * _e10428)) - ((((_e10433 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e10447) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e10455))) * _e10459) + ((_e10463 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e10471) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e10475))) * lambda_other)) * area));
+        let _e10490 = normal_vec.y;
+        let _e10495 = constants.viscosity;
+        let _e10502 = normal_vec.x;
+        let _e10517 = normal_vec.y;
+        let _e10521 = lambda;
+        let _e10525 = constants.viscosity;
+        let _e10528 = normal_vec.x;
+        let _e10537 = normal_vec.y;
+        phi_2_ = ((((_cse_384_ * _cse_388_.y) + (_cse_444_ * _cse_414_.y)) + ((_cse_447_ * area) * _e10490)) - ((((_e10495 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e10502) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e10517))) * _e10521) + ((_e10525 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e10528) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e10537))) * lambda_other)) * area));
+        let _e10617 = constants.eos_r;
+        let _e10692 = constants.eos_gm1_;
+        let _e10843 = constants.eos_r;
+        let _e10920 = constants.eos_r;
+        let _e11011 = constants.eos_gm1_;
+        let _e11022 = constants.eos_r;
+        let _e11186 = constants.eos_r;
+        let _e11261 = constants.eos_r;
+        let _e11358 = lambda;
+        let _e11363 = normal_vec;
+        let _e11374 = state[((owner_1 * 22u) + 10u)];
+        let _e11379 = normal_vec;
+        let _e11385 = lambda;
+        let _e11394 = normal_vec;
+        let _e11401 = lambda;
+        let _e11406 = normal_vec;
+        let _e11417 = state[((owner_1 * 22u) + 11u)];
+        let _e11422 = normal_vec;
+        let _e11428 = lambda;
+        let _e11437 = normal_vec;
+        let _e11442 = constants.viscosity;
+        let _e11446 = constants.viscosity;
+        let _e11460 = normal_vec.x;
+        let _e11468 = normal_vec.y;
+        let _e11472 = lambda;
+        let _e11476 = constants.viscosity;
+        let _e11484 = normal_vec.x;
+        let _e11488 = normal_vec.y;
+        let _e11496 = constants.viscosity;
+        let _e11503 = normal_vec.x;
+        let _e11518 = normal_vec.y;
+        let _e11522 = lambda;
+        let _e11526 = constants.viscosity;
+        let _e11529 = normal_vec.x;
+        let _e11538 = normal_vec.y;
+        phi_3_ = ((((_cse_384_ * ((((((_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f))) * _e10617) * (_e121 + ((((((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121) * abs((_e524 - _e121))) / max(abs((_e524 - _e121)), (abs(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + 0.00000001f))) * max(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)), 0f)) / max(abs(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121))), 0.00000001f)))) / max(_e10692, 0.000000000001f)) + ((0.5f * (_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f)))) * dot(_cse_387_, _cse_387_))) + (((_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f))) * _e10843) * (_e121 + ((((((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121) * abs((_e524 - _e121))) / max(abs((_e524 - _e121)), (abs(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + 0.00000001f))) * max(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)), 0f)) / max(abs(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121))), 0.00000001f)))))) + (_cse_444_ * (((((_cse_427_ * _e10920) * (_e524 + ((((((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524) * abs((_e121 - _e524))) / max(abs((_e121 - _e524)), (abs(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) + 0.00000001f))) * max(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)), 0f)) / max(abs(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))), 0.00000001f)))) / max(_e11011, 0.000000000001f)) + ((0.5f * _cse_427_) * dot(_cse_413_, _cse_413_))) + ((_cse_427_ * _e11022) * (_e524 + ((((((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524) * abs((_e121 - _e524))) / max(abs((_e121 - _e524)), (abs(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) + 0.00000001f))) * max(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)), 0f)) / max(abs(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))), 0.00000001f))))))) + (_cse_443_ * ((((_e234 + ((((((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234) * abs((_e746 - _e234))) / max(abs((_e746 - _e234)), (abs(((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)) + 0.00000001f))) * max(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234)), 0f)) / max(abs(((_e746 - _e234) * ((((_e234 * 0.625f) + (_e746 * 0.375f)) + (dot(vec2<f32>(s_own_grad_rho_x, s_own_grad_rho_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e234))), 0.00000001f))) * _e11186) * (_e121 + ((((((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121) * abs((_e524 - _e121))) / max(abs((_e524 - _e121)), (abs(((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)) + 0.00000001f))) * max(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121)), 0f)) / max(abs(((_e524 - _e121) * ((((_e121 * 0.625f) + (_e524 * 0.375f)) + (dot(vec2<f32>(s_own_grad_T_x, s_own_grad_T_y), (c_neigh_cell_vec - c_owner_vec)) * 0.125f)) - _e121))), 0.00000001f)))) - ((_cse_427_ * _e11261) * (_e524 + ((((((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524) * abs((_e121 - _e524))) / max(abs((_e121 - _e524)), (abs(((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)) + 0.00000001f))) * max(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524)), 0f)) / max(abs(((_e121 - _e524) * ((((_e524 * 0.625f) + (_e121 * 0.375f)) + (dot(vec2<f32>(select(s_neigh_grad_T_x, 0f, is_boundary_1), select(s_neigh_grad_T_y, 0f, is_boundary_1)), (c_owner_vec - c_neigh_cell_vec)) * 0.125f)) - _e524))), 0.00000001f))))))) - (dot(((vec2<f32>(dot((((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e11358) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)) + ((_e11363 * select(0f, 1f, is_boundary_1)) * (((s_own_u_x - _e11374) / max(dist, 0.000001f)) - dot(_e11379, ((vec2<f32>(select(s_neigh_grad_u_x_x, 0f, is_boundary_1), select(s_neigh_grad_u_x_y, 0f, is_boundary_1)) * _e11385) + (vec2<f32>(s_own_grad_u_x_x, s_own_grad_u_x_y) * lambda_other)))))), _e11394), dot((((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e11401) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)) + ((_e11406 * select(0f, 1f, is_boundary_1)) * (((s_own_u_y - _e11417) / max(dist, 0.000001f)) - dot(_e11422, ((vec2<f32>(select(s_neigh_grad_u_y_x, 0f, is_boundary_1), select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) * _e11428) + (vec2<f32>(s_own_grad_u_y_x, s_own_grad_u_y_y) * lambda_other)))))), _e11437)) * _e11442) + vec2<f32>((((_e11446 * ((((2f * select(s_neigh_grad_u_x_x, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e11460) + ((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e11468))) * _e11472) + ((_e11476 * ((((2f * s_own_grad_u_x_x) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e11484) + ((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e11488))) * lambda_other)), (((_e11496 * (((select(s_neigh_grad_u_x_y, 0f, is_boundary_1) + select(s_neigh_grad_u_y_x, 0f, is_boundary_1)) * _e11503) + (((2f * select(s_neigh_grad_u_y_y, 0f, is_boundary_1)) - (0.6666667f * (select(s_neigh_grad_u_x_x, 0f, is_boundary_1) + select(s_neigh_grad_u_y_y, 0f, is_boundary_1)))) * _e11518))) * _e11522) + ((_e11526 * (((s_own_grad_u_x_y + s_own_grad_u_y_x) * _e11529) + (((2f * s_own_grad_u_y_y) - (0.6666667f * (s_own_grad_u_x_x + s_own_grad_u_y_y))) * _e11538))) * lambda_other)))), ((_cse_387_ * _cse_399_) + (_cse_413_ * _cse_446_))) * area));
         phi_4_ = 0f;
         phi_5_ = 0f;
         phi_6_ = 0f;
         phi_7_ = 0f;
     }
-    let _e8774 = phi_0_;
-    fluxes[((idx * 8u) + 0u)] = _e8774;
-    let _e8781 = phi_1_;
-    fluxes[((idx * 8u) + 1u)] = _e8781;
-    let _e8788 = phi_2_;
-    fluxes[((idx * 8u) + 2u)] = _e8788;
-    let _e8795 = phi_3_;
-    fluxes[((idx * 8u) + 3u)] = _e8795;
-    let _e8802 = phi_4_;
-    fluxes[((idx * 8u) + 4u)] = _e8802;
-    let _e8809 = phi_5_;
-    fluxes[((idx * 8u) + 5u)] = _e8809;
-    let _e8816 = phi_6_;
-    fluxes[((idx * 8u) + 6u)] = _e8816;
-    let _e8823 = phi_7_;
-    fluxes[((idx * 8u) + 7u)] = _e8823;
+    let _e11562 = phi_0_;
+    fluxes[((idx * 8u) + 0u)] = _e11562;
+    let _e11569 = phi_1_;
+    fluxes[((idx * 8u) + 1u)] = _e11569;
+    let _e11576 = phi_2_;
+    fluxes[((idx * 8u) + 2u)] = _e11576;
+    let _e11583 = phi_3_;
+    fluxes[((idx * 8u) + 3u)] = _e11583;
+    let _e11590 = phi_4_;
+    fluxes[((idx * 8u) + 4u)] = _e11590;
+    let _e11597 = phi_5_;
+    fluxes[((idx * 8u) + 5u)] = _e11597;
+    let _e11604 = phi_6_;
+    fluxes[((idx * 8u) + 6u)] = _e11604;
+    let _e11611 = phi_7_;
+    fluxes[((idx * 8u) + 7u)] = _e11611;
     return;
 }
 "#;

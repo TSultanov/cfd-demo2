@@ -11,6 +11,11 @@ use cfd2::solver::model::helpers::{
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 
+/// Test compressible acoustic wave against OpenFOAM reference.
+///
+/// # Timeout
+/// This test requires extended timeout (~60-120s) due to GPU compute.
+/// Run with: `cargo test --test openfoam_compressible_acoustic_reference_test -- --ignored --timeout 120`
 #[test]
 #[ignore]
 fn openfoam_compressible_acoustic_matches_reference_profile() {

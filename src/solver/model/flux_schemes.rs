@@ -460,7 +460,9 @@ fn euler_central_upwind(
         )
     };
 
-    let c_eff2 = |side: FaceSide| {
+    // Effective sound speed squared for preconditioning (blended across models).
+    // Currently unused but kept for potential future low-Mach flux modifications.
+    let _c_eff2 = |side: FaceSide| {
         let c2_side = c2(side);
         S::Add(
             Box::new(S::Add(
@@ -784,12 +786,47 @@ fn euler_central_upwind(
         Box::new(a_sf.clone()),
     );
 
+    // --- Low-Mach pressure coupling for mass flux ---
+    // Add pressure perturbation contribution to prevent checkerboarding at low Mach numbers.
+    // The coupling adds a term: alpha * (p_pos - p_neg) / c^2 * area
+    // which acts as an artificial compressibility to couple pressure and velocity.
+    let p_pos = p(FaceSide::Owner);
+    let p_neg = p(FaceSide::Neighbor);
+    let pressure_diff = S::Sub(Box::new(p_pos.clone()), Box::new(p_neg.clone()));
+    
+    // Pressure coupling term: rho' = alpha * (p' / c^2)
+    let rho_couple_pos = S::Div(
+        Box::new(S::Mul(Box::new(pressure_coupling_alpha.clone()), Box::new(pressure_diff.clone()))),
+        Box::new(c_couple2_safe(FaceSide::Owner)),
+    );
+    let rho_couple_neg = S::Div(
+        Box::new(S::Mul(Box::new(pressure_coupling_alpha.clone()), Box::new(pressure_diff.clone()))),
+        Box::new(c_couple2_safe(FaceSide::Neighbor)),
+    );
+    
+    // Apply low-Mach enablement weight and area
+    let area = S::area();
+    let phi_couple_pos = S::Mul(
+        Box::new(S::Mul(Box::new(rho_couple_pos), Box::new(low_mach_enabled.clone()))),
+        Box::new(area.clone()),
+    );
+    let phi_couple_neg = S::Mul(
+        Box::new(S::Mul(Box::new(rho_couple_neg), Box::new(low_mach_enabled.clone()))),
+        Box::new(area),
+    );
+
     let phi = {
         let rho_pos = rho(FaceSide::Owner);
         let rho_neg = rho(FaceSide::Neighbor);
         S::Add(
-            Box::new(S::Mul(Box::new(aphiv_pos.clone()), Box::new(rho_pos))),
-            Box::new(S::Mul(Box::new(aphiv_neg.clone()), Box::new(rho_neg))),
+            Box::new(S::Add(
+                Box::new(S::Mul(Box::new(aphiv_pos.clone()), Box::new(rho_pos))),
+                Box::new(phi_couple_pos),
+            )),
+            Box::new(S::Add(
+                Box::new(S::Mul(Box::new(aphiv_neg.clone()), Box::new(rho_neg))),
+                Box::new(phi_couple_neg),
+            )),
         )
     };
 
@@ -810,8 +847,6 @@ fn euler_central_upwind(
         )
     };
 
-    let p_pos = p(FaceSide::Owner);
-    let p_neg = p(FaceSide::Neighbor);
     let p_blend = S::Add(
         Box::new(S::Mul(Box::new(a_pos_sf.clone()), Box::new(p_pos.clone()))),
         Box::new(S::Mul(Box::new(a_neg_sf.clone()), Box::new(p_neg.clone()))),

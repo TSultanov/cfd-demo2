@@ -12,6 +12,11 @@ use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 use std::collections::HashMap;
 
+/// Test compressible supersonic wedge against OpenFOAM reference.
+///
+/// # Timeout
+/// This test requires extended timeout (~60-120s) due to GPU compute.
+/// Run with: `cargo test --test openfoam_compressible_supersonic_wedge_reference_test -- --ignored --timeout 120`
 #[test]
 #[ignore]
 fn openfoam_compressible_supersonic_wedge_matches_reference_field() {

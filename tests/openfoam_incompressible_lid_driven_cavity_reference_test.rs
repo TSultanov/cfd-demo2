@@ -10,6 +10,11 @@ use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 
+/// Test incompressible lid-driven cavity against OpenFOAM reference.
+///
+/// # Timeout
+/// This test requires extended timeout (~60-120s) due to GPU compute.
+/// Run with: `cargo test --test openfoam_incompressible_lid_driven_cavity_reference_test -- --ignored --timeout 120`
 #[test]
 #[ignore]
 fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {

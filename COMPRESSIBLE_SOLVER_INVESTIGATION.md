@@ -226,6 +226,38 @@ A new test (`lid_driven_cavity_compressible_vs_incompressible`) compares the two
 2. **Boundary gradient correction**: Already implemented, no improvement
 3. **Gauss theorem approach**: Already used, no improvement
 
+## Low-Mach Preconditioning Investigation
+
+### Theory
+
+Low-Mach preconditioning is designed to:
+- Reduce stiffness at low Mach numbers by modifying the artificial compressibility
+- Prevent pressure-velocity decoupling (checkerboard instability)
+- Improve convergence and accuracy for nearly incompressible flows
+
+Common approaches include:
+- **Weiss-Smith preconditioning**: Modifies the time derivative and dissipation terms
+- **Artificial compressibility**: Adds pressure perturbation to density
+- **Pressure-velocity coupling**: Adds artificial dissipation to couple pressure and velocity
+
+### Our Implementation
+
+We use pressure-velocity coupling via:
+```
+phi_couple = alpha * (p_pos - p_neg) / c^2 * area
+```
+
+Where `alpha = 0.01` (pressure_coupling_alpha).
+
+### Test Results
+
+| Preconditioning | Error | Notes |
+|----------------|-------|-------|
+| WeissSmith (alpha=0.01) | 59.8% | Baseline |
+| **OFF** | **59.8%** | **Same error!** |
+
+**Conclusion**: Low-Mach preconditioning is NOT the cause of the discrepancy. The error is identical with or without preconditioning, suggesting the issue lies elsewhere in the solver formulation.
+
 ## Next Steps
 
 1. **Verify backwards_step and acoustic tests** - These have smaller errors (~0.3-0.7%) 

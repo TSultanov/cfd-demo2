@@ -42,7 +42,7 @@ fn ui_compressible_air_backstep_smoke() {
         compressible_model_with_eos(eos),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Implicit { outer_iters: 1 },
         },

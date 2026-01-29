@@ -32,7 +32,7 @@ fn gpu_incompressible_schur_smoke() {
 
     let config = SolverConfig {
         advection_scheme: Scheme::Upwind,
-        time_scheme: TimeScheme::Euler,
+        time_scheme: TimeScheme::BDF2,
         preconditioner: PreconditionerType::Jacobi,
         stepping: SteppingMode::Coupled,
     };

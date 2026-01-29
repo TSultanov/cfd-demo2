@@ -29,7 +29,7 @@ fn run_solver(mesh: &Mesh, steps: usize) -> (Vec<(f64, f64)>, Vec<f64>) {
         incompressible_momentum_model(),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Coupled,
         },

@@ -43,7 +43,7 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
         incompressible_momentum_model(),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Coupled,
         },

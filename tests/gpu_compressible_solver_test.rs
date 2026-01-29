@@ -28,7 +28,7 @@ fn gpu_compressible_solver_preserves_uniform_state() {
     let mesh = build_mesh();
     let config = SolverConfig {
         advection_scheme: Scheme::SecondOrderUpwind,
-        time_scheme: TimeScheme::Euler,
+        time_scheme: TimeScheme::BDF2,
         preconditioner: PreconditionerType::Jacobi,
         stepping: SteppingMode::Implicit { outer_iters: 1 },
     };

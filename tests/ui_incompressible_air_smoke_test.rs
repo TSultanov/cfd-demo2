@@ -32,7 +32,7 @@ fn ui_incompressible_air_smoke_does_not_blow_up_immediately() {
         incompressible_momentum_model(),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: TimeScheme::BDF2,
             ..Default::default()
         },
         None,

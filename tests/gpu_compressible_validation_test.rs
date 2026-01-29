@@ -53,7 +53,7 @@ fn compressible_shock_tube_relaxes_discontinuity() {
         compressible_model(),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
@@ -140,7 +140,7 @@ fn compressible_acoustic_pulse_propagates() {
         compressible_model(),
         SolverConfig {
             advection_scheme: Scheme::QUICK,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Implicit { outer_iters: 1 },
         },

@@ -36,7 +36,7 @@ fn test_gpu_fine_mesh_obstacle() {
             incompressible_momentum_model(),
             SolverConfig {
                 advection_scheme: Scheme::Upwind,
-                time_scheme: TimeScheme::Euler,
+                time_scheme: TimeScheme::BDF2,
                 preconditioner: PreconditionerType::Jacobi,
                 stepping: SteppingMode::Coupled,
             },

@@ -175,7 +175,7 @@ fn gpu_solvers_scale_with_mesh_size() {
         let mesh = build_mesh(cell_size);
         let config = SolverConfig {
             advection_scheme: Scheme::Upwind,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Coupled,
         };

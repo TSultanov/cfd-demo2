@@ -30,7 +30,7 @@ fn test_amg_preconditioner() {
             compressible_model(),
             SolverConfig {
                 advection_scheme: Scheme::Upwind,
-                time_scheme: TimeScheme::Euler,
+                time_scheme: TimeScheme::BDF2,
                 preconditioner: PreconditionerType::Jacobi,
                 stepping: SteppingMode::Implicit { outer_iters: 1 },
             },
@@ -62,7 +62,7 @@ fn test_amg_preconditioner() {
             compressible_model(),
             SolverConfig {
                 advection_scheme: Scheme::Upwind,
-                time_scheme: TimeScheme::Euler,
+                time_scheme: TimeScheme::BDF2,
                 preconditioner: PreconditionerType::Amg,
                 stepping: SteppingMode::Implicit { outer_iters: 1 },
             },

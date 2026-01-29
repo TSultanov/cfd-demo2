@@ -31,7 +31,7 @@ fn diag_incompressible_channel_outer_iters_per_step() {
         incompressible_momentum_model(),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
-            time_scheme: TimeScheme::Euler,
+            time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Coupled,
         },

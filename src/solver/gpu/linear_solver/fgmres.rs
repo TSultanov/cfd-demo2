@@ -979,6 +979,7 @@ impl FgmresWorkspace {
             }
             queue.submit(Some(encoder.finish()));
         }
+        crate::count_dispatch!("FGMRES", "norm_sq_partial");
 
         // Pass 2: final reduction + staging copy
         let reduce_params = RawFgmresParams {
@@ -1138,6 +1139,7 @@ pub fn dispatch_vector_pipeline(
         pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
     }
     core.queue.submit(Some(encoder.finish()));
+    crate::count_dispatch!("FGMRES", label);
 }
 
 pub fn dispatch_logic_pipeline(
@@ -1160,6 +1162,7 @@ pub fn dispatch_logic_pipeline(
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
     core.queue.submit(Some(encoder.finish()));
+    crate::count_dispatch!("FGMRES", label);
 }
 
 pub fn write_params(core: &FgmresCore<'_>, params: &RawFgmresParams) {

@@ -240,6 +240,17 @@ impl ParamTypeKind {
             panic!("Unknown parameter type")
         }
     }
+
+    /// Parse a WGSL type string into a ParamTypeKind.
+    pub fn from_wgsl_type(wgsl_type: &str) -> Option<Self> {
+        match wgsl_type {
+            "f32" => Some(ParamTypeKind::F32),
+            "f64" => Some(ParamTypeKind::F64),
+            "i32" => Some(ParamTypeKind::I32),
+            "u32" => Some(ParamTypeKind::U32),
+            _ => None,
+        }
+    }
 }
 
 /// Builder for parameter port sets.

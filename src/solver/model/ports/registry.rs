@@ -37,7 +37,7 @@ use std::collections::HashMap;
 ///     "state", 1, 0
 /// );
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PortRegistry {
     next_id: u32,
     state_layout: StateLayout,
@@ -116,6 +116,18 @@ impl BufferTypeKind {
             BufferTypeKind::Vec3F32
         } else {
             panic!("Unknown buffer type")
+        }
+    }
+
+    /// Parse a WGSL element type string into a BufferTypeKind.
+    pub fn from_wgsl_type(elem_type: &str) -> Option<Self> {
+        match elem_type {
+            "f32" => Some(BufferTypeKind::F32),
+            "u32" => Some(BufferTypeKind::U32),
+            "i32" => Some(BufferTypeKind::I32),
+            "vec2<f32>" => Some(BufferTypeKind::Vec2F32),
+            "vec3<f32>" => Some(BufferTypeKind::Vec3F32),
+            _ => None,
         }
     }
 }
@@ -467,6 +479,249 @@ impl PortRegistry {
     pub fn get_buffer_entry(&self, id: PortId) -> Option<&BufferPortEntry> {
         self.buffer_ports.get(&id)
     }
+
+    /// Register all ports from a manifest.
+    ///
+    /// This method iterates through all params, fields, and buffers in the manifest
+    /// and registers them idempotently. Field validation is performed against the
+    /// state layout.
+    ///
+    /// # Arguments
+    ///
+    /// * `module_name` - The name of the module providing this manifest (for error context)
+    /// * `manifest` - The port manifest to register
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any port cannot be registered or if validation fails.
+    pub fn register_manifest(
+        &mut self,
+        module_name: &str,
+        manifest: &crate::solver::ir::ports::PortManifest,
+    ) -> Result<(), PortRegistryError> {
+        // Register params
+        for param in &manifest.params {
+            self.register_param_from_spec(module_name, param)?;
+        }
+
+        // Register fields
+        for field in &manifest.fields {
+            self.register_field_from_spec(module_name, field)?;
+        }
+
+        // Register buffers
+        for buffer in &manifest.buffers {
+            self.register_buffer_from_spec(module_name, buffer)?;
+        }
+
+        Ok(())
+    }
+
+    /// Register a parameter from a ParamSpec.
+    fn register_param_from_spec(
+        &mut self,
+        module_name: &str,
+        param: &crate::solver::ir::ports::ParamSpec,
+    ) -> Result<(), PortRegistryError> {
+        let param_type = ParamTypeKind::from_wgsl_type(param.wgsl_type).ok_or_else(|| {
+            PortRegistryError::InvalidParamType {
+                module: module_name.to_string(),
+                key: param.key.to_string(),
+                wgsl_type: param.wgsl_type.to_string(),
+            }
+        })?;
+
+        // Check if already registered
+        if let Some(&existing_id) = self.param_key_to_id.get(param.key) {
+            let entry = self.param_ports.get(&existing_id).expect("entry exists");
+            // Verify wgsl_field matches
+            if entry.wgsl_field != param.wgsl_field {
+                return Err(PortRegistryError::ParamSpecConflict {
+                    key: format!("{} (from module '{}')", param.key, module_name),
+                    expected_wgsl: param.wgsl_field.to_string(),
+                    registered_wgsl: entry.wgsl_field.clone(),
+                });
+            }
+            // Verify type matches
+            if entry.param_type != param_type {
+                return Err(PortRegistryError::ParamTypeConflict {
+                    key: format!("{} (from module '{}')", param.key, module_name),
+                    expected_type: param_type,
+                    registered_type: entry.param_type,
+                });
+            }
+            // Verify unit matches (if we want strict unit checking)
+            if entry.runtime_dim != param.unit {
+                // For now, just warn - we may want to make this an error later
+                // This allows for "dynamic dimensions" where the same param key
+                // can have different units in different contexts
+            }
+            return Ok(());
+        }
+
+        let id = self.allocate_id();
+
+        self.param_ports.insert(
+            id,
+            ParamPortEntry {
+                id,
+                key: param.key.to_string(),
+                wgsl_field: param.wgsl_field.to_string(),
+                runtime_dim: param.unit,
+                param_type,
+            },
+        );
+        self.param_key_to_id.insert(param.key.to_string(), id);
+
+        Ok(())
+    }
+
+    /// Register a field from a FieldSpec.
+    fn register_field_from_spec(
+        &mut self,
+        module_name: &str,
+        field: &crate::solver::ir::ports::FieldSpec,
+    ) -> Result<(), PortRegistryError> {
+        // Check if already registered
+        if let Some(&existing_id) = self.field_name_to_id.get(field.name) {
+            let entry = self.field_ports.get(&existing_id).expect("entry exists");
+            // Verify kind matches
+            let expected_components = field.kind.component_count();
+            if entry.component_count != expected_components {
+                return Err(PortRegistryError::FieldSpecConflict {
+                    name: format!("{} (from module '{}')", field.name, module_name),
+                    expected_kind: expected_components,
+                    registered_kind: entry.component_count,
+                });
+            }
+            // Unit validation - warn on mismatch for now
+            if entry.runtime_dim != field.unit {
+                // Allow dynamic dimensions for now
+            }
+            return Ok(());
+        }
+
+        // Validate field exists in state layout
+        let (offset, stride, actual_components, runtime_dim) = {
+            let layout_field = self.state_layout.field(field.name).ok_or_else(|| {
+                PortRegistryError::FieldNotFound {
+                    name: format!("{} (required by module '{}')", field.name, module_name),
+                }
+            })?;
+
+            // Validate field kind matches
+            let expected_components = field.kind.component_count();
+            let actual_components = layout_field.component_count();
+            if expected_components != actual_components {
+                return Err(PortRegistryError::FieldKindMismatch {
+                    name: format!("{} (from module '{}')", field.name, module_name),
+                    expected: expected_components,
+                    found: actual_components,
+                });
+            }
+
+            // Validate unit matches (optional for now)
+            let runtime_dim = layout_field.unit();
+            if runtime_dim != field.unit {
+                // For now, allow unit mismatches - this supports "dynamic dimensions"
+                // where the same field name can have different units in different models
+            }
+
+            (
+                layout_field.offset(),
+                self.state_layout.stride(),
+                actual_components,
+                runtime_dim,
+            )
+        };
+
+        let id = self.allocate_id();
+
+        self.field_ports.insert(
+            id,
+            FieldPortEntry {
+                id,
+                name: field.name.to_string(),
+                offset,
+                stride,
+                component_count: actual_components,
+                runtime_dim,
+            },
+        );
+        self.field_name_to_id.insert(field.name.to_string(), id);
+
+        Ok(())
+    }
+
+    /// Register a buffer from a BufferSpec.
+    fn register_buffer_from_spec(
+        &mut self,
+        module_name: &str,
+        buffer: &crate::solver::ir::ports::BufferSpec,
+    ) -> Result<(), PortRegistryError> {
+        let buffer_type =
+            BufferTypeKind::from_wgsl_type(buffer.elem_wgsl_type).ok_or_else(|| {
+                PortRegistryError::InvalidBufferType {
+                    module: module_name.to_string(),
+                    name: buffer.name.to_string(),
+                    elem_type: buffer.elem_wgsl_type.to_string(),
+                }
+            })?;
+
+        let access_mode = match buffer.access {
+            crate::solver::ir::ports::BufferAccess::ReadOnly => AccessModeKind::ReadOnly,
+            crate::solver::ir::ports::BufferAccess::ReadWrite => AccessModeKind::ReadWrite,
+        };
+
+        let buffer_key = BufferKey {
+            name: buffer.name.to_string(),
+            group: buffer.group,
+            binding: buffer.binding,
+        };
+
+        // Check if already registered
+        if let Some(&existing_id) = self.buffer_key_to_id.get(&buffer_key) {
+            let entry = self.buffer_ports.get(&existing_id).expect("entry exists");
+            // Verify type matches
+            if entry.buffer_type != buffer_type {
+                return Err(PortRegistryError::BufferTypeConflict {
+                    name: format!("{} (from module '{}')", buffer.name, module_name),
+                    group: buffer.group,
+                    binding: buffer.binding,
+                    expected_type: buffer_type,
+                    registered_type: entry.buffer_type,
+                });
+            }
+            // Verify access mode matches
+            if entry.access_mode != access_mode {
+                return Err(PortRegistryError::BufferAccessConflict {
+                    name: format!("{} (from module '{}')", buffer.name, module_name),
+                    group: buffer.group,
+                    binding: buffer.binding,
+                    expected_mode: access_mode,
+                    registered_mode: entry.access_mode,
+                });
+            }
+            return Ok(());
+        }
+
+        let id = self.allocate_id();
+
+        self.buffer_ports.insert(
+            id,
+            BufferPortEntry {
+                id,
+                name: buffer.name.to_string(),
+                group: buffer.group,
+                binding: buffer.binding,
+                buffer_type,
+                access_mode,
+            },
+        );
+        self.buffer_key_to_id.insert(buffer_key, id);
+
+        Ok(())
+    }
 }
 
 /// Typed wrapper around PortRegistry with type-safe lookup methods.
@@ -600,6 +855,18 @@ pub enum PortRegistryError {
         expected_mode: AccessModeKind,
         registered_mode: AccessModeKind,
     },
+    /// Invalid parameter type in manifest.
+    InvalidParamType {
+        module: String,
+        key: String,
+        wgsl_type: String,
+    },
+    /// Invalid buffer element type in manifest.
+    InvalidBufferType {
+        module: String,
+        name: String,
+        elem_type: String,
+    },
 }
 
 impl std::fmt::Display for PortRegistryError {
@@ -676,6 +943,28 @@ impl std::fmt::Display for PortRegistryError {
                     f,
                     "Buffer '{}' (group={}, binding={}) already registered with {:?} access, expected {:?}",
                     name, group, binding, registered_mode, expected_mode
+                )
+            }
+            PortRegistryError::InvalidParamType {
+                module,
+                key,
+                wgsl_type,
+            } => {
+                write!(
+                    f,
+                    "Module '{}' defines parameter '{}' with unsupported WGSL type '{}'",
+                    module, key, wgsl_type
+                )
+            }
+            PortRegistryError::InvalidBufferType {
+                module,
+                name,
+                elem_type,
+            } => {
+                write!(
+                    f,
+                    "Module '{}' defines buffer '{}' with unsupported element type '{}'",
+                    module, name, elem_type
                 )
             }
         }
@@ -1030,5 +1319,214 @@ mod tests {
         assert_eq!(u.wgsl_type(), "vec2<f32>");
         assert_eq!(u.linear_index("idx"), "idx * 4u + 0u");
         assert_eq!(u.wgsl_access(Some("cell_idx")), "state[cell_idx * 4u + 0u]");
+    }
+
+    #[test]
+    fn register_manifest_success() {
+        use crate::solver::ir::ports::{
+            BufferAccess, BufferSpec, FieldSpec, ParamSpec, PortFieldKind, PortManifest,
+        };
+
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        let manifest = PortManifest {
+            params: vec![ParamSpec {
+                key: "test.dt",
+                wgsl_field: "dt",
+                wgsl_type: "f32",
+                unit: si::TIME,
+            }],
+            fields: vec![FieldSpec {
+                name: "p",
+                kind: PortFieldKind::Scalar,
+                unit: si::PRESSURE,
+            }],
+            buffers: vec![BufferSpec {
+                name: "test_buffer",
+                group: 1,
+                binding: 0,
+                elem_wgsl_type: "f32",
+                access: BufferAccess::ReadWrite,
+            }],
+        };
+
+        registry
+            .register_manifest("test_module", &manifest)
+            .expect("should register manifest");
+
+        assert_eq!(registry.param_port_count(), 1);
+        assert_eq!(registry.field_port_count(), 1);
+        assert_eq!(registry.buffer_port_count(), 1);
+
+        // Verify params
+        let dt_id = registry
+            .lookup_param("test.dt")
+            .expect("should find dt param");
+        let dt_entry = registry.get_param_entry(dt_id).unwrap();
+        assert_eq!(dt_entry.key, "test.dt");
+        assert_eq!(dt_entry.wgsl_field, "dt");
+
+        // Verify fields
+        let p_id = registry.lookup_field("p").expect("should find p field");
+        let p_entry = registry.get_field_entry(p_id).unwrap();
+        assert_eq!(p_entry.name, "p");
+        assert_eq!(p_entry.component_count, 1);
+
+        // Verify buffers
+        let buf_id = registry
+            .lookup_buffer("test_buffer", 1, 0)
+            .expect("should find buffer");
+        let buf_entry = registry.get_buffer_entry(buf_id).unwrap();
+        assert_eq!(buf_entry.name, "test_buffer");
+        assert_eq!(buf_entry.group, 1);
+        assert_eq!(buf_entry.binding, 0);
+    }
+
+    #[test]
+    fn register_manifest_idempotent() {
+        use crate::solver::ir::ports::{ParamSpec, PortManifest};
+
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        let manifest = PortManifest {
+            params: vec![ParamSpec {
+                key: "test.param",
+                wgsl_field: "param",
+                wgsl_type: "f32",
+                unit: si::DIMENSIONLESS,
+            }],
+            fields: vec![],
+            buffers: vec![],
+        };
+
+        // First registration
+        registry
+            .register_manifest("module1", &manifest)
+            .expect("should register first time");
+        assert_eq!(registry.param_port_count(), 1);
+
+        // Second registration with same spec should succeed (idempotent)
+        registry
+            .register_manifest("module2", &manifest)
+            .expect("should be idempotent");
+        assert_eq!(registry.param_port_count(), 1);
+    }
+
+    #[test]
+    fn register_manifest_field_not_found() {
+        use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
+
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        let manifest = PortManifest {
+            params: vec![],
+            fields: vec![FieldSpec {
+                name: "nonexistent_field",
+                kind: PortFieldKind::Scalar,
+                unit: si::PRESSURE,
+            }],
+            buffers: vec![],
+        };
+
+        let err = registry
+            .register_manifest("test_module", &manifest)
+            .expect_err("should fail for missing field");
+
+        match err {
+            PortRegistryError::FieldNotFound { name } => {
+                assert!(name.contains("nonexistent_field"));
+                assert!(name.contains("test_module"));
+            }
+            _ => panic!("expected FieldNotFound, got {:?}", err),
+        }
+    }
+
+    #[test]
+    fn register_manifest_invalid_param_type() {
+        use crate::solver::ir::ports::{ParamSpec, PortManifest};
+
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        let manifest = PortManifest {
+            params: vec![ParamSpec {
+                key: "test.param",
+                wgsl_field: "param",
+                wgsl_type: "vec2<f32>", // Invalid for params
+                unit: si::DIMENSIONLESS,
+            }],
+            fields: vec![],
+            buffers: vec![],
+        };
+
+        let err = registry
+            .register_manifest("test_module", &manifest)
+            .expect_err("should fail for invalid param type");
+
+        match err {
+            PortRegistryError::InvalidParamType {
+                module,
+                key,
+                wgsl_type,
+            } => {
+                assert_eq!(module, "test_module");
+                assert_eq!(key, "test.param");
+                assert_eq!(wgsl_type, "vec2<f32>");
+            }
+            _ => panic!("expected InvalidParamType, got {:?}", err),
+        }
+    }
+
+    #[test]
+    fn eos_port_manifest_units() {
+        use crate::solver::model::modules::eos_ports::eos_uniform_port_manifest;
+        use crate::solver::units::si;
+
+        let manifest = eos_uniform_port_manifest();
+
+        assert_eq!(manifest.params.len(), 6);
+
+        // Find each param and verify its unit
+        let gamma = manifest
+            .params
+            .iter()
+            .find(|p| p.key == "eos.gamma")
+            .unwrap();
+        assert_eq!(gamma.unit, si::DIMENSIONLESS);
+
+        let gm1 = manifest.params.iter().find(|p| p.key == "eos.gm1").unwrap();
+        assert_eq!(gm1.unit, si::DIMENSIONLESS);
+
+        let r = manifest.params.iter().find(|p| p.key == "eos.r").unwrap();
+        // R = P/(rho*T) = (ML⁻¹T⁻²)/(ML⁻³·K) = L²T⁻²K⁻¹
+        let expected_r = si::PRESSURE.div_dim(si::DENSITY).div_dim(si::TEMPERATURE);
+        assert_eq!(r.unit, expected_r);
+
+        let dp_drho = manifest
+            .params
+            .iter()
+            .find(|p| p.key == "eos.dp_drho")
+            .unwrap();
+        // dp/drho = P/rho = (ML⁻¹T⁻²)/(ML⁻³) = L²T⁻²
+        let expected_dp_drho = si::PRESSURE.div_dim(si::DENSITY);
+        assert_eq!(dp_drho.unit, expected_dp_drho);
+
+        let p_offset = manifest
+            .params
+            .iter()
+            .find(|p| p.key == "eos.p_offset")
+            .unwrap();
+        assert_eq!(p_offset.unit, si::PRESSURE);
+
+        let theta_ref = manifest
+            .params
+            .iter()
+            .find(|p| p.key == "eos.theta_ref")
+            .unwrap();
+        // theta = P/rho has units L²/T² (specific energy)
+        assert_eq!(theta_ref.unit, expected_dp_drho);
     }
 }

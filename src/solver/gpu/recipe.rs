@@ -15,11 +15,13 @@ use crate::solver::gpu::modules::graph::DispatchKind;
 use crate::solver::gpu::structs::{GpuConstants, PreconditionerType};
 use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
 use crate::solver::model::linear_solver::ModelLinearSolverType;
+use crate::solver::model::ports::PortRegistry;
 use crate::solver::model::{
     expand_field_components, GradientStorage, KernelId, ModelPreconditionerSpec, ModelSpec,
 };
 use crate::solver::scheme::Scheme;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 /// Specification for a linear solver.
 #[derive(Debug, Clone)]
@@ -197,6 +199,9 @@ pub struct SolverRecipe {
 
     /// Whether the implicit stepping program requires an iteration snapshot buffer (`state_iter`).
     pub requires_iteration_snapshot: bool,
+
+    /// Port registry for runtime port access and validation.
+    pub port_registry: Arc<PortRegistry>,
 }
 
 impl SolverRecipe {
@@ -209,6 +214,20 @@ impl SolverRecipe {
         stepping: SteppingMode,
     ) -> Result<Self, String> {
         model.validate_module_manifests()?;
+
+        // Build a PortRegistry and register port manifests from all modules.
+        // The registry is stored in the recipe for runtime field access and validation.
+        let mut port_registry = PortRegistry::new(model.state_layout.clone());
+        for module in &model.modules {
+            if let Some(ref manifest) = module.manifest.port_manifest {
+                if let Err(e) = port_registry.register_manifest(module.name, manifest) {
+                    return Err(format!(
+                        "Port registration failed for module '{}': {}",
+                        module.name, e
+                    ));
+                }
+            }
+        }
 
         let scheme_registry = SchemeRegistry::new(advection_scheme);
         let scheme_expansion = expand_schemes(&model.system, &scheme_registry)
@@ -280,13 +299,16 @@ impl SolverRecipe {
         //
         // Kernel selection, phase membership, and dispatch kind are model-owned and derived
         // from the method + module configuration.
-        let model_kernel_specs = crate::solver::model::kernel::derive_kernel_specs_for_model(model)?;
+        let model_kernel_specs =
+            crate::solver::model::kernel::derive_kernel_specs_for_model(model)?;
 
         let mut kernels: Vec<KernelSpec> = Vec::new();
         for spec in model_kernel_specs {
             let include = match spec.condition {
                 crate::solver::model::kernel::KernelConditionId::Always => true,
-                crate::solver::model::kernel::KernelConditionId::RequiresGradState => has_grad_state,
+                crate::solver::model::kernel::KernelConditionId::RequiresGradState => {
+                    has_grad_state
+                }
                 crate::solver::model::kernel::KernelConditionId::RequiresNoGradState => {
                     !has_grad_state
                 }
@@ -299,7 +321,9 @@ impl SolverRecipe {
             }
 
             let phase = match spec.phase {
-                crate::solver::model::kernel::KernelPhaseId::Preparation => KernelPhase::Preparation,
+                crate::solver::model::kernel::KernelPhaseId::Preparation => {
+                    KernelPhase::Preparation
+                }
                 crate::solver::model::kernel::KernelPhaseId::Gradients => KernelPhase::Gradients,
                 crate::solver::model::kernel::KernelPhaseId::FluxComputation => {
                     KernelPhase::FluxComputation
@@ -376,13 +400,12 @@ impl SolverRecipe {
         if needs_gradients {
             // Add gradient buffers for each field that needs them
             for field_name in &gradient_fields {
-                let size_per_cell = if gradient_storage == GradientStorage::PackedState
-                    && field_name == "state"
-                {
-                    model.state_layout.stride() as usize * 2
-                } else {
-                    2
-                };
+                let size_per_cell =
+                    if gradient_storage == GradientStorage::PackedState && field_name == "state" {
+                        model.state_layout.stride() as usize * 2
+                    } else {
+                        2
+                    };
                 aux_buffers.push(BufferSpec {
                     name: Box::leak(format!("grad_{field_name}").into_boxed_str()),
                     size_per_cell,
@@ -408,9 +431,9 @@ impl SolverRecipe {
         }
 
         let solver_type = match model_solver.solver.solver_type {
-            ModelLinearSolverType::Fgmres { max_restart } => LinearSolverType::Fgmres {
-                max_restart,
-            },
+            ModelLinearSolverType::Fgmres { max_restart } => {
+                LinearSolverType::Fgmres { max_restart }
+            }
             ModelLinearSolverType::Cg => LinearSolverType::Cg,
         };
 
@@ -435,6 +458,7 @@ impl SolverRecipe {
             initial_constants,
             unknowns_per_cell: model.system.unknowns_per_cell() as usize,
             requires_iteration_snapshot,
+            port_registry: Arc::new(port_registry),
         })
     }
 
@@ -661,7 +685,9 @@ mod tests {
 
     #[test]
     fn recipe_derives_linear_solver_defaults_from_model_and_config() {
-        use crate::solver::model::linear_solver::{ModelLinearSolverSettings, ModelLinearSolverType};
+        use crate::solver::model::linear_solver::{
+            ModelLinearSolverSettings, ModelLinearSolverType,
+        };
         use crate::solver::model::{ModelLinearSolverSpec, ModelPreconditionerSpec};
 
         let mut model = generic_diffusion_demo_model();
@@ -835,7 +861,10 @@ mod tests {
             .iter()
             .find(|b| b.purpose == BufferPurpose::Gradient && b.name == "grad_state")
             .expect("recipe must allocate grad_state buffer");
-        assert_eq!(grad_state.size_per_cell, model.state_layout.stride() as usize * 2);
+        assert_eq!(
+            grad_state.size_per_cell,
+            model.state_layout.stride() as usize * 2
+        );
     }
 
     #[test]
@@ -943,10 +972,7 @@ mod tests {
             model.system.unknowns_per_cell(),
             "flux stride should match packed coupled unknown layout"
         );
-        assert!(recipe
-            .kernels
-            .iter()
-            .any(|k| k.id == KernelId::FLUX_MODULE));
+        assert!(recipe.kernels.iter().any(|k| k.id == KernelId::FLUX_MODULE));
         assert!(recipe
             .kernels
             .iter()
@@ -973,6 +999,9 @@ mod tests {
         assert!((recipe.initial_constants.eos_p_offset - eos_params.p_offset).abs() < 1e-6);
         assert!((recipe.initial_constants.eos_theta_ref - eos_params.theta_ref).abs() < 1e-6);
         assert_eq!(recipe.initial_constants.scheme, Scheme::QUICK.gpu_id());
-        assert_eq!(recipe.initial_constants.time_scheme, TimeScheme::BDF2 as u32);
+        assert_eq!(
+            recipe.initial_constants.time_scheme,
+            TimeScheme::BDF2 as u32
+        );
     }
 }

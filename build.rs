@@ -5,6 +5,9 @@ use wgsl_bindgen::{WgslBindgenOptionBuilder, WgslTypeSerializeStrategy};
 
 #[allow(dead_code)]
 mod solver {
+    pub mod dimensions {
+        pub use cfd2_ir::solver::dimensions::*;
+    }
     pub mod units {
         include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/units.rs"));
     }
@@ -95,6 +98,12 @@ mod solver {
                     "/src/solver/model/backend/scheme_expansion.rs"
                 ));
             }
+            pub mod typed_ast {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/crates/cfd2_ir/src/solver/model/backend/typed_ast.rs"
+                ));
+            }
             #[allow(unused_imports)]
             pub use ast::{
                 fvc, fvm, Coefficient, Discretization, Equation, EquationSystem, FieldKind,
@@ -106,6 +115,11 @@ mod solver {
             pub use scheme_expansion::{expand_schemes, SchemeExpansion};
             #[allow(unused_imports)]
             pub use state_layout::{StateField, StateLayout};
+            // Re-export typed_ast items
+            pub use typed_ast::{
+                typed_fvc, typed_fvm, Kind, Scalar, TypedCoeff, TypedEquation, TypedEquationSystem,
+                TypedFieldRef, TypedFluxRef, TypedTerm, TypedTermSum, Vector2, Vector3,
+            };
         }
         pub mod gpu_spec {
             include!(concat!(
@@ -144,6 +158,8 @@ mod solver {
             ));
         }
         #[allow(unused_imports)]
+        pub use super::ir::LimiterSpec;
+        #[allow(unused_imports)]
         pub use definitions::{
             all_models, compressible_model, compressible_system, generic_diffusion_demo_model,
             generic_diffusion_demo_neumann_model, incompressible_momentum_model,
@@ -154,8 +170,6 @@ mod solver {
         pub use eos::EosSpec;
         #[allow(unused_imports)]
         pub use flux_layout::{FluxComponent, FluxLayout};
-        #[allow(unused_imports)]
-        pub use super::ir::LimiterSpec;
         #[allow(unused_imports)]
         pub use flux_module::FluxModuleSpec;
         #[allow(unused_imports)]
@@ -337,10 +351,7 @@ fn enforce_codegen_ir_boundary(manifest_dir: &str) {
     }
 }
 
-fn generate_kernel_registry_map(
-    manifest_dir: &str,
-    models: &[solver::model::ModelSpec],
-) {
+fn generate_kernel_registry_map(manifest_dir: &str, models: &[solver::model::ModelSpec]) {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = PathBuf::from(out_dir).join("kernel_registry_map.rs");
 
@@ -367,15 +378,17 @@ fn generate_kernel_registry_map(
         }
     }
 
-    let mut shared_kernel_ids: Vec<solver::model::KernelId> = shared_kernel_ids.into_iter().collect();
+    let mut shared_kernel_ids: Vec<solver::model::KernelId> =
+        shared_kernel_ids.into_iter().collect();
     shared_kernel_ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
 
     for kernel_id in shared_kernel_ids {
         let filename = solver::model::kernel::kernel_output_name_for_model("", kernel_id)
             .unwrap_or_else(|err| panic!("failed to compute shared kernel output name: {err}"));
         let path = generated_dir.join(filename);
-        let src = fs::read_to_string(&path)
-            .unwrap_or_else(|err| panic!("failed to read generated WGSL '{}': {err}", path.display()));
+        let src = fs::read_to_string(&path).unwrap_or_else(|err| {
+            panic!("failed to read generated WGSL '{}': {err}", path.display())
+        });
         let bindings = parse_wgsl_bindings(&src);
         let stem = path
             .file_stem()
@@ -401,9 +414,9 @@ fn generate_kernel_registry_map(
                     solver::model::kernel::kernel_output_name_for_model(model.id, gen.id)
                         .unwrap_or_else(|err| {
                             panic!(
-                                "failed to compute per-model kernel output name for model '{}': {err}",
-                                model.id
-                            )
+                        "failed to compute per-model kernel output name for model '{}': {err}",
+                        model.id
+                    )
                         });
                 let path = generated_dir.join(filename);
                 let src = fs::read_to_string(&path).unwrap_or_else(|err| {
@@ -431,7 +444,8 @@ fn generate_kernel_registry_map(
     shared_entries.sort_by(|a, b| a.0.cmp(&b.0));
     shared_entries.dedup_by(|a, b| a.0 == b.0);
 
-    let mut handwritten_entries: Vec<(String, String, String, Vec<(u32, u32, String)>)> = Vec::new();
+    let mut handwritten_entries: Vec<(String, String, String, Vec<(u32, u32, String)>)> =
+        Vec::new();
     for path in list_wgsl_files_recursive(&shader_dir) {
         // Handwritten kernels only: generated WGSL is mapped separately via per-model/shared entries.
         if path.starts_with(&generated_dir) {
@@ -737,9 +751,13 @@ fn list_wgsl_files_recursive(dir: &PathBuf) -> Vec<PathBuf> {
 }
 
 fn wgsl_relative_stem(shader_dir: &PathBuf, path: &PathBuf) -> String {
-    let rel = path
-        .strip_prefix(shader_dir)
-        .unwrap_or_else(|_| panic!("WGSL path '{}' is not under '{}'", path.display(), shader_dir.display()));
+    let rel = path.strip_prefix(shader_dir).unwrap_or_else(|_| {
+        panic!(
+            "WGSL path '{}' is not under '{}'",
+            path.display(),
+            shader_dir.display()
+        )
+    });
     let rel_no_ext = rel.with_extension("");
     rel_no_ext.to_string_lossy().replace('\\', "/")
 }
@@ -836,8 +854,12 @@ fn fingerprint_files(paths: &[PathBuf]) -> u64 {
         hash ^= 0xff;
         hash = hash.wrapping_mul(FNV_PRIME);
 
-        let data = fs::read(path)
-            .unwrap_or_else(|err| panic!("failed to read fingerprint input '{}': {err}", path.display()));
+        let data = fs::read(path).unwrap_or_else(|err| {
+            panic!(
+                "failed to read fingerprint input '{}': {err}",
+                path.display()
+            )
+        });
         for b in &data {
             hash ^= *b as u64;
             hash = hash.wrapping_mul(FNV_PRIME);

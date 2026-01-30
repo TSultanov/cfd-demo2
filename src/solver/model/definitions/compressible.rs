@@ -40,8 +40,14 @@ impl CompressibleFields {
 }
 
 fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
+    // NOTE: The compressible model uses complex algebraic constraints with derived fields
+    // that don't have straightforward dimension mappings in the typed builder.
+    // For now, we use the untyped builder with runtime validation.
+    // TODO: Migrate to typed builder once dimension algebra for derived coefficients is clearer.
+
     let rho_eqn =
         (fvm::ddt(fields.rho) + fvm::div_flux(fields.phi_rho, fields.rho)).eqn(fields.rho);
+
     let rho_u_eqn = (fvm::ddt(fields.rho_u)
         + fvm::div_flux(fields.phi_rho_u, fields.rho_u)
         // Viscous momentum term (Newtonian stress, simplified):
@@ -51,14 +57,8 @@ fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
             fields.u,
         ))
     .eqn(fields.rho_u);
+
     // Total energy (rho_e) equation.
-    //
-    // Match OpenFOAM rhoCentralFoam laminar energy transport more closely by including a
-    // Fourier heat-conduction term:
-    //   -div(kappa * grad(T))
-    //
-    // OpenFOAM solves an internal-energy correction with `alphaEff` (gamma*mu/Pr) and then
-    // reconstructs rhoE. Here we couple conduction directly through the temperature unknown.
     let kappa = vol_scalar("kappa", si::POWER / (si::LENGTH * si::TEMPERATURE));
     let rho_e_eqn = (fvm::ddt(fields.rho_e)
         + fvm::div_flux(fields.phi_rho_e, fields.rho_e)
@@ -69,13 +69,8 @@ fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
     .eqn(fields.rho_e);
 
     // Primitive velocity recovery as an algebraic constraint:
-    //   rho_u = rho * u
-    //
-    // This makes `u` part of the coupled unknown set so viscous terms can be treated implicitly.
     let u_eqn = {
         let rho = Coefficient::field(fields.rho).expect("rho must be scalar");
-        // Scale the algebraic constraint by `1/dt` to improve conditioning in implicit time
-        // schemes (BDF2 in particular).
         let inv_dt =
             Coefficient::field(vol_scalar("inv_dt", si::INV_TIME)).expect("inv_dt must be scalar");
 
@@ -89,11 +84,6 @@ fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
     };
 
     // Primitive pressure recovery as an algebraic constraint:
-    //
-    //   p = (gamma - 1) * (rho_e - 0.5 * rho * |u|^2) + (dp/drho) * rho - p_offset
-    //
-    // We treat |u|^2 as a coefficient evaluated from the current state (outer-iteration
-    // linearization) and scale the constraint by `1/dt` for conditioning.
     let p_eqn = {
         let inv_dt =
             Coefficient::field(vol_scalar("inv_dt", si::INV_TIME)).expect("inv_dt must be scalar");
@@ -129,8 +119,6 @@ fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
         )
         .expect("dp/drho/dt coefficient must be scalar");
 
-        // Constant pressure offset (barotropic EOS) as an explicit source term:
-        //   inv_dt * p = ... - inv_dt * p_offset  =>  RHS += (-inv_dt * p_offset) * V
         let minus_p_offset_over_dt = Coefficient::product(
             Coefficient::product(Coefficient::constant(-1.0), p_offset)
                 .expect("-p_offset coefficient must be scalar"),
@@ -147,10 +135,6 @@ fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
     };
 
     // Temperature recovery as an algebraic constraint (ideal gas):
-    //
-    //   p = rho * R * T
-    //
-    // Scale by `1/dt` for conditioning.
     let t_eqn = {
         let rho = Coefficient::field(fields.rho).expect("rho must be scalar");
         let r = Coefficient::field(vol_scalar(
@@ -179,6 +163,12 @@ fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
     system.add_equation(u_eqn);
     system.add_equation(p_eqn);
     system.add_equation(t_eqn);
+
+    // Validate units to ensure the system is consistent
+    system
+        .validate_units()
+        .expect("compressible system failed unit validation");
+
     system
 }
 

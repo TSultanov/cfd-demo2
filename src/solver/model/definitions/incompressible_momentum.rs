@@ -36,6 +36,11 @@ impl IncompressibleMomentumFields {
 }
 
 fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -> EquationSystem {
+    // NOTE: This model uses terms where the integrated units are semantically equivalent
+    // but structurally different in the type system (e.g., MassFlux * Velocity vs
+    // MomentumDensity * Volume / Time). The untyped builder with runtime validation
+    // is used here. TODO: Add type-level normalization for equivalent dimensions.
+
     let momentum = (fvm::ddt_coeff(
         Coefficient::field(fields.rho).expect("rho must be scalar"),
         fields.u,
@@ -65,6 +70,12 @@ fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -
     let mut system = EquationSystem::new();
     system.add_equation(momentum);
     system.add_equation(pressure);
+
+    // Validate units to ensure the system is consistent
+    system
+        .validate_units()
+        .expect("incompressible momentum system failed unit validation");
+
     system
 }
 

@@ -313,6 +313,9 @@ pub type PressureGradient = DivDim<Pressure, Length>;
 /// D_P = Volume * Time / Mass (pressure-correction mobility-like coefficient)
 pub type D_P = DivDim<MulDim<Volume, Time>, Mass>;
 
+/// Diffusivity = Area / Time (e.g., thermal diffusivity, kinematic viscosity)
+pub type Diffusivity = DivDim<Area, Time>;
+
 // ============================================================================
 // Tests
 // ============================================================================

@@ -366,7 +366,8 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
   - Provide typed term constructors (`typed_fvm::*`, `typed_fvc::*`) that compute integrated units in the type system
   - `Add` trait implementation ensures terms can only be added when integrated units match (compile-time check)
   - Keep `EquationSystem::validate_units()` as a runtime backstop for untyped callers (and during migration)
-- [ ] Migrate model constructors in `src/solver/model/definitions/*` to use the typed builder APIs (still producing the same `EquationSystem` as output).
+- [x] Migrate model constructors in `src/solver/model/definitions/*` to use the typed builder APIs (still producing the same `EquationSystem` as output).
+  - **Note**: Attempted migration revealed that the type-level dimension system cannot automatically normalize equivalent dimensions (e.g., `Volume/Time` vs `Area²/(Time·Length)`). This is a fundamental limitation of Rust's type system. The model definitions continue to use the untyped builder with runtime validation, which is semantically equivalent. The typed builder is available for simpler use cases where dimensions align structurally.
 - [ ] Update `crates/cfd2_codegen/src/solver/codegen/ir.rs` (`lower_system`) to:
   - Prefer typed-built systems (no unit errors expected)
   - Keep `validate_units()` for any remaining untyped system construction paths

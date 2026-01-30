@@ -1,23 +1,22 @@
-//! Typed IR builder layer for compile-time unit dimension checking.
-//!
-//! This module provides type-level wrappers around the untyped AST that enforce
-//! unit consistency at compile time. The typed wrappers erase to the existing
-//! untyped IR structs, allowing incremental adoption without changing codegen.
-//!
-//! # Example
-//!
-//! ```rust,ignore
-//! use cfd2_ir::solver::model::backend::typed_ast::*;
-//! use cfd2_ir::solver::dimensions::*;
-//!
-//! // Create typed field references
-//! let p = TypedFieldRef::<Pressure, Scalar>::new("p");
-//! let u = TypedFieldRef::<Velocity, Vector2>::new("U");
-//!
-//! // Build equation with compile-time unit checking
-//! let eqn = (typed_fvm::ddt(u.clone()) + typed_fvm::div(phi, u.clone())).eqn(u.clone());
-//! ```
-
+/// Typed IR builder layer for compile-time unit dimension checking.
+///
+/// This module provides type-level wrappers around the untyped AST that enforce
+/// unit consistency at compile time. The typed wrappers erase to the existing
+/// untyped IR structs, allowing incremental adoption without changing codegen.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use cfd2_ir::solver::model::backend::typed_ast::*;
+/// use cfd2_ir::solver::dimensions::*;
+///
+/// // Create typed field references
+/// let p = TypedFieldRef::<Pressure, Scalar>::new("p");
+/// let u = TypedFieldRef::<Velocity, Vector2>::new("U");
+///
+/// // Build equation with compile-time unit checking
+/// let eqn = (typed_fvm::ddt(u.clone()) + typed_fvm::div(phi, u.clone())).eqn(u.clone());
+/// ```
 use std::marker::PhantomData;
 use std::ops::Add;
 
@@ -159,8 +158,11 @@ impl<D: UnitDimension> TypedCoeff<D> {
     }
 
     /// Create a magnitude-squared coefficient from any field.
-    pub fn mag_sqr<K: Kind>(field: TypedFieldRef<D, K>) -> Self {
-        Self {
+    /// Returns a coefficient with squared dimension: D * D
+    pub fn mag_sqr<K: Kind>(
+        field: TypedFieldRef<D, K>,
+    ) -> TypedCoeff<crate::solver::dimensions::MulDim<D, D>> {
+        TypedCoeff {
             inner: Coefficient::mag_sqr(field.to_untyped()),
             _dim: PhantomData,
         }
@@ -424,9 +426,10 @@ pub mod typed_fvm {
     /// Divergence term: div(flux, field)
     ///
     /// Integrated unit: flux_unit * field_unit
-    pub fn div<FluxD: UnitDimension, FieldD: UnitDimension, K: Kind>(
-        flux: TypedFluxRef<FluxD, K>,
-        field: TypedFieldRef<FieldD, K>,
+    /// Note: flux and field can have different kinds (e.g., scalar flux with vector field)
+    pub fn div<FluxD: UnitDimension, FieldD: UnitDimension, FluxK: Kind, FieldK: Kind>(
+        flux: TypedFluxRef<FluxD, FluxK>,
+        field: TypedFieldRef<FieldD, FieldK>,
     ) -> TypedTerm<DivUnit<FluxD, FieldD>> {
         TypedTerm {
             inner: Term::new(
@@ -573,9 +576,10 @@ pub mod typed_fvc {
     }
 
     /// Explicit divergence term.
-    pub fn div<FluxD: UnitDimension, FieldD: UnitDimension, K: Kind>(
-        flux: TypedFluxRef<FluxD, K>,
-        field: TypedFieldRef<FieldD, K>,
+    /// Note: flux and field can have different kinds (e.g., scalar flux with vector field)
+    pub fn div<FluxD: UnitDimension, FieldD: UnitDimension, FluxK: Kind, FieldK: Kind>(
+        flux: TypedFluxRef<FluxD, FluxK>,
+        field: TypedFieldRef<FieldD, FieldK>,
     ) -> TypedTerm<DivUnit<FluxD, FieldD>> {
         TypedTerm {
             inner: Term::new(
@@ -639,13 +643,10 @@ pub mod typed_fvc {
 
     /// Explicit source term.
     ///
-    /// For explicit discretization: coeff * volume (field-independent)
+    /// For explicit discretization: volume (field-independent, coeff = dimensionless)
     pub fn source<D: UnitDimension, K: Kind>(
         field: TypedFieldRef<D, K>,
-    ) -> TypedTerm<SourceImplicitUnit<D, crate::solver::dimensions::Dimensionless>> {
-        // Note: Even for explicit source, we use the implicit unit type because
-        // the field is still part of the term. The actual unit depends on discretization
-        // but we use a consistent type for API simplicity.
+    ) -> TypedTerm<SourceExplicitUnit<crate::solver::dimensions::Dimensionless>> {
         TypedTerm {
             inner: Term::new(
                 TermOp::Source,
@@ -659,10 +660,12 @@ pub mod typed_fvc {
     }
 
     /// Explicit source term with coefficient.
+    ///
+    /// For explicit discretization: coeff * volume (field-independent)
     pub fn source_coeff<FieldD: UnitDimension, CoeffD: UnitDimension, K: Kind>(
         coeff: TypedCoeff<CoeffD>,
         field: TypedFieldRef<FieldD, K>,
-    ) -> TypedTerm<SourceImplicitUnit<FieldD, CoeffD>> {
+    ) -> TypedTerm<SourceExplicitUnit<CoeffD>> {
         TypedTerm {
             inner: Term::new(
                 TermOp::Source,
@@ -896,5 +899,85 @@ mod tests {
             ddt_term.to_untyped().discretization,
             Discretization::Explicit
         );
+    }
+
+    #[test]
+    fn typed_div_accepts_mismatched_kinds() {
+        // div(phi_scalar, u_vector) should compile and work
+        // This is used in incompressible momentum: phi (mass flux, scalar) with U (velocity, vector)
+        let phi = TypedFluxRef::<MassFlux, Scalar>::new("phi");
+        let u = TypedFieldRef::<Velocity, Vector2>::new("U");
+
+        let term = typed_fvm::div(phi, u);
+
+        let untyped = term.to_untyped();
+        assert_eq!(untyped.op, TermOp::Div);
+        assert_eq!(untyped.discretization, Discretization::Implicit);
+        assert_eq!(untyped.flux.unwrap().name(), "phi");
+        assert_eq!(untyped.field.name(), "U");
+    }
+
+    #[test]
+    fn typed_explicit_source_has_correct_unit() {
+        // Explicit source: coeff * volume (field-independent)
+        let coeff = TypedCoeff::<Pressure>::constant(101325.0);
+        let p = TypedFieldRef::<Pressure, Scalar>::new("p");
+
+        let term = typed_fvc::source_coeff(coeff, p);
+
+        let untyped = term.to_untyped();
+        assert_eq!(untyped.op, TermOp::Source);
+        assert_eq!(untyped.discretization, Discretization::Explicit);
+
+        // Verify integrated unit matches runtime: coeff_unit * volume
+        let integrated = untyped.integrated_unit().expect("should compute unit");
+        let expected = si::PRESSURE * si::VOLUME;
+        assert_eq!(integrated, expected);
+    }
+
+    #[test]
+    fn typed_explicit_source_without_coeff_has_correct_unit() {
+        // Explicit source without coeff: dimensionless * volume
+        let p = TypedFieldRef::<Pressure, Scalar>::new("p");
+
+        let term = typed_fvc::source(p);
+
+        let untyped = term.to_untyped();
+        assert_eq!(untyped.op, TermOp::Source);
+        assert_eq!(untyped.discretization, Discretization::Explicit);
+
+        // Verify integrated unit matches runtime: volume
+        let integrated = untyped.integrated_unit().expect("should compute unit");
+        assert_eq!(integrated, si::VOLUME);
+    }
+
+    #[test]
+    fn typed_mag_sqr_produces_squared_unit() {
+        // mag_sqr(u) should have unit velocity^2
+        let u = TypedFieldRef::<Velocity, Vector2>::new("U");
+
+        let coeff = TypedCoeff::mag_sqr(u);
+
+        let untyped = coeff.to_untyped();
+        // Coefficient::mag_sqr produces MagSqr variant
+        assert!(matches!(untyped, Coefficient::MagSqr(_)));
+
+        // Verify unit is velocity^2
+        let unit = untyped.unit();
+        let expected = si::VELOCITY * si::VELOCITY;
+        assert_eq!(unit, expected);
+    }
+
+    #[test]
+    fn typed_div_explicit_accepts_mismatched_kinds() {
+        // Explicit div should also accept mismatched kinds
+        let phi = TypedFluxRef::<MassFlux, Scalar>::new("phi");
+        let u = TypedFieldRef::<Velocity, Vector2>::new("U");
+
+        let term = typed_fvc::div(phi, u);
+
+        let untyped = term.to_untyped();
+        assert_eq!(untyped.op, TermOp::Div);
+        assert_eq!(untyped.discretization, Discretization::Explicit);
     }
 }

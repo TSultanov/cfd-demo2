@@ -6,12 +6,19 @@ use crate::solver::units::si;
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
 pub fn generic_diffusion_demo_model() -> ModelSpec {
+    // NOTE: Using untyped builder with runtime validation.
+    // The typed builder would require type-level normalization for equivalent dimensions.
     let phi = vol_scalar("phi", si::DIMENSIONLESS);
     let kappa = Coefficient::constant_unit(1.0, si::AREA / si::TIME);
     let eqn = (fvm::ddt(phi) + fvm::laplacian(kappa, phi)).eqn(phi);
 
     let mut system = EquationSystem::new();
     system.add_equation(eqn);
+
+    // Validate units to ensure the system is consistent
+    system
+        .validate_units()
+        .expect("generic diffusion demo system failed unit validation");
 
     let layout = StateLayout::new(vec![phi]);
     let mut boundaries = BoundarySpec::default();
@@ -58,12 +65,18 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
 }
 
 pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
+    // NOTE: Using untyped builder with runtime validation.
     let phi = vol_scalar("phi", si::DIMENSIONLESS);
     let kappa = Coefficient::constant_unit(1.0, si::AREA / si::TIME);
     let eqn = (fvm::ddt(phi) + fvm::laplacian(kappa, phi)).eqn(phi);
 
     let mut system = EquationSystem::new();
     system.add_equation(eqn);
+
+    // Validate units to ensure the system is consistent
+    system
+        .validate_units()
+        .expect("generic diffusion demo neumann system failed unit validation");
 
     let layout = StateLayout::new(vec![phi]);
     let mut boundaries = BoundarySpec::default();

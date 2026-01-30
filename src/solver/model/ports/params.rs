@@ -222,6 +222,24 @@ impl ParamTypeKind {
             ParamTypeKind::U32 => 4,
         }
     }
+
+    /// Create a ParamTypeKind from a type parameter.
+    ///
+    /// This is used internally by the port registry for idempotency checks.
+    pub fn from_type<T: ParamType>() -> Self {
+        use std::any::TypeId;
+        if TypeId::of::<T>() == TypeId::of::<F32>() {
+            ParamTypeKind::F32
+        } else if TypeId::of::<T>() == TypeId::of::<F64>() {
+            ParamTypeKind::F64
+        } else if TypeId::of::<T>() == TypeId::of::<I32>() {
+            ParamTypeKind::I32
+        } else if TypeId::of::<T>() == TypeId::of::<U32>() {
+            ParamTypeKind::U32
+        } else {
+            panic!("Unknown parameter type")
+        }
+    }
 }
 
 /// Builder for parameter port sets.

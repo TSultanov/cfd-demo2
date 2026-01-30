@@ -8,6 +8,7 @@ use super::{
 };
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::ports::dimensions::UnitDimension;
+use crate::solver::model::ports::params::ParamTypeKind;
 use crate::solver::units::UnitDim;
 use std::collections::HashMap;
 
@@ -15,6 +16,10 @@ use std::collections::HashMap;
 ///
 /// The `PortRegistry` manages the creation of field, parameter, and buffer ports,
 /// ensuring unique IDs and proper mapping to underlying resources.
+///
+/// Registration is idempotent: registering the same port multiple times with the
+/// same spec returns the existing port. Registering with a conflicting spec returns
+/// an error.
 ///
 /// # Example
 ///
@@ -39,11 +44,24 @@ pub struct PortRegistry {
     field_ports: HashMap<PortId, FieldPortEntry>,
     param_ports: HashMap<PortId, ParamPortEntry>,
     buffer_ports: HashMap<PortId, BufferPortEntry>,
+    // Idempotency indexes: name/key -> PortId
+    field_name_to_id: HashMap<String, PortId>,
+    param_key_to_id: HashMap<String, PortId>,
+    buffer_key_to_id: HashMap<BufferKey, PortId>,
+}
+
+/// Key for buffer lookup: (name, group, binding)
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct BufferKey {
+    name: String,
+    group: u32,
+    binding: u32,
 }
 
 /// Storage for field port metadata.
 #[derive(Debug, Clone)]
 struct FieldPortEntry {
+    id: PortId,
     name: String,
     offset: u32,
     stride: u32,
@@ -54,17 +72,70 @@ struct FieldPortEntry {
 /// Storage for parameter port metadata.
 #[derive(Debug, Clone)]
 struct ParamPortEntry {
+    id: PortId,
     key: String,
     wgsl_field: String,
     runtime_dim: UnitDim,
+    param_type: ParamTypeKind,
 }
 
 /// Storage for buffer port metadata.
 #[derive(Debug, Clone)]
 struct BufferPortEntry {
+    id: PortId,
     name: String,
     group: u32,
     binding: u32,
+    buffer_type: BufferTypeKind,
+    access_mode: AccessModeKind,
+}
+
+/// Enum representing buffer element types for storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BufferTypeKind {
+    F32,
+    U32,
+    I32,
+    Vec2F32,
+    Vec3F32,
+}
+
+impl BufferTypeKind {
+    fn from_type<T: BufferType>() -> Self {
+        use super::{BufferF32, BufferI32, BufferU32, BufferVec2F32, BufferVec3F32};
+        // This is a bit hacky but works for our marker types
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<BufferF32>() {
+            BufferTypeKind::F32
+        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<BufferU32>() {
+            BufferTypeKind::U32
+        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<BufferI32>() {
+            BufferTypeKind::I32
+        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<BufferVec2F32>() {
+            BufferTypeKind::Vec2F32
+        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<BufferVec3F32>() {
+            BufferTypeKind::Vec3F32
+        } else {
+            panic!("Unknown buffer type")
+        }
+    }
+}
+
+/// Enum representing access modes for storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AccessModeKind {
+    ReadOnly,
+    ReadWrite,
+}
+
+impl AccessModeKind {
+    fn from_mode<A: AccessMode>() -> Self {
+        use super::{ReadOnly, ReadWrite};
+        if std::any::TypeId::of::<A>() == std::any::TypeId::of::<ReadOnly>() {
+            AccessModeKind::ReadOnly
+        } else {
+            AccessModeKind::ReadWrite
+        }
+    }
 }
 
 impl PortRegistry {
@@ -76,6 +147,9 @@ impl PortRegistry {
             field_ports: HashMap::new(),
             param_ports: HashMap::new(),
             buffer_ports: HashMap::new(),
+            field_name_to_id: HashMap::new(),
+            param_key_to_id: HashMap::new(),
+            buffer_key_to_id: HashMap::new(),
         }
     }
 
@@ -132,6 +206,10 @@ impl PortRegistry {
 
     /// Register a field port with arbitrary kind.
     ///
+    /// Idempotent: if a field with this name is already registered with the same
+    /// spec, returns the existing port. If registered with a conflicting spec,
+    /// returns an error.
+    ///
     /// # Type Parameters
     ///
     /// - `D`: The expected physical dimension
@@ -140,6 +218,28 @@ impl PortRegistry {
         &mut self,
         name: &'static str,
     ) -> Result<FieldPort<D, K>, PortRegistryError> {
+        // Check if already registered
+        if let Some(&existing_id) = self.field_name_to_id.get(name) {
+            let entry = self.field_ports.get(&existing_id).expect("entry exists");
+            // Verify kind matches
+            let expected_components = K::COMPONENT_COUNT;
+            if entry.component_count != expected_components {
+                return Err(PortRegistryError::FieldSpecConflict {
+                    name: name.to_string(),
+                    expected_kind: expected_components,
+                    registered_kind: entry.component_count,
+                });
+            }
+            // Return existing port
+            return Ok(FieldPort::new(
+                existing_id,
+                name,
+                entry.offset,
+                entry.stride,
+                entry.runtime_dim,
+            ));
+        }
+
         let field =
             self.state_layout
                 .field(name)
@@ -168,6 +268,7 @@ impl PortRegistry {
         self.field_ports.insert(
             id,
             FieldPortEntry {
+                id,
                 name: name.to_string(),
                 offset,
                 stride,
@@ -175,11 +276,16 @@ impl PortRegistry {
                 runtime_dim,
             },
         );
+        self.field_name_to_id.insert(name.to_string(), id);
 
         Ok(FieldPort::new(id, name, offset, stride, runtime_dim))
     }
 
     /// Register a parameter port.
+    ///
+    /// Idempotent: if a parameter with this key is already registered with the same
+    /// spec, returns the existing port. If registered with a conflicting spec,
+    /// returns an error.
     ///
     /// # Type Parameters
     ///
@@ -189,23 +295,59 @@ impl PortRegistry {
         &mut self,
         key: &'static str,
         wgsl_field_name: &'static str,
-    ) -> ParamPort<T, D> {
+    ) -> Result<ParamPort<T, D>, PortRegistryError> {
+        // Check if already registered
+        if let Some(&existing_id) = self.param_key_to_id.get(key) {
+            let entry = self.param_ports.get(&existing_id).expect("entry exists");
+            // Verify wgsl_field matches
+            if entry.wgsl_field != wgsl_field_name {
+                return Err(PortRegistryError::ParamSpecConflict {
+                    key: key.to_string(),
+                    expected_wgsl: wgsl_field_name.to_string(),
+                    registered_wgsl: entry.wgsl_field.clone(),
+                });
+            }
+            // Verify type matches
+            let expected_type = ParamTypeKind::from_type::<T>();
+            if entry.param_type != expected_type {
+                return Err(PortRegistryError::ParamTypeConflict {
+                    key: key.to_string(),
+                    expected_type,
+                    registered_type: entry.param_type,
+                });
+            }
+            // Return existing port
+            return Ok(ParamPort::new(
+                existing_id,
+                key,
+                wgsl_field_name,
+                entry.runtime_dim,
+            ));
+        }
+
         let id = self.allocate_id();
         let runtime_dim = D::to_runtime();
 
         self.param_ports.insert(
             id,
             ParamPortEntry {
+                id,
                 key: key.to_string(),
                 wgsl_field: wgsl_field_name.to_string(),
                 runtime_dim,
+                param_type: ParamTypeKind::from_type::<T>(),
             },
         );
+        self.param_key_to_id.insert(key.to_string(), id);
 
-        ParamPort::new(id, key, wgsl_field_name, runtime_dim)
+        Ok(ParamPort::new(id, key, wgsl_field_name, runtime_dim))
     }
 
     /// Register a buffer port.
+    ///
+    /// Idempotent: if a buffer with this name/group/binding is already registered
+    /// with the same spec, returns the existing port. If registered with a
+    /// conflicting spec, returns an error.
     ///
     /// # Type Parameters
     ///
@@ -216,19 +358,58 @@ impl PortRegistry {
         name: &'static str,
         group: u32,
         binding: u32,
-    ) -> BufferPort<T, A> {
+    ) -> Result<BufferPort<T, A>, PortRegistryError> {
+        let buffer_key = BufferKey {
+            name: name.to_string(),
+            group,
+            binding,
+        };
+
+        // Check if already registered
+        if let Some(&existing_id) = self.buffer_key_to_id.get(&buffer_key) {
+            let entry = self.buffer_ports.get(&existing_id).expect("entry exists");
+            // Verify type matches
+            let expected_type = BufferTypeKind::from_type::<T>();
+            if entry.buffer_type != expected_type {
+                return Err(PortRegistryError::BufferTypeConflict {
+                    name: name.to_string(),
+                    group,
+                    binding,
+                    expected_type,
+                    registered_type: entry.buffer_type,
+                });
+            }
+            // Verify access mode matches
+            let expected_mode = AccessModeKind::from_mode::<A>();
+            if entry.access_mode != expected_mode {
+                return Err(PortRegistryError::BufferAccessConflict {
+                    name: name.to_string(),
+                    group,
+                    binding,
+                    expected_mode,
+                    registered_mode: entry.access_mode,
+                });
+            }
+            // Return existing port
+            return Ok(BufferPort::new(existing_id, name, group, binding));
+        }
+
         let id = self.allocate_id();
 
         self.buffer_ports.insert(
             id,
             BufferPortEntry {
+                id,
                 name: name.to_string(),
                 group,
                 binding,
+                buffer_type: BufferTypeKind::from_type::<T>(),
+                access_mode: AccessModeKind::from_mode::<A>(),
             },
         );
+        self.buffer_key_to_id.insert(buffer_key, id);
 
-        BufferPort::new(id, name, group, binding)
+        Ok(BufferPort::new(id, name, group, binding))
     }
 
     /// Get the number of registered field ports.
@@ -244,6 +425,47 @@ impl PortRegistry {
     /// Get the number of registered buffer ports.
     pub fn buffer_port_count(&self) -> usize {
         self.buffer_ports.len()
+    }
+
+    /// Look up a field port by name.
+    ///
+    /// Returns `Some(port_id)` if a field with this name has been registered.
+    pub fn lookup_field(&self, name: &str) -> Option<PortId> {
+        self.field_name_to_id.get(name).copied()
+    }
+
+    /// Look up a parameter port by key.
+    ///
+    /// Returns `Some(port_id)` if a parameter with this key has been registered.
+    pub fn lookup_param(&self, key: &str) -> Option<PortId> {
+        self.param_key_to_id.get(key).copied()
+    }
+
+    /// Look up a buffer port by name/group/binding.
+    ///
+    /// Returns `Some(port_id)` if a buffer with this key has been registered.
+    pub fn lookup_buffer(&self, name: &str, group: u32, binding: u32) -> Option<PortId> {
+        let key = BufferKey {
+            name: name.to_string(),
+            group,
+            binding,
+        };
+        self.buffer_key_to_id.get(&key).copied()
+    }
+
+    /// Get a field port entry by ID.
+    pub fn get_field_entry(&self, id: PortId) -> Option<&FieldPortEntry> {
+        self.field_ports.get(&id)
+    }
+
+    /// Get a parameter port entry by ID.
+    pub fn get_param_entry(&self, id: PortId) -> Option<&ParamPortEntry> {
+        self.param_ports.get(&id)
+    }
+
+    /// Get a buffer port entry by ID.
+    pub fn get_buffer_entry(&self, id: PortId) -> Option<&BufferPortEntry> {
+        self.buffer_ports.get(&id)
     }
 }
 
@@ -344,6 +566,40 @@ pub enum PortRegistryError {
         expected: u32,
         found: u32,
     },
+    /// Field spec conflict (re-registered with different kind).
+    FieldSpecConflict {
+        name: String,
+        expected_kind: u32,
+        registered_kind: u32,
+    },
+    /// Parameter spec conflict (re-registered with different wgsl field).
+    ParamSpecConflict {
+        key: String,
+        expected_wgsl: String,
+        registered_wgsl: String,
+    },
+    /// Parameter type conflict (re-registered with different type).
+    ParamTypeConflict {
+        key: String,
+        expected_type: ParamTypeKind,
+        registered_type: ParamTypeKind,
+    },
+    /// Buffer type conflict (re-registered with different type).
+    BufferTypeConflict {
+        name: String,
+        group: u32,
+        binding: u32,
+        expected_type: BufferTypeKind,
+        registered_type: BufferTypeKind,
+    },
+    /// Buffer access mode conflict (re-registered with different access).
+    BufferAccessConflict {
+        name: String,
+        group: u32,
+        binding: u32,
+        expected_mode: AccessModeKind,
+        registered_mode: AccessModeKind,
+    },
 }
 
 impl std::fmt::Display for PortRegistryError {
@@ -363,6 +619,65 @@ impl std::fmt::Display for PortRegistryError {
                     name, found, expected
                 )
             }
+            PortRegistryError::FieldSpecConflict {
+                name,
+                expected_kind,
+                registered_kind,
+            } => {
+                write!(
+                    f,
+                    "Field '{}' already registered with {} component(s), expected {}",
+                    name, registered_kind, expected_kind
+                )
+            }
+            PortRegistryError::ParamSpecConflict {
+                key,
+                expected_wgsl,
+                registered_wgsl,
+            } => {
+                write!(
+                    f,
+                    "Parameter '{}' already registered with wgsl field '{}', expected '{}'",
+                    key, registered_wgsl, expected_wgsl
+                )
+            }
+            PortRegistryError::ParamTypeConflict {
+                key,
+                expected_type,
+                registered_type,
+            } => {
+                write!(
+                    f,
+                    "Parameter '{}' already registered as {:?}, expected {:?}",
+                    key, registered_type, expected_type
+                )
+            }
+            PortRegistryError::BufferTypeConflict {
+                name,
+                group,
+                binding,
+                expected_type,
+                registered_type,
+            } => {
+                write!(
+                    f,
+                    "Buffer '{}' (group={}, binding={}) already registered as {:?}, expected {:?}",
+                    name, group, binding, registered_type, expected_type
+                )
+            }
+            PortRegistryError::BufferAccessConflict {
+                name,
+                group,
+                binding,
+                expected_mode,
+                registered_mode,
+            } => {
+                write!(
+                    f,
+                    "Buffer '{}' (group={}, binding={}) already registered with {:?} access, expected {:?}",
+                    name, group, binding, registered_mode, expected_mode
+                )
+            }
         }
     }
 }
@@ -374,7 +689,9 @@ mod tests {
     use super::*;
     use crate::solver::model::backend::ast::{vol_scalar, vol_vector};
     use crate::solver::model::ports::dimensions::{Length, Pressure, Time, Velocity};
-    use crate::solver::model::ports::{BufferF32, ReadOnly, ReadWrite, Scalar, Vector2, F32};
+    use crate::solver::model::ports::{
+        BufferF32, BufferU32, ReadOnly, ReadWrite, Scalar, Vector2, F32,
+    };
     use crate::solver::model::ports::{Port, WgslPort};
     use crate::solver::units::si;
 
@@ -459,7 +776,9 @@ mod tests {
         let layout = create_test_layout();
         let mut registry = PortRegistry::new(layout);
 
-        let dt = registry.register_param::<F32, Time>("dt", "dt");
+        let dt = registry
+            .register_param::<F32, Time>("dt", "dt")
+            .expect("should register dt");
 
         assert_eq!(dt.key(), "dt");
         assert_eq!(dt.wgsl_field_name(), "dt");
@@ -471,7 +790,9 @@ mod tests {
         let layout = create_test_layout();
         let mut registry = PortRegistry::new(layout);
 
-        let state = registry.register_buffer::<BufferF32, ReadWrite>("state", 1, 0);
+        let state = registry
+            .register_buffer::<BufferF32, ReadWrite>("state", 1, 0)
+            .expect("should register state");
 
         assert_eq!(state.name(), "state");
         assert_eq!(state.group(), 1);
@@ -486,12 +807,217 @@ mod tests {
         let mut registry = PortRegistry::new(layout);
 
         let p = registry.register_scalar_field::<Pressure>("p").unwrap();
-        let dt = registry.register_param::<F32, Time>("dt", "dt");
-        let state = registry.register_buffer::<BufferF32, ReadWrite>("state", 1, 0);
+        let dt = registry.register_param::<F32, Time>("dt", "dt").unwrap();
+        let state = registry
+            .register_buffer::<BufferF32, ReadWrite>("state", 1, 0)
+            .unwrap();
 
         assert_ne!(p.id(), dt.id());
         assert_ne!(dt.id(), state.id());
         assert_ne!(p.id(), state.id());
+    }
+
+    #[test]
+    fn register_field_idempotent() {
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        // First registration
+        let p1 = registry
+            .register_scalar_field::<Pressure>("p")
+            .expect("should register p");
+
+        // Second registration with same spec returns same port
+        let p2 = registry
+            .register_scalar_field::<Pressure>("p")
+            .expect("should return existing p");
+
+        assert_eq!(p1.id(), p2.id());
+        assert_eq!(registry.field_port_count(), 1);
+    }
+
+    #[test]
+    fn register_field_conflict() {
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        // Register as scalar
+        registry
+            .register_scalar_field::<Pressure>("p")
+            .expect("should register p as scalar");
+
+        // Try to register same field as vector - should fail
+        let err = registry
+            .register_vector2_field::<Pressure>("p")
+            .expect_err("should fail with conflict");
+
+        match err {
+            PortRegistryError::FieldSpecConflict {
+                name,
+                expected_kind,
+                registered_kind,
+            } => {
+                assert_eq!(name, "p");
+                assert_eq!(expected_kind, 2); // Vector2
+                assert_eq!(registered_kind, 1); // Scalar
+            }
+            _ => panic!("expected FieldSpecConflict, got {:?}", err),
+        }
+    }
+
+    #[test]
+    fn register_param_idempotent() {
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        // First registration
+        let dt1 = registry
+            .register_param::<F32, Time>("dt", "dt")
+            .expect("should register dt");
+
+        // Second registration with same spec returns same port
+        let dt2 = registry
+            .register_param::<F32, Time>("dt", "dt")
+            .expect("should return existing dt");
+
+        assert_eq!(dt1.id(), dt2.id());
+        assert_eq!(registry.param_port_count(), 1);
+    }
+
+    #[test]
+    fn register_param_conflict() {
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        // Register with wgsl field "dt"
+        registry
+            .register_param::<F32, Time>("dt", "dt")
+            .expect("should register dt");
+
+        // Try to register same key with different wgsl field - should fail
+        let err = registry
+            .register_param::<F32, Time>("dt", "delta_t")
+            .expect_err("should fail with conflict");
+
+        match err {
+            PortRegistryError::ParamSpecConflict {
+                key,
+                expected_wgsl,
+                registered_wgsl,
+            } => {
+                assert_eq!(key, "dt");
+                assert_eq!(expected_wgsl, "delta_t");
+                assert_eq!(registered_wgsl, "dt");
+            }
+            _ => panic!("expected ParamSpecConflict, got {:?}", err),
+        }
+    }
+
+    #[test]
+    fn register_buffer_idempotent() {
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        // First registration
+        let state1 = registry
+            .register_buffer::<BufferF32, ReadWrite>("state", 1, 0)
+            .expect("should register state");
+
+        // Second registration with same spec returns same port
+        let state2 = registry
+            .register_buffer::<BufferF32, ReadWrite>("state", 1, 0)
+            .expect("should return existing state");
+
+        assert_eq!(state1.id(), state2.id());
+        assert_eq!(registry.buffer_port_count(), 1);
+    }
+
+    #[test]
+    fn register_buffer_type_conflict() {
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        // Register as f32
+        registry
+            .register_buffer::<BufferF32, ReadWrite>("state", 1, 0)
+            .expect("should register state as f32");
+
+        // Try to register same buffer as u32 - should fail
+        let err = registry
+            .register_buffer::<BufferU32, ReadWrite>("state", 1, 0)
+            .expect_err("should fail with conflict");
+
+        match err {
+            PortRegistryError::BufferTypeConflict {
+                name,
+                group,
+                binding,
+                expected_type: _,
+                registered_type: _,
+            } => {
+                assert_eq!(name, "state");
+                assert_eq!(group, 1);
+                assert_eq!(binding, 0);
+            }
+            _ => panic!("expected BufferTypeConflict, got {:?}", err),
+        }
+    }
+
+    #[test]
+    fn register_buffer_access_conflict() {
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        // Register as read-write
+        registry
+            .register_buffer::<BufferF32, ReadWrite>("state", 1, 0)
+            .expect("should register state as read-write");
+
+        // Try to register same buffer as read-only - should fail
+        let err = registry
+            .register_buffer::<BufferF32, ReadOnly>("state", 1, 0)
+            .expect_err("should fail with conflict");
+
+        match err {
+            PortRegistryError::BufferAccessConflict {
+                name,
+                group,
+                binding,
+                expected_mode: _,
+                registered_mode: _,
+            } => {
+                assert_eq!(name, "state");
+                assert_eq!(group, 1);
+                assert_eq!(binding, 0);
+            }
+            _ => panic!("expected BufferAccessConflict, got {:?}", err),
+        }
+    }
+
+    #[test]
+    fn lookup_ports() {
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        let p = registry
+            .register_scalar_field::<Pressure>("p")
+            .expect("should register p");
+        let dt = registry
+            .register_param::<F32, Time>("dt", "dt")
+            .expect("should register dt");
+        let state = registry
+            .register_buffer::<BufferF32, ReadWrite>("state", 1, 0)
+            .expect("should register state");
+
+        // Lookup by name/key
+        assert_eq!(registry.lookup_field("p"), Some(p.id()));
+        assert_eq!(registry.lookup_param("dt"), Some(dt.id()));
+        assert_eq!(registry.lookup_buffer("state", 1, 0), Some(state.id()));
+
+        // Lookup non-existent
+        assert_eq!(registry.lookup_field("nonexistent"), None);
+        assert_eq!(registry.lookup_param("nonexistent"), None);
+        assert_eq!(registry.lookup_buffer("nonexistent", 1, 0), None);
     }
 
     #[test]

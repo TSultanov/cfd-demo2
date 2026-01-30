@@ -1,0 +1,15 @@
+error: Duplicate parameter key: dt
+ --> tests/ui/port_set_fail/duplicate_param_key.rs:6:10
+  |
+6 | #[derive(PortSet)]
+  |          ^^^^^^^
+  |
+  = note: this error originates in the derive macro `PortSet` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `Dimensionless`
+ --> tests/ui/port_set_fail/duplicate_param_key.rs:3:34
+  |
+3 | use cfd2::solver::model::ports::{Dimensionless, ParamPort, Time, F32};
+  |                                  ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default

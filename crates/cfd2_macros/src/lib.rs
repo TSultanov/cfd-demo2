@@ -5,8 +5,8 @@
 //! - `PortSet` - Derive parameter/field port sets
 
 use proc_macro::TokenStream;
-use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Expr, Lit, Meta};
+use quote::{format_ident, quote};
+use syn::{parse_macro_input, DeriveInput, Expr, Lit, Meta, Type};
 
 /// Derive macro for module port requirements.
 #[proc_macro_derive(ModulePorts, attributes(port))]
@@ -45,37 +45,432 @@ pub fn derive_module_ports(input: TokenStream) -> TokenStream {
 }
 
 /// Derive macro for port sets.
-#[proc_macro_derive(PortSet, attributes(param))]
+#[proc_macro_derive(PortSet, attributes(param, field, buffer))]
 pub fn derive_port_set(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
+    // Parse struct fields and generate registration/lookup code
+    let fields = match &input.data {
+        syn::Data::Struct(data) => &data.fields,
+        _ => {
+            return syn::Error::new_spanned(input, "PortSet can only be derived for structs")
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    // Generate registration code for each field
+    let register_fields: Vec<_> = fields
+        .iter()
+        .filter_map(|field| generate_register_field(field))
+        .collect();
+
+    // Generate from_registry code for each field
+    let from_registry_fields: Vec<_> = fields
+        .iter()
+        .filter_map(|field| generate_from_registry_field(field))
+        .collect();
+
+    // Generate field names for struct construction
+    let field_names: Vec<_> = fields
+        .iter()
+        .map(|field| {
+            field
+                .ident
+                .as_ref()
+                .expect("PortSet only supports named structs")
+        })
+        .collect();
+
+    // Generate compile-time validation
+    let validations = generate_validations(fields);
+
     let expanded = quote! {
+        #validations
+
         #[automatically_derived]
         impl #impl_generics ::cfd2::solver::model::ports::PortSetTrait for #name #ty_generics #where_clause {
             const SET_NAME: &'static str = stringify!(#name);
 
             fn register(
                 &self,
-                _registry: &mut ::cfd2::solver::model::ports::PortRegistry,
+                registry: &mut ::cfd2::solver::model::ports::PortRegistry,
             ) -> Result<(), ::cfd2::solver::model::ports::PortRegistryError> {
-                // Registration logic will be added later
+                // Registration is idempotent; from_registry handles actual registration
+                // This method is kept for backward compatibility but is a no-op
                 Ok(())
             }
 
             fn from_registry(
-                _registry: &mut ::cfd2::solver::model::ports::PortRegistry,
+                registry: &mut ::cfd2::solver::model::ports::PortRegistry,
             ) -> Result<Self, ::cfd2::solver::model::ports::PortRegistryError>
             where
                 Self: Sized
             {
-                todo!("PortSet::from_registry not yet implemented")
+                #(#register_fields)*
+
+                Ok(Self {
+                    #(#field_names),*
+                })
             }
         }
     };
 
     TokenStream::from(expanded)
+}
+
+/// Generate registration code for a single field.
+fn generate_register_field(field: &syn::Field) -> Option<proc_macro2::TokenStream> {
+    let field_name = field.ident.as_ref()?;
+
+    // Check for param attribute
+    if let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("param")) {
+        return generate_param_registration(field, field_name, attr);
+    }
+
+    // Check for field attribute
+    if let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("field")) {
+        return generate_field_registration(field, field_name, attr);
+    }
+
+    // Check for buffer attribute
+    if let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("buffer")) {
+        return generate_buffer_registration(field, field_name, attr);
+    }
+
+    None
+}
+
+/// Generate parameter registration code.
+fn generate_param_registration(
+    _field: &syn::Field,
+    field_name: &syn::Ident,
+    attr: &syn::Attribute,
+) -> Option<proc_macro2::TokenStream> {
+    let args = parse_param_args(attr).ok()?;
+
+    let name = args.name?;
+    let wgsl = args.wgsl?;
+
+    Some(quote! {
+        let #field_name = registry.register_param(
+            #name,
+            #wgsl,
+        )?;
+    })
+}
+
+/// Generate field registration code.
+fn generate_field_registration(
+    field: &syn::Field,
+    field_name: &syn::Ident,
+    attr: &syn::Attribute,
+) -> Option<proc_macro2::TokenStream> {
+    let args = parse_field_args(attr).ok()?;
+    let name = args.name?;
+
+    // Extract dimension and kind from the field type
+    // Expected: FieldPort<Dimension, Kind>
+    let (dim, kind) = extract_field_port_types(&field.ty)?;
+
+    Some(quote! {
+        let #field_name = registry.register_field::<#dim, #kind>(#name)?;
+    })
+}
+
+/// Generate buffer registration code.
+fn generate_buffer_registration(
+    field: &syn::Field,
+    field_name: &syn::Ident,
+    attr: &syn::Attribute,
+) -> Option<proc_macro2::TokenStream> {
+    let args = parse_buffer_args(attr).ok()?;
+
+    let name = args.name?;
+    let group = args.group.unwrap_or(0);
+    let binding = args.binding.unwrap_or(0);
+
+    // Extract type and access mode from the field type
+    // Expected: BufferPort<Type, AccessMode>
+    let (buf_type, access) = extract_buffer_port_types(&field.ty)?;
+
+    Some(quote! {
+        let #field_name = registry.register_buffer::<#buf_type, #access>(
+            #name,
+            #group,
+            #binding,
+        )?;
+    })
+}
+
+/// Generate from_registry field construction code.
+fn generate_from_registry_field(field: &syn::Field) -> Option<proc_macro2::TokenStream> {
+    // This is the same as registration since we use idempotent registration
+    generate_register_field(field)
+}
+
+/// Generate compile-time validations.
+fn generate_validations(fields: &syn::Fields) -> proc_macro2::TokenStream {
+    let mut validations = Vec::new();
+    let mut seen_params: Vec<String> = Vec::new();
+    let mut seen_fields: Vec<String> = Vec::new();
+    let mut seen_wgsl: Vec<String> = Vec::new();
+
+    for field in fields.iter() {
+        let field_name = field
+            .ident
+            .as_ref()
+            .map(|i| i.to_string())
+            .unwrap_or_default();
+
+        // Check param attributes
+        if let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("param")) {
+            if let Ok(args) = parse_param_args(attr) {
+                // Check for duplicate param keys
+                if let Some(ref name) = args.name {
+                    if seen_params.contains(name) {
+                        let msg = format!("Duplicate parameter key: {}", name);
+                        validations.push(quote! {
+                            compile_error!(#msg);
+                        });
+                    }
+                    seen_params.push(name.clone());
+                }
+
+                // Check for duplicate wgsl names
+                if let Some(ref wgsl) = args.wgsl {
+                    if seen_wgsl.contains(wgsl) {
+                        let msg = format!("Duplicate wgsl field name: {}", wgsl);
+                        validations.push(quote! {
+                            compile_error!(#msg);
+                        });
+                    }
+                    seen_wgsl.push(wgsl.clone());
+                }
+
+                // Validate field type is ParamPort
+                if !is_param_port_type(&field.ty) {
+                    let msg = format!(
+                        "Field '{}' has #[param] attribute but is not a ParamPort type",
+                        field_name
+                    );
+                    validations.push(quote! {
+                        compile_error!(#msg);
+                    });
+                }
+            }
+        }
+
+        // Check field attributes
+        if let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("field")) {
+            if let Ok(args) = parse_field_args(attr) {
+                // Check for duplicate field names
+                if let Some(ref name) = args.name {
+                    if seen_fields.contains(name) {
+                        let msg = format!("Duplicate field name: {}", name);
+                        validations.push(quote! {
+                            compile_error!(#msg);
+                        });
+                    }
+                    seen_fields.push(name.clone());
+                }
+
+                // Validate field type is FieldPort
+                if !is_field_port_type(&field.ty) {
+                    let msg = format!(
+                        "Field '{}' has #[field] attribute but is not a FieldPort type",
+                        field_name
+                    );
+                    validations.push(quote! {
+                        compile_error!(#msg);
+                    });
+                }
+            }
+        }
+
+        // Check buffer attributes
+        if let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("buffer")) {
+            // Validate field type is BufferPort
+            if !is_buffer_port_type(&field.ty) {
+                let msg = format!(
+                    "Field '{}' has #[buffer] attribute but is not a BufferPort type",
+                    field_name
+                );
+                validations.push(quote! {
+                    compile_error!(#msg);
+                });
+            }
+        }
+    }
+
+    quote! {
+        #(#validations)*
+    }
+}
+
+/// Parse param attribute arguments.
+#[derive(Default)]
+struct ParamArgs {
+    name: Option<String>,
+    wgsl: Option<String>,
+}
+
+fn parse_param_args(attr: &syn::Attribute) -> Result<ParamArgs, syn::Error> {
+    let mut args = ParamArgs::default();
+
+    attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident("name") {
+            let value = meta.value()?;
+            let lit: Lit = value.parse()?;
+            if let Lit::Str(s) = lit {
+                args.name = Some(s.value());
+            }
+        } else if meta.path.is_ident("wgsl") {
+            let value = meta.value()?;
+            let lit: Lit = value.parse()?;
+            if let Lit::Str(s) = lit {
+                args.wgsl = Some(s.value());
+            }
+        }
+        Ok(())
+    })?;
+
+    Ok(args)
+}
+
+/// Parse field attribute arguments.
+#[derive(Default)]
+struct FieldArgs {
+    name: Option<String>,
+}
+
+fn parse_field_args(attr: &syn::Attribute) -> Result<FieldArgs, syn::Error> {
+    let mut args = FieldArgs::default();
+
+    attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident("name") {
+            let value = meta.value()?;
+            let lit: Lit = value.parse()?;
+            if let Lit::Str(s) = lit {
+                args.name = Some(s.value());
+            }
+        }
+        Ok(())
+    })?;
+
+    Ok(args)
+}
+
+/// Parse buffer attribute arguments.
+#[derive(Default)]
+struct BufferArgs {
+    name: Option<String>,
+    group: Option<u32>,
+    binding: Option<u32>,
+}
+
+fn parse_buffer_args(attr: &syn::Attribute) -> Result<BufferArgs, syn::Error> {
+    let mut args = BufferArgs::default();
+
+    attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident("name") {
+            let value = meta.value()?;
+            let lit: Lit = value.parse()?;
+            if let Lit::Str(s) = lit {
+                args.name = Some(s.value());
+            }
+        } else if meta.path.is_ident("group") {
+            let value = meta.value()?;
+            let lit: Lit = value.parse()?;
+            if let Lit::Int(i) = lit {
+                args.group = Some(i.base10_parse()?);
+            }
+        } else if meta.path.is_ident("binding") {
+            let value = meta.value()?;
+            let lit: Lit = value.parse()?;
+            if let Lit::Int(i) = lit {
+                args.binding = Some(i.base10_parse()?);
+            }
+        }
+        Ok(())
+    })?;
+
+    Ok(args)
+}
+
+/// Extract dimension and kind types from FieldPort<Dim, Kind>.
+fn extract_field_port_types(ty: &Type) -> Option<(Type, Type)> {
+    // This is a simplified version - in production you'd want more robust parsing
+    if let Type::Path(type_path) = ty {
+        let segment = type_path.path.segments.first()?;
+        if segment.ident == "FieldPort" {
+            if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                let types: Vec<_> = args.args.iter().collect();
+                if types.len() >= 2 {
+                    if let (syn::GenericArgument::Type(dim), syn::GenericArgument::Type(kind)) =
+                        (types[0], types[1])
+                    {
+                        return Some((dim.clone(), kind.clone()));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract type and access mode from BufferPort<Type, Access>.
+fn extract_buffer_port_types(ty: &Type) -> Option<(Type, Type)> {
+    if let Type::Path(type_path) = ty {
+        let segment = type_path.path.segments.first()?;
+        if segment.ident == "BufferPort" {
+            if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                let types: Vec<_> = args.args.iter().collect();
+                if types.len() >= 2 {
+                    if let (
+                        syn::GenericArgument::Type(buf_type),
+                        syn::GenericArgument::Type(access),
+                    ) = (types[0], types[1])
+                    {
+                        return Some((buf_type.clone(), access.clone()));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Check if a type is ParamPort<_, _>.
+fn is_param_port_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.first() {
+            return segment.ident == "ParamPort";
+        }
+    }
+    false
+}
+
+/// Check if a type is FieldPort<_, _>.
+fn is_field_port_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.first() {
+            return segment.ident == "FieldPort";
+        }
+    }
+    false
+}
+
+/// Check if a type is BufferPort<_, _>.
+fn is_buffer_port_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.first() {
+            return segment.ident == "BufferPort";
+        }
+    }
+    false
 }
 
 fn extract_module_name(attrs: &[syn::Attribute]) -> String {

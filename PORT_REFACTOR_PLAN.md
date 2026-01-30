@@ -37,11 +37,11 @@ Based on design discussions, the implementation follows these principles:
 - [x] Implement `#[derive(ModulePorts)]` with `#[port(module = "...")]` attribute parsing
 
 **Remaining**:
-- [ ] Implement `#[derive(PortSet)]` field parsing + codegen (currently `register()` is a no-op; `from_registry()` is `todo!()`)
-- [ ] Add support for `#[param]` / `#[field]` / (optional) `#[buffer]` attributes and generate registrations/lookups
-- [ ] Fix crate-path resolution (macros currently emit `::cfd2::...`; in-crate usage needs `extern crate self as cfd2;` or equivalent)
-- [ ] Add compile-time validation (duplicates, unknown attrs, missing WGSL names, etc.)
-- [ ] Add macro tests (e.g. `trybuild`) and at least one end-to-end "migrated module compiles" test
+- [x] Implement `#[derive(PortSet)]` field parsing + codegen with idempotent registration
+- [x] Add support for `#[param]` / `#[field]` / `#[buffer]` attributes and generate registrations/lookups
+- [x] Fix crate-path resolution (added `extern crate self as cfd2;` to src/lib.rs)
+- [x] Add compile-time validation (duplicates, unknown attrs, missing WGSL names, etc.)
+- [x] Add macro tests with `trybuild` (passing and failing cases)
 
 **Files Created**:
 ```

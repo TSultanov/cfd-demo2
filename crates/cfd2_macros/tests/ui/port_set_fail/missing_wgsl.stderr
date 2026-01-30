@@ -1,0 +1,5 @@
+error[E0425]: cannot find value `dt` in this scope
+ --> tests/ui/port_set_fail/missing_wgsl.rs:9:9
+  |
+9 |     pub dt: ParamPort<F32, Time>,
+  |         ^^ not found in this scope

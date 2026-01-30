@@ -1,0 +1,24 @@
+error: Field 'dt' has #[param] attribute but is not a ParamPort type
+ --> tests/ui/port_set_fail/wrong_param_type.rs:7:10
+  |
+7 | #[derive(PortSet)]
+  |          ^^^^^^^
+  |
+  = note: this error originates in the derive macro `PortSet` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `Time`
+ --> tests/ui/port_set_fail/wrong_param_type.rs:3:34
+  |
+3 | use cfd2::solver::model::ports::{Time, F32};
+  |                                  ^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+error[E0308]: mismatched types
+  --> tests/ui/port_set_fail/wrong_param_type.rs:10:9
+   |
+10 |     pub dt: F32, // Wrong type!
+   |         ^^ expected `F32`, found `ParamPort<_, _>`
+   |
+   = note: expected struct `cfd2::solver::model::ports::F32`
+              found struct `ParamPort<_, _>`

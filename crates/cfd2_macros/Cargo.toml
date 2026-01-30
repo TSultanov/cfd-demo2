@@ -13,3 +13,5 @@ syn = { version = "2.0", features = ["full", "derive"] }
 
 [dev-dependencies]
 # Tests will use cfd2 from the workspace
+trybuild = { version = "1.0", features = ["diff"] }
+cfd2 = { path = "../.." }

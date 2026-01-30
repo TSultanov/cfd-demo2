@@ -27,6 +27,7 @@ pub mod dimensions;
 pub mod field;
 pub mod intern;
 pub mod params;
+pub mod prelude;
 pub mod registry;
 pub mod traits;
 

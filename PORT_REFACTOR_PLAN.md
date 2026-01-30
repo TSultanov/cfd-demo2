@@ -103,7 +103,7 @@ src/solver/model/ports/
 **Remaining**:
 - [ ] Integrate with existing build-time generation (WGSL emission still does not use `PortManifest`; build-time plumbing should not require ad-hoc string lists once port manifests are the single source of truth)
 - [ ] Add validation helpers ("missing field", "wrong kind", "dimension mismatch", etc.)
-- [ ] Add `ports::prelude` for convenient imports for module authors
+- [x] Add `ports::prelude` for convenient imports for module authors
 
 **Notes**:
 - Keep `manifest.named_params` as an escape hatch for params that aren’t simple WGSL uniform fields (solver knobs, flags, higher-level enums, etc.) until they are representable in `PortManifest` (or can be lowered to it cleanly).

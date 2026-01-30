@@ -30,13 +30,9 @@ pub fn eos_module(eos: EosSpec) -> KernelBundleModule {
 
         // Keep named_params for non-uniform parameters and backward compatibility
         // Note: low_mach.model is a u32 enum, not representable as ParamPort<F32, _>
+        // EOS uniform params are now declared via port_manifest, so we only list
+        // low_mach params here.
         manifest.named_params = vec![
-            NamedParamKey::Key("eos.gamma"),
-            NamedParamKey::Key("eos.gm1"),
-            NamedParamKey::Key("eos.r"),
-            NamedParamKey::Key("eos.dp_drho"),
-            NamedParamKey::Key("eos.p_offset"),
-            NamedParamKey::Key("eos.theta_ref"),
             NamedParamKey::Key("low_mach.model"),
             NamedParamKey::Key("low_mach.theta_floor"),
             NamedParamKey::Key("low_mach.pressure_coupling_alpha"),

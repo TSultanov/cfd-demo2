@@ -565,16 +565,18 @@ As of **2026-01-30**:
 - IR-safe `PortManifest` exists (`crates/cfd2_ir/src/solver/ir/ports.rs`) and is attached to `ModuleManifest` via `ModuleManifest.port_manifest`
 - First module migrated: `eos` publishes a `PortManifest` for its uniform params (still also exposes `named_params` for backward compatibility / non-f32 params)
 - `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present
-- ⚠️ `build.rs` currently emits `cargo:rustc-cfg=cfd2_build_script`, so `#[cfg(not(cfd2_build_script))]` blocks `eos_module` from attaching its `port_manifest` in normal builds; fix this before relying on `SolverRecipe.port_registry` at runtime
+- `cfd2_build_script` cfg is currently used as a build-time hack to exclude runtime-only manifest attachment from the build script’s `include!()` compilation context; regression coverage exists to ensure the runtime recipe populates `port_registry` from the EOS manifest
 - Build-time codegen still does not use port manifests, and string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 
 **Next (recommended)**:
-- Fix the `cfd2_build_script` gating story so port manifests are available at runtime:
-  - Flip `#[cfg(not(cfd2_build_script))]` → `#[cfg(cfd2_build_script)]` on runtime-only port-manifest attachment sites (e.g. `eos_module`) so manifests compile into the main crate, while still being skipped in the build-script `include!()` compilation context.
+- Start consuming `port_manifest.params` for the named-parameter surface area:
+  - Include `port_manifest.params[*].key` in `ModelSpec::named_param_keys()` and `named_params_for_model(...)` so modules don’t have to duplicate uniform params in both `named_params` and `port_manifest`.
+  - Keep `named_params` as the escape hatch for non-uniform / non-constant params (e.g. enums, solver knobs, flags) until they are representable in port manifests.
+- Migrate `generic_coupled` to publish a `PortManifest` for its uniform params (dt/dtau/viscosity/density/alpha_u/alpha_p/scheme/time_scheme) and remove those keys from `manifest.named_params` once the above plumbing is in place.
 - Phase 3: start consuming `port_manifest` at build time (codegen):
   - Plumb module `PortManifest` data into the build-time pipeline (uniform params + bindings), reducing reliance on ad-hoc string lists.
   - Keep an escape hatch for params that are not yet representable as `ParamPort<...>` (e.g. `low_mach.model` as `u32` enum).
-- Migrate the next low-risk module(s) to publish a `PortManifest` (start with uniform params only): `generic_coupled_apply`, then `generic_coupled`.
+- Migrate remaining low-risk modules to publish `PortManifest` where applicable (next: `generic_coupled_apply`).
 - Decide the dimension enforcement policy in `PortRegistry` (especially for semantic fields/params) and implement it (with an escape hatch for dynamic-dimension fields).
 - Keep dimensional correctness enforced by runtime `EquationSystem::validate_units()` for complex systems until/unless we adopt a different type-level encoding (nightly features or type-encoded exponents).
 

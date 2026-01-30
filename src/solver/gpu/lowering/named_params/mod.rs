@@ -10,9 +10,26 @@ pub(crate) fn named_params_for_model(
     let mut out: HashMap<&'static str, ProgramParamHandler> = HashMap::new();
 
     for module in &model.modules {
-        for key in &module.manifest.named_params {
-            let key = key.as_str();
+        // Collect keys from both named_params (legacy) and port_manifest (new)
+        let mut keys_to_process: Vec<&'static str> = Vec::new();
 
+        // Add keys from named_params
+        for key in &module.manifest.named_params {
+            keys_to_process.push(key.as_str());
+        }
+
+        // Add keys from port_manifest
+        if let Some(ref port_manifest) = module.manifest.port_manifest {
+            for param in &port_manifest.params {
+                keys_to_process.push(param.key);
+            }
+        }
+
+        // Deduplicate keys within this module
+        keys_to_process.sort_unstable();
+        keys_to_process.dedup();
+
+        for key in keys_to_process {
             if !named_param_registry_exists(module.name) {
                 return Err(format!(
                     "module '{}' declares named parameter '{key}', but no handler registry exists for that module",
@@ -54,5 +71,33 @@ mod tests {
                 "missing named param handler for '{key}'"
             );
         }
+    }
+
+    #[test]
+    fn named_params_include_eos_keys_via_port_manifest() {
+        // Regression test: EOS uniform params are declared via port_manifest,
+        // not named_params. Ensure they are still discoverable.
+        let model = crate::solver::model::compressible_model();
+        let params = named_params_for_model(&model).expect("named params");
+
+        // These keys come from eos.port_manifest, not eos.named_params
+        assert!(
+            params.contains_key("eos.gamma"),
+            "eos.gamma should be discoverable via port_manifest"
+        );
+        assert!(
+            params.contains_key("eos.r"),
+            "eos.r should be discoverable via port_manifest"
+        );
+        assert!(
+            params.contains_key("eos.theta_ref"),
+            "eos.theta_ref should be discoverable via port_manifest"
+        );
+
+        // low_mach params should still work (they remain in named_params)
+        assert!(
+            params.contains_key("low_mach.model"),
+            "low_mach.model should still be in named_params"
+        );
     }
 }

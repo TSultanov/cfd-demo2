@@ -35,8 +35,15 @@ impl ModelSpec {
         let mut out: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
 
         for module in &self.modules {
+            // Include params from named_params (legacy)
             for key in &module.manifest.named_params {
                 out.insert(key.as_str());
+            }
+            // Include params from port_manifest (new)
+            if let Some(ref port_manifest) = module.manifest.port_manifest {
+                for param in &port_manifest.params {
+                    out.insert(param.key);
+                }
             }
         }
 

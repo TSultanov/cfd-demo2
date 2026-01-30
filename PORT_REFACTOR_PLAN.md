@@ -366,8 +366,16 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
   - Provide typed term constructors (`typed_fvm::*`, `typed_fvc::*`) that compute integrated units in the type system
   - `Add` trait implementation ensures terms can only be added when integrated units match (compile-time check)
   - Keep `EquationSystem::validate_units()` as a runtime backstop for untyped callers (and during migration)
-- [x] Migrate model constructors in `src/solver/model/definitions/*` to use the typed builder APIs (still producing the same `EquationSystem` as output).
-  - **Note**: Attempted migration revealed that the type-level dimension system cannot automatically normalize equivalent dimensions (e.g., `Volume/Time` vs `Area²/(Time·Length)`). This is a fundamental limitation of Rust's type system. The model definitions continue to use the untyped builder with runtime validation, which is semantically equivalent. The typed builder is available for simpler use cases where dimensions align structurally.
+- [x] Fix typed-IR builder gaps found while migrating models:
+  - `div()` accepts independent flux/field kinds (scalar face flux with vector unknowns)
+  - Explicit `source` integrated unit matches runtime semantics (`coeff * Volume`)
+  - `mag_sqr()` returns squared units
+- [ ] Canonicalize type-level dimensions so equivalent exponent vectors become the same Rust type:
+  - Introduce a canonical dimension carrier type (e.g. `Dim<...exponents...>`)
+  - Make `MulDim`/`DivDim`/`PowDim` (or a `Canonical<D>` helper) resolve to that canonical type
+  - Add compile-time regression tests for “same units, different expressions” (e.g. ddt vs div force balance)
+- [ ] Migrate model constructors in `src/solver/model/definitions/*` to use the typed builder APIs (still producing the same `EquationSystem` as output).
+  - **Current**: model definitions still use the untyped builder + `EquationSystem::validate_units()` assertions as a runtime backstop.
 - [ ] Update `crates/cfd2_codegen/src/solver/codegen/ir.rs` (`lower_system`) to:
   - Prefer typed-built systems (no unit errors expected)
   - Keep `validate_units()` for any remaining untyped system construction paths
@@ -536,15 +544,14 @@ crates/cfd2_macros/tests/*        # (planned) trybuild + compile-fail tests
 
 As of **2026-01-30**:
 - Canonical type-level dimensions (rational exponents) live in `crates/cfd2_ir/src/solver/dimensions.rs` and are re-exported through the main crate for ports
-- A typed IR builder layer exists at `crates/cfd2_ir/src/solver/model/backend/typed_ast.rs`, enabling compile-time unit checking when constructing `EquationSystem`s in Rust
+- A typed IR builder layer exists at `crates/cfd2_ir/src/solver/model/backend/typed_ast.rs` for compile-time unit checking when constructing `EquationSystem`s in Rust (currently best-effort; complex systems still rely on runtime `validate_units()` until dimension types are canonicalized)
 - Port runtime types + registry exist under `src/solver/model/ports/*`
 - Proc-macro scaffolding exists, but `PortSet` is not implemented yet (and `ModulePorts` delegates to it)
 - No model modules have been migrated to ports yet
 - `PortManifest` does not exist yet; `ModuleManifest`/string-based codegen remains the source of truth
 
 **Next (recommended)**:
-- Type-Level Dimensions Migration (Step 3 follow-up): migrate model constructors in `src/solver/model/definitions/*` to use the typed builder APIs (still producing the same `EquationSystem` as output).
-- Fix any typed-IR builder gaps found during migration (e.g. explicit-source integrated unit typing, `div()` kind constraints, coefficient `mag_sqr()` dimensionality).
+- Type-Level Dimensions Migration: canonicalize type-level dimensions so equivalent unit expressions become the same Rust type, then re-attempt typed model definitions.
 - Phase 1: finish derive macros (`PortSet`) so modules can be migrated with minimal boilerplate.
 - Phase 3: define `PortManifest` + module integration, then migrate `eos`.
 

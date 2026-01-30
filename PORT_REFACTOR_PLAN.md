@@ -530,7 +530,7 @@ crates/cfd2_macros/tests/*        # (planned) trybuild + compile-fail tests
 
 - [ ] `cargo test` passes
 - [ ] Zero string-based field lookups in migrated modules
-- [ ] Compile-time dimension checking works
+- [ ] Compile-time dimension checking works where Rust can express it (ports + structurally-identical typed IR); runtime `validate_units()` remains the backstop for semantically-equal-but-structurally-different dimensions
 - [ ] Runtime validation catches invalid configs
 - [ ] Generated WGSL diffs are empty (or equivalent check passes)
 - [ ] Hard cutoff removes all deprecated APIs

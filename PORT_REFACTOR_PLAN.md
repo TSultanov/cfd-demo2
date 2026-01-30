@@ -535,19 +535,22 @@ crates/cfd2_macros/tests/*        # (planned) trybuild + compile-fail tests
 
 As of **2026-01-30**:
 - Canonical type-level dimensions (rational exponents) live in `crates/cfd2_ir/src/solver/dimensions.rs` and are re-exported through the main crate for ports
+- A typed IR builder layer exists at `crates/cfd2_ir/src/solver/model/backend/typed_ast.rs`, enabling compile-time unit checking when constructing `EquationSystem`s in Rust
 - Port runtime types + registry exist under `src/solver/model/ports/*`
 - Proc-macro scaffolding exists, but `PortSet` is not implemented yet (and `ModulePorts` delegates to it)
 - No model modules have been migrated to ports yet
 - `PortManifest` does not exist yet; `ModuleManifest`/string-based codegen remains the source of truth
 
 **Next (recommended)**:
-- Type-Level Dimensions Migration (Step 3): add a typed IR builder layer (`typed_ast.rs`) so unit mismatches become compile-time errors when constructing systems in Rust.
+- Type-Level Dimensions Migration (Step 3 follow-up): migrate model constructors in `src/solver/model/definitions/*` to use the typed builder APIs (still producing the same `EquationSystem` as output).
+- Fix any typed-IR builder gaps found during migration (e.g. explicit-source integrated unit typing, `div()` kind constraints, coefficient `mag_sqr()` dimensionality).
 - Phase 1: finish derive macros (`PortSet`) so modules can be migrated with minimal boilerplate.
 - Phase 3: define `PortManifest` + module integration, then migrate `eos`.
 
 **Deliverables Ready**:
 - ✅ `src/solver/model/ports/*` runtime primitives + tests
 - ✅ Core traits (`ModulePortsTrait`, `PortSetTrait`, etc.)
+- ✅ Typed IR builder layer for compile-time unit checking (`crates/cfd2_ir/src/solver/model/backend/typed_ast.rs`)
 - ⚠️ `cfd2_macros` derive macros exist but are not yet usable for real module migrations
 
 **Ready for**: Completing derive macros + deciding the module/container integration strategy

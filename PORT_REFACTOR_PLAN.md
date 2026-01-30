@@ -41,7 +41,7 @@ Based on design discussions, the implementation follows these principles:
 - [ ] Add support for `#[param]` / `#[field]` / (optional) `#[buffer]` attributes and generate registrations/lookups
 - [ ] Fix crate-path resolution (macros currently emit `::cfd2::...`; in-crate usage needs `extern crate self as cfd2;` or equivalent)
 - [ ] Add compile-time validation (duplicates, unknown attrs, missing WGSL names, etc.)
-- [ ] Add macro tests (e.g. `trybuild`) and at least one end-to-end “migrated module compiles” test
+- [ ] Add macro tests (e.g. `trybuild`) and at least one end-to-end "migrated module compiles" test
 
 **Files Created**:
 ```
@@ -69,7 +69,7 @@ crates/cfd2_macros/
 **Remaining**:
 - [ ] Wire `ParamPortProvider` / `FieldPortProvider` so `PortSetTrait::from_registry()` can be derived/implemented
 - [ ] Add missing runtime validation (e.g. dimension mismatch checks on field registration; richer `PortRegistryError`)
-- [ ] Decide and implement an IR-facing “port manifest” representation that can cross into `crates/cfd2_codegen` without violating the IR boundary
+- [ ] Decide and implement an IR-facing "port manifest" representation that can cross into `crates/cfd2_codegen` without violating the IR boundary
 
 **Files Created**:
 ```
@@ -93,7 +93,7 @@ src/solver/model/ports/
 - [ ] Define `PortManifest` (fields/params/buffers + WGSL names + units/kinds) as pure data
 - [ ] Wire model initialization to build a `PortRegistry` on-demand (requires a strategy for getting `ModulePortsTrait` implementations from `ModelSpec.modules`)
 - [ ] Integrate with existing build-time generation (WGSL emission + `named_params_registry` generation currently depends on `ModuleManifest.named_params`)
-- [ ] Add validation helpers (“missing field”, “wrong kind”, “dimension mismatch”, etc.)
+- [ ] Add validation helpers ("missing field", "wrong kind", "dimension mismatch", etc.)
 - [ ] Add `ports::prelude` for convenient imports for module authors
 
 **Files to Create**:
@@ -165,11 +165,11 @@ migration steps to move that logic onto the port infrastructure.
 
 - [ ] Finish Phase 1: `#[derive(PortSet)]` must be usable for real structs (registration + lookup)
 - [ ] Finish Phase 3: define an IR-safe `PortManifest` (`cfd2_ir::solver::ir`) and a way to attach it to model modules (likely via `KernelBundleModule.manifest`)
-- [x] Unify/upgrade the dimension system across crates (see “Type-Level Dimensions Migration” below). This must happen before we can rely on `FieldPort<Dim, Kind>` throughout the repo (including in IR/codegen).
+- [x] Unify/upgrade the dimension system across crates (see "Type-Level Dimensions Migration" below). This must happen before we can rely on `FieldPort<Dim, Kind>` throughout the repo (including in IR/codegen).
 - [ ] Add (or decide against) dimension enforcement policy in `PortRegistry`:
-  - For “semantic” fields (p, rho, mu, grad_p, etc) enforce runtime dimension matches compile-time `UnitDimension`
-  - For “system-driven” fields whose dimensions vary by model, provide a supported escape hatch:
-    - Option A: an explicit “any-dimension” port type (no dimension check)
+  - For "semantic" fields (p, rho, mu, grad_p, etc) enforce runtime dimension matches compile-time `UnitDimension`
+  - For "system-driven" fields whose dimensions vary by model, provide a supported escape hatch:
+    - Option A: an explicit "any-dimension" port type (no dimension check)
     - Option B: a separate untyped field port that tracks kind only
 
 ### 1) Common refactor recipe (apply to every module below)
@@ -177,7 +177,7 @@ migration steps to move that logic onto the port infrastructure.
 1. **Inventory**: list every string-based lookup in the module (field name(s), expected kind, expected unit).
 2. **Define ports**:
    - Add a `PortSet` struct describing required fields/params/buffers.
-   - If the set is dynamic (depends on model/system), use a manifest “record list” (Vec of resolved port specs) rather than a fixed struct.
+   - If the set is dynamic (depends on model/system), use a manifest "record list" (Vec of resolved port specs) rather than a fixed struct.
 3. **Resolve once**:
    - Add a single resolver function (model init / build.rs time) that turns names into ports/offsets using `StateLayout` + invariants.
    - Store the results in `PortManifest` (IR-safe) and/or in a runtime `PortRegistry` cached on the solver/model.
@@ -198,7 +198,7 @@ migration steps to move that logic onto the port infrastructure.
 - `component_offset(momentum.name(), c)`
 
 **Migration steps**:
-- [ ] Define dimension aliases needed by this module in the canonical IR type-level dimensions module (see “Type-Level Dimensions Migration”):
+- [ ] Define dimension aliases needed by this module in the canonical IR type-level dimensions module (see "Type-Level Dimensions Migration"):
   - `PressureGradient = DivDim<Pressure, Length>`
   - `DP = DivDim<MulDim<Volume, Time>, Mass>` (matches `si::D_P`)
 - [ ] Create a port set / manifest entries for:
@@ -221,31 +221,31 @@ migration steps to move that logic onto the port infrastructure.
 - Scans `StateLayout` for `grad_*` targets and calls `layout.field(...)` / `component_offset(...)`.
 
 **Migration steps**:
-- [ ] Move “gradient target discovery” out of WGSL generation:
+- [ ] Move "gradient target discovery" out of WGSL generation:
   - During model validation (or during port registry build), compute an explicit list of gradient targets:
     - base field name + (optional) base component
     - grad field name (vector2)
     - resolved offsets for base/grad components
     - bc unknown offset (from `FluxLayout`)
-- [ ] Define a compact IR-safe record type (in `cfd2_ir::solver::ir::ports`) for gradient targets and attach it to the module’s `PortManifest`.
+- [ ] Define a compact IR-safe record type (in `cfd2_ir::solver::ir::ports`) for gradient targets and attach it to the module's `PortManifest`.
 - [ ] Change `generate_flux_module_gradients_wgsl(...)` to accept the resolved target records instead of a `StateLayout`.
 - [ ] Delete all `layout.field/component_offset` calls from `flux_module_gradients_wgsl.rs`.
 - [ ] Add/keep tests to ensure:
-  - The resolved target list matches the legacy “scan `grad_` fields” behavior
+  - The resolved target list matches the legacy "scan `grad_` fields" behavior
   - WGSL output remains identical
 
 #### C) `src/solver/model/modules/flux_module_wgsl.rs` (Flux kernel WGSL generation)
 
 **String lookups to remove** (today):
 - `state_layout.offset_for(name)` and `state_layout.component_offset(base, c)` inside helper routines.
-- Various “does this field/component exist?” checks using `StateLayout`.
+- Various "does this field/component exist?" checks using `StateLayout`.
 
 **Migration steps**:
-- [ ] Add a lowering pass that resolves every state-field reference used by flux codegen into a “resolved state slot”:
+- [ ] Add a lowering pass that resolves every state-field reference used by flux codegen into a "resolved state slot":
   - Traverse `FluxModuleKernelSpec` + any `PrimitiveExpr` used by flux evaluation
   - Collect all referenced field names (including component-suffixed names like `<field>_x`)
   - Resolve them once via `StateLayout` into `(stride, offset[, component_count], unit)` records
-- [ ] Store this resolved mapping in the module’s `PortManifest` (IR-safe) and pass it into `generate_flux_module_wgsl*`.
+- [ ] Store this resolved mapping in the module's `PortManifest` (IR-safe) and pass it into `generate_flux_module_wgsl*`.
 - [ ] Replace all `StateLayout` lookups in `flux_module_wgsl.rs` with reads from the resolved mapping / ports.
 - [ ] Keep the public API surface stable:
   - The module can still accept a `FluxModuleSpec` by value
@@ -258,7 +258,7 @@ migration steps to move that logic onto the port infrastructure.
 - Uses `layout.offset_for(name)` / `layout.component_offset(name, comp)` while building program bindings for unknowns.
 
 **Migration steps**:
-- [ ] Pre-resolve per-model “unknown → state slot” mapping at model build time:
+- [ ] Pre-resolve per-model "unknown → state slot" mapping at model build time:
   - For each equation target field in the system, compute offsets for each component
   - Store as an IR-safe mapping (e.g. `Vec<StateSlot>` ordered by unknown index) in `PortManifest`
 - [ ] Update lowering to use the mapping instead of calling `StateLayout` directly.
@@ -270,7 +270,7 @@ migration steps to move that logic onto the port infrastructure.
 - Repeated `state_layout.offset_for("rho")`, `"rho_u"`, `"rho_e"`, `"p"`, `"T"`, `"u"/"U"` when seeding initial conditions.
 
 **Migration steps**:
-- [ ] Define “canonical field port sets” for the helper surfaces:
+- [ ] Define "canonical field port sets" for the helper surfaces:
   - Compressible: `rho`, `rho_u` (vec2), `rho_e` (+ optional `p`, `T`, `u|U`)
   - Incompressible: `U|u`, `p`, (and any optional diagnostics fields used by stats helpers)
 - [ ] Resolve these ports once per solver/model and cache them (avoid per-call `StateLayout` scanning).
@@ -294,7 +294,7 @@ migration steps to move that logic onto the port infrastructure.
 - Invariant validation checks required fields via `state_layout.field(...)` / `component_offset(...)`.
 
 **Migration steps**:
-- [ ] Make `PortManifest` the single source of truth for “required fields” and “gradient targets”.
+- [ ] Make `PortManifest` the single source of truth for "required fields" and "gradient targets".
 - [ ] Convert validation to:
   - Resolve all required ports once, returning structured `PortValidationError`
   - Avoid repeated `StateLayout` probing across multiple validation passes
@@ -305,16 +305,16 @@ migration steps to move that logic onto the port infrastructure.
 - `layout.offset_for("U"/"u")` and `layout.offset_for("p")` for plotting/inspection.
 
 **Migration steps** (optional; do after core solver is migrated):
-- [ ] Expose a small, stable “UI port set” from the solver/model (optional ports for common fields)
+- [ ] Expose a small, stable "UI port set" from the solver/model (optional ports for common fields)
 - [ ] Update UI to use that port set instead of raw `StateLayout` probing
 
 #### I) `crates/cfd2_codegen/src/solver/codegen/*` (Codegen helper modules)
 
-These are not “model modules”, but they are the largest remaining concentration of string-based
+These are not "model modules", but they are the largest remaining concentration of string-based
 state lookups and will block completing Phase 6 unless migrated.
 
 **Migration steps**:
-- [ ] Introduce an IR-safe “resolved state slot” type (offset + stride + kind/unit metadata as needed).
+- [ ] Introduce an IR-safe "resolved state slot" type (offset + stride + kind/unit metadata as needed).
 - [ ] Update `state_access.rs` to accept resolved slots instead of `(StateLayout, field_name)`.
 - [ ] Update callers (`generic_coupled_kernels`, `unified_assembly`, `primitive_expr`, `coeff_expr`) to use slots/ports provided by model/module manifests.
 
@@ -370,10 +370,12 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
   - `div()` accepts independent flux/field kinds (scalar face flux with vector unknowns)
   - Explicit `source` integrated unit matches runtime semantics (`coeff * Volume`)
   - `mag_sqr()` returns squared units
-- [ ] Canonicalize type-level dimensions so equivalent exponent vectors become the same Rust type:
-  - Introduce a canonical dimension carrier type (e.g. `Dim<...exponents...>`)
-  - Make `MulDim`/`DivDim`/`PowDim` (or a `Canonical<D>` helper) resolve to that canonical type
-  - Add compile-time regression tests for “same units, different expressions” (e.g. ddt vs div force balance)
+- [x] Attempted to canonicalize type-level dimensions (BLOCKED by Rust limitations):
+  - Introduced `Dim<...exponents...>` canonical carrier type in `dimensions.rs`
+  - **BLOCKER**: Rust doesn't allow type parameters in const generic expressions in a way that makes them "used"
+  - Cannot make `MulDim<A, B>` automatically resolve to `Dim<...>` even when exponents are computable
+  - The typed builder works for structurally identical dimensions but cannot prove equivalence of semantically-equal-but-structurally-different dimensions (e.g., `Volume/Time` vs `Area²/(Time·Length)`)
+  - **Workaround**: Model definitions continue using untyped builder with runtime `validate_units()` assertions
 - [ ] Migrate model constructors in `src/solver/model/definitions/*` to use the typed builder APIs (still producing the same `EquationSystem` as output).
   - **Current**: model definitions still use the untyped builder + `EquationSystem::validate_units()` assertions as a runtime backstop.
 - [ ] Update `crates/cfd2_codegen/src/solver/codegen/ir.rs` (`lower_system`) to:
@@ -390,7 +392,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
   - Addition/subtraction only type-checks for identical `D`
   - Multiplication/division returns `TypedExpr<MulDim<...>>` / `TypedExpr<DivDim<...>>`
   - `sqrt()` returns `TypedExpr<SqrtDim<D>>`
-  - Keep an ergonomic escape hatch for genuinely dynamic units (explicitly marked, avoids silent “any unit”)
+  - Keep an ergonomic escape hatch for genuinely dynamic units (explicitly marked, avoids silent "any unit")
 - [ ] Incrementally migrate codegen helpers to the typed DSL, starting with the leaf utilities:
   - `crates/cfd2_codegen/src/solver/codegen/state_access.rs`
   - `crates/cfd2_codegen/src/solver/codegen/primitive_expr.rs`
@@ -544,21 +546,19 @@ crates/cfd2_macros/tests/*        # (planned) trybuild + compile-fail tests
 
 As of **2026-01-30**:
 - Canonical type-level dimensions (rational exponents) live in `crates/cfd2_ir/src/solver/dimensions.rs` and are re-exported through the main crate for ports
-- A typed IR builder layer exists at `crates/cfd2_ir/src/solver/model/backend/typed_ast.rs` for compile-time unit checking when constructing `EquationSystem`s in Rust (currently best-effort; complex systems still rely on runtime `validate_units()` until dimension types are canonicalized)
 - Port runtime types + registry exist under `src/solver/model/ports/*`
 - Proc-macro scaffolding exists, but `PortSet` is not implemented yet (and `ModulePorts` delegates to it)
 - No model modules have been migrated to ports yet
 - `PortManifest` does not exist yet; `ModuleManifest`/string-based codegen remains the source of truth
 
 **Next (recommended)**:
-- Type-Level Dimensions Migration: canonicalize type-level dimensions so equivalent unit expressions become the same Rust type, then re-attempt typed model definitions.
+- Type-Level Dimensions Migration (Step 3): add a typed IR builder layer (`typed_ast.rs`) so unit mismatches become compile-time errors when constructing systems in Rust.
 - Phase 1: finish derive macros (`PortSet`) so modules can be migrated with minimal boilerplate.
 - Phase 3: define `PortManifest` + module integration, then migrate `eos`.
 
 **Deliverables Ready**:
 - ✅ `src/solver/model/ports/*` runtime primitives + tests
 - ✅ Core traits (`ModulePortsTrait`, `PortSetTrait`, etc.)
-- ✅ Typed IR builder layer for compile-time unit checking (`crates/cfd2_ir/src/solver/model/backend/typed_ast.rs`)
 - ⚠️ `cfd2_macros` derive macros exist but are not yet usable for real module migrations
 
 **Ready for**: Completing derive macros + deciding the module/container integration strategy

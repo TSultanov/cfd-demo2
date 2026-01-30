@@ -79,6 +79,54 @@ pub trait UnitDimension: 'static + Copy + Send + Sync + Eq + PartialEq + std::fm
     }
 }
 
+/// Canonical dimension type with const generics for rational exponents.
+///
+/// This type ensures that dimensions with the same exponents are the same Rust type,
+/// enabling typed builder operations (like term addition) to work correctly.
+///
+/// The type parameters are the rational exponents for each base dimension:
+/// - `M_NUM/M_DEN`: Mass exponent
+/// - `L_NUM/L_DEN`: Length exponent  
+/// - `T_NUM/T_DEN`: Time exponent
+/// - `TEMP_NUM/TEMP_DEN`: Temperature exponent
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use cfd2_ir::solver::dimensions::Dim;
+///
+/// // Velocity = Length / Time = L^1 * T^-1
+/// type Velocity = Dim<0, 1, 1, 1, -1, 1, 0, 1>;
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Dim<
+    const M_NUM: i32,
+    const M_DEN: i32,
+    const L_NUM: i32,
+    const L_DEN: i32,
+    const T_NUM: i32,
+    const T_DEN: i32,
+    const TEMP_NUM: i32,
+    const TEMP_DEN: i32,
+>;
+
+impl<
+        const M_NUM: i32,
+        const M_DEN: i32,
+        const L_NUM: i32,
+        const L_DEN: i32,
+        const T_NUM: i32,
+        const T_DEN: i32,
+        const TEMP_NUM: i32,
+        const TEMP_DEN: i32,
+    > UnitDimension for Dim<M_NUM, M_DEN, L_NUM, L_DEN, T_NUM, T_DEN, TEMP_NUM, TEMP_DEN>
+{
+    const M: (i32, i32) = (M_NUM, M_DEN);
+    const L: (i32, i32) = (L_NUM, L_DEN);
+    const T: (i32, i32) = (T_NUM, T_DEN);
+    const TEMP: (i32, i32) = (TEMP_NUM, TEMP_DEN);
+}
+
 /// Marker trait for dimensions that are compatible (same exponents).
 ///
 /// This is automatically implemented when two dimensions have identical exponents.

@@ -72,7 +72,6 @@ crates/cfd2_macros/
 - [ ] Add missing runtime validation (dimension mismatch checks + clear errors):
   - Decide whether `PortRegistry` enforces `D::to_runtime() == layout.unit()` for “semantic” fields/params
   - Provide an explicit escape hatch for genuinely dynamic-dimension fields (per prerequisites)
-- [ ] Decide and implement an IR-facing "port manifest" representation that can cross into `crates/cfd2_codegen` without violating the IR boundary
 
 **Files Created**:
 ```
@@ -110,9 +109,6 @@ src/solver/model/ports/
 ```
 crates/cfd2_ir/src/solver/ir/
 └── ports.rs            # IR-facing PortManifest + port specs (re-export from ir/mod.rs)
-
-src/solver/model/ports/
-└── prelude.rs          # Convenient imports for module authors (and re-exports) [TODO]
 ```
 
 ### Phase 4: Low-Risk Module Migration (Weeks 3-4)
@@ -173,8 +169,8 @@ migration steps to move that logic onto the port infrastructure.
 
 ### 0) Prerequisites (one-time, required before bulk migration)
 
-- [ ] Finish Phase 1: `#[derive(PortSet)]` must be usable for real structs (registration + lookup)
-- [ ] Finish Phase 3: define an IR-safe `PortManifest` (`cfd2_ir::solver::ir`) and a way to attach it to model modules (likely via `KernelBundleModule.manifest`)
+- [x] `#[derive(PortSet)]` is usable for real structs (registration + lookup)
+- [x] Phase 3 baseline: IR-safe `PortManifest` exists and can be attached to model modules via `KernelBundleModule.manifest.port_manifest`
 - [x] Unify/upgrade the dimension system across crates (see "Type-Level Dimensions Migration" below). This must happen before we can rely on `FieldPort<Dim, Kind>` throughout the repo (including in IR/codegen).
 - [ ] Add (or decide against) dimension enforcement policy in `PortRegistry`:
   - For "semantic" fields (p, rho, mu, grad_p, etc) enforce runtime dimension matches compile-time `UnitDimension`
@@ -482,11 +478,14 @@ pub struct EosModule {
 impl ModelSpec {
     pub fn create_port_registry(&self) -> Result<PortRegistry, PortRegistryError> {
         let mut registry = PortRegistry::new(self.state_layout.clone());
-        // NOTE: `ModelSpec.modules` is currently `Vec<KernelBundleModule>`.
-        // Before this can work, decide how port-declaring modules are stored:
-        // - Option A: introduce an object-safe port trait for storage/iteration (e.g. `ModelModulePorts`)
-        //   (Note: `ModulePortsTrait` itself is not directly usable as a heterogeneous trait object due to its `PortSet` assoc type.)
-        // - Option B: keep `KernelBundleModule` but attach a `PortManifest` to it (or its manifest)
+        // Iterate module manifests and register/validate their port manifests.
+        // NOTE: this requires a dynamic "register by spec" API on PortRegistry,
+        // since PortManifest is pure data (no type parameters available here).
+        for module in &self.modules {
+            if let Some(manifest) = &module.manifest.port_manifest {
+                registry.register_manifest(module.name, manifest)?;
+            }
+        }
         Ok(registry)
     }
 }
@@ -561,11 +560,16 @@ As of **2026-01-30**:
 - Port runtime types + registry exist under `src/solver/model/ports/*`
 - `#[derive(PortSet)]` exists (param/field/buffer) with trybuild tests; `PortRegistry` registration is idempotent
 - `#[derive(ModulePorts)]` exists but still needs a clarified integration story (how/when modules materialize a port set and expose it to codegen)
-- No model modules have been migrated to ports yet
-- `PortManifest` does not exist yet; `ModuleManifest`/string-based codegen remains the source of truth
+- IR-safe `PortManifest` exists (`crates/cfd2_ir/src/solver/ir/ports.rs`) and is attached to `ModuleManifest` via `ModuleManifest.port_manifest`
+- First module migrated: `eos` publishes a `PortManifest` for its uniform params (still also exposes `named_params` for backward compatibility / non-f32 params)
+- Model init + codegen do not consume `port_manifest` yet; string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 
 **Next (recommended)**:
-- Phase 3: define `PortManifest` + module integration, then migrate `eos` as the first port-based module.
+- Phase 3: wire `ModelSpec`/validation to consume `ModuleManifest.port_manifest`:
+  - Add a dynamic registry API (e.g. `PortRegistry::register_manifest(module_name, &PortManifest)`) for validation + layout resolution
+  - Plumb resolved port metadata into WGSL generation and build-time registries (uniform params + bindings)
+- Audit and correct `eos` manifest units (ensure `UnitDim` matches runtime semantics, including temperature exponent where applicable) and add a small regression test.
+- Migrate the next low-risk module(s) to publish a `PortManifest` (start with uniform params only): `generic_coupled_apply`, then `generic_coupled`.
 - Decide the dimension enforcement policy in `PortRegistry` (especially for semantic fields/params) and implement it (with an escape hatch for dynamic-dimension fields).
 - Keep dimensional correctness enforced by runtime `EquationSystem::validate_units()` for complex systems until/unless we adopt a different type-level encoding (nightly features or type-encoded exponents).
 
@@ -573,8 +577,11 @@ As of **2026-01-30**:
 - ✅ `src/solver/model/ports/*` runtime primitives + tests
 - ✅ Core traits (`ModulePortsTrait`, `PortSetTrait`, etc.)
 - ✅ `#[derive(PortSet)]` + trybuild tests (param/field/buffer)
+- ✅ IR-safe `PortManifest` types (`crates/cfd2_ir/src/solver/ir/ports.rs`) + re-export through `cfd2_ir::solver::ir`
+- ✅ `ModuleManifest.port_manifest` wiring (model boundary-safe)
+- ✅ `eos` publishes a first `PortManifest` (uniform params)
 - ✅ Canonical dimension carrier type `Dim<...>` (usable directly, but not auto-derived from expressions)
 - ✅ Typed IR builder layer (`crates/cfd2_ir/src/solver/model/backend/typed_ast.rs`) for structurally-matching unit expressions
 - ⚠️ `#[derive(ModulePorts)]` exists but needs integration work before real module migrations
 
-**Ready for**: Defining `PortManifest` + wiring module integration to start real port-based module migrations
+**Ready for**: Wiring model init/codegen to consume `PortManifest`, then migrating additional modules

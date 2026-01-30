@@ -257,7 +257,11 @@ migration steps to move that logic onto the port infrastructure.
 - Various "does this field/component exist?" checks using `StateLayout`.
 
 **Migration steps**:
-- [ ] Port runtime offset resolution to `PortRegistry` (keep build-script fallback).
+- [x] Port runtime offset resolution to `PortRegistry` (keep build-script fallback).
+  - Created `OffsetResolver` trait abstracting over PortRegistry and StateLayout
+  - Runtime (`#[cfg(cfd2_build_script)]`) uses `PortRegistryResolver` with Dimensionless placeholder
+  - Build-script (`#[cfg(not(cfd2_build_script))]`) keeps using StateLayout directly
+  - Updated `state_component_at`, `state_component_at_side`, `apply_slipwall_velocity_reflection`, `resolve_state_field_component`
 - [ ] Add a lowering pass that resolves every state-field reference used by flux codegen into a "resolved state slot":
   - Traverse `FluxModuleKernelSpec` + any `PrimitiveExpr` used by flux evaluation
   - Collect all referenced field names (including component-suffixed names like `<field>_x`)

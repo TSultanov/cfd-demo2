@@ -179,6 +179,70 @@ mod tests {
             "expected boundary neighbor gradient to be zeroed via select(..., 0.0, is_boundary)"
         );
     }
+
+    #[test]
+    fn flux_module_codegen_accepts_vector_component_selector() {
+        // Regression test: PrimitiveExpr::Field("rho_u_x")-style component selectors
+        // should resolve correctly to state offsets via PortRegistry.
+        use crate::solver::shared::PrimitiveExpr;
+
+        let rho_u = vol_vector("rho_u", si::MOMENTUM_DENSITY);
+        let layout = StateLayout::new(vec![rho_u]);
+        let flux_layout = FluxLayout {
+            stride: 2,
+            components: vec![
+                FluxComponent {
+                    name: "rho_u_x".to_string(),
+                    offset: 0,
+                },
+                FluxComponent {
+                    name: "rho_u_y".to_string(),
+                    offset: 1,
+                },
+            ],
+        };
+
+        // Use primitive expressions that access vector components by name
+        let primitives = vec![
+            (
+                "mom_x".to_string(),
+                PrimitiveExpr::Field("rho_u_x".to_string()),
+            ),
+            (
+                "mom_y".to_string(),
+                PrimitiveExpr::Field("rho_u_y".to_string()),
+            ),
+        ];
+
+        // Simple flux that just passes through the primitive values
+        let spec = FluxModuleKernelSpec::ScalarPerComponent {
+            components: vec!["rho_u_x".to_string(), "rho_u_y".to_string()],
+            flux: vec![
+                FaceScalarExpr::Primitive {
+                    side: FaceSide::Owner,
+                    name: "mom_x".to_string(),
+                },
+                FaceScalarExpr::Primitive {
+                    side: FaceSide::Owner,
+                    name: "mom_y".to_string(),
+                },
+            ],
+        };
+
+        let wgsl =
+            generate_flux_module_wgsl(&layout, &flux_layout, 2, &primitives, &spec).to_wgsl();
+
+        // Should contain state accesses for both components
+        // rho_u_x is at offset 0, rho_u_y is at offset 1
+        assert!(
+            wgsl.contains("state[owner * 2u + 0u]") || wgsl.contains("state[owner * 2u]"),
+            "expected WGSL to access rho_u_x at offset 0"
+        );
+        assert!(
+            wgsl.contains("state[owner * 2u + 1u]"),
+            "expected WGSL to access rho_u_y at offset 1"
+        );
+    }
 }
 
 fn base_items(include_low_mach_params: bool) -> Vec<Item> {
@@ -1663,6 +1727,111 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
     }
 }
 
+/// Trait for resolving field offsets in state layout.
+/// Abstracts over PortRegistry (runtime) and StateLayout (build script).
+trait OffsetResolver {
+    fn component_offset(&self, field: &str, component: u32) -> Option<u32>;
+    fn stride(&self) -> u32;
+    fn field_kind(&self, field: &str) -> Option<FieldKind>;
+}
+
+#[cfg(cfd2_build_script)]
+struct PortRegistryResolver {
+    /// Map of (field_name, component_index) -> offset
+    offsets: HashMap<(String, u32), u32>,
+    stride: u32,
+    field_kinds: HashMap<String, FieldKind>,
+}
+
+#[cfg(cfd2_build_script)]
+impl PortRegistryResolver {
+    fn new(layout: &StateLayout) -> Self {
+        use crate::solver::model::ports::dimensions::Dimensionless;
+        use crate::solver::model::ports::{PortRegistry, Scalar, Vector2, Vector3};
+
+        let mut registry = PortRegistry::new(layout.clone());
+        let mut offsets = HashMap::new();
+        let mut field_kinds = HashMap::new();
+
+        // Register all fields in the layout and collect their offsets
+        for field in layout.fields() {
+            let name = field.name();
+            field_kinds.insert(name.to_string(), field.kind());
+
+            match field.kind() {
+                FieldKind::Scalar => {
+                    if let Ok(port) = registry.register_scalar_field::<Dimensionless>(name) {
+                        offsets.insert((name.to_string(), 0), port.offset());
+                    }
+                }
+                FieldKind::Vector2 => {
+                    if let Ok(port) = registry.register_vector2_field::<Dimensionless>(name) {
+                        offsets.insert(
+                            (name.to_string(), 0),
+                            port.component(0).unwrap().full_offset(),
+                        );
+                        offsets.insert(
+                            (name.to_string(), 1),
+                            port.component(1).unwrap().full_offset(),
+                        );
+                    }
+                }
+                FieldKind::Vector3 => {
+                    if let Ok(port) = registry.register_vector3_field::<Dimensionless>(name) {
+                        offsets.insert(
+                            (name.to_string(), 0),
+                            port.component(0).unwrap().full_offset(),
+                        );
+                        offsets.insert(
+                            (name.to_string(), 1),
+                            port.component(1).unwrap().full_offset(),
+                        );
+                        offsets.insert(
+                            (name.to_string(), 2),
+                            port.component(2).unwrap().full_offset(),
+                        );
+                    }
+                }
+            };
+        }
+
+        Self {
+            offsets,
+            stride: layout.stride(),
+            field_kinds,
+        }
+    }
+}
+
+#[cfg(cfd2_build_script)]
+impl OffsetResolver for PortRegistryResolver {
+    fn component_offset(&self, field: &str, component: u32) -> Option<u32> {
+        self.offsets.get(&(field.to_string(), component)).copied()
+    }
+
+    fn stride(&self) -> u32 {
+        self.stride
+    }
+
+    fn field_kind(&self, field: &str) -> Option<FieldKind> {
+        self.field_kinds.get(field).copied()
+    }
+}
+
+impl OffsetResolver for StateLayout {
+    fn component_offset(&self, field: &str, component: u32) -> Option<u32> {
+        self.component_offset(field, component)
+    }
+
+    fn stride(&self) -> u32 {
+        self.stride()
+    }
+
+    fn field_kind(&self, field: &str) -> Option<FieldKind> {
+        self.field(field).map(|f| f.kind())
+    }
+}
+
 fn state_component_at(
     layout: &StateLayout,
     buffer: &str,
@@ -1670,7 +1839,25 @@ fn state_component_at(
     field: &str,
     component: u32,
 ) -> Expr {
-    let offset = layout
+    #[cfg(cfd2_build_script)]
+    {
+        let resolver = PortRegistryResolver::new(layout);
+        state_component_at_resolver(&resolver, buffer, idx, field, component)
+    }
+    #[cfg(not(cfd2_build_script))]
+    {
+        state_component_at_resolver(layout, buffer, idx, field, component)
+    }
+}
+
+fn state_component_at_resolver(
+    resolver: &dyn OffsetResolver,
+    buffer: &str,
+    idx: Expr,
+    field: &str,
+    component: u32,
+) -> Expr {
+    let offset = resolver
         .component_offset(field, component)
         .unwrap_or_else(|| {
             panic!(
@@ -1678,7 +1865,7 @@ fn state_component_at(
                 field, component
             )
         });
-    let stride = layout.stride();
+    let stride = resolver.stride();
     Expr::ident(buffer).index(idx * stride + offset)
 }
 
@@ -1690,15 +1877,36 @@ fn state_component_at_side(
     component: u32,
     flux_layout: &FluxLayout,
 ) -> Expr {
-    let owner = state_component_at(layout, buffer, Expr::ident("owner"), field, component);
+    #[cfg(cfd2_build_script)]
+    {
+        let resolver = PortRegistryResolver::new(layout);
+        state_component_at_side_resolver(&resolver, buffer, side, field, component, flux_layout)
+    }
+    #[cfg(not(cfd2_build_script))]
+    {
+        state_component_at_side_resolver(layout, buffer, side, field, component, flux_layout)
+    }
+}
+
+fn state_component_at_side_resolver(
+    resolver: &dyn OffsetResolver,
+    buffer: &str,
+    side: FaceSide,
+    field: &str,
+    component: u32,
+    flux_layout: &FluxLayout,
+) -> Expr {
+    let owner =
+        state_component_at_resolver(resolver, buffer, Expr::ident("owner"), field, component);
 
     // Interior neighbor value (for boundary faces, `neigh_idx` is set to `owner`).
-    let interior = state_component_at(layout, buffer, Expr::ident("neigh_idx"), field, component);
+    let interior =
+        state_component_at_resolver(resolver, buffer, Expr::ident("neigh_idx"), field, component);
 
-    let Some(state_field) = layout.field(field) else {
+    let Some(state_field_kind) = resolver.field_kind(field) else {
         panic!("missing field '{field}' in state layout");
     };
-    let comp_name = match state_field.kind() {
+    let comp_name = match state_field_kind {
         FieldKind::Scalar => {
             if component != 0 {
                 return owner;
@@ -1761,7 +1969,9 @@ fn state_component_at_side(
             )
         };
 
-        return apply_slipwall_velocity_reflection(layout, buffer, field, component, base);
+        return apply_slipwall_velocity_reflection_resolver(
+            resolver, buffer, field, component, base,
+        );
     }
 
     if side == FaceSide::Owner {
@@ -1770,11 +1980,29 @@ fn state_component_at_side(
     }
 
     let base = dsl::select(interior, owner, Expr::ident("is_boundary"));
-    apply_slipwall_velocity_reflection(layout, buffer, field, component, base)
+    apply_slipwall_velocity_reflection_resolver(resolver, buffer, field, component, base)
 }
 
 fn apply_slipwall_velocity_reflection(
     layout: &StateLayout,
+    buffer: &str,
+    field: &str,
+    component: u32,
+    base: Expr,
+) -> Expr {
+    #[cfg(cfd2_build_script)]
+    {
+        let resolver = PortRegistryResolver::new(layout);
+        apply_slipwall_velocity_reflection_resolver(&resolver, buffer, field, component, base)
+    }
+    #[cfg(not(cfd2_build_script))]
+    {
+        apply_slipwall_velocity_reflection_resolver(layout, buffer, field, component, base)
+    }
+}
+
+fn apply_slipwall_velocity_reflection_resolver(
+    resolver: &dyn OffsetResolver,
     buffer: &str,
     field: &str,
     component: u32,
@@ -1802,8 +2030,8 @@ fn apply_slipwall_velocity_reflection(
     // both components). Projecting the owner-cell velocity would incorrectly introduce
     // tangential slip into the convective flux.
     let is_slipwall = is_boundary.clone() & boundary_type.clone().eq(Expr::from(4u32));
-    let ux = state_component_at(layout, buffer, Expr::ident("owner"), field, 0);
-    let uy = state_component_at(layout, buffer, Expr::ident("owner"), field, 1);
+    let ux = state_component_at_resolver(resolver, buffer, Expr::ident("owner"), field, 0);
+    let uy = state_component_at_resolver(resolver, buffer, Expr::ident("owner"), field, 1);
     let nx = Expr::ident("normal_vec").field("x");
     let ny = Expr::ident("normal_vec").field("y");
     let un = ux.clone() * nx.clone() + uy.clone() * ny.clone();
@@ -1966,8 +2194,27 @@ fn lower_primitive_expr_at_side<'a>(
 }
 
 fn resolve_state_field_component<'a>(state_layout: &StateLayout, name: &'a str) -> (&'a str, u32) {
-    if state_layout.offset_for(name).is_some() {
-        return (name, 0);
+    #[cfg(cfd2_build_script)]
+    {
+        let resolver = PortRegistryResolver::new(state_layout);
+        resolve_state_field_component_resolver(&resolver, name)
+    }
+    #[cfg(not(cfd2_build_script))]
+    {
+        resolve_state_field_component_resolver(state_layout, name)
+    }
+}
+
+fn resolve_state_field_component_resolver<'a>(
+    resolver: &dyn OffsetResolver,
+    name: &'a str,
+) -> (&'a str, u32) {
+    // Check if it's a scalar field (component 0)
+    if resolver.component_offset(name, 0).is_some() {
+        // Verify it's actually a scalar by checking field kind
+        if let Some(FieldKind::Scalar) = resolver.field_kind(name) {
+            return (name, 0);
+        }
     }
 
     let (base, component) = name
@@ -1981,7 +2228,7 @@ fn resolve_state_field_component<'a>(state_layout: &StateLayout, name: &'a str) 
         _ => panic!("primitive field '{}' not found in state layout", name),
     };
 
-    if state_layout.component_offset(base, component).is_none() {
+    if resolver.component_offset(base, component).is_none() {
         panic!("primitive field '{}' not found in state layout", name);
     }
 

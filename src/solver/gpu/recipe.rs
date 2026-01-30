@@ -1004,4 +1004,40 @@ mod tests {
             TimeScheme::BDF2 as u32
         );
     }
+
+    #[test]
+    fn recipe_populates_port_registry_from_eos_manifest() {
+        // Regression test: ensure PortRegistry is populated at runtime from module manifests
+        let model = compressible_model();
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Coupled,
+        )
+        .expect("recipe build");
+
+        // Verify EOS params are registered in the port registry
+        assert!(
+            recipe.port_registry.lookup_param("eos.gamma").is_some(),
+            "eos.gamma should be registered in port registry"
+        );
+        assert!(
+            recipe.port_registry.lookup_param("eos.r").is_some(),
+            "eos.r should be registered in port registry"
+        );
+        assert!(
+            recipe.port_registry.lookup_param("eos.theta_ref").is_some(),
+            "eos.theta_ref should be registered in port registry"
+        );
+
+        // Verify these are actual PortIds (not just Some(()))
+        let gamma_id = recipe.port_registry.lookup_param("eos.gamma").unwrap();
+        let r_id = recipe.port_registry.lookup_param("eos.r").unwrap();
+        assert_ne!(
+            gamma_id, r_id,
+            "different params should have different PortIds"
+        );
+    }
 }

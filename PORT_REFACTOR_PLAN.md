@@ -19,8 +19,8 @@ Based on design discussions, the implementation follows these principles:
 | Phase | Status | Progress | Description |
 |-------|--------|----------|-------------|
 | 1. Macro Infrastructure | **Mostly Done** | ~90% | `cfd2_macros` has `PortSet` derive (param/field/buffer) + trybuild tests; `ModulePorts` exists but needs integration strategy (how/when modules materialize port sets) |
-| 2. Core Port Runtime | **In Progress** | ~75% | `src/solver/model/ports/*` exists (ports + registry + tests); registry supports idempotent registration + conflict errors; still missing dimension enforcement policy + richer validation |
-| 3. PortManifest + Module Integration | **In Progress** | ~50% | IR-safe `PortManifest` defined in `cfd2_ir`; attached to `ModuleManifest`; `PortSet` emits manifest; first module (`eos`) migrated |
+| 2. Core Port Runtime | **In Progress** | ~80% | `src/solver/model/ports/*` exists (ports + registry + tests); registry supports idempotent registration + conflict errors; IR-safe manifests can be registered dynamically; still missing dimension enforcement policy + richer validation |
+| 3. PortManifest + Module Integration | **In Progress** | ~70% | IR-safe `PortManifest` defined in `cfd2_ir`; attached to `ModuleManifest`; `PortSet` emits manifest; `PortRegistry::register_manifest` exists and `SolverRecipe` stores a `port_registry`; first module (`eos`) migrated |
 | 4. Low-Risk Migration | **In Progress** | ~33% | `eos` module migrated to publish `PortManifest` for uniform params; `generic_coupled_apply` and `generic_coupled` pending |
 | 5. Field-Access Migration | Pending | 0% | flux_module, rhie_chow |
 | 6. Codegen Replacement | Pending | 0% | Replace string-based codegen |
@@ -95,9 +95,11 @@ src/solver/model/ports/
 - [x] Add `port_manifest: Option<PortManifest>` to `ModuleManifest`
 - [x] Teach `#[derive(PortSet)]` to emit `port_manifest()` method
 - [x] Migrate `eos` module to publish `PortManifest` for uniform params
+- [x] Add `PortRegistry::register_manifest(module, &PortManifest)` for dynamic manifest registration + validation
+- [x] Store `PortRegistry` on `SolverRecipe` (`SolverRecipe.port_registry`) and populate it from module manifests in `SolverRecipe::from_model()`
+- [x] Correct EOS port-manifest units (including temperature exponent for `eos.r`) and add a regression test
 
 **Remaining**:
-- [ ] Wire model initialization to build a `PortRegistry` on-demand (requires a strategy for getting `ModulePortsTrait` implementations from `ModelSpec.modules`)
 - [ ] Integrate with existing build-time generation (WGSL emission + `named_params_registry` generation currently depends on `ModuleManifest.named_params`)
 - [ ] Add validation helpers ("missing field", "wrong kind", "dimension mismatch", etc.)
 - [ ] Add `ports::prelude` for convenient imports for module authors
@@ -562,13 +564,16 @@ As of **2026-01-30**:
 - `#[derive(ModulePorts)]` exists but still needs a clarified integration story (how/when modules materialize a port set and expose it to codegen)
 - IR-safe `PortManifest` exists (`crates/cfd2_ir/src/solver/ir/ports.rs`) and is attached to `ModuleManifest` via `ModuleManifest.port_manifest`
 - First module migrated: `eos` publishes a `PortManifest` for its uniform params (still also exposes `named_params` for backward compatibility / non-f32 params)
-- Model init + codegen do not consume `port_manifest` yet; string-based lookups remain in core hotspots (see “Module Migration Playbook”)
+- `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present
+- ⚠️ `build.rs` currently emits `cargo:rustc-cfg=cfd2_build_script`, so `#[cfg(not(cfd2_build_script))]` blocks `eos_module` from attaching its `port_manifest` in normal builds; fix this before relying on `SolverRecipe.port_registry` at runtime
+- Build-time codegen still does not use port manifests, and string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 
 **Next (recommended)**:
-- Phase 3: wire `ModelSpec`/validation to consume `ModuleManifest.port_manifest`:
-  - Add a dynamic registry API (e.g. `PortRegistry::register_manifest(module_name, &PortManifest)`) for validation + layout resolution
-  - Plumb resolved port metadata into WGSL generation and build-time registries (uniform params + bindings)
-- Audit and correct `eos` manifest units (ensure `UnitDim` matches runtime semantics, including temperature exponent where applicable) and add a small regression test.
+- Fix the `cfd2_build_script` gating story so port manifests are available at runtime:
+  - Flip `#[cfg(not(cfd2_build_script))]` → `#[cfg(cfd2_build_script)]` on runtime-only port-manifest attachment sites (e.g. `eos_module`) so manifests compile into the main crate, while still being skipped in the build-script `include!()` compilation context.
+- Phase 3: start consuming `port_manifest` at build time (codegen):
+  - Plumb module `PortManifest` data into the build-time pipeline (uniform params + bindings), reducing reliance on ad-hoc string lists.
+  - Keep an escape hatch for params that are not yet representable as `ParamPort<...>` (e.g. `low_mach.model` as `u32` enum).
 - Migrate the next low-risk module(s) to publish a `PortManifest` (start with uniform params only): `generic_coupled_apply`, then `generic_coupled`.
 - Decide the dimension enforcement policy in `PortRegistry` (especially for semantic fields/params) and implement it (with an escape hatch for dynamic-dimension fields).
 - Keep dimensional correctness enforced by runtime `EquationSystem::validate_units()` for complex systems until/unless we adopt a different type-level encoding (nightly features or type-encoded exponents).

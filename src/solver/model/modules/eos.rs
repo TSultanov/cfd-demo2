@@ -22,7 +22,7 @@ pub fn eos_module(eos: EosSpec) -> KernelBundleModule {
         // Set the port-based manifest for uniform params
         // This is done via a helper function in a separate module to avoid
         // proc-macro issues in build scripts
-        #[cfg(not(cfd2_build_script))]
+        #[cfg(cfd2_build_script)]
         {
             manifest.port_manifest =
                 Some(crate::solver::model::modules::eos_ports::eos_uniform_port_manifest());

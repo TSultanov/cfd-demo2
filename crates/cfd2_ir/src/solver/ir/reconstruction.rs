@@ -32,7 +32,10 @@ pub fn minmod_delta_limited<B: ReconstructionBuilder>(
     B::min(B::max(delta, min_diff), max_diff)
 }
 
-pub fn vanleer_delta_limited<B: ReconstructionBuilder>(diff: B::Scalar, delta: B::Scalar) -> B::Scalar {
+pub fn vanleer_delta_limited<B: ReconstructionBuilder>(
+    diff: B::Scalar,
+    delta: B::Scalar,
+) -> B::Scalar {
     // VanLeer-style slope scaling:
     // - Always scale by |diff| / max(|diff|, |delta| + eps)
     // - Additionally guard against opposite-signed slopes (diff * delta <= 0) to avoid

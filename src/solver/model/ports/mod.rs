@@ -38,8 +38,9 @@ pub use buffer::{
 };
 pub use dimensions::{
     Acceleration, Area, Density, DimCompatible, Dimensionless, DivDim, DynamicViscosity, Energy,
-    Force, KinematicViscosity, Length, Mass, MulDim, PowDim, Pressure, SqrtDim, Temperature, Time,
-    UnitDimension, Velocity, Volume,
+    EnergyDensity, Force, InvTime, KinematicViscosity, Length, Mass, MassFlux, MomentumDensity,
+    MulDim, PowDim, Pressure, PressureGradient, SqrtDim, Temperature, Time, UnitDimension,
+    Velocity, Volume, D_P,
 };
 pub use field::{
     ComponentOffset, FieldKind, FieldPort, FieldPortError, FieldPortProvider, Scalar, Vector2,

@@ -1,5 +1,6 @@
 pub use cfd2_codegen::solver::codegen;
 pub use cfd2_codegen::compiler;
+pub mod dimensions;
 pub mod gpu;
 pub(crate) mod ir;
 pub mod kernels;

@@ -225,6 +225,35 @@ impl UnitDim {
     pub const fn sqrt(self) -> Self {
         self.pow_ratio(1, 2)
     }
+
+    /// Create a UnitDim from rational exponents.
+    ///
+    /// Each dimension is specified as `(numerator, denominator)` for the exponent.
+    /// The denominator must be non-zero.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Create m^(1/2) * kg^(-1/2) * s^0 * K^0
+    /// let dim = UnitDim::from_rational(1, 2, -1, 2, 0, 1, 0, 1);
+    /// ```
+    pub const fn from_rational(
+        m_num: i32,
+        m_den: i32,
+        l_num: i32,
+        l_den: i32,
+        t_num: i32,
+        t_den: i32,
+        temp_num: i32,
+        temp_den: i32,
+    ) -> Self {
+        Self {
+            m: UnitExp::new(m_num, m_den),
+            l: UnitExp::new(l_num, l_den),
+            t: UnitExp::new(t_num, t_den),
+            temp: UnitExp::new(temp_num, temp_den),
+        }
+    }
 }
 
 impl Default for UnitDim {

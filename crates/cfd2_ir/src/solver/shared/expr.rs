@@ -34,7 +34,6 @@ pub enum PrimitiveExpr {
     /// Unary operations
     Sqrt(Box<PrimitiveExpr>),
     Neg(Box<PrimitiveExpr>),
-
     // Future: Max, Min, Clamp, Select, etc.
 }
 

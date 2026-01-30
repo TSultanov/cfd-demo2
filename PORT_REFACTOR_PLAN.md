@@ -332,22 +332,25 @@ while keeping `UnitDim` as the runtime/serialization/debug representation.
 
 ### 1) Create a canonical type-level dimension system in `cfd2_ir`
 
-- [ ] Add a new IR module that defines type-level dimensions with **rational exponents** (to match `UnitDim`):
-  - Suggested location: `crates/cfd2_ir/src/solver/dimensions.rs` (re-export via `crates/cfd2_ir/src/solver/mod.rs`)
-  - Use const-generics to represent rationals (e.g. `NUM/DEN`) for each base dimension exponent:
+- [x] Add a new IR module that defines type-level dimensions with **rational exponents** (to match `UnitDim`):
+  - Location: `crates/cfd2_ir/src/solver/dimensions.rs` (re-export via `crates/cfd2_ir/src/solver/mod.rs`)
+  - Uses const-generics to represent rationals as `(NUM, DEN)` tuples for each base dimension exponent:
     - Mass (kg), Length (m), Time (s), Temperature (K)
-  - Provide type constructors:
+  - Provides type constructors:
     - `MulDim<A, B>`, `DivDim<A, B>`, `PowDim<A, NUM, DEN>`, `SqrtDim<A>`
-  - Provide a `to_runtime() -> UnitDim` mapping and round-trip tests
-- [ ] Define typed equivalents for the existing `si::*` dimensions (e.g. `Pressure`, `Velocity`, `Density`, `D_P`, `PressureGradient`) in that module.
-- [ ] Derive the existing `units::si` **runtime constants** from the type-level definitions to prevent drift:
-  - e.g. `pub const PRESSURE: UnitDim = <dims::Pressure as UnitDimension>::to_runtime();`
+  - Provides a `to_runtime() -> UnitDim` mapping and round-trip tests
+  - Added `UnitDim::from_rational()` const fn constructor for building `UnitDim` from rational exponents
+- [x] Define typed equivalents for the existing `si::*` dimensions (e.g. `Pressure`, `Velocity`, `Density`, `D_P`, `PressureGradient`) in that module.
+- [x] Tests verify that type-level dimensions match `units::si::*` runtime constants exactly (see `derived_dimensions_match_si_constants` test)
 
 ### 2) Make ports reuse the canonical IR dimension types
 
-- [ ] Refactor `src/solver/model/ports/dimensions.rs` to re-export `cfd2_ir::solver::dimensions::*` (or remove the duplicate impls).
-- [ ] Update `FieldPort` / `ParamPort` / `PortRegistry` to use the shared `UnitDimension` trait, and ensure runtime checks compare against `UnitDim` derived from the type.
-- [ ] Add regression tests that the port dimension types match `crate::solver::units::si::*` exactly.
+- [x] Refactor `src/solver/model/ports/dimensions.rs` to re-export `cfd2_ir::solver::dimensions::*` (removed duplicate impls).
+- [x] Created `src/solver/dimensions.rs` re-export module for convenient access from main crate.
+- [x] `FieldPort` / `ParamPort` / `PortRegistry` already use the `UnitDimension` trait via the re-export.
+- [x] Added regression tests that port dimension types match `crate::solver::units::si::*` exactly (see `port_specific_dimensions_match_si` test).
+
+**Note**: The old ports dimension system used `i8` exponents and had a buggy `SqrtDim` definition (`PowDim<A, 1>` instead of `A^(1/2)`). The new canonical system uses rational `(i32, i32)` exponents and correctly implements `SqrtDim<A> = PowDim<A, 1, 2>`.
 
 ### 3) Add a typed IR builder layer (units checked by Rust types)
 

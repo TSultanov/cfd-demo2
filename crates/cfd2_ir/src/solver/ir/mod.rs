@@ -5,7 +5,7 @@
 
 #[allow(unused_imports)]
 pub use crate::solver::model::backend::{
-    fvc, fvm, expand_schemes, Coefficient, Discretization, Equation, EquationSystem, FieldKind,
+    expand_schemes, fvc, fvm, Coefficient, Discretization, Equation, EquationSystem, FieldKind,
     FieldRef, FluxRef, SchemeExpansion, SchemeRegistry, StateField, StateLayout, Term, TermKey,
     TermOp,
 };
@@ -171,17 +171,25 @@ pub enum FaceVec2Builtin {
     /// Vector from the given side's cell center to the face center.
     ///
     /// This is geometry-only (PDE-agnostic) and enables IR-driven reconstruction.
-    CellToFace { side: FaceSide },
+    CellToFace {
+        side: FaceSide,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FaceVec2Expr {
     Builtin(FaceVec2Builtin),
     Vec2(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
-    StateVec2 { side: FaceSide, field: String },
+    StateVec2 {
+        side: FaceSide,
+        field: String,
+    },
     /// Read a vec2 from the state buffer at the given side's cell index, without applying
     /// boundary conditions (raw cell-centered values).
-    CellStateVec2 { side: FaceSide, field: String },
+    CellStateVec2 {
+        side: FaceSide,
+        field: String,
+    },
     Add(Box<FaceVec2Expr>, Box<FaceVec2Expr>),
     Sub(Box<FaceVec2Expr>, Box<FaceVec2Expr>),
     Neg(Box<FaceVec2Expr>),
@@ -194,14 +202,22 @@ pub enum FaceScalarExpr {
     Literal(f32),
     Builtin(FaceScalarBuiltin),
     /// Read a scalar from the shared `Constants` uniform buffer (e.g. `dt`, `density`).
-    Constant { name: String },
+    Constant {
+        name: String,
+    },
     /// Read a scalar from the optional `LowMachParams` uniform buffer.
     ///
     /// Note: `LowMachParam::Model` is stored as `u32` but is exposed to IR as an `f32`
     /// (codegen inserts the cast).
     LowMachParam(LowMachParam),
-    State { side: FaceSide, name: String },
-    Primitive { side: FaceSide, name: String },
+    State {
+        side: FaceSide,
+        name: String,
+    },
+    Primitive {
+        side: FaceSide,
+        name: String,
+    },
     Add(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
     Sub(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
     Mul(Box<FaceScalarExpr>, Box<FaceScalarExpr>),

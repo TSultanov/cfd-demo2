@@ -22,7 +22,7 @@ Based on design discussions, the implementation follows these principles:
 | 2. Core Port Runtime | **In Progress** | ~80% | `src/solver/model/ports/*` exists (ports + registry + tests); registry supports idempotent registration + conflict errors; IR-safe manifests can be registered dynamically; still missing dimension enforcement policy + richer validation |
 | 3. PortManifest + Module Integration | **In Progress** | ~80% | IR-safe `PortManifest` defined in `cfd2_ir`; attached to `ModuleManifest`; `PortRegistry::register_manifest` exists and `SolverRecipe` stores a `port_registry`; named-param allowlisting now consumes `port_manifest.params`; first modules (`eos`, `generic_coupled`) migrated |
 | 4. Low-Risk Migration | **In Progress** | ~66% | `eos` + `generic_coupled` publish `PortManifest` for uniform params; `generic_coupled_apply` is TBD/likely unused |
-| 5. Field-Access Migration | Pending | 0% | flux_module, rhie_chow |
+| 5. Field-Access Migration | **In Progress** | ~50% | `rhie_chow` runtime generators migrated to PortRegistry (build-script fallback remains); `flux_module` pending |
 | 6. Codegen Replacement | Pending | 0% | Replace string-based codegen |
 | 7. Hard Cutoff | Pending | 0% | Remove deprecated APIs |
 
@@ -157,7 +157,7 @@ pub struct EosModule {
 
 **Modules**:
 - [ ] `flux_module` - Gradient and flux computation
-- [ ] `rhie_chow` - Pressure-velocity coupling
+- [x] `rhie_chow` - Pressure-velocity coupling (runtime generators use PortRegistry; build-script fallback remains)
 
 **Special considerations**:
 - Integrate with `PortRegistry` for field validation
@@ -175,10 +175,9 @@ migration steps to move that logic onto the port infrastructure.
 - [x] `#[derive(PortSet)]` is usable for real structs (registration + lookup)
 - [x] Phase 3 baseline: IR-safe `PortManifest` exists and can be attached to model modules via `KernelBundleModule.manifest.port_manifest`
 - [x] Unify/upgrade the dimension system across crates (see "Type-Level Dimensions Migration" below). This must happen before we can rely on `FieldPort<Dim, Kind>` throughout the repo (including in IR/codegen).
-- [ ] Decide how ports handle **derived/dynamic field names**:
-  - Today `FieldPort`/`FieldSpec` use `&'static str`, but some modules derive names (e.g. `format!("grad_{}", pressure.name())`).
-  - Option A: make field port names **owned** (`Arc<str>`/`String`) and accept `&str` in registry APIs.
-  - Option B: keep `&'static str` but provide a safe **interning** mechanism (or equivalent) for derived names (avoid ad-hoc `Box::leak`).
+- [x] Support **derived/dynamic field names** (e.g. `format!("grad_{}", pressure.name())`) in the port system:
+  - Implemented as a centralized string interner: `src/solver/model/ports/intern.rs`.
+  - `PortRegistry` field registration APIs accept `&str` and internally intern to `&'static str` for storage.
 - [ ] Add (or decide against) dimension enforcement policy in `PortRegistry`:
   - For "semantic" fields (p, rho, mu, grad_p, etc) enforce runtime dimension matches compile-time `UnitDimension`
   - For "system-driven" fields whose dimensions vary by model, provide a supported escape hatch:
@@ -211,22 +210,23 @@ migration steps to move that logic onto the port infrastructure.
 - `component_offset(momentum.name(), c)`
 
 **Migration steps**:
-- [ ] Define dimension aliases needed by this module in the canonical IR type-level dimensions module (see "Type-Level Dimensions Migration"):
+- [x] Define dimension aliases needed by this module in the canonical IR type-level dimensions module (see "Type-Level Dimensions Migration"):
   - `PressureGradient = DivDim<Pressure, Length>`
-  - `DP = DivDim<MulDim<Volume, Time>, Mass>` (matches `si::D_P`)
+  - `D_P = DivDim<MulDim<Volume, Time>, Mass>` (matches `si::D_P`)
 - [ ] Create a port set / manifest entries for:
-  - `dp_field`: scalar field (`DP`, Scalar) (name comes from module config)
+  - `dp_field`: scalar field (`D_P`, Scalar) (name comes from module config)
   - `grad_p` + `grad_p_old`: vector2 fields (`PressureGradient`, Vector2) (names derived from inferred pressure field)
   - `momentum`: vector2 field (dimension is model-dependent; use the chosen escape hatch)
 - [ ] Add a single resolver:
   - Infer `(momentum, pressure)` via `infer_unique_momentum_pressure_coupling_referencing_dp`
   - Build all ports (and derived `grad_*` names) from that inference
-- [ ] Change the kernel generators in this module to take resolved ports/offsets:
-  - Replace `StateLayout` lookups with `FieldPort::{offset,stride}` / `ComponentOffset::full_offset()` equivalents
+- [x] Change the kernel generators in this module to use ports/offsets in the runtime build:
+  - Replace direct `StateLayout` lookups with `FieldPort::{offset,stride}` / `ComponentOffset::full_offset()` equivalents (via `PortRegistry`)
   - Keep `rhie_chow_wgsl.rs` unchanged (it already accepts offsets/stride)
-- [ ] Update/extend tests in `src/solver/model/modules/rhie_chow.rs`:
+  - Keep a build-script fallback implementation until Phase 6 migrates build-time codegen
+- [x] Update/extend tests in `src/solver/model/modules/rhie_chow.rs`:
   - Keep the existing dp-field-name contract test
-  - Add a test that the resolver fails with a clear error when `grad_<p>`/`grad_<p>_old` are missing or wrong kind
+  - Add a regression test that a missing `grad_<p>_old` fails with a clear error (this can remain even after adding a resolver)
 
 #### B) `src/solver/model/modules/flux_module_gradients_wgsl.rs` (Flux gradients stage)
 
@@ -571,6 +571,8 @@ As of **2026-01-30**:
 - Named parameter allowlisting now includes `port_manifest.params[*].key`, so modules no longer need to duplicate uniform params in `manifest.named_params`
 - First module migrated: `eos` publishes a `PortManifest` for its uniform params and no longer duplicates those uniform keys in `manifest.named_params` (keeps only non-uniform/escape-hatch keys there)
 - Second module migrated: `generic_coupled` publishes a `PortManifest` for its uniform params and no longer duplicates those uniform keys in `manifest.named_params` (keeps only host-only keys there)
+- Derived/dynamic field name support is implemented via a centralized interner (`src/solver/model/ports/intern.rs`); `PortRegistry::{register_field,register_scalar_field,register_vector2_field,register_vector3_field}` accept `&str`
+- `rhie_chow` kernel generators use `PortRegistry` (runtime build) to resolve offsets/stride and derived `grad_<p>` names; the build script compilation context still uses the legacy `StateLayout` code paths
 - `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present
 - `cfd2_build_script` cfg is currently used as a build-time hack to exclude runtime-only manifest attachment from the build script’s `include!()` compilation context; regression coverage exists to ensure the runtime recipe populates `port_registry` from the EOS manifest
 - Build-time codegen still does not use port manifests, and string-based lookups remain in core hotspots (see “Module Migration Playbook”)
@@ -582,7 +584,7 @@ As of **2026-01-30**:
 - Phase 3: start consuming `port_manifest` at build time (codegen):
   - Plumb module `PortManifest` data into the build-time pipeline (uniform params + bindings), reducing reliance on ad-hoc string lists.
   - Keep an escape hatch for params that are not yet representable as `ParamPort<...>` (e.g. `low_mach.model` as `u32` enum).
-- Start Phase 5 by migrating the first field-access module (recommended: `rhie_chow`) once the "dynamic-dimension field" story is decided (escape hatch + dimension enforcement policy).
+- Migrate `flux_module` (gradients stage first) to stop doing `StateLayout` lookups inside WGSL generation in the runtime code path; keep a build-script fallback until Phase 6 consumes `PortManifest` at build time.
 - Decide the dimension enforcement policy in `PortRegistry` (especially for semantic fields/params) and implement it (with an escape hatch for dynamic-dimension fields).
 - Keep dimensional correctness enforced by runtime `EquationSystem::validate_units()` for complex systems until/unless we adopt a different type-level encoding (nightly features or type-encoded exponents).
 

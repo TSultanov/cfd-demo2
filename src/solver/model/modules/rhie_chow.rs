@@ -101,13 +101,13 @@ fn generate_dp_init_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
 ) -> Result<KernelWgsl, String> {
-    use crate::solver::model::ports::dimensions::Pressure;
+    use crate::solver::model::ports::dimensions::D_P;
     use crate::solver::model::ports::{PortRegistry, Scalar};
 
     let mut registry = PortRegistry::new(model.state_layout.clone());
 
     let d_p = registry
-        .register_scalar_field::<Pressure>(dp_field)
+        .register_scalar_field::<D_P>(dp_field)
         .map_err(|e| format!("dp_init: {e}"))?;
 
     let stride = registry.state_layout().stride();
@@ -143,13 +143,13 @@ fn generate_dp_update_from_diag_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
 ) -> Result<KernelWgsl, String> {
-    use crate::solver::model::ports::dimensions::{Pressure, Velocity};
-    use crate::solver::model::ports::{PortRegistry, Scalar, Vector2};
+    use crate::solver::model::ports::dimensions::D_P;
+    use crate::solver::model::ports::{PortRegistry, Scalar};
 
     let mut registry = PortRegistry::new(model.state_layout.clone());
 
     let d_p = registry
-        .register_scalar_field::<Pressure>(dp_field)
+        .register_scalar_field::<D_P>(dp_field)
         .map_err(|e| format!("dp_update_from_diag: {e}"))?;
 
     let stride = registry.state_layout().stride();
@@ -162,9 +162,12 @@ fn generate_dp_update_from_diag_kernel_wgsl(
         .map_err(|e| format!("dp_update_from_diag {e}"))?;
     let momentum = coupling.momentum;
 
-    // Register momentum field to get its offset
-    let u = registry
-        .register_vector2_field::<Velocity>(momentum.name())
+    // Register momentum field to validate it exists (offset not needed here)
+    // Using Dimensionless as placeholder since we only need validation, not dimension checking
+    let _u = registry
+        .register_vector2_field::<crate::solver::model::ports::dimensions::Dimensionless>(
+            momentum.name(),
+        )
         .map_err(|e| format!("dp_update_from_diag: {e}"))?;
 
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
@@ -374,13 +377,13 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
 ) -> Result<KernelWgsl, String> {
-    use crate::solver::model::ports::dimensions::{Pressure, PressureGradient, Velocity};
+    use crate::solver::model::ports::dimensions::{PressureGradient, D_P};
     use crate::solver::model::ports::{PortRegistry, Scalar, Vector2};
 
     let mut registry = PortRegistry::new(model.state_layout.clone());
 
     let d_p = registry
-        .register_scalar_field::<Pressure>(dp_field)
+        .register_scalar_field::<D_P>(dp_field)
         .map_err(|e| format!("rhie_chow/correct_velocity_delta: {e}"))?;
 
     let coupling =
@@ -392,8 +395,11 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
     let pressure = coupling.pressure;
 
     // Register momentum field
+    // Using Dimensionless as placeholder since we only need offset, not dimension checking
     let u = registry
-        .register_vector2_field::<Velocity>(momentum.name())
+        .register_vector2_field::<crate::solver::model::ports::dimensions::Dimensionless>(
+            momentum.name(),
+        )
         .map_err(|e| format!("rhie_chow/correct_velocity_delta: {e}"))?;
 
     let grad_name = format!("grad_{}", pressure.name());

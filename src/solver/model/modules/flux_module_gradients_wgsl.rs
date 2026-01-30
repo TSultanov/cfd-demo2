@@ -1,3 +1,4 @@
+use crate::solver::ir::{FieldKind, FluxLayout, StateLayout};
 use cfd2_codegen::solver::codegen::dsl as typed;
 use cfd2_codegen::solver::codegen::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
@@ -5,7 +6,6 @@ use cfd2_codegen::solver::codegen::wgsl_ast::{
 };
 use cfd2_codegen::solver::codegen::wgsl_dsl as dsl;
 use cfd2_codegen::solver::codegen::KernelWgsl;
-use crate::solver::ir::{FieldKind, FluxLayout, StateLayout};
 
 pub fn generate_flux_module_gradients_wgsl(
     layout: &StateLayout,
@@ -64,6 +64,60 @@ mod tests {
         assert!(wgsl.contains("grad_acc_rho"));
         assert!(wgsl.contains("grad_acc_rho_u_x"));
         assert!(wgsl.contains("grad_acc_rho_u_y"));
+    }
+
+    #[test]
+    fn missing_grad_field_component_returns_clear_error() {
+        // Regression test: when a grad_<field> exists and base field exists,
+        // but the base field component is missing (e.g., trying to access component 5 of a vec2),
+        // the generator should return a clear error containing the field name.
+        let rho = vol_scalar("rho", si::DENSITY);
+        let grad_rho = vol_vector("grad_rho", si::DENSITY / si::LENGTH);
+
+        let layout = StateLayout::new(vec![rho, grad_rho]);
+
+        let flux_layout = FluxLayout {
+            stride: 1,
+            components: vec![FluxComponent {
+                name: "rho".to_string(),
+                offset: 0,
+            }],
+        };
+
+        // This should succeed since rho is a scalar (component 0)
+        let result = generate_flux_module_gradients_wgsl(&layout, &flux_layout);
+        assert!(
+            result.is_ok(),
+            "should succeed for scalar field: {:?}",
+            result.err()
+        );
+
+        // Now test with a vector component selector that exceeds the field's component count
+        let rho_u = vol_vector("rho_u", si::MOMENTUM_DENSITY);
+        let grad_rho_u_z = vol_vector("grad_rho_u_z", si::MOMENTUM_DENSITY / si::LENGTH);
+        // Note: rho_u only has x,y components (0,1), but we're requesting z (component 2)
+
+        let layout2 = StateLayout::new(vec![rho_u, grad_rho_u_z]);
+        let flux_layout2 = FluxLayout {
+            stride: 2,
+            components: vec![
+                FluxComponent {
+                    name: "rho_u_x".to_string(),
+                    offset: 0,
+                },
+                FluxComponent {
+                    name: "rho_u_y".to_string(),
+                    offset: 1,
+                },
+            ],
+        };
+
+        let result2 = generate_flux_module_gradients_wgsl(&layout2, &flux_layout2);
+        let err = result2.expect_err("should fail when requesting component z of vec2 field");
+        assert!(
+            err.contains("rho_u_z") || err.contains("rho_u") || err.contains("component"),
+            "error should contain field name or component info: {err}"
+        );
     }
 }
 
@@ -127,12 +181,121 @@ fn build_specs(
     flux_layout: &FluxLayout,
     gradients: &[(String, String)],
 ) -> Result<Vec<GradientSpec>, String> {
+    #[cfg(cfd2_build_script)]
+    {
+        build_specs_runtime(layout, flux_layout, gradients)
+    }
+    #[cfg(not(cfd2_build_script))]
+    {
+        build_specs_build_script(layout, flux_layout, gradients)
+    }
+}
+
+#[cfg(cfd2_build_script)]
+fn build_specs_runtime(
+    layout: &StateLayout,
+    flux_layout: &FluxLayout,
+    gradients: &[(String, String)],
+) -> Result<Vec<GradientSpec>, String> {
+    use crate::solver::model::ports::dimensions::Dimensionless;
+    use crate::solver::model::ports::{PortRegistry, Scalar, Vector2};
+
+    let mut registry = PortRegistry::new(layout.clone());
+    let mut specs = Vec::new();
+
+    for (component, grad) in gradients {
+        let (base_field, base_component) = resolve_base_scalar(layout, component)?;
+
+        // Register base field and get offset
+        let base_offset = if let Some(field) = layout.field(&base_field) {
+            match field.kind() {
+                FieldKind::Scalar => {
+                    let port = registry
+                        .register_scalar_field::<Dimensionless>(base_field.as_str())
+                        .map_err(|e| format!("flux_module_gradients: {e}"))?;
+                    port.offset()
+                }
+                FieldKind::Vector2 => {
+                    let port = registry
+                        .register_vector2_field::<Dimensionless>(base_field.as_str())
+                        .map_err(|e| format!("flux_module_gradients: {e}"))?;
+                    port.component(base_component)
+                        .map(|c| c.full_offset())
+                        .ok_or_else(|| format!("flux_module_gradients: invalid component {base_component} for '{base_field}'"))?
+                }
+                FieldKind::Vector3 => {
+                    let port = registry
+                        .register_vector3_field::<Dimensionless>(base_field.as_str())
+                        .map_err(|e| format!("flux_module_gradients: {e}"))?;
+                    port.component(base_component)
+                        .map(|c| c.full_offset())
+                        .ok_or_else(|| format!("flux_module_gradients: invalid component {base_component} for '{base_field}'"))?
+                }
+            }
+        } else {
+            return Err(format!(
+                "flux_module_gradients: base field '{base_field}' not found"
+            ));
+        };
+
+        // Register grad field and get component offsets
+        let grad_port = registry
+            .register_vector2_field::<Dimensionless>(grad.as_str())
+            .map_err(|e| format!("flux_module_gradients: missing gradient field '{grad}': {e}"))?;
+
+        let grad_x_offset = grad_port
+            .component(0)
+            .map(|c| c.full_offset())
+            .ok_or_else(|| format!("flux_module_gradients: missing '{grad}[0]'"))?;
+        let grad_y_offset = grad_port
+            .component(1)
+            .map(|c| c.full_offset())
+            .ok_or_else(|| format!("flux_module_gradients: missing '{grad}[1]'"))?;
+
+        let bc_unknown_offset = flux_layout.offset_for(component).map(|v| v as u32);
+
+        // SlipWall offsets for velocity-like vec2 fields
+        let (slip_vec2_x_offset, slip_vec2_y_offset) = match base_field.as_str() {
+            "u" | "U" | "rho_u" | "rhoU" => {
+                let slip_port = registry
+                    .register_vector2_field::<Dimensionless>(base_field.as_str())
+                    .map_err(|e| format!("flux_module_gradients: {e}"))?;
+                (
+                    slip_port.component(0).map(|c| c.full_offset()),
+                    slip_port.component(1).map(|c| c.full_offset()),
+                )
+            }
+            _ => (None, None),
+        };
+
+        specs.push(GradientSpec {
+            component: component.clone(),
+            base_component,
+            base_offset,
+            grad_x_offset,
+            grad_y_offset,
+            bc_unknown_offset,
+            slip_vec2_x_offset,
+            slip_vec2_y_offset,
+        });
+    }
+    Ok(specs)
+}
+
+#[cfg(not(cfd2_build_script))]
+fn build_specs_build_script(
+    layout: &StateLayout,
+    flux_layout: &FluxLayout,
+    gradients: &[(String, String)],
+) -> Result<Vec<GradientSpec>, String> {
     let mut specs = Vec::new();
     for (component, grad) in gradients {
         let (base_field, base_component) = resolve_base_scalar(layout, component)?;
         let base_offset = layout
             .component_offset(&base_field, base_component)
-            .ok_or_else(|| format!("state layout missing field '{base_field}[{base_component}]'"))?;
+            .ok_or_else(|| {
+                format!("state layout missing field '{base_field}[{base_component}]'")
+            })?;
         let grad_x_offset = layout
             .component_offset(grad, 0)
             .ok_or_else(|| format!("state layout missing vector field '{grad}[0]'"))?;
@@ -186,8 +349,8 @@ fn resolve_base_scalar(layout: &StateLayout, component: &str) -> Result<(String,
         "z" => 2,
         _ => {
             return Err(format!(
-                "flux_module_gradients: unknown component suffix '{component_name}' in '{component}'"
-            ))
+            "flux_module_gradients: unknown component suffix '{component_name}' in '{component}'"
+        ))
         }
     };
 
@@ -325,13 +488,7 @@ fn mesh_bindings() -> Vec<Item> {
 
 fn state_bindings() -> Vec<Item> {
     vec![
-        storage_var(
-            "state",
-            Type::array(Type::F32),
-            1,
-            0,
-            AccessMode::ReadWrite,
-        ),
+        storage_var("state", Type::array(Type::F32), 1, 0, AccessMode::ReadWrite),
         uniform_var("constants", Type::Custom("Constants".to_string()), 1, 1),
     ]
 }
@@ -405,7 +562,11 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, specs: &[GradientSp
     // Accumulators: one vec2 per gradient.
     for spec in specs {
         let var_name = format!("grad_acc_{}", spec.component);
-        stmts.push(dsl::var_typed_expr(&var_name, Type::vec2_f32(), Some(dsl::vec2_f32(0.0, 0.0))));
+        stmts.push(dsl::var_typed_expr(
+            &var_name,
+            Type::vec2_f32(),
+            Some(dsl::vec2_f32(0.0, 0.0)),
+        ));
     }
 
     // Face loop.
@@ -454,8 +615,9 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, specs: &[GradientSp
                 .expr(),
             ),
         ));
-        let cell_to_face = typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec"))
-            .sub(&typed::VecExpr::<2>::from_expr(Expr::ident("cell_center_vec")));
+        let cell_to_face = typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec")).sub(
+            &typed::VecExpr::<2>::from_expr(Expr::ident("cell_center_vec")),
+        );
         body.push(dsl::if_block_expr(
             cell_to_face
                 .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec")))
@@ -513,7 +675,9 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, specs: &[GradientSp
             "d_own",
             dsl::abs(
                 typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec"))
-                    .sub(&typed::VecExpr::<2>::from_expr(Expr::ident("cell_center_vec")))
+                    .sub(&typed::VecExpr::<2>::from_expr(Expr::ident(
+                        "cell_center_vec",
+                    )))
                     .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
             ),
         ));
@@ -521,7 +685,9 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, specs: &[GradientSp
             "d_neigh",
             dsl::abs(
                 typed::VecExpr::<2>::from_expr(Expr::ident("other_center_vec"))
-                    .sub(&typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec")))
+                    .sub(&typed::VecExpr::<2>::from_expr(Expr::ident(
+                        "face_center_vec",
+                    )))
                     .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
             ),
         ));
@@ -544,11 +710,14 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, specs: &[GradientSp
         ));
 
         for spec in specs {
-            let cell_val = Expr::ident("state").index(Expr::ident("idx") * stride + spec.base_offset);
-            let interior_other = Expr::ident("state").index(Expr::ident("other_idx") * stride + spec.base_offset);
+            let cell_val =
+                Expr::ident("state").index(Expr::ident("idx") * stride + spec.base_offset);
+            let interior_other =
+                Expr::ident("state").index(Expr::ident("other_idx") * stride + spec.base_offset);
 
             let mut other_val = if let Some(off) = spec.bc_unknown_offset {
-                let bc_table_idx = Expr::ident("face_idx") * Expr::from(unknown_stride) + Expr::from(off);
+                let bc_table_idx =
+                    Expr::ident("face_idx") * Expr::from(unknown_stride) + Expr::from(off);
                 let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
                 let value = dsl::array_access("bc_value", bc_table_idx);
                 let from_bc = dsl::select(
@@ -586,7 +755,8 @@ fn main_body(layout: &StateLayout, flux_layout: &FluxLayout, specs: &[GradientSp
                 }
             }
 
-            let phi_face = cell_val * Expr::ident("lambda") + other_val * Expr::ident("lambda_other");
+            let phi_face =
+                cell_val * Expr::ident("lambda") + other_val * Expr::ident("lambda_other");
 
             let acc_name = format!("grad_acc_{}", spec.component);
             let contrib = typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))

@@ -67,5 +67,6 @@ pub fn generic_coupled_uniform_port_manifest(
         params,
         fields: vec![],
         buffers: vec![],
+        gradient_targets: vec![],
     }
 }

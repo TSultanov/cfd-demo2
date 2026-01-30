@@ -215,9 +215,26 @@ impl SolverRecipe {
     ) -> Result<Self, String> {
         model.validate_module_manifests()?;
 
-        // Build a PortRegistry and register port manifests from all modules.
+        // Build a PortRegistry and register all state fields first, then port manifests from modules.
+        // This ensures all equation target fields are available for runtime resolution.
         // The registry is stored in the recipe for runtime field access and validation.
         let mut port_registry = PortRegistry::new(model.state_layout.clone());
+
+        // Pre-register all StateLayout fields so they're available for runtime resolution.
+        // This allows runtime code to look up field offsets via PortRegistry without
+        // querying StateLayout directly. The actual dimensions are already validated
+        // by StateLayout, so we don't need to track them in the registry.
+        for field in model.state_layout.fields() {
+            let name = field.name();
+            if let Err(e) = port_registry.register_state_field(name) {
+                return Err(format!(
+                    "Failed to register state field '{}' in port registry: {}",
+                    name, e
+                ));
+            }
+        }
+
+        // Register port manifests from modules (params, additional fields, buffers)
         for module in &model.modules {
             if let Some(ref manifest) = module.manifest.port_manifest {
                 if let Err(e) = port_registry.register_manifest(module.name, manifest) {

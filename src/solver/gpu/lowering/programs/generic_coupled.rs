@@ -2048,12 +2048,22 @@ pub(crate) fn param_low_mach_pressure_coupling_alpha(
 mod tests {
     use super::*;
     use crate::solver::model::backend::ast::{fvm, vol_scalar, vol_vector3, EquationSystem};
+    use crate::solver::model::ports::PortRegistry;
     use crate::solver::model::{eos, primitives};
     use crate::solver::model::{
         incompressible_momentum_model, BoundarySpec, ModelLinearSolverSpec,
         ModelPreconditionerSpec, SchurBlockLayout,
     };
     use crate::solver::units::si;
+
+    /// Helper to create a PortRegistry with all state fields registered.
+    fn create_port_registry_for_test(model: &ModelSpec) -> PortRegistry {
+        let mut registry = PortRegistry::new(model.state_layout.clone());
+        for field in model.state_layout.fields() {
+            registry.register_state_field(field.name()).expect("Failed to register field");
+        }
+        registry
+    }
 
     #[test]
     fn schur_rejects_invalid_layout_indices() {
@@ -2067,7 +2077,10 @@ mod tests {
         // Distinct/in-range, but doesn't cover the full set of equation target indices.
         *layout = SchurBlockLayout::from_u_p(&[0], 2).expect("layout build failed");
 
-        let unknown_mapping = resolve_unknown_mapping_build_script(&model).expect("mapping failed");
+        // Test runtime path: create PortRegistry with all fields registered
+        let registry = create_port_registry_for_test(&model);
+        let unknown_mapping = resolve_unknown_mapping_runtime(&model, &registry)
+            .expect("runtime mapping failed");
         let err = validate_schur_model(&model, &unknown_mapping).unwrap_err();
         assert!(err.contains("equation targets"), "unexpected error: {err}");
     }
@@ -2109,7 +2122,85 @@ mod tests {
             primitives: primitives::PrimitiveDerivations::default(),
         };
 
-        let unknown_mapping = resolve_unknown_mapping_build_script(&model).expect("mapping failed");
-        validate_schur_model(&model, &unknown_mapping).expect("Vector3 velocity Schur layout should validate");
+        // Test runtime path: create PortRegistry with all fields registered
+        let registry = create_port_registry_for_test(&model);
+        let unknown_mapping = resolve_unknown_mapping_runtime(&model, &registry)
+            .expect("runtime mapping failed");
+        validate_schur_model(&model, &unknown_mapping)
+            .expect("Vector3 velocity Schur layout should validate");
+    }
+
+    #[test]
+    fn runtime_mapping_fails_when_field_not_registered() {
+        // Create a model with fields
+        let u = vol_vector3("U", si::VELOCITY);
+        let p = vol_scalar("p", si::PRESSURE);
+
+        let mut system = EquationSystem::new();
+        system.add_equation(fvm::ddt(u).eqn(u));
+        system.add_equation(fvm::ddt(p).eqn(p));
+
+        let layout = crate::solver::model::backend::StateLayout::new(vec![u, p]);
+        let model = crate::solver::model::ModelSpec {
+            id: "test_missing_field",
+            system,
+            state_layout: layout,
+            boundaries: BoundarySpec::default(),
+            modules: vec![],
+            linear_solver: None,
+            primitives: primitives::PrimitiveDerivations::default(),
+        };
+
+        // Create a PortRegistry WITHOUT registering the fields
+        let empty_registry = PortRegistry::new(model.state_layout.clone());
+
+        // Runtime mapping should fail because fields are not registered
+        let err = resolve_unknown_mapping_runtime(&model, &empty_registry).unwrap_err();
+        assert!(
+            err.contains("Field 'U' not found in port registry"),
+            "Expected error about missing field 'U', got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn runtime_mapping_succeeds_with_all_fields_registered() {
+        // Create a model with scalar and vector fields
+        let u = vol_vector3("U", si::VELOCITY);
+        let p = vol_scalar("p", si::PRESSURE);
+
+        let mut system = EquationSystem::new();
+        system.add_equation(fvm::ddt(u).eqn(u));
+        system.add_equation(fvm::ddt(p).eqn(p));
+
+        let layout = crate::solver::model::backend::StateLayout::new(vec![u, p]);
+        let model = crate::solver::model::ModelSpec {
+            id: "test_all_fields",
+            system,
+            state_layout: layout.clone(),
+            boundaries: BoundarySpec::default(),
+            modules: vec![],
+            linear_solver: None,
+            primitives: primitives::PrimitiveDerivations::default(),
+        };
+
+        // Create a PortRegistry and register all fields
+        let registry = create_port_registry_for_test(&model);
+
+        // Runtime mapping should succeed
+        let mapping = resolve_unknown_mapping_runtime(&model, &registry)
+            .expect("Runtime mapping should succeed with registered fields");
+
+        // Verify the mapping is correct
+        assert_eq!(mapping.num_equations, 2);
+        assert_eq!(mapping.target_names, vec!["U", "p"]);
+        assert_eq!(mapping.component_counts, vec![3, 1]);
+
+        // Verify offsets match StateLayout
+        // U is at offset 0, p is at offset 3 (after U's 3 components)
+        assert_eq!(mapping.get_offset(0, 0), Some(0)); // U x
+        assert_eq!(mapping.get_offset(0, 1), Some(1)); // U y
+        assert_eq!(mapping.get_offset(0, 2), Some(2)); // U z
+        assert_eq!(mapping.get_offset(1, 0), Some(3)); // p
     }
 }

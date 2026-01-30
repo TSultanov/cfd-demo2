@@ -418,6 +418,16 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
         scheme: crate::solver::model::flux_module::FluxSchemeSpec::EulerCentralUpwind,
     };
 
+    // Clone system and layout for flux_module_module since we need to move them into ModelSpec
+    let system_for_flux = system.clone();
+    let layout_for_flux = layout.clone();
+    let flux_module_module = crate::solver::model::modules::flux_module::flux_module_module(
+        flux,
+        &system_for_flux,
+        &layout_for_flux,
+    )
+    .expect("failed to build flux_module module");
+
     let model = ModelSpec {
         id: "compressible",
         // Route compressible through the generic coupled pipeline.
@@ -427,8 +437,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
 
         modules: vec![
             crate::solver::model::modules::eos::eos_module(eos),
-            crate::solver::model::modules::flux_module::flux_module_module(flux)
-                .expect("failed to build flux_module module"),
+            flux_module_module,
             crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
         ],
         // The compressible model couples conserved and primitive fields in a single solve.

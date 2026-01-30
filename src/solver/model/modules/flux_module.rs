@@ -295,20 +295,52 @@ fn resolve_base_scalar(layout: &StateLayout, component: &str) -> Result<(String,
     Ok((base.to_string(), component_idx))
 }
 
-pub fn flux_module_module(flux: FluxModuleSpec) -> Result<KernelBundleModule, String> {
+pub fn flux_module_module(
+    flux: FluxModuleSpec,
+    system: &crate::solver::model::backend::ast::EquationSystem,
+    state_layout: &StateLayout,
+) -> Result<KernelBundleModule, String> {
     let has_gradients = match &flux {
         FluxModuleSpec::Kernel { gradients, .. } => gradients.is_some(),
         FluxModuleSpec::Scheme { gradients, .. } => gradients.is_some(),
+    };
+
+    // Pre-resolve gradient targets and attach to manifest when gradients are enabled
+    let port_manifest = if has_gradients {
+        let flux_layout = crate::solver::ir::FluxLayout::from_system(system);
+        let targets = resolve_flux_module_gradients_targets(state_layout, &flux_layout)?;
+        Some(crate::solver::ir::ports::PortManifest {
+            gradient_targets: targets
+                .into_iter()
+                .map(|t| crate::solver::ir::ports::ResolvedGradientTargetSpec {
+                    component: t.component,
+                    base_field: t.base_field,
+                    base_component: t.base_component,
+                    base_offset: t.base_offset,
+                    grad_x_offset: t.grad_x_offset,
+                    grad_y_offset: t.grad_y_offset,
+                    bc_unknown_offset: t.bc_unknown_offset,
+                    slip_vec2_x_offset: t.slip_vec2_x_offset,
+                    slip_vec2_y_offset: t.slip_vec2_y_offset,
+                })
+                .collect(),
+            ..Default::default()
+        })
+    } else {
+        None
+    };
+
+    let manifest = ModuleManifest {
+        flux_module: Some(flux),
+        port_manifest,
+        ..Default::default()
     };
 
     let mut out = KernelBundleModule {
         name: "flux_module",
         kernels: Vec::new(),
         generators: Vec::new(),
-        manifest: ModuleManifest {
-            flux_module: Some(flux),
-            ..Default::default()
-        },
+        manifest,
         ..Default::default()
     };
 

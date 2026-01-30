@@ -11,6 +11,10 @@ pub struct PortManifest {
     pub fields: Vec<FieldSpec>,
     /// Buffer ports (storage buffer bindings).
     pub buffers: Vec<BufferSpec>,
+    /// Resolved gradient targets for flux module gradients kernel.
+    /// When gradients are enabled, this contains pre-resolved offsets and metadata
+    /// for each gradient computation target.
+    pub gradient_targets: Vec<ResolvedGradientTargetSpec>,
 }
 
 /// Specification for a parameter port.
@@ -107,6 +111,33 @@ impl BufferAccess {
     }
 }
 
+/// IR-safe specification for a resolved gradient target.
+///
+/// This record holds pre-resolved offsets and metadata for a single gradient computation target,
+/// eliminating the need to scan StateLayout during WGSL generation. It is stored in the
+/// PortManifest so codegen can access it without depending on runtime types.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedGradientTargetSpec {
+    /// The component key used in BC/flux tables (e.g., "rho_u_x")
+    pub component: String,
+    /// Base field name (e.g., "rho_u" for component "rho_u_x")
+    pub base_field: String,
+    /// Component index within the base field (0/1/2)
+    pub base_component: u32,
+    /// Offset of the base field/component in state array
+    pub base_offset: u32,
+    /// Offset of gradient x-component in state array
+    pub grad_x_offset: u32,
+    /// Offset of gradient y-component in state array
+    pub grad_y_offset: u32,
+    /// Offset in flux layout for BC lookup (if applicable)
+    pub bc_unknown_offset: Option<u32>,
+    /// SlipWall: x-offset of full vec2 field (for velocity fields)
+    pub slip_vec2_x_offset: Option<u32>,
+    /// SlipWall: y-offset of full vec2 field (for velocity fields)
+    pub slip_vec2_y_offset: Option<u32>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,5 +168,6 @@ mod tests {
         assert!(manifest.params.is_empty());
         assert!(manifest.fields.is_empty());
         assert!(manifest.buffers.is_empty());
+        assert!(manifest.gradient_targets.is_empty());
     }
 }

@@ -193,6 +193,15 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         kernel: flux_kernel,
     };
 
+    // Clone layout for flux_module_module since we need to move it into ModelSpec
+    let layout_for_flux = layout.clone();
+    let flux_module_module = crate::solver::model::modules::flux_module::flux_module_module(
+        flux_module,
+        &system,
+        &layout_for_flux,
+    )
+    .expect("failed to build flux_module module");
+
     let model = ModelSpec {
         id: "incompressible_momentum",
         system,
@@ -203,8 +212,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             crate::solver::model::modules::eos::eos_module(
                 crate::solver::model::eos::EosSpec::Constant,
             ),
-            crate::solver::model::modules::flux_module::flux_module_module(flux_module)
-                .expect("failed to build flux_module module"),
+            flux_module_module,
             crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
             crate::solver::model::modules::rhie_chow::rhie_chow_aux_module("d_p", true, true),
         ],

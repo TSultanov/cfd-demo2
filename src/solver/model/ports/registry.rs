@@ -248,6 +248,51 @@ impl PortRegistry {
         self.register_field::<D, super::Vector3>(name)
     }
 
+    /// Register a field from the StateLayout without returning a typed port.
+    ///
+    /// This is useful for bulk-registration of all state fields where the specific
+    /// port type is not needed (e.g., during recipe initialization).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the field is not found in the state layout.
+    pub fn register_state_field(&mut self, name: &str) -> Result<(), PortRegistryError> {
+        // Check if already registered
+        if self.field_name_to_id.contains_key(name) {
+            return Ok(());
+        }
+
+        let field =
+            self.state_layout
+                .field(name)
+                .ok_or_else(|| PortRegistryError::FieldNotFound {
+                    name: name.to_string(),
+                })?;
+
+        // Copy all data we need before mutable borrow
+        let offset = field.offset();
+        let stride = self.state_layout.stride();
+        let runtime_dim = field.unit();
+        let component_count = field.component_count();
+
+        let id = self.allocate_id();
+
+        self.field_ports.insert(
+            id,
+            FieldPortEntry {
+                id,
+                name: name.to_string(),
+                offset,
+                stride,
+                component_count,
+                runtime_dim,
+            },
+        );
+        self.field_name_to_id.insert(name.to_string(), id);
+
+        Ok(())
+    }
+
     /// Register a field port with arbitrary kind.
     ///
     /// Idempotent: if a field with this name is already registered with the same
@@ -1395,6 +1440,7 @@ mod tests {
                 elem_wgsl_type: "f32",
                 access: BufferAccess::ReadWrite,
             }],
+            gradient_targets: vec![],
         };
 
         registry
@@ -1445,6 +1491,7 @@ mod tests {
             }],
             fields: vec![],
             buffers: vec![],
+            gradient_targets: vec![],
         };
 
         // First registration
@@ -1475,6 +1522,7 @@ mod tests {
                 unit: si::PRESSURE,
             }],
             buffers: vec![],
+            gradient_targets: vec![],
         };
 
         let err = registry
@@ -1506,6 +1554,7 @@ mod tests {
             }],
             fields: vec![],
             buffers: vec![],
+            gradient_targets: vec![],
         };
 
         let err = registry

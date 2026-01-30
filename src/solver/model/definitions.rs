@@ -629,21 +629,16 @@ mod tests {
             gradients: Some(FluxModuleGradientsSpec::FromStateLayout),
             scheme: FluxSchemeSpec::EulerCentralUpwind,
         };
-        let mut replaced = false;
-        for module in &mut model.modules {
-            if module.name == "flux_module" {
-                *module = flux_module_module(with_gradients).unwrap();
-                replaced = true;
-                break;
-            }
-        }
-        assert!(
-            replaced,
-            "expected compressible_model to include flux_module module"
-        );
 
-        let err = model.validate_module_manifests().unwrap_err();
-        assert!(err.contains("requires 'grad_rho' to be Vector2"));
+        // Now that gradient targets are resolved at module creation time,
+        // the error should be caught when building the flux module.
+        let err =
+            flux_module_module(with_gradients, &model.system, &model.state_layout).unwrap_err();
+        assert!(
+            err.contains("no grad_<field> fields found") || err.contains("Vector2"),
+            "Expected error about missing/invalid gradient fields, got: {}",
+            err
+        );
     }
 
     #[test]

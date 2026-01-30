@@ -165,7 +165,7 @@ migration steps to move that logic onto the port infrastructure.
 
 - [ ] Finish Phase 1: `#[derive(PortSet)]` must be usable for real structs (registration + lookup)
 - [ ] Finish Phase 3: define an IR-safe `PortManifest` (`cfd2_ir::solver::ir`) and a way to attach it to model modules (likely via `KernelBundleModule.manifest`)
-- [ ] Unify/upgrade the dimension system across crates (see “Type-Level Dimensions Migration” below). This must happen before we can rely on `FieldPort<Dim, Kind>` throughout the repo (including in IR/codegen).
+- [x] Unify/upgrade the dimension system across crates (see “Type-Level Dimensions Migration” below). This must happen before we can rely on `FieldPort<Dim, Kind>` throughout the repo (including in IR/codegen).
 - [ ] Add (or decide against) dimension enforcement policy in `PortRegistry`:
   - For “semantic” fields (p, rho, mu, grad_p, etc) enforce runtime dimension matches compile-time `UnitDimension`
   - For “system-driven” fields whose dimensions vary by model, provide a supported escape hatch:
@@ -323,9 +323,9 @@ state lookups and will block completing Phase 6 unless migrated.
 Today, the codebase uses **runtime** dimensional analysis via `cfd2_ir::solver::units::UnitDim`:
 - IR/model backend validates term units at runtime: `crates/cfd2_ir/src/solver/model/backend/ast.rs` (`EquationSystem::validate_units`)
 - Codegen DSL checks units at runtime: `crates/cfd2_codegen/src/solver/codegen/dsl/expr.rs` (`TypedExpr.unit: UnitDim`)
-- Port infrastructure defines a separate **type-level** dimension system: `src/solver/model/ports/dimensions.rs` (`UnitDimension` + `MulDim/DivDim/...`), but it currently:
-  - Does not support rational exponents (needed for `sqrt`)
-  - Duplicates concepts that must be shared with IR/codegen to respect the IR boundary
+- Port infrastructure previously defined a separate **type-level** dimension system, but it has now been unified:
+  - Canonical type-level dimensions live in `crates/cfd2_ir/src/solver/dimensions.rs`
+  - Ports re-export the canonical system via `src/solver/model/ports/dimensions.rs`
 
 **Goal**: make the *type-level* dimension system the canonical source of truth across **IR + codegen + ports**,
 while keeping `UnitDim` as the runtime/serialization/debug representation.
@@ -356,12 +356,15 @@ while keeping `UnitDim` as the runtime/serialization/debug representation.
 
 This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generic-heavy, while still moving unit correctness to types.
 
-- [ ] Add a typed “builder/front-end” in IR that erases into the existing IR structs:
-  - Suggested location: `crates/cfd2_ir/src/solver/model/backend/typed_ast.rs`
+- [x] Add a typed "builder/front-end" in IR that erases into the existing IR structs:
+  - Location: `crates/cfd2_ir/src/solver/model/backend/typed_ast.rs`
   - Provide typed wrappers:
     - `TypedFieldRef<D, K>` / `TypedFluxRef<D, K>` (dimension `D`, kind `K`)
-    - Typed coefficient/term constructors that compute integrated units in the type system
-  - Provide an `EquationBuilder` that only accepts terms whose integrated unit matches, so “unit mismatch” becomes a compile-time error when building in Rust
+    - `TypedCoeff<D>` for coefficients with compile-time dimension checking
+    - `TypedTerm<D>` and `TypedTermSum<D>` for terms with integrated unit checking
+    - `TypedEquation<D, K>` and `TypedEquationSystem` for equation building
+  - Provide typed term constructors (`typed_fvm::*`, `typed_fvc::*`) that compute integrated units in the type system
+  - `Add` trait implementation ensures terms can only be added when integrated units match (compile-time check)
   - Keep `EquationSystem::validate_units()` as a runtime backstop for untyped callers (and during migration)
 - [ ] Migrate model constructors in `src/solver/model/definitions/*` to use the typed builder APIs (still producing the same `EquationSystem` as output).
 - [ ] Update `crates/cfd2_codegen/src/solver/codegen/ir.rs` (`lower_system`) to:
@@ -531,12 +534,16 @@ crates/cfd2_macros/tests/*        # (planned) trybuild + compile-fail tests
 ## Current Status
 
 As of **2026-01-30**:
+- Canonical type-level dimensions (rational exponents) live in `crates/cfd2_ir/src/solver/dimensions.rs` and are re-exported through the main crate for ports
 - Port runtime types + registry exist under `src/solver/model/ports/*`
 - Proc-macro scaffolding exists, but `PortSet` is not implemented yet (and `ModulePorts` delegates to it)
 - No model modules have been migrated to ports yet
 - `PortManifest` does not exist yet; `ModuleManifest`/string-based codegen remains the source of truth
 
-**Next**: Finish Phase 1 (make derives usable), then Phase 3 (PortManifest + module integration), then migrate `eos`
+**Next (recommended)**:
+- Type-Level Dimensions Migration (Step 3): add a typed IR builder layer (`typed_ast.rs`) so unit mismatches become compile-time errors when constructing systems in Rust.
+- Phase 1: finish derive macros (`PortSet`) so modules can be migrated with minimal boilerplate.
+- Phase 3: define `PortManifest` + module integration, then migrate `eos`.
 
 **Deliverables Ready**:
 - ✅ `src/solver/model/ports/*` runtime primitives + tests

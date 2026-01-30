@@ -208,7 +208,7 @@ pub struct Term {
 }
 
 impl Term {
-    fn new(
+    pub fn new(
         op: TermOp,
         discretization: Discretization,
         field: FieldRef,

@@ -770,6 +770,7 @@ dependencies = [
  "glob",
  "image",
  "log",
+ "naga 27.0.3",
  "nalgebra",
  "pollster 0.3.0",
  "rand 0.8.5",

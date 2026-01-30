@@ -160,6 +160,7 @@ pub fn derive_port_set(input: TokenStream) -> TokenStream {
                     params: vec![#(#param_specs),*],
                     fields: vec![#(#field_specs),*],
                     buffers: vec![#(#buffer_specs),*],
+                    gradient_targets: vec![],
                 }
             }
         }

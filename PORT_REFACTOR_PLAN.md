@@ -42,7 +42,7 @@ Based on design discussions, the implementation follows these principles:
 - [x] Fix crate-path resolution (added `extern crate self as cfd2;` to src/lib.rs)
 - [x] Add compile-time validation (duplicates, unknown attrs, missing WGSL names, etc.)
 - [x] Add macro tests with `trybuild` (passing and failing cases)
-- [ ] Add at least one end-to-end “migrated module compiles” test that uses both `ModulePorts` + `PortSet` (not just `PortSet` in isolation)
+- [x] Add at least one end-to-end “migrated module compiles” test that uses both `ModulePorts` + `PortSet` (not just `PortSet` in isolation)
 
 **Files Created**:
 ```

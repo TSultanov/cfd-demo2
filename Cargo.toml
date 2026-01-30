@@ -23,6 +23,7 @@ env_logger = { version = "0.10", optional = true }
 wide = { version = "0.8.3", optional = true }
 rayon = { version = "1.8", optional = true }
 wgpu = "27.0"
+naga = { version = "27.0.3", default-features = false, features = ["termcolor"] }
 bytemuck = { version = "1.14", features = ["derive"] }
 pollster = "0.3"
 ahash = { version = "0.8.12", optional = true }

@@ -185,7 +185,7 @@ impl PortRegistry {
     /// or if its kind doesn't match Scalar.
     pub fn register_scalar_field<D: UnitDimension>(
         &mut self,
-        name: &'static str,
+        name: &str,
     ) -> Result<FieldPort<D, super::Scalar>, PortRegistryError> {
         self.register_field::<D, super::Scalar>(name)
     }
@@ -198,7 +198,7 @@ impl PortRegistry {
     /// or if its kind doesn't match Vector2.
     pub fn register_vector2_field<D: UnitDimension>(
         &mut self,
-        name: &'static str,
+        name: &str,
     ) -> Result<FieldPort<D, super::Vector2>, PortRegistryError> {
         self.register_field::<D, super::Vector2>(name)
     }
@@ -211,7 +211,7 @@ impl PortRegistry {
     /// or if its kind doesn't match Vector3.
     pub fn register_vector3_field<D: UnitDimension>(
         &mut self,
-        name: &'static str,
+        name: &str,
     ) -> Result<FieldPort<D, super::Vector3>, PortRegistryError> {
         self.register_field::<D, super::Vector3>(name)
     }
@@ -222,14 +222,19 @@ impl PortRegistry {
     /// spec, returns the existing port. If registered with a conflicting spec,
     /// returns an error.
     ///
+    /// The name is interned to obtain a `&'static str` for storage.
+    ///
     /// # Type Parameters
     ///
     /// - `D`: The expected physical dimension
     /// - `K`: The expected field kind
     pub fn register_field<D: UnitDimension, K: FieldKind>(
         &mut self,
-        name: &'static str,
+        name: &str,
     ) -> Result<FieldPort<D, K>, PortRegistryError> {
+        // Intern the name to get a 'static str
+        let name = super::intern(name);
+
         // Check if already registered
         if let Some(&existing_id) = self.field_name_to_id.get(name) {
             let entry = self.field_ports.get(&existing_id).expect("entry exists");
@@ -1528,5 +1533,75 @@ mod tests {
             .unwrap();
         // theta = P/rho has units L²/T² (specific energy)
         assert_eq!(theta_ref.unit, expected_dp_drho);
+    }
+
+    #[test]
+    fn register_field_with_owned_string_name() {
+        // Test that we can register a field using an owned String name
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        // Create an owned String (simulating derived name like format!("grad_{}", p))
+        let owned_name = String::from("p");
+        let p = registry
+            .register_scalar_field::<Pressure>(&owned_name)
+            .expect("should register field with owned String name");
+
+        assert_eq!(p.name(), "p");
+        assert_eq!(p.offset(), 2);
+    }
+
+    #[test]
+    fn register_field_idempotent_with_different_allocations() {
+        // Test that registering the same field with different String allocations
+        // returns the same PortId (idempotent behavior)
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        // First registration with one String allocation
+        let name1 = String::from("p");
+        let p1 = registry
+            .register_scalar_field::<Pressure>(&name1)
+            .expect("first registration");
+
+        // Second registration with a different String allocation
+        let name2 = String::from("p");
+        let p2 = registry
+            .register_scalar_field::<Pressure>(&name2)
+            .expect("second registration");
+
+        // Should get the same PortId
+        assert_eq!(p1.id(), p2.id(), "same field should have same PortId");
+        assert_eq!(p1.name(), p2.name());
+    }
+
+    #[test]
+    fn register_field_with_derived_name_pattern() {
+        // Test the pattern used in rhie_chow: format!("grad_{}", pressure.name())
+        let layout = StateLayout::new(vec![
+            vol_scalar("p", si::PRESSURE),
+            vol_vector("grad_p", si::PRESSURE / si::LENGTH),
+        ]);
+        let mut registry = PortRegistry::new(layout);
+
+        // Simulate deriving a field name
+        let pressure_name = "p";
+        let grad_name = format!("grad_{}", pressure_name);
+
+        // Register using the derived name
+        let grad_p = registry
+            .register_vector2_field::<super::super::dimensions::PressureGradient>(&grad_name)
+            .expect("should register grad_p with derived name");
+
+        assert_eq!(grad_p.name(), "grad_p");
+
+        // Register again with a fresh derived name to test idempotency
+        let grad_name2 = format!("grad_{}", pressure_name);
+        let grad_p2 = registry
+            .register_vector2_field::<super::super::dimensions::PressureGradient>(&grad_name2)
+            .expect("second registration with derived name");
+
+        // Should be idempotent
+        assert_eq!(grad_p.id(), grad_p2.id());
     }
 }

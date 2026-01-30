@@ -25,6 +25,7 @@
 pub mod buffer;
 pub mod dimensions;
 pub mod field;
+pub mod intern;
 pub mod params;
 pub mod registry;
 pub mod traits;
@@ -46,6 +47,7 @@ pub use field::{
     ComponentOffset, FieldKind, FieldPort, FieldPortError, FieldPortProvider, Scalar, Vector2,
     Vector3,
 };
+pub use intern::{intern, intern_string};
 pub use params::{
     ParamPort, ParamPortError, ParamPortProvider, ParamPortSet, ParamPortSetBuilder, ParamType,
     F32, F64, I32, U32,

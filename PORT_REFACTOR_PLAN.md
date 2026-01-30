@@ -18,8 +18,8 @@ Based on design discussions, the implementation follows these principles:
 
 | Phase | Status | Progress | Description |
 |-------|--------|----------|-------------|
-| 1. Macro Infrastructure | **In Progress** | ~30% | `cfd2_macros` exists; `ModulePorts` skeleton + `#[port(module = ...)]` parsing implemented; `PortSet` derive is still stubbed |
-| 2. Core Port Runtime | **In Progress** | ~70% | `src/solver/model/ports/*` exists (ports + registry + tests); missing provider wiring + some runtime validation |
+| 1. Macro Infrastructure | **Mostly Done** | ~90% | `cfd2_macros` has `PortSet` derive (param/field/buffer) + trybuild tests; `ModulePorts` exists but needs integration strategy (how/when modules materialize port sets) |
+| 2. Core Port Runtime | **In Progress** | ~75% | `src/solver/model/ports/*` exists (ports + registry + tests); registry supports idempotent registration + conflict errors; still missing dimension enforcement policy + richer validation |
 | 3. PortManifest + Module Integration | Pending | 0% | Decide IR-facing manifest shape + wire into model init/lowering (replacing/augmenting `ModuleManifest`) |
 | 4. Low-Risk Migration | Pending | 0% | eos, generic_coupled modules |
 | 5. Field-Access Migration | Pending | 0% | flux_module, rhie_chow |
@@ -28,7 +28,7 @@ Based on design discussions, the implementation follows these principles:
 
 ## Implementation Phases
 
-### Phase 1: Macro Infrastructure (In Progress)
+### Phase 1: Macro Infrastructure (Mostly Done)
 
 **Goal**: Create proc-macro crate and basic derive macros
 
@@ -42,6 +42,7 @@ Based on design discussions, the implementation follows these principles:
 - [x] Fix crate-path resolution (added `extern crate self as cfd2;` to src/lib.rs)
 - [x] Add compile-time validation (duplicates, unknown attrs, missing WGSL names, etc.)
 - [x] Add macro tests with `trybuild` (passing and failing cases)
+- [ ] Add at least one end-to-end “migrated module compiles” test that uses both `ModulePorts` + `PortSet` (not just `PortSet` in isolation)
 
 **Files Created**:
 ```
@@ -51,8 +52,8 @@ crates/cfd2_macros/
 ```
 
 **Deliverables**:
-- `#[derive(ModulePorts)]` - Derives `ModulePortsTrait` (currently delegates to `PortSetTrait`)
-- `#[derive(PortSet)]` - Intended to derive parameter/field/buffer port collections (not yet usable)
+- `#[derive(PortSet)]` - Derives parameter/field/buffer port collections (`from_registry` registers ports idempotently)
+- `#[derive(ModulePorts)]` - Exists but needs a clarified integration story (module instances are created after a registry exists, so “register ports” vs “build port set” must be reconciled)
 - `#[port(module = "name")]` attribute parsing
 
 ### Phase 2: Core Port Runtime (In Progress)
@@ -64,11 +65,13 @@ crates/cfd2_macros/
 - [x] Implement port primitives (`FieldPort`, `ParamPort`, `BufferPort`) + WGSL helpers
 - [x] Implement compile-time dimension tracking (`UnitDimension` + common dimensions)
 - [x] Implement `PortRegistry` (field/param/buffer registration) + basic errors
+- [x] Make `PortRegistry` registration idempotent (name/key indexes) + return clear conflicts when re-registered with incompatible specs
 - [x] Add unit tests for the port runtime pieces
 
 **Remaining**:
-- [ ] Wire `ParamPortProvider` / `FieldPortProvider` so `PortSetTrait::from_registry()` can be derived/implemented
-- [ ] Add missing runtime validation (e.g. dimension mismatch checks on field registration; richer `PortRegistryError`)
+- [ ] Add missing runtime validation (dimension mismatch checks + clear errors):
+  - Decide whether `PortRegistry` enforces `D::to_runtime() == layout.unit()` for “semantic” fields/params
+  - Provide an explicit escape hatch for genuinely dynamic-dimension fields (per prerequisites)
 - [ ] Decide and implement an IR-facing "port manifest" representation that can cross into `crates/cfd2_codegen` without violating the IR boundary
 
 **Files Created**:
@@ -523,7 +526,7 @@ pub struct EosModule { ... }
 **Test files**:
 ```
 src/solver/model/ports/*.rs
-crates/cfd2_macros/tests/*        # (planned) trybuild + compile-fail tests
+crates/cfd2_macros/tests/*        # trybuild + compile-fail tests
 ```
 
 ## Success Criteria
@@ -549,20 +552,22 @@ As of **2026-01-30**:
 - A typed IR builder layer exists at `crates/cfd2_ir/src/solver/model/backend/typed_ast.rs` for **best-effort** compile-time unit checking when building `EquationSystem`s in Rust
 - Attempted full dimension canonicalization is **blocked** on stable Rust today; the type-level dimension system cannot prove equivalence of semantically-equal-but-structurally-different expressions (see “Type-Level Dimensions Migration”, Step 3)
 - Port runtime types + registry exist under `src/solver/model/ports/*`
-- Proc-macro scaffolding exists, but `PortSet` is not implemented yet (and `ModulePorts` delegates to it)
+- `#[derive(PortSet)]` exists (param/field/buffer) with trybuild tests; `PortRegistry` registration is idempotent
+- `#[derive(ModulePorts)]` exists but still needs a clarified integration story (how/when modules materialize a port set and expose it to codegen)
 - No model modules have been migrated to ports yet
 - `PortManifest` does not exist yet; `ModuleManifest`/string-based codegen remains the source of truth
 
 **Next (recommended)**:
-- Phase 1: finish derive macros (`PortSet`) so modules can be migrated with minimal boilerplate.
-- Phase 3: define `PortManifest` + module integration, then migrate `eos`.
+- Phase 3: define `PortManifest` + module integration, then migrate `eos` as the first port-based module.
+- Decide the dimension enforcement policy in `PortRegistry` (especially for semantic fields/params) and implement it (with an escape hatch for dynamic-dimension fields).
 - Keep dimensional correctness enforced by runtime `EquationSystem::validate_units()` for complex systems until/unless we adopt a different type-level encoding (nightly features or type-encoded exponents).
 
 **Deliverables Ready**:
 - ✅ `src/solver/model/ports/*` runtime primitives + tests
 - ✅ Core traits (`ModulePortsTrait`, `PortSetTrait`, etc.)
+- ✅ `#[derive(PortSet)]` + trybuild tests (param/field/buffer)
 - ✅ Canonical dimension carrier type `Dim<...>` (usable directly, but not auto-derived from expressions)
 - ✅ Typed IR builder layer (`crates/cfd2_ir/src/solver/model/backend/typed_ast.rs`) for structurally-matching unit expressions
-- ⚠️ `cfd2_macros` derive macros exist but are not yet usable for real module migrations
+- ⚠️ `#[derive(ModulePorts)]` exists but needs integration work before real module migrations
 
-**Ready for**: Completing derive macros + deciding the module/container integration strategy
+**Ready for**: Defining `PortManifest` + wiring module integration to start real port-based module migrations

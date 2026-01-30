@@ -546,19 +546,23 @@ crates/cfd2_macros/tests/*        # (planned) trybuild + compile-fail tests
 
 As of **2026-01-30**:
 - Canonical type-level dimensions (rational exponents) live in `crates/cfd2_ir/src/solver/dimensions.rs` and are re-exported through the main crate for ports
+- A typed IR builder layer exists at `crates/cfd2_ir/src/solver/model/backend/typed_ast.rs` for **best-effort** compile-time unit checking when building `EquationSystem`s in Rust
+- Attempted full dimension canonicalization is **blocked** on stable Rust today; the type-level dimension system cannot prove equivalence of semantically-equal-but-structurally-different expressions (see “Type-Level Dimensions Migration”, Step 3)
 - Port runtime types + registry exist under `src/solver/model/ports/*`
 - Proc-macro scaffolding exists, but `PortSet` is not implemented yet (and `ModulePorts` delegates to it)
 - No model modules have been migrated to ports yet
 - `PortManifest` does not exist yet; `ModuleManifest`/string-based codegen remains the source of truth
 
 **Next (recommended)**:
-- Type-Level Dimensions Migration (Step 3): add a typed IR builder layer (`typed_ast.rs`) so unit mismatches become compile-time errors when constructing systems in Rust.
 - Phase 1: finish derive macros (`PortSet`) so modules can be migrated with minimal boilerplate.
 - Phase 3: define `PortManifest` + module integration, then migrate `eos`.
+- Keep dimensional correctness enforced by runtime `EquationSystem::validate_units()` for complex systems until/unless we adopt a different type-level encoding (nightly features or type-encoded exponents).
 
 **Deliverables Ready**:
 - ✅ `src/solver/model/ports/*` runtime primitives + tests
 - ✅ Core traits (`ModulePortsTrait`, `PortSetTrait`, etc.)
+- ✅ Canonical dimension carrier type `Dim<...>` (usable directly, but not auto-derived from expressions)
+- ✅ Typed IR builder layer (`crates/cfd2_ir/src/solver/model/backend/typed_ast.rs`) for structurally-matching unit expressions
 - ⚠️ `cfd2_macros` derive macros exist but are not yet usable for real module migrations
 
 **Ready for**: Completing derive macros + deciding the module/container integration strategy

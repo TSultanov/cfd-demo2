@@ -1,5 +1,10 @@
-use crate::solver::model::kernel::{ModelKernelGeneratorSpec, ModelKernelSpec};
 use crate::solver::model::eos::EosSpec;
+use crate::solver::model::kernel::{ModelKernelGeneratorSpec, ModelKernelSpec};
+
+/// Re-export IR-safe port manifest types for convenience.
+pub use cfd2_ir::solver::ir::ports::{
+    BufferAccess, BufferSpec, FieldSpec, ParamSpec, PortFieldKind, PortManifest,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NamedParamKey {
@@ -54,6 +59,12 @@ pub struct ModuleManifest {
 
     /// Typed invariant requirements declared by this module.
     pub invariants: Vec<ModuleInvariant>,
+
+    /// Optional port-based manifest for this module.
+    ///
+    /// This provides a structured declaration of params, fields, and buffers
+    /// that can be used for validation and code generation.
+    pub port_manifest: Option<PortManifest>,
 }
 
 /// Object-safe interface for model-defined numerical modules.

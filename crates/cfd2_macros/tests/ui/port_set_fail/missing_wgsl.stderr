@@ -1,5 +1,5 @@
-error[E0425]: cannot find value `dt` in this scope
- --> tests/ui/port_set_fail/missing_wgsl.rs:9:9
+error: PortSet derive requires at least one field with #[param], #[field], or #[buffer] attribute
+ --> tests/ui/port_set_fail/missing_wgsl.rs:7:12
   |
-9 |     pub dt: ParamPort<F32, Time>,
-  |         ^^ not found in this scope
+7 | pub struct TestParams {
+  |            ^^^^^^^^^^

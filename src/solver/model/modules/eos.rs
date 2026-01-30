@@ -1,5 +1,7 @@
 use crate::solver::model::eos::EosSpec;
-use crate::solver::model::module::{KernelBundleModule, ModuleManifest, NamedParamKey};
+use crate::solver::model::module::{
+    KernelBundleModule, ModuleManifest, NamedParamKey, PortManifest,
+};
 
 /// EOS is treated as a model-defined module so its named parameters and
 /// resource requirements are declared via manifests (rather than implied
@@ -11,9 +13,23 @@ pub fn eos_module(eos: EosSpec) -> KernelBundleModule {
 
     // For now, EOS tuning + low-mach knobs are only meaningful for compressible EOS variants.
     // Keep the contract consistent with the previous EOS-implied behavior.
-    let requires_low_mach_params = matches!(eos, EosSpec::IdealGas { .. } | EosSpec::LinearCompressibility { .. });
+    let requires_low_mach_params = matches!(
+        eos,
+        EosSpec::IdealGas { .. } | EosSpec::LinearCompressibility { .. }
+    );
 
     if requires_low_mach_params {
+        // Set the port-based manifest for uniform params
+        // This is done via a helper function in a separate module to avoid
+        // proc-macro issues in build scripts
+        #[cfg(not(cfd2_build_script))]
+        {
+            manifest.port_manifest =
+                Some(crate::solver::model::modules::eos_ports::eos_uniform_port_manifest());
+        }
+
+        // Keep named_params for non-uniform parameters and backward compatibility
+        // Note: low_mach.model is a u32 enum, not representable as ParamPort<F32, _>
         manifest.named_params = vec![
             NamedParamKey::Key("eos.gamma"),
             NamedParamKey::Key("eos.gm1"),

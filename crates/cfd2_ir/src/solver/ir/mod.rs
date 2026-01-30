@@ -376,7 +376,11 @@ pub enum LimiterSpec {
 /// embedding separate numeric literals.
 pub const VANLEER_EPS: f32 = 1e-8;
 
+pub mod ports;
 pub mod reconstruction;
+
+// Re-export port types for convenience
+pub use ports::{BufferAccess, BufferSpec, FieldSpec, ParamSpec, PortFieldKind, PortManifest};
 
 impl Default for LimiterSpec {
     fn default() -> Self {

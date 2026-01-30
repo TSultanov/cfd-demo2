@@ -184,6 +184,9 @@ mod solver {
 }
 
 fn main() {
+    // Set cfg flag for build script context
+    println!("cargo:rustc-cfg=cfd2_build_script");
+
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
 
     enforce_codegen_ir_boundary(&manifest_dir);

@@ -31,4 +31,19 @@ fn main() {
 
     let fields = TestFields::from_registry(&mut registry).expect("should create fields");
     assert_eq!(fields.pressure.name(), "p");
+
+    // Test port_manifest() - this exercises the new API
+    let params_manifest = TestParams::port_manifest();
+    assert_eq!(params_manifest.params.len(), 1);
+    assert_eq!(params_manifest.params[0].key, "dt");
+    assert_eq!(params_manifest.params[0].wgsl_field, "dt");
+    assert_eq!(params_manifest.params[0].wgsl_type, "f32");
+
+    let fields_manifest = TestFields::port_manifest();
+    assert_eq!(fields_manifest.fields.len(), 1);
+    assert_eq!(fields_manifest.fields[0].name, "p");
+    assert_eq!(
+        fields_manifest.fields[0].kind,
+        cfd2::solver::model::module::PortFieldKind::Scalar
+    );
 }

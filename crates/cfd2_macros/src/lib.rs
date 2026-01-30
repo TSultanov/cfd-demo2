@@ -87,6 +87,42 @@ pub fn derive_port_set(input: TokenStream) -> TokenStream {
     // Generate compile-time validation
     let validations = generate_validations(fields);
 
+    // Generate port manifest entries
+    let param_specs: Vec<_> = fields
+        .iter()
+        .filter_map(|field| generate_param_spec(field))
+        .collect();
+
+    let field_specs: Vec<_> = fields
+        .iter()
+        .filter_map(|field| generate_field_spec(field))
+        .collect();
+
+    let buffer_specs: Vec<_> = fields
+        .iter()
+        .filter_map(|field| generate_buffer_spec(field))
+        .collect();
+
+    // Debug: Check if we found any specs
+    if param_specs.is_empty() && field_specs.is_empty() && buffer_specs.is_empty() {
+        return syn::Error::new_spanned(
+            &input.ident,
+            "PortSet derive requires at least one field with #[param], #[field], or #[buffer] attribute",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    // Debug: Check if we found any specs
+    if param_specs.is_empty() && field_specs.is_empty() && buffer_specs.is_empty() {
+        return syn::Error::new_spanned(
+            &input.ident,
+            "PortSet derive requires at least one field with #[param], #[field], or #[buffer] attribute",
+        )
+        .to_compile_error()
+        .into();
+    }
+
     let expanded = quote! {
         #validations
 
@@ -114,6 +150,17 @@ pub fn derive_port_set(input: TokenStream) -> TokenStream {
                 Ok(Self {
                     #(#field_names),*
                 })
+            }
+
+            fn port_manifest() -> ::cfd2::solver::model::module::PortManifest
+            where
+                Self: Sized
+            {
+                ::cfd2::solver::model::module::PortManifest {
+                    params: vec![#(#param_specs),*],
+                    fields: vec![#(#field_specs),*],
+                    buffers: vec![#(#buffer_specs),*],
+                }
             }
         }
     };
@@ -446,7 +493,7 @@ fn extract_buffer_port_types(ty: &Type) -> Option<(Type, Type)> {
 /// Check if a type is ParamPort<_, _>.
 fn is_param_port_type(ty: &Type) -> bool {
     if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.first() {
+        if let Some(segment) = type_path.path.segments.last() {
             return segment.ident == "ParamPort";
         }
     }
@@ -456,7 +503,7 @@ fn is_param_port_type(ty: &Type) -> bool {
 /// Check if a type is FieldPort<_, _>.
 fn is_field_port_type(ty: &Type) -> bool {
     if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.first() {
+        if let Some(segment) = type_path.path.segments.last() {
             return segment.ident == "FieldPort";
         }
     }
@@ -466,11 +513,186 @@ fn is_field_port_type(ty: &Type) -> bool {
 /// Check if a type is BufferPort<_, _>.
 fn is_buffer_port_type(ty: &Type) -> bool {
     if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.first() {
+        if let Some(segment) = type_path.path.segments.last() {
             return segment.ident == "BufferPort";
         }
     }
     false
+}
+
+/// Generate a ParamSpec for the port manifest.
+fn generate_param_spec(field: &syn::Field) -> Option<proc_macro2::TokenStream> {
+    let attr = field.attrs.iter().find(|a| a.path().is_ident("param"))?;
+    let args = parse_param_args(attr).ok()?;
+
+    let name = args.name?;
+    let wgsl = args.wgsl?;
+
+    // Extract ParamPort<T, D> to get T and D
+    let (param_type, dim) = extract_param_port_types(&field.ty)?;
+
+    // Map param type to WGSL type string
+    let wgsl_type = map_param_type_to_wgsl(&param_type);
+
+    Some(quote! {
+        ::cfd2::solver::model::module::ParamSpec {
+            key: #name,
+            wgsl_field: #wgsl,
+            wgsl_type: #wgsl_type,
+            unit: <#dim as ::cfd2::solver::model::ports::UnitDimension>::to_runtime(),
+        }
+    })
+}
+
+/// Generate a FieldSpec for the port manifest.
+fn generate_field_spec(field: &syn::Field) -> Option<proc_macro2::TokenStream> {
+    let attr = field.attrs.iter().find(|a| a.path().is_ident("field"))?;
+    let args = parse_field_args(attr).ok()?;
+
+    let name = args.name?;
+
+    // Extract FieldPort<D, K> to get D and K
+    let (dim, kind) = extract_field_port_types(&field.ty)?;
+
+    // Map kind to PortFieldKind
+    let field_kind = map_field_kind(&kind);
+
+    Some(quote! {
+        ::cfd2::solver::model::module::FieldSpec {
+            name: #name,
+            kind: #field_kind,
+            unit: <#dim as ::cfd2::solver::model::ports::UnitDimension>::to_runtime(),
+        }
+    })
+}
+
+/// Generate a BufferSpec for the port manifest.
+fn generate_buffer_spec(field: &syn::Field) -> Option<proc_macro2::TokenStream> {
+    let attr = field.attrs.iter().find(|a| a.path().is_ident("buffer"))?;
+    let args = parse_buffer_args(attr).ok()?;
+
+    let name = args.name?;
+    let group = args.group.unwrap_or(0);
+    let binding = args.binding.unwrap_or(0);
+
+    // Extract BufferPort<T, A> to get T and A
+    let (buf_type, access) = extract_buffer_port_types(&field.ty)?;
+
+    // Map buffer type to element WGSL type
+    let elem_wgsl = map_buffer_type_to_wgsl(&buf_type);
+
+    // Map access mode to BufferAccess
+    let access_mode = map_buffer_access(&access);
+
+    Some(quote! {
+        ::cfd2::solver::model::module::BufferSpec {
+            name: #name,
+            group: #group,
+            binding: #binding,
+            elem_wgsl_type: #elem_wgsl,
+            access: #access_mode,
+        }
+    })
+}
+
+/// Extract T and D from ParamPort<T, D>.
+fn extract_param_port_types(ty: &Type) -> Option<(Type, Type)> {
+    if let Type::Path(type_path) = ty {
+        // Check if the last segment is ParamPort (handles both `ParamPort` and `crate::...::ParamPort`)
+        let segment = type_path.path.segments.last()?;
+        if segment.ident == "ParamPort" {
+            if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                let types: Vec<_> = args.args.iter().collect();
+                if types.len() >= 2 {
+                    if let (
+                        syn::GenericArgument::Type(param_type),
+                        syn::GenericArgument::Type(dim),
+                    ) = (types[0], types[1])
+                    {
+                        return Some((param_type.clone(), dim.clone()));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Map a param type to its WGSL type string.
+fn map_param_type_to_wgsl(ty: &Type) -> proc_macro2::TokenStream {
+    // Check if it's a known type by looking at the type name
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.first() {
+            let ident = &segment.ident;
+            let name = ident.to_string();
+            match name.as_str() {
+                "F32" => return quote!("f32"),
+                "F64" => return quote!("f32"), // WGSL doesn't have f64, use f32
+                "I32" => return quote!("i32"),
+                "U32" => return quote!("u32"),
+                _ => {}
+            }
+        }
+    }
+    // Default to f32 for unknown types
+    quote!("f32")
+}
+
+/// Map a field kind type to PortFieldKind.
+fn map_field_kind(kind: &Type) -> proc_macro2::TokenStream {
+    if let Type::Path(type_path) = kind {
+        if let Some(segment) = type_path.path.segments.last() {
+            let ident = &segment.ident;
+            let name = ident.to_string();
+            match name.as_str() {
+                "Scalar" => return quote!(::cfd2::solver::model::module::PortFieldKind::Scalar),
+                "Vector2" => return quote!(::cfd2::solver::model::module::PortFieldKind::Vector2),
+                "Vector3" => return quote!(::cfd2::solver::model::module::PortFieldKind::Vector3),
+                _ => {}
+            }
+        }
+    }
+    // Default to Scalar
+    quote!(::cfd2::solver::model::module::PortFieldKind::Scalar)
+}
+
+/// Map a buffer type to its element WGSL type string.
+fn map_buffer_type_to_wgsl(ty: &Type) -> proc_macro2::TokenStream {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.first() {
+            let ident = &segment.ident;
+            let name = ident.to_string();
+            match name.as_str() {
+                "BufferF32" => return quote!("f32"),
+                "BufferU32" => return quote!("u32"),
+                "BufferI32" => return quote!("i32"),
+                "BufferVec2F32" => return quote!("vec2<f32>"),
+                "BufferVec3F32" => return quote!("vec3<f32>"),
+                _ => {}
+            }
+        }
+    }
+    // Default to f32
+    quote!("f32")
+}
+
+/// Map an access mode type to BufferAccess.
+fn map_buffer_access(access: &Type) -> proc_macro2::TokenStream {
+    if let Type::Path(type_path) = access {
+        if let Some(segment) = type_path.path.segments.last() {
+            let ident = &segment.ident;
+            let name = ident.to_string();
+            match name.as_str() {
+                "ReadOnly" => return quote!(::cfd2::solver::model::module::BufferAccess::ReadOnly),
+                "ReadWrite" => {
+                    return quote!(::cfd2::solver::model::module::BufferAccess::ReadWrite)
+                }
+                _ => {}
+            }
+        }
+    }
+    // Default to ReadWrite
+    quote!(::cfd2::solver::model::module::BufferAccess::ReadWrite)
 }
 
 fn extract_module_name(attrs: &[syn::Attribute]) -> String {

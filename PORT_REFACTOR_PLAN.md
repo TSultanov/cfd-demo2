@@ -20,8 +20,8 @@ Based on design discussions, the implementation follows these principles:
 |-------|--------|----------|-------------|
 | 1. Macro Infrastructure | **Mostly Done** | ~90% | `cfd2_macros` has `PortSet` derive (param/field/buffer) + trybuild tests; `ModulePorts` exists but needs integration strategy (how/when modules materialize port sets) |
 | 2. Core Port Runtime | **In Progress** | ~75% | `src/solver/model/ports/*` exists (ports + registry + tests); registry supports idempotent registration + conflict errors; still missing dimension enforcement policy + richer validation |
-| 3. PortManifest + Module Integration | Pending | 0% | Decide IR-facing manifest shape + wire into model init/lowering (replacing/augmenting `ModuleManifest`) |
-| 4. Low-Risk Migration | Pending | 0% | eos, generic_coupled modules |
+| 3. PortManifest + Module Integration | **In Progress** | ~50% | IR-safe `PortManifest` defined in `cfd2_ir`; attached to `ModuleManifest`; `PortSet` emits manifest; first module (`eos`) migrated |
+| 4. Low-Risk Migration | **In Progress** | ~33% | `eos` module migrated to publish `PortManifest` for uniform params; `generic_coupled_apply` and `generic_coupled` pending |
 | 5. Field-Access Migration | Pending | 0% | flux_module, rhie_chow |
 | 6. Codegen Replacement | Pending | 0% | Replace string-based codegen |
 | 7. Hard Cutoff | Pending | 0% | Remove deprecated APIs |
@@ -87,25 +87,32 @@ src/solver/model/ports/
 └── tests.rs
 ```
 
-### Phase 3: PortManifest + Module Integration (Pending)
+### Phase 3: PortManifest + Module Integration (In Progress)
 
 **Goal**: Replace/augment `ModuleManifest` so modules can declare ports and the solver can build/validate a port registry
 
-**Tasks**:
-- [ ] Decide where `PortManifest` lives (if `crates/cfd2_codegen` needs it directly, it must live in `cfd2_ir::solver::ir`)
-- [ ] Define `PortManifest` (fields/params/buffers + WGSL names + units/kinds) as pure data
+**Done**:
+- [x] Define IR-safe `PortManifest` in `cfd2_ir::solver::ir::ports` (pure data, no `src/solver/model/*` deps)
+- [x] Add `port_manifest: Option<PortManifest>` to `ModuleManifest`
+- [x] Teach `#[derive(PortSet)]` to emit `port_manifest()` method
+- [x] Migrate `eos` module to publish `PortManifest` for uniform params
+
+**Remaining**:
 - [ ] Wire model initialization to build a `PortRegistry` on-demand (requires a strategy for getting `ModulePortsTrait` implementations from `ModelSpec.modules`)
 - [ ] Integrate with existing build-time generation (WGSL emission + `named_params_registry` generation currently depends on `ModuleManifest.named_params`)
 - [ ] Add validation helpers ("missing field", "wrong kind", "dimension mismatch", etc.)
 - [ ] Add `ports::prelude` for convenient imports for module authors
 
-**Files to Create**:
+**Notes**:
+- Named-params with non-uniform types (like `low_mach.model` which is a `u32` enum) are not yet representable by `ParamPort<F32, _>` and remain in `named_params` for backward compatibility.
+
+**Files Created**:
 ```
 crates/cfd2_ir/src/solver/ir/
 └── ports.rs            # IR-facing PortManifest + port specs (re-export from ir/mod.rs)
 
 src/solver/model/ports/
-└── prelude.rs          # Convenient imports for module authors (and re-exports)
+└── prelude.rs          # Convenient imports for module authors (and re-exports) [TODO]
 ```
 
 ### Phase 4: Low-Risk Module Migration (Weeks 3-4)
@@ -113,7 +120,7 @@ src/solver/model/ports/
 **Goal**: Migrate modules with only parameter declarations
 
 **Modules**:
-- [ ] `eos` - EOS configuration (proof of concept)
+- [x] `eos` - EOS configuration (proof of concept) - publishes `PortManifest` for uniform params
 - [ ] `generic_coupled_apply` - Simple module (1 kernel)
 - [ ] `generic_coupled` - Complex but safe (16 params, 5 kernels)
 

@@ -35,6 +35,11 @@ ui = ["dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger", "meshgen"]
 meshgen = ["dep:ahash", "dep:rand", "dep:wide", "dep:rayon"]
 profiling = []
 dev-tests = []
+# Internal feature used by build script to avoid proc-macro dependencies
+build-script = []
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(cfd2_build_script)'] }
 
 [dev-dependencies]
 criterion = "0.5"

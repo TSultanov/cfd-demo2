@@ -1040,4 +1040,80 @@ mod tests {
             "different params should have different PortIds"
         );
     }
+
+    #[test]
+    fn recipe_populates_port_registry_from_generic_coupled_manifest() {
+        // Regression test: ensure generic_coupled port manifest is registered at runtime
+        let model = generic_diffusion_demo_model();
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Coupled,
+        )
+        .expect("recipe build");
+
+        // Verify generic_coupled params are registered in the port registry
+        assert!(
+            recipe.port_registry.lookup_param("dt").is_some(),
+            "dt should be registered in port registry"
+        );
+        assert!(
+            recipe.port_registry.lookup_param("dtau").is_some(),
+            "dtau should be registered in port registry"
+        );
+        assert!(
+            recipe.port_registry.lookup_param("viscosity").is_some(),
+            "viscosity should be registered in port registry"
+        );
+        assert!(
+            recipe.port_registry.lookup_param("density").is_some(),
+            "density should be registered in port registry"
+        );
+        assert!(
+            recipe
+                .port_registry
+                .lookup_param("advection_scheme")
+                .is_some(),
+            "advection_scheme should be registered in port registry"
+        );
+        assert!(
+            recipe.port_registry.lookup_param("time_scheme").is_some(),
+            "time_scheme should be registered in port registry"
+        );
+
+        // Verify these are actual PortIds (not just Some(()))
+        let dt_id = recipe.port_registry.lookup_param("dt").unwrap();
+        let viscosity_id = recipe.port_registry.lookup_param("viscosity").unwrap();
+        assert_ne!(
+            dt_id, viscosity_id,
+            "different params should have different PortIds"
+        );
+    }
+
+    #[test]
+    fn recipe_populates_relaxation_params_when_enabled() {
+        // Test that alpha_u/alpha_p are registered when relaxation is enabled
+        // (compressible model has apply_relaxation_in_update = true)
+        let model = compressible_model();
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Coupled,
+        )
+        .expect("recipe build");
+
+        // Relaxation params should be present for compressible model
+        assert!(
+            recipe.port_registry.lookup_param("alpha_u").is_some(),
+            "alpha_u should be registered when relaxation is enabled"
+        );
+        assert!(
+            recipe.port_registry.lookup_param("alpha_p").is_some(),
+            "alpha_p should be registered when relaxation is enabled"
+        );
+    }
 }

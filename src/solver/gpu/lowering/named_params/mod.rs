@@ -100,4 +100,68 @@ mod tests {
             "low_mach.model should still be in named_params"
         );
     }
+
+    #[test]
+    fn named_params_include_generic_coupled_keys_via_port_manifest() {
+        // Regression test: generic_coupled uniform params are declared via port_manifest,
+        // not named_params. Ensure they are still discoverable.
+        let model = crate::solver::model::generic_diffusion_demo_model();
+        let params = named_params_for_model(&model).expect("named params");
+
+        // These keys come from generic_coupled.port_manifest
+        assert!(
+            params.contains_key("dt"),
+            "dt should be discoverable via port_manifest"
+        );
+        assert!(
+            params.contains_key("dtau"),
+            "dtau should be discoverable via port_manifest"
+        );
+        assert!(
+            params.contains_key("viscosity"),
+            "viscosity should be discoverable via port_manifest"
+        );
+        assert!(
+            params.contains_key("density"),
+            "density should be discoverable via port_manifest"
+        );
+        assert!(
+            params.contains_key("advection_scheme"),
+            "advection_scheme should be discoverable via port_manifest"
+        );
+        assert!(
+            params.contains_key("time_scheme"),
+            "time_scheme should be discoverable via port_manifest"
+        );
+
+        // Host-only keys should still work (they remain in named_params)
+        assert!(
+            params.contains_key("outer_iters"),
+            "outer_iters should still be in named_params"
+        );
+    }
+
+    #[test]
+    fn named_params_include_generic_coupled_relaxation_keys_when_enabled() {
+        // Test that alpha_u/alpha_p are present when relaxation is enabled
+        // (compressible model has apply_relaxation_in_update = true)
+        let model = crate::solver::model::compressible_model();
+        let params = named_params_for_model(&model).expect("named params");
+
+        // Relaxation params should be present for compressible model
+        assert!(
+            params.contains_key("alpha_u"),
+            "alpha_u should be present when relaxation is enabled"
+        );
+        assert!(
+            params.contains_key("alpha_p"),
+            "alpha_p should be present when relaxation is enabled"
+        );
+
+        // nonconverged_relax should also be present (remains in named_params)
+        assert!(
+            params.contains_key("nonconverged_relax"),
+            "nonconverged_relax should still be in named_params"
+        );
+    }
 }

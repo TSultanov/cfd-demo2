@@ -11,28 +11,33 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
         MethodSpec::Coupled(caps) => caps.apply_relaxation_in_update,
     };
 
+    // Set the port-based manifest for uniform params
+    // This is done via a helper function in a separate module to avoid
+    // proc-macro issues in build scripts
+    #[cfg(cfd2_build_script)]
+    let port_manifest = Some(
+        crate::solver::model::modules::generic_coupled_ports::generic_coupled_uniform_port_manifest(
+            apply_relaxation_in_update,
+        ),
+    );
+    #[cfg(not(cfd2_build_script))]
+    let port_manifest = None;
+
+    // Keep named_params for host-only parameters
+    // Uniform params (dt, dtau, viscosity, density, schemes, relaxation) are now
+    // declared via port_manifest
     let mut named_params = vec![
-        NamedParamKey::Key("dt"),
-        NamedParamKey::Key("dtau"),
-        NamedParamKey::Key("advection_scheme"),
-        NamedParamKey::Key("time_scheme"),
         NamedParamKey::Key("preconditioner"),
         NamedParamKey::Key("linear_solver.max_restart"),
         NamedParamKey::Key("linear_solver.max_iters"),
         NamedParamKey::Key("linear_solver.tolerance"),
         NamedParamKey::Key("linear_solver.tolerance_abs"),
-        NamedParamKey::Key("viscosity"),
-        NamedParamKey::Key("density"),
         NamedParamKey::Key("outer_iters"),
         NamedParamKey::Key("detailed_profiling_enabled"),
     ];
 
     if apply_relaxation_in_update {
-        named_params.extend([
-            NamedParamKey::Key("alpha_u"),
-            NamedParamKey::Key("alpha_p"),
-            NamedParamKey::Key("nonconverged_relax"),
-        ]);
+        named_params.push(NamedParamKey::Key("nonconverged_relax"));
     }
 
     KernelBundleModule {
@@ -96,6 +101,7 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
         manifest: ModuleManifest {
             method: Some(method),
             named_params,
+            port_manifest,
             ..Default::default()
         },
         ..Default::default()

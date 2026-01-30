@@ -760,6 +760,7 @@ dependencies = [
  "bytemuck",
  "cfd2_codegen",
  "cfd2_ir",
+ "cfd2_macros",
  "criterion",
  "eframe",
  "egui",
@@ -790,6 +791,15 @@ dependencies = [
 [[package]]
 name = "cfd2_ir"
 version = "0.1.0"
+
+[[package]]
+name = "cfd2_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "cfg-if"

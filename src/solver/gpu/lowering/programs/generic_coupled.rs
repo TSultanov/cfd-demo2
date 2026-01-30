@@ -26,9 +26,167 @@ use crate::solver::gpu::structs::{
 };
 use crate::solver::model::{ModelPreconditionerSpec, ModelSpec};
 use crate::solver::model::backend::ast::FieldKind;
+use crate::solver::model::ports::PortRegistry;
 use bytemuck::{bytes_of, Pod, Zeroable};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+/// Pre-resolved mapping from unknown indices to state layout slots.
+///
+/// This is computed once at model build time and stored in the program resources
+/// to avoid repeated StateLayout lookups during GPU operations.
+#[derive(Debug, Clone)]
+pub struct ResolvedUnknownMapping {
+    /// Maps (equation_index, component_index) -> state_offset
+    /// Stored as a flat Vec where index = equation_index * max_components + component_index
+    pub offsets: Vec<u32>,
+    /// Number of equations
+    pub num_equations: usize,
+    /// Maximum components per equation (for indexing)
+    pub max_components: usize,
+    /// Target names for each equation
+    pub target_names: Vec<String>,
+    /// Component counts for each equation
+    pub component_counts: Vec<usize>,
+}
+
+impl ResolvedUnknownMapping {
+    /// Get the state offset for a given equation and component.
+    pub fn get_offset(&self, equation: usize, component: usize) -> Option<u32> {
+        if equation >= self.num_equations || component >= self.component_counts[equation] {
+            return None;
+        }
+        let idx = equation * self.max_components + component;
+        Some(self.offsets[idx])
+    }
+
+    /// Get the target name for a given equation.
+    pub fn get_target_name(&self, equation: usize) -> Option<&str> {
+        self.target_names.get(equation).map(|s| s.as_str())
+    }
+
+    /// Get the component count for a given equation.
+    pub fn get_component_count(&self, equation: usize) -> Option<usize> {
+        self.component_counts.get(equation).copied()
+    }
+}
+
+/// Resolve the unknown-to-state mapping from equation targets using PortRegistry.
+///
+/// This is the runtime path (used during actual GPU execution) that registers
+/// field ports and extracts their offsets.
+pub fn resolve_unknown_mapping_runtime(
+    model: &ModelSpec,
+    port_registry: &PortRegistry,
+) -> Result<ResolvedUnknownMapping, String> {
+    let equations: Vec<_> = model.system.equations().iter().collect();
+    let num_equations = equations.len();
+    let max_components = equations
+        .iter()
+        .map(|eq| eq.target().kind().component_count())
+        .max()
+        .unwrap_or(1);
+
+    let mut offsets = vec![0u32; num_equations * max_components];
+    let mut target_names = Vec::with_capacity(num_equations);
+    let mut component_counts = Vec::with_capacity(num_equations);
+
+    for (eq_idx, eq) in equations.iter().enumerate() {
+        let target = eq.target();
+        let name = target.name();
+        let kind = target.kind();
+        let comps = kind.component_count();
+
+        target_names.push(name.to_string());
+        component_counts.push(comps);
+
+        // Get offsets from PortRegistry
+        match kind {
+            FieldKind::Scalar => {
+                let port = port_registry
+                    .get_field_entry_by_name(name)
+                    .ok_or_else(|| format!("Field '{}' not found in port registry", name))?;
+                offsets[eq_idx * max_components] = port.offset();
+            }
+            _ => {
+                for comp in 0..comps {
+                    // For vector fields, we need to get the component offset
+                    // The PortRegistry stores these as separate entries or we compute from base
+                    let port = port_registry
+                        .get_field_entry_by_name(name)
+                        .ok_or_else(|| format!("Field '{}' not found in port registry", name))?;
+                    // Component offset = base offset + component index
+                    offsets[eq_idx * max_components + comp] = port.offset() + comp as u32;
+                }
+            }
+        }
+    }
+
+    Ok(ResolvedUnknownMapping {
+        offsets,
+        num_equations,
+        max_components,
+        target_names,
+        component_counts,
+    })
+}
+
+/// Resolve the unknown-to-state mapping from equation targets using StateLayout.
+///
+/// This is the build-script fallback path (used during code generation) that
+/// directly queries the StateLayout without PortRegistry.
+pub fn resolve_unknown_mapping_build_script(
+    model: &ModelSpec,
+) -> Result<ResolvedUnknownMapping, String> {
+    let layout = &model.state_layout;
+    let equations: Vec<_> = model.system.equations().iter().collect();
+    let num_equations = equations.len();
+    let max_components = equations
+        .iter()
+        .map(|eq| eq.target().kind().component_count())
+        .max()
+        .unwrap_or(1);
+
+    let mut offsets = vec![0u32; num_equations * max_components];
+    let mut target_names = Vec::with_capacity(num_equations);
+    let mut component_counts = Vec::with_capacity(num_equations);
+
+    for (eq_idx, eq) in equations.iter().enumerate() {
+        let target = eq.target();
+        let name = target.name();
+        let kind = target.kind();
+        let comps = kind.component_count();
+
+        target_names.push(name.to_string());
+        component_counts.push(comps);
+
+        match kind {
+            FieldKind::Scalar => {
+                let off = layout
+                    .offset_for(name)
+                    .ok_or_else(|| format!("Missing '{}' in state layout", name))?;
+                offsets[eq_idx * max_components] = off;
+            }
+            _ => {
+                for comp in 0..comps {
+                    let off = layout
+                        .component_offset(name, comp as u32)
+                        .ok_or_else(|| format!("Missing '{}' component {} in state layout", name, comp))?;
+                    offsets[eq_idx * max_components + comp] = off;
+                }
+            }
+        }
+    }
+
+    Ok(ResolvedUnknownMapping {
+        offsets,
+        num_equations,
+        max_components,
+        target_names,
+        component_counts,
+    })
+}
 
 pub(crate) struct GenericCoupledProgramResources {
     runtime: GpuCsrRuntime,
@@ -53,6 +211,9 @@ pub(crate) struct GenericCoupledProgramResources {
     _b_bc_kind: wgpu::Buffer,
     _b_bc_value: wgpu::Buffer,
     boundary_faces: Vec<Vec<u32>>,
+    /// Pre-resolved unknown-to-state mapping for GPU operations.
+    /// This is computed at model build time to avoid repeated StateLayout lookups.
+    unknown_mapping: ResolvedUnknownMapping,
 }
 
 struct GenericCoupledSchurResources {
@@ -114,6 +275,7 @@ impl OuterConvergenceMonitor {
         model: &ModelSpec,
         num_cells: u32,
         x: &wgpu::Buffer,
+        unknown_mapping: &ResolvedUnknownMapping,
     ) -> Result<Option<Self>, String> {
         let stride_x = model.system.unknowns_per_cell();
         let stride_state = model.state_layout.stride();
@@ -121,13 +283,12 @@ impl OuterConvergenceMonitor {
             return Ok(None);
         }
 
-        let layout = &model.state_layout;
         let mut target_names: Vec<String> = Vec::new();
         let mut target_descs_x: Vec<GpuOuterConvergenceTargetDesc> = Vec::new();
         let mut target_descs_state: Vec<GpuOuterConvergenceTargetDesc> = Vec::new();
 
         let mut unknown_offset_cursor: u32 = 0;
-        for eqn in model.system.equations() {
+        for (eq_idx, eqn) in model.system.equations().iter().enumerate() {
             let target = eqn.target();
             let name = target.name();
 
@@ -148,27 +309,22 @@ impl OuterConvergenceMonitor {
             }
             unknown_offset_cursor += comps as u32;
 
+            // Get state offsets from the pre-resolved mapping
             let mut offsets_state = [0u32; 4];
-            match kind {
-                FieldKind::Scalar => {
-                    let Some(off) = layout.offset_for(name) else {
-                        continue;
-                    };
-                    offsets_state[0] = off;
-                }
-                _ => {
-                    for comp in 0..comps {
-                        let Some(off) = layout.component_offset(name, comp as u32) else {
-                            offsets_state = [0u32; 4];
-                            break;
-                        };
-                        offsets_state[comp] = off;
-                    }
-                    if offsets_state == [0u32; 4] {
-                        continue;
+            let mut has_all_offsets = true;
+            for comp in 0..comps {
+                match unknown_mapping.get_offset(eq_idx, comp) {
+                    Some(off) => offsets_state[comp] = off,
+                    None => {
+                        has_all_offsets = false;
+                        break;
                     }
                 }
-            };
+            }
+
+            if !has_all_offsets {
+                continue;
+            }
 
             target_names.push(name.to_string());
             target_descs_x.push(GpuOuterConvergenceTargetDesc {
@@ -521,12 +677,16 @@ impl GenericCoupledProgramResources {
             build_generic_krylov(recipe, &runtime)?
         };
 
+        // Resolve unknown-to-state mapping using PortRegistry (runtime path)
+        let unknown_mapping = resolve_unknown_mapping_runtime(model, &recipe.port_registry)?;
+
         let outer_convergence = OuterConvergenceMonitor::new(
             &runtime.common.context.device,
             &runtime.common.context.queue,
             model,
             runtime.common.num_cells,
             runtime.linear_port_space.buffer(runtime.linear_ports.x),
+            &unknown_mapping,
         )?;
 
         let requested_time_scheme = match recipe.initial_constants.time_scheme {
@@ -558,6 +718,7 @@ impl GenericCoupledProgramResources {
             _b_bc_kind: b_bc_kind,
             _b_bc_value: b_bc_value,
             boundary_faces,
+            unknown_mapping,
         })
     }
 }
@@ -573,6 +734,7 @@ impl GenericCoupledProgramResources {
 
 fn validate_schur_model(
     model: &ModelSpec,
+    unknown_mapping: &ResolvedUnknownMapping,
 ) -> Result<(f32, crate::solver::model::SchurBlockLayout), String> {
     let Some(solver) = model.linear_solver else {
         return Err("model does not define a linear solver spec".into());
@@ -591,28 +753,29 @@ fn validate_schur_model(
     //
     // For the current Schur bridge, the linear system is assumed to consist only of a
     // velocity-like block and a single pressure-like scalar.
+    //
+    // Use the pre-resolved unknown_mapping instead of querying StateLayout directly.
     let mut target_indices = std::collections::BTreeSet::new();
     let mut scalar_targets = std::collections::BTreeSet::new();
-    for eq in model.system.equations() {
+    for (eq_idx, eq) in model.system.equations().iter().enumerate() {
         let target = eq.target();
+        let comps = target.kind().component_count() as usize;
+        
         match target.kind() {
             crate::solver::model::backend::ast::FieldKind::Scalar => {
-                let idx = model
-                    .state_layout
-                    .offset_for(target.name())
-                    .ok_or_else(|| format!("missing '{}' in state layout", target.name()))?;
+                let idx = unknown_mapping
+                    .get_offset(eq_idx, 0)
+                    .ok_or_else(|| format!("missing '{}' in unknown mapping", target.name()))?;
                 target_indices.insert(idx);
                 scalar_targets.insert(idx);
             }
-            kind => {
-                for comp in 0..kind.component_count() {
-                    let comp = comp as u32;
-                    let idx = model
-                        .state_layout
-                        .component_offset(target.name(), comp)
+            _ => {
+                for comp in 0..comps {
+                    let idx = unknown_mapping
+                        .get_offset(eq_idx, comp)
                         .ok_or_else(|| {
                             format!(
-                                "missing '{}' component {} in state layout",
+                                "missing '{}' component {} in unknown mapping",
                                 target.name(),
                                 comp
                             )
@@ -663,7 +826,9 @@ fn build_generic_schur(
         ModelPreconditionerSpec::Schur { .. } => {}
     }
 
-    let (omega, layout) = validate_schur_model(model)?;
+    // Compute the unknown mapping for Schur validation
+    let unknown_mapping = resolve_unknown_mapping_runtime(model, &recipe.port_registry)?;
+    let (omega, layout) = validate_schur_model(model, &unknown_mapping)?;
 
     let LinearSolverType::Fgmres { max_restart } = recipe.linear_solver.solver_type else {
         return Err(
@@ -1902,7 +2067,8 @@ mod tests {
         // Distinct/in-range, but doesn't cover the full set of equation target indices.
         *layout = SchurBlockLayout::from_u_p(&[0], 2).expect("layout build failed");
 
-        let err = validate_schur_model(&model).unwrap_err();
+        let unknown_mapping = resolve_unknown_mapping_build_script(&model).expect("mapping failed");
+        let err = validate_schur_model(&model, &unknown_mapping).unwrap_err();
         assert!(err.contains("equation targets"), "unexpected error: {err}");
     }
 
@@ -1943,6 +2109,7 @@ mod tests {
             primitives: primitives::PrimitiveDerivations::default(),
         };
 
-        validate_schur_model(&model).expect("Vector3 velocity Schur layout should validate");
+        let unknown_mapping = resolve_unknown_mapping_build_script(&model).expect("mapping failed");
+        validate_schur_model(&model, &unknown_mapping).expect("Vector3 velocity Schur layout should validate");
     }
 }

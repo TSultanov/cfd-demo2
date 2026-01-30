@@ -60,13 +60,45 @@ struct BufferKey {
 
 /// Storage for field port metadata.
 #[derive(Debug, Clone)]
-struct FieldPortEntry {
+pub struct FieldPortEntry {
     id: PortId,
     name: String,
     offset: u32,
     stride: u32,
     component_count: u32,
     runtime_dim: UnitDim,
+}
+
+impl FieldPortEntry {
+    /// Get the offset of this field within each cell's state.
+    pub fn offset(&self) -> u32 {
+        self.offset
+    }
+
+    /// Get the stride between cells in the state array.
+    pub fn stride(&self) -> u32 {
+        self.stride
+    }
+
+    /// Get the component count for this field.
+    pub fn component_count(&self) -> u32 {
+        self.component_count
+    }
+
+    /// Get the runtime physical dimension.
+    pub fn runtime_dimension(&self) -> UnitDim {
+        self.runtime_dim
+    }
+
+    /// Get the field name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get the port ID.
+    pub fn id(&self) -> PortId {
+        self.id
+    }
 }
 
 /// Storage for parameter port metadata.
@@ -473,6 +505,15 @@ impl PortRegistry {
     /// Get a field port entry by ID.
     pub fn get_field_entry(&self, id: PortId) -> Option<&FieldPortEntry> {
         self.field_ports.get(&id)
+    }
+
+    /// Get a field port entry by name.
+    ///
+    /// Returns `Some(&FieldPortEntry)` if a field with this name has been registered.
+    pub fn get_field_entry_by_name(&self, name: &str) -> Option<&FieldPortEntry> {
+        self.field_name_to_id
+            .get(name)
+            .and_then(|id| self.field_ports.get(id))
     }
 
     /// Get a parameter port entry by ID.

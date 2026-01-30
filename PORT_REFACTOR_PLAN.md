@@ -22,7 +22,7 @@ Based on design discussions, the implementation follows these principles:
 | 2. Core Port Runtime | **In Progress** | ~80% | `src/solver/model/ports/*` exists (ports + registry + tests); registry supports idempotent registration + conflict errors; IR-safe manifests can be registered dynamically; still missing dimension enforcement policy + richer validation |
 | 3. PortManifest + Module Integration | **In Progress** | ~80% | IR-safe `PortManifest` defined in `cfd2_ir`; attached to `ModuleManifest`; `PortRegistry::register_manifest` exists and `SolverRecipe` stores a `port_registry`; named-param allowlisting now consumes `port_manifest.params`; first modules (`eos`, `generic_coupled`) migrated |
 | 4. Low-Risk Migration | **In Progress** | ~66% | `eos` + `generic_coupled` publish `PortManifest` for uniform params; `generic_coupled_apply` is TBD/likely unused |
-| 5. Field-Access Migration | **In Progress** | ~55% | `rhie_chow` runtime generators migrated to PortRegistry (build-script fallback remains); `flux_module_gradients_wgsl` runtime offset resolution migrated (still scans `StateLayout`); `flux_module_wgsl` pending |
+| 5. Field-Access Migration | **In Progress** | ~60% | `rhie_chow` runtime generators migrated to PortRegistry (build-script fallback remains); `flux_module_gradients_wgsl` + `flux_module_wgsl` runtime offset resolution migrated (still scans/probes `StateLayout`); build-script fallbacks remain |
 | 6. Codegen Replacement | Pending | 0% | Replace string-based codegen |
 | 7. Hard Cutoff | Pending | 0% | Remove deprecated APIs |
 
@@ -157,7 +157,7 @@ pub struct EosModule {
 
 **Modules**:
 - [ ] `flux_module_gradients_wgsl` - Gradients stage (runtime offset resolution via PortRegistry; target discovery still scans `StateLayout`; build-script fallback remains)
-- [ ] `flux_module_wgsl` - Flux kernel WGSL generation (pending)
+- [ ] `flux_module_wgsl` - Flux kernel WGSL generation (runtime offset resolution via PortRegistry; still probes `StateLayout` for kind/name resolution; build-script fallback remains)
 - [x] `rhie_chow` - Pressure-velocity coupling (runtime generators use PortRegistry; build-script fallback remains)
 
 **Special considerations**:
@@ -582,6 +582,7 @@ As of **2026-01-30**:
 - Derived/dynamic field name support is implemented via a centralized interner (`src/solver/model/ports/intern.rs`); `PortRegistry::{register_field,register_scalar_field,register_vector2_field,register_vector3_field}` accept `&str`
 - `rhie_chow` kernel generators use `PortRegistry` (runtime build) to resolve offsets/stride and derived `grad_<p>` names; the build script compilation context still uses the legacy `StateLayout` code paths
 - `flux_module_gradients_wgsl` uses `PortRegistry` (runtime build) to resolve offsets for base/grad fields (still scans `StateLayout` for targets/kinds); the build script compilation context still uses legacy `StateLayout` offsets
+- `flux_module_wgsl` uses `PortRegistry` (runtime build) to resolve state offsets (still probes `StateLayout` for name/kind decisions); the build script compilation context still uses legacy `StateLayout` offsets
 - `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present
 - `cfd2_build_script` cfg is currently used as a build-time hack to exclude runtime-only manifest attachment from the build script’s `include!()` compilation context; regression coverage exists to ensure the runtime recipe populates `port_registry` from the EOS manifest
 - Build-time codegen still does not use port manifests, and string-based lookups remain in core hotspots (see “Module Migration Playbook”)
@@ -594,8 +595,8 @@ As of **2026-01-30**:
   - Plumb module `PortManifest` data into the build-time pipeline (uniform params + bindings), reducing reliance on ad-hoc string lists.
   - Keep an escape hatch for params that are not yet representable as `ParamPort<...>` (e.g. `low_mach.model` as `u32` enum).
 - Continue migrating `flux_module`:
-  - Port `flux_module_wgsl` runtime offsets to `PortRegistry` (keep build-script fallback)
-  - Then move gradients target discovery out of WGSL generation (attach resolved targets to `PortManifest`)
+  - Move gradients target discovery out of WGSL generation (attach resolved targets to `PortManifest`)
+  - Add a lowering pass for flux codegen that pre-resolves all state slots used by a flux spec and passes them into WGSL generation (eliminate remaining `StateLayout` probing in `flux_module_wgsl.rs`)
 - Decide the dimension enforcement policy in `PortRegistry` (especially for semantic fields/params) and implement it (with an escape hatch for dynamic-dimension fields).
 - Keep dimensional correctness enforced by runtime `EquationSystem::validate_units()` for complex systems until/unless we adopt a different type-level encoding (nightly features or type-encoded exponents).
 

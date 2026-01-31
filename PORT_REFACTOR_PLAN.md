@@ -330,7 +330,7 @@ migration steps to move that logic onto the port infrastructure.
 
 **Migration steps**:
 - [x] Make `PortManifest.gradient_targets` the single source of truth for flux-module gradients validation (no `StateLayout` `grad_*` scanning in `ModelSpec::validate_module_manifests()`).
-- [ ] Make `PortManifest` the single source of truth for "required fields" (beyond gradient targets).
+- [x] Validate `port_manifest.fields` against the model `StateLayout` (existence + kind + unit) in `ModelSpec::validate_module_manifests()`.
 - [ ] Convert validation to:
   - Resolve all required ports once, returning structured `PortValidationError`
   - Avoid repeated `StateLayout` probing across multiple validation passes

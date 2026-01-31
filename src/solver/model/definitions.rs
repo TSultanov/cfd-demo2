@@ -170,6 +170,46 @@ impl ModelSpec {
             }
         }
 
+        // Validate port_manifest fields against state_layout.
+        // This makes PortManifest.fields the single source of truth for required fields.
+        for module in &self.modules {
+            if let Some(ref port_manifest) = module.manifest.port_manifest {
+                for field_spec in &port_manifest.fields {
+                    let name = field_spec.name;
+                    let Some(layout_field) = self.state_layout.field(name) else {
+                        return Err(format!(
+                            "module '{}' port_manifest field '{}' not found in state layout",
+                            module.name, name
+                        ));
+                    };
+
+                    // Validate component count (kind) matches
+                    let expected_components = field_spec.kind.component_count();
+                    let actual_components = layout_field.component_count();
+                    if expected_components != actual_components {
+                        return Err(format!(
+                            "module '{}' port_manifest field '{}' kind mismatch: expected {} component(s), found {}",
+                            module.name,
+                            name,
+                            expected_components,
+                            actual_components
+                        ));
+                    }
+
+                    // Validate unit dimension matches
+                    if field_spec.unit != layout_field.unit() {
+                        return Err(format!(
+                            "module '{}' port_manifest field '{}' unit mismatch: expected {}, found {}",
+                            module.name,
+                            name,
+                            field_spec.unit,
+                            layout_field.unit()
+                        ));
+                    }
+                }
+            }
+        }
+
         // Validate typed invariant requirements declared by modules.
         for module in &self.modules {
             for inv in &module.manifest.invariants {

@@ -1,10 +1,16 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{
-    fvc, fvm, surface_scalar, surface_vector, vol_scalar, vol_vector, Coefficient, EquationSystem,
-    FieldRef, FluxRef,
+    surface_scalar, surface_vector, vol_scalar, vol_vector, EquationSystem, FieldRef, FluxRef,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
+use crate::solver::model::backend::typed_ast::{
+    typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
+};
 use crate::solver::units::si;
+use cfd2_ir::solver::dimensions::{
+    Density, Dimensionless, DynamicViscosity, EnergyDensity, Force, InvTime, Length, MassFlux,
+    MomentumDensity, MulDim, Power, Pressure, Temperature, Velocity,
+};
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
@@ -39,123 +45,147 @@ impl CompressibleFields {
     }
 }
 
-fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
-    // NOTE: The compressible model uses complex algebraic constraints with derived fields
-    // that don't have straightforward dimension mappings in the typed builder.
-    // For now, we use the untyped builder with runtime validation.
-    // TODO: Migrate to typed builder once dimension algebra for derived coefficients is clearer.
+fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
+    // NOTE: This model uses typed builder APIs with explicit cast_to() calls to align
+    // terms to canonical dimension types. Type-level dimension expressions are not normalized,
+    // so semantically equivalent dimensions are different types; cast_to() unifies them.
 
-    let rho_eqn =
-        (fvm::ddt(fields.rho) + fvm::div_flux(fields.phi_rho, fields.rho)).eqn(fields.rho);
+    // Define typed field references for conservative variables
+    let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
+    let rho_u_typed = TypedFieldRef::<MomentumDensity, Vector2>::new("rho_u");
+    let rho_e_typed = TypedFieldRef::<EnergyDensity, Scalar>::new("rho_e");
 
-    let rho_u_eqn = (fvm::ddt(fields.rho_u)
-        + fvm::div_flux(fields.phi_rho_u, fields.rho_u)
-        // Viscous momentum term (Newtonian stress, simplified):
-        //   ∇·τ ≈ μ ∇²u  (i.e., -∇·(μ∇u) moved to the LHS as `laplacian(mu, u)`).
-        + fvm::laplacian(
-            Coefficient::field(fields.mu).expect("mu must be scalar"),
-            fields.u,
-        ))
-    .eqn(fields.rho_u);
+    // Define typed field references for primitive variables
+    let u_typed = TypedFieldRef::<Velocity, Vector2>::new("u");
+    let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
+    let t_typed = TypedFieldRef::<Temperature, Scalar>::new("T");
+    let mu_typed = TypedFieldRef::<DynamicViscosity, Scalar>::new("mu");
 
-    // Total energy (rho_e) equation.
-    let kappa = vol_scalar("kappa", si::POWER / (si::LENGTH * si::TEMPERATURE));
-    let rho_e_eqn = (fvm::ddt(fields.rho_e)
-        + fvm::div_flux(fields.phi_rho_e, fields.rho_e)
-        + fvm::laplacian(
-            Coefficient::field(kappa).expect("kappa must be scalar"),
-            fields.t,
-        ))
-    .eqn(fields.rho_e);
+    // Define typed flux references
+    let phi_rho_typed = TypedFluxRef::<MassFlux, Scalar>::new("phi_rho");
+    let phi_rho_u_typed = TypedFluxRef::<Force, Vector2>::new("phi_rho_u");
+    let phi_rho_e_typed = TypedFluxRef::<Power, Scalar>::new("phi_rho_e");
 
-    // Primitive velocity recovery as an algebraic constraint:
-    let u_eqn = {
-        let rho = Coefficient::field(fields.rho).expect("rho must be scalar");
-        let inv_dt =
-            Coefficient::field(vol_scalar("inv_dt", si::INV_TIME)).expect("inv_dt must be scalar");
+    // Build coefficients
+    let mu_coeff = TypedCoeff::from_field(mu_typed);
 
-        let rho_over_dt =
-            Coefficient::product(rho, inv_dt.clone()).expect("rho/dt coefficient must be scalar");
-        let minus_rho_over_dt = Coefficient::product(Coefficient::constant(-1.0), rho_over_dt)
-            .expect("rho/dt coefficient must be scalar");
+    // ========================================
+    // Continuity equation: ddt(rho) + div(phi_rho, rho) = 0
+    // ========================================
+    let rho_ddt = typed_fvm::ddt(rho_typed);
+    let rho_div = typed_fvm::div_flux(phi_rho_typed, rho_typed);
 
-        (fvm::source_coeff(minus_rho_over_dt, fields.u) + fvm::source_coeff(inv_dt, fields.rho_u))
-            .eqn(fields.u)
-    };
+    let rho_eqn = (rho_ddt.cast_to::<MassFlux>() + rho_div.cast_to::<MassFlux>()).eqn(rho_typed);
 
-    // Primitive pressure recovery as an algebraic constraint:
-    let p_eqn = {
-        let inv_dt =
-            Coefficient::field(vol_scalar("inv_dt", si::INV_TIME)).expect("inv_dt must be scalar");
-        let gm1 = Coefficient::field(vol_scalar("eos_gm1", si::DIMENSIONLESS))
-            .expect("eos_gm1 must be scalar");
-        let dp_drho = Coefficient::field(vol_scalar("eos_dp_drho", si::PRESSURE / si::DENSITY))
-            .expect("eos_dp_drho must be scalar");
-        let p_offset = Coefficient::field(vol_scalar("eos_p_offset", si::PRESSURE))
-            .expect("eos_p_offset must be scalar");
-        let u2 = Coefficient::mag_sqr(fields.u);
+    // ========================================
+    // Momentum equation: ddt(rho_u) + div(phi_rho_u, rho_u) - laplacian(mu, u) = 0
+    // ========================================
+    let rho_u_ddt = typed_fvm::ddt(rho_u_typed);
+    let rho_u_div = typed_fvm::div_flux(phi_rho_u_typed, rho_u_typed);
+    let viscous_term = typed_fvm::laplacian(mu_coeff, u_typed);
 
-        let minus_gm1_over_dt = Coefficient::product(
-            Coefficient::product(Coefficient::constant(-1.0), gm1.clone())
-                .expect("gm1 coefficient must be scalar"),
-            inv_dt.clone(),
-        )
-        .expect("(gamma-1)/dt coefficient must be scalar");
-        let rho_coeff = Coefficient::product(
-            Coefficient::product(
-                Coefficient::product(Coefficient::constant(0.5), gm1)
-                    .expect("0.5*(gamma-1) coefficient must be scalar"),
-                inv_dt.clone(),
-            )
-            .expect("0.5*(gamma-1)/dt coefficient must be scalar"),
-            u2,
-        )
-        .expect("rho*u^2/dt coefficient must be scalar");
+    let rho_u_eqn = (rho_u_ddt.cast_to::<Force>()
+        + rho_u_div.cast_to::<Force>()
+        + viscous_term.cast_to::<Force>())
+    .eqn(rho_u_typed);
 
-        let minus_dp_drho_over_dt = Coefficient::product(
-            Coefficient::product(Coefficient::constant(-1.0), dp_drho)
-                .expect("-dp/drho coefficient must be scalar"),
-            inv_dt.clone(),
-        )
-        .expect("dp/drho/dt coefficient must be scalar");
+    // ========================================
+    // Energy equation: ddt(rho_e) + div(phi_rho_e, rho_e) - laplacian(kappa, T) = 0
+    // ========================================
+    // Thermal conductivity field coefficient: kappa has unit Power/(Length*Temperature)
+    let kappa_typed = TypedCoeff::from_field(
+        TypedFieldRef::<cfd2_ir::solver::dimensions::DivDim<Power, MulDim<Length, Temperature>>, Scalar>::new("kappa")
+    );
 
-        let minus_p_offset_over_dt = Coefficient::product(
-            Coefficient::product(Coefficient::constant(-1.0), p_offset)
-                .expect("-p_offset coefficient must be scalar"),
-            inv_dt.clone(),
-        )
-        .expect("p_offset/dt coefficient must be scalar");
+    let rho_e_ddt = typed_fvm::ddt(rho_e_typed);
+    let rho_e_div = typed_fvm::div_flux(phi_rho_e_typed, rho_e_typed);
+    let heat_flux = typed_fvm::laplacian(kappa_typed, t_typed);
 
-        (fvm::source_coeff(inv_dt, fields.p)
-            + fvm::source_coeff(minus_gm1_over_dt, fields.rho_e)
-            + fvm::source_coeff(rho_coeff, fields.rho)
-            + fvm::source_coeff(minus_dp_drho_over_dt, fields.rho)
-            + fvc::source_coeff(minus_p_offset_over_dt, fields.p))
-        .eqn(fields.p)
-    };
+    let rho_e_eqn = (rho_e_ddt.cast_to::<Power>()
+        + rho_e_div.cast_to::<Power>()
+        + heat_flux.cast_to::<Power>())
+    .eqn(rho_e_typed);
 
-    // Temperature recovery as an algebraic constraint (ideal gas):
-    let t_eqn = {
-        let rho = Coefficient::field(fields.rho).expect("rho must be scalar");
-        let r = Coefficient::field(vol_scalar(
-            "eos_r",
-            si::PRESSURE / (si::DENSITY * si::TEMPERATURE),
-        ))
-        .expect("eos_r must be scalar");
-        let inv_dt =
-            Coefficient::field(vol_scalar("inv_dt", si::INV_TIME)).expect("inv_dt must be scalar");
-        let rho_r_over_dt = Coefficient::product(
-            Coefficient::product(rho, r).expect("rho*R coefficient must be scalar"),
-            inv_dt.clone(),
-        )
-        .expect("rho*R/dt coefficient must be scalar");
-        let minus_inv_dt = Coefficient::product(Coefficient::constant(-1.0), inv_dt)
-            .expect("inv_dt must be scalar");
+    // ========================================
+    // Primitive velocity recovery: u = rho_u / rho
+    // Implemented as: (rho/dt) * u = (1/dt) * rho_u
+    // ========================================
+    // Field-based coefficients (preserving original semantics)
+    let inv_dt_typed = TypedFieldRef::<InvTime, Scalar>::new("inv_dt");
+    let inv_dt_coeff = TypedCoeff::from_field(inv_dt_typed);
+    let rho_coeff = TypedCoeff::from_field(rho_typed);
+    let minus_one_coeff: TypedCoeff<Dimensionless> = TypedCoeff::constant(-1.0);
 
-        (fvm::source_coeff(rho_r_over_dt, fields.t) + fvm::source_coeff(minus_inv_dt, fields.p))
-            .eqn(fields.t)
-    };
+    // Coefficients for u recovery
+    let rho_over_dt = rho_coeff.clone().mul(inv_dt_coeff.clone());
+    let minus_rho_over_dt = minus_one_coeff.clone().mul(rho_over_dt);
 
+    let u_source_1 = typed_fvm::source_coeff(minus_rho_over_dt, u_typed);
+    let u_source_2 = typed_fvm::source_coeff(inv_dt_coeff.clone(), rho_u_typed);
+
+    let u_eqn = (u_source_1.cast_to::<Force>() + u_source_2.cast_to::<Force>()).eqn(u_typed);
+
+    // ========================================
+    // Primitive pressure recovery (algebraic constraint)
+    // ========================================
+    // EOS field-based coefficients (preserving original semantics)
+    let gm1_typed = TypedCoeff::from_field(TypedFieldRef::<Dimensionless, Scalar>::new("eos_gm1"));
+    let dp_drho_typed = TypedCoeff::from_field(
+        TypedFieldRef::<cfd2_ir::solver::dimensions::DivDim<Pressure, Density>, Scalar>::new("eos_dp_drho")
+    );
+    let p_offset_typed = TypedCoeff::from_field(TypedFieldRef::<Pressure, Scalar>::new("eos_p_offset"));
+    let half_coeff: TypedCoeff<Dimensionless> = TypedCoeff::constant(0.5);
+
+    // minus_gm1/dt
+    let minus_gm1 = minus_one_coeff.clone().mul(gm1_typed.clone());
+    let minus_gm1_over_dt = minus_gm1.mul(inv_dt_coeff.clone());
+
+    // 0.5 * gm1 / dt * |u|^2
+    let u2 = TypedCoeff::mag_sqr(u_typed);
+    let half_gm1_over_dt = half_coeff.mul(gm1_typed).mul(inv_dt_coeff.clone());
+    let rho_coeff_term = half_gm1_over_dt.mul(u2);
+
+    // minus_dp_drho/dt
+    let minus_dp_drho = minus_one_coeff.clone().mul(dp_drho_typed);
+    let minus_dp_drho_over_dt = minus_dp_drho.mul(inv_dt_coeff.clone());
+
+    // minus_p_offset/dt
+    let minus_p_offset = minus_one_coeff.clone().mul(p_offset_typed);
+    let minus_p_offset_over_dt = minus_p_offset.mul(inv_dt_coeff.clone());
+
+    let p_source_1 = typed_fvm::source_coeff(inv_dt_coeff.clone(), p_typed);
+    let p_source_2 = typed_fvm::source_coeff(minus_gm1_over_dt, rho_e_typed);
+    let p_source_3 = typed_fvm::source_coeff(rho_coeff_term, rho_typed);
+    let p_source_4 = typed_fvm::source_coeff(minus_dp_drho_over_dt, rho_typed);
+    let p_source_5 = typed_fvc::source_coeff(minus_p_offset_over_dt, p_typed);
+
+    let p_eqn = (p_source_1.cast_to::<Power>()
+        + p_source_2.cast_to::<Power>()
+        + p_source_3.cast_to::<Power>()
+        + p_source_4.cast_to::<Power>()
+        + p_source_5.cast_to::<Power>())
+    .eqn(p_typed);
+
+    // ========================================
+    // Temperature recovery: T = p / (rho * R)
+    // Implemented as: (rho*R/dt) * T = (1/dt) * p
+    // ========================================
+    // EOS gas constant field coefficient (preserving original semantics)
+    let r_typed = TypedCoeff::from_field(
+        TypedFieldRef::<cfd2_ir::solver::dimensions::DivDim<Pressure, MulDim<Density, Temperature>>, Scalar>::new("eos_r")
+    );
+
+    let rho_r_over_dt = rho_coeff.mul(r_typed).mul(inv_dt_coeff.clone());
+    let minus_inv_dt = minus_one_coeff.mul(inv_dt_coeff);
+
+    let t_source_1 = typed_fvm::source_coeff(rho_r_over_dt, t_typed);
+    let t_source_2 = typed_fvm::source_coeff(minus_inv_dt, p_typed);
+
+    let t_eqn = (t_source_1.cast_to::<Power>() + t_source_2.cast_to::<Power>()).eqn(t_typed);
+
+    // ========================================
+    // Assemble equation system
+    // ========================================
     let mut system = EquationSystem::new();
     system.add_equation(rho_eqn);
     system.add_equation(rho_u_eqn);

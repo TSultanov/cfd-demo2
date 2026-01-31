@@ -413,10 +413,11 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
   - Cannot make `MulDim<A, B>` automatically resolve to `Dim<...>` even when exponents are computable
   - The typed builder works for structurally identical dimensions but cannot prove equivalence of semantically-equal-but-structurally-different dimensions (e.g., `Volume/Time` vs `Area²/(Time·Length)`)
   - **Workaround**: Typed builder supports explicit `cast_to()` for semantically-equal units (runtime-checked), enabling incremental adoption while keeping `validate_units()` as the backstop
-- [ ] Migrate model constructors in `src/solver/model/definitions/*` to use the typed builder APIs (still producing the same `EquationSystem` as output).
-  - **Current**: some model definitions still use the untyped builder + `EquationSystem::validate_units()` assertions as a runtime backstop.
+- [x] Migrate model constructors in `src/solver/model/definitions/*` to use the typed builder APIs (still producing the same `EquationSystem` as output).
+  - **Current**: all model definitions use the typed builder layer (with `cast_to()` where needed).
   - ✅ Migrated: `generic_diffusion_demo` (+ Neumann variant) uses typed builder + `cast_to()`
   - ✅ Migrated: `incompressible_momentum` uses typed builder + `cast_to()` (`Force` / `MassFlux`)
+  - ✅ Migrated: `compressible` uses typed builder + `cast_to()` (`Force` / `MassFlux` / `Power`)
 - [ ] Update `crates/cfd2_codegen/src/solver/codegen/ir.rs` (`lower_system`) to:
   - Prefer typed-built systems (no unit errors expected)
   - Keep `validate_units()` for any remaining untyped system construction paths

@@ -1,10 +1,15 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{
-    fvc, fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, EquationSystem, FieldRef,
-    FluxRef,
+    surface_scalar, vol_scalar, vol_vector, EquationSystem, FieldRef, FluxRef,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
+use crate::solver::model::backend::typed_ast::{
+    typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
+};
 use crate::solver::units::si;
+use cfd2_ir::solver::dimensions::{
+    Density, DynamicViscosity, Force, MassFlux, Pressure, Velocity,
+};
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
@@ -35,41 +40,61 @@ impl IncompressibleMomentumFields {
     }
 }
 
-fn build_incompressible_momentum_system(fields: &IncompressibleMomentumFields) -> EquationSystem {
-    // NOTE: This model uses terms where the integrated units are semantically equivalent
-    // but structurally different in the type system (e.g., MassFlux * Velocity vs
-    // MomentumDensity * Volume / Time). The untyped builder with runtime validation
-    // is used here. TODO: Add type-level normalization for equivalent dimensions.
+fn build_incompressible_momentum_system(_fields: &IncompressibleMomentumFields) -> EquationSystem {
+    // NOTE: This model uses typed builder APIs with explicit cast_to() calls to align
+    // terms to canonical dimension types. The type-level dimension expressions are not
+    // normalized, so semantically equivalent dimensions (e.g., MassFlux * Velocity vs
+    // MomentumDensity * Volume / Time) are different types; cast_to::<Force>() unifies them.
 
-    let momentum = (fvm::ddt_coeff(
-        Coefficient::field(fields.rho).expect("rho must be scalar"),
-        fields.u,
-    ) + fvm::div(fields.phi, fields.u)
-        + fvm::laplacian(
-            Coefficient::field(fields.mu).expect("mu must be scalar"),
-            fields.u,
-        )
-        + fvc::grad(fields.p))
-    .eqn(fields.u);
+    // Build typed field and flux references
+    let u_typed = TypedFieldRef::<Velocity, Vector2>::new("U");
+    let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
+    let phi_typed = TypedFluxRef::<MassFlux, Scalar>::new("phi");
+    let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
+    let mu_typed = TypedFieldRef::<DynamicViscosity, Scalar>::new("mu");
+    let d_p_typed = TypedFieldRef::<cfd2_ir::solver::dimensions::D_P, Scalar>::new("d_p");
 
-    let pressure = (fvm::laplacian(
-        Coefficient::product(
-            Coefficient::field(fields.rho).expect("rho must be scalar"),
-            Coefficient::field(fields.d_p).expect("d_p must be scalar"),
-        )
-        .expect("pressure coefficient must be scalar"),
-        fields.p,
-    )
-    // SIMPLE-style pressure correction source term.
-    //
-    // Enforce continuity via div(phi) = 0 by solving a Poisson equation whose RHS is the
-    // divergence of the current face mass flux.
-    + fvm::div_flux(fields.phi, fields.p))
-    .eqn(fields.p);
+    // Build coefficients
+    let rho_coeff = TypedCoeff::from_field(rho_typed);
+    let mu_coeff = TypedCoeff::from_field(mu_typed);
+    let rho_dp_coeff = TypedCoeff::from_field(rho_typed).mul(TypedCoeff::from_field(d_p_typed));
+
+    // Build momentum equation terms
+    // ddt(rho, U): integrated unit is MomentumDensity * Volume / Time = Force
+    let ddt_term = typed_fvm::ddt_coeff(rho_coeff, u_typed);
+
+    // div(phi, U): integrated unit is MassFlux * Velocity = Force
+    let div_term = typed_fvm::div(phi_typed, u_typed);
+
+    // laplacian(mu, U): integrated unit is DynamicViscosity * Velocity * Area / Length = Force
+    let laplacian_term = typed_fvm::laplacian(mu_coeff, u_typed);
+
+    // grad(p): integrated unit is Pressure * Area = Force
+    let grad_term = typed_fvc::grad(p_typed);
+
+    // Cast all terms to Force and add
+    let momentum_eqn = (ddt_term.cast_to::<Force>()
+        + div_term.cast_to::<Force>()
+        + laplacian_term.cast_to::<Force>()
+        + grad_term.cast_to::<Force>())
+    .eqn(u_typed);
+
+    // Build pressure equation terms
+    // laplacian(rho*d_p, p): integrated unit is (rho*d_p) * Pressure * Area / Length = MassFlux
+    // where rho*d_p has units: Density * (Volume*Time/Mass) = Time (since Volume/Mass = 1/Density)
+    // So the unit is: Time * Pressure * Area / Length = Time * (Mass/(Length*Time^2)) * Length
+    // = Mass / Time = MassFlux
+    let p_laplacian_term = typed_fvm::laplacian(rho_dp_coeff, p_typed);
+
+    // div_flux(phi, p): integrated unit is MassFlux
+    let p_div_flux_term = typed_fvm::div_flux(phi_typed, p_typed);
+
+    // Cast all terms to MassFlux and add
+    let pressure_eqn = (p_laplacian_term.cast_to::<MassFlux>() + p_div_flux_term.cast_to::<MassFlux>()).eqn(p_typed);
 
     let mut system = EquationSystem::new();
-    system.add_equation(momentum);
-    system.add_equation(pressure);
+    system.add_equation(momentum_eqn);
+    system.add_equation(pressure_eqn);
 
     // Validate units to ensure the system is consistent
     system

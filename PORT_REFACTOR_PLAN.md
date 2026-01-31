@@ -416,6 +416,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 - [ ] Migrate model constructors in `src/solver/model/definitions/*` to use the typed builder APIs (still producing the same `EquationSystem` as output).
   - **Current**: some model definitions still use the untyped builder + `EquationSystem::validate_units()` assertions as a runtime backstop.
   - ✅ Migrated: `generic_diffusion_demo` (+ Neumann variant) uses typed builder + `cast_to()`
+  - ✅ Migrated: `incompressible_momentum` uses typed builder + `cast_to()` (`Force` / `MassFlux`)
 - [ ] Update `crates/cfd2_codegen/src/solver/codegen/ir.rs` (`lower_system`) to:
   - Prefer typed-built systems (no unit errors expected)
   - Keep `validate_units()` for any remaining untyped system construction paths

@@ -12,7 +12,7 @@ use super::wgsl_dsl as dsl;
 use super::KernelWgsl;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
 use crate::solver::codegen::primitive_expr::lower_primitive_expr;
-use crate::solver::codegen::state_access::resolve_state_offset_by_name;
+
 use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::ir::ports::{ParamSpec, ResolvedStateSlotsSpec};
@@ -38,7 +38,7 @@ pub fn generate_generic_coupled_assembly_wgsl(
 pub fn generate_generic_coupled_update_wgsl(
     system: &DiscreteSystem,
     slots: &ResolvedStateSlotsSpec,
-    primitives: &[(String, PrimitiveExpr)],
+    primitives: &[(u32, PrimitiveExpr)],
     apply_relaxation: bool,
     relaxation_requires_dtau: bool,
     eos_params: &[ParamSpec],
@@ -866,7 +866,7 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
 fn main_update_fn(
     system: &DiscreteSystem,
     slots: &ResolvedStateSlotsSpec,
-    primitives: &[(String, PrimitiveExpr)],
+    primitives: &[(u32, PrimitiveExpr)],
     apply_relaxation: bool,
     relaxation_requires_dtau: bool,
 ) -> Function {
@@ -948,14 +948,13 @@ fn main_update_fn(
     //
     // This is intentionally emitted inside the model-side update kernel to avoid
     // additional per-model registry plumbing.
+    //
+    // Primitives are pre-resolved to state offsets by the caller (model-side).
     if !primitives.is_empty() {
         let cell_idx = Expr::ident("idx");
-        for (name, expr) in primitives {
-            let Some(offset) = resolve_state_offset_by_name(slots, name) else {
-                continue;
-            };
+        for (offset, expr) in primitives {
             let value = lower_primitive_expr(expr, slots, cell_idx.clone(), "state");
-            let target = dsl::array_access_linear("state", Expr::ident("idx"), stride, offset);
+            let target = dsl::array_access_linear("state", Expr::ident("idx"), stride, *offset);
             stmts.push(dsl::assign_expr(target, value));
         }
     }

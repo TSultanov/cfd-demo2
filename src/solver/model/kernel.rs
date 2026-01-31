@@ -339,6 +339,38 @@ pub(crate) fn generate_packed_state_gradients_kernel_wgsl(
     .map_err(|e| e.to_string())
 }
 
+/// Resolve a state offset by field name, supporting component suffixes (e.g., "rho_u_x").
+/// Uses the ResolvedStateSlotsSpec to find the base offset and add component index.
+fn resolve_offset_from_slots(slots: &ResolvedStateSlotsSpec, name: &str) -> Option<u32> {
+    // Helper to find a slot by field name
+    fn find_slot<'a>(
+        slots: &'a ResolvedStateSlotsSpec,
+        field: &str,
+    ) -> Option<&'a ResolvedStateSlotSpec> {
+        slots.slots.iter().find(|s| s.name == field)
+    }
+
+    // First, try direct field lookup
+    if let Some(slot) = find_slot(slots, name) {
+        return Some(slot.base_offset);
+    }
+
+    // Try to parse component suffix (_x, _y, _z)
+    let (base, component) = name.rsplit_once('_')?;
+    let component = match component {
+        "x" => 0,
+        "y" => 1,
+        "z" => 2,
+        _ => return None,
+    };
+
+    let slot = find_slot(slots, base)?;
+    if component >= slot.kind.component_count() {
+        return None;
+    }
+    Some(slot.base_offset + component)
+}
+
 pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
@@ -356,11 +388,20 @@ pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
         }
     };
     let slots = resolved_slots_from_layout(&model.state_layout);
+
+    // Pre-resolve primitive output offsets (skip primitives that cannot be resolved)
+    let resolved_prims: Vec<(u32, cfd2_codegen::solver::shared::PrimitiveExpr)> = prims
+        .into_iter()
+        .filter_map(|(name, expr)| {
+            resolve_offset_from_slots(&slots, &name).map(|offset| (offset, expr))
+        })
+        .collect();
+
     let eos_params = extract_eos_params(model);
     Ok(cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_update_wgsl(
         &discrete,
         &slots,
-        &prims,
+        &resolved_prims,
         apply_relaxation,
         relaxation_requires_dtau,
         &eos_params,

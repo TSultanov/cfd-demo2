@@ -1,5 +1,7 @@
 use crate::solver::codegen::dsl::{DynExpr, DslType};
-use crate::solver::codegen::state_access::{state_scalar_typed, state_vec2_typed, state_vec3_typed};
+use crate::solver::codegen::state_access::{
+    state_scalar_slot_typed, state_vec2_slot_typed, state_vec3_slot_typed,
+};
 use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotsSpec};
 use crate::solver::ir::Coefficient;
@@ -134,15 +136,15 @@ fn coeff_expr_dyn(slots: &ResolvedStateSlotsSpec, coeff: &Coefficient, sample: C
                 }
                 match sample {
                     CoeffSample::Cell { idx } => {
-                        state_scalar_typed(slots, "state", idx, field.name())
+                        state_scalar_slot_typed(slots.stride, "state", idx, slot)
                     }
                     CoeffSample::Face {
                         owner_idx,
                         neighbor_idx,
                         interp,
                     } => {
-                        let own = state_scalar_typed(slots, "state", owner_idx, field.name());
-                        let neigh = state_scalar_typed(slots, "state", neighbor_idx, field.name());
+                        let own = state_scalar_slot_typed(slots.stride, "state", owner_idx, slot);
+                        let neigh = state_scalar_slot_typed(slots.stride, "state", neighbor_idx, slot);
                         // interp is dimensionless scalar
                         let interp_dyn = DynExpr::new(interp, DslType::f32(), si::DIMENSIONLESS);
                         let one = DynExpr::f32(1.0, si::DIMENSIONLESS);
@@ -169,17 +171,17 @@ fn coeff_expr_dyn(slots: &ResolvedStateSlotsSpec, coeff: &Coefficient, sample: C
 
             let mag_sqr_at = |idx: &str| match slot.kind {
                 PortFieldKind::Scalar => {
-                    let v = state_scalar_typed(slots, "state", idx, field.name());
+                    let v = state_scalar_slot_typed(slots.stride, "state", idx, slot);
                     // v * v (square the unit)
                     v.clone() * v
                 }
                 PortFieldKind::Vector2 => {
-                    let v = state_vec2_typed(slots, "state", idx, field.name());
+                    let v = state_vec2_slot_typed(slots.stride, "state", idx, slot);
                     // dot product: v · v (produces squared unit)
                     v.clone().dot(&v).expect("dot product for vec2")
                 }
                 PortFieldKind::Vector3 => {
-                    let v = state_vec3_typed(slots, "state", idx, field.name());
+                    let v = state_vec3_slot_typed(slots.stride, "state", idx, slot);
                     // dot product: v · v (produces squared unit)
                     v.clone().dot(&v).expect("dot product for vec3")
                 }

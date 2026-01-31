@@ -464,6 +464,9 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 - Keep string-based helpers temporarily (mark as `#[deprecated]` during migration)
 - Update kernel generators to pass port metadata instead of raw strings (without importing `src/solver/model/*` into codegen)
 
+**Progress**:
+- ✅ Added slot-based state access helpers in `crates/cfd2_codegen/src/solver/codegen/state_access.rs` and refactored `crates/cfd2_codegen/src/solver/codegen/coeff_expr.rs` to use them when slot metadata is already available.
+
 ### Phase 7: Hard Cutoff (Week 9)
 
 **Goal**: Remove all legacy code

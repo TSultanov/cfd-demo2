@@ -3,6 +3,19 @@
 /// These types provide a pure-data representation of port metadata that can cross
 /// the IR/codegen boundary without depending on runtime port types.
 use crate::solver::units::UnitDim;
+
+/// Sentinel value for "any dimension" - used as an escape hatch to skip unit checks.
+///
+/// This constant represents a dimension that will not be validated against
+/// the actual field unit in StateLayout. Use this for dynamic-dimension fields
+/// where the unit is not known at compile time.
+pub const ANY_DIMENSION: UnitDim = UnitDim::from_rational(1000, 1, 1000, 1, 1000, 1, 1000, 1);
+
+/// Check if a unit dimension is the "any dimension" sentinel.
+pub fn is_any_dimension(unit: UnitDim) -> bool {
+    unit == ANY_DIMENSION
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PortManifest {
     /// Parameter ports (uniform buffer entries).

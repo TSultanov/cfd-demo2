@@ -832,8 +832,10 @@ impl PortRegistry {
                     registered_kind: entry.component_count,
                 });
             }
-            // Unit validation
-            if entry.runtime_dim != field.unit {
+            // Unit validation (skip if field expects ANY_DIMENSION sentinel)
+            if !crate::solver::ir::ports::is_any_dimension(field.unit)
+                && entry.runtime_dim != field.unit
+            {
                 return Err(PortRegistryError::FieldUnitMismatch {
                     name: format!("{} (from module '{}')", field.name, module_name),
                     expected: entry.runtime_dim,
@@ -862,9 +864,10 @@ impl PortRegistry {
                 });
             }
 
-            // Validate unit matches
+            // Validate unit matches (skip if field expects ANY_DIMENSION sentinel)
             let runtime_dim = layout_field.unit();
-            if runtime_dim != field.unit {
+            if !crate::solver::ir::ports::is_any_dimension(field.unit) && runtime_dim != field.unit
+            {
                 return Err(PortRegistryError::FieldUnitMismatch {
                     name: format!("{} (from module '{}')", field.name, module_name),
                     expected: field.unit,

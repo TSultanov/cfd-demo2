@@ -40,8 +40,8 @@ impl FieldRef {
         Self { name, kind, unit }
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn name(&self) -> &'static str {
+        self.name
     }
 
     pub fn kind(&self) -> FieldKind {

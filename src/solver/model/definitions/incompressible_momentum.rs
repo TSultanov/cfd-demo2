@@ -245,6 +245,11 @@ pub fn incompressible_momentum_model() -> ModelSpec {
     )
     .expect("failed to build flux_module module");
 
+    // Build rhie_chow module before system is moved into ModelSpec
+    let rhie_chow_module =
+        crate::solver::model::modules::rhie_chow::rhie_chow_aux_module(&system, "d_p", true, true)
+            .expect("failed to create rhie_chow_aux_module");
+
     let model = ModelSpec {
         id: "incompressible_momentum",
         system,
@@ -257,7 +262,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             ),
             flux_module_module,
             crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
-            crate::solver::model::modules::rhie_chow::rhie_chow_aux_module("d_p", true, true),
+            rhie_chow_module,
         ],
         // The generic coupled path needs a saddle-point-capable preconditioner.
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {

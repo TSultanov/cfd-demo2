@@ -214,11 +214,11 @@ migration steps to move that logic onto the port infrastructure.
 - [x] Define dimension aliases needed by this module in the canonical IR type-level dimensions module (see "Type-Level Dimensions Migration"):
   - `PressureGradient = DivDim<Pressure, Length>`
   - `D_P = DivDim<MulDim<Volume, Time>, Mass>` (matches `si::D_P`)
-- [ ] Create a port set / dynamic manifest entries for:
+- [x] Create a port set / dynamic manifest entries for:
   - `dp_field`: scalar field (`D_P`, Scalar) (name comes from module config)
   - `grad_p` + `grad_p_old`: vector2 fields (`PressureGradient`, Vector2) (names derived from inferred pressure field)
   - `momentum`: vector2 field (dimension is model-dependent; use the chosen escape hatch)
-- [ ] Add a single resolver:
+- [x] Add a single resolver:
   - Infer `(momentum, pressure)` via `infer_unique_momentum_pressure_coupling_referencing_dp`
   - Build all ports (and derived `grad_*` names) from that inference once (avoid duplicating inference/registration per-kernel)
 - [x] Change the kernel generators in this module to use ports/offsets in the runtime build:
@@ -591,11 +591,12 @@ As of **2026-01-31**:
 - `#[derive(PortSet)]` exists (param/field/buffer) with trybuild tests; `PortRegistry` registration is idempotent
 - `#[derive(ModulePorts)]` exists but still needs a clarified integration story (how/when modules materialize a port set and expose it to codegen)
 - IR-safe `PortManifest` exists (`crates/cfd2_ir/src/solver/ir/ports.rs`) and is attached to `ModuleManifest` via `ModuleManifest.port_manifest`
+- `PortManifest` field specs support an `ANY_DIMENSION` unit sentinel to skip unit validation for dynamic-dimension fields
 - Named parameter allowlisting now includes `port_manifest.params[*].key`, so modules no longer need to duplicate uniform params in `manifest.named_params`
 - First module migrated: `eos` publishes a `PortManifest` for its uniform params and no longer duplicates those uniform keys in `manifest.named_params` (keeps only non-uniform/escape-hatch keys there)
 - Second module migrated: `generic_coupled` publishes a `PortManifest` for its uniform params and no longer duplicates those uniform keys in `manifest.named_params` (keeps only host-only keys there)
 - Derived/dynamic field name support is implemented via a centralized interner (`src/solver/model/ports/intern.rs`); `PortRegistry::{register_field,register_scalar_field,register_vector2_field,register_vector3_field}` accept `&str`
-- `rhie_chow` kernel generators use `PortRegistry` (runtime build) to resolve offsets/stride and derived `grad_<p>` names; the build script compilation context still uses the legacy `StateLayout` code paths
+- `rhie_chow` publishes a `PortManifest` (dp, grad_p, grad_p_old, momentum) and pre-resolves momentum/pressure coupling at module creation; kernel generators use `PortRegistry` (runtime build) to resolve offsets/stride; the build script compilation context still uses the legacy `StateLayout` code paths
 - `flux_module_gradients_wgsl` resolves targets + offsets before WGSL generation; runtime uses `PortRegistry` for offsets (still scans `StateLayout` for target discovery); the build script compilation context still uses legacy `StateLayout` offsets
 - `flux_module_wgsl` uses `PortRegistry` (runtime build) to resolve state offsets (still probes `StateLayout` for name/kind decisions); the build script compilation context still uses legacy `StateLayout` offsets
 - `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present

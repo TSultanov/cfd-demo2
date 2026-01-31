@@ -196,8 +196,10 @@ impl ModelSpec {
                         ));
                     }
 
-                    // Validate unit dimension matches
-                    if field_spec.unit != layout_field.unit() {
+                    // Validate unit dimension matches (skip for ANY_DIMENSION sentinel)
+                    if field_spec.unit != crate::solver::ir::ports::ANY_DIMENSION
+                        && field_spec.unit != layout_field.unit()
+                    {
                         return Err(format!(
                             "module '{}' port_manifest field '{}' unit mismatch: expected {}, found {}",
                             module.name,

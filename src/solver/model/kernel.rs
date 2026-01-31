@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use cfd2_codegen::solver::codegen::KernelWgsl;
-use cfd2_ir::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
+use cfd2_ir::solver::ir::ports::{ParamSpec, PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
 use cfd2_ir::solver::ir::StateLayout;
 
 /// Stable identifier for a compute kernel.
@@ -244,6 +244,24 @@ fn resolved_slots_from_layout(layout: &StateLayout) -> ResolvedStateSlotsSpec {
     }
 }
 
+/// Extract EOS params for WGSL generation.
+///
+/// Uses the model's "eos" module port manifest if present, otherwise falls back
+/// to the canonical EOS param list to ensure shared kernels generate identical
+/// WGSL across all models.
+fn extract_eos_params(model: &crate::solver::model::ModelSpec) -> Vec<ParamSpec> {
+    model
+        .modules
+        .iter()
+        .find(|m| m.name == "eos")
+        .and_then(|m| m.manifest.port_manifest.as_ref())
+        .map(|p| p.params.clone())
+        .unwrap_or_else(|| {
+            crate::solver::model::modules::eos_ports::eos_uniform_port_manifest()
+                .params
+        })
+}
+
 pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
@@ -260,11 +278,13 @@ pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
         .map(|_| model.system.unknowns_per_cell())
         .unwrap_or(0);
     let slots = resolved_slots_from_layout(&model.state_layout);
+    let eos_params = extract_eos_params(model);
     Ok(cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
         &discrete,
         &slots,
         flux_stride,
         needs_gradients,
+        &eos_params,
     ))
 }
 
@@ -296,11 +316,13 @@ pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_wgsl(
         .map(|_| model.system.unknowns_per_cell())
         .unwrap_or(0);
     let slots = resolved_slots_from_layout(&model.state_layout);
+    let eos_params = extract_eos_params(model);
     Ok(cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
         &discrete,
         &slots,
         flux_stride,
         needs_gradients,
+        &eos_params,
     ))
 }
 
@@ -308,9 +330,11 @@ pub(crate) fn generate_packed_state_gradients_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     _schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<KernelWgsl, String> {
+    let eos_params = extract_eos_params(model);
     cfd2_codegen::solver::codegen::generate_packed_state_gradients_wgsl(
         &model.state_layout,
         model.system.unknowns_per_cell(),
+        &eos_params,
     )
     .map_err(|e| e.to_string())
 }
@@ -332,12 +356,14 @@ pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
         }
     };
     let slots = resolved_slots_from_layout(&model.state_layout);
+    let eos_params = extract_eos_params(model);
     Ok(cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_update_wgsl(
         &discrete,
         &slots,
         &prims,
         apply_relaxation,
         relaxation_requires_dtau,
+        &eos_params,
     ))
 }
 

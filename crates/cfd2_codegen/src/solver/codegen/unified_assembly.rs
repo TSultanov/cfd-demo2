@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use super::coeff_expr::coeff_cell_expr;
+use super::constants::constants_struct;
 use super::dsl as typed;
 use super::state_access::state_component;
 use super::wgsl_ast::{
@@ -13,7 +14,7 @@ use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
 use crate::solver::codegen::reconstruction::scalar_reconstruction;
 use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::gpu::enums::TimeScheme;
-use crate::solver::ir::ports::ResolvedStateSlotsSpec;
+use crate::solver::ir::ports::{ParamSpec, ResolvedStateSlotsSpec};
 use crate::solver::ir::{Coefficient, Discretization, TermOp};
 use crate::solver::scheme::Scheme;
 
@@ -22,6 +23,7 @@ pub fn generate_unified_assembly_wgsl(
     slots: &ResolvedStateSlotsSpec,
     flux_stride: u32,
     needs_gradients: bool,
+    eos_params: &[ParamSpec],
 ) -> KernelWgsl {
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -39,7 +41,7 @@ pub fn generate_unified_assembly_wgsl(
         panic!("unified_assembly requires flux_stride > 0 when convection ops are present");
     }
 
-    module.extend(base_assembly_items(needs_gradients, needs_fluxes));
+    module.extend(base_assembly_items(needs_gradients, needs_fluxes, eos_params));
     module.push(Item::Function(main_assembly_fn(
         system,
         slots,
@@ -59,31 +61,7 @@ fn vector2_struct() -> StructDef {
     )
 }
 
-fn constants_struct() -> StructDef {
-    StructDef::new(
-        "Constants",
-        vec![
-            StructField::new("dt", Type::F32),
-            StructField::new("dt_old", Type::F32),
-            StructField::new("dtau", Type::F32),
-            StructField::new("time", Type::F32),
-            StructField::new("viscosity", Type::F32),
-            StructField::new("density", Type::F32),
-            StructField::new("component", Type::U32),
-            StructField::new("alpha_p", Type::F32),
-            StructField::new("scheme", Type::U32),
-            StructField::new("alpha_u", Type::F32),
-            StructField::new("stride_x", Type::U32),
-            StructField::new("time_scheme", Type::U32),
-            StructField::new("eos_gamma", Type::F32),
-            StructField::new("eos_gm1", Type::F32),
-            StructField::new("eos_r", Type::F32),
-            StructField::new("eos_dp_drho", Type::F32),
-            StructField::new("eos_p_offset", Type::F32),
-            StructField::new("eos_theta_ref", Type::F32),
-        ],
-    )
-}
+// Use the shared constants helper from the constants module.
 
 fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
     Item::GlobalVar(GlobalVar::new(
@@ -105,10 +83,10 @@ fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
     ))
 }
 
-fn base_mesh_items() -> Vec<Item> {
+fn base_mesh_items(eos_params: &[ParamSpec]) -> Vec<Item> {
     vec![
         Item::Struct(vector2_struct()),
-        Item::Struct(constants_struct()),
+        Item::Struct(constants_struct(eos_params)),
         Item::Comment("Group 0: Mesh".to_string()),
         storage_var("face_owner", Type::array(Type::U32), 0, 0, AccessMode::Read),
         storage_var(
@@ -209,9 +187,9 @@ fn base_state_items(needs_gradients: bool, needs_fluxes: bool) -> Vec<Item> {
     items
 }
 
-fn base_assembly_items(needs_gradients: bool, needs_fluxes: bool) -> Vec<Item> {
+fn base_assembly_items(needs_gradients: bool, needs_fluxes: bool, eos_params: &[ParamSpec]) -> Vec<Item> {
     let mut items = Vec::new();
-    items.extend(base_mesh_items());
+    items.extend(base_mesh_items(eos_params));
     items.extend(base_state_items(needs_gradients, needs_fluxes));
     items.push(Item::Comment(
         "Group 2: Solver (block CSR values + RHS)".to_string(),

@@ -20,8 +20,8 @@ Based on design discussions, the implementation follows these principles:
 |-------|--------|----------|-------------|
 | 1. Macro Infrastructure | **Mostly Done** | ~90% | `cfd2_macros` has `PortSet` derive (param/field/buffer) + trybuild tests; `ModulePorts` exists but needs integration strategy (how/when modules materialize port sets) |
 | 2. Core Port Runtime | **Done** | 100% | `src/solver/model/ports/*` exists (ports + registry + tests); registry supports idempotent registration + conflict errors; IR-safe manifests can be registered dynamically; dimension enforcement policy is implemented (with an explicit escape hatch for dynamic dimensions) |
-| 3. PortManifest + Module Integration | **In Progress** | ~80% | IR-safe `PortManifest` defined in `cfd2_ir`; attached to `ModuleManifest`; `PortRegistry::register_manifest` exists and `SolverRecipe` stores a `port_registry`; named-param allowlisting now consumes `port_manifest.params`; first modules (`eos`, `generic_coupled`) migrated |
-| 4. Low-Risk Migration | **In Progress** | ~66% | `eos` + `generic_coupled` publish `PortManifest` for uniform params; `generic_coupled_apply` wrapper removed (kernel remains in `generic_coupled`) |
+| 3. PortManifest + Module Integration | **Done** | 100% | IR-safe `PortManifest` is wired through runtime + build-time; named-param allowlisting consumes `port_manifest.params`; WGSL `Constants` generation consumes manifest params (no ad-hoc string lists) |
+| 4. Low-Risk Migration | **Done** | 100% | `eos` + `generic_coupled` publish `PortManifest` for uniform params; `generic_coupled_apply` wrapper removed (kernel remains in `generic_coupled`) |
 | 5. Field-Access Migration | **In Progress** | ~90% | `flux_module_gradients_wgsl` no longer scans `StateLayout` during WGSL generation (targets pre-resolved); `flux_module_wgsl` consumes pre-resolved `ResolvedStateSlotsSpec` from `PortManifest` (no `StateLayout` probing) and has WGSL goldens; `rhie_chow` runtime generators migrated to PortRegistry (build-script fallback remains); `generic_coupled` GPU lowering migrated to use pre-resolved unknown-to-state mapping via PortRegistry (runtime path works correctly with all StateLayout fields pre-registered; tests cover the runtime resolver); flux-module gradient targets now stored in IR-safe `PortManifest` |
 | 6. Codegen Replacement | Pending | 0% | Replace string-based codegen |
 | 7. Hard Cutoff | Pending | 0% | Remove deprecated APIs |
@@ -86,7 +86,7 @@ src/solver/model/ports/
 └── tests.rs
 ```
 
-### Phase 3: PortManifest + Module Integration (In Progress)
+### Phase 3: PortManifest + Module Integration (Done)
 
 **Goal**: Replace/augment `ModuleManifest` so modules can declare ports and the solver can build/validate a port registry
 
@@ -102,8 +102,9 @@ src/solver/model/ports/
 - [x] Align EOS `PortManifest` `wgsl_field` names with the `Constants` uniform struct (e.g. `eos_*`) and add regression assertions
 
 **Remaining**:
-- [ ] Integrate with existing build-time generation (WGSL emission still does not use `PortManifest`; build-time plumbing should not require ad-hoc string lists once port manifests are the single source of truth)
-  - Prep: ensure module `port_manifest` is populated in build-script compilation (no `#[cfg(cfd2_build_script)]` gating for IR-safe manifests).
+- [x] Integrate with existing build-time generation (WGSL emission uses `PortManifest`; build-time plumbing avoids ad-hoc string lists once port manifests are the single source of truth)
+  - Ensure module `port_manifest` is populated in build-script compilation (no `#[cfg(cfd2_build_script)]` gating for IR-safe manifests).
+  - WGSL `Constants` generation consumes `PortManifest.params` (e.g. EOS) rather than hard-coded field lists.
 - [x] Add validation helpers ("missing field", "wrong kind", "dimension mismatch", etc.) (`PortRegistry::validate_*` in `src/solver/model/ports/registry.rs`)
 - [x] Add `ports::prelude` for convenient imports for module authors
 

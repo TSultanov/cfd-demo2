@@ -483,6 +483,20 @@ fn generate_flux_module_kernel_wgsl(
         .and_then(|p| p.resolved_state_slots.as_ref())
         .ok_or_else(|| "flux_module port_manifest missing resolved_state_slots".to_string())?;
 
+    // Extract EOS params for WGSL generation. Use the model's "eos" module port
+    // manifest if present, otherwise fall back to the canonical EOS param list
+    // to ensure consistent WGSL across all models.
+    let eos_params: Vec<crate::solver::ir::ports::ParamSpec> = model
+        .modules
+        .iter()
+        .find(|m| m.name == "eos")
+        .and_then(|m| m.manifest.port_manifest.as_ref())
+        .map(|p| p.params.clone())
+        .unwrap_or_else(|| {
+            crate::solver::model::modules::eos_ports::eos_uniform_port_manifest()
+                .params
+        });
+
     match flux {
         crate::solver::model::flux_module::FluxModuleSpec::Kernel { kernel, .. } => {
             Ok(wgsl_flux::generate_flux_module_wgsl(
@@ -491,6 +505,7 @@ fn generate_flux_module_kernel_wgsl(
                 flux_stride,
                 &prims,
                 kernel,
+                &eos_params,
             ))
         }
         crate::solver::model::flux_module::FluxModuleSpec::Scheme { scheme, .. } => {
@@ -523,6 +538,7 @@ fn generate_flux_module_kernel_wgsl(
                 flux_stride,
                 &prims,
                 &variants,
+                &eos_params,
             ))
         }
     }

@@ -394,24 +394,60 @@ fn generate_flux_module_gradients_kernel_wgsl(
             "flux_module_gradients requested but model has no flux module".to_string()
         })?;
 
-    match flux {
-        crate::solver::model::flux_module::FluxModuleSpec::Kernel {
-            gradients: Some(_), ..
+    // Check if gradients are enabled for this flux module
+    let has_gradients = match &flux {
+        crate::solver::model::flux_module::FluxModuleSpec::Kernel { gradients, .. } => {
+            gradients.is_some()
         }
-        | crate::solver::model::flux_module::FluxModuleSpec::Scheme {
-            gradients: Some(_), ..
-        } => {
-            let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
-            // Resolve gradient targets first, then generate WGSL
-            let targets = resolve_flux_module_gradients_targets(&model.state_layout, &flux_layout)?;
-            Ok(generate_flux_module_gradients_wgsl(
-                model.state_layout.stride(),
-                &flux_layout,
-                &targets,
-            ))
+        crate::solver::model::flux_module::FluxModuleSpec::Scheme { gradients, .. } => {
+            gradients.is_some()
         }
-        _ => Err("flux_module_gradients requested but model has no gradients stage".to_string()),
+    };
+
+    if !has_gradients {
+        return Err("flux_module_gradients requested but model has no gradients stage".to_string());
     }
+
+    // Fetch pre-resolved gradient targets from the flux_module's port_manifest
+    let flux_module = model
+        .modules
+        .iter()
+        .find(|m| m.name == "flux_module")
+        .ok_or_else(|| "flux_module_gradients: flux_module not found in model".to_string())?;
+
+    let port_manifest = flux_module
+        .manifest
+        .port_manifest
+        .as_ref()
+        .ok_or_else(|| "flux_module_gradients: port_manifest missing".to_string())?;
+
+    if port_manifest.gradient_targets.is_empty() {
+        return Err("flux_module_gradients: gradient_targets empty in port_manifest".to_string());
+    }
+
+    // Convert IR-safe ResolvedGradientTargetSpec to local ResolvedGradientTarget
+    let targets: Vec<ResolvedGradientTarget> = port_manifest
+        .gradient_targets
+        .iter()
+        .map(|spec| ResolvedGradientTarget {
+            component: spec.component.clone(),
+            base_field: spec.base_field.clone(),
+            base_component: spec.base_component,
+            base_offset: spec.base_offset,
+            grad_x_offset: spec.grad_x_offset,
+            grad_y_offset: spec.grad_y_offset,
+            bc_unknown_offset: spec.bc_unknown_offset,
+            slip_vec2_x_offset: spec.slip_vec2_x_offset,
+            slip_vec2_y_offset: spec.slip_vec2_y_offset,
+        })
+        .collect();
+
+    let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
+    Ok(generate_flux_module_gradients_wgsl(
+        model.state_layout.stride(),
+        &flux_layout,
+        &targets,
+    ))
 }
 
 /// Resolve state slots for flux module based on the spec type.

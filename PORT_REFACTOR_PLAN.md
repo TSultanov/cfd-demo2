@@ -598,15 +598,15 @@ As of **2026-01-31**:
 - Second module migrated: `generic_coupled` publishes a `PortManifest` for its uniform params and no longer duplicates those uniform keys in `manifest.named_params` (keeps only host-only keys there)
 - Derived/dynamic field name support is implemented via a centralized interner (`src/solver/model/ports/intern.rs`); `PortRegistry::{register_field,register_scalar_field,register_vector2_field,register_vector3_field}` accept `&str`
 - `rhie_chow` publishes a `PortManifest` (dp, grad_p, grad_p_old, momentum) and pre-resolves momentum/pressure coupling at module creation; kernel generators use `PortRegistry` (runtime build) to resolve offsets/stride; the build script compilation context still uses the legacy `StateLayout` code paths
-- `flux_module_gradients_wgsl` resolves targets + offsets before WGSL generation; runtime uses `PortRegistry` for offsets (still scans `StateLayout` for target discovery); the build script compilation context still uses legacy `StateLayout` offsets
+- `flux_module_gradients_wgsl` consumes pre-resolved `PortManifest.gradient_targets` during kernel WGSL generation; target discovery still scans `StateLayout` during module creation; the build script compilation context still uses legacy `StateLayout` offsets
 - `flux_module_wgsl` consumes pre-resolved `PortManifest.resolved_state_slots` (IR-safe `ResolvedStateSlotsSpec`) and no longer probes `StateLayout`; golden WGSL tests cover compressible + incompressible_momentum
 - `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present
 - `cfd2_build_script` cfg is currently used as a build-time hack to exclude runtime-only manifest attachment from the build script’s `include!()` compilation context; regression coverage exists to ensure the runtime recipe populates `port_registry` from the EOS manifest
-- Build-time codegen still does not use port manifests, and string-based lookups remain in core hotspots (see “Module Migration Playbook”)
+- Build-time codegen consumes port manifests for uniform params (e.g. EOS `Constants` fields); string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 
 **Next (recommended)**:
 - ✅ `generic_coupled_apply` module wrapper removed (kernel remains in `generic_coupled`).
-- Phase 3: start consuming `port_manifest` at build time (codegen):
+- ✅ Phase 3: consume `port_manifest` at build time (codegen):
   - Plumb module `PortManifest` data into the build-time pipeline (uniform params + bindings), reducing reliance on ad-hoc string lists.
   - Keep an escape hatch for params that are not yet representable as `ParamPort<...>` (e.g. `low_mach.model` as `u32` enum).
 - Continue migrating `flux_module`:

@@ -329,7 +329,8 @@ migration steps to move that logic onto the port infrastructure.
 - Invariant validation checks required fields via `state_layout.field(...)` / `component_offset(...)`.
 
 **Migration steps**:
-- [ ] Make `PortManifest` the single source of truth for "required fields" and "gradient targets".
+- [x] Make `PortManifest.gradient_targets` the single source of truth for flux-module gradients validation (no `StateLayout` `grad_*` scanning in `ModelSpec::validate_module_manifests()`).
+- [ ] Make `PortManifest` the single source of truth for "required fields" (beyond gradient targets).
 - [ ] Convert validation to:
   - Resolve all required ports once, returning structured `PortValidationError`
   - Avoid repeated `StateLayout` probing across multiple validation passes

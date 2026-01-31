@@ -137,7 +137,6 @@ impl ModelSpec {
         // `advection_scheme` parameter (shared with unified_assembly), but some flux modules
         // still require precomputed `grad_*` fields (e.g. Rhie–Chow / pressure-correction).
         if let Some(flux) = flux {
-            use crate::solver::model::backend::FieldKind;
             use crate::solver::model::flux_module::FluxModuleGradientsSpec;
 
             let gradients = match flux {
@@ -150,87 +149,24 @@ impl ModelSpec {
             };
 
             if matches!(gradients, Some(FluxModuleGradientsSpec::FromStateLayout)) {
-                let mut found_target = false;
+                // Find the unique module providing flux_module to access its port manifest.
+                // This uses the same uniqueness assumptions as ModelSpec::flux_module().
+                let flux_module_provider = self.modules.iter().find(|m| {
+                    m.manifest.flux_module.is_some()
+                });
 
-                for field in self.state_layout.fields() {
-                    let Some(base) = field.name().strip_prefix("grad_") else {
-                        continue;
-                    };
-                    if base.is_empty() {
-                        continue;
-                    }
+                let has_gradient_targets = flux_module_provider
+                    .and_then(|m| m.manifest.port_manifest.as_ref())
+                    .map(|pm| !pm.gradient_targets.is_empty())
+                    .unwrap_or(false);
 
-                    // Match codegen's `collect_gradients` behavior:
-                    // - `grad_<scalar>` targets scalar fields.
-                    // - `grad_<vec>_x` / `grad_<vec>_y` / `grad_<vec>_z` target vector components.
-                    //
-                    // `grad_*` fields whose base does not exist are ignored (e.g. auxiliary
-                    // fields that happen to use the `grad_` prefix but are not computed by the
-                    // gradients stage).
-                    let base_exists = if let Some(base_field) = self.state_layout.field(base) {
-                        if base_field.kind() != FieldKind::Scalar {
-                            return Err(format!(
-                                "flux_module gradients stage expects '{base}' to be scalar (base for '{}')",
-                                field.name()
-                            ));
-                        }
-                        true
-                    } else if let Some((base_field_name, component)) = base.rsplit_once('_') {
-                        if let Some(base_field) = self.state_layout.field(base_field_name) {
-                            let idx = match component {
-                                "x" => Some(0),
-                                "y" => Some(1),
-                                "z" => Some(2),
-                                _ => None,
-                            };
-                            if let Some(idx) = idx {
-                                if idx as u32 >= base_field.component_count() {
-                                    return Err(format!(
-                                        "flux_module gradients stage: base field '{}' has {} components, cannot select '{base}'",
-                                        base_field.name(),
-                                        base_field.component_count(),
-                                    ));
-                                }
-                                true
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    };
-
-                    if !base_exists {
-                        continue;
-                    }
-
-                    if field.kind() != FieldKind::Vector2 {
-                        return Err(format!(
-                            "flux_module gradients stage requires '{}' to be Vector2",
-                            field.name()
-                        ));
-                    }
-
-                    // Ensure the component offsets exist (avoids later codegen errors).
-                    for c in 0..2 {
-                        self.state_layout
-                            .component_offset(field.name(), c)
-                            .ok_or_else(|| {
-                                format!(
-                                "flux_module gradients stage requires '{}[{c}]' in state layout",
-                                field.name()
-                            )
-                            })?;
-                    }
-
-                    found_target = true;
-                }
-
-                if !found_target {
+                if !has_gradient_targets {
                     return Err("flux_module_gradients requested but no grad_<field> targets found in state layout".to_string());
                 }
+
+                // Gradient targets are pre-resolved at module creation time
+                // (in flux_module_module()) and stored in port_manifest.gradient_targets.
+                // No additional StateLayout scanning needed here.
             }
         }
 

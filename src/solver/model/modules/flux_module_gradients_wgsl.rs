@@ -35,6 +35,60 @@ mod tests {
     use crate::solver::units::si;
 
     #[test]
+    fn flux_module_gradients_wgsl_matches_committed_incompressible_momentum() {
+        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
+        use crate::solver::model::incompressible_momentum_model;
+        use crate::solver::ir::SchemeRegistry;
+
+        let model = incompressible_momentum_model();
+        let schemes = SchemeRegistry::default();
+        let generated = generate_kernel_wgsl_for_model_by_id(
+            &model,
+            &schemes,
+            KernelId::FLUX_MODULE_GRADIENTS,
+        )
+        .expect("should generate flux_module_gradients WGSL");
+
+        let committed = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/solver/gpu/shaders/generated/flux_module_gradients_incompressible_momentum.wgsl"
+        ));
+
+        assert_eq!(
+            generated.trim_end(),
+            committed.trim_end(),
+            "generated flux_module_gradients WGSL for incompressible_momentum does not match committed file"
+        );
+    }
+
+    #[test]
+    fn flux_module_gradients_wgsl_matches_committed_compressible() {
+        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
+        use crate::solver::model::compressible_model;
+        use crate::solver::ir::SchemeRegistry;
+
+        let model = compressible_model();
+        let schemes = SchemeRegistry::default();
+        let generated = generate_kernel_wgsl_for_model_by_id(
+            &model,
+            &schemes,
+            KernelId::FLUX_MODULE_GRADIENTS,
+        )
+        .expect("should generate flux_module_gradients WGSL");
+
+        let committed = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/solver/gpu/shaders/generated/flux_module_gradients_compressible.wgsl"
+        ));
+
+        assert_eq!(
+            generated.trim_end(),
+            committed.trim_end(),
+            "generated flux_module_gradients WGSL for compressible does not match committed file"
+        );
+    }
+
+    #[test]
     fn flux_module_gradients_accepts_vector_component_gradients() {
         let rho_u = vol_vector("rho_u", si::MOMENTUM_DENSITY);
         let grad_rho_u_x = vol_vector("grad_rho_u_x", si::MOMENTUM_DENSITY / si::LENGTH);

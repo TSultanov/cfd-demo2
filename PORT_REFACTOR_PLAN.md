@@ -156,7 +156,7 @@ pub struct EosModule {
 **Goal**: Migrate modules with field lookups
 
 **Modules**:
-- [ ] `flux_module_gradients_wgsl` - Gradients stage (targets pre-resolved; WGSL generator no longer scans `StateLayout`; build-script fallback remains)
+- [x] `flux_module_gradients_wgsl` - Gradients stage (targets pre-resolved; WGSL generator no longer scans `StateLayout`; build-script fallback remains)
 - [ ] `flux_module_wgsl` - Flux kernel WGSL generation (runtime offset resolution via PortRegistry; still probes `StateLayout` for kind/name resolution; build-script fallback remains)
 - [x] `rhie_chow` - Pressure-velocity coupling (runtime generators use PortRegistry; build-script fallback remains)
 
@@ -250,7 +250,7 @@ migration steps to move that logic onto the port infrastructure.
   - Tests updated to use runtime path with properly populated PortRegistry
 - [x] Change `generate_flux_module_gradients_wgsl(...)` to accept resolved targets instead of a `StateLayout`.
 - [x] Delete all `StateLayout` lookups from `flux_module_gradients_wgsl.rs` (generator no longer probes layout).
-- [ ] Add/keep tests to ensure WGSL output remains identical (or explicitly bless diffs).
+- [x] Add/keep tests to ensure WGSL output remains identical (or explicitly bless diffs).
 
 #### C) `src/solver/model/modules/flux_module_wgsl.rs` (Flux kernel WGSL generation)
 

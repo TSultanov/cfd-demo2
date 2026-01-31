@@ -9,7 +9,7 @@ pub use ast::{
     Term, TermOp,
 };
 pub use scheme::{SchemeRegistry, TermKey};
-pub use scheme_expansion::{expand_schemes, SchemeExpansion};
+pub use scheme_expansion::{expand_schemes, expand_schemes_unchecked, SchemeExpansion};
 pub use state_layout::{StateField, StateLayout};
 pub use typed_ast::{
     typed_fvc, typed_fvm, Kind, Scalar, TypedCoeff, TypedEquation, TypedEquationSystem,

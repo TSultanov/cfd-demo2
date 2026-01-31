@@ -418,10 +418,10 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
   - ✅ Migrated: `generic_diffusion_demo` (+ Neumann variant) uses typed builder + `cast_to()`
   - ✅ Migrated: `incompressible_momentum` uses typed builder + `cast_to()` (`Force` / `MassFlux`)
   - ✅ Migrated: `compressible` uses typed builder + `cast_to()` (`Force` / `MassFlux` / `Power`)
-- [ ] Update `crates/cfd2_codegen/src/solver/codegen/ir.rs` (`lower_system`) to:
+- [x] Update `crates/cfd2_codegen/src/solver/codegen/ir.rs` (`lower_system`) to:
   - Prefer typed-built systems (no unit errors expected)
   - Keep `validate_units()` for any remaining untyped system construction paths
-- [ ] Update `crates/cfd2_ir/src/solver/model/backend/scheme_expansion.rs` (`expand_schemes`) similarly:
+- [x] Update `crates/cfd2_ir/src/solver/model/backend/scheme_expansion.rs` (`expand_schemes`) similarly:
   - Prefer typed-built systems
   - Keep `validate_units()` as a backstop during migration
 

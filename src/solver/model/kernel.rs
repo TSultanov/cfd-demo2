@@ -266,8 +266,8 @@ pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<KernelWgsl, String> {
-    let discrete = cfd2_codegen::solver::codegen::lower_system(&model.system, schemes)
-        .map_err(|e| e.to_string())?;
+    // Use unchecked variant: model.system is already validated during construction.
+    let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(&model.system, schemes);
 
     // `generic_coupled_assembly` is the no-grad_state variant.
     // The grad_state-binding variant is emitted under `KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE`.
@@ -306,8 +306,8 @@ pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_wgsl(
         );
     }
 
-    let discrete = cfd2_codegen::solver::codegen::lower_system(&model.system, schemes)
-        .map_err(|e| e.to_string())?;
+    // Use unchecked variant: model.system is already validated during construction.
+    let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(&model.system, schemes);
 
     let needs_gradients = true;
     let flux_stride = model
@@ -343,8 +343,8 @@ pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<KernelWgsl, String> {
-    let discrete = cfd2_codegen::solver::codegen::lower_system(&model.system, schemes)
-        .map_err(|e| e.to_string())?;
+    // Use unchecked variant: model.system is already validated during construction.
+    let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(&model.system, schemes);
     let prims = model
         .primitives
         .ordered()

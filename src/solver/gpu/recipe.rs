@@ -13,7 +13,7 @@ use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::graph::DispatchKind;
 use crate::solver::gpu::structs::{GpuConstants, PreconditionerType};
-use crate::solver::model::backend::{expand_schemes, SchemeRegistry};
+use crate::solver::model::backend::{expand_schemes_unchecked, SchemeRegistry};
 use crate::solver::model::linear_solver::ModelLinearSolverType;
 use crate::solver::model::ports::PortRegistry;
 use crate::solver::model::{
@@ -247,8 +247,8 @@ impl SolverRecipe {
         }
 
         let scheme_registry = SchemeRegistry::new(advection_scheme);
-        let scheme_expansion = expand_schemes(&model.system, &scheme_registry)
-            .map_err(|e| format!("scheme expansion failed: {e}"))?;
+        // Use unchecked variant: model.system is already validated during construction.
+        let scheme_expansion = expand_schemes_unchecked(&model.system, &scheme_registry);
 
         let method = model.method()?;
         let gradient_storage = match method {

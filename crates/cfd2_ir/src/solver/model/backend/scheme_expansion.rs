@@ -19,12 +19,12 @@ impl SchemeExpansion {
     }
 }
 
-pub fn expand_schemes(
-    system: &EquationSystem,
-    schemes: &SchemeRegistry,
-) -> Result<SchemeExpansion, UnitValidationError> {
-    system.validate_units()?;
-
+/// Expand schemes without validation.
+///
+/// This is a "trusted" variant for systems that have already been validated
+/// (e.g., built with the typed builder). Prefer `expand_schemes` for untyped
+/// construction paths where validation is needed as a backstop.
+pub fn expand_schemes_unchecked(system: &EquationSystem, schemes: &SchemeRegistry) -> SchemeExpansion {
     let mut seen: HashSet<String> = HashSet::new();
     let mut gradient_fields = Vec::new();
 
@@ -43,7 +43,20 @@ pub fn expand_schemes(
         }
     }
 
-    Ok(SchemeExpansion { gradient_fields })
+    SchemeExpansion { gradient_fields }
+}
+
+/// Expand schemes with validation.
+///
+/// This is the standard entry point that validates units before expansion.
+/// For systems already known to be valid (e.g., typed-built), use
+/// `expand_schemes_unchecked` to avoid redundant validation.
+pub fn expand_schemes(
+    system: &EquationSystem,
+    schemes: &SchemeRegistry,
+) -> Result<SchemeExpansion, UnitValidationError> {
+    system.validate_units()?;
+    Ok(expand_schemes_unchecked(system, schemes))
 }
 
 #[cfg(test)]

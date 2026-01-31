@@ -49,11 +49,15 @@ pub struct DiscreteSystem {
     pub equations: Vec<DiscreteEquation>,
 }
 
-pub fn lower_system(
+/// Lower an equation system to a discrete system without validation.
+///
+/// This is a "trusted" variant for systems that have already been validated
+/// (e.g., built with the typed builder). Prefer `lower_system` for untyped
+/// construction paths where validation is needed as a backstop.
+pub fn lower_system_unchecked(
     system: &EquationSystem,
     schemes: &SchemeRegistry,
-) -> Result<DiscreteSystem, UnitValidationError> {
-    system.validate_units()?;
+) -> DiscreteSystem {
     let mut equations = Vec::new();
     for equation in system.equations() {
         let mut ops = Vec::new();
@@ -65,7 +69,20 @@ pub fn lower_system(
             ops,
         });
     }
-    Ok(DiscreteSystem { equations })
+    DiscreteSystem { equations }
+}
+
+/// Lower an equation system to a discrete system with validation.
+///
+/// This is the standard entry point that validates units before lowering.
+/// For systems already known to be valid (e.g., typed-built), use
+/// `lower_system_unchecked` to avoid redundant validation.
+pub fn lower_system(
+    system: &EquationSystem,
+    schemes: &SchemeRegistry,
+) -> Result<DiscreteSystem, UnitValidationError> {
+    system.validate_units()?;
+    Ok(lower_system_unchecked(system, schemes))
 }
 
 fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> DiscreteOp {

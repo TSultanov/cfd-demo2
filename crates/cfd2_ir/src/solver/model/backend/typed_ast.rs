@@ -215,6 +215,28 @@ impl<D: UnitDimension> TypedTerm<D> {
     ) -> Equation {
         self.inner.eqn(target.to_untyped())
     }
+
+    /// Cast this term to a different dimension type.
+    ///
+    /// This is useful when two dimension types are semantically equivalent
+    /// but different at the type level (e.g., due to unnormalized type expressions).
+    /// The cast is safe as long as the runtime unit dimensions match.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `DFrom::UNIT != DTo::UNIT`.
+    pub fn cast_to<DTo: UnitDimension>(self) -> TypedTerm<DTo> {
+        assert!(
+            D::UNIT == DTo::UNIT,
+            "Cannot cast term from dimension {:?} to {:?} - units do not match",
+            D::UNIT,
+            DTo::UNIT
+        );
+        TypedTerm {
+            inner: self.inner,
+            _dim: PhantomData,
+        }
+    }
 }
 
 impl<D: UnitDimension> Add<TypedTerm<D>> for TypedTerm<D> {
@@ -256,6 +278,28 @@ impl<D: UnitDimension> TypedTermSum<D> {
         target: TypedFieldRef<TargetD, K>,
     ) -> Equation {
         self.inner.eqn(target.to_untyped())
+    }
+
+    /// Cast this term sum to a different dimension type.
+    ///
+    /// This is useful when two dimension types are semantically equivalent
+    /// but different at the type level (e.g., due to unnormalized type expressions).
+    /// The cast is safe as long as the runtime unit dimensions match.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `DFrom::UNIT != DTo::UNIT`.
+    pub fn cast_to<DTo: UnitDimension>(self) -> TypedTermSum<DTo> {
+        assert!(
+            D::UNIT == DTo::UNIT,
+            "Cannot cast term sum from dimension {:?} to {:?} - units do not match",
+            D::UNIT,
+            DTo::UNIT
+        );
+        TypedTermSum {
+            inner: self.inner,
+            _dim: PhantomData,
+        }
     }
 }
 

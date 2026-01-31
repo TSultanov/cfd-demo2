@@ -412,9 +412,10 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
   - **BLOCKER**: Rust doesn't allow type parameters in const generic expressions in a way that makes them "used"
   - Cannot make `MulDim<A, B>` automatically resolve to `Dim<...>` even when exponents are computable
   - The typed builder works for structurally identical dimensions but cannot prove equivalence of semantically-equal-but-structurally-different dimensions (e.g., `Volume/Time` vs `Area²/(Time·Length)`)
-  - **Workaround**: Model definitions continue using untyped builder with runtime `validate_units()` assertions
+  - **Workaround**: Typed builder supports explicit `cast_to()` for semantically-equal units (runtime-checked), enabling incremental adoption while keeping `validate_units()` as the backstop
 - [ ] Migrate model constructors in `src/solver/model/definitions/*` to use the typed builder APIs (still producing the same `EquationSystem` as output).
-  - **Current**: model definitions still use the untyped builder + `EquationSystem::validate_units()` assertions as a runtime backstop.
+  - **Current**: some model definitions still use the untyped builder + `EquationSystem::validate_units()` assertions as a runtime backstop.
+  - ✅ Migrated: `generic_diffusion_demo` (+ Neumann variant) uses typed builder + `cast_to()`
 - [ ] Update `crates/cfd2_codegen/src/solver/codegen/ir.rs` (`lower_system`) to:
   - Prefer typed-built systems (no unit errors expected)
   - Keep `validate_units()` for any remaining untyped system construction paths

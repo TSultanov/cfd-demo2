@@ -13,12 +13,13 @@ use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
 use crate::solver::codegen::reconstruction::scalar_reconstruction;
 use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::gpu::enums::TimeScheme;
-use crate::solver::ir::{Coefficient, Discretization, StateLayout, TermOp};
+use crate::solver::ir::ports::ResolvedStateSlotsSpec;
+use crate::solver::ir::{Coefficient, Discretization, TermOp};
 use crate::solver::scheme::Scheme;
 
 pub fn generate_unified_assembly_wgsl(
     system: &DiscreteSystem,
-    layout: &StateLayout,
+    slots: &ResolvedStateSlotsSpec,
     flux_stride: u32,
     needs_gradients: bool,
 ) -> KernelWgsl {
@@ -41,7 +42,7 @@ pub fn generate_unified_assembly_wgsl(
     module.extend(base_assembly_items(needs_gradients, needs_fluxes));
     module.push(Item::Function(main_assembly_fn(
         system,
-        layout,
+        slots,
         flux_stride,
         needs_gradients,
     )));
@@ -278,21 +279,21 @@ fn coupled_offsets(system: &DiscreteSystem) -> HashMap<String, u32> {
 }
 
 fn coefficient_value_expr(
-    layout: &StateLayout,
+    slots: &ResolvedStateSlotsSpec,
     coeff: Option<&Coefficient>,
     idx_ident: &str,
     default: Expr,
 ) -> Expr {
-    coeff_cell_expr(layout, coeff, idx_ident, default)
+    coeff_cell_expr(slots, coeff, idx_ident, default)
 }
 
 fn main_assembly_fn(
     system: &DiscreteSystem,
-    layout: &StateLayout,
+    slots: &ResolvedStateSlotsSpec,
     flux_stride: u32,
     needs_gradients: bool,
 ) -> Function {
-    let _stride = layout.stride();
+    let _stride = slots.stride;
     let unknowns = coupled_unknown_components(system);
     let coupled_stride = unknowns.len() as u32;
     let block_stride = coupled_stride * coupled_stride;
@@ -409,7 +410,7 @@ fn main_assembly_fn(
         let base_offset = *offsets
             .get(equation.target.name())
             .expect("missing target offset");
-        let rho_expr = coefficient_value_expr(layout, ddt_op.coeff.as_ref(), "idx", 1.0.into());
+        let rho_expr = coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
         let base_coeff =
             Expr::ident("vol") * rho_expr.clone() / Expr::ident("constants").field("dt");
         let dtau = Expr::ident("constants").field("dtau");
@@ -423,21 +424,21 @@ fn main_assembly_fn(
         for component in 0..equation.target.kind().component_count() as u32 {
             let u_idx = base_offset + component;
             let phi_n = state_component(
-                layout,
+                slots,
                 "state_old",
                 "idx",
                 equation.target.name(),
                 component,
             );
             let phi_nm1 = state_component(
-                layout,
+                slots,
                 "state_old_old",
                 "idx",
                 equation.target.name(),
                 component,
             );
             let phi_iter = state_component(
-                layout,
+                slots,
                 "state_iter",
                 "idx",
                 equation.target.name(),
@@ -520,7 +521,7 @@ fn main_assembly_fn(
                 .get(equation.target.name())
                 .expect("missing target offset");
 
-            let val = coefficient_value_expr(layout, source_op.coeff.as_ref(), "idx", 0.0.into());
+            let val = coefficient_value_expr(slots, source_op.coeff.as_ref(), "idx", 0.0.into());
             let term = val * Expr::ident("vol");
 
             let field_name = source_op.field.name();
@@ -747,9 +748,9 @@ fn main_assembly_fn(
                 // the pressure Laplacian coefficient (rho * d_p) must match the
                 // face-interpolated d_p used in the momentum flux computation.
                 let kappa_own =
-                    coefficient_value_expr(layout, diff_op.coeff.as_ref(), "idx", 1.0.into());
+                    coefficient_value_expr(slots, diff_op.coeff.as_ref(), "idx", 1.0.into());
                 let kappa_other =
-                    coefficient_value_expr(layout, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
+                    coefficient_value_expr(slots, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
                 // Use arithmetic mean for interior faces; for boundaries use owner value.
                 let kappa = dsl::select(
                     kappa_own.clone(),
@@ -820,8 +821,8 @@ fn main_assembly_fn(
                             && equation.target.kind().component_count() >= 2
                             && component <= 1
                         {
-                            let vx = state_component(layout, "state", "idx", field_name, 0);
-                            let vy = state_component(layout, "state", "idx", field_name, 1);
+                            let vx = state_component(slots, "state", "idx", field_name, 0);
+                            let vy = state_component(slots, "state", "idx", field_name, 1);
                             let nx = Expr::ident("normal").field("x");
                             let ny = Expr::ident("normal").field("y");
                             let un = vx.clone() * nx.clone() + vy.clone() * ny.clone();
@@ -918,9 +919,9 @@ fn main_assembly_fn(
                 let field_name = diff_op.field.name();
 
                 let kappa_own =
-                    coefficient_value_expr(layout, diff_op.coeff.as_ref(), "idx", 1.0.into());
+                    coefficient_value_expr(slots, diff_op.coeff.as_ref(), "idx", 1.0.into());
                 let kappa_other =
-                    coefficient_value_expr(layout, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
+                    coefficient_value_expr(slots, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
                 let kappa_face = dsl::select(
                     kappa_own.clone(),
                     (kappa_own.clone() + kappa_other) * 0.5,
@@ -941,9 +942,9 @@ fn main_assembly_fn(
 
                 for component in 0..equation.target.kind().component_count() as u32 {
                     let u_idx = base_offset + component;
-                    let phi_own = state_component(layout, "state", "idx", field_name, component);
+                    let phi_own = state_component(slots, "state", "idx", field_name, component);
                     let phi_neigh =
-                        state_component(layout, "state", "other_idx", field_name, component);
+                        state_component(slots, "state", "other_idx", field_name, component);
 
                     let interior_contrib = dsl::block(vec![dsl::assign_op_expr(
                         AssignOp::Add,
@@ -998,7 +999,7 @@ fn main_assembly_fn(
                         let bc_rho_val = dsl::array_access("bc_value", bc_rho_idx);
                         let bc_rho_u_val = dsl::array_access("bc_value", bc_rho_u_idx);
 
-                        let rho_own = state_component(layout, "state", "idx", "rho", 0);
+                        let rho_own = state_component(slots, "state", "idx", "rho", 0);
                         let rho_bc =
                             dsl::select(rho_own, bc_rho_val, bc_rho_kind.eq(GpuBcKind::Dirichlet));
                         let rho_bc_safe = dsl::max(rho_bc, 1e-12);
@@ -1104,9 +1105,9 @@ fn main_assembly_fn(
                         ));
 
                         let phi_own =
-                            state_component(layout, "state", "idx", field_name, component);
+                            state_component(slots, "state", "idx", field_name, component);
                         let phi_neigh =
-                            state_component(layout, "state", "other_idx", field_name, component);
+                            state_component(slots, "state", "other_idx", field_name, component);
 
                         // Runtime-configurable advection scheme.
                         //
@@ -1122,18 +1123,30 @@ fn main_assembly_fn(
                         // a simple two-point gradient estimate based on neighbor differences.
                         // This keeps the scheme knob meaningful without requiring a dedicated
                         // gradients kernel for every model.
+                        // Helper to find slot offset by field name.
+                        let field_offset = slots
+                            .slots
+                            .iter()
+                            .find(|s| s.name == field_name)
+                            .map(|s| s.base_offset)
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "missing field '{}' in resolved state slots",
+                                    field_name
+                                )
+                            });
                         let (grad_own, grad_neigh) = if needs_gradients {
                             let grad_own = dsl::array_access_linear(
                                 "grad_state",
                                 Expr::ident("idx"),
-                                layout.stride(),
-                                layout.offset_for(field_name).unwrap() as u32 + component,
+                                slots.stride,
+                                field_offset + component,
                             );
                             let grad_neigh = dsl::array_access_linear(
                                 "grad_state",
                                 Expr::ident("other_idx"),
-                                layout.stride(),
-                                layout.offset_for(field_name).unwrap() as u32 + component,
+                                slots.stride,
+                                field_offset + component,
                             );
                             (grad_own, grad_neigh)
                         } else {
@@ -1230,11 +1243,11 @@ fn main_assembly_fn(
             {
                 let field_name = grad_op.field.name();
                 let p_offset_opt = offsets.get(field_name);
-                let phi_own = state_component(layout, "state", "idx", field_name, 0);
-                let phi_neigh = state_component(layout, "state", "other_idx", field_name, 0);
+                let phi_own = state_component(slots, "state", "idx", field_name, 0);
+                let phi_neigh = state_component(slots, "state", "other_idx", field_name, 0);
 
                 let coeff =
-                    coefficient_value_expr(layout, grad_op.coeff.as_ref(), "idx", 1.0.into());
+                    coefficient_value_expr(slots, grad_op.coeff.as_ref(), "idx", 1.0.into());
                 let factor = coeff * 0.5 * Expr::ident("area");
 
                 for component in 0..equation.target.kind().component_count() as u32 {

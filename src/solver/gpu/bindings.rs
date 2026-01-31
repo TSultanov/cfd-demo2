@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: e716485b9cc3746a0483bba646dd622f00b8ce9d08cbadba2775325bf4b01858
+// SourceHash: be06220ba243c45c1eab12e886e9fd2b9b381060afe6e08a8c92e9c1e2e6e3ab
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -10673,7 +10673,7 @@ var<uniform> constants: Constants;
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var sum: f32 = 0f;
-    var k: u32;
+    var i: u32;
 
     let _e5 = constants.stride_x;
     let row = ((global_id.y * _e5) + global_id.x);
@@ -10683,25 +10683,25 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let start = row_offsets[row];
     let end = row_offsets[(row + 1u)];
-    k = start;
+    i = start;
     loop {
-        let _e23 = k;
+        let _e23 = i;
         if (_e23 < end) {
         } else {
             break;
         }
         {
-            let _e26 = k;
+            let _e26 = i;
             let col = col_indices[_e26];
-            let _e30 = k;
-            let _e32 = matrix_values[_e30];
-            let _e36 = x[col];
+            let _e30 = i;
+            let val = matrix_values[_e30];
+            let x_val = x[col];
             let _e38 = sum;
-            sum = (_e38 + (_e32 * _e36));
+            sum = (_e38 + (val * x_val));
         }
         continuing {
-            let _e41 = k;
-            k = (_e41 + 1u);
+            let _e41 = i;
+            i = (_e41 + 1u);
         }
     }
     let _e45 = sum;

@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use cfd2_codegen::solver::codegen::KernelWgsl;
+use cfd2_ir::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
+use cfd2_ir::solver::ir::StateLayout;
 
 /// Stable identifier for a compute kernel.
 ///
@@ -220,6 +222,28 @@ pub fn kernel_output_name_for_model(model_id: &str, kernel_id: KernelId) -> Resu
     }
 }
 
+/// Convert a StateLayout to a ResolvedStateSlotsSpec for use in codegen.
+fn resolved_slots_from_layout(layout: &StateLayout) -> ResolvedStateSlotsSpec {
+    let mut slots = Vec::new();
+    for field in layout.fields() {
+        let kind = match field.kind() {
+            cfd2_ir::solver::ir::FieldKind::Scalar => PortFieldKind::Scalar,
+            cfd2_ir::solver::ir::FieldKind::Vector2 => PortFieldKind::Vector2,
+            cfd2_ir::solver::ir::FieldKind::Vector3 => PortFieldKind::Vector3,
+        };
+        slots.push(ResolvedStateSlotSpec {
+            name: field.name().to_string(),
+            kind,
+            unit: field.unit(),
+            base_offset: field.offset(),
+        });
+    }
+    ResolvedStateSlotsSpec {
+        stride: layout.stride(),
+        slots,
+    }
+}
+
 pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
@@ -235,9 +259,10 @@ pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
         .map_err(|e| e.to_string())?
         .map(|_| model.system.unknowns_per_cell())
         .unwrap_or(0);
+    let slots = resolved_slots_from_layout(&model.state_layout);
     Ok(cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
         &discrete,
-        &model.state_layout,
+        &slots,
         flux_stride,
         needs_gradients,
     ))
@@ -270,9 +295,10 @@ pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_wgsl(
         .map_err(|e| e.to_string())?
         .map(|_| model.system.unknowns_per_cell())
         .unwrap_or(0);
+    let slots = resolved_slots_from_layout(&model.state_layout);
     Ok(cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
         &discrete,
-        &model.state_layout,
+        &slots,
         flux_stride,
         needs_gradients,
     ))
@@ -305,9 +331,10 @@ pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
             (caps.apply_relaxation_in_update, caps.relaxation_requires_dtau)
         }
     };
+    let slots = resolved_slots_from_layout(&model.state_layout);
     Ok(cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_update_wgsl(
         &discrete,
-        &model.state_layout,
+        &slots,
         &prims,
         apply_relaxation,
         relaxation_requires_dtau,

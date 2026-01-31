@@ -11,14 +11,16 @@ use super::wgsl_dsl as dsl;
 use super::KernelWgsl;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
 use crate::solver::codegen::primitive_expr::lower_primitive_expr;
+use crate::solver::codegen::state_access::resolve_state_offset_by_name;
 use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::gpu::enums::TimeScheme;
-use crate::solver::ir::{Coefficient, Discretization, StateLayout};
+use crate::solver::ir::ports::ResolvedStateSlotsSpec;
+use crate::solver::ir::{Coefficient, Discretization};
 use crate::solver::shared::PrimitiveExpr;
 
 pub fn generate_generic_coupled_assembly_wgsl(
     system: &DiscreteSystem,
-    layout: &StateLayout,
+    slots: &ResolvedStateSlotsSpec,
     needs_gradients: bool,
 ) -> KernelWgsl {
     let mut module = Module::new();
@@ -27,13 +29,13 @@ pub fn generate_generic_coupled_assembly_wgsl(
     ));
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_assembly_items(needs_gradients));
-    module.push(Item::Function(main_assembly_fn(system, layout)));
+    module.push(Item::Function(main_assembly_fn(system, slots)));
     KernelWgsl::from(module)
 }
 
 pub fn generate_generic_coupled_update_wgsl(
     system: &DiscreteSystem,
-    layout: &StateLayout,
+    slots: &ResolvedStateSlotsSpec,
     primitives: &[(String, PrimitiveExpr)],
     apply_relaxation: bool,
     relaxation_requires_dtau: bool,
@@ -46,7 +48,7 @@ pub fn generate_generic_coupled_update_wgsl(
     module.extend(base_update_items());
     module.push(Item::Function(main_update_fn(
         system,
-        layout,
+        slots,
         primitives,
         apply_relaxation,
         relaxation_requires_dtau,
@@ -69,9 +71,32 @@ pub fn generate_generic_coupled_apply_wgsl() -> KernelWgsl {
 mod tests {
     use super::*;
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::ir::{fvm, Equation, EquationSystem, SchemeRegistry, StateLayout, vol_scalar};
+    use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
+    use crate::solver::ir::{fvm, Equation, EquationSystem, SchemeRegistry, vol_scalar};
     use crate::solver::scheme::Scheme;
     use crate::solver::units::si;
+
+    /// Helper to create a ResolvedStateSlotsSpec from a StateLayout for testing.
+    fn slots_from_layout(layout: &crate::solver::ir::StateLayout) -> ResolvedStateSlotsSpec {
+        let mut slots = Vec::new();
+        for field in layout.fields() {
+            let kind = match field.kind() {
+                crate::solver::ir::FieldKind::Scalar => PortFieldKind::Scalar,
+                crate::solver::ir::FieldKind::Vector2 => PortFieldKind::Vector2,
+                crate::solver::ir::FieldKind::Vector3 => PortFieldKind::Vector3,
+            };
+            slots.push(ResolvedStateSlotSpec {
+                name: field.name().to_string(),
+                kind,
+                unit: field.unit(),
+                base_offset: field.offset(),
+            });
+        }
+        ResolvedStateSlotsSpec {
+            stride: layout.stride(),
+            slots,
+        }
+    }
 
     #[test]
     fn generic_coupled_ddt_adds_dtau_diagonal_when_enabled() {
@@ -83,11 +108,12 @@ mod tests {
         let mut system = EquationSystem::new();
         system.add_equation(eqn);
 
-        let layout = StateLayout::new(vec![u]);
+        let layout = crate::solver::ir::StateLayout::new(vec![u]);
+        let slots = slots_from_layout(&layout);
         let schemes = SchemeRegistry::new(Scheme::Upwind);
         let discrete = lower_system(&system, &schemes).expect("lower_system");
 
-        let wgsl = generate_generic_coupled_assembly_wgsl(&discrete, &layout, false).to_wgsl();
+        let wgsl = generate_generic_coupled_assembly_wgsl(&discrete, &slots, false).to_wgsl();
         assert!(
             wgsl.contains("constants.dtau > 0.0"),
             "expected assembly WGSL to gate dual-time term on constants.dtau"
@@ -255,7 +281,7 @@ fn base_assembly_items(needs_gradients: bool) -> Vec<Item> {
     items.extend(base_mesh_items());
     items.extend(base_state_items(needs_gradients));
     items.push(Item::Comment(
-        "Group 2: Solver (block CSR values + RHS)".to_string(),
+        "Group 2: Solver (block csr values + RHS)".to_string(),
     ));
     items.push(storage_var(
         "matrix_values",
@@ -386,16 +412,16 @@ fn coupled_offsets(system: &DiscreteSystem) -> HashMap<String, u32> {
 }
 
 fn coefficient_value_expr(
-    layout: &StateLayout,
+    slots: &ResolvedStateSlotsSpec,
     coeff: Option<&Coefficient>,
     idx_ident: &str,
     default: Expr,
 ) -> Expr {
-    coeff_cell_expr(layout, coeff, idx_ident, default)
+    coeff_cell_expr(slots, coeff, idx_ident, default)
 }
 
-fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
-    let _stride = layout.stride();
+fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> Function {
+    let _stride = slots.stride;
     let unknowns = coupled_unknown_components(system);
     let coupled_stride = unknowns.len() as u32;
     let block_stride = coupled_stride * coupled_stride;
@@ -508,7 +534,7 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
         let base_offset = *offsets
             .get(equation.target.name())
             .expect("missing target offset");
-        let rho_expr = coefficient_value_expr(layout, ddt_op.coeff.as_ref(), "idx", 1.0.into());
+        let rho_expr = coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
         let base_coeff =
             Expr::ident("vol") * rho_expr.clone() / Expr::ident("constants").field("dt");
         let dtau = Expr::ident("constants").field("dtau");
@@ -522,21 +548,21 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
         for component in 0..equation.target.kind().component_count() as u32 {
             let u_idx = base_offset + component;
             let phi_n = state_component(
-                layout,
+                slots,
                 "state_old",
                 "idx",
                 equation.target.name(),
                 component,
             );
             let phi_nm1 = state_component(
-                layout,
+                slots,
                 "state_old_old",
                 "idx",
                 equation.target.name(),
                 component,
             );
             let phi_iter =
-                state_component(layout, "state_iter", "idx", equation.target.name(), component);
+                state_component(slots, "state_iter", "idx", equation.target.name(), component);
 
             // Default BDF1
             stmts.push(dsl::assign_op_expr(
@@ -756,7 +782,7 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
                 .get(equation.target.name())
                 .expect("missing target offset");
 
-            let kappa = coefficient_value_expr(layout, diff_op.coeff.as_ref(), "idx", 1.0.into());
+            let kappa = coefficient_value_expr(slots, diff_op.coeff.as_ref(), "idx", 1.0.into());
 
             let diff_coeff_name = format!("diff_coeff_{}", equation.target.name());
             body.push(dsl::let_expr(
@@ -859,28 +885,14 @@ fn main_assembly_fn(system: &DiscreteSystem, layout: &StateLayout) -> Function {
     )
 }
 
-fn resolve_state_offset(layout: &StateLayout, name: &str) -> Option<u32> {
-    if let Some(offset) = layout.offset_for(name) {
-        return Some(offset);
-    }
-    let (base, component) = name.rsplit_once('_')?;
-    let component = match component {
-        "x" => 0,
-        "y" => 1,
-        "z" => 2,
-        _ => return None,
-    };
-    layout.component_offset(base, component)
-}
-
 fn main_update_fn(
     system: &DiscreteSystem,
-    layout: &StateLayout,
+    slots: &ResolvedStateSlotsSpec,
     primitives: &[(String, PrimitiveExpr)],
     apply_relaxation: bool,
     relaxation_requires_dtau: bool,
 ) -> Function {
-    let stride = layout.stride();
+    let stride = slots.stride;
     let unknowns = coupled_unknown_components(system);
     let coupled_stride = unknowns.len() as u32;
 
@@ -907,7 +919,7 @@ fn main_update_fn(
     ));
 
     for (u_idx, (field, component)) in unknowns.iter().enumerate() {
-        let target = state_component(layout, "state", "idx", field.name(), *component);
+        let target = state_component(slots, "state", "idx", field.name(), *component);
         let x_entry =
             dsl::array_access_linear("x", Expr::ident("idx"), coupled_stride, u_idx as u32);
         let value = x_entry.clone();
@@ -956,15 +968,15 @@ fn main_update_fn(
 
     // Optional primitive recovery (derived primitives from conserved state).
     //
-    // This is intentionally emitted inside the model-specific update kernel to avoid
+    // This is intentionally emitted inside the model-side update kernel to avoid
     // additional per-model registry plumbing.
     if !primitives.is_empty() {
         let cell_idx = Expr::ident("idx");
         for (name, expr) in primitives {
-            let Some(offset) = resolve_state_offset(layout, name) else {
+            let Some(offset) = resolve_state_offset_by_name(slots, name) else {
                 continue;
             };
-            let value = lower_primitive_expr(expr, layout, cell_idx.clone(), "state");
+            let value = lower_primitive_expr(expr, slots, cell_idx.clone(), "state");
             let target = dsl::array_access_linear("state", Expr::ident("idx"), stride, offset);
             stmts.push(dsl::assign_expr(target, value));
         }
@@ -1010,22 +1022,24 @@ fn main_apply_fn() -> Function {
         dsl::array_access("row_offsets", Expr::ident("row") + 1u32),
     ));
     stmts.push(dsl::var_typed_expr("sum", Type::F32, Some(0.0.into())));
-
     stmts.push(dsl::for_loop_expr(
-        dsl::for_init_var_expr("k", Expr::ident("start")),
-        Expr::ident("k").lt(Expr::ident("end")),
-        dsl::for_step_increment_expr(Expr::ident("k")),
+        dsl::for_init_var_expr("i", Expr::ident("start")),
+        Expr::ident("i").lt(Expr::ident("end")),
+        dsl::for_step_increment_expr(Expr::ident("i")),
         dsl::block(vec![
-            dsl::let_expr("col", dsl::array_access("col_indices", Expr::ident("k"))),
+            dsl::let_expr("col", dsl::array_access("col_indices", Expr::ident("i"))),
+            dsl::let_expr(
+                "val",
+                dsl::array_access("matrix_values", Expr::ident("i")),
+            ),
+            dsl::let_expr("x_val", dsl::array_access("x", Expr::ident("col"))),
             dsl::assign_op_expr(
                 AssignOp::Add,
                 Expr::ident("sum"),
-                dsl::array_access("matrix_values", Expr::ident("k"))
-                    * dsl::array_access("x", Expr::ident("col")),
+                Expr::ident("val") * Expr::ident("x_val"),
             ),
         ]),
     ));
-
     stmts.push(dsl::assign_expr(
         dsl::array_access("y", Expr::ident("row")),
         Expr::ident("sum"),

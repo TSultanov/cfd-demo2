@@ -349,8 +349,8 @@ state lookups and will block completing Phase 6 unless migrated.
 
 **Migration steps**:
 - [x] Introduce an IR-safe "resolved state slot" type (offset + stride + kind/unit metadata as needed).
-- [ ] Update `state_access.rs` to accept resolved slots instead of `(StateLayout, field_name)`.
-- [ ] Update callers (`generic_coupled_kernels`, `unified_assembly`, `primitive_expr`, `coeff_expr`) to use slots/ports provided by model/module manifests.
+- [x] Update `state_access.rs` to accept resolved slots instead of `(StateLayout, field_name)`.
+- [x] Update callers (`generic_coupled_kernels`, `unified_assembly`, `primitive_expr`, `coeff_expr`) to use slots/ports provided by model/module manifests.
 
 ## Type-Level Dimensions Migration (entire codebase, including IR)
 

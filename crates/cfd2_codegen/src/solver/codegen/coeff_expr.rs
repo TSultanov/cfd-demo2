@@ -1,6 +1,7 @@
 use crate::solver::codegen::state_access::{state_component, state_scalar};
 use crate::solver::codegen::wgsl_ast::Expr;
-use crate::solver::ir::{Coefficient, FieldKind, StateLayout};
+use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotsSpec};
+use crate::solver::ir::Coefficient;
 
 #[derive(Clone)]
 enum CoeffSample<'a> {
@@ -60,57 +61,62 @@ fn coeff_named_expr(name: &str) -> Option<Expr> {
     }
 }
 
-fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>) -> Expr {
+/// Find a slot by name in the resolved state slots spec.
+fn find_slot<'a>(slots: &'a ResolvedStateSlotsSpec, field: &str) -> Option<&'a crate::solver::ir::ports::ResolvedStateSlotSpec> {
+    slots.slots.iter().find(|s| s.name == field)
+}
+
+fn coeff_expr(slots: &ResolvedStateSlotsSpec, coeff: &Coefficient, sample: CoeffSample<'_>) -> Expr {
     match coeff {
         Coefficient::Constant { value, .. } => f32_literal(*value),
         Coefficient::Field(field) => {
-            if let Some(state_field) = layout.field(field.name()) {
-                if state_field.kind() != FieldKind::Scalar {
+            if let Some(slot) = find_slot(slots, field.name()) {
+                if slot.kind != PortFieldKind::Scalar {
                     panic!("coefficient '{}' must be scalar", field.name());
                 }
                 match sample {
-                    CoeffSample::Cell { idx } => state_scalar(layout, "state", idx, field.name()),
+                    CoeffSample::Cell { idx } => state_scalar(slots, "state", idx, field.name()),
                     CoeffSample::Face {
                         owner_idx,
                         neighbor_idx,
                         interp,
                     } => {
-                        let own = state_scalar(layout, "state", owner_idx, field.name());
-                        let neigh = state_scalar(layout, "state", neighbor_idx, field.name());
+                        let own = state_scalar(slots, "state", owner_idx, field.name());
+                        let neigh = state_scalar(slots, "state", neighbor_idx, field.name());
                         interp * own + (Expr::from(1.0) - interp) * neigh
                     }
                 }
             } else {
                 coeff_named_expr(field.name()).unwrap_or_else(|| {
                     panic!(
-                        "missing coefficient field '{}' in state layout",
+                        "missing coefficient field '{}' in resolved state slots",
                         field.name()
                     )
                 })
             }
         }
         Coefficient::MagSqr(field) => {
-            let Some(state_field) = layout.field(field.name()) else {
+            let Some(slot) = find_slot(slots, field.name()) else {
                 panic!(
-                    "missing coefficient field '{}' in state layout",
+                    "missing coefficient field '{}' in resolved state slots",
                     field.name()
                 );
             };
 
-            let mag_sqr_at = |idx: &str| match state_field.kind() {
-                FieldKind::Scalar => {
-                    let v = state_scalar(layout, "state", idx, field.name());
+            let mag_sqr_at = |idx: &str| match slot.kind {
+                PortFieldKind::Scalar => {
+                    let v = state_scalar(slots, "state", idx, field.name());
                     v.clone() * v
                 }
-                FieldKind::Vector2 => {
-                    let x = state_component(layout, "state", idx, field.name(), 0);
-                    let y = state_component(layout, "state", idx, field.name(), 1);
+                PortFieldKind::Vector2 => {
+                    let x = state_component(slots, "state", idx, field.name(), 0);
+                    let y = state_component(slots, "state", idx, field.name(), 1);
                     x.clone() * x + y.clone() * y
                 }
-                FieldKind::Vector3 => {
-                    let x = state_component(layout, "state", idx, field.name(), 0);
-                    let y = state_component(layout, "state", idx, field.name(), 1);
-                    let z = state_component(layout, "state", idx, field.name(), 2);
+                PortFieldKind::Vector3 => {
+                    let x = state_component(slots, "state", idx, field.name(), 0);
+                    let y = state_component(slots, "state", idx, field.name(), 1);
+                    let z = state_component(slots, "state", idx, field.name(), 2);
                     x.clone() * x + y.clone() * y + z.clone() * z
                 }
             };
@@ -129,27 +135,27 @@ fn coeff_expr(layout: &StateLayout, coeff: &Coefficient, sample: CoeffSample<'_>
             }
         }
         Coefficient::Product(lhs, rhs) => {
-            let lhs_expr = coeff_expr(layout, lhs, sample.clone());
-            let rhs_expr = coeff_expr(layout, rhs, sample);
+            let lhs_expr = coeff_expr(slots, lhs, sample.clone());
+            let rhs_expr = coeff_expr(slots, rhs, sample);
             lhs_expr * rhs_expr
         }
     }
 }
 
 pub fn coeff_cell_expr(
-    layout: &StateLayout,
+    slots: &ResolvedStateSlotsSpec,
     coeff: Option<&Coefficient>,
     idx: &str,
     fallback: Expr,
 ) -> Expr {
     match coeff {
         None => fallback,
-        Some(value) => coeff_expr(layout, value, CoeffSample::Cell { idx }),
+        Some(value) => coeff_expr(slots, value, CoeffSample::Cell { idx }),
     }
 }
 
 pub fn coeff_face_expr(
-    layout: &StateLayout,
+    slots: &ResolvedStateSlotsSpec,
     coeff: Option<&Coefficient>,
     owner_idx: &str,
     neighbor_idx: &str,
@@ -159,7 +165,7 @@ pub fn coeff_face_expr(
     match coeff {
         None => fallback,
         Some(value) => coeff_expr(
-            layout,
+            slots,
             value,
             CoeffSample::Face {
                 owner_idx,
@@ -173,8 +179,31 @@ pub fn coeff_face_expr(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::ir::{vol_scalar, vol_vector};
+    use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
+    use crate::solver::ir::vol_scalar;
     use crate::solver::units::si;
+
+    /// Helper to create a ResolvedStateSlotsSpec from a StateLayout for testing.
+    fn slots_from_layout(layout: &crate::solver::ir::StateLayout) -> ResolvedStateSlotsSpec {
+        let mut slots = Vec::new();
+        for field in layout.fields() {
+            let kind = match field.kind() {
+                crate::solver::ir::FieldKind::Scalar => PortFieldKind::Scalar,
+                crate::solver::ir::FieldKind::Vector2 => PortFieldKind::Vector2,
+                crate::solver::ir::FieldKind::Vector3 => PortFieldKind::Vector3,
+            };
+            slots.push(ResolvedStateSlotSpec {
+                name: field.name().to_string(),
+                kind,
+                unit: field.unit(),
+                base_offset: field.offset(),
+            });
+        }
+        ResolvedStateSlotsSpec {
+            stride: layout.stride(),
+            slots,
+        }
+    }
 
     #[test]
     fn coeff_expr_inv_dt_prefers_dtau_when_set() {
@@ -189,14 +218,15 @@ mod tests {
     fn coeff_expr_handles_product_and_constants() {
         let rho = vol_scalar("rho", si::DENSITY);
         let d_p = vol_scalar("d_p", si::D_P);
-        let layout = StateLayout::new(vec![d_p]);
+        let layout = crate::solver::ir::StateLayout::new(vec![d_p]);
+        let slots = slots_from_layout(&layout);
         let coeff = Coefficient::product(
             Coefficient::field(rho).unwrap(),
             Coefficient::field(vol_scalar("d_p", si::D_P)).unwrap(),
         )
         .unwrap();
 
-        let expr = coeff_face_expr(&layout, Some(&coeff), "i", "j", 0.5.into(), 1.0.into());
+        let expr = coeff_face_expr(&slots, Some(&coeff), "i", "j", 0.5.into(), 1.0.into());
         assert_eq!(
             expr.to_string(),
             "constants.density * (0.5 * state[i * 1u + 0u] + (1.0 - 0.5) * state[j * 1u + 0u])"
@@ -205,8 +235,9 @@ mod tests {
 
     #[test]
     fn coeff_expr_rejects_vector_coefficients() {
-        let u = vol_vector("U", si::VELOCITY);
-        let layout = StateLayout::new(vec![vol_scalar("p", si::PRESSURE)]);
+        let u = crate::solver::ir::vol_vector("U", si::VELOCITY);
+        let layout = crate::solver::ir::StateLayout::new(vec![vol_scalar("p", si::PRESSURE)]);
+        let slots = slots_from_layout(&layout);
         let err = Coefficient::product(
             Coefficient::field(vol_scalar("p", si::PRESSURE)).unwrap(),
             Coefficient::Field(u),
@@ -218,7 +249,7 @@ mod tests {
         ));
 
         let coeff = Coefficient::field(vol_scalar("p", si::PRESSURE)).unwrap();
-        let expr = coeff_cell_expr(&layout, Some(&coeff), "idx", 1.0.into());
+        let expr = coeff_cell_expr(&slots, Some(&coeff), "idx", 1.0.into());
         assert_eq!(expr.to_string(), "state[idx * 1u + 0u]");
     }
 }

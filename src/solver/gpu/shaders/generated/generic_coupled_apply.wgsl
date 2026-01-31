@@ -56,9 +56,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let start = row_offsets[row];
     let end = row_offsets[row + 1u];
     var sum: f32 = 0.0;
-    for (var k = start; k < end; k++) {
-        let col = col_indices[k];
-        sum += matrix_values[k] * x[col];
+    for (var i = start; i < end; i++) {
+        let col = col_indices[i];
+        let val = matrix_values[i];
+        let x_val = x[col];
+        sum += val * x_val;
     }
     y[row] = sum;
 }

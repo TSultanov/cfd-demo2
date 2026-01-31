@@ -3,6 +3,9 @@ use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::GpuUnifiedSolver;
 use crate::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel};
 use crate::solver::model::eos::EosSpec;
+use crate::solver::model::ports::{
+    Density, EnergyDensity, MomentumDensity, PortRegistry, Pressure, Temperature, Velocity,
+};
 use std::future::Future;
 use std::pin::Pin;
 
@@ -215,33 +218,43 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         let r_gas = eos_params.r;
 
         let stride = self.model().state_layout.stride() as usize;
-        let (Some(off_rho), Some(off_rho_u), Some(off_rho_e)) = (
-            self.model().state_layout.offset_for("rho"),
-            self.model().state_layout.offset_for("rho_u"),
-            self.model().state_layout.offset_for("rho_e"),
-        ) else {
+
+        // Build port registry and resolve required/optional field ports
+        let mut registry = PortRegistry::new(self.model().state_layout.clone());
+
+        let (rho_port, rho_u_port, rho_e_port) = (
+            registry.register_scalar_field::<Density>("rho").ok(),
+            registry.register_vector2_field::<MomentumDensity>("rho_u").ok(),
+            registry.register_scalar_field::<EnergyDensity>("rho_e").ok(),
+        );
+        let (Some(rho_port), Some(rho_u_port), Some(rho_e_port)) = (rho_port, rho_u_port, rho_e_port)
+        else {
             return;
         };
 
-        let off_rho = off_rho as usize;
-        let off_rho_u = off_rho_u as usize;
-        let off_rho_e = off_rho_e as usize;
-        let off_p = self
-            .model()
-            .state_layout
-            .offset_for("p")
-            .map(|v| v as usize);
-        let off_t = self
-            .model()
-            .state_layout
-            .offset_for("T")
-            .map(|v| v as usize);
-        let off_u = self
-            .model()
-            .state_layout
-            .offset_for("u")
-            .or_else(|| self.model().state_layout.offset_for("U"))
-            .map(|v| v as usize);
+        let off_rho = rho_port.offset() as usize;
+        let off_rho_u_x = rho_u_port.component(0).unwrap().full_offset() as usize;
+        let off_rho_u_y = rho_u_port.component(1).unwrap().full_offset() as usize;
+        let off_rho_e = rho_e_port.offset() as usize;
+
+        let off_p = registry
+            .register_scalar_field::<Pressure>("p")
+            .ok()
+            .map(|p| p.offset() as usize);
+        let off_t = registry
+            .register_scalar_field::<Temperature>("T")
+            .ok()
+            .map(|t| t.offset() as usize);
+        let off_u = registry
+            .register_vector2_field::<Velocity>("u")
+            .ok()
+            .or_else(|| registry.register_vector2_field::<Velocity>("U").ok())
+            .map(|u_port| {
+                (
+                    u_port.component(0).unwrap().full_offset() as usize,
+                    u_port.component(1).unwrap().full_offset() as usize,
+                )
+            });
 
         let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
         let rho_e = if gm1 > 0.0 { p / gm1 + ke } else { ke };
@@ -255,8 +268,8 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         for cell in 0..self.num_cells() as usize {
             let base = cell * stride;
             state[base + off_rho] = rho;
-            state[base + off_rho_u] = rho * u[0];
-            state[base + off_rho_u + 1] = rho * u[1];
+            state[base + off_rho_u_x] = rho * u[0];
+            state[base + off_rho_u_y] = rho * u[1];
             state[base + off_rho_e] = rho_e;
             if let Some(off_p) = off_p {
                 state[base + off_p] = p;
@@ -268,9 +281,9 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
                     0.0
                 };
             }
-            if let Some(off_u) = off_u {
-                state[base + off_u] = u[0];
-                state[base + off_u + 1] = u[1];
+            if let Some((off_u_x, off_u_y)) = off_u {
+                state[base + off_u_x] = u[0];
+                state[base + off_u_y] = u[1];
             }
         }
         let _ = self.write_state_f32(&state);
@@ -290,33 +303,43 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         let r_gas = eos_params.r;
 
         let stride = self.model().state_layout.stride() as usize;
-        let (Some(off_rho), Some(off_rho_u), Some(off_rho_e)) = (
-            self.model().state_layout.offset_for("rho"),
-            self.model().state_layout.offset_for("rho_u"),
-            self.model().state_layout.offset_for("rho_e"),
-        ) else {
+
+        // Build port registry and resolve required/optional field ports
+        let mut registry = PortRegistry::new(self.model().state_layout.clone());
+
+        let (rho_port, rho_u_port, rho_e_port) = (
+            registry.register_scalar_field::<Density>("rho").ok(),
+            registry.register_vector2_field::<MomentumDensity>("rho_u").ok(),
+            registry.register_scalar_field::<EnergyDensity>("rho_e").ok(),
+        );
+        let (Some(rho_port), Some(rho_u_port), Some(rho_e_port)) = (rho_port, rho_u_port, rho_e_port)
+        else {
             return;
         };
 
-        let off_rho = off_rho as usize;
-        let off_rho_u = off_rho_u as usize;
-        let off_rho_e = off_rho_e as usize;
-        let off_p = self
-            .model()
-            .state_layout
-            .offset_for("p")
-            .map(|v| v as usize);
-        let off_t = self
-            .model()
-            .state_layout
-            .offset_for("T")
-            .map(|v| v as usize);
-        let off_u = self
-            .model()
-            .state_layout
-            .offset_for("u")
-            .or_else(|| self.model().state_layout.offset_for("U"))
-            .map(|v| v as usize);
+        let off_rho = rho_port.offset() as usize;
+        let off_rho_u_x = rho_u_port.component(0).unwrap().full_offset() as usize;
+        let off_rho_u_y = rho_u_port.component(1).unwrap().full_offset() as usize;
+        let off_rho_e = rho_e_port.offset() as usize;
+
+        let off_p = registry
+            .register_scalar_field::<Pressure>("p")
+            .ok()
+            .map(|p| p.offset() as usize);
+        let off_t = registry
+            .register_scalar_field::<Temperature>("T")
+            .ok()
+            .map(|t| t.offset() as usize);
+        let off_u = registry
+            .register_vector2_field::<Velocity>("u")
+            .ok()
+            .or_else(|| registry.register_vector2_field::<Velocity>("U").ok())
+            .map(|u_port| {
+                (
+                    u_port.component(0).unwrap().full_offset() as usize,
+                    u_port.component(1).unwrap().full_offset() as usize,
+                )
+            });
 
         // Preserve unrelated state fields (e.g. mu, gradients) when seeding initial conditions.
         let mut state = pollster::block_on(async { self.read_state_f32().await });
@@ -332,8 +355,8 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             let rho_e = if gm1 > 0.0 { p_val / gm1 + ke } else { ke };
 
             state[base + off_rho] = rho_val;
-            state[base + off_rho_u] = rho_val * u_val[0];
-            state[base + off_rho_u + 1] = rho_val * u_val[1];
+            state[base + off_rho_u_x] = rho_val * u_val[0];
+            state[base + off_rho_u_y] = rho_val * u_val[1];
             state[base + off_rho_e] = rho_e;
             if let Some(off_p) = off_p {
                 state[base + off_p] = p_val;
@@ -345,9 +368,9 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
                     0.0
                 };
             }
-            if let Some(off_u) = off_u {
-                state[base + off_u] = u_val[0];
-                state[base + off_u + 1] = u_val[1];
+            if let Some((off_u_x, off_u_y)) = off_u {
+                state[base + off_u_x] = u_val[0];
+                state[base + off_u_y] = u_val[1];
             }
         }
         let _ = self.write_state_f32(&state);

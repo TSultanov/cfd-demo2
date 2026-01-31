@@ -5,6 +5,7 @@
 
 use super::{
     AccessMode, BufferPort, BufferType, FieldKind, FieldPort, ParamPort, ParamType, PortId,
+    PortValidationError,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::ports::dimensions::UnitDimension;
@@ -200,6 +201,103 @@ impl PortRegistry {
     /// Get the state layout.
     pub fn state_layout(&self) -> &StateLayout {
         &self.state_layout
+    }
+
+    /// Validate that a scalar field exists with the expected kind and dimension.
+    pub fn validate_scalar_field<D: UnitDimension>(
+        &self,
+        module: &'static str,
+        name: &str,
+    ) -> Result<(), PortValidationError> {
+        self.validate_field::<D, super::Scalar>(module, name)
+    }
+
+    /// Validate that a Vector2 field exists with the expected kind and dimension.
+    pub fn validate_vector2_field<D: UnitDimension>(
+        &self,
+        module: &'static str,
+        name: &str,
+    ) -> Result<(), PortValidationError> {
+        self.validate_field::<D, super::Vector2>(module, name)
+    }
+
+    /// Validate that a Vector3 field exists with the expected kind and dimension.
+    pub fn validate_vector3_field<D: UnitDimension>(
+        &self,
+        module: &'static str,
+        name: &str,
+    ) -> Result<(), PortValidationError> {
+        self.validate_field::<D, super::Vector3>(module, name)
+    }
+
+    /// Validate that a parameter exists with the expected type.
+    pub fn validate_param<T: ParamType>(
+        &self,
+        module: &'static str,
+        key: &str,
+    ) -> Result<(), PortValidationError> {
+        let Some(&id) = self.param_key_to_id.get(key) else {
+            return Err(PortValidationError::MissingParameter {
+                module,
+                param: key.to_string(),
+            });
+        };
+
+        let entry = self.param_ports.get(&id).expect("entry exists");
+        let expected = ParamTypeKind::from_type::<T>();
+        if entry.param_type != expected {
+            return Err(PortValidationError::ParameterTypeMismatch {
+                param: key.to_string(),
+                expected: expected.wgsl_type().to_string(),
+                found: entry.param_type.wgsl_type().to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn validate_field<D: UnitDimension, K: FieldKind>(
+        &self,
+        module: &'static str,
+        name: &str,
+    ) -> Result<(), PortValidationError> {
+        let field = self.state_layout.field(name).ok_or_else(|| {
+            PortValidationError::MissingField {
+                module,
+                field: name.to_string(),
+            }
+        })?;
+
+        let expected_components = K::COMPONENT_COUNT;
+        let actual_components = field.component_count();
+        if expected_components != actual_components {
+            return Err(PortValidationError::FieldKindMismatch {
+                field: name.to_string(),
+                expected: Self::field_kind_label(expected_components),
+                found: Self::field_kind_label(actual_components),
+            });
+        }
+
+        let expected_dim = D::to_runtime();
+        let found_dim = field.unit();
+        if expected_dim != found_dim {
+            return Err(PortValidationError::DimensionMismatch {
+                field: name.to_string(),
+                expected: expected_dim.to_string(),
+                found: found_dim.to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn field_kind_label(components: u32) -> String {
+        match components {
+            1 => "Scalar".to_string(),
+            2 => "Vector2".to_string(),
+            3 => "Vector3".to_string(),
+            n => format!("Vector{n}"),
+        }
     }
 
     /// Allocate a new unique port ID.
@@ -1070,7 +1168,7 @@ mod tests {
     use crate::solver::model::backend::ast::{vol_scalar, vol_vector};
     use crate::solver::model::ports::dimensions::{Length, Pressure, Time, Velocity};
     use crate::solver::model::ports::{
-        BufferF32, BufferU32, ReadOnly, ReadWrite, Scalar, Vector2, F32,
+        BufferF32, BufferU32, ReadOnly, ReadWrite, Scalar, Vector2, F32, U32,
     };
     use crate::solver::model::ports::{Port, WgslPort};
     use crate::solver::units::si;
@@ -1163,6 +1261,121 @@ mod tests {
         assert_eq!(dt.key(), "dt");
         assert_eq!(dt.wgsl_field_name(), "dt");
         assert_eq!(registry.param_port_count(), 1);
+    }
+
+    #[test]
+    fn validate_field_success() {
+        let layout = create_test_layout();
+        let registry = PortRegistry::new(layout);
+
+        registry
+            .validate_scalar_field::<Pressure>("test_module", "p")
+            .expect("should validate p");
+    }
+
+    #[test]
+    fn validate_field_missing() {
+        let layout = create_test_layout();
+        let registry = PortRegistry::new(layout);
+
+        let err = registry
+            .validate_scalar_field::<Pressure>("test_module", "does_not_exist")
+            .expect_err("should fail");
+
+        match err {
+            PortValidationError::MissingField { module, field } => {
+                assert_eq!(module, "test_module");
+                assert_eq!(field, "does_not_exist");
+            }
+            _ => panic!("expected MissingField"),
+        }
+    }
+
+    #[test]
+    fn validate_field_kind_mismatch() {
+        let layout = create_test_layout();
+        let registry = PortRegistry::new(layout);
+
+        let err = registry
+            .validate_vector2_field::<Velocity>("test_module", "p")
+            .expect_err("should fail");
+
+        match err {
+            PortValidationError::FieldKindMismatch {
+                field,
+                expected,
+                found,
+            } => {
+                assert_eq!(field, "p");
+                assert_eq!(expected, "Vector2");
+                assert_eq!(found, "Scalar");
+            }
+            _ => panic!("expected FieldKindMismatch"),
+        }
+    }
+
+    #[test]
+    fn validate_field_dimension_mismatch() {
+        let layout = create_test_layout();
+        let registry = PortRegistry::new(layout);
+
+        let err = registry
+            .validate_scalar_field::<Length>("test_module", "p")
+            .expect_err("should fail");
+
+        match err {
+            PortValidationError::DimensionMismatch {
+                field,
+                expected,
+                found,
+            } => {
+                assert_eq!(field, "p");
+                assert_eq!(expected, Length::to_runtime().to_string());
+                assert_eq!(found, si::PRESSURE.to_string());
+            }
+            _ => panic!("expected DimensionMismatch"),
+        }
+    }
+
+    #[test]
+    fn validate_param_missing_and_type_mismatch() {
+        let layout = create_test_layout();
+        let mut registry = PortRegistry::new(layout);
+
+        let err = registry
+            .validate_param::<F32>("test_module", "dt")
+            .expect_err("should fail");
+        match err {
+            PortValidationError::MissingParameter { module, param } => {
+                assert_eq!(module, "test_module");
+                assert_eq!(param, "dt");
+            }
+            _ => panic!("expected MissingParameter"),
+        }
+
+        registry
+            .register_param::<F32, Time>("dt", "dt")
+            .expect("register dt");
+
+        let err = registry
+            .validate_param::<U32>("test_module", "dt")
+            .expect_err("should fail");
+        match err {
+            PortValidationError::ParameterTypeMismatch {
+                param,
+                expected,
+                found,
+            } => {
+                assert_eq!(param, "dt");
+                assert_eq!(expected, "u32");
+                assert_eq!(found, "f32");
+            }
+            _ => panic!("expected ParameterTypeMismatch"),
+        }
+
+        registry
+            .validate_param::<F32>("test_module", "dt")
+            .expect("should validate dt");
     }
 
     #[test]

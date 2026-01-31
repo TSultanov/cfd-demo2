@@ -19,9 +19,9 @@ Based on design discussions, the implementation follows these principles:
 | Phase | Status | Progress | Description |
 |-------|--------|----------|-------------|
 | 1. Macro Infrastructure | **Mostly Done** | ~90% | `cfd2_macros` has `PortSet` derive (param/field/buffer) + trybuild tests; `ModulePorts` exists but needs integration strategy (how/when modules materialize port sets) |
-| 2. Core Port Runtime | **In Progress** | ~80% | `src/solver/model/ports/*` exists (ports + registry + tests); registry supports idempotent registration + conflict errors; IR-safe manifests can be registered dynamically; still missing dimension enforcement policy + richer validation |
+| 2. Core Port Runtime | **In Progress** | ~80% | `src/solver/model/ports/*` exists (ports + registry + tests); registry supports idempotent registration + conflict errors; IR-safe manifests can be registered dynamically; still missing dimension enforcement policy |
 | 3. PortManifest + Module Integration | **In Progress** | ~80% | IR-safe `PortManifest` defined in `cfd2_ir`; attached to `ModuleManifest`; `PortRegistry::register_manifest` exists and `SolverRecipe` stores a `port_registry`; named-param allowlisting now consumes `port_manifest.params`; first modules (`eos`, `generic_coupled`) migrated |
-| 4. Low-Risk Migration | **In Progress** | ~66% | `eos` + `generic_coupled` publish `PortManifest` for uniform params; `generic_coupled_apply` is TBD/likely unused |
+| 4. Low-Risk Migration | **In Progress** | ~66% | `eos` + `generic_coupled` publish `PortManifest` for uniform params; `generic_coupled_apply` wrapper removed (kernel remains in `generic_coupled`) |
 | 5. Field-Access Migration | **In Progress** | ~80% | `flux_module_gradients_wgsl` no longer scans `StateLayout` during WGSL generation (targets pre-resolved); `flux_module_wgsl` now threads a single `OffsetResolver` through WGSL lowering (runtime builds a `PortRegistryResolver` from the `StateLayout`), but still resolves offsets on-the-fly; `rhie_chow` runtime generators migrated to PortRegistry (build-script fallback remains); `generic_coupled` GPU lowering migrated to use pre-resolved unknown-to-state mapping via PortRegistry (runtime path works correctly with all StateLayout fields pre-registered; tests cover the runtime resolver); flux-module gradient targets now stored in IR-safe `PortManifest` |
 | 6. Codegen Replacement | Pending | 0% | Replace string-based codegen |
 | 7. Hard Cutoff | Pending | 0% | Remove deprecated APIs |
@@ -102,7 +102,7 @@ src/solver/model/ports/
 
 **Remaining**:
 - [ ] Integrate with existing build-time generation (WGSL emission still does not use `PortManifest`; build-time plumbing should not require ad-hoc string lists once port manifests are the single source of truth)
-- [ ] Add validation helpers ("missing field", "wrong kind", "dimension mismatch", etc.)
+- [x] Add validation helpers ("missing field", "wrong kind", "dimension mismatch", etc.) (`PortRegistry::validate_*` in `src/solver/model/ports/registry.rs`)
 - [x] Add `ports::prelude` for convenient imports for module authors
 
 **Notes**:
@@ -121,7 +121,7 @@ crates/cfd2_ir/src/solver/ir/
 **Modules**:
 - [x] `eos` - EOS configuration (proof of concept) - publishes `PortManifest` for uniform params
 - [x] `generic_coupled` - Publishes `PortManifest` for uniform params and removes duplication in `manifest.named_params`
-- [ ] `generic_coupled_apply` - Likely unused as a model module (kernel is already provided by `generic_coupled`); decide whether to remove or migrate
+- [x] `generic_coupled_apply` - Removed as a model module wrapper (kernel is already provided by `generic_coupled`)
 
 **Process per module**:
 1. Create new port-based module (e.g., `eos_ports.rs`)
@@ -304,6 +304,7 @@ migration steps to move that logic onto the port infrastructure.
 - Repeated `state_layout.offset_for("rho")`, `"rho_u"`, `"rho_e"`, `"p"`, `"T"`, `"u"/"U"` when seeding initial conditions.
 
 **Migration steps**:
+- [x] Update compressible state seeding to resolve offsets via `PortRegistry` typed ports (still per-call; caching pending).
 - [ ] Define "canonical field port sets" for the helper surfaces:
   - Compressible: `rho`, `rho_u` (vec2), `rho_e` (+ optional `p`, `T`, `u|U`)
   - Incompressible: `U|u`, `p`, (and any optional diagnostics fields used by stats helpers)
@@ -317,7 +318,7 @@ migration steps to move that logic onto the port infrastructure.
 - `layout.component_offset("U", c)` and `layout.offset_for("p")` used as early validation.
 
 **Migration steps**:
-- [ ] Replace ad-hoc layout checks with port resolution:
+- [x] Replace ad-hoc layout checks with port resolution (runtime path; build-script fallback remains):
   - Build `FieldPort`s for `U` (vec2) and `p` (scalar) and fail early if missing/wrong kind
 - [ ] Prefer using the same ports later for any host-side indexing needs (avoid duplicating offset logic).
 
@@ -601,9 +602,7 @@ As of **2026-01-30**:
 - Build-time codegen still does not use port manifests, and string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 
 **Next (recommended)**:
-- Decide what to do with `generic_coupled_apply` as a model module:
-  - If unused (likely), remove the module wrapper and keep only the generated kernel path.
-  - If used anywhere, migrate it to publish a `PortManifest` (or re-compose it from `generic_coupled`).
+- ✅ `generic_coupled_apply` module wrapper removed (kernel remains in `generic_coupled`).
 - Phase 3: start consuming `port_manifest` at build time (codegen):
   - Plumb module `PortManifest` data into the build-time pipeline (uniform params + bindings), reducing reliance on ad-hoc string lists.
   - Keep an escape hatch for params that are not yet representable as `ParamPort<...>` (e.g. `low_mach.model` as `u32` enum).

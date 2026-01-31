@@ -24,6 +24,3 @@ pub mod generic_coupled_ports {
     include!("generic_coupled_ports.rs");
 }
 
-pub mod generic_coupled_apply {
-    include!("generic_coupled_apply.rs");
-}

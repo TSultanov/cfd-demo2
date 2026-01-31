@@ -97,18 +97,61 @@ pub fn incompressible_momentum_model() -> ModelSpec {
     let flux_kernel = rhie_chow_flux_module_kernel(&system, &layout)
         .expect("failed to derive Rhie–Chow flux formula from model system/layout");
 
-    let u0 = layout
-        .component_offset("U", 0)
-        .ok_or_else(|| "incompressible_momentum_model missing U[0] in state layout".to_string())
-        .expect("state layout validation failed");
-    let u1 = layout
-        .component_offset("U", 1)
-        .ok_or_else(|| "incompressible_momentum_model missing U[1] in state layout".to_string())
-        .expect("state layout validation failed");
-    let p = layout
-        .offset_for("p")
-        .ok_or_else(|| "incompressible_momentum_model missing p in state layout".to_string())
-        .expect("state layout validation failed");
+    // NOTE: `incompressible_momentum_model()` is compiled both into the runtime crate and into
+    // the build script (via `build.rs` `include!()`), but the build script does not include the
+    // ports module. Use the port-based path when `cfg(cfd2_build_script)` is set (runtime
+    // compilation) and keep the old StateLayout lookups as a build-script fallback.
+    #[cfg(cfd2_build_script)]
+    let (u0, u1, p) = {
+        use crate::solver::model::ports::{PortRegistry, Pressure, Velocity};
+
+        // Port-based validation and offset resolution (replaces ad-hoc StateLayout lookups)
+        let mut registry = PortRegistry::new(layout.clone());
+
+        // Validate required fields with clear errors
+        registry
+            .validate_vector2_field::<Velocity>("incompressible_momentum_model", "U")
+            .expect("state layout validation failed");
+        registry
+            .validate_scalar_field::<Pressure>("incompressible_momentum_model", "p")
+            .expect("state layout validation failed");
+
+        // Resolve offsets via ports (no StateLayout probing in this function)
+        let u_port = registry
+            .register_vector2_field::<Velocity>("U")
+            .expect("U field registration failed");
+        let p_port = registry
+            .register_scalar_field::<Pressure>("p")
+            .expect("p field registration failed");
+
+        let u0 = u_port
+            .component(0)
+            .expect("U component 0")
+            .full_offset();
+        let u1 = u_port
+            .component(1)
+            .expect("U component 1")
+            .full_offset();
+        let p = p_port.offset();
+        (u0, u1, p)
+    };
+
+    #[cfg(not(cfd2_build_script))]
+    let (u0, u1, p) = {
+        let u0 = layout
+            .component_offset("U", 0)
+            .ok_or_else(|| "incompressible_momentum_model missing U[0] in state layout".to_string())
+            .expect("state layout validation failed");
+        let u1 = layout
+            .component_offset("U", 1)
+            .ok_or_else(|| "incompressible_momentum_model missing U[1] in state layout".to_string())
+            .expect("state layout validation failed");
+        let p = layout
+            .offset_for("p")
+            .ok_or_else(|| "incompressible_momentum_model missing p in state layout".to_string())
+            .expect("state layout validation failed");
+        (u0, u1, p)
+    };
 
     let mut boundaries = BoundarySpec::default();
     boundaries.set_field(

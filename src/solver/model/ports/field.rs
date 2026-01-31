@@ -1,7 +1,7 @@
-//! Field ports for type-safe state field access.
-//!
-//! Field ports provide compile-time verified access to fields in the state layout,
-//! tracking both the physical dimension and the field kind (scalar, vector2, vector3).
+// Field ports for type-safe state field access.
+//
+// Field ports provide compile-time verified access to fields in the state layout,
+// tracking both the physical dimension and the field kind (scalar, vector2, vector3).
 
 use super::{DimensionalPort, Port, PortId, WgslPort};
 use crate::solver::model::ports::dimensions::UnitDimension;

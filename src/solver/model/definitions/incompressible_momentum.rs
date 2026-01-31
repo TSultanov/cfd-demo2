@@ -125,15 +125,10 @@ pub fn incompressible_momentum_model() -> ModelSpec {
     let flux_kernel = rhie_chow_flux_module_kernel(&system, &layout)
         .expect("failed to derive Rhie–Chow flux formula from model system/layout");
 
-    // NOTE: `incompressible_momentum_model()` is compiled both into the runtime crate and into
-    // the build script (via `build.rs` `include!()`), but the build script does not include the
-    // ports module. Use the port-based path when `cfg(cfd2_build_script)` is set (runtime
-    // compilation) and keep the old StateLayout lookups as a build-script fallback.
-    #[cfg(cfd2_build_script)]
+    // Port-based validation and offset resolution (replaces ad-hoc StateLayout lookups)
     let (u0, u1, p) = {
         use crate::solver::model::ports::{PortRegistry, Pressure, Velocity};
 
-        // Port-based validation and offset resolution (replaces ad-hoc StateLayout lookups)
         let mut registry = PortRegistry::new(layout.clone());
 
         // Validate required fields with clear errors
@@ -161,23 +156,6 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             .expect("U component 1")
             .full_offset();
         let p = p_port.offset();
-        (u0, u1, p)
-    };
-
-    #[cfg(not(cfd2_build_script))]
-    let (u0, u1, p) = {
-        let u0 = layout
-            .component_offset("U", 0)
-            .ok_or_else(|| "incompressible_momentum_model missing U[0] in state layout".to_string())
-            .expect("state layout validation failed");
-        let u1 = layout
-            .component_offset("U", 1)
-            .ok_or_else(|| "incompressible_momentum_model missing U[1] in state layout".to_string())
-            .expect("state layout validation failed");
-        let p = layout
-            .offset_for("p")
-            .ok_or_else(|| "incompressible_momentum_model missing p in state layout".to_string())
-            .expect("state layout validation failed");
         (u0, u1, p)
     };
 

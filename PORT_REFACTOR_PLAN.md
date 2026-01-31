@@ -23,7 +23,7 @@ Based on design discussions, the implementation follows these principles:
 | 3. PortManifest + Module Integration | **Done** | 100% | IR-safe `PortManifest` is wired through runtime + build-time; named-param allowlisting consumes `port_manifest.params`; WGSL `Constants` generation consumes manifest params (no ad-hoc string lists) |
 | 4. Low-Risk Migration | **Done** | 100% | `eos` + `generic_coupled` publish `PortManifest` for uniform params; `generic_coupled_apply` wrapper removed (kernel remains in `generic_coupled`) |
 | 5. Field-Access Migration | **In Progress** | ~90% | `flux_module_gradients_wgsl` no longer scans `StateLayout` during WGSL generation (targets pre-resolved); `flux_module_wgsl` consumes pre-resolved `ResolvedStateSlotsSpec` from `PortManifest` (no `StateLayout` probing) and has WGSL goldens; `rhie_chow` runtime generators migrated to PortRegistry (build-script fallback remains); `generic_coupled` GPU lowering migrated to use pre-resolved unknown-to-state mapping via PortRegistry (runtime path works correctly with all StateLayout fields pre-registered; tests cover the runtime resolver); flux-module gradient targets now stored in IR-safe `PortManifest` |
-| 6. Codegen Replacement | Pending | 0% | Replace string-based codegen |
+| 6. Codegen Replacement | **In Progress** | ~15% | Replace string-based codegen |
 | 7. Hard Cutoff | Pending | 0% | Remove deprecated APIs |
 
 ## Implementation Phases
@@ -467,6 +467,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 **Progress**:
 - ✅ Added slot-based state access helpers in `crates/cfd2_codegen/src/solver/codegen/state_access.rs` and refactored `crates/cfd2_codegen/src/solver/codegen/coeff_expr.rs` to use them when slot metadata is already available.
 - ✅ Reduced redundant slot lookups in `crates/cfd2_codegen/src/solver/codegen/primitive_expr.rs` by resolving `(slot, component)` once and deriving both offset + unit from that.
+- ✅ Build-script codegen now includes `solver::model::ports` (proc-macro re-exports + DashMap-based interner gated to runtime), enabling port-based offset resolution during build.rs WGSL generation (e.g., `incompressible_momentum_model()` no longer needs a `StateLayout` fallback).
 
 ### Phase 7: Hard Cutoff (Week 9)
 
@@ -609,7 +610,7 @@ As of **2026-01-31**:
 - `flux_module_gradients_wgsl` consumes pre-resolved `PortManifest.gradient_targets` during kernel WGSL generation; target discovery still scans `StateLayout` during module creation; the build script compilation context still uses legacy `StateLayout` offsets
 - `flux_module_wgsl` consumes pre-resolved `PortManifest.resolved_state_slots` (IR-safe `ResolvedStateSlotsSpec`) and no longer probes `StateLayout`; golden WGSL tests cover compressible + incompressible_momentum
 - `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present
-- `cfd2_build_script` cfg is currently used as a build-time hack to exclude runtime-only manifest attachment from the build script’s `include!()` compilation context; regression coverage exists to ensure the runtime recipe populates `port_registry` from the EOS manifest
+- `cfd2_build_script` cfg is currently used as a build-time hack to exclude runtime-only manifest attachment from the build script’s `include!()` compilation context. The build script now also compiles `solver::model::ports` (with proc-macro + DashMap interner gated to runtime), enabling incremental removal of build-script `StateLayout` fallbacks (e.g., `incompressible_momentum_model()` now uses `PortRegistry` in both contexts).
 - Build-time codegen consumes port manifests for uniform params (e.g. EOS `Constants` fields); string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 
 **Next (recommended)**:

@@ -1,7 +1,7 @@
-//! Buffer ports for WGSL storage buffer bindings.
-//!
-//! Buffer ports provide type-safe abstractions for GPU buffer bindings,
-//! tracking access modes (read-only, read-write) and data types.
+// Buffer ports for WGSL storage buffer bindings.
+//
+// Buffer ports provide type-safe abstractions for GPU buffer bindings,
+// tracking access modes (read-only, read-write) and data types.
 
 use super::{Port, PortId, WgslPort};
 use std::marker::PhantomData;

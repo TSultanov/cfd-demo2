@@ -31,6 +31,13 @@ mod solver {
         include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/ir/mod.rs"));
     }
     pub mod model {
+        pub mod ports {
+            // Include the full ports module (intern module is cfg-gated for runtime only)
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/ports/mod.rs"
+            ));
+        }
         pub mod linear_solver {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),

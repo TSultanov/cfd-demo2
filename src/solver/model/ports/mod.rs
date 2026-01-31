@@ -1,30 +1,31 @@
-//! Type-safe port system for model fields, parameters, and GPU resources.
-//!
-//! This module provides statically-typed port abstractions that replace string-based
-//! field name lookups with compile-time verified references. Ports track physical
-//! dimensions, field kinds, and access modes to prevent errors at compile time.
-//!
-//! # Overview
-//!
-//! - [`FieldPort`]: References to fields in the state layout with physical dimensions
-//! - [`ParamPort`]: Type-safe named parameters with units
-//! - [`BufferPort`]: WGSL buffer binding specifications
-//! - [`PortRegistry`]: Runtime storage and lookup for ports
-//!
-//! # Example
-//!
-//! ```rust,ignore
-//! // Instead of string lookups:
-//! let offset = model.state_layout.offset_for("d_p").unwrap();
-//!
-//! // Use typed ports:
-//! let dp_port: FieldPort<DPDim, Scalar> = model.ports.scalar_field("d_p")?;
-//! let expr = dp_port.access("idx"); // Generates: state[idx * stride + offset]
-//! ```
+// Type-safe port system for model fields, parameters, and GPU resources.
+//
+// This module provides statically-typed port abstractions that replace string-based
+// field name lookups with compile-time verified references. Ports track physical
+// dimensions, field kinds, and access modes to prevent errors at compile time.
+//
+// # Overview
+//
+// - [`FieldPort`]: References to fields in the state layout with physical dimensions
+// - [`ParamPort`]: Type-safe named parameters with units
+// - [`BufferPort`]: WGSL buffer binding specifications
+// - [`PortRegistry`]: Runtime storage and lookup for ports
+//
+// # Example
+//
+// ```rust,ignore
+// // Instead of string lookups:
+// let offset = model.state_layout.offset_for("d_p").unwrap();
+//
+// // Use typed ports:
+// let dp_port: FieldPort<DPDim, Scalar> = model.ports.scalar_field("d_p")?;
+// let expr = dp_port.access("idx"); // Generates: state[idx * stride + offset]
+// ```
 
 pub mod buffer;
 pub mod dimensions;
 pub mod field;
+#[cfg(cfd2_build_script)]
 pub mod intern;
 pub mod params;
 pub mod prelude;
@@ -48,6 +49,7 @@ pub use field::{
     ComponentOffset, FieldKind, FieldPort, FieldPortError, FieldPortProvider, Scalar, Vector2,
     Vector3,
 };
+#[cfg(cfd2_build_script)]
 pub use intern::{intern, intern_string};
 pub use params::{
     ParamPort, ParamPortError, ParamPortProvider, ParamPortSet, ParamPortSetBuilder, ParamType,
@@ -55,7 +57,8 @@ pub use params::{
 };
 pub use registry::{PortRegistry, PortRegistryError, TypedPortRegistry};
 
-// Re-export derive macros from cfd2_macros
+// Re-export derive macros from cfd2_macros (only available in runtime, not in build script)
+#[cfg(cfd2_build_script)]
 pub use cfd2_macros::{ModulePorts, PortSet};
 
 // Re-export traits

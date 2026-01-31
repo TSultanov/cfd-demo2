@@ -1,12 +1,12 @@
-//! String interning for port names.
-//!
-//! This module provides a thread-safe string interner that converts `&str` into
-//! `&'static str` in a controlled, deduplicated way. This allows derived/dynamic
-//! field names (e.g., `format!("grad_{}", pressure.name())`) to be used with the
-//! port system without ad-hoc `Box::leak` calls in modules.
-//!
-//! The interner is lazy-initialized on first use and uses a DashMap for
-//! thread-safe concurrent access.
+// String interning for port names.
+//
+// This module provides a thread-safe string interner that converts `&str` into
+// `&'static str` in a controlled, deduplicated way. This allows derived/dynamic
+// field names (e.g., `format!("grad_{}", pressure.name())`) to be used with the
+// port system without ad-hoc `Box::leak` calls in modules.
+//
+// The interner is lazy-initialized on first use and uses a DashMap for
+// thread-safe concurrent access.
 
 use dashmap::DashMap;
 use std::sync::OnceLock;

@@ -1,7 +1,7 @@
-//! Traits for port-based module system.
-//!
-//! This module defines the core traits that are implemented by the derive macros
-//! in `cfd2_macros`.
+// Traits for port-based module system.
+//
+// This module defines the core traits that are implemented by the derive macros
+// in `cfd2_macros`.
 
 use super::{PortRegistry, PortRegistryError};
 

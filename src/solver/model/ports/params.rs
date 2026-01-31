@@ -1,7 +1,7 @@
-//! Parameter ports for type-safe named parameter access.
-//!
-//! Parameter ports replace string-based named parameter lookups with
-//! compile-time type and dimension verification.
+// Parameter ports for type-safe named parameter access.
+//
+// Parameter ports replace string-based named parameter lookups with
+// compile-time type and dimension verification.
 
 use super::{DimensionalPort, Port, PortId, WgslPort};
 use crate::solver::model::ports::dimensions::UnitDimension;

@@ -1,33 +1,33 @@
-//! Compile-time physical dimension tracking for ports.
-//!
-//! This module re-exports the canonical type-level dimension system from
-//! `cfd2_ir::solver::dimensions`. The canonical system provides:
-//!
-//! - Rational exponents for all base dimensions (M, L, T, TEMP)
-//! - Type constructors: [`MulDim`], [`DivDim`], [`PowDim`], [`SqrtDim`]
-//! - Typed aliases for common SI dimensions
-//! - Conversion to runtime [`UnitDim`](crate::solver::units::UnitDim)
-//!
-//! # Migration Note
-//!
-//! This module previously contained a duplicate dimension system using `i8` exponents.
-//! It has been refactored to use the canonical rational-exponent system from `cfd2_ir`.
-//! The public API remains compatible - all type aliases and traits are preserved.
-//!
-//! # Example
-//!
-//! ```rust,ignore
-//! use crate::solver::model::ports::dimensions::*;
-//!
-//! // Velocity = Length / Time
-//! type MyVelocity = DivDim<Length, Time>;
-//!
-//! // Pressure = Force / Area
-//! type MyPressure = DivDim<Force, Area>;
-//!
-//! // Square root dimension (requires rational exponents)
-//! type SqrtPressure = SqrtDim<Pressure>;
-//! ```
+// Compile-time physical dimension tracking for ports.
+//
+// This module re-exports the canonical type-level dimension system from
+// `cfd2_ir::solver::dimensions`. The canonical system provides:
+//
+// - Rational exponents for all base dimensions (M, L, T, TEMP)
+// - Type constructors: [`MulDim`], [`DivDim`], [`PowDim`], [`SqrtDim`]
+// - Typed aliases for common SI dimensions
+// - Conversion to runtime [`UnitDim`](crate::solver::units::UnitDim)
+//
+// # Migration Note
+//
+// This module previously contained a duplicate dimension system using `i8` exponents.
+// It has been refactored to use the canonical rational-exponent system from `cfd2_ir`.
+// The public API remains compatible - all type aliases and traits are preserved.
+//
+// # Example
+//
+// ```rust,ignore
+// use crate::solver::model::ports::dimensions::*;
+//
+// // Velocity = Length / Time
+// type MyVelocity = DivDim<Length, Time>;
+//
+// // Pressure = Force / Area
+// type MyPressure = DivDim<Force, Area>;
+//
+// // Square root dimension (requires rational exponents)
+// type SqrtPressure = SqrtDim<Pressure>;
+// ```
 
 // Re-export everything from the canonical dimension system
 pub use crate::solver::dimensions::*;

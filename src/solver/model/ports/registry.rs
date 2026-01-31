@@ -1,12 +1,20 @@
-//! Port registry for runtime management of ports.
-//!
-//! The port registry manages the creation and storage of field, parameter,
-//! and buffer ports, mapping them to their underlying resources.
+// Port registry for runtime management of ports.
+//
+// The port registry manages the creation and storage of field, parameter,
+// and buffer ports, mapping them to their underlying resources.
 
 use super::{
     AccessMode, BufferPort, BufferType, FieldKind, FieldPort, ParamPort, ParamType, PortId,
     PortValidationError,
 };
+
+// Simple intern fallback for build script context (no dashmap dependency)
+#[cfg(not(cfd2_build_script))]
+fn intern(s: &str) -> &'static str {
+    // In build script context, just leak the string
+    // (build script memory is short-lived and this is only called a few times)
+    Box::leak(s.to_string().into_boxed_str())
+}
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::ports::dimensions::{AnyDimension, UnitDimension};
 use crate::solver::model::ports::params::ParamTypeKind;
@@ -420,7 +428,10 @@ impl PortRegistry {
         name: &str,
     ) -> Result<FieldPort<D, K>, PortRegistryError> {
         // Intern the name to get a 'static str
+        #[cfg(cfd2_build_script)]
         let name = super::intern(name);
+        #[cfg(not(cfd2_build_script))]
+        let name = intern(name);
 
         // Check if already registered
         if let Some(&existing_id) = self.field_name_to_id.get(name) {

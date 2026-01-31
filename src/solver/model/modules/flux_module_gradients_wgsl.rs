@@ -1,5 +1,6 @@
 use crate::solver::ir::FluxLayout;
 use crate::solver::model::modules::flux_module::ResolvedGradientTarget;
+use cfd2_codegen::solver::codegen::constants::constants_struct;
 use cfd2_codegen::solver::codegen::dsl as typed;
 use cfd2_codegen::solver::codegen::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
@@ -184,7 +185,7 @@ mod tests {
 fn base_items() -> Vec<Item> {
     let mut items = Vec::new();
     items.push(Item::Struct(vector2_struct()));
-    items.push(Item::Struct(constants_struct()));
+    items.push(Item::Struct(base_constants_struct()));
     items.push(Item::Comment("Group 0: Mesh".to_string()));
     items.extend(mesh_bindings());
     items.push(Item::Comment("Group 1: Fields".to_string()));
@@ -206,24 +207,9 @@ fn vector2_struct() -> StructDef {
     )
 }
 
-fn constants_struct() -> StructDef {
-    StructDef::new(
-        "Constants",
-        vec![
-            StructField::new("dt", Type::F32),
-            StructField::new("dt_old", Type::F32),
-            StructField::new("dtau", Type::F32),
-            StructField::new("time", Type::F32),
-            StructField::new("viscosity", Type::F32),
-            StructField::new("density", Type::F32),
-            StructField::new("component", Type::U32),
-            StructField::new("alpha_p", Type::F32),
-            StructField::new("scheme", Type::U32),
-            StructField::new("alpha_u", Type::F32),
-            StructField::new("stride_x", Type::U32),
-            StructField::new("time_scheme", Type::U32),
-        ],
-    )
+fn base_constants_struct() -> StructDef {
+    // Use shared helper for base Constants struct (no extra params)
+    constants_struct(&[])
 }
 
 fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {

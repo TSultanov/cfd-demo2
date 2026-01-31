@@ -1,6 +1,6 @@
 use crate::solver::model::kernel::{DispatchKindId, KernelPhaseId};
 use crate::solver::model::kernel::{KernelConditionId, ModelKernelGeneratorSpec, ModelKernelSpec};
-use crate::solver::model::module::{KernelBundleModule, ModuleInvariant, ModuleManifest};
+use crate::solver::model::module::{KernelBundleModule, ModuleInvariant};
 use crate::solver::model::KernelId;
 
 use cfd2_codegen::solver::codegen::KernelWgsl;
@@ -167,17 +167,14 @@ pub fn rhie_chow_aux_module(
         name: "rhie_chow_aux",
         kernels,
         generators,
-        manifest: ModuleManifest {
-            invariants: vec![
-                ModuleInvariant::RequireUniqueMomentumPressureCouplingReferencingDp {
-                    dp_field,
-                    require_vector2_momentum,
-                    require_pressure_gradient,
-                },
-            ],
-            port_manifest,
-            ..Default::default()
-        },
+        invariants: vec![
+            ModuleInvariant::RequireUniqueMomentumPressureCouplingReferencingDp {
+                dp_field,
+                require_vector2_momentum,
+                require_pressure_gradient,
+            },
+        ],
+        port_manifest,
         ..Default::default()
     })
 }
@@ -582,7 +579,6 @@ mod tests {
 
         // Check that port_manifest is present
         let port_manifest = module
-            .manifest
             .port_manifest
             .expect("port_manifest should be present");
 

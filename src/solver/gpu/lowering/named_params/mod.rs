@@ -14,12 +14,12 @@ pub(crate) fn named_params_for_model(
         let mut keys_to_process: Vec<&'static str> = Vec::new();
 
         // Add keys from named_params
-        for key in &module.manifest.named_params {
+        for key in &module.named_params {
             keys_to_process.push(*key);
         }
 
         // Add keys from port_manifest
-        if let Some(ref port_manifest) = module.manifest.port_manifest {
+        if let Some(ref port_manifest) = module.port_manifest {
             for param in &port_manifest.params {
                 keys_to_process.push(param.key);
             }

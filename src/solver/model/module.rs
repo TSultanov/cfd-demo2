@@ -32,8 +32,28 @@ pub enum ModuleInvariant {
     },
 }
 
+/// Object-safe interface for model-defined numerical modules.
+///
+/// Modules are small bundles of kernel passes + optional WGSL generators.
+/// They are composed by the model (and/or method selection) to produce a recipe.
+pub trait ModelModule {
+    fn name(&self) -> &'static str;
+    fn kernel_specs(&self) -> &[ModelKernelSpec];
+    fn kernel_generators(&self) -> &[ModelKernelGeneratorSpec];
+}
+
+/// A simple data-driven module: a named bundle of kernel specs + WGSL generators.
 #[derive(Debug, Clone, Default)]
-pub struct ModuleManifest {
+pub struct KernelBundleModule {
+    pub name: &'static str,
+    pub kernels: Vec<ModelKernelSpec>,
+    pub generators: Vec<ModelKernelGeneratorSpec>,
+
+    /// Optional EOS configuration carried by this module.
+    ///
+    /// When present, the owning model is considered to have an EOS.
+    pub eos: Option<EosSpec>,
+
     /// Optional solver/method selection contributed by this module.
     pub method: Option<crate::solver::model::method::MethodSpec>,
 
@@ -55,33 +75,6 @@ pub struct ModuleManifest {
     pub port_manifest: Option<PortManifest>,
 }
 
-/// Object-safe interface for model-defined numerical modules.
-///
-/// Modules are small bundles of kernel passes + optional WGSL generators.
-/// They are composed by the model (and/or method selection) to produce a recipe.
-pub trait ModelModule {
-    fn name(&self) -> &'static str;
-    fn kernel_specs(&self) -> &[ModelKernelSpec];
-    fn kernel_generators(&self) -> &[ModelKernelGeneratorSpec];
-
-    fn manifest(&self) -> &ModuleManifest;
-}
-
-/// A simple data-driven module: a named bundle of kernel specs + WGSL generators.
-#[derive(Debug, Clone, Default)]
-pub struct KernelBundleModule {
-    pub name: &'static str,
-    pub kernels: Vec<ModelKernelSpec>,
-    pub generators: Vec<ModelKernelGeneratorSpec>,
-
-    /// Optional EOS configuration carried by this module.
-    ///
-    /// When present, the owning model is considered to have an EOS.
-    pub eos: Option<EosSpec>,
-
-    pub manifest: ModuleManifest,
-}
-
 impl ModelModule for KernelBundleModule {
     fn name(&self) -> &'static str {
         self.name
@@ -93,9 +86,5 @@ impl ModelModule for KernelBundleModule {
 
     fn kernel_generators(&self) -> &[ModelKernelGeneratorSpec] {
         &self.generators
-    }
-
-    fn manifest(&self) -> &ModuleManifest {
-        &self.manifest
     }
 }

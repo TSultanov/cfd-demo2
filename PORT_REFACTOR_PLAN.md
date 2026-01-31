@@ -88,11 +88,11 @@ src/solver/model/ports/
 
 ### Phase 3: PortManifest + Module Integration (Done)
 
-**Goal**: Replace/augment `ModuleManifest` so modules can declare ports and the solver can build/validate a port registry
+**Goal**: Replace/augment per-module metadata so modules can declare ports and the solver can build/validate a port registry
 
 **Done**:
 - [x] Define IR-safe `PortManifest` in `cfd2_ir::solver::ir::ports` (pure data, no `src/solver/model/*` deps)
-- [x] Add `port_manifest: Option<PortManifest>` to `ModuleManifest`
+- [x] Add `port_manifest: Option<PortManifest>` to per-module metadata (now stored on `KernelBundleModule`)
 - [x] Teach `#[derive(PortSet)]` to emit `port_manifest()` method
 - [x] Migrate `eos` module to publish `PortManifest` for uniform params
 - [x] Add `PortRegistry::register_manifest(module, &PortManifest)` for dynamic manifest registration + validation
@@ -137,12 +137,16 @@ crates/cfd2_ir/src/solver/ir/
 ```rust
 // BEFORE (string-based)
 pub fn eos_module(eos: EosSpec) -> KernelBundleModule {
-    let mut manifest = ModuleManifest::default();
-    manifest.named_params = vec![
-        NamedParamKey::Key("eos.gamma"),
-        // ...
-    ];
-    KernelBundleModule { ... }
+    KernelBundleModule {
+        name: "eos",
+        eos: Some(eos),
+        // Host-only params (string allowlist)
+        named_params: vec![
+            "eos.gamma",
+            // ...
+        ],
+        ..Default::default()
+    }
 }
 
 // AFTER (port-based)
@@ -476,7 +480,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 
 - [ ] Delete deprecated module functions
 - [x] Remove `NamedParamKey` enum
-- [ ] Remove old `ModuleManifest`
+- [x] Remove old `ModuleManifest`
 - [ ] Delete string-based codegen functions
 - [ ] Update documentation
 - [ ] Breaking change commit with migration guide
@@ -601,7 +605,7 @@ As of **2026-01-31**:
 - Port runtime types + registry exist under `src/solver/model/ports/*`
 - `#[derive(PortSet)]` exists (param/field/buffer) with trybuild tests; `PortRegistry` registration is idempotent
 - `#[derive(ModulePorts)]` exists but still needs a clarified integration story (how/when modules materialize a port set and expose it to codegen)
-- IR-safe `PortManifest` exists (`crates/cfd2_ir/src/solver/ir/ports.rs`) and is attached to `ModuleManifest` via `ModuleManifest.port_manifest`
+- IR-safe `PortManifest` exists (`crates/cfd2_ir/src/solver/ir/ports.rs`) and is attached to modules via `KernelBundleModule.port_manifest`
 - `PortManifest` field specs support an `ANY_DIMENSION` unit sentinel to skip unit validation for dynamic-dimension fields
 - Named parameter allowlisting now includes `port_manifest.params[*].key`, so modules no longer need to duplicate uniform params in `manifest.named_params`
 - First module migrated: `eos` publishes a `PortManifest` for its uniform params and no longer duplicates those uniform keys in `manifest.named_params` (keeps only non-uniform/escape-hatch keys there)
@@ -631,7 +635,7 @@ As of **2026-01-31**:
 - ✅ Core traits (`ModulePortsTrait`, `PortSetTrait`, etc.)
 - ✅ `#[derive(PortSet)]` + trybuild tests (param/field/buffer)
 - ✅ IR-safe `PortManifest` types (`crates/cfd2_ir/src/solver/ir/ports.rs`) + re-export through `cfd2_ir::solver::ir`
-- ✅ `ModuleManifest.port_manifest` wiring (model boundary-safe)
+- ✅ `KernelBundleModule.port_manifest` wiring (model boundary-safe)
 - ✅ `eos` publishes a first `PortManifest` (uniform params)
 - ✅ Canonical dimension carrier type `Dim<...>` (usable directly, but not auto-derived from expressions)
 - ✅ Typed IR builder layer (`crates/cfd2_ir/src/solver/model/backend/typed_ast.rs`) for structurally-matching unit expressions

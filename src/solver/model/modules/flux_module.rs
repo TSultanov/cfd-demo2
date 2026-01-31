@@ -3,7 +3,7 @@ use crate::solver::model::flux_module::FluxModuleSpec;
 use crate::solver::model::kernel::{
     DispatchKindId, KernelConditionId, KernelPhaseId, ModelKernelGeneratorSpec, ModelKernelSpec,
 };
-use crate::solver::model::module::{KernelBundleModule, ModuleManifest};
+use crate::solver::model::module::KernelBundleModule;
 use crate::solver::model::KernelId;
 
 use cfd2_codegen::solver::codegen::KernelWgsl;
@@ -273,21 +273,16 @@ pub fn flux_module_module(
     let resolved_state_slots =
         resolve_state_slots_for_flux(&flux, system, state_layout, &ordered_primitives)?;
 
-    let manifest = ModuleManifest {
+    let mut out = KernelBundleModule {
+        name: "flux_module",
+        kernels: Vec::new(),
+        generators: Vec::new(),
         flux_module: Some(flux),
         port_manifest: Some(crate::solver::ir::ports::PortManifest {
             gradient_targets,
             resolved_state_slots: Some(resolved_state_slots),
             ..Default::default()
         }),
-        ..Default::default()
-    };
-
-    let mut out = KernelBundleModule {
-        name: "flux_module",
-        kernels: Vec::new(),
-        generators: Vec::new(),
-        manifest,
         ..Default::default()
     };
 
@@ -351,7 +346,6 @@ fn generate_flux_module_gradients_kernel_wgsl(
         .ok_or_else(|| "flux_module_gradients: flux_module not found in model".to_string())?;
 
     let port_manifest = flux_module
-        .manifest
         .port_manifest
         .as_ref()
         .ok_or_else(|| "flux_module_gradients: port_manifest missing".to_string())?;
@@ -450,7 +444,7 @@ fn generate_flux_module_kernel_wgsl(
         .modules
         .iter()
         .find(|m| m.name == "flux_module")
-        .and_then(|m| m.manifest.port_manifest.as_ref())
+        .and_then(|m| m.port_manifest.as_ref())
         .and_then(|p| p.resolved_state_slots.as_ref())
         .ok_or_else(|| "flux_module port_manifest missing resolved_state_slots".to_string())?;
 

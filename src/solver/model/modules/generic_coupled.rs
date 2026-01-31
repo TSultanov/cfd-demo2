@@ -1,7 +1,7 @@
 use crate::solver::model::kernel::{
     DispatchKindId, KernelConditionId, KernelPhaseId, ModelKernelGeneratorSpec, ModelKernelSpec,
 };
-use crate::solver::model::module::{KernelBundleModule, ModuleManifest, PortManifest};
+use crate::solver::model::module::{KernelBundleModule, PortManifest};
 use crate::solver::model::{KernelId, MethodSpec};
 
 pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
@@ -99,12 +99,9 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                 crate::solver::model::kernel::generate_generic_coupled_update_kernel_wgsl,
             ),
         ],
-        manifest: ModuleManifest {
-            method: Some(method),
-            named_params,
-            port_manifest,
-            ..Default::default()
-        },
+        method: Some(method),
+        named_params,
+        port_manifest,
         ..Default::default()
     }
 }

@@ -37,11 +37,11 @@ impl ModelSpec {
 
         for module in &self.modules {
             // Include params from named_params (legacy)
-            for key in &module.manifest.named_params {
+            for key in &module.named_params {
                 out.insert(*key);
             }
             // Include params from port_manifest (new)
-            if let Some(ref port_manifest) = module.manifest.port_manifest {
+            if let Some(ref port_manifest) = module.port_manifest {
                 for param in &port_manifest.params {
                     out.insert(param.key);
                 }
@@ -80,7 +80,7 @@ impl ModelSpec {
     pub fn method(&self) -> Result<crate::solver::model::method::MethodSpec, String> {
         let mut found: Option<(&'static str, crate::solver::model::method::MethodSpec)> = None;
         for module in &self.modules {
-            if let Some(method) = module.manifest.method {
+            if let Some(method) = module.method {
                 match found {
                     None => found = Some((module.name, method)),
                     Some((prev_name, _)) => {
@@ -105,7 +105,7 @@ impl ModelSpec {
             &crate::solver::model::flux_module::FluxModuleSpec,
         )> = None;
         for module in &self.modules {
-            if let Some(spec) = module.manifest.flux_module.as_ref() {
+            if let Some(spec) = module.flux_module.as_ref() {
                 match found {
                     None => found = Some((module.name, spec)),
                     Some((prev_name, _)) => {
@@ -153,11 +153,11 @@ impl ModelSpec {
                 // Find the unique module providing flux_module to access its port manifest.
                 // This uses the same uniqueness assumptions as ModelSpec::flux_module().
                 let flux_module_provider = self.modules.iter().find(|m| {
-                    m.manifest.flux_module.is_some()
+                    m.flux_module.is_some()
                 });
 
                 let has_gradient_targets = flux_module_provider
-                    .and_then(|m| m.manifest.port_manifest.as_ref())
+                    .and_then(|m| m.port_manifest.as_ref())
                     .map(|pm| !pm.gradient_targets.is_empty())
                     .unwrap_or(false);
 
@@ -195,7 +195,7 @@ impl ModelSpec {
 
         // Validate port_manifest fields against the registry.
         for module in &self.modules {
-            if let Some(ref port_manifest) = module.manifest.port_manifest {
+            if let Some(ref port_manifest) = module.port_manifest {
                 for field_spec in &port_manifest.fields {
                     let name = field_spec.name;
 
@@ -244,7 +244,7 @@ impl ModelSpec {
 
         // Validate typed invariant requirements declared by modules.
         for module in &self.modules {
-            for inv in &module.manifest.invariants {
+            for inv in &module.invariants {
                 match *inv {
                     ModuleInvariant::RequireStateField { name, kind } => {
                         let Some(entry) = registry.get_field_entry_by_name(name) else {
@@ -737,7 +737,6 @@ mod tests {
     #[test]
     fn validate_module_manifests_reports_missing_port_manifest_field() {
         use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
-        use crate::solver::model::module::ModuleManifest;
         use crate::solver::units::si;
 
         let mut model = incompressible_momentum_model();
@@ -745,17 +744,14 @@ mod tests {
         // Add a module with a port_manifest referencing a non-existent field
         let bad_module = crate::solver::model::module::KernelBundleModule {
             name: "test_module",
-            manifest: ModuleManifest {
-                port_manifest: Some(PortManifest {
-                    fields: vec![FieldSpec {
-                        name: "nonexistent_field",
-                        kind: PortFieldKind::Scalar,
-                        unit: si::PRESSURE,
-                    }],
-                    ..Default::default()
-                }),
+            port_manifest: Some(PortManifest {
+                fields: vec![FieldSpec {
+                    name: "nonexistent_field",
+                    kind: PortFieldKind::Scalar,
+                    unit: si::PRESSURE,
+                }],
                 ..Default::default()
-            },
+            }),
             ..Default::default()
         };
         model.modules.push(bad_module);
@@ -775,7 +771,6 @@ mod tests {
     #[test]
     fn validate_module_manifests_reports_kind_mismatch() {
         use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
-        use crate::solver::model::module::ModuleManifest;
         use crate::solver::units::si;
 
         let mut model = incompressible_momentum_model();
@@ -783,17 +778,14 @@ mod tests {
         // Add a module expecting 'U' to be a Scalar (but it's Vector2 in the model)
         let bad_module = crate::solver::model::module::KernelBundleModule {
             name: "test_module",
-            manifest: ModuleManifest {
-                port_manifest: Some(PortManifest {
-                    fields: vec![FieldSpec {
-                        name: "U", // U is Vector2 in incompressible_momentum_model
-                        kind: PortFieldKind::Scalar, // But we claim it's Scalar
-                        unit: si::VELOCITY,
-                    }],
-                    ..Default::default()
-                }),
+            port_manifest: Some(PortManifest {
+                fields: vec![FieldSpec {
+                    name: "U", // U is Vector2 in incompressible_momentum_model
+                    kind: PortFieldKind::Scalar, // But we claim it's Scalar
+                    unit: si::VELOCITY,
+                }],
                 ..Default::default()
-            },
+            }),
             ..Default::default()
         };
         model.modules.push(bad_module);

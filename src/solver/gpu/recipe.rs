@@ -236,7 +236,7 @@ impl SolverRecipe {
 
         // Register port manifests from modules (params, additional fields, buffers)
         for module in &model.modules {
-            if let Some(ref manifest) = module.manifest.port_manifest {
+            if let Some(ref manifest) = module.port_manifest {
                 if let Err(e) = port_registry.register_manifest(module.name, manifest) {
                     return Err(format!(
                         "Port registration failed for module '{}': {}",

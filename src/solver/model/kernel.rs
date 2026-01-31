@@ -254,7 +254,7 @@ pub(crate) fn extract_eos_params(model: &crate::solver::model::ModelSpec) -> Vec
         .modules
         .iter()
         .find(|m| m.name == "eos")
-        .and_then(|m| m.manifest.port_manifest.as_ref())
+        .and_then(|m| m.port_manifest.as_ref())
         .map(|p| p.params.clone())
         .unwrap_or_else(|| {
             crate::solver::model::modules::eos_ports::eos_uniform_port_manifest()

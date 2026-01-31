@@ -12,7 +12,7 @@ use crate::solver::model::{
 use crate::solver::scheme::Scheme;
 use crate::solver::{
     GpuLowMachPrecondModel, LinearSolverStats, PreconditionerType, SolverConfig, SteppingMode,
-    TimeScheme as GpuTimeScheme, UnifiedSolver,
+    TimeScheme as GpuTimeScheme, UiPortSet, UnifiedSolver,
 };
 use crate::trace as tracefmt;
 use crate::ui::{cfd_renderer, fluid::Fluid};
@@ -590,13 +590,9 @@ impl CFDApp {
     fn supported_ui_models() -> Vec<(&'static str, &'static str)> {
         let mut out = Vec::new();
         for model in all_models() {
-            let layout = &model.state_layout;
-            let has_u = layout
-                .offset_for("U")
-                .or_else(|| layout.offset_for("u"))
-                .is_some();
-            let has_p = layout.offset_for("p").is_some();
-            if !has_u || !has_p {
+            // Use UiPortSet to check for required fields (validates types too)
+            let ui_ports = UiPortSet::from_layout(&model.state_layout);
+            if !ui_ports.is_complete() {
                 continue;
             }
             out.push((model.id, CFDApp::model_label(model.id)));
@@ -641,14 +637,13 @@ impl CFDApp {
         self.model_caps.supports_dtau = named_params.iter().any(|&k| k == "dtau");
         self.model_caps.supports_low_mach = named_params.iter().any(|&k| k == "low_mach.model");
 
-        let layout = model.state_layout;
-        self.model_caps.plot_stride = layout.stride();
-        let u_off = layout.offset_for("U").or_else(|| layout.offset_for("u"));
-        self.model_caps.plot_has_u = u_off.is_some();
-        self.model_caps.plot_u_offset = u_off.unwrap_or(0);
-        let p_off = layout.offset_for("p");
-        self.model_caps.plot_has_p = p_off.is_some();
-        self.model_caps.plot_p_offset = p_off.unwrap_or(0);
+        // Use UiPortSet for field offset resolution (validates field types)
+        let ui_ports = UiPortSet::from_layout(&model.state_layout);
+        self.model_caps.plot_stride = ui_ports.stride;
+        self.model_caps.plot_has_u = ui_ports.u_offset.is_some();
+        self.model_caps.plot_u_offset = ui_ports.u_offset.unwrap_or(0);
+        self.model_caps.plot_has_p = ui_ports.p_offset.is_some();
+        self.model_caps.plot_p_offset = ui_ports.p_offset.unwrap_or(0);
 
         const UI_MAX_BLOCK_JACOBI: u32 = 16;
         if matches!(
@@ -1156,16 +1151,16 @@ impl CFDApp {
             PreconditionerType::Jacobi
         };
 
-        let layout = &model.state_layout;
-        let u_off = layout.offset_for("U").or_else(|| layout.offset_for("u"));
-        let p_off = layout.offset_for("p");
+        // Build initial model_caps from layout (will be updated after solver creation
+        // to use PortRegistry-based ui_ports when available)
+        let ui_ports_fallback = UiPortSet::from_layout(&model.state_layout);
 
-        let model_caps = ModelUiCaps {
-            plot_stride: layout.stride(),
-            plot_u_offset: u_off.unwrap_or(0),
-            plot_p_offset: p_off.unwrap_or(0),
-            plot_has_u: u_off.is_some(),
-            plot_has_p: p_off.is_some(),
+        let mut model_caps = ModelUiCaps {
+            plot_stride: ui_ports_fallback.stride,
+            plot_u_offset: ui_ports_fallback.u_offset.unwrap_or(0),
+            plot_p_offset: ui_ports_fallback.p_offset.unwrap_or(0),
+            plot_has_u: ui_ports_fallback.u_offset.is_some(),
+            plot_has_p: ui_ports_fallback.p_offset.is_some(),
             supports_preconditioner,
             model_owns_preconditioner: model
                 .linear_solver
@@ -1207,6 +1202,14 @@ impl CFDApp {
             solver_start.elapsed(),
             Some(format!("model_id={} cells={}", request.model_id, n_cells)),
         );
+
+        // Update model_caps from gpu_solver.ui_ports() (prefers PortRegistry over StateLayout)
+        let ui_ports = gpu_solver.ui_ports();
+        model_caps.plot_stride = ui_ports.stride;
+        model_caps.plot_u_offset = ui_ports.u_offset.unwrap_or(0);
+        model_caps.plot_p_offset = ui_ports.p_offset.unwrap_or(0);
+        model_caps.plot_has_u = ui_ports.u_offset.is_some();
+        model_caps.plot_has_p = ui_ports.p_offset.is_some();
 
         let solver_setup_start = std::time::Instant::now();
         let stride = gpu_solver.model().state_layout.stride() as usize;

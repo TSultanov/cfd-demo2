@@ -9,12 +9,86 @@ use crate::solver::gpu::recipe::SteppingMode;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
-use crate::solver::model::backend::FieldKind;
+use crate::solver::model::backend::{FieldKind, StateLayout};
 use crate::solver::model::ports::PortRegistry;
 use crate::solver::scheme::Scheme;
 use std::sync::Arc;
 
 pub use crate::solver::gpu::program::plan_instance::FgmresSizing;
+
+/// UI-relevant state access metadata.
+///
+/// This provides a small, stable interface for UI code to access common field offsets
+/// without probing StateLayout directly. It supports both PortRegistry (preferred at runtime)
+/// and StateLayout (fallback for pre-solver inspection) sources.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UiPortSet {
+    /// State stride (number of floats per cell).
+    pub stride: u32,
+    /// Offset for velocity field (U or u), if present.
+    pub u_offset: Option<u32>,
+    /// Offset for pressure field (p), if present.
+    pub p_offset: Option<u32>,
+}
+
+impl UiPortSet {
+    /// Create a UiPortSet from a PortRegistry (preferred method at runtime).
+    ///
+    /// Validates that U/u fields are Vector2 (2 components) and p is Scalar (1 component).
+    /// Returns a UiPortSet with optional offsets - each field is independently validated.
+    pub fn from_registry(registry: &PortRegistry) -> Self {
+        let stride = registry.state_layout().stride();
+
+        // Try "U" first, then "u" for velocity
+        let u_offset = registry
+            .get_field_entry_by_name("U")
+            .or_else(|| registry.get_field_entry_by_name("u"))
+            .filter(|entry| entry.component_count() == 2)  // must be vec2
+            .map(|entry| entry.offset());
+
+        // Get pressure field - must be scalar (1 component)
+        let p_offset = registry
+            .get_field_entry_by_name("p")
+            .filter(|entry| entry.component_count() == 1)  // must be scalar
+            .map(|entry| entry.offset());
+
+        Self {
+            stride,
+            u_offset,
+            p_offset,
+        }
+    }
+
+    /// Create a UiPortSet from a StateLayout (fallback for pre-solver model inspection).
+    /// Returns a UiPortSet with optional offsets - each field is independently validated.
+    pub fn from_layout(layout: &StateLayout) -> Self {
+        let stride = layout.stride();
+
+        // Try "U" first, then "u" for velocity - must be Vector2
+        let u_offset = layout
+            .field("U")
+            .or_else(|| layout.field("u"))
+            .filter(|field| field.kind() == FieldKind::Vector2)
+            .map(|field| field.offset());
+
+        // Get pressure field - must be Scalar
+        let p_offset = layout
+            .field("p")
+            .filter(|field| field.kind() == FieldKind::Scalar)
+            .map(|field| field.offset());
+
+        Self {
+            stride,
+            u_offset,
+            p_offset,
+        }
+    }
+
+    /// Returns true if both velocity (U/u) and pressure (p) fields are present.
+    pub fn is_complete(&self) -> bool {
+        self.u_offset.is_some() && self.p_offset.is_some()
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct SolverConfig {
@@ -89,6 +163,18 @@ impl GpuUnifiedSolver {
     pub fn port_registry(&self) -> Option<&PortRegistry> {
         self.plan.resources.get::<Arc<PortRegistry>>()
             .map(|arc| arc.as_ref())
+    }
+
+    /// Get the UI port set for accessing common field offsets.
+    ///
+    /// Prefers the PortRegistry when available (runtime), falling back to
+    /// the model's StateLayout for pre-solver inspection.
+    pub fn ui_ports(&self) -> UiPortSet {
+        if let Some(registry) = self.port_registry() {
+            UiPortSet::from_registry(registry)
+        } else {
+            UiPortSet::from_layout(&self.model.state_layout)
+        }
     }
 
     pub fn num_cells(&self) -> u32 {

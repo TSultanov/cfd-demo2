@@ -339,8 +339,8 @@ migration steps to move that logic onto the port infrastructure.
 - `layout.offset_for("U"/"u")` and `layout.offset_for("p")` for plotting/inspection.
 
 **Migration steps** (optional; do after core solver is migrated):
-- [ ] Expose a small, stable "UI port set" from the solver/model (optional ports for common fields)
-- [ ] Update UI to use that port set instead of raw `StateLayout` probing
+- [x] Expose a small, stable "UI port set" from the solver/model (optional ports for common fields)
+- [x] Update UI to use that port set instead of raw `StateLayout` probing
 
 #### I) `crates/cfd2_codegen/src/solver/codegen/*` (Codegen helper modules)
 

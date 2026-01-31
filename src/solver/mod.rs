@@ -10,7 +10,7 @@ pub mod scheme;
 pub mod shared;
 pub mod units;
 
-pub use gpu::{FgmresSizing, GpuUnifiedSolver as UnifiedSolver, SolverConfig};
+pub use gpu::{FgmresSizing, GpuUnifiedSolver as UnifiedSolver, SolverConfig, UiPortSet};
 pub use gpu::enums::{GpuBcKind, GpuBoundaryType, GpuLowMachPrecondModel, TimeScheme};
 pub use gpu::profiling::{ProfileCategory, ProfilingStats};
 pub use gpu::recipe::SteppingMode;

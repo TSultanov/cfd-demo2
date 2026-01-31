@@ -619,6 +619,7 @@ As of **2026-01-31**:
 - `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present
 - `ModelSpec::validate_module_manifests()` now validates using `PortRegistry` in both runtime and build-script contexts (legacy `StateLayout`-only validation path removed)
 - `cfd2_build_script` cfg hack removed: build.rs no longer injects a custom cfg, and build-script vs runtime now compile the same ports/runtime code (DashMap interner + proc-macros available in build-dependencies), so no dual code paths remain.
+- `cfd2_codegen` WGSL codegen unit tests migrated to typed `*_dim` constructors (no `solver::units::si` usage in `wgsl.rs` tests).
 - Build-time codegen consumes port manifests for uniform params (e.g. EOS `Constants` fields); string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 
 **Next (recommended)**:

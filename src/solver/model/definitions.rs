@@ -38,7 +38,7 @@ impl ModelSpec {
         for module in &self.modules {
             // Include params from named_params (legacy)
             for key in &module.manifest.named_params {
-                out.insert(key.as_str());
+                out.insert(*key);
             }
             // Include params from port_manifest (new)
             if let Some(ref port_manifest) = module.manifest.port_manifest {

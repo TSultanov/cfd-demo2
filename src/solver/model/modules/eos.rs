@@ -1,5 +1,5 @@
 use crate::solver::model::eos::EosSpec;
-use crate::solver::model::module::{KernelBundleModule, ModuleManifest, NamedParamKey};
+use crate::solver::model::module::{KernelBundleModule, ModuleManifest};
 
 /// EOS is treated as a model-defined module so its named parameters and
 /// resource requirements are declared via manifests (rather than implied
@@ -28,9 +28,9 @@ pub fn eos_module(eos: EosSpec) -> KernelBundleModule {
         // EOS uniform params are now declared via port_manifest, so we only list
         // low_mach params here.
         manifest.named_params = vec![
-            NamedParamKey::Key("low_mach.model"),
-            NamedParamKey::Key("low_mach.theta_floor"),
-            NamedParamKey::Key("low_mach.pressure_coupling_alpha"),
+            "low_mach.model",
+            "low_mach.theta_floor",
+            "low_mach.pressure_coupling_alpha",
         ];
     }
 

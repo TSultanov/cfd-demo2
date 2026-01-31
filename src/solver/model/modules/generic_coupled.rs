@@ -1,7 +1,7 @@
 use crate::solver::model::kernel::{
     DispatchKindId, KernelConditionId, KernelPhaseId, ModelKernelGeneratorSpec, ModelKernelSpec,
 };
-use crate::solver::model::module::{KernelBundleModule, ModuleManifest, NamedParamKey, PortManifest};
+use crate::solver::model::module::{KernelBundleModule, ModuleManifest, PortManifest};
 use crate::solver::model::{KernelId, MethodSpec};
 
 pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
@@ -24,17 +24,17 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
     // Uniform params (dt, dtau, viscosity, density, schemes, relaxation) are now
     // declared via port_manifest
     let mut named_params = vec![
-        NamedParamKey::Key("preconditioner"),
-        NamedParamKey::Key("linear_solver.max_restart"),
-        NamedParamKey::Key("linear_solver.max_iters"),
-        NamedParamKey::Key("linear_solver.tolerance"),
-        NamedParamKey::Key("linear_solver.tolerance_abs"),
-        NamedParamKey::Key("outer_iters"),
-        NamedParamKey::Key("detailed_profiling_enabled"),
+        "preconditioner",
+        "linear_solver.max_restart",
+        "linear_solver.max_iters",
+        "linear_solver.tolerance",
+        "linear_solver.tolerance_abs",
+        "outer_iters",
+        "detailed_profiling_enabled",
     ];
 
     if apply_relaxation_in_update {
-        named_params.push(NamedParamKey::Key("nonconverged_relax"));
+        named_params.push("nonconverged_relax");
     }
 
     KernelBundleModule {

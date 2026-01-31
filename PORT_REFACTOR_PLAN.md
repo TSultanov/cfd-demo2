@@ -475,7 +475,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 **Goal**: Remove all legacy code
 
 - [ ] Delete deprecated module functions
-- [ ] Remove `NamedParamKey` enum
+- [x] Remove `NamedParamKey` enum
 - [ ] Remove old `ModuleManifest`
 - [ ] Delete string-based codegen functions
 - [ ] Update documentation

@@ -15,7 +15,7 @@ pub(crate) fn named_params_for_model(
 
         // Add keys from named_params
         for key in &module.manifest.named_params {
-            keys_to_process.push(key.as_str());
+            keys_to_process.push(*key);
         }
 
         // Add keys from port_manifest

@@ -6,18 +6,6 @@ pub use cfd2_ir::solver::ir::ports::{
     BufferAccess, BufferSpec, FieldSpec, ParamSpec, PortFieldKind, PortManifest,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum NamedParamKey {
-    Key(&'static str),
-}
-
-impl NamedParamKey {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            NamedParamKey::Key(s) => s,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKindReq {
@@ -55,7 +43,7 @@ pub struct ModuleManifest {
     /// Named parameters supported by this module.
     ///
     /// These keys control which `plan.set_named_param()` entries are accepted.
-    pub named_params: Vec<NamedParamKey>,
+    pub named_params: Vec<&'static str>,
 
     /// Typed invariant requirements declared by this module.
     pub invariants: Vec<ModuleInvariant>,

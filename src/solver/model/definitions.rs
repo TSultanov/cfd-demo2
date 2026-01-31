@@ -170,24 +170,14 @@ impl ModelSpec {
             }
         }
 
-        // Use PortRegistry-based validation for runtime crate compilation.
-        // For build-script compilation, use the StateLayout-based fallback.
-        #[cfg(cfd2_build_script)]
-        {
-            self.validate_module_manifests_with_registry()
-                .map_err(|e| e.to_string())
-        }
-        #[cfg(not(cfd2_build_script))]
-        {
-            self.validate_module_manifests_legacy()
-        }
+        self.validate_module_manifests_with_registry()
+            .map_err(|e| e.to_string())
     }
 
-    /// Validate module manifests using PortRegistry (runtime path).
+    /// Validate module manifests using PortRegistry.
     ///
     /// This resolves all required state-field metadata once and reuses it across
     /// validation passes, producing structured `PortValidationError` internally.
-    #[cfg(cfd2_build_script)]
     fn validate_module_manifests_with_registry(
         &self,
     ) -> Result<(), crate::solver::model::ports::PortValidationError> {
@@ -372,148 +362,6 @@ impl ModelSpec {
                             // Vector2 should have 2 components; if we got here, it's valid.
                             // The actual offset computation happens at codegen time using
                             // the resolved gradient targets in PortManifest.
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Legacy validation using direct StateLayout probing (build-script path).
-    ///
-    /// This path is used when the ports module is not available (e.g., during
-    /// build.rs WGSL generation). It preserves the original string-based error
-    /// format for backward compatibility.
-    #[cfg(not(cfd2_build_script))]
-    fn validate_module_manifests_legacy(&self) -> Result<(), String> {
-        use crate::solver::model::backend::FieldKind;
-        use crate::solver::model::module::{FieldKindReq, ModuleInvariant};
-
-        // Validate port_manifest fields against state_layout.
-        for module in &self.modules {
-            if let Some(ref port_manifest) = module.manifest.port_manifest {
-                for field_spec in &port_manifest.fields {
-                    let name = field_spec.name;
-                    let Some(layout_field) = self.state_layout.field(name) else {
-                        return Err(format!(
-                            "module '{}' port_manifest field '{}' not found in state layout",
-                            module.name, name
-                        ));
-                    };
-
-                    // Validate component count (kind) matches
-                    let expected_components = field_spec.kind.component_count();
-                    let actual_components = layout_field.component_count();
-                    if expected_components != actual_components {
-                        return Err(format!(
-                            "module '{}' port_manifest field '{}' kind mismatch: expected {} component(s), found {}",
-                            module.name,
-                            name,
-                            expected_components,
-                            actual_components
-                        ));
-                    }
-
-                    // Validate unit dimension matches (skip for ANY_DIMENSION sentinel)
-                    if field_spec.unit != crate::solver::ir::ports::ANY_DIMENSION
-                        && field_spec.unit != layout_field.unit()
-                    {
-                        return Err(format!(
-                            "module '{}' port_manifest field '{}' unit mismatch: expected {}, found {}",
-                            module.name,
-                            name,
-                            field_spec.unit,
-                            layout_field.unit()
-                        ));
-                    }
-                }
-            }
-        }
-
-        // Validate typed invariant requirements declared by modules.
-        for module in &self.modules {
-            for inv in &module.manifest.invariants {
-                let err_prefix = format!("module '{}' invariant failed: ", module.name);
-
-                match *inv {
-                    ModuleInvariant::RequireStateField { name, kind } => {
-                        let Some(field) = self.state_layout.field(name) else {
-                            return Err(format!(
-                                "{err_prefix}missing required state field '{name}'"
-                            ));
-                        };
-                        if let Some(req) = kind {
-                            let expected = match req {
-                                FieldKindReq::Scalar => FieldKind::Scalar,
-                                FieldKindReq::Vector2 => FieldKind::Vector2,
-                                FieldKindReq::Vector3 => FieldKind::Vector3,
-                            };
-                            if field.kind() != expected {
-                                return Err(format!(
-                                    "{err_prefix}state field '{name}' has kind {:?}, expected {:?}",
-                                    field.kind(),
-                                    expected
-                                ));
-                            }
-                        }
-                    }
-                    ModuleInvariant::RequireUniqueMomentumPressureCouplingReferencingDp {
-                        dp_field,
-                        require_vector2_momentum,
-                        require_pressure_gradient,
-                    } => {
-                        let Some(dp) = self.state_layout.field(dp_field) else {
-                            return Err(format!(
-                                "{err_prefix}requires '{dp_field}' in state layout"
-                            ));
-                        };
-                        if dp.kind() != FieldKind::Scalar {
-                            return Err(format!(
-                                "{err_prefix}requires '{dp_field}' to be a scalar field"
-                            ));
-                        }
-
-                        let coupling = crate::solver::model::invariants::infer_unique_momentum_pressure_coupling_referencing_dp(
-                            self,
-                            dp_field,
-                        )
-                        .map_err(|e| format!("{err_prefix}{e}"))?;
-
-                        if require_vector2_momentum
-                            && coupling.momentum.kind() != FieldKind::Vector2
-                        {
-                            return Err(format!(
-                                "{err_prefix}requires Vector2 momentum field; got {:?} ('{}')",
-                                coupling.momentum.kind(),
-                                coupling.momentum.name()
-                            ));
-                        }
-
-                        if require_pressure_gradient {
-                            let grad_name = format!("grad_{}", coupling.pressure.name());
-                            let Some(grad) = self.state_layout.field(&grad_name) else {
-                                return Err(format!(
-                                    "{err_prefix}requires '{grad_name}' in state layout"
-                                ));
-                            };
-                            if grad.kind() != FieldKind::Vector2 {
-                                return Err(format!(
-                                    "{err_prefix}requires '{grad_name}' to be Vector2"
-                                ));
-                            }
-
-                            // Ensure the component offsets exist (avoids a later codegen error).
-                            for c in 0..2 {
-                                self.state_layout
-                                    .component_offset(&grad_name, c)
-                                    .ok_or_else(|| {
-                                        format!(
-                                        "{err_prefix}requires '{grad_name}[{c}]' in state layout"
-                                    )
-                                    })?;
-                            }
                         }
                     }
                 }
@@ -870,7 +718,6 @@ mod tests {
     /// Test that validate_module_manifests produces reasonable error messages
     /// for invalid port manifest field specs (using the PortRegistry-based path).
     #[test]
-    #[cfg(cfd2_build_script)]
     fn validate_module_manifests_reports_missing_port_manifest_field() {
         use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
         use crate::solver::model::module::ModuleManifest;
@@ -909,7 +756,6 @@ mod tests {
 
     /// Test that validate_module_manifests reports kind mismatches correctly.
     #[test]
-    #[cfg(cfd2_build_script)]
     fn validate_module_manifests_reports_kind_mismatch() {
         use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
         use crate::solver::model::module::ModuleManifest;

@@ -609,6 +609,7 @@ As of **2026-01-31**:
 - `flux_module_gradients_wgsl` consumes pre-resolved `PortManifest.gradient_targets` during kernel WGSL generation; target discovery still scans `StateLayout` during module creation; resolved target offset resolution now uses `PortRegistry` in both runtime and build-script contexts (no legacy `StateLayout::component_offset`/`offset_for` fallback path)
 - `flux_module_wgsl` consumes pre-resolved `PortManifest.resolved_state_slots` (IR-safe `ResolvedStateSlotsSpec`) and no longer probes `StateLayout`; golden WGSL tests cover compressible + incompressible_momentum
 - `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present
+- `ModelSpec::validate_module_manifests()` now validates using `PortRegistry` in both runtime and build-script contexts (legacy `StateLayout`-only validation path removed)
 - `cfd2_build_script` cfg is currently used as a build-time hack to exclude runtime-only manifest attachment from the build script’s `include!()` compilation context. The build script now also compiles `solver::model::ports` (with proc-macro + DashMap interner gated to runtime), enabling incremental removal of build-script `StateLayout` fallbacks (e.g., `incompressible_momentum_model()` now uses `PortRegistry` in both contexts).
 - Build-time codegen consumes port manifests for uniform params (e.g. EOS `Constants` fields); string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 

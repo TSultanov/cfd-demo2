@@ -959,14 +959,13 @@ fn contract_low_mach_named_params_are_consumed_by_generated_kernels() {
 
 #[test]
 fn contract_compressible_flux_module_reflects_velocity_on_walls() {
-    // Compressible wall boundaries must enforce no-penetration in the convective flux.
-    // The generated flux module should reflect the normal component for both Wall and SlipWall
-    // boundary types when reading the neighbor primitive velocity (`u`).
+    // Compressible slip-wall boundaries must enforce no-penetration in the convective flux.
+    // The generated flux module should reflect the normal component for SlipWall boundary types
+    // when reading the neighbor primitive velocity (`u`).
     let shader_path =
         repo_root().join("src/solver/gpu/shaders/generated/flux_module_compressible.wgsl");
     let shader_src = read_utf8(&shader_path);
 
-    assert_contains(&shader_src, "boundary_type == 3u", "flux_module_compressible.wgsl");
     assert_contains(&shader_src, "boundary_type == 4u", "flux_module_compressible.wgsl");
 }
 

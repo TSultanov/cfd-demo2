@@ -108,22 +108,6 @@ fn build_resolved_targets(
     flux_layout: &FluxLayout,
     gradients: &[(String, String)],
 ) -> Result<Vec<ResolvedGradientTarget>, String> {
-    #[cfg(cfd2_build_script)]
-    {
-        build_resolved_targets_runtime(layout, flux_layout, gradients)
-    }
-    #[cfg(not(cfd2_build_script))]
-    {
-        build_resolved_targets_build_script(layout, flux_layout, gradients)
-    }
-}
-
-#[cfg(cfd2_build_script)]
-fn build_resolved_targets_runtime(
-    layout: &StateLayout,
-    flux_layout: &FluxLayout,
-    gradients: &[(String, String)],
-) -> Result<Vec<ResolvedGradientTarget>, String> {
     use crate::solver::model::ports::dimensions::AnyDimension;
     use crate::solver::model::ports::{PortRegistry, Scalar, Vector2, Vector3};
 
@@ -192,55 +176,6 @@ fn build_resolved_targets_runtime(
                     slip_port.component(1).map(|c| c.full_offset()),
                 )
             }
-            _ => (None, None),
-        };
-
-        targets.push(ResolvedGradientTarget {
-            component: component.clone(),
-            base_field,
-            base_component,
-            base_offset,
-            grad_x_offset,
-            grad_y_offset,
-            bc_unknown_offset,
-            slip_vec2_x_offset,
-            slip_vec2_y_offset,
-        });
-    }
-    Ok(targets)
-}
-
-#[cfg(not(cfd2_build_script))]
-fn build_resolved_targets_build_script(
-    layout: &StateLayout,
-    flux_layout: &FluxLayout,
-    gradients: &[(String, String)],
-) -> Result<Vec<ResolvedGradientTarget>, String> {
-    let mut targets = Vec::new();
-    for (component, grad) in gradients {
-        let (base_field, base_component) = resolve_base_scalar(layout, component)?;
-        let base_offset = layout
-            .component_offset(&base_field, base_component)
-            .ok_or_else(|| {
-                format!("state layout missing field '{base_field}[{base_component}]'")
-            })?;
-        let grad_x_offset = layout
-            .component_offset(grad, 0)
-            .ok_or_else(|| format!("state layout missing vector field '{grad}[0]'"))?;
-        let grad_y_offset = layout
-            .component_offset(grad, 1)
-            .ok_or_else(|| format!("state layout missing vector field '{grad}[1]'"))?;
-        let bc_unknown_offset = flux_layout.offset_for(component).map(|v| v as u32);
-
-        // SlipWall uses a vector constraint u_patch = u_owner - (u_owner·n)n, which cannot be
-        // represented by scalar per-component BC tables. For velocity-like vec2 fields, keep the
-        // offsets of the full vec2 so the gradients kernel can apply the projection at boundary
-        // faces (matching OpenFOAM's patch-field handling in `fvc::grad`).
-        let (slip_vec2_x_offset, slip_vec2_y_offset) = match base_field.as_str() {
-            "u" | "U" | "rho_u" | "rhoU" => (
-                layout.component_offset(&base_field, 0),
-                layout.component_offset(&base_field, 1),
-            ),
             _ => (None, None),
         };
 

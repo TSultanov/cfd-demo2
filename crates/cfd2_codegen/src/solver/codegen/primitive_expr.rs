@@ -1,32 +1,42 @@
 use crate::solver::codegen::dsl::{DynExpr, DslType};
-use crate::solver::codegen::state_access::resolve_state_offset_by_name;
 use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::ir::ports::{ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
 use crate::solver::shared::PrimitiveExpr;
 use crate::solver::units::UnitDim;
 
-/// Find a slot by name in the resolved state slots spec.
-fn find_slot<'a>(slots: &'a ResolvedStateSlotsSpec, field: &str) -> Option<&'a ResolvedStateSlotSpec> {
-    slots.slots.iter().find(|s| s.name == field)
-}
-
-/// Resolve the unit for a field name, supporting component suffixes (e.g., "rho_u_x").
-/// Returns the unit of the underlying slot.
-fn resolve_field_unit(slots: &ResolvedStateSlotsSpec, name: &str) -> Option<UnitDim> {
+/// Resolve a field name to a slot and component index.
+///
+/// Supports:
+/// - Direct field matches: "rho" -> (slot, 0)
+/// - Component suffixes: "rho_u_x" -> (slot, 0), "rho_u_y" -> (slot, 1), etc.
+///
+/// Returns `None` if the field is not found or the component is out of range.
+fn resolve_field_slot_component<'a>(
+    slots: &'a ResolvedStateSlotsSpec,
+    name: &str,
+) -> Option<(&'a ResolvedStateSlotSpec, u32)> {
     // First, try direct field lookup
-    if let Some(slot) = find_slot(slots, name) {
-        return Some(slot.unit);
+    if let Some(slot) = slots.slots.iter().find(|s| s.name == name) {
+        return Some((slot, 0));
     }
 
     // Try to parse component suffix (_x, _y, _z)
-    let (base, component) = name.rsplit_once('_')?;
-    match component {
-        "x" | "y" | "z" => {
-            let slot = find_slot(slots, base)?;
-            Some(slot.unit)
-        }
-        _ => None,
+    let (base, suffix) = name.rsplit_once('_')?;
+    let component = match suffix {
+        "x" => 0,
+        "y" => 1,
+        "z" => 2,
+        _ => return None,
+    };
+
+    let slot = slots.slots.iter().find(|s| s.name == base)?;
+
+    // Validate component is within range for this slot's kind
+    if component >= slot.kind.component_count() {
+        return None;
     }
+
+    Some((slot, component))
 }
 
 /// Lower a PrimitiveExpr to a DynExpr with runtime unit checking.
@@ -46,15 +56,13 @@ pub fn lower_primitive_expr_dyn(
         }
 
         PrimitiveExpr::Field(name) => {
-            let offset = resolve_state_offset_by_name(slots, name).unwrap_or_else(|| {
+            let (slot, component) = resolve_field_slot_component(slots, name).unwrap_or_else(|| {
                 panic!("primitive field '{}' not found in resolved state slots", name)
             });
+            let offset = slot.base_offset + component;
             let stride = slots.stride;
             let expr = Expr::ident(state_array).index(cell_idx * stride + offset);
-            let unit = resolve_field_unit(slots, name).unwrap_or_else(|| {
-                panic!("primitive field '{}' has no associated unit", name)
-            });
-            DynExpr::new(expr, DslType::f32(), unit)
+            DynExpr::new(expr, DslType::f32(), slot.unit)
         }
 
         PrimitiveExpr::Add(lhs, rhs) => {

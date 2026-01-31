@@ -466,6 +466,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 
 **Progress**:
 - ✅ Added slot-based state access helpers in `crates/cfd2_codegen/src/solver/codegen/state_access.rs` and refactored `crates/cfd2_codegen/src/solver/codegen/coeff_expr.rs` to use them when slot metadata is already available.
+- ✅ Reduced redundant slot lookups in `crates/cfd2_codegen/src/solver/codegen/primitive_expr.rs` by resolving `(slot, component)` once and deriving both offset + unit from that.
 
 ### Phase 7: Hard Cutoff (Week 9)
 

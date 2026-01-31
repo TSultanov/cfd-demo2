@@ -103,7 +103,7 @@ src/solver/model/ports/
 
 **Remaining**:
 - [x] Integrate with existing build-time generation (WGSL emission uses `PortManifest`; build-time plumbing avoids ad-hoc string lists once port manifests are the single source of truth)
-  - Ensure module `port_manifest` is populated in build-script compilation (no `#[cfg(cfd2_build_script)]` gating for IR-safe manifests).
+  - Ensure module `port_manifest` is populated in build-script compilation (IR-safe; no build-time-only gating).
   - WGSL `Constants` generation consumes `PortManifest.params` (e.g. EOS) rather than hard-coded field lists.
 - [x] Add validation helpers ("missing field", "wrong kind", "dimension mismatch", etc.) (`PortRegistry::validate_*` in `src/solver/model/ports/registry.rs`)
 - [x] Add `ports::prelude` for convenient imports for module authors
@@ -263,8 +263,7 @@ migration steps to move that logic onto the port infrastructure.
 **Migration steps**:
 - [x] Port runtime offset resolution to `PortRegistry` (keep build-script fallback).
   - Created `OffsetResolver` trait abstracting over PortRegistry and StateLayout
-  - Runtime (`#[cfg(cfd2_build_script)]`) uses `PortRegistryResolver` with Dimensionless placeholder
-  - Build-script (`#[cfg(not(cfd2_build_script))]`) keeps using StateLayout directly
+  - No build-time/runtime cfg split remains (build.rs and runtime share the same port/slot resolution path)
   - Updated `state_component_at`, `state_component_at_side`, `apply_slipwall_velocity_reflection`, `resolve_state_field_component`
 - [x] Thread a single resolver through WGSL lowering (no per-helper registry creation):
   - Both `generate_flux_module_wgsl` and `generate_flux_module_wgsl_runtime_scheme` now create a single resolver at the top
@@ -610,7 +609,7 @@ As of **2026-01-31**:
 - `flux_module_wgsl` consumes pre-resolved `PortManifest.resolved_state_slots` (IR-safe `ResolvedStateSlotsSpec`) and no longer probes `StateLayout`; golden WGSL tests cover compressible + incompressible_momentum
 - `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present
 - `ModelSpec::validate_module_manifests()` now validates using `PortRegistry` in both runtime and build-script contexts (legacy `StateLayout`-only validation path removed)
-- `cfd2_build_script` cfg is currently used as a build-time hack to exclude runtime-only manifest attachment from the build script’s `include!()` compilation context. The build script now also compiles `solver::model::ports` (with proc-macro + DashMap interner gated to runtime), enabling incremental removal of build-script `StateLayout` fallbacks (e.g., `incompressible_momentum_model()` now uses `PortRegistry` in both contexts).
+- `cfd2_build_script` cfg hack removed: build.rs no longer injects a custom cfg, and build-script vs runtime now compile the same ports/runtime code (DashMap interner + proc-macros available in build-dependencies), so no dual code paths remain.
 - Build-time codegen consumes port manifests for uniform params (e.g. EOS `Constants` fields); string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 
 **Next (recommended)**:

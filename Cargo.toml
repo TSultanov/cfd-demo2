@@ -37,11 +37,8 @@ ui = ["dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger", "meshgen"]
 meshgen = ["dep:ahash", "dep:rand", "dep:wide", "dep:rayon"]
 profiling = []
 dev-tests = []
-# Internal feature used by build script to avoid proc-macro dependencies
-build-script = []
-
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(cfd2_build_script)'] }
+unexpected_cfgs = { level = "warn", check-cfg = [] }
 
 [dev-dependencies]
 criterion = "0.5"
@@ -50,6 +47,8 @@ image = "0.25"
 [build-dependencies]
 cfd2_ir = { path = "crates/cfd2_ir" }
 cfd2_codegen = { path = "crates/cfd2_codegen" }
+cfd2_macros = { path = "crates/cfd2_macros" }
+dashmap = "6.1"
 wgsl_bindgen = "0.21.2"
 glob = "0.3"
 

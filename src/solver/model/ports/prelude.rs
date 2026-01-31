@@ -19,8 +19,7 @@
 // }
 // ```
 
-// Derive macros for port sets and module ports (only available in runtime, not in build script)
-#[cfg(cfd2_build_script)]
+// Derive macros for port sets and module ports
 pub use cfd2_macros::{ModulePorts, PortSet};
 
 // Core port types and field kinds

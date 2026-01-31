@@ -25,7 +25,6 @@
 pub mod buffer;
 pub mod dimensions;
 pub mod field;
-#[cfg(cfd2_build_script)]
 pub mod intern;
 pub mod params;
 pub mod prelude;
@@ -49,7 +48,6 @@ pub use field::{
     ComponentOffset, FieldKind, FieldPort, FieldPortError, FieldPortProvider, Scalar, Vector2,
     Vector3,
 };
-#[cfg(cfd2_build_script)]
 pub use intern::{intern, intern_string};
 pub use params::{
     ParamPort, ParamPortError, ParamPortProvider, ParamPortSet, ParamPortSetBuilder, ParamType,
@@ -57,8 +55,7 @@ pub use params::{
 };
 pub use registry::{PortRegistry, PortRegistryError, TypedPortRegistry};
 
-// Re-export derive macros from cfd2_macros (only available in runtime, not in build script)
-#[cfg(cfd2_build_script)]
+// Re-export derive macros from cfd2_macros
 pub use cfd2_macros::{ModulePorts, PortSet};
 
 // Re-export traits

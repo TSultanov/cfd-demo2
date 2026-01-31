@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: be06220ba243c45c1eab12e886e9fd2b9b381060afe6e08a8c92e9c1e2e6e3ab
+// SourceHash: 1e83093871b6e16497e5853197c02ad013ceee63411efc26c1bfe0c7a58e259d
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -11851,11 +11851,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e1311 = constants.dtau;
     let _e1314 = constants.dtau;
     let _e1325 = state[((idx * 22u) + 10u)];
-    let _e1332 = state[((idx * 22u) + 10u)];
-    let _e1340 = state[((idx * 22u) + 11u)];
+    let _e1332 = state[((idx * 22u) + 11u)];
+    let _e1340 = state[((idx * 22u) + 10u)];
     let _e1347 = state[((idx * 22u) + 11u)];
     let _e1352 = matrix_values[((start_row_6_ + (diag_rank * 8u)) + 0u)];
-    matrix_values[((start_row_6_ + (diag_rank * 8u)) + 0u)] = (_e1352 - (((((0.5f * _e1301) * 1f) / select(_e1308, _e1311, (_e1314 > 0f))) * ((_e1325 * _e1332) + (_e1340 * _e1347))) * vol));
+    matrix_values[((start_row_6_ + (diag_rank * 8u)) + 0u)] = (_e1352 - (((((0.5f * _e1301) * 1f) / select(_e1308, _e1311, (_e1314 > 0f))) * dot(vec2<f32>(_e1325, _e1332), vec2<f32>(_e1340, _e1347))) * vol));
     let _e1363 = constants.eos_dp_drho;
     let _e1369 = constants.dt;
     let _e1372 = constants.dtau;
@@ -14553,11 +14553,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e1311 = constants.dtau;
     let _e1314 = constants.dtau;
     let _e1325 = state[((idx * 22u) + 10u)];
-    let _e1332 = state[((idx * 22u) + 10u)];
-    let _e1340 = state[((idx * 22u) + 11u)];
+    let _e1332 = state[((idx * 22u) + 11u)];
+    let _e1340 = state[((idx * 22u) + 10u)];
     let _e1347 = state[((idx * 22u) + 11u)];
     let _e1352 = matrix_values[((start_row_6_ + (diag_rank * 8u)) + 0u)];
-    matrix_values[((start_row_6_ + (diag_rank * 8u)) + 0u)] = (_e1352 - (((((0.5f * _e1301) * 1f) / select(_e1308, _e1311, (_e1314 > 0f))) * ((_e1325 * _e1332) + (_e1340 * _e1347))) * vol));
+    matrix_values[((start_row_6_ + (diag_rank * 8u)) + 0u)] = (_e1352 - (((((0.5f * _e1301) * 1f) / select(_e1308, _e1311, (_e1314 > 0f))) * dot(vec2<f32>(_e1325, _e1332), vec2<f32>(_e1340, _e1347))) * vol));
     let _e1363 = constants.eos_dp_drho;
     let _e1369 = constants.dt;
     let _e1372 = constants.dtau;

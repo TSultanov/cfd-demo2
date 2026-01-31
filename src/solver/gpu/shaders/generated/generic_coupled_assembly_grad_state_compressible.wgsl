@@ -274,7 +274,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     matrix_values[start_row_5 + diag_rank * 8u + 2u] -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
     diag_6 -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
     matrix_values[start_row_6 + diag_rank * 8u + 3u] -= -constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
-    matrix_values[start_row_6 + diag_rank * 8u + 0u] -= 0.5 * constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * (state[idx * 22u + 10u] * state[idx * 22u + 10u] + state[idx * 22u + 11u] * state[idx * 22u + 11u]) * vol;
+    matrix_values[start_row_6 + diag_rank * 8u + 0u] -= 0.5 * constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * dot(vec2<f32>(state[idx * 22u + 10u], state[idx * 22u + 11u]), vec2<f32>(state[idx * 22u + 10u], state[idx * 22u + 11u])) * vol;
     matrix_values[start_row_6 + diag_rank * 8u + 0u] -= -constants.eos_dp_drho * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
     rhs_6 += -constants.eos_p_offset * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
     diag_7 -= state[idx * 22u + 0u] * constants.eos_r * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;

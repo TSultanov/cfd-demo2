@@ -6,11 +6,17 @@ use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::backend::typed_ast::{
     typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
-use crate::solver::units::si;
+// si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_ir::solver::dimensions::{
     Density, Dimensionless, DivDim, DynamicViscosity, EnergyDensity, Force, InvTime, Length, MassFlux,
     MomentumDensity, MulDim, Power, Pressure, Temperature, Velocity,
 };
+// Type-level dimensions for boundary conditions (re-exported for convenience)
+type DensityGradient = DivDim<Density, Length>;
+type MomentumDensityGradient = DivDim<MomentumDensity, Length>;
+type EnergyDensityGradient = DivDim<EnergyDensity, Length>;
+type PressureGradient = DivDim<Pressure, Length>;
+type TemperatureGradient = DivDim<Temperature, Length>;
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
@@ -256,27 +262,27 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::dirichlet(1.0, si::DENSITY),
+                BoundaryCondition::dirichlet_dim::<Density>(1.0),
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 1,
-                BoundaryCondition::zero_gradient(si::DENSITY / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<DensityGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
                 1,
-                BoundaryCondition::zero_gradient(si::DENSITY / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<DensityGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::SlipWall,
                 1,
-                BoundaryCondition::zero_gradient(si::DENSITY / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<DensityGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::MovingWall,
                 1,
-                BoundaryCondition::zero_gradient(si::DENSITY / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<DensityGradient>(),
             ),
     );
     boundaries.set_field(
@@ -287,27 +293,27 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 2,
-                BoundaryCondition::dirichlet(0.0, si::MOMENTUM_DENSITY),
+                BoundaryCondition::dirichlet_dim::<MomentumDensity>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 2,
-                BoundaryCondition::zero_gradient(si::MOMENTUM_DENSITY / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<MomentumDensityGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
                 2,
-                BoundaryCondition::dirichlet(0.0, si::MOMENTUM_DENSITY),
+                BoundaryCondition::dirichlet_dim::<MomentumDensity>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::SlipWall,
                 2,
-                BoundaryCondition::zero_gradient(si::MOMENTUM_DENSITY / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<MomentumDensityGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::MovingWall,
                 2,
-                BoundaryCondition::dirichlet(0.0, si::MOMENTUM_DENSITY),
+                BoundaryCondition::dirichlet_dim::<MomentumDensity>(0.0),
             ),
     );
     boundaries.set_field(
@@ -318,28 +324,28 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 2,
-                BoundaryCondition::dirichlet(0.0, si::VELOCITY),
+                BoundaryCondition::dirichlet_dim::<Velocity>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 2,
-                BoundaryCondition::zero_gradient(si::INV_TIME),
+                BoundaryCondition::zero_gradient_dim::<InvTime>(),
             )
             // Walls: no-slip (matches `rho_u` Dirichlet=0).
             .set_uniform(
                 GpuBoundaryType::Wall,
                 2,
-                BoundaryCondition::dirichlet(0.0, si::VELOCITY),
+                BoundaryCondition::dirichlet_dim::<Velocity>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::SlipWall,
                 2,
-                BoundaryCondition::zero_gradient(si::INV_TIME),
+                BoundaryCondition::zero_gradient_dim::<InvTime>(),
             )
             .set_uniform(
                 GpuBoundaryType::MovingWall,
                 2,
-                BoundaryCondition::dirichlet(0.0, si::VELOCITY),
+                BoundaryCondition::dirichlet_dim::<Velocity>(0.0),
             ),
     );
     boundaries.set_field(
@@ -350,27 +356,27 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::dirichlet(0.0, si::ENERGY_DENSITY),
+                BoundaryCondition::dirichlet_dim::<EnergyDensity>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 1,
-                BoundaryCondition::zero_gradient(si::ENERGY_DENSITY / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<EnergyDensityGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
                 1,
-                BoundaryCondition::zero_gradient(si::ENERGY_DENSITY / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<EnergyDensityGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::SlipWall,
                 1,
-                BoundaryCondition::zero_gradient(si::ENERGY_DENSITY / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<EnergyDensityGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::MovingWall,
                 1,
-                BoundaryCondition::zero_gradient(si::ENERGY_DENSITY / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<EnergyDensityGradient>(),
             ),
     );
     boundaries.set_field(
@@ -381,27 +387,27 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::dirichlet(0.0, si::PRESSURE),
+                BoundaryCondition::dirichlet_dim::<Pressure>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 1,
-                BoundaryCondition::zero_gradient(si::PRESSURE / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<PressureGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
                 1,
-                BoundaryCondition::zero_gradient(si::PRESSURE / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<PressureGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::SlipWall,
                 1,
-                BoundaryCondition::zero_gradient(si::PRESSURE / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<PressureGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::MovingWall,
                 1,
-                BoundaryCondition::zero_gradient(si::PRESSURE / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<PressureGradient>(),
             ),
     );
     boundaries.set_field(
@@ -411,27 +417,27 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::dirichlet(0.0, si::TEMPERATURE),
+                BoundaryCondition::dirichlet_dim::<Temperature>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 1,
-                BoundaryCondition::zero_gradient(si::TEMPERATURE / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<TemperatureGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
                 1,
-                BoundaryCondition::zero_gradient(si::TEMPERATURE / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<TemperatureGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::SlipWall,
                 1,
-                BoundaryCondition::zero_gradient(si::TEMPERATURE / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<TemperatureGradient>(),
             )
             .set_uniform(
                 GpuBoundaryType::MovingWall,
                 1,
-                BoundaryCondition::zero_gradient(si::TEMPERATURE / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<TemperatureGradient>(),
             ),
     );
     let method = crate::solver::model::method::MethodSpec::Coupled(

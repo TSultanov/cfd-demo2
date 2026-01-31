@@ -2,6 +2,7 @@
 use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
 use crate::solver::model::backend::ast::{EquationSystem, FieldRef};
 use crate::solver::model::backend::state_layout::StateLayout;
+use crate::solver::dimensions::UnitDimension;
 use crate::solver::units::{si, UnitDim};
 use std::collections::HashMap;
 
@@ -518,6 +519,22 @@ impl BoundaryCondition {
             value: dphi_dn,
             unit,
         }
+    }
+
+    /// Typed zero-gradient boundary condition using type-level dimensions.
+    pub fn zero_gradient_dim<D: UnitDimension>() -> Self {
+        Self::zero_gradient(D::UNIT)
+    }
+
+    /// Typed Dirichlet boundary condition using type-level dimensions.
+    pub fn dirichlet_dim<D: UnitDimension>(value: f64) -> Self {
+        Self::dirichlet(value, D::UNIT)
+    }
+
+    /// Typed Neumann boundary condition using type-level dimensions.
+    /// Value is `dphi/dn` (outward normal gradient).
+    pub fn neumann_dim<D: UnitDimension>(dphi_dn: f64) -> Self {
+        Self::neumann(dphi_dn, D::UNIT)
     }
 }
 

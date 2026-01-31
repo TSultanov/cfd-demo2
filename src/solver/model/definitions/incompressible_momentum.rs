@@ -6,9 +6,9 @@ use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::backend::typed_ast::{
     typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
-use crate::solver::units::si;
+// si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_ir::solver::dimensions::{
-    Density, DivDim, DynamicViscosity, Force, Length, MassFlux, Pressure, Velocity,
+    Density, DivDim, DynamicViscosity, Force, InvTime, Length, MassFlux, Pressure, Velocity,
 };
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
@@ -168,30 +168,30 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 2,
-                BoundaryCondition::dirichlet(0.0, si::VELOCITY),
+                BoundaryCondition::dirichlet_dim::<Velocity>(0.0),
             )
             // Outlet: do not constrain velocity (Neumann/zeroGradient).
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 2,
-                BoundaryCondition::zero_gradient(si::INV_TIME),
+                BoundaryCondition::zero_gradient_dim::<InvTime>(),
             )
             // Walls: no-slip.
             .set_uniform(
                 GpuBoundaryType::Wall,
                 2,
-                BoundaryCondition::dirichlet(0.0, si::VELOCITY),
+                BoundaryCondition::dirichlet_dim::<Velocity>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::SlipWall,
                 2,
-                BoundaryCondition::zero_gradient(si::INV_TIME),
+                BoundaryCondition::zero_gradient_dim::<InvTime>(),
             )
             // MovingWall: Dirichlet velocity (value set at runtime via boundary table API).
             .set_uniform(
                 GpuBoundaryType::MovingWall,
                 2,
-                BoundaryCondition::dirichlet(0.0, si::VELOCITY),
+                BoundaryCondition::dirichlet_dim::<Velocity>(0.0),
             ),
     );
     boundaries.set_field(
@@ -201,29 +201,29 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::zero_gradient(si::PRESSURE_GRADIENT),
+                BoundaryCondition::zero_gradient_dim::<DivDim<Pressure, Length>>(),
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
                 1,
-                BoundaryCondition::zero_gradient(si::PRESSURE_GRADIENT),
+                BoundaryCondition::zero_gradient_dim::<DivDim<Pressure, Length>>(),
             )
             .set_uniform(
                 GpuBoundaryType::SlipWall,
                 1,
-                BoundaryCondition::zero_gradient(si::PRESSURE_GRADIENT),
+                BoundaryCondition::zero_gradient_dim::<DivDim<Pressure, Length>>(),
             )
             // MovingWall: zero-gradient pressure (same as regular wall).
             .set_uniform(
                 GpuBoundaryType::MovingWall,
                 1,
-                BoundaryCondition::zero_gradient(si::PRESSURE_GRADIENT),
+                BoundaryCondition::zero_gradient_dim::<DivDim<Pressure, Length>>(),
             )
             // Outlet: fix gauge by pinning pressure to 0.
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 1,
-                BoundaryCondition::dirichlet(0.0, si::PRESSURE),
+                BoundaryCondition::dirichlet_dim::<Pressure>(0.0),
             ),
     );
 

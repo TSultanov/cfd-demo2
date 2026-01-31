@@ -2,10 +2,12 @@ use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{vol_scalar_dim, EquationSystem};
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::backend::typed_ast::{typed_fvm, Scalar, TypedCoeff, TypedFieldRef};
-use crate::solver::units::si;
+// si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_ir::solver::dimensions::{
-    Dimensionless, DivDim, Area, Time, Volume,
+    Dimensionless, DivDim, Area, Length, Time, Volume,
 };
+// Type alias for dimensionless gradient (used for boundary conditions)
+type DimensionlessGradient = DivDim<Dimensionless, Length>;
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
@@ -58,17 +60,17 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::dirichlet(0.0, si::DIMENSIONLESS),
+                BoundaryCondition::dirichlet_dim::<Dimensionless>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 1,
-                BoundaryCondition::dirichlet(0.0, si::DIMENSIONLESS),
+                BoundaryCondition::dirichlet_dim::<Dimensionless>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
                 1,
-                BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<DimensionlessGradient>(),
             ),
     );
     let model = ModelSpec {
@@ -133,17 +135,17 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::neumann(0.0, si::DIMENSIONLESS / si::LENGTH),
+                BoundaryCondition::neumann_dim::<DimensionlessGradient>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 1,
-                BoundaryCondition::neumann(0.0, si::DIMENSIONLESS / si::LENGTH),
+                BoundaryCondition::neumann_dim::<DimensionlessGradient>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
                 1,
-                BoundaryCondition::zero_gradient(si::DIMENSIONLESS / si::LENGTH),
+                BoundaryCondition::zero_gradient_dim::<DimensionlessGradient>(),
             ),
     );
     let model = ModelSpec {

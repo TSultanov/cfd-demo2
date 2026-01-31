@@ -442,6 +442,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 
 - [ ] All dimensional invariants are enforced by Rust types wherever construction happens in Rust (models, IR builders, port definitions, codegen DSL).
   - [x] Added typed `vol_*_dim` / `surface_*_dim` constructors and migrated built-in model definitions to use type-level dimensions for field/flux units (including compressible `grad_*` fields).
+  - [x] Added typed `BoundaryCondition::*_dim` constructors and migrated built-in model definitions to use type-level dimensions for boundary-condition units.
 - [ ] Runtime `UnitDim` remains only for:
   - Serialization/debug output
   - Reading units off runtime `StateLayout` metadata

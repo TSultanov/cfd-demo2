@@ -53,5 +53,6 @@ pub fn eos_uniform_port_manifest() -> ModulePortManifest {
         fields: vec![],
         buffers: vec![],
         gradient_targets: vec![],
+        resolved_state_slots: None,
     }
 }

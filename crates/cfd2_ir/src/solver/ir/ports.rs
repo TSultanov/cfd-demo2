@@ -28,6 +28,9 @@ pub struct PortManifest {
     /// When gradients are enabled, this contains pre-resolved offsets and metadata
     /// for each gradient computation target.
     pub gradient_targets: Vec<ResolvedGradientTargetSpec>,
+    /// Resolved state slots for flux module WGSL generation.
+    /// This provides IR-safe access to state field offsets without StateLayout probing.
+    pub resolved_state_slots: Option<ResolvedStateSlotsSpec>,
 }
 
 /// Specification for a parameter port.
@@ -151,6 +154,31 @@ pub struct ResolvedGradientTargetSpec {
     pub slip_vec2_y_offset: Option<u32>,
 }
 
+/// IR-safe specification for resolved state slots.
+///
+/// This provides a pre-resolved mapping from field names to their offsets and metadata,
+/// eliminating the need to probe StateLayout during WGSL generation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedStateSlotsSpec {
+    /// State stride (number of floats per cell).
+    pub stride: u32,
+    /// Per-field resolved slot information.
+    pub slots: Vec<ResolvedStateSlotSpec>,
+}
+
+/// IR-safe specification for a single resolved state field slot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedStateSlotSpec {
+    /// Field name (e.g., "rho", "U", "p").
+    pub name: String,
+    /// Field kind (scalar, vector2, vector3).
+    pub kind: PortFieldKind,
+    /// Physical unit dimension.
+    pub unit: UnitDim,
+    /// Base offset of the field in the state array (first component).
+    pub base_offset: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +210,6 @@ mod tests {
         assert!(manifest.fields.is_empty());
         assert!(manifest.buffers.is_empty());
         assert!(manifest.gradient_targets.is_empty());
+        assert!(manifest.resolved_state_slots.is_none());
     }
 }

@@ -235,6 +235,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         ),
         kernel: flux_kernel,
     };
+    let primitives = crate::solver::model::primitives::PrimitiveDerivations::identity();
 
     // Clone layout for flux_module_module since we need to move it into ModelSpec
     let layout_for_flux = layout.clone();
@@ -242,6 +243,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         flux_module,
         &system,
         &layout_for_flux,
+        &primitives,
     )
     .expect("failed to build flux_module module");
 
@@ -276,7 +278,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             },
             ..Default::default()
         }),
-        primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
+        primitives,
     };
 
     model

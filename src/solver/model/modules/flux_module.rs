@@ -16,6 +16,10 @@ mod wgsl_gradients {
     include!("flux_module_gradients_wgsl.rs");
 }
 
+mod resolver_pass {
+    include!("flux_module_resolver_pass.rs");
+}
+
 pub(crate) use wgsl_gradients::generate_flux_module_gradients_wgsl;
 
 /// Resolved gradient target for flux module gradients kernel.
@@ -299,6 +303,7 @@ pub fn flux_module_module(
     flux: FluxModuleSpec,
     system: &crate::solver::model::backend::ast::EquationSystem,
     state_layout: &StateLayout,
+    primitives: &crate::solver::model::primitives::PrimitiveDerivations,
 ) -> Result<KernelBundleModule, String> {
     let has_gradients = match &flux {
         FluxModuleSpec::Kernel { gradients, .. } => gradients.is_some(),
@@ -306,33 +311,40 @@ pub fn flux_module_module(
     };
 
     // Pre-resolve gradient targets and attach to manifest when gradients are enabled
-    let port_manifest = if has_gradients {
+    let mut gradient_targets = Vec::new();
+    if has_gradients {
         let flux_layout = crate::solver::ir::FluxLayout::from_system(system);
         let targets = resolve_flux_module_gradients_targets(state_layout, &flux_layout)?;
-        Some(crate::solver::ir::ports::PortManifest {
-            gradient_targets: targets
-                .into_iter()
-                .map(|t| crate::solver::ir::ports::ResolvedGradientTargetSpec {
-                    component: t.component,
-                    base_field: t.base_field,
-                    base_component: t.base_component,
-                    base_offset: t.base_offset,
-                    grad_x_offset: t.grad_x_offset,
-                    grad_y_offset: t.grad_y_offset,
-                    bc_unknown_offset: t.bc_unknown_offset,
-                    slip_vec2_x_offset: t.slip_vec2_x_offset,
-                    slip_vec2_y_offset: t.slip_vec2_y_offset,
-                })
-                .collect(),
-            ..Default::default()
-        })
-    } else {
-        None
-    };
+        gradient_targets = targets
+            .into_iter()
+            .map(|t| crate::solver::ir::ports::ResolvedGradientTargetSpec {
+                component: t.component,
+                base_field: t.base_field,
+                base_component: t.base_component,
+                base_offset: t.base_offset,
+                grad_x_offset: t.grad_x_offset,
+                grad_y_offset: t.grad_y_offset,
+                bc_unknown_offset: t.bc_unknown_offset,
+                slip_vec2_x_offset: t.slip_vec2_x_offset,
+                slip_vec2_y_offset: t.slip_vec2_y_offset,
+            })
+            .collect();
+    }
+
+    // Pre-resolve state field references for flux module WGSL generation
+    let ordered_primitives = primitives
+        .ordered()
+        .map_err(|e| format!("primitive recovery ordering failed: {e}"))?;
+    let resolved_state_slots =
+        resolve_state_slots_for_flux(&flux, system, state_layout, &ordered_primitives)?;
 
     let manifest = ModuleManifest {
         flux_module: Some(flux),
-        port_manifest,
+        port_manifest: Some(crate::solver::ir::ports::PortManifest {
+            gradient_targets,
+            resolved_state_slots: Some(resolved_state_slots),
+            ..Default::default()
+        }),
         ..Default::default()
     };
 
@@ -402,6 +414,50 @@ fn generate_flux_module_gradients_kernel_wgsl(
     }
 }
 
+/// Resolve state slots for flux module based on the spec type.
+fn resolve_state_slots_for_flux(
+    flux: &FluxModuleSpec,
+    system: &crate::solver::model::backend::ast::EquationSystem,
+    state_layout: &StateLayout,
+    primitives: &[(String, crate::solver::shared::PrimitiveExpr)],
+) -> Result<crate::solver::ir::ports::ResolvedStateSlotsSpec, String> {
+    match flux {
+        FluxModuleSpec::Kernel { kernel, .. } => {
+            resolver_pass::resolve_flux_module_state_slots(kernel, primitives, state_layout)
+        }
+        FluxModuleSpec::Scheme { scheme, .. } => {
+            use crate::solver::scheme::Scheme;
+
+            let schemes = [
+                Scheme::Upwind,
+                Scheme::SecondOrderUpwind,
+                Scheme::QUICK,
+                Scheme::SecondOrderUpwindMinMod,
+                Scheme::SecondOrderUpwindVanLeer,
+                Scheme::QUICKMinMod,
+                Scheme::QUICKVanLeer,
+            ];
+
+            let mut variants = Vec::new();
+            for reconstruction in schemes {
+                let kernel = crate::solver::model::flux_schemes::lower_flux_scheme(
+                    scheme,
+                    system,
+                    reconstruction,
+                )
+                .map_err(|e| format!("flux scheme lowering failed: {e}"))?;
+                variants.push((reconstruction, kernel));
+            }
+
+            resolver_pass::resolve_flux_module_state_slots_runtime_scheme(
+                &variants,
+                primitives,
+                state_layout,
+            )
+        }
+    }
+}
+
 fn generate_flux_module_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     _schemes: &crate::solver::ir::SchemeRegistry,
@@ -418,10 +474,19 @@ fn generate_flux_module_kernel_wgsl(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "flux_module requested but model has no flux module".to_string())?;
 
+    // Get resolved state slots from port_manifest (populated during module creation)
+    let resolved_slots = model
+        .modules
+        .iter()
+        .find(|m| m.name == "flux_module")
+        .and_then(|m| m.manifest.port_manifest.as_ref())
+        .and_then(|p| p.resolved_state_slots.as_ref())
+        .ok_or_else(|| "flux_module port_manifest missing resolved_state_slots".to_string())?;
+
     match flux {
         crate::solver::model::flux_module::FluxModuleSpec::Kernel { kernel, .. } => {
             Ok(wgsl_flux::generate_flux_module_wgsl(
-                &model.state_layout,
+                resolved_slots,
                 &flux_layout,
                 flux_stride,
                 &prims,
@@ -453,7 +518,7 @@ fn generate_flux_module_kernel_wgsl(
             }
 
             Ok(wgsl_flux::generate_flux_module_wgsl_runtime_scheme(
-                &model.state_layout,
+                resolved_slots,
                 &flux_layout,
                 flux_stride,
                 &prims,

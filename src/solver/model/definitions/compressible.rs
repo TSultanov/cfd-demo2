@@ -417,6 +417,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
         ),
         scheme: crate::solver::model::flux_module::FluxSchemeSpec::EulerCentralUpwind,
     };
+    let primitives = crate::solver::model::primitives::PrimitiveDerivations::identity();
 
     // Clone system and layout for flux_module_module since we need to move them into ModelSpec
     let system_for_flux = system.clone();
@@ -425,6 +426,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
         flux,
         &system_for_flux,
         &layout_for_flux,
+        &primitives,
     )
     .expect("failed to build flux_module module");
 
@@ -454,7 +456,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
                 tolerance_abs: 1e-12,
             },
         }),
-        primitives: crate::solver::model::primitives::PrimitiveDerivations::identity(),
+        primitives,
     };
 
     model

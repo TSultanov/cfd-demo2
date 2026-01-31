@@ -610,8 +610,8 @@ mod tests {
 
         // Now that gradient targets are resolved at module creation time,
         // the error should be caught when building the flux module.
-        let err =
-            flux_module_module(with_gradients, &model.system, &model.state_layout).unwrap_err();
+        let err = flux_module_module(with_gradients, &model.system, &model.state_layout, &model.primitives)
+            .unwrap_err();
         assert!(
             err.contains("no grad_<field> fields found") || err.contains("Vector2"),
             "Expected error about missing/invalid gradient fields, got: {}",

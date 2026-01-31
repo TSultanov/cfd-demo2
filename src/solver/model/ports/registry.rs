@@ -1747,6 +1747,7 @@ mod tests {
                 access: BufferAccess::ReadWrite,
             }],
             gradient_targets: vec![],
+            resolved_state_slots: None,
         };
 
         registry
@@ -1798,6 +1799,7 @@ mod tests {
             fields: vec![],
             buffers: vec![],
             gradient_targets: vec![],
+            resolved_state_slots: None,
         };
 
         // First registration
@@ -1829,6 +1831,7 @@ mod tests {
             }],
             buffers: vec![],
             gradient_targets: vec![],
+            resolved_state_slots: None,
         };
 
         let err = registry
@@ -1861,6 +1864,7 @@ mod tests {
             fields: vec![],
             buffers: vec![],
             gradient_targets: vec![],
+            resolved_state_slots: None,
         };
 
         let err = registry

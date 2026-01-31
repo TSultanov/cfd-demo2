@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotsSpec};
 use crate::solver::ir::{
     FaceScalarBuiltin, FaceScalarExpr, FaceSide, FaceVec2Builtin, FaceVec2Expr, FieldKind,
-    FluxLayout, FluxModuleKernelSpec, LowMachParam, StateLayout,
+    FluxLayout, FluxModuleKernelSpec, LowMachParam,
 };
 use crate::solver::scheme::Scheme;
 use crate::solver::shared::PrimitiveExpr;
@@ -14,8 +15,36 @@ use cfd2_codegen::solver::codegen::wgsl_ast::{
 use cfd2_codegen::solver::codegen::wgsl_dsl as dsl;
 use cfd2_codegen::solver::codegen::KernelWgsl;
 
+/// Build a resolver from ResolvedStateSlotsSpec.
+struct ResolvedSlotResolver {
+    stride: u32,
+    offsets: HashMap<(String, u32), u32>,
+    field_kinds: HashMap<String, PortFieldKind>,
+}
+
+impl ResolvedSlotResolver {
+    fn from_spec(spec: &ResolvedStateSlotsSpec) -> Self {
+        let mut offsets = HashMap::new();
+        let mut field_kinds = HashMap::new();
+
+        for slot in &spec.slots {
+            field_kinds.insert(slot.name.clone(), slot.kind);
+            let count = slot.kind.component_count();
+            for comp in 0..count {
+                offsets.insert((slot.name.clone(), comp), slot.base_offset + comp);
+            }
+        }
+
+        Self {
+            stride: spec.stride,
+            offsets,
+            field_kinds,
+        }
+    }
+}
+
 pub fn generate_flux_module_wgsl(
-    layout: &StateLayout,
+    resolved_slots: &ResolvedStateSlotsSpec,
     flux_layout: &FluxLayout,
     flux_stride: u32,
     primitives: &[(String, PrimitiveExpr)],
@@ -30,12 +59,8 @@ pub fn generate_flux_module_wgsl(
     let primitive_map: HashMap<&str, &PrimitiveExpr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
-    #[cfg(cfd2_build_script)]
-    let resolver = PortRegistryResolver::new(layout);
-    #[cfg(cfd2_build_script)]
+    let resolver = ResolvedSlotResolver::from_spec(resolved_slots);
     let resolver_ref: &dyn OffsetResolver = &resolver;
-    #[cfg(not(cfd2_build_script))]
-    let resolver_ref: &dyn OffsetResolver = layout;
 
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -60,7 +85,7 @@ pub fn generate_flux_module_wgsl(
 /// selects between the variants per face invocation, while guarding boundary faces to remain
 /// first-order.
 pub fn generate_flux_module_wgsl_runtime_scheme(
-    layout: &StateLayout,
+    resolved_slots: &ResolvedStateSlotsSpec,
     flux_layout: &FluxLayout,
     flux_stride: u32,
     primitives: &[(String, PrimitiveExpr)],
@@ -75,12 +100,8 @@ pub fn generate_flux_module_wgsl_runtime_scheme(
     let primitive_map: HashMap<&str, &PrimitiveExpr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
-    #[cfg(cfd2_build_script)]
-    let resolver = PortRegistryResolver::new(layout);
-    #[cfg(cfd2_build_script)]
+    let resolver = ResolvedSlotResolver::from_spec(resolved_slots);
     let resolver_ref: &dyn OffsetResolver = &resolver;
-    #[cfg(not(cfd2_build_script))]
-    let resolver_ref: &dyn OffsetResolver = layout;
 
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -105,15 +126,39 @@ pub fn generate_flux_module_wgsl_runtime_scheme(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::ir::{vol_scalar, vol_vector, FaceSide, FluxComponent};
+    use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
+    use crate::solver::ir::{vol_scalar, vol_vector, FaceSide, FluxComponent, StateLayout};
     use crate::solver::scheme::Scheme;
     use crate::solver::units::si;
+
+    /// Helper to build ResolvedStateSlotsSpec from StateLayout for tests.
+    fn build_resolved_slots(layout: &StateLayout) -> ResolvedStateSlotsSpec {
+        let slots: Vec<ResolvedStateSlotSpec> = layout
+            .fields()
+            .iter()
+            .map(|f| ResolvedStateSlotSpec {
+                name: f.name().to_string(),
+                kind: match f.kind() {
+                    FieldKind::Scalar => PortFieldKind::Scalar,
+                    FieldKind::Vector2 => PortFieldKind::Vector2,
+                    FieldKind::Vector3 => PortFieldKind::Vector3,
+                },
+                unit: f.unit(),
+                base_offset: f.offset(),
+            })
+            .collect();
+        ResolvedStateSlotsSpec {
+            stride: layout.stride(),
+            slots,
+        }
+    }
 
     #[test]
     fn flux_module_codegen_accepts_cell_to_face_reconstruction_exprs() {
         let phi = vol_scalar("phi", si::DIMENSIONLESS);
         let grad_phi = vol_vector("grad_phi", si::DIMENSIONLESS);
         let layout = StateLayout::new(vec![phi, grad_phi]);
+        let resolved = build_resolved_slots(&layout);
         let flux_layout = FluxLayout {
             stride: 1,
             components: vec![FluxComponent {
@@ -153,7 +198,7 @@ mod tests {
             a_minus: FaceScalarExpr::lit(-1.0),
         };
 
-        let wgsl = generate_flux_module_wgsl(&layout, &flux_layout, 1, &[], &spec).to_wgsl();
+        let wgsl = generate_flux_module_wgsl(&resolved, &flux_layout, 1, &[], &spec).to_wgsl();
         assert!(wgsl.contains("cell_centers"));
         assert!(wgsl.contains("face_centers"));
     }
@@ -168,6 +213,7 @@ mod tests {
         let phi = vol_scalar("phi", si::DIMENSIONLESS);
         let grad_phi = vol_vector("grad_phi", si::DIMENSIONLESS);
         let layout = StateLayout::new(vec![phi, grad_phi]);
+        let resolved = build_resolved_slots(&layout);
         let flux_layout = FluxLayout {
             stride: 1,
             components: vec![FluxComponent {
@@ -184,7 +230,7 @@ mod tests {
         );
         let spec = FluxModuleKernelSpec::ScalarReplicated { phi: phi_expr };
 
-        let wgsl = generate_flux_module_wgsl(&layout, &flux_layout, 1, &[], &spec).to_wgsl();
+        let wgsl = generate_flux_module_wgsl(&resolved, &flux_layout, 1, &[], &spec).to_wgsl();
 
         // `phi`(scalar) + `grad_phi`(vec2) => stride=3; grad_phi.x is at offset 1.
         assert!(wgsl.contains("state[neigh_idx * 3u + 1u]"));
@@ -202,6 +248,7 @@ mod tests {
 
         let rho_u = vol_vector("rho_u", si::MOMENTUM_DENSITY);
         let layout = StateLayout::new(vec![rho_u]);
+        let resolved = build_resolved_slots(&layout);
         let flux_layout = FluxLayout {
             stride: 2,
             components: vec![
@@ -244,7 +291,7 @@ mod tests {
         };
 
         let wgsl =
-            generate_flux_module_wgsl(&layout, &flux_layout, 2, &primitives, &spec).to_wgsl();
+            generate_flux_module_wgsl(&resolved, &flux_layout, 2, &primitives, &spec).to_wgsl();
 
         // Should contain state accesses for both components
         // rho_u_x is at offset 0, rho_u_y is at offset 1
@@ -255,6 +302,52 @@ mod tests {
         assert!(
             wgsl.contains("state[owner * 2u + 1u]"),
             "expected WGSL to access rho_u_y at offset 1"
+        );
+    }
+
+    #[test]
+    fn flux_module_wgsl_matches_committed_incompressible_momentum() {
+        use crate::solver::ir::SchemeRegistry;
+        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
+        use crate::solver::model::incompressible_momentum_model;
+
+        let model = incompressible_momentum_model();
+        let schemes = SchemeRegistry::default();
+        let generated = generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE)
+            .expect("should generate flux_module WGSL");
+
+        let committed = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/solver/gpu/shaders/generated/flux_module_incompressible_momentum.wgsl"
+        ));
+
+        assert_eq!(
+            generated.trim_end(),
+            committed.trim_end(),
+            "generated flux_module WGSL for incompressible_momentum does not match committed file"
+        );
+    }
+
+    #[test]
+    fn flux_module_wgsl_matches_committed_compressible() {
+        use crate::solver::ir::SchemeRegistry;
+        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
+        use crate::solver::model::compressible_model;
+
+        let model = compressible_model();
+        let schemes = SchemeRegistry::default();
+        let generated = generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE)
+            .expect("should generate flux_module WGSL");
+
+        let committed = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/solver/gpu/shaders/generated/flux_module_compressible.wgsl"
+        ));
+
+        assert_eq!(
+            generated.trim_end(),
+            committed.trim_end(),
+            "generated flux_module WGSL for compressible does not match committed file"
         );
     }
 }
@@ -1749,76 +1842,7 @@ trait OffsetResolver {
     fn field_kind(&self, field: &str) -> Option<FieldKind>;
 }
 
-#[cfg(cfd2_build_script)]
-struct PortRegistryResolver {
-    /// Map of (field_name, component_index) -> offset
-    offsets: HashMap<(String, u32), u32>,
-    stride: u32,
-    field_kinds: HashMap<String, FieldKind>,
-}
-
-#[cfg(cfd2_build_script)]
-impl PortRegistryResolver {
-    fn new(layout: &StateLayout) -> Self {
-        use crate::solver::model::ports::dimensions::AnyDimension;
-        use crate::solver::model::ports::{PortRegistry, Scalar, Vector2, Vector3};
-
-        let mut registry = PortRegistry::new(layout.clone());
-        let mut offsets = HashMap::new();
-        let mut field_kinds = HashMap::new();
-
-        // Register all fields in the layout and collect their offsets
-        for field in layout.fields() {
-            let name = field.name();
-            field_kinds.insert(name.to_string(), field.kind());
-
-            match field.kind() {
-                FieldKind::Scalar => {
-                    if let Ok(port) = registry.register_scalar_field::<AnyDimension>(name) {
-                        offsets.insert((name.to_string(), 0), port.offset());
-                    }
-                }
-                FieldKind::Vector2 => {
-                    if let Ok(port) = registry.register_vector2_field::<AnyDimension>(name) {
-                        offsets.insert(
-                            (name.to_string(), 0),
-                            port.component(0).unwrap().full_offset(),
-                        );
-                        offsets.insert(
-                            (name.to_string(), 1),
-                            port.component(1).unwrap().full_offset(),
-                        );
-                    }
-                }
-                FieldKind::Vector3 => {
-                    if let Ok(port) = registry.register_vector3_field::<AnyDimension>(name) {
-                        offsets.insert(
-                            (name.to_string(), 0),
-                            port.component(0).unwrap().full_offset(),
-                        );
-                        offsets.insert(
-                            (name.to_string(), 1),
-                            port.component(1).unwrap().full_offset(),
-                        );
-                        offsets.insert(
-                            (name.to_string(), 2),
-                            port.component(2).unwrap().full_offset(),
-                        );
-                    }
-                }
-            };
-        }
-
-        Self {
-            offsets,
-            stride: layout.stride(),
-            field_kinds,
-        }
-    }
-}
-
-#[cfg(cfd2_build_script)]
-impl OffsetResolver for PortRegistryResolver {
+impl OffsetResolver for ResolvedSlotResolver {
     fn component_offset(&self, field: &str, component: u32) -> Option<u32> {
         self.offsets.get(&(field.to_string(), component)).copied()
     }
@@ -1828,39 +1852,11 @@ impl OffsetResolver for PortRegistryResolver {
     }
 
     fn field_kind(&self, field: &str) -> Option<FieldKind> {
-        self.field_kinds.get(field).copied()
-    }
-}
-
-impl OffsetResolver for StateLayout {
-    fn component_offset(&self, field: &str, component: u32) -> Option<u32> {
-        self.component_offset(field, component)
-    }
-
-    fn stride(&self) -> u32 {
-        self.stride()
-    }
-
-    fn field_kind(&self, field: &str) -> Option<FieldKind> {
-        self.field(field).map(|f| f.kind())
-    }
-}
-
-fn state_component_at(
-    layout: &StateLayout,
-    buffer: &str,
-    idx: Expr,
-    field: &str,
-    component: u32,
-) -> Expr {
-    #[cfg(cfd2_build_script)]
-    {
-        let resolver = PortRegistryResolver::new(layout);
-        state_component_at_resolver(&resolver, buffer, idx, field, component)
-    }
-    #[cfg(not(cfd2_build_script))]
-    {
-        state_component_at_resolver(layout, buffer, idx, field, component)
+        self.field_kinds.get(field).map(|k| match k {
+            PortFieldKind::Scalar => FieldKind::Scalar,
+            PortFieldKind::Vector2 => FieldKind::Vector2,
+            PortFieldKind::Vector3 => FieldKind::Vector3,
+        })
     }
 }
 
@@ -1881,25 +1877,6 @@ fn state_component_at_resolver(
         });
     let stride = resolver.stride();
     Expr::ident(buffer).index(idx * stride + offset)
-}
-
-fn state_component_at_side(
-    layout: &StateLayout,
-    buffer: &str,
-    side: FaceSide,
-    field: &str,
-    component: u32,
-    flux_layout: &FluxLayout,
-) -> Expr {
-    #[cfg(cfd2_build_script)]
-    {
-        let resolver = PortRegistryResolver::new(layout);
-        state_component_at_side_resolver(&resolver, buffer, side, field, component, flux_layout)
-    }
-    #[cfg(not(cfd2_build_script))]
-    {
-        state_component_at_side_resolver(layout, buffer, side, field, component, flux_layout)
-    }
 }
 
 fn state_component_at_side_resolver(
@@ -1995,24 +1972,6 @@ fn state_component_at_side_resolver(
 
     let base = dsl::select(interior, owner, Expr::ident("is_boundary"));
     apply_slipwall_velocity_reflection_resolver(resolver, buffer, field, component, base)
-}
-
-fn apply_slipwall_velocity_reflection(
-    layout: &StateLayout,
-    buffer: &str,
-    field: &str,
-    component: u32,
-    base: Expr,
-) -> Expr {
-    #[cfg(cfd2_build_script)]
-    {
-        let resolver = PortRegistryResolver::new(layout);
-        apply_slipwall_velocity_reflection_resolver(&resolver, buffer, field, component, base)
-    }
-    #[cfg(not(cfd2_build_script))]
-    {
-        apply_slipwall_velocity_reflection_resolver(layout, buffer, field, component, base)
-    }
 }
 
 fn apply_slipwall_velocity_reflection_resolver(
@@ -2204,18 +2163,6 @@ fn lower_primitive_expr_at_side<'a>(
             Expr::call_named("sqrt", vec![lower_primitive_expr_at_side(inner, ctx, side)])
         }
         PrimitiveExpr::Neg(inner) => -lower_primitive_expr_at_side(inner, ctx, side),
-    }
-}
-
-fn resolve_state_field_component<'a>(state_layout: &StateLayout, name: &'a str) -> (&'a str, u32) {
-    #[cfg(cfd2_build_script)]
-    {
-        let resolver = PortRegistryResolver::new(state_layout);
-        resolve_state_field_component_resolver(&resolver, name)
-    }
-    #[cfg(not(cfd2_build_script))]
-    {
-        resolve_state_field_component_resolver(state_layout, name)
     }
 }
 

@@ -108,16 +108,20 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::ir::{fvc, fvm, surface_scalar, vol_scalar, vol_vector};
-    use crate::solver::units::si;
+    use crate::solver::ir::{
+        fvc, fvm, surface_scalar_dim, vol_scalar_dim, vol_vector_dim,
+    };
+    use cfd2_ir::solver::dimensions::{
+        Density, DynamicViscosity, MassFlux, Pressure, PressureGradient, UnitDimension, Velocity,
+    };
 
     #[test]
     fn lower_system_maps_all_term_kinds() {
-        let u = vol_vector("U", si::VELOCITY);
-        let p = vol_scalar("p", si::PRESSURE);
-        let rho = vol_scalar("rho", si::DENSITY);
-        let phi = surface_scalar("phi", si::MASS_FLUX);
-        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
+        let u = vol_vector_dim::<Velocity>("U");
+        let p = vol_scalar_dim::<Pressure>("p");
+        let rho = vol_scalar_dim::<Density>("rho");
+        let phi = surface_scalar_dim::<MassFlux>("phi");
+        let mu = vol_scalar_dim::<DynamicViscosity>("mu");
 
         let mut eqn = crate::solver::ir::Equation::new(u.clone());
         eqn.add_term(fvm::ddt_coeff(Coefficient::field(rho).unwrap(), u.clone()));
@@ -125,7 +129,7 @@ mod tests {
         eqn.add_term(fvc::grad(p.clone()));
         eqn.add_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
         eqn.add_term(fvc::source_coeff(
-            Coefficient::constant_unit(1.0, si::PRESSURE_GRADIENT),
+            Coefficient::constant_unit(1.0, PressureGradient::UNIT),
             u.clone(),
         ));
 
@@ -148,8 +152,8 @@ mod tests {
 
     #[test]
     fn lower_system_applies_scheme_registry() {
-        let u = vol_vector("U", si::VELOCITY);
-        let phi = surface_scalar("phi", si::MASS_FLUX);
+        let u = vol_vector_dim::<Velocity>("U");
+        let phi = surface_scalar_dim::<MassFlux>("phi");
 
         let mut eqn = crate::solver::ir::Equation::new(u.clone());
         eqn.add_term(fvm::div(phi.clone(), u.clone()));

@@ -75,9 +75,8 @@ mod tests {
     use super::*;
     use crate::solver::codegen::ir::lower_system;
     use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
-    use crate::solver::ir::{fvm, Equation, EquationSystem, SchemeRegistry, vol_scalar};
+    use crate::solver::ir::{fvm, vol_scalar_dim, Equation, EquationSystem, SchemeRegistry};
     use crate::solver::scheme::Scheme;
-    use crate::solver::units::si;
 
     /// Helper to create a ResolvedStateSlotsSpec from a StateLayout for testing.
     fn slots_from_layout(layout: &crate::solver::ir::StateLayout) -> ResolvedStateSlotsSpec {
@@ -103,7 +102,7 @@ mod tests {
 
     #[test]
     fn generic_coupled_ddt_adds_dtau_diagonal_when_enabled() {
-        let u = vol_scalar("u", si::VELOCITY);
+        let u = vol_scalar_dim::<cfd2_ir::solver::dimensions::Velocity>("u");
 
         let mut eqn = Equation::new(u.clone());
         eqn.add_term(fvm::ddt(u.clone()));

@@ -5,14 +5,17 @@
 //
 // - Rational exponents for all base dimensions (M, L, T, TEMP)
 // - Type constructors: [`MulDim`], [`DivDim`], [`PowDim`], [`SqrtDim`]
-// - Typed aliases for common SI dimensions
+// - Typed aliases for common SI dimensions (including ports-relevant ones
+//   like [`PressureGradient`], [`D_P`], [`MassFlux`], [`MomentumDensity`],
+//   [`EnergyDensity`], [`InvTime`], etc.)
 // - Conversion to runtime [`UnitDim`](crate::solver::units::UnitDim)
 //
 // # Migration Note
 //
-// This module previously contained a duplicate dimension system using `i8` exponents.
-// It has been refactored to use the canonical rational-exponent system from `cfd2_ir`.
-// The public API remains compatible - all type aliases and traits are preserved.
+// This module previously contained a duplicate dimension system using `i8` exponents,
+// and later had ports-specific aliases for CFD-related dimensions. All dimension
+// aliases have now been moved to the canonical dimension system in `cfd2_ir`.
+// This module now only provides ports-specific additions like [`AnyDimension`].
 //
 // # Example
 //
@@ -27,35 +30,13 @@
 //
 // // Square root dimension (requires rational exponents)
 // type SqrtPressure = SqrtDim<Pressure>;
+//
+// // Pressure gradient (available from canonical re-export)
+// type PG = PressureGradient;
 // ```
 
 // Re-export everything from the canonical dimension system
 pub use crate::solver::dimensions::*;
-
-// Additional dimension aliases specific to ports that aren't in the canonical system
-// (These were in the old ports dimensions module)
-
-/// Pressure gradient = Pressure / Length
-///
-/// Used in momentum equations for pressure source terms.
-pub type PressureGradient = DivDim<Pressure, Length>;
-
-/// D_P = Volume * Time / Mass (pressure-correction mobility-like coefficient)
-///
-/// Used in Rhie-Chow interpolation and pressure correction equations.
-pub type D_P = DivDim<MulDim<Volume, Time>, Mass>;
-
-/// Mass flux = Mass / Time (integrated over face)
-pub type MassFlux = DivDim<Mass, Time>;
-
-/// Momentum density = Density * Velocity
-pub type MomentumDensity = MulDim<Density, Velocity>;
-
-/// Energy density (same as Pressure for compressible flow)
-pub type EnergyDensity = Pressure;
-
-/// Inverse time = 1/Time
-pub type InvTime = PowDim<Time, -1, 1>;
 
 /// Any dimension - escape hatch for dynamic/unknown dimensions.
 ///
@@ -122,11 +103,13 @@ mod tests {
     fn port_specific_dimensions_match_si() {
         use crate::solver::units::si;
 
+        // These are re-exported from the canonical dimension system
         assert_eq!(PressureGradient::UNIT, si::PRESSURE_GRADIENT);
         assert_eq!(D_P::UNIT, si::D_P);
         assert_eq!(MassFlux::UNIT, si::MASS_FLUX);
         assert_eq!(MomentumDensity::UNIT, si::MOMENTUM_DENSITY);
         assert_eq!(EnergyDensity::UNIT, si::ENERGY_DENSITY);
+        assert_eq!(InvTime::UNIT, si::INV_TIME);
     }
 
     #[test]

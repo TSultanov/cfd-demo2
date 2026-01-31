@@ -319,7 +319,7 @@ migration steps to move that logic onto the port infrastructure.
 **Migration steps**:
 - [x] Replace ad-hoc layout checks with port resolution (runtime path; build-script fallback remains):
   - Build `FieldPort`s for `U` (vec2) and `p` (scalar) and fail early if missing/wrong kind
-- [ ] Prefer using the same ports later for any host-side indexing needs (avoid duplicating offset logic).
+- [x] Prefer using the same ports later for any host-side indexing needs (avoid duplicating offset logic).
 
 #### G) `src/solver/model/definitions.rs` (Model validation and invariants)
 

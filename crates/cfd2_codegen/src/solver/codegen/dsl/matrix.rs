@@ -1,6 +1,6 @@
 use crate::solver::codegen::wgsl_ast::Expr;
 
-use super::expr::TypedExpr;
+use super::expr::DynExpr;
 use super::types::{ScalarType, Shape};
 use super::{DslType, UnitDim};
 
@@ -78,8 +78,8 @@ impl CsrMatrix {
         Self::new(pattern, values, DslType::f32(), unit)
     }
 
-    pub fn value_at(&self, nnz_index: &Expr) -> TypedExpr {
-        TypedExpr::new(
+    pub fn value_at(&self, nnz_index: &Expr) -> DynExpr {
+        DynExpr::new(
             self.values.index(*nnz_index),
             self.entry_ty,
             self.entry_unit,
@@ -113,14 +113,14 @@ impl BlockCsrMatrix {
         }
     }
 
-    pub fn entry(&self, nnz_index: &Expr, row: u8, col: u8) -> TypedExpr {
+    pub fn entry(&self, nnz_index: &Expr, row: u8, col: u8) -> DynExpr {
         assert!(row < self.block.rows, "block row out of bounds");
         assert!(col < self.block.cols, "block col out of bounds");
         let base = *nnz_index * self.block.entry_count();
         let offset = row as u32 * self.block.cols as u32 + col as u32;
         let index = base + offset;
         let ty = DslType::new(self.scalar, Shape::Scalar);
-        TypedExpr::new(self.values.index(index), ty, self.entry_unit)
+        DynExpr::new(self.values.index(index), ty, self.entry_unit)
     }
 }
 
@@ -178,7 +178,7 @@ impl BlockCsrSoaMatrix {
         BlockCsrSoaEntry::new(self.values, bases, self.block, self.scalar, self.entry_unit)
     }
 
-    pub fn entry(&self, rank: &Expr, row: u8, col: u8) -> TypedExpr {
+    pub fn entry(&self, rank: &Expr, row: u8, col: u8) -> DynExpr {
         self.row_entry(rank).entry(row, col)
     }
 }
@@ -213,9 +213,9 @@ impl BlockCsrSoaEntry {
         }
     }
 
-    pub fn entry(&self, row: u8, col: u8) -> TypedExpr {
+    pub fn entry(&self, row: u8, col: u8) -> DynExpr {
         let ty = DslType::new(self.scalar, Shape::Scalar);
-        TypedExpr::new(self.access_expr(row, col), ty, self.entry_unit)
+        DynExpr::new(self.access_expr(row, col), ty, self.entry_unit)
     }
 
     pub fn index_expr(&self, row: u8, col: u8) -> Expr {

@@ -427,7 +427,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 
 ### 4) Port the codegen DSL unit checks to type-level dimensions
 
-- [ ] Introduce a typed variant of `TypedExpr` parameterized by dimension type:
+- [x] Introduce a typed variant of `TypedExpr` parameterized by dimension type:
   - `TypedExpr<D>` where `D: UnitDimension`
   - Addition/subtraction only type-checks for identical `D`
   - Multiplication/division returns `TypedExpr<MulDim<...>>` / `TypedExpr<DivDim<...>>`

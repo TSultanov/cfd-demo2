@@ -6,7 +6,7 @@ pub mod types;
 pub mod units;
 
 pub use enums::{EnumExpr, WgslEnum};
-pub use expr::{DslError, TypedExpr};
+pub use expr::{DslError, DynExpr, TypedExpr, TypedSqrt};
 pub use matrix::{
     BlockCsrMatrix, BlockCsrSoaEntry, BlockCsrSoaMatrix, BlockShape, CsrMatrix, CsrPattern,
 };

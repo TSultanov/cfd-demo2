@@ -1,4 +1,4 @@
-use crate::solver::codegen::dsl::{DslType, TypedExpr};
+use crate::solver::codegen::dsl::{DslType, DynExpr};
 use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
 
@@ -118,12 +118,12 @@ pub fn state_component_typed(
     idx: &str,
     field: &str,
     component: u32,
-) -> TypedExpr {
+) -> DynExpr {
     let slot = find_slot(slots, field).unwrap_or_else(|| {
         panic!("missing field '{}' in resolved state slots", field);
     });
     let expr = state_component(slots, buffer, idx, field, component);
-    TypedExpr::new(expr, DslType::f32(), slot.unit)
+    DynExpr::new(expr, DslType::f32(), slot.unit)
 }
 
 pub fn state_scalar_typed(
@@ -131,7 +131,7 @@ pub fn state_scalar_typed(
     buffer: &str,
     idx: &str,
     field: &str,
-) -> TypedExpr {
+) -> DynExpr {
     let slot = find_slot(slots, field).unwrap_or_else(|| {
         panic!("missing field '{}' in resolved state slots", field);
     });
@@ -146,7 +146,7 @@ pub fn state_vec2_typed(
     buffer: &str,
     idx: &str,
     field: &str,
-) -> TypedExpr {
+) -> DynExpr {
     let slot = find_slot(slots, field).unwrap_or_else(|| {
         panic!("missing field '{}' in resolved state slots", field);
     });
@@ -155,7 +155,7 @@ pub fn state_vec2_typed(
     }
     let x_expr = state_component(slots, buffer, idx, field, 0);
     let y_expr = state_component(slots, buffer, idx, field, 1);
-    TypedExpr::new(
+    DynExpr::new(
         Expr::call_named("vec2<f32>", vec![x_expr, y_expr]),
         DslType::vec2_f32(),
         slot.unit,
@@ -167,7 +167,7 @@ pub fn state_vec3_typed(
     buffer: &str,
     idx: &str,
     field: &str,
-) -> TypedExpr {
+) -> DynExpr {
     let slot = find_slot(slots, field).unwrap_or_else(|| {
         panic!("missing field '{}' in resolved state slots", field);
     });
@@ -177,7 +177,7 @@ pub fn state_vec3_typed(
     let x_expr = state_component(slots, buffer, idx, field, 0);
     let y_expr = state_component(slots, buffer, idx, field, 1);
     let z_expr = state_component(slots, buffer, idx, field, 2);
-    TypedExpr::new(
+    DynExpr::new(
         Expr::call_named("vec3<f32>", vec![x_expr, y_expr, z_expr]),
         DslType::vec3_f32(),
         slot.unit,

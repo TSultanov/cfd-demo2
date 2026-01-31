@@ -130,44 +130,38 @@ pub fn rhie_chow_aux_module(
     ];
 
     // Build PortManifest with required fields
-    #[cfg(cfd2_build_script)]
-    let port_manifest = {
-        use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
-        use crate::solver::units::si;
+    use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
+    use crate::solver::units::si;
 
-        Some(PortManifest {
-            fields: vec![
-                // dp field: Scalar with D_P unit
-                FieldSpec {
-                    name: dp_field,
-                    kind: PortFieldKind::Scalar,
-                    unit: si::D_P,
-                },
-                // grad_p field: Vector2 with PRESSURE_GRADIENT unit
-                FieldSpec {
-                    name: grad_p_name,
-                    kind: PortFieldKind::Vector2,
-                    unit: si::PRESSURE_GRADIENT,
-                },
-                // grad_p_old field: Vector2 with PRESSURE_GRADIENT unit
-                FieldSpec {
-                    name: grad_p_old_name,
-                    kind: PortFieldKind::Vector2,
-                    unit: si::PRESSURE_GRADIENT,
-                },
-                // momentum field: Vector2 with ANY_DIMENSION (dynamic dimension)
-                FieldSpec {
-                    name: coupling.momentum.name(),
-                    kind: PortFieldKind::Vector2,
-                    unit: crate::solver::ir::ports::ANY_DIMENSION,
-                },
-            ],
-            ..Default::default()
-        })
-    };
-
-    #[cfg(not(cfd2_build_script))]
-    let port_manifest: Option<crate::solver::ir::ports::PortManifest> = None;
+    let port_manifest = Some(PortManifest {
+        fields: vec![
+            // dp field: Scalar with D_P unit
+            FieldSpec {
+                name: dp_field,
+                kind: PortFieldKind::Scalar,
+                unit: si::D_P,
+            },
+            // grad_p field: Vector2 with PRESSURE_GRADIENT unit
+            FieldSpec {
+                name: grad_p_name,
+                kind: PortFieldKind::Vector2,
+                unit: si::PRESSURE_GRADIENT,
+            },
+            // grad_p_old field: Vector2 with PRESSURE_GRADIENT unit
+            FieldSpec {
+                name: grad_p_old_name,
+                kind: PortFieldKind::Vector2,
+                unit: si::PRESSURE_GRADIENT,
+            },
+            // momentum field: Vector2 with ANY_DIMENSION (dynamic dimension)
+            FieldSpec {
+                name: coupling.momentum.name(),
+                kind: PortFieldKind::Vector2,
+                unit: crate::solver::ir::ports::ANY_DIMENSION,
+            },
+        ],
+        ..Default::default()
+    });
 
     Ok(KernelBundleModule {
         name: "rhie_chow_aux",

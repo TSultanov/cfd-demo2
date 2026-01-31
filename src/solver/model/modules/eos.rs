@@ -1,7 +1,5 @@
 use crate::solver::model::eos::EosSpec;
-use crate::solver::model::module::{
-    KernelBundleModule, ModuleManifest, NamedParamKey, PortManifest,
-};
+use crate::solver::model::module::{KernelBundleModule, ModuleManifest, NamedParamKey};
 
 /// EOS is treated as a model-defined module so its named parameters and
 /// resource requirements are declared via manifests (rather than implied
@@ -22,11 +20,8 @@ pub fn eos_module(eos: EosSpec) -> KernelBundleModule {
         // Set the port-based manifest for uniform params
         // This is done via a helper function in a separate module to avoid
         // proc-macro issues in build scripts
-        #[cfg(cfd2_build_script)]
-        {
-            manifest.port_manifest =
-                Some(crate::solver::model::modules::eos_ports::eos_uniform_port_manifest());
-        }
+        manifest.port_manifest =
+            Some(crate::solver::model::modules::eos_ports::eos_uniform_port_manifest());
 
         // Keep named_params for non-uniform parameters and backward compatibility
         // Note: low_mach.model is a u32 enum, not representable as ParamPort<F32, _>

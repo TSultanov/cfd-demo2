@@ -1,7 +1,7 @@
 /// EOS port definitions - separate from the main eos module to avoid build script issues.
-use crate::solver::ir::ports::{ParamSpec, PortManifest};
+use crate::solver::ir::ports::ParamSpec;
 use crate::solver::model::module::PortManifest as ModulePortManifest;
-use crate::solver::units::{si, UnitDim};
+use crate::solver::units::si;
 
 /// Get the port manifest for EOS uniform params.
 pub fn eos_uniform_port_manifest() -> ModulePortManifest {

@@ -1,7 +1,7 @@
 /// Generic coupled module port definitions - separate from the main module to avoid build script issues.
-use crate::solver::ir::ports::{ParamSpec, PortManifest};
+use crate::solver::ir::ports::ParamSpec;
 use crate::solver::model::module::PortManifest as ModulePortManifest;
-use crate::solver::units::{si, UnitDim};
+use crate::solver::units::si;
 
 /// Get the port manifest for generic_coupled uniform params.
 pub fn generic_coupled_uniform_port_manifest(

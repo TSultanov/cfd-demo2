@@ -1,7 +1,7 @@
 use crate::solver::model::kernel::{
     DispatchKindId, KernelConditionId, KernelPhaseId, ModelKernelGeneratorSpec, ModelKernelSpec,
 };
-use crate::solver::model::module::{KernelBundleModule, ModuleManifest, NamedParamKey};
+use crate::solver::model::module::{KernelBundleModule, ModuleManifest, NamedParamKey, PortManifest};
 use crate::solver::model::{KernelId, MethodSpec};
 
 pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
@@ -14,14 +14,11 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
     // Set the port-based manifest for uniform params
     // This is done via a helper function in a separate module to avoid
     // proc-macro issues in build scripts
-    #[cfg(cfd2_build_script)]
-    let port_manifest = Some(
+    let port_manifest: Option<PortManifest> = Some(
         crate::solver::model::modules::generic_coupled_ports::generic_coupled_uniform_port_manifest(
             apply_relaxation_in_update,
         ),
     );
-    #[cfg(not(cfd2_build_script))]
-    let port_manifest = None;
 
     // Keep named_params for host-only parameters
     // Uniform params (dt, dtau, viscosity, density, schemes, relaxation) are now

@@ -102,6 +102,7 @@ src/solver/model/ports/
 
 **Remaining**:
 - [ ] Integrate with existing build-time generation (WGSL emission still does not use `PortManifest`; build-time plumbing should not require ad-hoc string lists once port manifests are the single source of truth)
+  - Prep: ensure module `port_manifest` is populated in build-script compilation (no `#[cfg(cfd2_build_script)]` gating for IR-safe manifests).
 - [x] Add validation helpers ("missing field", "wrong kind", "dimension mismatch", etc.) (`PortRegistry::validate_*` in `src/solver/model/ports/registry.rs`)
 - [x] Add `ports::prelude` for convenient imports for module authors
 

@@ -22,7 +22,7 @@ Based on design discussions, the implementation follows these principles:
 | 2. Core Port Runtime | **Done** | 100% | `src/solver/model/ports/*` exists (ports + registry + tests); registry supports idempotent registration + conflict errors; IR-safe manifests can be registered dynamically; dimension enforcement policy is implemented (with an explicit escape hatch for dynamic dimensions) |
 | 3. PortManifest + Module Integration | **Done** | 100% | IR-safe `PortManifest` is wired through runtime + build-time; named-param allowlisting consumes `port_manifest.params`; WGSL `Constants` generation consumes manifest params (no ad-hoc string lists) |
 | 4. Low-Risk Migration | **Done** | 100% | `eos` + `generic_coupled` publish `PortManifest` for uniform params; `generic_coupled_apply` wrapper removed (kernel remains in `generic_coupled`) |
-| 5. Field-Access Migration | **In Progress** | ~90% | `flux_module_gradients_wgsl` no longer scans `StateLayout` during WGSL generation (targets pre-resolved); `flux_module_wgsl` consumes pre-resolved `ResolvedStateSlotsSpec` from `PortManifest` (no `StateLayout` probing) and has WGSL goldens; `rhie_chow` runtime generators migrated to PortRegistry (build-script fallback remains); `generic_coupled` GPU lowering migrated to use pre-resolved unknown-to-state mapping via PortRegistry (runtime path works correctly with all StateLayout fields pre-registered; tests cover the runtime resolver); flux-module gradient targets now stored in IR-safe `PortManifest` |
+| 5. Field-Access Migration | **In Progress** | ~90% | `flux_module_gradients_wgsl` no longer scans `StateLayout` during WGSL generation (targets pre-resolved); `flux_module_wgsl` consumes pre-resolved `ResolvedStateSlotsSpec` from `PortManifest` (no `StateLayout` probing) and has WGSL goldens; `rhie_chow` kernel generators migrated to PortRegistry (no build-script fallback); `generic_coupled` GPU lowering migrated to use pre-resolved unknown-to-state mapping via PortRegistry (runtime path works correctly with all StateLayout fields pre-registered; tests cover the runtime resolver); flux-module gradient targets now stored in IR-safe `PortManifest` |
 | 6. Codegen Replacement | **In Progress** | ~15% | Replace string-based codegen |
 | 7. Hard Cutoff | Pending | 0% | Remove deprecated APIs |
 
@@ -161,7 +161,7 @@ pub struct EosModule {
 **Modules**:
 - [x] `flux_module_gradients_wgsl` - Gradients stage (targets pre-resolved; WGSL generator no longer scans `StateLayout`)
 - [x] `flux_module_wgsl` - Flux kernel WGSL generation (state slot references are pre-resolved into IR-safe `ResolvedStateSlotsSpec` stored on `PortManifest`; WGSL generator consumes only that mapping; WGSL goldens cover compressible + incompressible_momentum)
-- [x] `rhie_chow` - Pressure-velocity coupling (runtime generators use PortRegistry; build-script fallback remains)
+- [x] `rhie_chow` - Pressure-velocity coupling (kernel generators use PortRegistry; no build-script fallback)
 
 **Special considerations**:
 - Integrate with `PortRegistry` for field validation
@@ -224,9 +224,8 @@ migration steps to move that logic onto the port infrastructure.
 - [x] Add a single resolver:
   - Infer `(momentum, pressure)` via `infer_unique_momentum_pressure_coupling_referencing_dp`
   - Build all ports (and derived `grad_*` names) from that inference once (avoid duplicating inference/registration per-kernel)
-- [x] Change the kernel generators in this module to use ports/offsets in the runtime build:
-  - Re-introduce a `#[cfg(cfd2_build_script)]` runtime path that uses `PortRegistry` (derived names via interner)
-  - Keep a `#[cfg(not(cfd2_build_script))]` build-script fallback path using `StateLayout`
+- [x] Change the kernel generators in this module to use `PortRegistry`-resolved offsets/stride in both runtime and build-script contexts:
+  - Derived `grad_*` names use the interner/leak pattern as needed for `&'static str`
   - Keep `rhie_chow_wgsl.rs` unchanged (it already accepts offsets/stride)
 - [x] Update/extend tests in `src/solver/model/modules/rhie_chow.rs`:
   - Keep the existing dp-field-name contract test
@@ -239,7 +238,7 @@ migration steps to move that logic onto the port infrastructure.
 - WGSL generator no longer uses `StateLayout` (consumes pre-resolved targets).
 
 **Migration steps**:
-- [x] Port runtime offset resolution to `PortRegistry` (keep build-script fallback).
+- [x] Port resolved-target offset resolution to `PortRegistry` (no build-script fallback).
 - [x] Move "gradient target discovery" out of WGSL generation:
   - Implemented as `ResolvedGradientTarget` + `resolve_flux_module_gradients_targets(...)` in `src/solver/model/modules/flux_module.rs`.
 - [x] Move/duplicate `ResolvedGradientTarget` into an IR-safe record type (in `cfd2_ir::solver::ir::ports`) and attach it to the module's `PortManifest` (for Phase 6 / build-time codegen plumbing).
@@ -606,7 +605,7 @@ As of **2026-01-31**:
 - First module migrated: `eos` publishes a `PortManifest` for its uniform params and no longer duplicates those uniform keys in `manifest.named_params` (keeps only non-uniform/escape-hatch keys there)
 - Second module migrated: `generic_coupled` publishes a `PortManifest` for its uniform params and no longer duplicates those uniform keys in `manifest.named_params` (keeps only host-only keys there)
 - Derived/dynamic field name support is implemented via a centralized interner (`src/solver/model/ports/intern.rs`); `PortRegistry::{register_field,register_scalar_field,register_vector2_field,register_vector3_field}` accept `&str`
-- `rhie_chow` publishes a `PortManifest` (dp, grad_p, grad_p_old, momentum) and pre-resolves momentum/pressure coupling at module creation; kernel generators use `PortRegistry` (runtime build) to resolve offsets/stride; the build script compilation context still uses the legacy `StateLayout` code paths
+- `rhie_chow` publishes a `PortManifest` (dp, grad_p, grad_p_old, momentum) and pre-resolves momentum/pressure coupling at module creation; kernel generators use `PortRegistry` to resolve offsets/stride in both runtime and build-script contexts (no legacy `StateLayout` fallback path)
 - `flux_module_gradients_wgsl` consumes pre-resolved `PortManifest.gradient_targets` during kernel WGSL generation; target discovery still scans `StateLayout` during module creation; resolved target offset resolution now uses `PortRegistry` in both runtime and build-script contexts (no legacy `StateLayout::component_offset`/`offset_for` fallback path)
 - `flux_module_wgsl` consumes pre-resolved `PortManifest.resolved_state_slots` (IR-safe `ResolvedStateSlotsSpec`) and no longer probes `StateLayout`; golden WGSL tests cover compressible + incompressible_momentum
 - `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present

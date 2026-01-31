@@ -186,39 +186,18 @@ fn generate_dp_init_kernel_wgsl(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
 ) -> Result<KernelWgsl, String> {
-    #[cfg(cfd2_build_script)]
-    {
-        use crate::solver::model::ports::dimensions::D_P;
-        use crate::solver::model::ports::{PortRegistry, Scalar};
+    use crate::solver::model::ports::dimensions::D_P;
+    use crate::solver::model::ports::{PortRegistry, Scalar};
 
-        let mut registry = PortRegistry::new(model.state_layout.clone());
+    let mut registry = PortRegistry::new(model.state_layout.clone());
 
-        let d_p = registry
-            .register_scalar_field::<D_P>(dp_field)
-            .map_err(|e| format!("dp_init: {e}"))?;
+    let d_p = registry
+        .register_scalar_field::<D_P>(dp_field)
+        .map_err(|e| format!("dp_init: {e}"))?;
 
-        let stride = registry.state_layout().stride();
-        let d_p_offset = d_p.offset();
-        Ok(wgsl::generate_dp_init_wgsl(stride, d_p_offset))
-    }
-    #[cfg(not(cfd2_build_script))]
-    {
-        use crate::solver::model::backend::FieldKind;
-
-        let stride = model.state_layout.stride();
-        let Some(d_p) = model.state_layout.field(dp_field) else {
-            return Err(format!(
-                "dp_init requested but model has no '{dp_field}' field in state layout"
-            ));
-        };
-        if d_p.kind() != FieldKind::Scalar {
-            return Err(format!(
-                "dp_init requires '{dp_field}' to be a scalar field"
-            ));
-        }
-        let d_p_offset = d_p.offset();
-        Ok(wgsl::generate_dp_init_wgsl(stride, d_p_offset))
-    }
+    let stride = registry.state_layout().stride();
+    let d_p_offset = d_p.offset();
+    Ok(wgsl::generate_dp_init_wgsl(stride, d_p_offset))
 }
 
 fn generate_dp_update_from_diag_kernel_wgsl(
@@ -226,86 +205,44 @@ fn generate_dp_update_from_diag_kernel_wgsl(
     dp_field: &str,
     coupling: crate::solver::model::invariants::MomentumPressureCoupling,
 ) -> Result<KernelWgsl, String> {
-    #[cfg(cfd2_build_script)]
-    {
-        use crate::solver::model::ports::dimensions::{AnyDimension, D_P};
-        use crate::solver::model::ports::{PortRegistry, Scalar, Vector2};
+    use crate::solver::model::ports::dimensions::{AnyDimension, D_P};
+    use crate::solver::model::ports::{PortRegistry, Scalar, Vector2};
 
-        let mut registry = PortRegistry::new(model.state_layout.clone());
+    let mut registry = PortRegistry::new(model.state_layout.clone());
 
-        let d_p = registry
-            .register_scalar_field::<D_P>(dp_field)
-            .map_err(|e| format!("dp_update_from_diag: {e}"))?;
+    let d_p = registry
+        .register_scalar_field::<D_P>(dp_field)
+        .map_err(|e| format!("dp_update_from_diag: {e}"))?;
 
-        let momentum = coupling.momentum;
+    let momentum = coupling.momentum;
 
-        // Register momentum field to validate it exists (offset not needed here)
-        let _u = registry
-            .register_vector2_field::<AnyDimension>(momentum.name())
-            .map_err(|e| format!("dp_update_from_diag: {e}"))?;
+    // Register momentum field to validate it exists (offset not needed here)
+    let _u = registry
+        .register_vector2_field::<AnyDimension>(momentum.name())
+        .map_err(|e| format!("dp_update_from_diag: {e}"))?;
 
-        let stride = registry.state_layout().stride();
-        let d_p_offset = d_p.offset();
+    let stride = registry.state_layout().stride();
+    let d_p_offset = d_p.offset();
 
-        let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
-        let mut u_indices = Vec::new();
-        for component in 0..2u32 {
-            let Some(offset) = flux_layout.offset_for_field_component(momentum, component) else {
-                return Err(format!(
-                    "dp_update_from_diag: missing unknown offset for momentum field '{}' component {}",
-                    momentum.name(),
-                    component
-                ));
-            };
-            u_indices.push(offset);
-        }
-
-        wgsl::generate_dp_update_from_diag_wgsl(
-            stride,
-            d_p_offset,
-            model.system.unknowns_per_cell(),
-            &u_indices,
-        )
-    }
-    #[cfg(not(cfd2_build_script))]
-    {
-        use crate::solver::model::backend::FieldKind;
-
-        let stride = model.state_layout.stride();
-        let Some(d_p) = model.state_layout.field(dp_field) else {
+    let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
+    let mut u_indices = Vec::new();
+    for component in 0..2u32 {
+        let Some(offset) = flux_layout.offset_for_field_component(momentum, component) else {
             return Err(format!(
-                "dp_update_from_diag requested but model has no '{dp_field}' field in state layout"
+                "dp_update_from_diag: missing unknown offset for momentum field '{}' component {}",
+                momentum.name(),
+                component
             ));
         };
-        if d_p.kind() != FieldKind::Scalar {
-            return Err(format!(
-                "dp_update_from_diag requires '{dp_field}' to be a scalar field"
-            ));
-        }
-        let d_p_offset = d_p.offset();
-
-        let momentum = coupling.momentum;
-
-        let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
-        let mut u_indices = Vec::new();
-        for component in 0..momentum.kind().component_count() as u32 {
-            let Some(offset) = flux_layout.offset_for_field_component(momentum, component) else {
-                return Err(format!(
-                    "dp_update_from_diag: missing unknown offset for momentum field '{}' component {}",
-                    momentum.name(),
-                    component
-                ));
-            };
-            u_indices.push(offset);
-        }
-
-        wgsl::generate_dp_update_from_diag_wgsl(
-            stride,
-            d_p_offset,
-            model.system.unknowns_per_cell(),
-            &u_indices,
-        )
+        u_indices.push(offset);
     }
+
+    wgsl::generate_dp_update_from_diag_wgsl(
+        stride,
+        d_p_offset,
+        model.system.unknowns_per_cell(),
+        &u_indices,
+    )
 }
 
 fn generate_rhie_chow_grad_p_update_kernel_wgsl(
@@ -333,99 +270,51 @@ fn generate_rhie_chow_store_grad_p_kernel_wgsl(
     grad_p_name: &'static str,
     grad_p_old_name: &'static str,
 ) -> Result<KernelWgsl, String> {
-    #[cfg(cfd2_build_script)]
-    {
-        use crate::solver::model::ports::dimensions::PressureGradient;
-        use crate::solver::model::ports::{PortRegistry, Vector2};
+    use crate::solver::model::ports::dimensions::PressureGradient;
+    use crate::solver::model::ports::{PortRegistry, Vector2};
 
-        let mut registry = PortRegistry::new(model.state_layout.clone());
+    let mut registry = PortRegistry::new(model.state_layout.clone());
 
-        // Register gradient fields using pre-computed derived names
-        let grad_p = registry
-            .register_vector2_field::<PressureGradient>(grad_p_name)
-            .map_err(|e| {
-                format!(
-                    "rhie_chow/store_grad_p: missing gradient field '{}': {e}",
-                    grad_p_name
-                )
-            })?;
+    // Register gradient fields using pre-computed derived names
+    let grad_p = registry
+        .register_vector2_field::<PressureGradient>(grad_p_name)
+        .map_err(|e| {
+            format!(
+                "rhie_chow/store_grad_p: missing gradient field '{}': {e}",
+                grad_p_name
+            )
+        })?;
 
-        let grad_old = registry
-            .register_vector2_field::<PressureGradient>(grad_p_old_name)
-            .map_err(|e| {
-                format!(
-                    "rhie_chow/store_grad_p: missing old gradient field '{}': {e}",
-                    grad_p_old_name
-                )
-            })?;
+    let grad_old = registry
+        .register_vector2_field::<PressureGradient>(grad_p_old_name)
+        .map_err(|e| {
+            format!(
+                "rhie_chow/store_grad_p: missing old gradient field '{}': {e}",
+                grad_p_old_name
+            )
+        })?;
 
-        let stride = registry.state_layout().stride();
-        let grad_p_x = grad_p
-            .component(0)
-            .map(|c| c.full_offset())
-            .ok_or("grad_p component 0")?;
-        let grad_p_y = grad_p
-            .component(1)
-            .map(|c| c.full_offset())
-            .ok_or("grad_p component 1")?;
-        let grad_old_x = grad_old
-            .component(0)
-            .map(|c| c.full_offset())
-            .ok_or("grad_old component 0")?;
-        let grad_old_y = grad_old
-            .component(1)
-            .map(|c| c.full_offset())
-            .ok_or("grad_old component 1")?;
+    let stride = registry.state_layout().stride();
+    let grad_p_x = grad_p
+        .component(0)
+        .map(|c| c.full_offset())
+        .ok_or("grad_p component 0")?;
+    let grad_p_y = grad_p
+        .component(1)
+        .map(|c| c.full_offset())
+        .ok_or("grad_p component 1")?;
+    let grad_old_x = grad_old
+        .component(0)
+        .map(|c| c.full_offset())
+        .ok_or("grad_old component 0")?;
+    let grad_old_y = grad_old
+        .component(1)
+        .map(|c| c.full_offset())
+        .ok_or("grad_old component 1")?;
 
-        Ok(wgsl::generate_rhie_chow_store_grad_p_wgsl(
-            stride, grad_p_x, grad_p_y, grad_old_x, grad_old_y,
-        ))
-    }
-    #[cfg(not(cfd2_build_script))]
-    {
-        let stride = model.state_layout.stride();
-
-        let grad_p_x = model
-            .state_layout
-            .component_offset(grad_p_name, 0)
-            .ok_or_else(|| {
-                format!(
-                    "rhie_chow/store_grad_p requires '{}[0]' in state layout",
-                    grad_p_name
-                )
-            })?;
-        let grad_p_y = model
-            .state_layout
-            .component_offset(grad_p_name, 1)
-            .ok_or_else(|| {
-                format!(
-                    "rhie_chow/store_grad_p requires '{}[1]' in state layout",
-                    grad_p_name
-                )
-            })?;
-        let grad_old_x = model
-            .state_layout
-            .component_offset(grad_p_old_name, 0)
-            .ok_or_else(|| {
-                format!(
-                    "rhie_chow/store_grad_p requires '{}[0]' in state layout",
-                    grad_p_old_name
-                )
-            })?;
-        let grad_old_y = model
-            .state_layout
-            .component_offset(grad_p_old_name, 1)
-            .ok_or_else(|| {
-                format!(
-                    "rhie_chow/store_grad_p requires '{}[1]' in state layout",
-                    grad_p_old_name
-                )
-            })?;
-
-        Ok(wgsl::generate_rhie_chow_store_grad_p_wgsl(
-            stride, grad_p_x, grad_p_y, grad_old_x, grad_old_y,
-        ))
-    }
+    Ok(wgsl::generate_rhie_chow_store_grad_p_wgsl(
+        stride, grad_p_x, grad_p_y, grad_old_x, grad_old_y,
+    ))
 }
 
 fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
@@ -435,154 +324,72 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
     grad_p_name: &'static str,
     grad_p_old_name: &'static str,
 ) -> Result<KernelWgsl, String> {
-    #[cfg(cfd2_build_script)]
-    {
-        use crate::solver::model::ports::dimensions::{AnyDimension, D_P};
-        use crate::solver::model::ports::dimensions::PressureGradient;
-        use crate::solver::model::ports::{PortRegistry, Scalar, Vector2};
+    use crate::solver::model::ports::dimensions::{AnyDimension, D_P};
+    use crate::solver::model::ports::dimensions::PressureGradient;
+    use crate::solver::model::ports::{PortRegistry, Scalar, Vector2};
 
-        let mut registry = PortRegistry::new(model.state_layout.clone());
+    let mut registry = PortRegistry::new(model.state_layout.clone());
 
-        let d_p = registry
-            .register_scalar_field::<D_P>(dp_field)
-            .map_err(|e| format!("rhie_chow/correct_velocity_delta: {e}"))?;
+    let d_p = registry
+        .register_scalar_field::<D_P>(dp_field)
+        .map_err(|e| format!("rhie_chow/correct_velocity_delta: {e}"))?;
 
-        let momentum = coupling.momentum;
+    let momentum = coupling.momentum;
 
-        // Register momentum field
-        let u = registry
-            .register_vector2_field::<AnyDimension>(momentum.name())
-            .map_err(|e| format!("rhie_chow/correct_velocity_delta: {e}"))?;
+    // Register momentum field
+    let u = registry
+        .register_vector2_field::<AnyDimension>(momentum.name())
+        .map_err(|e| format!("rhie_chow/correct_velocity_delta: {e}"))?;
 
-        // Register gradient fields using pre-computed derived names
-        let grad_p = registry
-            .register_vector2_field::<PressureGradient>(grad_p_name)
-            .map_err(|e| {
-                format!(
-                    "rhie_chow/correct_velocity_delta: missing gradient field '{}': {e}",
-                    grad_p_name
-                )
-            })?;
-
-        let grad_old = registry
-            .register_vector2_field::<PressureGradient>(grad_p_old_name)
-            .map_err(|e| {
-                format!(
-                    "rhie_chow/correct_velocity_delta: missing old gradient field '{}': {e}",
-                    grad_p_old_name
-                )
-            })?;
-
-        let stride = registry.state_layout().stride();
-        let d_p_offset = d_p.offset();
-        let u_x = u
-            .component(0)
-            .map(|c| c.full_offset())
-            .ok_or("u component 0")?;
-        let u_y = u
-            .component(1)
-            .map(|c| c.full_offset())
-            .ok_or("u component 1")?;
-        let grad_p_x = grad_p
-            .component(0)
-            .map(|c| c.full_offset())
-            .ok_or("grad_p component 0")?;
-        let grad_p_y = grad_p
-            .component(1)
-            .map(|c| c.full_offset())
-            .ok_or("grad_p component 1")?;
-        let grad_old_x = grad_old
-            .component(0)
-            .map(|c| c.full_offset())
-            .ok_or("grad_old component 0")?;
-        let grad_old_y = grad_old
-            .component(1)
-            .map(|c| c.full_offset())
-            .ok_or("grad_old component 1")?;
-
-        Ok(wgsl::generate_rhie_chow_correct_velocity_delta_wgsl(
-            stride, u_x, u_y, d_p_offset, grad_p_x, grad_p_y, grad_old_x, grad_old_y,
-        ))
-    }
-    #[cfg(not(cfd2_build_script))]
-    {
-        use crate::solver::model::backend::FieldKind;
-
-        let stride = model.state_layout.stride();
-        let d_p = model.state_layout.offset_for(dp_field).ok_or_else(|| {
-            format!("rhie_chow/correct_velocity_delta requires '{dp_field}' in state layout")
+    // Register gradient fields using pre-computed derived names
+    let grad_p = registry
+        .register_vector2_field::<PressureGradient>(grad_p_name)
+        .map_err(|e| {
+            format!(
+                "rhie_chow/correct_velocity_delta: missing gradient field '{}': {e}",
+                grad_p_name
+            )
         })?;
 
-        let momentum = coupling.momentum;
+    let grad_old = registry
+        .register_vector2_field::<PressureGradient>(grad_p_old_name)
+        .map_err(|e| {
+            format!(
+                "rhie_chow/correct_velocity_delta: missing old gradient field '{}': {e}",
+                grad_p_old_name
+            )
+        })?;
 
-        if momentum.kind() != FieldKind::Vector2 {
-            return Err(
-                "rhie_chow/correct_velocity_delta currently supports only Vector2 momentum fields"
-                    .to_string(),
-            );
-        }
+    let stride = registry.state_layout().stride();
+    let d_p_offset = d_p.offset();
+    let u_x = u
+        .component(0)
+        .map(|c| c.full_offset())
+        .ok_or("u component 0")?;
+    let u_y = u
+        .component(1)
+        .map(|c| c.full_offset())
+        .ok_or("u component 1")?;
+    let grad_p_x = grad_p
+        .component(0)
+        .map(|c| c.full_offset())
+        .ok_or("grad_p component 0")?;
+    let grad_p_y = grad_p
+        .component(1)
+        .map(|c| c.full_offset())
+        .ok_or("grad_p component 1")?;
+    let grad_old_x = grad_old
+        .component(0)
+        .map(|c| c.full_offset())
+        .ok_or("grad_old component 0")?;
+    let grad_old_y = grad_old
+        .component(1)
+        .map(|c| c.full_offset())
+        .ok_or("grad_old component 1")?;
 
-        let u_x = model
-            .state_layout
-            .component_offset(momentum.name(), 0)
-            .ok_or_else(|| {
-                format!(
-                    "rhie_chow/correct_velocity_delta requires '{}[0]' in state layout",
-                    momentum.name()
-                )
-            })?;
-        let u_y = model
-            .state_layout
-            .component_offset(momentum.name(), 1)
-            .ok_or_else(|| {
-                format!(
-                    "rhie_chow/correct_velocity_delta requires '{}[1]' in state layout",
-                    momentum.name()
-                )
-            })?;
-
-        let grad_p_x = model
-            .state_layout
-            .component_offset(grad_p_name, 0)
-            .ok_or_else(|| {
-                format!(
-                    "rhie_chow/correct_velocity_delta requires '{}[0]' in state layout",
-                    grad_p_name
-                )
-            })?;
-        let grad_p_y = model
-            .state_layout
-            .component_offset(grad_p_name, 1)
-            .ok_or_else(|| {
-                format!(
-                    "rhie_chow/correct_velocity_delta requires '{}[1]' in state layout",
-                    grad_p_name
-                )
-            })?;
-
-        let grad_old_x = model
-            .state_layout
-            .component_offset(grad_p_old_name, 0)
-            .ok_or_else(|| {
-                format!(
-                    "rhie_chow/correct_velocity_delta requires '{}[0]' in state layout",
-                    grad_p_old_name
-                )
-            })?;
-        let grad_old_y = model
-            .state_layout
-            .component_offset(grad_p_old_name, 1)
-            .ok_or_else(|| {
-                format!(
-                    "rhie_chow/correct_velocity_delta requires '{}[1]' in state layout",
-                    grad_p_old_name
-                )
-            })?;
-
-        Ok(wgsl::generate_rhie_chow_correct_velocity_delta_wgsl(
-            stride, u_x, u_y, d_p, grad_p_x, grad_p_y, grad_old_x, grad_old_y,
-        ))
-    }
+    Ok(wgsl::generate_rhie_chow_correct_velocity_delta_wgsl(
+        stride, u_x, u_y, d_p_offset, grad_p_x, grad_p_y, grad_old_x, grad_old_y,
+    ))
 }
 
 #[cfg(test)]

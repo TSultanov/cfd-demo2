@@ -583,7 +583,7 @@ crates/cfd2_macros/tests/*        # trybuild + compile-fail tests
 
 ## Success Criteria
 
-- [ ] `cargo test` passes
+- [x] `cargo test` passes
 - [ ] Zero string-based field lookups in migrated modules
 - [ ] Compile-time dimension checking works where Rust can express it (ports + structurally-identical typed IR); runtime `validate_units()` remains the backstop for semantically-equal-but-structurally-different dimensions
 - [ ] Runtime validation catches invalid configs
@@ -615,6 +615,7 @@ As of **2026-01-31**:
 - `rhie_chow` publishes a `PortManifest` (dp, grad_p, grad_p_old, momentum) and pre-resolves momentum/pressure coupling at module creation; kernel generators use `PortRegistry` to resolve offsets/stride in both runtime and build-script contexts (no legacy `StateLayout` fallback path)
 - `flux_module_gradients_wgsl` consumes pre-resolved `PortManifest.gradient_targets` during kernel WGSL generation; target discovery still scans `StateLayout` during module creation; resolved target offset resolution now uses `PortRegistry` in both runtime and build-script contexts (no legacy `StateLayout::component_offset`/`offset_for` fallback path)
 - `flux_module_wgsl` consumes pre-resolved `PortManifest.resolved_state_slots` (IR-safe `ResolvedStateSlotsSpec`) and no longer probes `StateLayout`; golden WGSL tests cover compressible + incompressible_momentum
+- Low-Mach preconditioning now affects compressible Kurganov dissipation via `c_eff2` scaling (smoke-tested: Off/WeissSmith/Legacy yield distinct deltas)
 - `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present
 - `ModelSpec::validate_module_manifests()` now validates using `PortRegistry` in both runtime and build-script contexts (legacy `StateLayout`-only validation path removed)
 - `cfd2_build_script` cfg hack removed: build.rs no longer injects a custom cfg, and build-script vs runtime now compile the same ports/runtime code (DashMap interner + proc-macros available in build-dependencies), so no dual code paths remain.

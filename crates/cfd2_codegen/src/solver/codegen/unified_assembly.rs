@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::coeff_expr::coeff_cell_expr;
 use super::constants::constants_struct;
 use super::dsl as typed;
-use super::state_access::state_component;
+use super::state_access::state_component_slot;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
     StorageClass, StructDef, StructField, Type,
@@ -401,25 +401,32 @@ fn main_assembly_fn(
 
         for component in 0..equation.target.kind().component_count() as u32 {
             let u_idx = base_offset + component;
-            let phi_n = state_component(
-                slots,
+            let target_slot = slots
+                .slots
+                .iter()
+                .find(|s| s.name == equation.target.name())
+                .unwrap_or_else(|| {
+                    panic!("missing field '{}' in resolved state slots", equation.target.name())
+                });
+            let phi_n = state_component_slot(
+                slots.stride,
                 "state_old",
                 "idx",
-                equation.target.name(),
+                target_slot,
                 component,
             );
-            let phi_nm1 = state_component(
-                slots,
+            let phi_nm1 = state_component_slot(
+                slots.stride,
                 "state_old_old",
                 "idx",
-                equation.target.name(),
+                target_slot,
                 component,
             );
-            let phi_iter = state_component(
-                slots,
+            let phi_iter = state_component_slot(
+                slots.stride,
                 "state_iter",
                 "idx",
-                equation.target.name(),
+                target_slot,
                 component,
             );
 
@@ -799,8 +806,17 @@ fn main_assembly_fn(
                             && equation.target.kind().component_count() >= 2
                             && component <= 1
                         {
-                            let vx = state_component(slots, "state", "idx", field_name, 0);
-                            let vy = state_component(slots, "state", "idx", field_name, 1);
+                            let field_slot = slots
+                                .slots
+                                .iter()
+                                .find(|s| s.name == field_name)
+                                .unwrap_or_else(|| {
+                                    panic!("missing field '{}' in resolved state slots", field_name)
+                                });
+                            let vx =
+                                state_component_slot(slots.stride, "state", "idx", field_slot, 0);
+                            let vy =
+                                state_component_slot(slots.stride, "state", "idx", field_slot, 1);
                             let nx = Expr::ident("normal").field("x");
                             let ny = Expr::ident("normal").field("y");
                             let un = vx.clone() * nx.clone() + vy.clone() * ny.clone();
@@ -920,9 +936,22 @@ fn main_assembly_fn(
 
                 for component in 0..equation.target.kind().component_count() as u32 {
                     let u_idx = base_offset + component;
-                    let phi_own = state_component(slots, "state", "idx", field_name, component);
-                    let phi_neigh =
-                        state_component(slots, "state", "other_idx", field_name, component);
+                    let field_slot = slots
+                        .slots
+                        .iter()
+                        .find(|s| s.name == field_name)
+                        .unwrap_or_else(|| {
+                            panic!("missing field '{}' in resolved state slots", field_name)
+                        });
+                    let phi_own =
+                        state_component_slot(slots.stride, "state", "idx", field_slot, component);
+                    let phi_neigh = state_component_slot(
+                        slots.stride,
+                        "state",
+                        "other_idx",
+                        field_slot,
+                        component,
+                    );
 
                     let interior_contrib = dsl::block(vec![dsl::assign_op_expr(
                         AssignOp::Add,
@@ -977,7 +1006,14 @@ fn main_assembly_fn(
                         let bc_rho_val = dsl::array_access("bc_value", bc_rho_idx);
                         let bc_rho_u_val = dsl::array_access("bc_value", bc_rho_u_idx);
 
-                        let rho_own = state_component(slots, "state", "idx", "rho", 0);
+                        let rho_slot = slots
+                            .slots
+                            .iter()
+                            .find(|s| s.name == "rho")
+                            .unwrap_or_else(|| {
+                                panic!("missing field 'rho' in resolved state slots")
+                            });
+                        let rho_own = state_component_slot(slots.stride, "state", "idx", rho_slot, 0);
                         let rho_bc =
                             dsl::select(rho_own, bc_rho_val, bc_rho_kind.eq(GpuBcKind::Dirichlet));
                         let rho_bc_safe = dsl::max(rho_bc, 1e-12);
@@ -1082,10 +1118,22 @@ fn main_assembly_fn(
                             None,
                         ));
 
+                        let field_slot = slots
+                            .slots
+                            .iter()
+                            .find(|s| s.name == field_name)
+                            .unwrap_or_else(|| {
+                                panic!("missing field '{}' in resolved state slots", field_name)
+                            });
                         let phi_own =
-                            state_component(slots, "state", "idx", field_name, component);
-                        let phi_neigh =
-                            state_component(slots, "state", "other_idx", field_name, component);
+                            state_component_slot(slots.stride, "state", "idx", field_slot, component);
+                        let phi_neigh = state_component_slot(
+                            slots.stride,
+                            "state",
+                            "other_idx",
+                            field_slot,
+                            component,
+                        );
 
                         // Runtime-configurable advection scheme.
                         //
@@ -1221,8 +1269,17 @@ fn main_assembly_fn(
             {
                 let field_name = grad_op.field.name();
                 let p_offset_opt = offsets.get(field_name);
-                let phi_own = state_component(slots, "state", "idx", field_name, 0);
-                let phi_neigh = state_component(slots, "state", "other_idx", field_name, 0);
+                let field_slot = slots
+                    .slots
+                    .iter()
+                    .find(|s| s.name == field_name)
+                    .unwrap_or_else(|| {
+                        panic!("missing field '{}' in resolved state slots", field_name)
+                    });
+                let phi_own =
+                    state_component_slot(slots.stride, "state", "idx", field_slot, 0);
+                let phi_neigh =
+                    state_component_slot(slots.stride, "state", "other_idx", field_slot, 0);
 
                 let coeff =
                     coefficient_value_expr(slots, grad_op.coeff.as_ref(), "idx", 1.0.into());

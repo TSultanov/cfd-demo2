@@ -19,5 +19,5 @@ pub use ir::{
     lower_system, lower_system_unchecked, DiscreteEquation, DiscreteOp, DiscreteOpKind, DiscreteSystem,
 };
 pub use packed_state_gradients::generate_packed_state_gradients_wgsl;
-pub use state_access::{state_component_expr, state_scalar_expr, state_vec2_expr};
+// Slot-based state access helpers are publicly available via state_access module
 pub use wgsl::{generate_wgsl, generate_wgsl_library};

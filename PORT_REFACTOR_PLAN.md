@@ -458,9 +458,9 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 **Goal**: Replace string-based codegen with port-based
 
 **Files to update**:
-- [ ] `crates/cfd2_codegen/src/solver/codegen/state_access.rs`
-- [ ] `crates/cfd2_codegen/src/solver/codegen/coeff_expr.rs`
-- [ ] `crates/cfd2_codegen/src/solver/codegen/primitive_expr.rs`
+- [x] `crates/cfd2_codegen/src/solver/codegen/state_access.rs`
+- [x] `crates/cfd2_codegen/src/solver/codegen/coeff_expr.rs`
+- [x] `crates/cfd2_codegen/src/solver/codegen/primitive_expr.rs`
 - [ ] All `*_wgsl.rs` files in modules
 
 **Changes**:
@@ -473,6 +473,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 - ✅ Reduced redundant slot lookups in `crates/cfd2_codegen/src/solver/codegen/primitive_expr.rs` by resolving `(slot, component)` once and deriving both offset + unit from that.
 - ✅ Build-script codegen now includes `solver::model::ports` (proc-macro re-exports + DashMap-based interner gated to runtime), enabling port-based offset resolution during build.rs WGSL generation (e.g., `incompressible_momentum_model()` no longer needs a `StateLayout` fallback).
 - ✅ Generic coupled update kernel primitive recovery now passes pre-resolved state offsets into codegen (no name-based offset lookup inside `generic_coupled_kernels.rs`).
+- ✅ Removed legacy name-based state access helpers from `state_access.rs`; codegen now uses slot-based state access throughout.
 
 ### Phase 7: Hard Cutoff (Week 9)
 
@@ -481,7 +482,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 - [ ] Delete deprecated module functions
 - [x] Remove `NamedParamKey` enum
 - [x] Remove old `ModuleManifest`
-- [ ] Delete string-based codegen functions
+- [x] Delete string-based codegen functions
 - [ ] Update documentation
 - [ ] Breaking change commit with migration guide
 

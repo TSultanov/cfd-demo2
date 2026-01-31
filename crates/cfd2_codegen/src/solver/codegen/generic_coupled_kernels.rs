@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::coeff_expr::coeff_cell_expr;
 use super::constants::constants_struct;
 use super::dsl as typed;
-use super::state_access::state_component;
+use super::state_access::state_component_slot;
 use super::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
     StorageClass, StructDef, StructField, Type,
@@ -525,22 +525,29 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
 
         for component in 0..equation.target.kind().component_count() as u32 {
             let u_idx = base_offset + component;
-            let phi_n = state_component(
-                slots,
+            let target_slot = slots
+                .slots
+                .iter()
+                .find(|s| s.name == equation.target.name())
+                .unwrap_or_else(|| {
+                    panic!("missing field '{}' in resolved state slots", equation.target.name())
+                });
+            let phi_n = state_component_slot(
+                slots.stride,
                 "state_old",
                 "idx",
-                equation.target.name(),
+                target_slot,
                 component,
             );
-            let phi_nm1 = state_component(
-                slots,
+            let phi_nm1 = state_component_slot(
+                slots.stride,
                 "state_old_old",
                 "idx",
-                equation.target.name(),
+                target_slot,
                 component,
             );
             let phi_iter =
-                state_component(slots, "state_iter", "idx", equation.target.name(), component);
+                state_component_slot(slots.stride, "state_iter", "idx", target_slot, component);
 
             // Default BDF1
             stmts.push(dsl::assign_op_expr(
@@ -897,7 +904,14 @@ fn main_update_fn(
     ));
 
     for (u_idx, (field, component)) in unknowns.iter().enumerate() {
-        let target = state_component(slots, "state", "idx", field.name(), *component);
+        let field_slot = slots
+            .slots
+            .iter()
+            .find(|s| s.name == field.name())
+            .unwrap_or_else(|| {
+                panic!("missing field '{}' in resolved state slots", field.name())
+            });
+        let target = state_component_slot(slots.stride, "state", "idx", field_slot, *component);
         let x_entry =
             dsl::array_access_linear("x", Expr::ident("idx"), coupled_stride, u_idx as u32);
         let value = x_entry.clone();

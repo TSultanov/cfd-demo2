@@ -249,7 +249,7 @@ fn resolved_slots_from_layout(layout: &StateLayout) -> ResolvedStateSlotsSpec {
 /// Uses the model's "eos" module port manifest if present, otherwise falls back
 /// to the canonical EOS param list to ensure shared kernels generate identical
 /// WGSL across all models.
-fn extract_eos_params(model: &crate::solver::model::ModelSpec) -> Vec<ParamSpec> {
+pub(crate) fn extract_eos_params(model: &crate::solver::model::ModelSpec) -> Vec<ParamSpec> {
     model
         .modules
         .iter()

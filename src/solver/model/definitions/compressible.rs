@@ -194,10 +194,13 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     system.add_equation(p_eqn);
     system.add_equation(t_eqn);
 
-    // Validate units to ensure the system is consistent
-    system
-        .validate_units()
-        .expect("compressible system failed unit validation");
+    // Validate units to ensure the system is consistent (debug builds only)
+    #[cfg(debug_assertions)]
+    {
+        system
+            .validate_units()
+            .expect("compressible system failed unit validation");
+    }
 
     system
 }

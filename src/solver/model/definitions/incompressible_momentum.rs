@@ -96,10 +96,13 @@ fn build_incompressible_momentum_system(_fields: &IncompressibleMomentumFields) 
     system.add_equation(momentum_eqn);
     system.add_equation(pressure_eqn);
 
-    // Validate units to ensure the system is consistent
-    system
-        .validate_units()
-        .expect("incompressible momentum system failed unit validation");
+    // Validate units to ensure the system is consistent (debug builds only)
+    #[cfg(debug_assertions)]
+    {
+        system
+            .validate_units()
+            .expect("incompressible momentum system failed unit validation");
+    }
 
     system
 }

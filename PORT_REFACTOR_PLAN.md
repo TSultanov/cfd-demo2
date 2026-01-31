@@ -437,7 +437,8 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
   - ✅ `crates/cfd2_codegen/src/solver/codegen/state_access.rs` (`state_*_dim<D> -> TypedExpr<D>` with runtime unit validation; `DynExpr` helpers remain the escape hatch)
   - ✅ `crates/cfd2_codegen/src/solver/codegen/primitive_expr.rs` (`lower_primitive_expr_dyn -> DynExpr` with runtime unit validation; legacy `lower_primitive_expr` delegates)
   - ✅ `crates/cfd2_codegen/src/solver/codegen/coeff_expr.rs` (`coeff_*_expr_dyn -> DynExpr` with runtime unit validation; legacy wrappers delegate)
-- [ ] Remove (or quarantine) the runtime unit mismatch checks once all call sites are typed.
+- [x] Remove (or quarantine) the runtime unit mismatch checks once all call sites are typed.
+  - ✅ Typed model constructors now validate units only in debug builds (`#[cfg(debug_assertions)]`).
 
 ### 5) End-state success criteria for dimensions
 
@@ -446,7 +447,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
   - Serialization/debug output
   - Reading units off runtime `StateLayout` metadata
   - Validating runtime layouts/configurations against typed expectations
-- [ ] No duplicate dimension systems remain (single canonical definition in `cfd2_ir`).
+- [x] No duplicate dimension systems remain (single canonical definition in `cfd2_ir`).
 
 ### Phase 6: Codegen Replacement (Weeks 7-8)
 

@@ -305,12 +305,12 @@ migration steps to move that logic onto the port infrastructure.
 
 **Migration steps**:
 - [x] Update compressible state seeding helpers to use cached `PortRegistry` field entries for offsets (no per-call `StateLayout` cloning).
-- [ ] Define "canonical field port sets" for the helper surfaces:
+- [x] Define "canonical field port sets" for the helper surfaces:
   - Compressible: `rho`, `rho_u` (vec2), `rho_e` (+ optional `p`, `T`, `u|U`)
   - Incompressible: `U|u`, `p`, (and any optional diagnostics fields used by stats helpers)
 - [x] Resolve these ports once per solver/model and cache them (avoid per-call `StateLayout` scanning): store `Arc<PortRegistry>` in plan resources and expose via `GpuUnifiedSolver::port_registry()`.
 - [x] Update helper implementations to use cached ports for offsets/stride (compressible state seeding).
-- [ ] Leave boundary APIs string-keyed for now, but centralize the names as constants next to the port set definitions.
+- [x] Leave boundary APIs string-keyed for now, but centralize the names as constants next to the port set definitions.
 
 #### F) `src/solver/model/definitions/incompressible_momentum.rs` (Model construction)
 

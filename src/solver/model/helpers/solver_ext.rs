@@ -3,11 +3,112 @@ use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::GpuUnifiedSolver;
 use crate::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel};
 use crate::solver::model::eos::EosSpec;
-// PortRegistry and dimension types no longer needed here; helpers use cached registry via solver
+use crate::solver::model::ports::PortRegistry;
 use std::future::Future;
 use std::pin::Pin;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
+
+// =============================================================================
+// Canonical field name constants for compressible conserved-state seeding
+// =============================================================================
+
+const FIELD_RHO: &str = "rho";
+const FIELD_RHO_U: &str = "rho_u";
+const FIELD_RHO_E: &str = "rho_e";
+const FIELD_P: &str = "p";
+const FIELD_T: &str = "T";
+const FIELD_U_LOWER: &str = "u";
+const FIELD_U_UPPER: &str = "U";
+const FIELD_MU: &str = "mu";
+
+// =============================================================================
+// Resolved offset bundle for compressible conserved-state seeding
+// =============================================================================
+
+/// Resolved state offsets for compressible conserved-state seeding.
+///
+/// This struct holds the computed offsets for all fields needed to seed
+/// initial conditions for compressible flow simulations. Required fields
+/// are stored as `usize`; optional fields are `Option<usize>`.
+#[derive(Debug, Clone, Copy)]
+struct CompressibleConservedStateOffsets {
+    /// Scalar offset for density (required)
+    pub rho: usize,
+    /// X-component offset for momentum density (required)
+    pub rho_u_x: usize,
+    /// Y-component offset for momentum density (required)
+    pub rho_u_y: usize,
+    /// Scalar offset for energy density (required)
+    pub rho_e: usize,
+    /// Scalar offset for pressure (optional)
+    pub p: Option<usize>,
+    /// Scalar offset for temperature (optional)
+    pub t: Option<usize>,
+    /// X-component offset for velocity (optional)
+    pub u_x: Option<usize>,
+    /// Y-component offset for velocity (optional)
+    pub u_y: Option<usize>,
+}
+
+impl CompressibleConservedStateOffsets {
+    /// Resolve offsets from the port registry.
+    ///
+    /// Returns `Some(Self)` if all required fields are present with correct kinds:
+    /// - `rho`: scalar (1 component)
+    /// - `rho_u`: vector2 (2 components)
+    /// - `rho_e`: scalar (1 component)
+    ///
+    /// Optional fields are resolved best-effort:
+    /// - `p`, `T`: scalar
+    /// - `u` or `U`: vector2 (prefers lowercase "u", falls back to "U")
+    pub fn resolve(registry: &PortRegistry) -> Option<Self> {
+        // Resolve required fields
+        let rho_entry = registry.get_field_entry_by_name(FIELD_RHO)?;
+        let rho_u_entry = registry.get_field_entry_by_name(FIELD_RHO_U)?;
+        let rho_e_entry = registry.get_field_entry_by_name(FIELD_RHO_E)?;
+
+        // Validate component counts for required fields
+        if rho_entry.component_count() != 1
+            || rho_u_entry.component_count() != 2
+            || rho_e_entry.component_count() != 1
+        {
+            return None;
+        }
+
+        // Resolve optional fields (best-effort)
+        let p = registry
+            .get_field_entry_by_name(FIELD_P)
+            .filter(|e| e.component_count() == 1)
+            .map(|e| e.offset() as usize);
+
+        let t = registry
+            .get_field_entry_by_name(FIELD_T)
+            .filter(|e| e.component_count() == 1)
+            .map(|e| e.offset() as usize);
+
+        let (u_x, u_y) = registry
+            .get_field_entry_by_name(FIELD_U_LOWER)
+            .filter(|e| e.component_count() == 2)
+            .or_else(|| registry.get_field_entry_by_name(FIELD_U_UPPER).filter(|e| e.component_count() == 2))
+            .map(|e| {
+                let base = e.offset() as usize;
+                (Some(base), Some(base + 1))
+            })
+            .unwrap_or((None, None));
+
+        Some(Self {
+            rho: rho_entry.offset() as usize,
+            rho_u_x: rho_u_entry.offset() as usize,
+            rho_u_y: rho_u_entry.offset() as usize + 1,
+            rho_e: rho_e_entry.offset() as usize,
+            p,
+            t,
+            u_x,
+            u_y,
+        })
+    }
+}
 
 pub trait SolverFieldAliasesExt {
     fn set_u(&mut self, u: &[(f64, f64)]);
@@ -20,20 +121,20 @@ pub trait SolverFieldAliasesExt {
 impl SolverFieldAliasesExt for GpuUnifiedSolver {
     fn set_u(&mut self, u: &[(f64, f64)]) {
         let _ = self
-            .set_field_vec2("U", u)
-            .or_else(|_| self.set_field_vec2("u", u));
+            .set_field_vec2(FIELD_U_UPPER, u)
+            .or_else(|_| self.set_field_vec2(FIELD_U_LOWER, u));
     }
 
     fn set_p(&mut self, p: &[f64]) {
-        let _ = self.set_field_scalar("p", p);
+        let _ = self.set_field_scalar(FIELD_P, p);
     }
 
     fn get_u(&self) -> BoxFuture<'_, Vec<(f64, f64)>> {
         Box::pin(async move {
-            if let Ok(v) = self.get_field_vec2("U").await {
+            if let Ok(v) = self.get_field_vec2(FIELD_U_UPPER).await {
                 return v;
             }
-            if let Ok(v) = self.get_field_vec2("u").await {
+            if let Ok(v) = self.get_field_vec2(FIELD_U_LOWER).await {
                 return v;
             }
             vec![(0.0, 0.0); self.num_cells() as usize]
@@ -42,7 +143,7 @@ impl SolverFieldAliasesExt for GpuUnifiedSolver {
 
     fn get_p(&self) -> BoxFuture<'_, Vec<f64>> {
         Box::pin(async move {
-            self.get_field_scalar("p")
+            self.get_field_scalar(FIELD_P)
                 .await
                 .unwrap_or_else(|_| vec![0.0; self.num_cells() as usize])
         })
@@ -50,7 +151,7 @@ impl SolverFieldAliasesExt for GpuUnifiedSolver {
 
     fn get_rho(&self) -> BoxFuture<'_, Vec<f64>> {
         Box::pin(async move {
-            self.get_field_scalar("rho")
+            self.get_field_scalar(FIELD_RHO)
                 .await
                 .unwrap_or_else(|_| vec![0.0; self.num_cells() as usize])
         })
@@ -87,7 +188,7 @@ impl SolverRuntimeParamsExt for GpuUnifiedSolver {
         let n = self.num_cells() as usize;
         let mu64 = mu as f64;
         let mu_field: Vec<f64> = vec![mu64; n];
-        let _ = self.set_field_scalar("mu", &mu_field);
+        let _ = self.set_field_scalar(FIELD_MU, &mu_field);
 
         Ok(())
     }
@@ -146,8 +247,8 @@ pub trait SolverInletVelocityExt {
 impl SolverInletVelocityExt for GpuUnifiedSolver {
     fn set_inlet_velocity(&mut self, velocity: f32) -> Result<(), String> {
         let value = [velocity, 0.0f32];
-        self.set_boundary_vec2(GpuBoundaryType::Inlet, "U", value)
-            .or_else(|_| self.set_boundary_vec2(GpuBoundaryType::Inlet, "u", value))
+        self.set_boundary_vec2(GpuBoundaryType::Inlet, FIELD_U_UPPER, value)
+            .or_else(|_| self.set_boundary_vec2(GpuBoundaryType::Inlet, FIELD_U_LOWER, value))
     }
 }
 
@@ -193,12 +294,12 @@ impl SolverCompressibleInletExt for GpuUnifiedSolver {
         let ke = 0.5 * rho * (u_x * u_x);
         let rho_e = if gm1 > 0.0 { p0 / gm1 + ke } else { ke };
 
-        self.set_boundary_scalar(GpuBoundaryType::Inlet, "rho", rho)?;
-        self.set_boundary_vec2(GpuBoundaryType::Inlet, "u", u)?;
-        self.set_boundary_vec2(GpuBoundaryType::Inlet, "rho_u", rho_u)?;
-        self.set_boundary_scalar(GpuBoundaryType::Inlet, "rho_e", rho_e)?;
-        let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, "p", p0);
-        let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, "T", t0);
+        self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_RHO, rho)?;
+        self.set_boundary_vec2(GpuBoundaryType::Inlet, FIELD_U_LOWER, u)?;
+        self.set_boundary_vec2(GpuBoundaryType::Inlet, FIELD_RHO_U, rho_u)?;
+        self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_RHO_E, rho_e)?;
+        let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_P, p0);
+        let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_T, t0);
         Ok(())
     }
 }
@@ -221,46 +322,9 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         let Some(registry) = self.port_registry() else {
             return;
         };
-
-        // Resolve required fields (early return if missing or wrong kind)
-        let (Some(rho_entry), Some(rho_u_entry), Some(rho_e_entry)) = (
-            registry.get_field_entry_by_name("rho"),
-            registry.get_field_entry_by_name("rho_u"),
-            registry.get_field_entry_by_name("rho_e"),
-        ) else {
+        let Some(offsets) = CompressibleConservedStateOffsets::resolve(registry) else {
             return;
         };
-
-        // Validate component counts for required fields
-        if rho_entry.component_count() != 1
-            || rho_u_entry.component_count() != 2
-            || rho_e_entry.component_count() != 1
-        {
-            return;
-        }
-
-        let off_rho = rho_entry.offset() as usize;
-        let off_rho_u_x = rho_u_entry.offset() as usize;
-        let off_rho_u_y = rho_u_entry.offset() as usize + 1;
-        let off_rho_e = rho_e_entry.offset() as usize;
-
-        // Resolve optional fields (best-effort)
-        let off_p = registry
-            .get_field_entry_by_name("p")
-            .filter(|e| e.component_count() == 1)
-            .map(|e| e.offset() as usize);
-        let off_t = registry
-            .get_field_entry_by_name("T")
-            .filter(|e| e.component_count() == 1)
-            .map(|e| e.offset() as usize);
-        let off_u = registry
-            .get_field_entry_by_name("u")
-            .filter(|e| e.component_count() == 2)
-            .or_else(|| registry.get_field_entry_by_name("U").filter(|e| e.component_count() == 2))
-            .map(|e| {
-                let base = e.offset() as usize;
-                (base, base + 1)
-            });
 
         let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
         let rho_e = if gm1 > 0.0 { p / gm1 + ke } else { ke };
@@ -273,21 +337,21 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         }
         for cell in 0..self.num_cells() as usize {
             let base = cell * stride;
-            state[base + off_rho] = rho;
-            state[base + off_rho_u_x] = rho * u[0];
-            state[base + off_rho_u_y] = rho * u[1];
-            state[base + off_rho_e] = rho_e;
-            if let Some(off_p) = off_p {
+            state[base + offsets.rho] = rho;
+            state[base + offsets.rho_u_x] = rho * u[0];
+            state[base + offsets.rho_u_y] = rho * u[1];
+            state[base + offsets.rho_e] = rho_e;
+            if let Some(off_p) = offsets.p {
                 state[base + off_p] = p;
             }
-            if let Some(off_t) = off_t {
+            if let Some(off_t) = offsets.t {
                 state[base + off_t] = if r_gas > 0.0 {
                     p / (rho.max(1e-12) * r_gas)
                 } else {
                     0.0
                 };
             }
-            if let Some((off_u_x, off_u_y)) = off_u {
+            if let (Some(off_u_x), Some(off_u_y)) = (offsets.u_x, offsets.u_y) {
                 state[base + off_u_x] = u[0];
                 state[base + off_u_y] = u[1];
             }
@@ -314,46 +378,9 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         let Some(registry) = self.port_registry() else {
             return;
         };
-
-        // Resolve required fields (early return if missing or wrong kind)
-        let (Some(rho_entry), Some(rho_u_entry), Some(rho_e_entry)) = (
-            registry.get_field_entry_by_name("rho"),
-            registry.get_field_entry_by_name("rho_u"),
-            registry.get_field_entry_by_name("rho_e"),
-        ) else {
+        let Some(offsets) = CompressibleConservedStateOffsets::resolve(registry) else {
             return;
         };
-
-        // Validate component counts for required fields
-        if rho_entry.component_count() != 1
-            || rho_u_entry.component_count() != 2
-            || rho_e_entry.component_count() != 1
-        {
-            return;
-        }
-
-        let off_rho = rho_entry.offset() as usize;
-        let off_rho_u_x = rho_u_entry.offset() as usize;
-        let off_rho_u_y = rho_u_entry.offset() as usize + 1;
-        let off_rho_e = rho_e_entry.offset() as usize;
-
-        // Resolve optional fields (best-effort)
-        let off_p = registry
-            .get_field_entry_by_name("p")
-            .filter(|e| e.component_count() == 1)
-            .map(|e| e.offset() as usize);
-        let off_t = registry
-            .get_field_entry_by_name("T")
-            .filter(|e| e.component_count() == 1)
-            .map(|e| e.offset() as usize);
-        let off_u = registry
-            .get_field_entry_by_name("u")
-            .filter(|e| e.component_count() == 2)
-            .or_else(|| registry.get_field_entry_by_name("U").filter(|e| e.component_count() == 2))
-            .map(|e| {
-                let base = e.offset() as usize;
-                (base, base + 1)
-            });
 
         // Preserve unrelated state fields (e.g. mu, gradients) when seeding initial conditions.
         let mut state = pollster::block_on(async { self.read_state_f32().await });
@@ -368,21 +395,21 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             let ke = 0.5 * rho_val * (u_val[0] * u_val[0] + u_val[1] * u_val[1]);
             let rho_e = if gm1 > 0.0 { p_val / gm1 + ke } else { ke };
 
-            state[base + off_rho] = rho_val;
-            state[base + off_rho_u_x] = rho_val * u_val[0];
-            state[base + off_rho_u_y] = rho_val * u_val[1];
-            state[base + off_rho_e] = rho_e;
-            if let Some(off_p) = off_p {
+            state[base + offsets.rho] = rho_val;
+            state[base + offsets.rho_u_x] = rho_val * u_val[0];
+            state[base + offsets.rho_u_y] = rho_val * u_val[1];
+            state[base + offsets.rho_e] = rho_e;
+            if let Some(off_p) = offsets.p {
                 state[base + off_p] = p_val;
             }
-            if let Some(off_t) = off_t {
+            if let Some(off_t) = offsets.t {
                 state[base + off_t] = if r_gas > 0.0 {
                     p_val / (rho_val.max(1e-12) * r_gas)
                 } else {
                     0.0
                 };
             }
-            if let Some((off_u_x, off_u_y)) = off_u {
+            if let (Some(off_u_x), Some(off_u_y)) = (offsets.u_x, offsets.u_y) {
                 state[base + off_u_x] = u_val[0];
                 state[base + off_u_y] = u_val[1];
             }

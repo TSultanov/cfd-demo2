@@ -461,12 +461,11 @@ fn euler_central_upwind(
     };
 
     // Effective sound speed squared for preconditioning (blended across models).
-    // Currently unused but kept for potential future low-Mach flux modifications.
-    let _c_eff2 = |side: FaceSide| {
+    let c_eff2 = |side: FaceSide| {
         let c2_side = c2(side);
         S::Add(
             Box::new(S::Add(
-                Box::new(S::Mul(Box::new(w_off.clone()), Box::new(c2_side))),
+                Box::new(S::Mul(Box::new(w_off.clone()), Box::new(c2_side.clone()))),
                 Box::new(S::Mul(
                     Box::new(w_legacy.clone()),
                     Box::new(c_eff2_legacy(side)),
@@ -700,7 +699,7 @@ fn euler_central_upwind(
         );
         V::MulScalar(Box::new(V::state_vec2(side, "grad_T")), Box::new(factor))
     };
-    let c_face = |side: FaceSide| match reconstruction {
+    let c_face_raw = |side: FaceSide| match reconstruction {
         Scheme::SecondOrderUpwindVanLeer => reconstruct_vanleer_scalar(
             side,
             c_cell(FaceSide::Owner),
@@ -711,8 +710,25 @@ fn euler_central_upwind(
         _ => reconstruct_scalar(side, c_cell(side), c_cell(other_side(side)), grad_c(side)),
     };
 
-    let c_sf_pos = S::Mul(Box::new(c_face(FaceSide::Owner)), Box::new(S::area()));
-    let c_sf_neg = S::Mul(Box::new(c_face(FaceSide::Neighbor)), Box::new(S::area()));
+    // Apply low-Mach preconditioning to the acoustic speed for dissipation scaling.
+    // scale = sqrt(c_eff^2 / c^2) gives the ratio of effective to physical wave speed.
+    let scale_factor = |side: FaceSide| {
+        let c2_side = c2(side);
+        S::Sqrt(Box::new(S::Div(
+            Box::new(c_eff2(side)),
+            Box::new(S::Max(Box::new(c2_side), Box::new(S::lit(1e-12)))),
+        )))
+    };
+
+    let c_face_pre = |side: FaceSide| {
+        S::Mul(
+            Box::new(c_face_raw(side)),
+            Box::new(scale_factor(side)),
+        )
+    };
+
+    let c_sf_pos = S::Mul(Box::new(c_face_pre(FaceSide::Owner)), Box::new(S::area()));
+    let c_sf_neg = S::Mul(Box::new(c_face_pre(FaceSide::Neighbor)), Box::new(S::area()));
 
     let ap = S::Max(
         Box::new(S::Max(

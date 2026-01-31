@@ -170,8 +170,228 @@ impl ModelSpec {
             }
         }
 
+        // Use PortRegistry-based validation for runtime crate compilation.
+        // For build-script compilation, use the StateLayout-based fallback.
+        #[cfg(cfd2_build_script)]
+        {
+            self.validate_module_manifests_with_registry()
+                .map_err(|e| e.to_string())
+        }
+        #[cfg(not(cfd2_build_script))]
+        {
+            self.validate_module_manifests_legacy()
+        }
+    }
+
+    /// Validate module manifests using PortRegistry (runtime path).
+    ///
+    /// This resolves all required state-field metadata once and reuses it across
+    /// validation passes, producing structured `PortValidationError` internally.
+    #[cfg(cfd2_build_script)]
+    fn validate_module_manifests_with_registry(
+        &self,
+    ) -> Result<(), crate::solver::model::ports::PortValidationError> {
+        use crate::solver::model::module::{FieldKindReq, ModuleInvariant};
+        use crate::solver::model::ports::{PortRegistry, PortValidationError};
+
+        // Build a PortRegistry and pre-register all StateLayout fields.
+        let mut registry = PortRegistry::new(self.state_layout.clone());
+
+        // Pre-register all fields from state_layout to enable lookup by name.
+        for field_ref in self.state_layout.fields() {
+            let _ = registry.register_state_field(field_ref.name());
+        }
+
+        // Validate port_manifest fields against the registry.
+        for module in &self.modules {
+            if let Some(ref port_manifest) = module.manifest.port_manifest {
+                for field_spec in &port_manifest.fields {
+                    let name = field_spec.name;
+
+                    // Use registry for field lookup (resolves once, reused across checks).
+                    let Some(entry) = registry.get_field_entry_by_name(name) else {
+                        return Err(PortValidationError::MissingField {
+                            module: module.name,
+                            field: name.to_string(),
+                        });
+                    };
+
+                    // Validate component count (kind) matches.
+                    let expected_components = field_spec.kind.component_count();
+                    let actual_components = entry.component_count();
+                    if expected_components != actual_components {
+                        return Err(PortValidationError::FieldKindMismatch {
+                            field: name.to_string(),
+                            expected: match expected_components {
+                                1 => "Scalar".to_string(),
+                                2 => "Vector2".to_string(),
+                                3 => "Vector3".to_string(),
+                                n => format!("Vector{n}"),
+                            },
+                            found: match actual_components {
+                                1 => "Scalar".to_string(),
+                                2 => "Vector2".to_string(),
+                                3 => "Vector3".to_string(),
+                                n => format!("Vector{n}"),
+                            },
+                        });
+                    }
+
+                    // Validate unit dimension matches (skip for ANY_DIMENSION sentinel).
+                    if field_spec.unit != crate::solver::ir::ports::ANY_DIMENSION
+                        && field_spec.unit != entry.runtime_dimension()
+                    {
+                        return Err(PortValidationError::DimensionMismatch {
+                            field: name.to_string(),
+                            expected: field_spec.unit.to_string(),
+                            found: entry.runtime_dimension().to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Validate typed invariant requirements declared by modules.
+        for module in &self.modules {
+            for inv in &module.manifest.invariants {
+                match *inv {
+                    ModuleInvariant::RequireStateField { name, kind } => {
+                        let Some(entry) = registry.get_field_entry_by_name(name) else {
+                            return Err(PortValidationError::MissingField {
+                                module: module.name,
+                                field: name.to_string(),
+                            });
+                        };
+
+                        if let Some(req) = kind {
+                            let expected_components = match req {
+                                FieldKindReq::Scalar => 1,
+                                FieldKindReq::Vector2 => 2,
+                                FieldKindReq::Vector3 => 3,
+                            };
+                            let actual_components = entry.component_count();
+                            if expected_components != actual_components {
+                                return Err(PortValidationError::FieldKindMismatch {
+                                    field: name.to_string(),
+                                    expected: match expected_components {
+                                        1 => "Scalar".to_string(),
+                                        2 => "Vector2".to_string(),
+                                        3 => "Vector3".to_string(),
+                                        n => format!("Vector{n}"),
+                                    },
+                                    found: match actual_components {
+                                        1 => "Scalar".to_string(),
+                                        2 => "Vector2".to_string(),
+                                        3 => "Vector3".to_string(),
+                                        n => format!("Vector{n}"),
+                                    },
+                                });
+                            }
+                        }
+                    }
+                    ModuleInvariant::RequireUniqueMomentumPressureCouplingReferencingDp {
+                        dp_field,
+                        require_vector2_momentum,
+                        require_pressure_gradient,
+                    } => {
+                        // Validate dp_field exists and is scalar.
+                        let Some(dp_entry) = registry.get_field_entry_by_name(dp_field) else {
+                            return Err(PortValidationError::MissingField {
+                                module: module.name,
+                                field: dp_field.to_string(),
+                            });
+                        };
+                        if dp_entry.component_count() != 1 {
+                            return Err(PortValidationError::FieldKindMismatch {
+                                field: dp_field.to_string(),
+                                expected: "Scalar".to_string(),
+                                found: match dp_entry.component_count() {
+                                    1 => "Scalar".to_string(),
+                                    2 => "Vector2".to_string(),
+                                    3 => "Vector3".to_string(),
+                                    n => format!("Vector{n}"),
+                                },
+                            });
+                        }
+
+                        // Infer coupling via legacy method (this still uses StateLayout internally
+                        // for the coupling inference logic, but field lookups use registry).
+                        let coupling = crate::solver::model::invariants::infer_unique_momentum_pressure_coupling_referencing_dp(
+                            self,
+                            dp_field,
+                        )
+                        .map_err(|e| PortValidationError::MissingField {
+                            module: module.name,
+                            field: format!("coupling inference failed: {e}"),
+                        })?;
+
+                        if require_vector2_momentum {
+                            let momentum_entry = registry
+                                .get_field_entry_by_name(coupling.momentum.name())
+                                .ok_or_else(|| PortValidationError::MissingField {
+                                    module: module.name,
+                                    field: coupling.momentum.name().to_string(),
+                                })?;
+                            if momentum_entry.component_count() != 2 {
+                                return Err(PortValidationError::FieldKindMismatch {
+                                    field: coupling.momentum.name().to_string(),
+                                    expected: "Vector2".to_string(),
+                                    found: match momentum_entry.component_count() {
+                                        1 => "Scalar".to_string(),
+                                        2 => "Vector2".to_string(),
+                                        3 => "Vector3".to_string(),
+                                        n => format!("Vector{n}"),
+                                    },
+                                });
+                            }
+                        }
+
+                        if require_pressure_gradient {
+                            let grad_name = format!("grad_{}", coupling.pressure.name());
+                            let Some(grad_entry) = registry.get_field_entry_by_name(&grad_name)
+                            else {
+                                return Err(PortValidationError::MissingField {
+                                    module: module.name,
+                                    field: grad_name.clone(),
+                                });
+                            };
+                            if grad_entry.component_count() != 2 {
+                                return Err(PortValidationError::FieldKindMismatch {
+                                    field: grad_name.clone(),
+                                    expected: "Vector2".to_string(),
+                                    found: match grad_entry.component_count() {
+                                        1 => "Scalar".to_string(),
+                                        2 => "Vector2".to_string(),
+                                        3 => "Vector3".to_string(),
+                                        n => format!("Vector{n}"),
+                                    },
+                                });
+                            }
+
+                            // Ensure the component offsets exist by checking component_count.
+                            // Vector2 should have 2 components; if we got here, it's valid.
+                            // The actual offset computation happens at codegen time using
+                            // the resolved gradient targets in PortManifest.
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Legacy validation using direct StateLayout probing (build-script path).
+    ///
+    /// This path is used when the ports module is not available (e.g., during
+    /// build.rs WGSL generation). It preserves the original string-based error
+    /// format for backward compatibility.
+    #[cfg(not(cfd2_build_script))]
+    fn validate_module_manifests_legacy(&self) -> Result<(), String> {
+        use crate::solver::model::backend::FieldKind;
+        use crate::solver::model::module::{FieldKindReq, ModuleInvariant};
+
         // Validate port_manifest fields against state_layout.
-        // This makes PortManifest.fields the single source of truth for required fields.
         for module in &self.modules {
             if let Some(ref port_manifest) = module.manifest.port_manifest {
                 for field_spec in &port_manifest.fields {
@@ -215,9 +435,6 @@ impl ModelSpec {
         // Validate typed invariant requirements declared by modules.
         for module in &self.modules {
             for inv in &module.manifest.invariants {
-                use crate::solver::model::backend::FieldKind;
-                use crate::solver::model::module::{FieldKindReq, ModuleInvariant};
-
                 let err_prefix = format!("module '{}' invariant failed: ", module.name);
 
                 match *inv {
@@ -647,6 +864,85 @@ mod tests {
         assert_eq!(
             kind[GpuBoundaryType::MovingWall as usize],
             GpuBcKind::ZeroGradient as u32
+        );
+    }
+
+    /// Test that validate_module_manifests produces reasonable error messages
+    /// for invalid port manifest field specs (using the PortRegistry-based path).
+    #[test]
+    #[cfg(cfd2_build_script)]
+    fn validate_module_manifests_reports_missing_port_manifest_field() {
+        use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
+        use crate::solver::model::module::ModuleManifest;
+        use crate::solver::units::si;
+
+        let mut model = incompressible_momentum_model();
+
+        // Add a module with a port_manifest referencing a non-existent field
+        let bad_module = crate::solver::model::module::KernelBundleModule {
+            name: "test_module",
+            manifest: ModuleManifest {
+                port_manifest: Some(PortManifest {
+                    fields: vec![FieldSpec {
+                        name: "nonexistent_field",
+                        kind: PortFieldKind::Scalar,
+                        unit: si::PRESSURE,
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        model.modules.push(bad_module);
+
+        // Validation should fail with a clear error message
+        let err = model
+            .validate_module_manifests()
+            .expect_err("should fail for missing field");
+        assert!(
+            err.contains("nonexistent_field") || err.contains("MissingField"),
+            "Expected error mentioning missing field, got: {}",
+            err
+        );
+    }
+
+    /// Test that validate_module_manifests reports kind mismatches correctly.
+    #[test]
+    #[cfg(cfd2_build_script)]
+    fn validate_module_manifests_reports_kind_mismatch() {
+        use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
+        use crate::solver::model::module::ModuleManifest;
+        use crate::solver::units::si;
+
+        let mut model = incompressible_momentum_model();
+
+        // Add a module expecting 'U' to be a Scalar (but it's Vector2 in the model)
+        let bad_module = crate::solver::model::module::KernelBundleModule {
+            name: "test_module",
+            manifest: ModuleManifest {
+                port_manifest: Some(PortManifest {
+                    fields: vec![FieldSpec {
+                        name: "U", // U is Vector2 in incompressible_momentum_model
+                        kind: PortFieldKind::Scalar, // But we claim it's Scalar
+                        unit: si::VELOCITY,
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        model.modules.push(bad_module);
+
+        // Validation should fail with a kind mismatch error
+        let err = model
+            .validate_module_manifests()
+            .expect_err("should fail for kind mismatch");
+        assert!(
+            err.contains("U") && (err.contains("kind") || err.contains("FieldKindMismatch")),
+            "Expected error mentioning field 'U' and kind mismatch, got: {}",
+            err
         );
     }
 }

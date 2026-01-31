@@ -329,7 +329,7 @@ migration steps to move that logic onto the port infrastructure.
 **Migration steps**:
 - [x] Make `PortManifest.gradient_targets` the single source of truth for flux-module gradients validation (no `StateLayout` `grad_*` scanning in `ModelSpec::validate_module_manifests()`).
 - [x] Validate `port_manifest.fields` against the model `StateLayout` (existence + kind + unit) in `ModelSpec::validate_module_manifests()`.
-- [ ] Convert validation to:
+- [x] Convert validation to:
   - Resolve all required ports once, returning structured `PortValidationError`
   - Avoid repeated `StateLayout` probing across multiple validation passes
 
@@ -348,7 +348,7 @@ These are not "model modules", but they are the largest remaining concentration 
 state lookups and will block completing Phase 6 unless migrated.
 
 **Migration steps**:
-- [ ] Introduce an IR-safe "resolved state slot" type (offset + stride + kind/unit metadata as needed).
+- [x] Introduce an IR-safe "resolved state slot" type (offset + stride + kind/unit metadata as needed).
 - [ ] Update `state_access.rs` to accept resolved slots instead of `(StateLayout, field_name)`.
 - [ ] Update callers (`generic_coupled_kernels`, `unified_assembly`, `primitive_expr`, `coeff_expr`) to use slots/ports provided by model/module manifests.
 

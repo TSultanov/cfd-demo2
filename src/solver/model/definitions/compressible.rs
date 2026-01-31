@@ -1,6 +1,6 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{
-    surface_scalar, surface_vector, vol_scalar, vol_vector, EquationSystem, FieldRef, FluxRef,
+    surface_scalar_dim, surface_vector_dim, vol_scalar_dim, vol_vector_dim, EquationSystem, FieldRef, FluxRef,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::backend::typed_ast::{
@@ -8,7 +8,7 @@ use crate::solver::model::backend::typed_ast::{
 };
 use crate::solver::units::si;
 use cfd2_ir::solver::dimensions::{
-    Density, Dimensionless, DynamicViscosity, EnergyDensity, Force, InvTime, Length, MassFlux,
+    Density, Dimensionless, DivDim, DynamicViscosity, EnergyDensity, Force, InvTime, Length, MassFlux,
     MomentumDensity, MulDim, Power, Pressure, Temperature, Velocity,
 };
 
@@ -31,16 +31,16 @@ pub struct CompressibleFields {
 impl CompressibleFields {
     pub fn new() -> Self {
         Self {
-            rho: vol_scalar("rho", si::DENSITY),
-            rho_u: vol_vector("rho_u", si::MOMENTUM_DENSITY),
-            rho_e: vol_scalar("rho_e", si::ENERGY_DENSITY),
-            p: vol_scalar("p", si::PRESSURE),
-            t: vol_scalar("T", si::TEMPERATURE),
-            u: vol_vector("u", si::VELOCITY),
-            mu: vol_scalar("mu", si::DYNAMIC_VISCOSITY),
-            phi_rho: surface_scalar("phi_rho", si::MASS_FLUX),
-            phi_rho_u: surface_vector("phi_rho_u", si::FORCE),
-            phi_rho_e: surface_scalar("phi_rho_e", si::POWER),
+            rho: vol_scalar_dim::<Density>("rho"),
+            rho_u: vol_vector_dim::<MomentumDensity>("rho_u"),
+            rho_e: vol_scalar_dim::<EnergyDensity>("rho_e"),
+            p: vol_scalar_dim::<Pressure>("p"),
+            t: vol_scalar_dim::<Temperature>("T"),
+            u: vol_vector_dim::<Velocity>("u"),
+            mu: vol_scalar_dim::<DynamicViscosity>("mu"),
+            phi_rho: surface_scalar_dim::<MassFlux>("phi_rho"),
+            phi_rho_u: surface_vector_dim::<Force>("phi_rho_u"),
+            phi_rho_e: surface_scalar_dim::<Power>("phi_rho_e"),
         }
     }
 }
@@ -224,13 +224,13 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
     let system = build_compressible_system(&fields);
     // Flux module reconstruction uses gradient fields in the state layout when enabled.
     // These are computed by the optional `flux_module_gradients` stage (Gauss gradients).
-    let grad_rho = vol_vector("grad_rho", si::DENSITY / si::LENGTH);
-    let grad_rho_u_x = vol_vector("grad_rho_u_x", si::MOMENTUM_DENSITY / si::LENGTH);
-    let grad_rho_u_y = vol_vector("grad_rho_u_y", si::MOMENTUM_DENSITY / si::LENGTH);
-    let grad_rho_e = vol_vector("grad_rho_e", si::ENERGY_DENSITY / si::LENGTH);
-    let grad_t = vol_vector("grad_T", si::TEMPERATURE / si::LENGTH);
-    let grad_u_x = vol_vector("grad_u_x", si::VELOCITY / si::LENGTH);
-    let grad_u_y = vol_vector("grad_u_y", si::VELOCITY / si::LENGTH);
+    let grad_rho = vol_vector_dim::<DivDim<Density, Length>>("grad_rho");
+    let grad_rho_u_x = vol_vector_dim::<DivDim<MomentumDensity, Length>>("grad_rho_u_x");
+    let grad_rho_u_y = vol_vector_dim::<DivDim<MomentumDensity, Length>>("grad_rho_u_y");
+    let grad_rho_e = vol_vector_dim::<DivDim<EnergyDensity, Length>>("grad_rho_e");
+    let grad_t = vol_vector_dim::<DivDim<Temperature, Length>>("grad_T");
+    let grad_u_x = vol_vector_dim::<DivDim<Velocity, Length>>("grad_u_x");
+    let grad_u_y = vol_vector_dim::<DivDim<Velocity, Length>>("grad_u_y");
     let layout = StateLayout::new(vec![
         fields.rho,
         fields.rho_u,

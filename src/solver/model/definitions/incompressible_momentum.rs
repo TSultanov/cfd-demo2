@@ -1,6 +1,6 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{
-    surface_scalar, vol_scalar, vol_vector, EquationSystem, FieldRef, FluxRef,
+    surface_scalar_dim, vol_scalar_dim, vol_vector_dim, EquationSystem, FieldRef, FluxRef,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::backend::typed_ast::{
@@ -8,7 +8,7 @@ use crate::solver::model::backend::typed_ast::{
 };
 use crate::solver::units::si;
 use cfd2_ir::solver::dimensions::{
-    Density, DynamicViscosity, Force, MassFlux, Pressure, Velocity,
+    Density, DivDim, DynamicViscosity, Force, Length, MassFlux, Pressure, Velocity,
 };
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
@@ -28,14 +28,14 @@ pub struct IncompressibleMomentumFields {
 impl IncompressibleMomentumFields {
     pub fn new() -> Self {
         Self {
-            u: vol_vector("U", si::VELOCITY),
-            p: vol_scalar("p", si::PRESSURE),
-            phi: surface_scalar("phi", si::MASS_FLUX),
-            mu: vol_scalar("mu", si::DYNAMIC_VISCOSITY),
-            rho: vol_scalar("rho", si::DENSITY),
-            d_p: vol_scalar("d_p", si::D_P),
-            grad_p: vol_vector("grad_p", si::PRESSURE_GRADIENT),
-            grad_p_old: vol_vector("grad_p_old", si::PRESSURE_GRADIENT),
+            u: vol_vector_dim::<Velocity>("U"),
+            p: vol_scalar_dim::<Pressure>("p"),
+            phi: surface_scalar_dim::<MassFlux>("phi"),
+            mu: vol_scalar_dim::<DynamicViscosity>("mu"),
+            rho: vol_scalar_dim::<Density>("rho"),
+            d_p: vol_scalar_dim::<cfd2_ir::solver::dimensions::D_P>("d_p"),
+            grad_p: vol_vector_dim::<DivDim<Pressure, Length>>("grad_p"),
+            grad_p_old: vol_vector_dim::<DivDim<Pressure, Length>>("grad_p_old"),
         }
     }
 }

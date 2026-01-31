@@ -1,5 +1,5 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
-use crate::solver::model::backend::ast::{vol_scalar, EquationSystem};
+use crate::solver::model::backend::ast::{vol_scalar_dim, EquationSystem};
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::backend::typed_ast::{typed_fvm, Scalar, TypedCoeff, TypedFieldRef};
 use crate::solver::units::si;
@@ -48,8 +48,8 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
             .expect("generic diffusion demo system failed unit validation");
     }
 
-    // Use untyped field for StateLayout/boundaries (unchanged behavior)
-    let phi = vol_scalar("phi", si::DIMENSIONLESS);
+    // Use typed field constructor for StateLayout/boundaries
+    let phi = vol_scalar_dim::<Dimensionless>("phi");
     let layout = StateLayout::new(vec![phi]);
     let mut boundaries = BoundarySpec::default();
     boundaries.set_field(
@@ -123,8 +123,8 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
             .expect("generic diffusion demo neumann system failed unit validation");
     }
 
-    // Use untyped field for StateLayout/boundaries (unchanged behavior)
-    let phi = vol_scalar("phi", si::DIMENSIONLESS);
+    // Use typed field constructor for StateLayout/boundaries
+    let phi = vol_scalar_dim::<Dimensionless>("phi");
     let layout = StateLayout::new(vec![phi]);
     let mut boundaries = BoundarySpec::default();
     boundaries.set_field(

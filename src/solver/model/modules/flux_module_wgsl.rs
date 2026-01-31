@@ -1760,7 +1760,7 @@ struct PortRegistryResolver {
 #[cfg(cfd2_build_script)]
 impl PortRegistryResolver {
     fn new(layout: &StateLayout) -> Self {
-        use crate::solver::model::ports::dimensions::Dimensionless;
+        use crate::solver::model::ports::dimensions::AnyDimension;
         use crate::solver::model::ports::{PortRegistry, Scalar, Vector2, Vector3};
 
         let mut registry = PortRegistry::new(layout.clone());
@@ -1774,12 +1774,12 @@ impl PortRegistryResolver {
 
             match field.kind() {
                 FieldKind::Scalar => {
-                    if let Ok(port) = registry.register_scalar_field::<Dimensionless>(name) {
+                    if let Ok(port) = registry.register_scalar_field::<AnyDimension>(name) {
                         offsets.insert((name.to_string(), 0), port.offset());
                     }
                 }
                 FieldKind::Vector2 => {
-                    if let Ok(port) = registry.register_vector2_field::<Dimensionless>(name) {
+                    if let Ok(port) = registry.register_vector2_field::<AnyDimension>(name) {
                         offsets.insert(
                             (name.to_string(), 0),
                             port.component(0).unwrap().full_offset(),
@@ -1791,7 +1791,7 @@ impl PortRegistryResolver {
                     }
                 }
                 FieldKind::Vector3 => {
-                    if let Ok(port) = registry.register_vector3_field::<Dimensionless>(name) {
+                    if let Ok(port) = registry.register_vector3_field::<AnyDimension>(name) {
                         offsets.insert(
                             (name.to_string(), 0),
                             port.component(0).unwrap().full_offset(),

@@ -57,6 +57,32 @@ pub type EnergyDensity = Pressure;
 /// Inverse time = 1/Time
 pub type InvTime = PowDim<Time, -1, 1>;
 
+/// Any dimension - escape hatch for dynamic/unknown dimensions.
+///
+/// This type represents "skip unit enforcement" in port registration.
+/// When used as the dimension type for field/param registration, unit
+/// checks are bypassed, allowing fields with any runtime unit to be
+/// registered without validation.
+///
+/// This is distinct from `Dimensionless` (which has a specific unit of 1).
+/// Use `AnyDimension` when the actual dimension is not known at compile time
+/// or when you explicitly want to opt out of dimension checking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnyDimension;
+
+// Use a large-but-safe sentinel value. This avoids accidental compatibility
+// with real dimensions, while still allowing const arithmetic (e.g. MulDim)
+// without overflowing `i32`.
+const ANY_DIMENSION_EXPONENT: (i32, i32) = (1000, 1);
+
+impl UnitDimension for AnyDimension {
+    // Use a unique sentinel value that won't match any real dimension
+    const M: (i32, i32) = ANY_DIMENSION_EXPONENT;
+    const L: (i32, i32) = ANY_DIMENSION_EXPONENT;
+    const T: (i32, i32) = ANY_DIMENSION_EXPONENT;
+    const TEMP: (i32, i32) = ANY_DIMENSION_EXPONENT;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

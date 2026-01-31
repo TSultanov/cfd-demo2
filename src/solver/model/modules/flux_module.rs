@@ -120,7 +120,7 @@ fn build_resolved_targets_runtime(
     flux_layout: &FluxLayout,
     gradients: &[(String, String)],
 ) -> Result<Vec<ResolvedGradientTarget>, String> {
-    use crate::solver::model::ports::dimensions::Dimensionless;
+    use crate::solver::model::ports::dimensions::AnyDimension;
     use crate::solver::model::ports::{PortRegistry, Scalar, Vector2, Vector3};
 
     let mut registry = PortRegistry::new(layout.clone());
@@ -134,13 +134,13 @@ fn build_resolved_targets_runtime(
             match field.kind() {
                 FieldKind::Scalar => {
                     let port = registry
-                        .register_scalar_field::<Dimensionless>(base_field.as_str())
+                        .register_scalar_field::<AnyDimension>(base_field.as_str())
                         .map_err(|e| format!("flux_module_gradients: {e}"))?;
                     port.offset()
                 }
                 FieldKind::Vector2 => {
                     let port = registry
-                        .register_vector2_field::<Dimensionless>(base_field.as_str())
+                        .register_vector2_field::<AnyDimension>(base_field.as_str())
                         .map_err(|e| format!("flux_module_gradients: {e}"))?;
                     port.component(base_component)
                         .map(|c| c.full_offset())
@@ -148,7 +148,7 @@ fn build_resolved_targets_runtime(
                 }
                 FieldKind::Vector3 => {
                     let port = registry
-                        .register_vector3_field::<Dimensionless>(base_field.as_str())
+                        .register_vector3_field::<AnyDimension>(base_field.as_str())
                         .map_err(|e| format!("flux_module_gradients: {e}"))?;
                     port.component(base_component)
                         .map(|c| c.full_offset())
@@ -163,7 +163,7 @@ fn build_resolved_targets_runtime(
 
         // Register grad field and get component offsets
         let grad_port = registry
-            .register_vector2_field::<Dimensionless>(grad.as_str())
+            .register_vector2_field::<AnyDimension>(grad.as_str())
             .map_err(|e| format!("flux_module_gradients: missing gradient field '{grad}': {e}"))?;
 
         let grad_x_offset = grad_port
@@ -181,7 +181,7 @@ fn build_resolved_targets_runtime(
         let (slip_vec2_x_offset, slip_vec2_y_offset) = match base_field.as_str() {
             "u" | "U" | "rho_u" | "rhoU" => {
                 let slip_port = registry
-                    .register_vector2_field::<Dimensionless>(base_field.as_str())
+                    .register_vector2_field::<AnyDimension>(base_field.as_str())
                     .map_err(|e| format!("flux_module_gradients: {e}"))?;
                 (
                     slip_port.component(0).map(|c| c.full_offset()),

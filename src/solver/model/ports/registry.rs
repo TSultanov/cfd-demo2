@@ -8,10 +8,19 @@ use super::{
     PortValidationError,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
-use crate::solver::model::ports::dimensions::UnitDimension;
+use crate::solver::model::ports::dimensions::{AnyDimension, UnitDimension};
 use crate::solver::model::ports::params::ParamTypeKind;
 use crate::solver::units::UnitDim;
+use std::any::TypeId;
 use std::collections::HashMap;
+
+/// Check if the dimension type is `AnyDimension` (the escape hatch).
+///
+/// Returns `true` if `D` is `AnyDimension`, which signals that unit checks
+/// should be skipped for this registration.
+fn is_any_dimension<D: UnitDimension>() -> bool {
+    TypeId::of::<D>() == TypeId::of::<AnyDimension>()
+}
 
 /// Central registry for all ports in a model.
 ///
@@ -278,14 +287,17 @@ impl PortRegistry {
             });
         }
 
-        let expected_dim = D::to_runtime();
-        let found_dim = field.unit();
-        if expected_dim != found_dim {
-            return Err(PortValidationError::DimensionMismatch {
-                field: name.to_string(),
-                expected: expected_dim.to_string(),
-                found: found_dim.to_string(),
-            });
+        // Skip dimension check if using AnyDimension escape hatch
+        if !is_any_dimension::<D>() {
+            let expected_dim = D::to_runtime();
+            let found_dim = field.unit();
+            if expected_dim != found_dim {
+                return Err(PortValidationError::DimensionMismatch {
+                    field: name.to_string(),
+                    expected: expected_dim.to_string(),
+                    found: found_dim.to_string(),
+                });
+            }
         }
 
         Ok(())
@@ -450,10 +462,22 @@ impl PortRegistry {
             });
         }
 
+        // Verify unit dimension matches (unless using AnyDimension escape hatch)
+        let runtime_dim = field.unit();
+        if !is_any_dimension::<D>() {
+            let expected_dim = D::to_runtime();
+            if expected_dim != runtime_dim {
+                return Err(PortRegistryError::FieldUnitMismatch {
+                    name: name.to_string(),
+                    expected: expected_dim,
+                    found: runtime_dim,
+                });
+            }
+        }
+
         // Copy all data we need before mutable borrow
         let offset = field.offset();
         let stride = self.state_layout.stride();
-        let runtime_dim = field.unit();
 
         let id = self.allocate_id();
 
@@ -490,7 +514,10 @@ impl PortRegistry {
     ) -> Result<ParamPort<T, D>, PortRegistryError> {
         // Check if already registered
         if let Some(&existing_id) = self.param_key_to_id.get(key) {
-            let entry = self.param_ports.get(&existing_id).expect("entry exists");
+            let entry = self
+                .param_ports
+                .get_mut(&existing_id)
+                .expect("entry exists");
             // Verify wgsl_field matches
             if entry.wgsl_field != wgsl_field_name {
                 return Err(PortRegistryError::ParamSpecConflict {
@@ -508,13 +535,26 @@ impl PortRegistry {
                     registered_type: entry.param_type,
                 });
             }
+
+            // Verify unit matches (unless using AnyDimension escape hatch). If the existing
+            // registration is also `AnyDimension`, allow a later call to "resolve" it to a
+            // concrete dimension.
+            if !is_any_dimension::<D>() {
+                let expected_dim = D::to_runtime();
+                if entry.runtime_dim != expected_dim {
+                    if entry.runtime_dim == AnyDimension::to_runtime() {
+                        entry.runtime_dim = expected_dim;
+                    } else {
+                        return Err(PortRegistryError::ParamUnitMismatch {
+                            key: key.to_string(),
+                            expected: expected_dim,
+                            found: entry.runtime_dim,
+                        });
+                    }
+                }
+            }
             // Return existing port
-            return Ok(ParamPort::new(
-                existing_id,
-                key,
-                wgsl_field_name,
-                entry.runtime_dim,
-            ));
+            return Ok(ParamPort::new(existing_id, key, wgsl_field_name, entry.runtime_dim));
         }
 
         let id = self.allocate_id();
@@ -722,7 +762,10 @@ impl PortRegistry {
 
         // Check if already registered
         if let Some(&existing_id) = self.param_key_to_id.get(param.key) {
-            let entry = self.param_ports.get(&existing_id).expect("entry exists");
+            let entry = self
+                .param_ports
+                .get_mut(&existing_id)
+                .expect("entry exists");
             // Verify wgsl_field matches
             if entry.wgsl_field != param.wgsl_field {
                 return Err(PortRegistryError::ParamSpecConflict {
@@ -739,11 +782,17 @@ impl PortRegistry {
                     registered_type: entry.param_type,
                 });
             }
-            // Verify unit matches (if we want strict unit checking)
+            // Verify unit matches
             if entry.runtime_dim != param.unit {
-                // For now, just warn - we may want to make this an error later
-                // This allows for "dynamic dimensions" where the same param key
-                // can have different units in different contexts
+                if entry.runtime_dim == AnyDimension::to_runtime() {
+                    entry.runtime_dim = param.unit;
+                } else {
+                    return Err(PortRegistryError::ParamUnitMismatch {
+                        key: format!("{} (from module '{}')", param.key, module_name),
+                        expected: entry.runtime_dim,
+                        found: param.unit,
+                    });
+                }
             }
             return Ok(());
         }
@@ -783,9 +832,13 @@ impl PortRegistry {
                     registered_kind: entry.component_count,
                 });
             }
-            // Unit validation - warn on mismatch for now
+            // Unit validation
             if entry.runtime_dim != field.unit {
-                // Allow dynamic dimensions for now
+                return Err(PortRegistryError::FieldUnitMismatch {
+                    name: format!("{} (from module '{}')", field.name, module_name),
+                    expected: entry.runtime_dim,
+                    found: field.unit,
+                });
             }
             return Ok(());
         }
@@ -809,11 +862,14 @@ impl PortRegistry {
                 });
             }
 
-            // Validate unit matches (optional for now)
+            // Validate unit matches
             let runtime_dim = layout_field.unit();
             if runtime_dim != field.unit {
-                // For now, allow unit mismatches - this supports "dynamic dimensions"
-                // where the same field name can have different units in different models
+                return Err(PortRegistryError::FieldUnitMismatch {
+                    name: format!("{} (from module '{}')", field.name, module_name),
+                    expected: field.unit,
+                    found: runtime_dim,
+                });
             }
 
             (
@@ -1056,6 +1112,18 @@ pub enum PortRegistryError {
         name: String,
         elem_type: String,
     },
+    /// Field unit dimension mismatch.
+    FieldUnitMismatch {
+        name: String,
+        expected: UnitDim,
+        found: UnitDim,
+    },
+    /// Parameter unit dimension mismatch.
+    ParamUnitMismatch {
+        key: String,
+        expected: UnitDim,
+        found: UnitDim,
+    },
 }
 
 impl std::fmt::Display for PortRegistryError {
@@ -1154,6 +1222,28 @@ impl std::fmt::Display for PortRegistryError {
                     f,
                     "Module '{}' defines buffer '{}' with unsupported element type '{}'",
                     module, name, elem_type
+                )
+            }
+            PortRegistryError::FieldUnitMismatch {
+                name,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "Field '{}' has unit {}, expected {}",
+                    name, found, expected
+                )
+            }
+            PortRegistryError::ParamUnitMismatch {
+                key,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "Parameter '{}' has unit {}, expected {}",
+                    key, found, expected
                 )
             }
         }

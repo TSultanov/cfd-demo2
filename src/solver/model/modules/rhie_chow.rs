@@ -141,7 +141,7 @@ fn generate_dp_update_from_diag_kernel_wgsl(
 ) -> Result<KernelWgsl, String> {
     #[cfg(cfd2_build_script)]
     {
-        use crate::solver::model::ports::dimensions::{Dimensionless, D_P};
+        use crate::solver::model::ports::dimensions::{AnyDimension, D_P};
         use crate::solver::model::ports::{PortRegistry, Scalar, Vector2};
 
         let mut registry = PortRegistry::new(model.state_layout.clone());
@@ -159,7 +159,7 @@ fn generate_dp_update_from_diag_kernel_wgsl(
 
         // Register momentum field to validate it exists (offset not needed here)
         let _u = registry
-            .register_vector2_field::<Dimensionless>(momentum.name())
+            .register_vector2_field::<AnyDimension>(momentum.name())
             .map_err(|e| format!("dp_update_from_diag: {e}"))?;
 
         let stride = registry.state_layout().stride();
@@ -375,7 +375,7 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
 ) -> Result<KernelWgsl, String> {
     #[cfg(cfd2_build_script)]
     {
-        use crate::solver::model::ports::dimensions::{Dimensionless, PressureGradient, D_P};
+        use crate::solver::model::ports::dimensions::{AnyDimension, PressureGradient, D_P};
         use crate::solver::model::ports::{PortRegistry, Scalar, Vector2};
 
         let mut registry = PortRegistry::new(model.state_layout.clone());
@@ -394,7 +394,7 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
 
         // Register momentum field
         let u = registry
-            .register_vector2_field::<Dimensionless>(momentum.name())
+            .register_vector2_field::<AnyDimension>(momentum.name())
             .map_err(|e| format!("rhie_chow/correct_velocity_delta: {e}"))?;
 
         let grad_name = format!("grad_{}", pressure.name());

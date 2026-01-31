@@ -19,7 +19,7 @@ Based on design discussions, the implementation follows these principles:
 | Phase | Status | Progress | Description |
 |-------|--------|----------|-------------|
 | 1. Macro Infrastructure | **Mostly Done** | ~90% | `cfd2_macros` has `PortSet` derive (param/field/buffer) + trybuild tests; `ModulePorts` exists but needs integration strategy (how/when modules materialize port sets) |
-| 2. Core Port Runtime | **In Progress** | ~80% | `src/solver/model/ports/*` exists (ports + registry + tests); registry supports idempotent registration + conflict errors; IR-safe manifests can be registered dynamically; still missing dimension enforcement policy |
+| 2. Core Port Runtime | **Done** | 100% | `src/solver/model/ports/*` exists (ports + registry + tests); registry supports idempotent registration + conflict errors; IR-safe manifests can be registered dynamically; dimension enforcement policy is implemented (with an explicit escape hatch for dynamic dimensions) |
 | 3. PortManifest + Module Integration | **In Progress** | ~80% | IR-safe `PortManifest` defined in `cfd2_ir`; attached to `ModuleManifest`; `PortRegistry::register_manifest` exists and `SolverRecipe` stores a `port_registry`; named-param allowlisting now consumes `port_manifest.params`; first modules (`eos`, `generic_coupled`) migrated |
 | 4. Low-Risk Migration | **In Progress** | ~66% | `eos` + `generic_coupled` publish `PortManifest` for uniform params; `generic_coupled_apply` wrapper removed (kernel remains in `generic_coupled`) |
 | 5. Field-Access Migration | **In Progress** | ~80% | `flux_module_gradients_wgsl` no longer scans `StateLayout` during WGSL generation (targets pre-resolved); `flux_module_wgsl` now threads a single `OffsetResolver` through WGSL lowering (runtime builds a `PortRegistryResolver` from the `StateLayout`), but still resolves offsets on-the-fly; `rhie_chow` runtime generators migrated to PortRegistry (build-script fallback remains); `generic_coupled` GPU lowering migrated to use pre-resolved unknown-to-state mapping via PortRegistry (runtime path works correctly with all StateLayout fields pre-registered; tests cover the runtime resolver); flux-module gradient targets now stored in IR-safe `PortManifest` |
@@ -56,7 +56,7 @@ crates/cfd2_macros/
 - `#[derive(ModulePorts)]` - Exists but needs a clarified integration story (module instances are created after a registry exists, so “register ports” vs “build port set” must be reconciled)
 - `#[port(module = "name")]` attribute parsing
 
-### Phase 2: Core Port Runtime (In Progress)
+### Phase 2: Core Port Runtime (Done)
 
 **Goal**: Provide the runtime port types + registry that macros and modules will use
 
@@ -69,7 +69,7 @@ crates/cfd2_macros/
 - [x] Add unit tests for the port runtime pieces
 
 **Remaining**:
-- [ ] Add missing runtime validation (dimension mismatch checks + clear errors):
+- [x] Add missing runtime validation (dimension mismatch checks + clear errors):
   - Decide whether `PortRegistry` enforces `D::to_runtime() == layout.unit()` for “semantic” fields/params
   - Provide an explicit escape hatch for genuinely dynamic-dimension fields (per prerequisites)
 
@@ -179,7 +179,7 @@ migration steps to move that logic onto the port infrastructure.
 - [x] Support **derived/dynamic field names** (e.g. `format!("grad_{}", pressure.name())`) in the port system:
   - Implemented as a centralized string interner: `src/solver/model/ports/intern.rs`.
   - `PortRegistry` field registration APIs accept `&str` and internally intern to `&'static str` for storage.
-- [ ] Add (or decide against) dimension enforcement policy in `PortRegistry`:
+- [x] Add (or decide against) dimension enforcement policy in `PortRegistry`:
   - For "semantic" fields (p, rho, mu, grad_p, etc) enforce runtime dimension matches compile-time `UnitDimension`
   - For "system-driven" fields whose dimensions vary by model, provide a supported escape hatch:
     - Option A: an explicit "any-dimension" port type (no dimension check)
@@ -583,7 +583,7 @@ crates/cfd2_macros/tests/*        # trybuild + compile-fail tests
 
 ## Current Status
 
-As of **2026-01-30**:
+As of **2026-01-31**:
 - Canonical type-level dimensions (rational exponents) live in `crates/cfd2_ir/src/solver/dimensions.rs` and are re-exported through the main crate for ports
 - A typed IR builder layer exists at `crates/cfd2_ir/src/solver/model/backend/typed_ast.rs` for **best-effort** compile-time unit checking when building `EquationSystem`s in Rust
 - Attempted full dimension canonicalization is **blocked** on stable Rust today; the type-level dimension system cannot prove equivalence of semantically-equal-but-structurally-different expressions (see “Type-Level Dimensions Migration”, Step 3)
@@ -610,7 +610,7 @@ As of **2026-01-30**:
 - Continue migrating `flux_module`:
   - Attach resolved gradients targets to `PortManifest` (IR-safe) so build-time codegen can consume them
   - Add a lowering pass for flux codegen that pre-resolves all state slots used by a flux spec and passes them into WGSL generation (eliminate remaining `StateLayout` probing in `flux_module_wgsl.rs`)
-- Decide the dimension enforcement policy in `PortRegistry` (especially for semantic fields/params) and implement it (with an escape hatch for dynamic-dimension fields).
+- ✅ Dimension enforcement policy in `PortRegistry` implemented (unit mismatch errors + `AnyDimension` escape hatch).
 - Keep dimensional correctness enforced by runtime `EquationSystem::validate_units()` for complex systems until/unless we adopt a different type-level encoding (nightly features or type-encoded exponents).
 
 **Deliverables Ready**:

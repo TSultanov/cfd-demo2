@@ -39,10 +39,10 @@ pub use buffer::{
     BufferPort, BufferType, BufferU32, BufferVec2F32, BufferVec3F32, ReadOnly, ReadWrite,
 };
 pub use dimensions::{
-    Acceleration, Area, Density, DimCompatible, Dimensionless, DivDim, DynamicViscosity, Energy,
-    EnergyDensity, Force, InvTime, KinematicViscosity, Length, Mass, MassFlux, MomentumDensity,
-    MulDim, PowDim, Pressure, PressureGradient, SqrtDim, Temperature, Time, UnitDimension,
-    Velocity, Volume, D_P,
+    Acceleration, AnyDimension, Area, Density, DimCompatible, Dimensionless, DivDim,
+    DynamicViscosity, Energy, EnergyDensity, Force, InvTime, KinematicViscosity, Length, Mass,
+    MassFlux, MomentumDensity, MulDim, PowDim, Pressure, PressureGradient, SqrtDim, Temperature,
+    Time, UnitDimension, Velocity, Volume, D_P,
 };
 pub use field::{
     ComponentOffset, FieldKind, FieldPort, FieldPortError, FieldPortProvider, Scalar, Vector2,

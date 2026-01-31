@@ -871,15 +871,19 @@ fn has_diffusion(system: &DiscreteSystem) -> bool {
 mod tests {
     use super::*;
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::ir::{fvc, fvm, surface_scalar, vol_scalar, vol_vector, SchemeRegistry};
-    use crate::solver::units::si;
+    use crate::solver::ir::{
+        fvc, fvm, surface_scalar_dim, vol_scalar_dim, vol_vector_dim, SchemeRegistry,
+    };
+    use cfd2_ir::solver::dimensions::{
+        Density, DynamicViscosity, InvTime, MassFlux, Pressure, Velocity, D_P, UnitDimension,
+    };
 
     #[test]
     fn generate_wgsl_emits_terms_and_metadata() {
-        let u = vol_vector("U", si::VELOCITY);
-        let p = vol_scalar("p", si::PRESSURE);
-        let phi = surface_scalar("phi", si::MASS_FLUX);
-        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
+        let u = vol_vector_dim::<Velocity>("U");
+        let p = vol_scalar_dim::<Pressure>("p");
+        let phi = surface_scalar_dim::<MassFlux>("phi");
+        let mu = vol_scalar_dim::<DynamicViscosity>("mu");
 
         let mut eqn = crate::solver::ir::Equation::new(u.clone());
         eqn.add_term(fvm::div(phi.clone(), u.clone()));
@@ -914,8 +918,8 @@ mod tests {
     fn format_helpers_cover_constant_coeff_and_schemes() {
         let coeff = Coefficient::constant(1.5);
         assert_eq!(format_coeff(&coeff), "const(1.5)");
-        let rho = vol_scalar("rho", si::DENSITY);
-        let d_p = vol_scalar("d_p", si::D_P);
+        let rho = vol_scalar_dim::<Density>("rho");
+        let d_p = vol_scalar_dim::<D_P>("d_p");
         let coeff = Coefficient::product(
             Coefficient::field(rho).unwrap(),
             Coefficient::field(d_p).unwrap(),
@@ -935,7 +939,7 @@ mod tests {
 
     #[test]
     fn generated_line_omits_optional_fields_when_absent() {
-        let u = vol_vector("U", si::VELOCITY);
+        let u = vol_vector_dim::<Velocity>("U");
         let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvc::grad(u.clone()));
 
@@ -953,13 +957,13 @@ mod tests {
 
     #[test]
     fn generate_wgsl_includes_ddt_and_source_terms() {
-        let u = vol_vector("U", si::VELOCITY);
+        let u = vol_vector_dim::<Velocity>("U");
         let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::ddt(u.clone()))
             // Source terms are scalar coefficients applied to the unknown.
             // Use an `inv_time` coefficient so the integrated unit matches the `ddt` term.
             .with_term(fvm::source_coeff(
-                Coefficient::constant_unit(1.0, si::INV_TIME),
+                Coefficient::constant_unit(1.0, InvTime::UNIT),
                 u.clone(),
             ));
 
@@ -984,8 +988,8 @@ mod tests {
 
     #[test]
     fn term_function_name_includes_flux_and_scheme() {
-        let u = vol_vector("U", si::VELOCITY);
-        let phi = surface_scalar("phi.face", si::MASS_FLUX);
+        let u = vol_vector_dim::<Velocity>("U");
+        let phi = surface_scalar_dim::<MassFlux>("phi.face");
         let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::div(phi.clone(), u.clone()));
 
@@ -1007,16 +1011,16 @@ mod tests {
 
     #[test]
     fn generate_wgsl_emits_term_math() {
-        let u = vol_vector("U", si::VELOCITY);
-        let rho = vol_scalar("rho", si::DENSITY);
-        let p = vol_scalar("p", si::PRESSURE);
-        let phi = surface_scalar("phi", si::MASS_FLUX);
+        let u = vol_vector_dim::<Velocity>("U");
+        let rho = vol_scalar_dim::<Density>("rho");
+        let p = vol_scalar_dim::<Pressure>("p");
+        let phi = surface_scalar_dim::<MassFlux>("phi");
         let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::ddt_coeff(Coefficient::field(rho).unwrap(), u.clone()))
             .with_term(fvm::div(phi, u.clone()))
             .with_term(fvc::grad(p))
             .with_term(fvm::laplacian(
-                Coefficient::constant_unit(0.1, si::DYNAMIC_VISCOSITY),
+                Coefficient::constant_unit(0.1, DynamicViscosity::UNIT),
                 u.clone(),
             ));
 
@@ -1038,16 +1042,16 @@ mod tests {
 
     #[test]
     fn equation_function_name_is_sanitized() {
-        let field = vol_vector("U-1", si::VELOCITY);
+        let field = vol_vector_dim::<Velocity>("U-1");
         let name = equation_function_name(&field);
         assert_eq!(name, "assemble_U_1");
     }
 
     #[test]
     fn generate_wgsl_library_emits_codegen_assemble() {
-        let u = vol_vector("U", si::VELOCITY);
-        let phi = surface_scalar("phi", si::MASS_FLUX);
-        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
+        let u = vol_vector_dim::<Velocity>("U");
+        let phi = surface_scalar_dim::<MassFlux>("phi");
+        let mu = vol_scalar_dim::<DynamicViscosity>("mu");
         let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::div(phi, u.clone()))
             .with_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
@@ -1067,7 +1071,7 @@ mod tests {
 
     #[test]
     fn generate_wgsl_library_omits_conv_coeff_when_no_convection() {
-        let u = vol_vector("U", si::VELOCITY);
+        let u = vol_vector_dim::<Velocity>("U");
         let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::ddt(u.clone()));
 
@@ -1084,8 +1088,8 @@ mod tests {
 
     #[test]
     fn generate_wgsl_library_emits_diff_coeff_for_laplacian() {
-        let u = vol_vector("U", si::VELOCITY);
-        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
+        let u = vol_vector_dim::<Velocity>("U");
+        let mu = vol_scalar_dim::<DynamicViscosity>("mu");
         let eqn = crate::solver::ir::Equation::new(u.clone())
             .with_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
 

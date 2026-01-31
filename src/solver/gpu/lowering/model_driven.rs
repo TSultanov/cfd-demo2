@@ -113,6 +113,8 @@ async fn lower_parts_for_model(
     resources.insert(programs::universal::UniversalProgramResources::new_generic_coupled(
         built.backend,
     ));
+    // Store the port registry so helpers can access cached field offsets
+    resources.insert(std::sync::Arc::clone(&recipe.port_registry));
 
     let named_params = programs::generic_coupled::named_params_for_recipe(&built.model, &recipe)?;
 

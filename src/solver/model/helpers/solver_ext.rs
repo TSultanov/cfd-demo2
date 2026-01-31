@@ -3,9 +3,7 @@ use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::GpuUnifiedSolver;
 use crate::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel};
 use crate::solver::model::eos::EosSpec;
-use crate::solver::model::ports::{
-    Density, EnergyDensity, MomentumDensity, PortRegistry, Pressure, Temperature, Velocity,
-};
+// PortRegistry and dimension types no longer needed here; helpers use cached registry via solver
 use std::future::Future;
 use std::pin::Pin;
 
@@ -219,41 +217,49 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
 
         let stride = self.model().state_layout.stride() as usize;
 
-        // Build port registry and resolve required/optional field ports
-        let mut registry = PortRegistry::new(self.model().state_layout.clone());
-
-        let (rho_port, rho_u_port, rho_e_port) = (
-            registry.register_scalar_field::<Density>("rho").ok(),
-            registry.register_vector2_field::<MomentumDensity>("rho_u").ok(),
-            registry.register_scalar_field::<EnergyDensity>("rho_e").ok(),
-        );
-        let (Some(rho_port), Some(rho_u_port), Some(rho_e_port)) = (rho_port, rho_u_port, rho_e_port)
-        else {
+        // Use cached port registry for field offset lookups
+        let Some(registry) = self.port_registry() else {
             return;
         };
 
-        let off_rho = rho_port.offset() as usize;
-        let off_rho_u_x = rho_u_port.component(0).unwrap().full_offset() as usize;
-        let off_rho_u_y = rho_u_port.component(1).unwrap().full_offset() as usize;
-        let off_rho_e = rho_e_port.offset() as usize;
+        // Resolve required fields (early return if missing or wrong kind)
+        let (Some(rho_entry), Some(rho_u_entry), Some(rho_e_entry)) = (
+            registry.get_field_entry_by_name("rho"),
+            registry.get_field_entry_by_name("rho_u"),
+            registry.get_field_entry_by_name("rho_e"),
+        ) else {
+            return;
+        };
 
+        // Validate component counts for required fields
+        if rho_entry.component_count() != 1
+            || rho_u_entry.component_count() != 2
+            || rho_e_entry.component_count() != 1
+        {
+            return;
+        }
+
+        let off_rho = rho_entry.offset() as usize;
+        let off_rho_u_x = rho_u_entry.offset() as usize;
+        let off_rho_u_y = rho_u_entry.offset() as usize + 1;
+        let off_rho_e = rho_e_entry.offset() as usize;
+
+        // Resolve optional fields (best-effort)
         let off_p = registry
-            .register_scalar_field::<Pressure>("p")
-            .ok()
-            .map(|p| p.offset() as usize);
+            .get_field_entry_by_name("p")
+            .filter(|e| e.component_count() == 1)
+            .map(|e| e.offset() as usize);
         let off_t = registry
-            .register_scalar_field::<Temperature>("T")
-            .ok()
-            .map(|t| t.offset() as usize);
+            .get_field_entry_by_name("T")
+            .filter(|e| e.component_count() == 1)
+            .map(|e| e.offset() as usize);
         let off_u = registry
-            .register_vector2_field::<Velocity>("u")
-            .ok()
-            .or_else(|| registry.register_vector2_field::<Velocity>("U").ok())
-            .map(|u_port| {
-                (
-                    u_port.component(0).unwrap().full_offset() as usize,
-                    u_port.component(1).unwrap().full_offset() as usize,
-                )
+            .get_field_entry_by_name("u")
+            .filter(|e| e.component_count() == 2)
+            .or_else(|| registry.get_field_entry_by_name("U").filter(|e| e.component_count() == 2))
+            .map(|e| {
+                let base = e.offset() as usize;
+                (base, base + 1)
             });
 
         let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
@@ -304,41 +310,49 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
 
         let stride = self.model().state_layout.stride() as usize;
 
-        // Build port registry and resolve required/optional field ports
-        let mut registry = PortRegistry::new(self.model().state_layout.clone());
-
-        let (rho_port, rho_u_port, rho_e_port) = (
-            registry.register_scalar_field::<Density>("rho").ok(),
-            registry.register_vector2_field::<MomentumDensity>("rho_u").ok(),
-            registry.register_scalar_field::<EnergyDensity>("rho_e").ok(),
-        );
-        let (Some(rho_port), Some(rho_u_port), Some(rho_e_port)) = (rho_port, rho_u_port, rho_e_port)
-        else {
+        // Use cached port registry for field offset lookups
+        let Some(registry) = self.port_registry() else {
             return;
         };
 
-        let off_rho = rho_port.offset() as usize;
-        let off_rho_u_x = rho_u_port.component(0).unwrap().full_offset() as usize;
-        let off_rho_u_y = rho_u_port.component(1).unwrap().full_offset() as usize;
-        let off_rho_e = rho_e_port.offset() as usize;
+        // Resolve required fields (early return if missing or wrong kind)
+        let (Some(rho_entry), Some(rho_u_entry), Some(rho_e_entry)) = (
+            registry.get_field_entry_by_name("rho"),
+            registry.get_field_entry_by_name("rho_u"),
+            registry.get_field_entry_by_name("rho_e"),
+        ) else {
+            return;
+        };
 
+        // Validate component counts for required fields
+        if rho_entry.component_count() != 1
+            || rho_u_entry.component_count() != 2
+            || rho_e_entry.component_count() != 1
+        {
+            return;
+        }
+
+        let off_rho = rho_entry.offset() as usize;
+        let off_rho_u_x = rho_u_entry.offset() as usize;
+        let off_rho_u_y = rho_u_entry.offset() as usize + 1;
+        let off_rho_e = rho_e_entry.offset() as usize;
+
+        // Resolve optional fields (best-effort)
         let off_p = registry
-            .register_scalar_field::<Pressure>("p")
-            .ok()
-            .map(|p| p.offset() as usize);
+            .get_field_entry_by_name("p")
+            .filter(|e| e.component_count() == 1)
+            .map(|e| e.offset() as usize);
         let off_t = registry
-            .register_scalar_field::<Temperature>("T")
-            .ok()
-            .map(|t| t.offset() as usize);
+            .get_field_entry_by_name("T")
+            .filter(|e| e.component_count() == 1)
+            .map(|e| e.offset() as usize);
         let off_u = registry
-            .register_vector2_field::<Velocity>("u")
-            .ok()
-            .or_else(|| registry.register_vector2_field::<Velocity>("U").ok())
-            .map(|u_port| {
-                (
-                    u_port.component(0).unwrap().full_offset() as usize,
-                    u_port.component(1).unwrap().full_offset() as usize,
-                )
+            .get_field_entry_by_name("u")
+            .filter(|e| e.component_count() == 2)
+            .or_else(|| registry.get_field_entry_by_name("U").filter(|e| e.component_count() == 2))
+            .map(|e| {
+                let base = e.offset() as usize;
+                (base, base + 1)
             });
 
         // Preserve unrelated state fields (e.g. mu, gradients) when seeding initial conditions.

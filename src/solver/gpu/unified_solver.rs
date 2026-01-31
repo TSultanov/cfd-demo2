@@ -10,6 +10,7 @@ use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
 use crate::solver::model::backend::FieldKind;
+use crate::solver::model::ports::PortRegistry;
 use crate::solver::scheme::Scheme;
 use std::sync::Arc;
 
@@ -81,6 +82,13 @@ impl GpuUnifiedSolver {
 
     pub fn config(&self) -> SolverConfig {
         self.config
+    }
+
+    /// Access the cached port registry from the plan resources.
+    /// Returns `None` if the registry is not available.
+    pub fn port_registry(&self) -> Option<&PortRegistry> {
+        self.plan.resources.get::<Arc<PortRegistry>>()
+            .map(|arc| arc.as_ref())
     }
 
     pub fn num_cells(&self) -> u32 {

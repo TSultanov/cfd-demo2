@@ -73,6 +73,21 @@ path = "examples/profile_mesh_generation.rs"
 required-features = ["meshgen", "profiling"]
 
 [[example]]
+name = "analyze_gpu_dispatches"
+path = "examples/analyze_gpu_dispatches.rs"
+required-features = ["meshgen"]
+
+[[example]]
+name = "profile_dispatch_analysis"
+path = "examples/profile_dispatch_analysis.rs"
+required-features = ["meshgen"]
+
+[[example]]
+name = "profile_solver_performance"
+path = "examples/profile_solver_performance.rs"
+required-features = ["meshgen", "profiling"]
+
+[[example]]
 name = "reproduce_chamfer"
 path = "examples/reproduce_chamfer.rs"
 required-features = ["meshgen"]

@@ -434,7 +434,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
   - `sqrt()` returns `TypedExpr<SqrtDim<D>>`
   - Keep an ergonomic escape hatch for genuinely dynamic units (explicitly marked, avoids silent "any unit")
 - [ ] Incrementally migrate codegen helpers to the typed DSL, starting with the leaf utilities:
-  - `crates/cfd2_codegen/src/solver/codegen/state_access.rs`
+  - ✅ `crates/cfd2_codegen/src/solver/codegen/state_access.rs` (`state_*_dim<D> -> TypedExpr<D>` with runtime unit validation; `DynExpr` helpers remain the escape hatch)
   - `crates/cfd2_codegen/src/solver/codegen/primitive_expr.rs`
   - `crates/cfd2_codegen/src/solver/codegen/coeff_expr.rs`
 - [ ] Remove (or quarantine) the runtime unit mismatch checks once all call sites are typed.

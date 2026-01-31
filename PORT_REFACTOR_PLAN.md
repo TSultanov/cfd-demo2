@@ -99,6 +99,7 @@ src/solver/model/ports/
 - [x] Store `PortRegistry` on `SolverRecipe` (`SolverRecipe.port_registry`) and populate it from module manifests in `SolverRecipe::from_model()`
 - [x] Consume `port_manifest.params` for the named-parameter surface area (`ModelSpec::named_param_keys()` + `named_params_for_model(...)`) so modules don’t have to duplicate uniform params in both `named_params` and `port_manifest`
 - [x] Correct EOS port-manifest units (including temperature exponent for `eos.r`) and add a regression test
+- [x] Align EOS `PortManifest` `wgsl_field` names with the `Constants` uniform struct (e.g. `eos_*`) and add regression assertions
 
 **Remaining**:
 - [ ] Integrate with existing build-time generation (WGSL emission still does not use `PortManifest`; build-time plumbing should not require ad-hoc string lists once port manifests are the single source of truth)

@@ -1894,21 +1894,24 @@ mod tests {
 
         assert_eq!(manifest.params.len(), 6);
 
-        // Find each param and verify its unit
+        // Find each param and verify its unit and wgsl_field name
         let gamma = manifest
             .params
             .iter()
             .find(|p| p.key == "eos.gamma")
             .unwrap();
         assert_eq!(gamma.unit, si::DIMENSIONLESS);
+        assert_eq!(gamma.wgsl_field, "eos_gamma");
 
         let gm1 = manifest.params.iter().find(|p| p.key == "eos.gm1").unwrap();
         assert_eq!(gm1.unit, si::DIMENSIONLESS);
+        assert_eq!(gm1.wgsl_field, "eos_gm1");
 
         let r = manifest.params.iter().find(|p| p.key == "eos.r").unwrap();
         // R = P/(rho*T) = (ML⁻¹T⁻²)/(ML⁻³·K) = L²T⁻²K⁻¹
         let expected_r = si::PRESSURE.div_dim(si::DENSITY).div_dim(si::TEMPERATURE);
         assert_eq!(r.unit, expected_r);
+        assert_eq!(r.wgsl_field, "eos_r");
 
         let dp_drho = manifest
             .params
@@ -1918,6 +1921,7 @@ mod tests {
         // dp/drho = P/rho = (ML⁻¹T⁻²)/(ML⁻³) = L²T⁻²
         let expected_dp_drho = si::PRESSURE.div_dim(si::DENSITY);
         assert_eq!(dp_drho.unit, expected_dp_drho);
+        assert_eq!(dp_drho.wgsl_field, "eos_dp_drho");
 
         let p_offset = manifest
             .params
@@ -1925,6 +1929,7 @@ mod tests {
             .find(|p| p.key == "eos.p_offset")
             .unwrap();
         assert_eq!(p_offset.unit, si::PRESSURE);
+        assert_eq!(p_offset.wgsl_field, "eos_p_offset");
 
         let theta_ref = manifest
             .params
@@ -1933,6 +1938,7 @@ mod tests {
             .unwrap();
         // theta = P/rho has units L²/T² (specific energy)
         assert_eq!(theta_ref.unit, expected_dp_drho);
+        assert_eq!(theta_ref.wgsl_field, "eos_theta_ref");
     }
 
     #[test]

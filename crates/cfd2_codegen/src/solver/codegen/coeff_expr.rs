@@ -5,7 +5,10 @@ use crate::solver::codegen::state_access::{
 use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotsSpec};
 use crate::solver::ir::Coefficient;
-use crate::solver::units::si;
+use cfd2_ir::solver::dimensions::{
+    UnitDimension, MulDim, DivDim, Density, InvTime, DynamicViscosity, Pressure, Temperature,
+    Power, Length, Dimensionless,
+};
 
 #[derive(Clone)]
 enum CoeffSample<'a> {
@@ -30,21 +33,21 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
         "rho" => Some(DynExpr::new(
             Expr::ident("constants").field("density"),
             DslType::f32(),
-            si::DENSITY,
+            Density::UNIT,
         )),
         "inv_dt" => {
             let dt = Expr::ident("constants").field("dt");
             let dtau = Expr::ident("constants").field("dtau");
             let dt_eff = Expr::call_named("select", vec![dt, dtau.clone(), dtau.clone().gt(0.0)]);
             let expr = Expr::from(1.0) / dt_eff;
-            Some(DynExpr::new(expr, DslType::f32(), si::INV_TIME))
+            Some(DynExpr::new(expr, DslType::f32(), InvTime::UNIT))
         }
         // Dynamic viscosity (SI): Pa·s = kg/(m·s). Historically this was called `nu`,
         // but `nu` is conventionally kinematic viscosity; accept both for now.
         "mu" | "nu" => Some(DynExpr::new(
             Expr::ident("constants").field("viscosity"),
             DslType::f32(),
-            si::DYNAMIC_VISCOSITY,
+            DynamicViscosity::UNIT,
         )),
 
         // Thermal conductivity for ideal-gas (laminar) OpenFOAM reference alignment:
@@ -66,22 +69,22 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
             let cp = gamma * r / gm1;
             let expr = mu * cp / pr;
             // kappa = POWER / (LENGTH * TEMPERATURE)
-            let kappa_unit = si::POWER / (si::LENGTH * si::TEMPERATURE);
+            let kappa_unit = DivDim::<Power, MulDim<Length, Temperature>>::UNIT;
             Some(DynExpr::new(expr, DslType::f32(), kappa_unit))
         }
         "eos_gamma" => Some(DynExpr::new(
             Expr::ident("constants").field("eos_gamma"),
             DslType::f32(),
-            si::DIMENSIONLESS,
+            Dimensionless::UNIT,
         )),
         "eos_gm1" => Some(DynExpr::new(
             Expr::ident("constants").field("eos_gm1"),
             DslType::f32(),
-            si::DIMENSIONLESS,
+            Dimensionless::UNIT,
         )),
         // eos_r: P = rho * R * T => R = P / (rho * T)
         "eos_r" => {
-            let eos_r_unit = si::PRESSURE / (si::DENSITY * si::TEMPERATURE);
+            let eos_r_unit = DivDim::<Pressure, MulDim<Density, Temperature>>::UNIT;
             Some(DynExpr::new(
                 Expr::ident("constants").field("eos_r"),
                 DslType::f32(),
@@ -90,7 +93,7 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
         }
         // eos_dp_drho: derivative of pressure w.r.t. density
         "eos_dp_drho" => {
-            let eos_dp_drho_unit = si::PRESSURE / si::DENSITY;
+            let eos_dp_drho_unit = DivDim::<Pressure, Density>::UNIT;
             Some(DynExpr::new(
                 Expr::ident("constants").field("eos_dp_drho"),
                 DslType::f32(),
@@ -100,12 +103,12 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
         "eos_p_offset" => Some(DynExpr::new(
             Expr::ident("constants").field("eos_p_offset"),
             DslType::f32(),
-            si::PRESSURE,
+            Pressure::UNIT,
         )),
         "eos_theta_ref" => Some(DynExpr::new(
             Expr::ident("constants").field("eos_theta_ref"),
             DslType::f32(),
-            si::TEMPERATURE,
+            Temperature::UNIT,
         )),
         _ => None,
     }
@@ -146,8 +149,8 @@ fn coeff_expr_dyn(slots: &ResolvedStateSlotsSpec, coeff: &Coefficient, sample: C
                         let own = state_scalar_slot_typed(slots.stride, "state", owner_idx, slot);
                         let neigh = state_scalar_slot_typed(slots.stride, "state", neighbor_idx, slot);
                         // interp is dimensionless scalar
-                        let interp_dyn = DynExpr::new(interp, DslType::f32(), si::DIMENSIONLESS);
-                        let one = DynExpr::f32(1.0, si::DIMENSIONLESS);
+                        let interp_dyn = DynExpr::new(interp, DslType::f32(), Dimensionless::UNIT);
+                        let one = DynExpr::f32(1.0, Dimensionless::UNIT);
                         let one_minus_interp = one - interp_dyn.clone();
                         interp_dyn * own + one_minus_interp * neigh
                     }
@@ -196,8 +199,8 @@ fn coeff_expr_dyn(slots: &ResolvedStateSlotsSpec, coeff: &Coefficient, sample: C
                 } => {
                     let own = mag_sqr_at(owner_idx);
                     let neigh = mag_sqr_at(neighbor_idx);
-                    let interp_dyn = DynExpr::new(interp, DslType::f32(), si::DIMENSIONLESS);
-                    let one = DynExpr::f32(1.0, si::DIMENSIONLESS);
+                    let interp_dyn = DynExpr::new(interp, DslType::f32(), Dimensionless::UNIT);
+                    let one = DynExpr::f32(1.0, Dimensionless::UNIT);
                     let one_minus_interp = one - interp_dyn.clone();
                     interp_dyn * own + one_minus_interp * neigh
                 }
@@ -261,7 +264,7 @@ pub fn coeff_cell_expr(
     idx: &str,
     fallback: Expr,
 ) -> Expr {
-    let fallback_dyn = DynExpr::new(fallback, DslType::f32(), si::DIMENSIONLESS);
+    let fallback_dyn = DynExpr::new(fallback, DslType::f32(), Dimensionless::UNIT);
     coeff_cell_expr_dyn(slots, coeff, idx, fallback_dyn).expr
 }
 
@@ -275,7 +278,7 @@ pub fn coeff_face_expr(
     interp: Expr,
     fallback: Expr,
 ) -> Expr {
-    let fallback_dyn = DynExpr::new(fallback, DslType::f32(), si::DIMENSIONLESS);
+    let fallback_dyn = DynExpr::new(fallback, DslType::f32(), Dimensionless::UNIT);
     coeff_face_expr_dyn(slots, coeff, owner_idx, neighbor_idx, interp, fallback_dyn).expr
 }
 
@@ -283,8 +286,11 @@ pub fn coeff_face_expr(
 mod tests {
     use super::*;
     use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
-    use crate::solver::ir::vol_scalar;
-    use crate::solver::units::si;
+    use crate::solver::ir::{vol_scalar_dim, vol_vector_dim, vol_vector3_dim};
+    use cfd2_ir::solver::dimensions::{
+        Density, Pressure, Temperature, Velocity, Dimensionless, InvTime, DynamicViscosity,
+        Power, Length, D_P, MulDim, DivDim,
+    };
 
     /// Helper to create a ResolvedStateSlotsSpec from a StateLayout for testing.
     fn slots_from_layout(layout: &crate::solver::ir::StateLayout) -> ResolvedStateSlotsSpec {
@@ -319,13 +325,13 @@ mod tests {
 
     #[test]
     fn coeff_expr_handles_product_and_constants() {
-        let rho = vol_scalar("rho", si::DENSITY);
-        let d_p = vol_scalar("d_p", si::D_P);
+        let rho = vol_scalar_dim::<Density>("rho");
+        let d_p = vol_scalar_dim::<D_P>("d_p");
         let layout = crate::solver::ir::StateLayout::new(vec![d_p]);
         let slots = slots_from_layout(&layout);
         let coeff = Coefficient::product(
             Coefficient::field(rho).unwrap(),
-            Coefficient::field(vol_scalar("d_p", si::D_P)).unwrap(),
+            Coefficient::field(vol_scalar_dim::<D_P>("d_p")).unwrap(),
         )
         .unwrap();
 
@@ -338,11 +344,11 @@ mod tests {
 
     #[test]
     fn coeff_expr_rejects_vector_coefficients() {
-        let u = crate::solver::ir::vol_vector("U", si::VELOCITY);
-        let layout = crate::solver::ir::StateLayout::new(vec![vol_scalar("p", si::PRESSURE)]);
+        let u = vol_vector_dim::<Velocity>("U");
+        let layout = crate::solver::ir::StateLayout::new(vec![vol_scalar_dim::<Pressure>("p")]);
         let slots = slots_from_layout(&layout);
         let err = Coefficient::product(
-            Coefficient::field(vol_scalar("p", si::PRESSURE)).unwrap(),
+            Coefficient::field(vol_scalar_dim::<Pressure>("p")).unwrap(),
             Coefficient::Field(u),
         )
         .unwrap_err();
@@ -351,7 +357,7 @@ mod tests {
             crate::solver::ir::CodegenError::NonScalarCoefficient { .. }
         ));
 
-        let coeff = Coefficient::field(vol_scalar("p", si::PRESSURE)).unwrap();
+        let coeff = Coefficient::field(vol_scalar_dim::<Pressure>("p")).unwrap();
         let expr = coeff_cell_expr(&slots, Some(&coeff), "idx", 1.0.into());
         assert_eq!(expr.to_string(), "state[idx * 1u + 0u]");
     }
@@ -363,14 +369,14 @@ mod tests {
     #[test]
     fn coeff_named_expr_dyn_inv_dt_has_inv_time_unit() {
         let inv_dt = coeff_named_expr_dyn("inv_dt").expect("inv_dt should exist");
-        assert_eq!(inv_dt.unit, si::INV_TIME);
+        assert_eq!(inv_dt.unit, InvTime::UNIT);
         assert_eq!(inv_dt.ty, DslType::f32());
     }
 
     #[test]
     fn coeff_named_expr_dyn_kappa_has_correct_unit() {
         let kappa = coeff_named_expr_dyn("kappa").expect("kappa should exist");
-        let expected_kappa_unit = si::POWER / (si::LENGTH * si::TEMPERATURE);
+        let expected_kappa_unit = DivDim::<Power, MulDim<Length, Temperature>>::UNIT;
         assert_eq!(kappa.unit, expected_kappa_unit);
         assert_eq!(kappa.ty, DslType::f32());
     }
@@ -378,7 +384,7 @@ mod tests {
     #[test]
     fn coeff_named_expr_dyn_eos_r_has_correct_unit() {
         let eos_r = coeff_named_expr_dyn("eos_r").expect("eos_r should exist");
-        let expected_eos_r_unit = si::PRESSURE / (si::DENSITY * si::TEMPERATURE);
+        let expected_eos_r_unit = DivDim::<Pressure, MulDim<Density, Temperature>>::UNIT;
         assert_eq!(eos_r.unit, expected_eos_r_unit);
         assert_eq!(eos_r.ty, DslType::f32());
     }
@@ -386,7 +392,7 @@ mod tests {
     #[test]
     fn coeff_named_expr_dyn_eos_dp_drho_has_correct_unit() {
         let eos_dp_drho = coeff_named_expr_dyn("eos_dp_drho").expect("eos_dp_drho should exist");
-        let expected_unit = si::PRESSURE / si::DENSITY;
+        let expected_unit = DivDim::<Pressure, Density>::UNIT;
         assert_eq!(eos_dp_drho.unit, expected_unit);
         assert_eq!(eos_dp_drho.ty, DslType::f32());
     }
@@ -394,28 +400,28 @@ mod tests {
     #[test]
     fn coeff_named_expr_dyn_rho_has_density_unit() {
         let rho = coeff_named_expr_dyn("rho").expect("rho should exist");
-        assert_eq!(rho.unit, si::DENSITY);
+        assert_eq!(rho.unit, Density::UNIT);
         assert_eq!(rho.ty, DslType::f32());
     }
 
     #[test]
     fn coeff_named_expr_dyn_mu_has_dynamic_viscosity_unit() {
         let mu = coeff_named_expr_dyn("mu").expect("mu should exist");
-        assert_eq!(mu.unit, si::DYNAMIC_VISCOSITY);
+        assert_eq!(mu.unit, DynamicViscosity::UNIT);
         assert_eq!(mu.ty, DslType::f32());
     }
 
     #[test]
     fn coeff_named_expr_dyn_nu_has_dynamic_viscosity_unit() {
         let nu = coeff_named_expr_dyn("nu").expect("nu should exist");
-        assert_eq!(nu.unit, si::DYNAMIC_VISCOSITY);
+        assert_eq!(nu.unit, DynamicViscosity::UNIT);
         assert_eq!(nu.ty, DslType::f32());
     }
 
     #[test]
     fn coeff_expr_dyn_product_combines_units() {
-        let rho = vol_scalar("rho", si::DENSITY);
-        let d_p = vol_scalar("d_p", si::D_P);
+        let rho = vol_scalar_dim::<Density>("rho");
+        let d_p = vol_scalar_dim::<D_P>("d_p");
         let layout = crate::solver::ir::StateLayout::new(vec![rho.clone(), d_p.clone()]);
         let slots = slots_from_layout(&layout);
         
@@ -428,14 +434,14 @@ mod tests {
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
         
         // Expected unit: DENSITY * D_P
-        let expected_unit = si::DENSITY * si::D_P;
+        let expected_unit = MulDim::<Density, D_P>::UNIT;
         assert_eq!(dyn_expr.unit, expected_unit);
         assert_eq!(dyn_expr.ty, DslType::f32());
     }
 
     #[test]
     fn coeff_expr_dyn_constant_preserves_unit() {
-        let coeff = Coefficient::Constant { value: 3.14, unit: si::PRESSURE };
+        let coeff = Coefficient::Constant { value: 3.14, unit: Pressure::UNIT };
         let slots = ResolvedStateSlotsSpec {
             stride: 0,
             slots: vec![],
@@ -443,7 +449,7 @@ mod tests {
         
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
         
-        assert_eq!(dyn_expr.unit, si::PRESSURE);
+        assert_eq!(dyn_expr.unit, Pressure::UNIT);
         assert_eq!(dyn_expr.ty, DslType::f32());
         assert_eq!(dyn_expr.expr.to_string(), "3.14");
     }
@@ -451,7 +457,7 @@ mod tests {
     #[test]
     fn coeff_expr_dyn_mag_sqr_scalar_squares_unit() {
         // Scalar field: MagSqr should square the unit
-        let p = vol_scalar("p", si::PRESSURE);
+        let p = vol_scalar_dim::<Pressure>("p");
         let layout = crate::solver::ir::StateLayout::new(vec![p.clone()]);
         let slots = slots_from_layout(&layout);
         
@@ -459,7 +465,7 @@ mod tests {
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
         
         // Expected unit: PRESSURE^2
-        let expected_unit = si::PRESSURE * si::PRESSURE;
+        let expected_unit = MulDim::<Pressure, Pressure>::UNIT;
         assert_eq!(dyn_expr.unit, expected_unit);
         assert_eq!(dyn_expr.ty, DslType::f32());
     }
@@ -467,7 +473,7 @@ mod tests {
     #[test]
     fn coeff_expr_dyn_mag_sqr_vector2_squares_unit() {
         // Vector2 field: MagSqr (dot product) should square the unit
-        let u = crate::solver::ir::vol_vector("U", si::VELOCITY);
+        let u = vol_vector_dim::<Velocity>("U");
         let layout = crate::solver::ir::StateLayout::new(vec![u.clone()]);
         let slots = slots_from_layout(&layout);
         
@@ -475,7 +481,7 @@ mod tests {
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
         
         // Expected unit: VELOCITY^2
-        let expected_unit = si::VELOCITY * si::VELOCITY;
+        let expected_unit = MulDim::<Velocity, Velocity>::UNIT;
         assert_eq!(dyn_expr.unit, expected_unit);
         assert_eq!(dyn_expr.ty, DslType::f32());
     }
@@ -483,7 +489,7 @@ mod tests {
     #[test]
     fn coeff_expr_dyn_mag_sqr_vector3_squares_unit() {
         // Vector3 field: MagSqr (dot product) should square the unit
-        let u = crate::solver::ir::vol_vector3("U", si::VELOCITY);
+        let u = vol_vector3_dim::<Velocity>("U");
         let layout = crate::solver::ir::StateLayout::new(vec![u.clone()]);
         let slots = slots_from_layout(&layout);
         
@@ -491,7 +497,7 @@ mod tests {
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
         
         // Expected unit: VELOCITY^2
-        let expected_unit = si::VELOCITY * si::VELOCITY;
+        let expected_unit = MulDim::<Velocity, Velocity>::UNIT;
         assert_eq!(dyn_expr.unit, expected_unit);
         assert_eq!(dyn_expr.ty, DslType::f32());
     }
@@ -500,7 +506,7 @@ mod tests {
     fn coeff_cell_expr_dyn_returns_fallback_when_coeff_none() {
         let layout = crate::solver::ir::StateLayout::new(vec![]);
         let slots = slots_from_layout(&layout);
-        let fallback = DynExpr::f32(42.0, si::PRESSURE);
+        let fallback = DynExpr::f32(42.0, Pressure::UNIT);
         
         let result = coeff_cell_expr_dyn(&slots, None, "i", fallback.clone());
         
@@ -510,18 +516,18 @@ mod tests {
 
     #[test]
     fn coeff_face_expr_dyn_interpolates_with_correct_units() {
-        let rho = vol_scalar("rho", si::DENSITY);
+        let rho = vol_scalar_dim::<Density>("rho");
         let layout = crate::solver::ir::StateLayout::new(vec![rho.clone()]);
         let slots = slots_from_layout(&layout);
         
         let coeff = Coefficient::field(rho).unwrap();
         let interp = Expr::from(0.75);
-        let fallback = DynExpr::f32(0.0, si::DIMENSIONLESS);
+        let fallback = DynExpr::f32(0.0, Dimensionless::UNIT);
         
         let dyn_expr = coeff_face_expr_dyn(&slots, Some(&coeff), "owner", "neigh", interp, fallback);
         
         // Result should have DENSITY unit
-        assert_eq!(dyn_expr.unit, si::DENSITY);
+        assert_eq!(dyn_expr.unit, Density::UNIT);
         assert_eq!(dyn_expr.ty, DslType::f32());
         // WGSL should contain interpolation
         let wgsl = dyn_expr.expr.to_string();

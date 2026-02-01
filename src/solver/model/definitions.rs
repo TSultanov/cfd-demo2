@@ -2,8 +2,8 @@
 use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
 use crate::solver::model::backend::ast::{EquationSystem, FieldRef};
 use crate::solver::model::backend::state_layout::StateLayout;
-use crate::solver::dimensions::UnitDimension;
-use crate::solver::units::{si, UnitDim};
+use crate::solver::dimensions::{Length, UnitDimension};
+use crate::solver::units::UnitDim;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -435,7 +435,7 @@ impl BoundarySpec {
                 let expected_unit = match entry.as_ref().map(|c| c.kind) {
                     Some(GpuBcKind::Dirichlet) => field.unit(),
                     Some(GpuBcKind::Neumann) | Some(GpuBcKind::ZeroGradient) | None => {
-                        field.unit() / si::LENGTH
+                        field.unit() / Length::UNIT
                     }
                 };
 
@@ -586,7 +586,7 @@ mod tests {
     use crate::solver::model::backend::ast::TermOp;
     use crate::solver::model::kernel::derive_kernel_specs_for_model;
     use crate::solver::model::KernelId;
-    use crate::solver::units::si;
+    use crate::solver::dimensions::{Density, DivDim, Length, Pressure, Velocity};
 
     #[test]
     fn incompressible_momentum_system_contains_expected_terms() {
@@ -682,7 +682,7 @@ mod tests {
             fields.p,
             fields.t,
             fields.u,
-            vol_scalar("grad_rho", si::DENSITY / si::LENGTH),
+            vol_scalar("grad_rho", DivDim::<Density, Length>::UNIT),
         ]);
 
         let with_gradients = crate::solver::model::FluxModuleSpec::Scheme {
@@ -737,7 +737,6 @@ mod tests {
     #[test]
     fn validate_module_manifests_reports_missing_port_manifest_field() {
         use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
-        use crate::solver::units::si;
 
         let mut model = incompressible_momentum_model();
 
@@ -748,7 +747,7 @@ mod tests {
                 fields: vec![FieldSpec {
                     name: "nonexistent_field",
                     kind: PortFieldKind::Scalar,
-                    unit: si::PRESSURE,
+                    unit: Pressure::UNIT,
                 }],
                 ..Default::default()
             }),
@@ -771,7 +770,6 @@ mod tests {
     #[test]
     fn validate_module_manifests_reports_kind_mismatch() {
         use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
-        use crate::solver::units::si;
 
         let mut model = incompressible_momentum_model();
 
@@ -782,7 +780,7 @@ mod tests {
                 fields: vec![FieldSpec {
                     name: "U", // U is Vector2 in incompressible_momentum_model
                     kind: PortFieldKind::Scalar, // But we claim it's Scalar
-                    unit: si::VELOCITY,
+                    unit: Velocity::UNIT,
                 }],
                 ..Default::default()
             }),

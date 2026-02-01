@@ -78,6 +78,7 @@ fn wgsl_type_to_ast_type(wgsl_type: &str) -> Type {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cfd2_ir::solver::dimensions::UnitDimension;
 
     #[test]
     fn constants_struct_with_no_extra_params_has_base_fields_only() {
@@ -97,13 +98,13 @@ mod tests {
                 key: "eos.gamma",
                 wgsl_field: "eos_gamma",
                 wgsl_type: "f32",
-                unit: cfd2_ir::solver::units::si::DIMENSIONLESS,
+                unit: cfd2_ir::solver::dimensions::Dimensionless::UNIT,
             },
             ParamSpec {
                 key: "eos.gm1",
                 wgsl_field: "eos_gm1",
                 wgsl_type: "f32",
-                unit: cfd2_ir::solver::units::si::DIMENSIONLESS,
+                unit: cfd2_ir::solver::dimensions::Dimensionless::UNIT,
             },
         ];
 
@@ -124,13 +125,13 @@ mod tests {
                 key: "eos.first",
                 wgsl_field: "eos_first",
                 wgsl_type: "f32",
-                unit: cfd2_ir::solver::units::si::DIMENSIONLESS,
+                unit: cfd2_ir::solver::dimensions::Dimensionless::UNIT,
             },
             ParamSpec {
                 key: "eos.second",
                 wgsl_field: "eos_second",
                 wgsl_type: "u32",
-                unit: cfd2_ir::solver::units::si::DIMENSIONLESS,
+                unit: cfd2_ir::solver::dimensions::Dimensionless::UNIT,
             },
         ];
 

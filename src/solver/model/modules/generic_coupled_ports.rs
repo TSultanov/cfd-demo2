@@ -1,7 +1,7 @@
 /// Generic coupled module port definitions - separate from the main module to avoid build script issues.
+use cfd2_ir::solver::dimensions::{Dimensionless, Density, DynamicViscosity, Time, UnitDimension};
 use crate::solver::ir::ports::ParamSpec;
 use crate::solver::model::module::PortManifest as ModulePortManifest;
-use crate::solver::units::si;
 
 /// Get the port manifest for generic_coupled uniform params.
 pub fn generic_coupled_uniform_port_manifest(
@@ -12,37 +12,37 @@ pub fn generic_coupled_uniform_port_manifest(
             key: "dt",
             wgsl_field: "dt",
             wgsl_type: "f32",
-            unit: si::TIME,
+            unit: Time::UNIT,
         },
         ParamSpec {
             key: "dtau",
             wgsl_field: "dtau",
             wgsl_type: "f32",
-            unit: si::TIME,
+            unit: Time::UNIT,
         },
         ParamSpec {
             key: "viscosity",
             wgsl_field: "viscosity",
             wgsl_type: "f32",
-            unit: si::DYNAMIC_VISCOSITY,
+            unit: DynamicViscosity::UNIT,
         },
         ParamSpec {
             key: "density",
             wgsl_field: "density",
             wgsl_type: "f32",
-            unit: si::DENSITY,
+            unit: Density::UNIT,
         },
         ParamSpec {
             key: "advection_scheme",
             wgsl_field: "scheme",
             wgsl_type: "u32",
-            unit: si::DIMENSIONLESS,
+            unit: Dimensionless::UNIT,
         },
         ParamSpec {
             key: "time_scheme",
             wgsl_field: "time_scheme",
             wgsl_type: "u32",
-            unit: si::DIMENSIONLESS,
+            unit: Dimensionless::UNIT,
         },
     ];
 
@@ -52,13 +52,13 @@ pub fn generic_coupled_uniform_port_manifest(
                 key: "alpha_u",
                 wgsl_field: "alpha_u",
                 wgsl_type: "f32",
-                unit: si::DIMENSIONLESS,
+                unit: Dimensionless::UNIT,
             },
             ParamSpec {
                 key: "alpha_p",
                 wgsl_field: "alpha_p",
                 wgsl_type: "f32",
-                unit: si::DIMENSIONLESS,
+                unit: Dimensionless::UNIT,
             },
         ]);
     }

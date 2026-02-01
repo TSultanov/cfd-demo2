@@ -164,16 +164,11 @@ struct SolverInitResponse {
 }
 
 // Cached GPU solver stats for UI display (avoids lock contention)
-#[allow(dead_code)]
 #[derive(Default, Clone)]
 struct CachedGpuStats {
-    time: f32,
     dt: f32,
     linear_solves: u32,
     linear_last: LinearSolverStats,
-    stats_ux: LinearSolverStats,
-    stats_uy: LinearSolverStats,
-    stats_p: LinearSolverStats,
     outer_residual_u: f32,
     outer_residual_p: f32,
     outer_iterations: u32,
@@ -2886,7 +2881,6 @@ fn solver_worker_main(
         }
 
         let mut stats = CachedGpuStats {
-            time: solver.time(),
             dt: solver.dt(),
             step_time_ms,
             linear_solves,
@@ -2904,12 +2898,6 @@ fn solver_worker_main(
         if let Some(res_p) = step_stats.outer_residual_p {
             stats.outer_residual_p = res_p;
         }
-        if step_linear_stats.len() == 3 {
-            stats.stats_ux = step_linear_stats[0];
-            stats.stats_uy = step_linear_stats[1];
-            stats.stats_p = step_linear_stats[2];
-        }
-
         let log_every_steps = params.log_every_steps.max(1) as u64;
         let should_log = params.log_convergence && (step_idx % log_every_steps == 0);
 

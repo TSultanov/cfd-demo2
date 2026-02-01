@@ -123,6 +123,7 @@ mod solver {
             #[allow(unused_imports)]
             pub use state_layout::{StateField, StateLayout};
             // Re-export typed_ast items
+            #[allow(unused_imports)]
             pub use typed_ast::{
                 typed_fvc, typed_fvm, Kind, Scalar, TypedCoeff, TypedEquation, TypedEquationSystem,
                 TypedFieldRef, TypedFluxRef, TypedTerm, TypedTermSum, Vector2, Vector3,

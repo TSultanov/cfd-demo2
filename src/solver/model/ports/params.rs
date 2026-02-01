@@ -186,6 +186,28 @@ pub struct ParamPortSet {
     ports: Vec<ParamPortEntry>,
 }
 
+impl ParamPortSet {
+    /// Get the name of this parameter set.
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// Get the parameter entries in this set.
+    pub fn ports(&self) -> &[ParamPortEntry] {
+        &self.ports
+    }
+
+    /// Get the number of parameters in this set.
+    pub fn len(&self) -> usize {
+        self.ports.len()
+    }
+
+    /// Check if this set is empty.
+    pub fn is_empty(&self) -> bool {
+        self.ports.is_empty()
+    }
+}
+
 /// Entry in a parameter port set.
 #[derive(Debug, Clone)]
 pub struct ParamPortEntry {
@@ -437,7 +459,7 @@ macro_rules! define_param_set {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::ports::dimensions::{Dimensionless, Length, Time, Velocity};
+    use crate::solver::model::ports::dimensions::{Dimensionless, Time};
 
     #[test]
     fn param_type_properties() {
@@ -476,9 +498,9 @@ mod tests {
             .add_param::<F32, Dimensionless>("alpha", "alpha_u")
             .build();
 
-        assert_eq!(set.name, "test_params");
-        assert_eq!(set.ports.len(), 2);
-        assert_eq!(set.ports[0].key, "dt");
-        assert_eq!(set.ports[1].key, "alpha");
+        assert_eq!(set.name(), "test_params");
+        assert_eq!(set.len(), 2);
+        assert_eq!(set.ports()[0].key, "dt");
+        assert_eq!(set.ports()[1].key, "alpha");
     }
 }

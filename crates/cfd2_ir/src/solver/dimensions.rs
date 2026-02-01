@@ -71,6 +71,7 @@ pub trait UnitDimension: 'static + Copy + Send + Sync + Eq + PartialEq + std::fm
     }
 
     /// Check if this dimension is compatible with another at compile time.
+    #[allow(non_snake_case)]
     fn IS_COMPATIBLE_WITH<Other: UnitDimension>() -> bool {
         Self::M == Other::M
             && Self::L == Other::L
@@ -359,6 +360,7 @@ pub type EnergyDensity = Pressure;
 pub type PressureGradient = DivDim<Pressure, Length>;
 
 /// D_P = Volume * Time / Mass (pressure-correction mobility-like coefficient)
+#[allow(non_camel_case_types)]
 pub type D_P = DivDim<MulDim<Volume, Time>, Mass>;
 
 /// Diffusivity = Area / Time (e.g., thermal diffusivity, kinematic viscosity)

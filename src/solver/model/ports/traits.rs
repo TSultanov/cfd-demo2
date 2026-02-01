@@ -232,12 +232,6 @@ impl<T: ModulePorts> ModulePortRegistry for T {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::ports::{
-        Dimensionless, ParamPort, PortId, Time, Vector2, Velocity, F32,
-    };
-
-    // Test that the trait bounds work correctly
-    fn assert_module_ports<T: ModulePorts>() {}
 
     #[test]
     fn port_validation_error_display() {

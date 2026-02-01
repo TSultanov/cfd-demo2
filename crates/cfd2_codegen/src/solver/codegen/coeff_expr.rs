@@ -22,10 +22,6 @@ enum CoeffSample<'a> {
     },
 }
 
-fn f32_literal(value: f64) -> Expr {
-    value.into()
-}
-
 /// Named coefficient expression with unit tracking (dynamic version).
 /// Returns the same WGSL expressions as `coeff_named_expr`, but with correct `UnitDim` metadata.
 pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
@@ -114,11 +110,7 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
     }
 }
 
-/// Legacy named coefficient expression (without unit tracking).
-/// Delegates to `coeff_named_expr_dyn` and extracts the expression.
-fn coeff_named_expr(name: &str) -> Option<Expr> {
-    coeff_named_expr_dyn(name).map(|d| d.expr)
-}
+
 
 /// Find a slot by name in the resolved state slots spec.
 fn find_slot<'a>(slots: &'a ResolvedStateSlotsSpec, field: &str) -> Option<&'a crate::solver::ir::ports::ResolvedStateSlotSpec> {
@@ -212,12 +204,6 @@ fn coeff_expr_dyn(slots: &ResolvedStateSlotsSpec, coeff: &Coefficient, sample: C
             lhs_expr * rhs_expr
         }
     }
-}
-
-/// Legacy coefficient expression (without unit tracking).
-/// Delegates to `coeff_expr_dyn` and extracts the expression.
-fn coeff_expr(slots: &ResolvedStateSlotsSpec, coeff: &Coefficient, sample: CoeffSample<'_>) -> Expr {
-    coeff_expr_dyn(slots, coeff, sample).expr
 }
 
 /// Cell coefficient expression with unit tracking (dynamic version).
@@ -316,7 +302,7 @@ mod tests {
 
     #[test]
     fn coeff_expr_inv_dt_prefers_dtau_when_set() {
-        let inv_dt = coeff_named_expr("inv_dt").expect("inv_dt");
+        let inv_dt = coeff_named_expr_dyn("inv_dt").expect("inv_dt").expr;
         assert_eq!(
             inv_dt.to_string(),
             "1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)"

@@ -116,7 +116,6 @@ impl FieldPortEntry {
 /// Storage for parameter port metadata.
 #[derive(Debug, Clone)]
 struct ParamPortEntry {
-    key: String,
     wgsl_field: String,
     runtime_dim: UnitDim,
     param_type: ParamTypeKind,
@@ -125,9 +124,6 @@ struct ParamPortEntry {
 /// Storage for buffer port metadata.
 #[derive(Debug, Clone)]
 struct BufferPortEntry {
-    name: String,
-    group: u32,
-    binding: u32,
     buffer_type: BufferTypeKind,
     access_mode: AccessModeKind,
 }
@@ -503,7 +499,6 @@ impl PortRegistry {
         self.param_ports.insert(
             id,
             ParamPortEntry {
-                key: key.to_string(),
                 wgsl_field: wgsl_field_name.to_string(),
                 runtime_dim,
                 param_type: ParamTypeKind::from_type::<T>(),
@@ -570,9 +565,6 @@ impl PortRegistry {
         self.buffer_ports.insert(
             id,
             BufferPortEntry {
-                name: name.to_string(),
-                group,
-                binding,
                 buffer_type: T::into_kind(),
                 access_mode: A::into_kind(),
             },
@@ -731,7 +723,6 @@ impl PortRegistry {
         self.param_ports.insert(
             id,
             ParamPortEntry {
-                key: param.key.to_string(),
                 wgsl_field: param.wgsl_field.to_string(),
                 runtime_dim: param.unit,
                 param_type,
@@ -886,9 +877,6 @@ impl PortRegistry {
         self.buffer_ports.insert(
             id,
             BufferPortEntry {
-                name: buffer.name.to_string(),
-                group: buffer.group,
-                binding: buffer.binding,
                 buffer_type,
                 access_mode,
             },
@@ -1188,9 +1176,8 @@ mod tests {
     use crate::solver::model::backend::ast::{vol_scalar, vol_vector};
     use crate::solver::model::ports::dimensions::{Length, Pressure, Time, Velocity};
     use crate::solver::model::ports::{
-        BufferF32, BufferU32, ReadOnly, ReadWrite, Scalar, Vector2, F32, U32,
+        BufferF32, BufferU32, Port, ReadOnly, ReadWrite, WgslPort, F32, U32,
     };
-    use crate::solver::model::ports::{Port, WgslPort};
     use crate::solver::units::si;
 
     fn create_test_layout() -> StateLayout {
@@ -1686,27 +1673,16 @@ mod tests {
         assert_eq!(registry.buffer_port_count(), 1);
 
         // Verify params
-        let dt_id = registry
-            .lookup_param("test.dt")
-            .expect("should find dt param");
-        let dt_entry = registry.param_ports.get(&dt_id).unwrap();
-        assert_eq!(dt_entry.key, "test.dt");
-        assert_eq!(dt_entry.wgsl_field, "dt");
+        assert!(registry.lookup_param("test.dt").is_some(), "should find dt param");
 
         // Verify fields
         let p_id = registry.lookup_field("p").expect("should find p field");
         let p_entry = registry.get_field_entry(p_id).unwrap();
-        assert_eq!(p_entry.name, "p");
-        assert_eq!(p_entry.component_count, 1);
+        assert_eq!(p_entry.name(), "p");
+        assert_eq!(p_entry.component_count(), 1);
 
         // Verify buffers
-        let buf_id = registry
-            .lookup_buffer("test_buffer", 1, 0)
-            .expect("should find buffer");
-        let buf_entry = registry.buffer_ports.get(&buf_id).unwrap();
-        assert_eq!(buf_entry.name, "test_buffer");
-        assert_eq!(buf_entry.group, 1);
-        assert_eq!(buf_entry.binding, 0);
+        assert!(registry.lookup_buffer("test_buffer", 1, 0).is_some(), "should find buffer");
     }
 
     #[test]

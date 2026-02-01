@@ -284,6 +284,18 @@ pub struct BufferBindingGroup {
     bindings: Vec<BufferBindingEntry>,
 }
 
+impl BufferBindingGroup {
+    /// Get the binding group index.
+    pub fn group_index(&self) -> u32 {
+        self.group_index
+    }
+
+    /// Get the bindings in this group.
+    pub fn bindings(&self) -> &[BufferBindingEntry] {
+        &self.bindings
+    }
+}
+
 /// Entry in a buffer binding group.
 #[derive(Debug, Clone)]
 pub struct BufferBindingEntry {

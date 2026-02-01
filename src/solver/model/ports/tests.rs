@@ -1,7 +1,6 @@
 //! Integration tests for port derive macros.
 
 use crate::solver::model::ports::*;
-use crate::solver::units::si;
 
 // Tests from inline module
 #[test]

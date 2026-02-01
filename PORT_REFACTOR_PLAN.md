@@ -461,7 +461,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 - [x] `crates/cfd2_codegen/src/solver/codegen/state_access.rs`
 - [x] `crates/cfd2_codegen/src/solver/codegen/coeff_expr.rs`
 - [x] `crates/cfd2_codegen/src/solver/codegen/primitive_expr.rs`
-- [ ] All `*_wgsl.rs` files in modules
+- [x] All `*_wgsl.rs` files in modules
 
 **Changes**:
 - Add IR-level (boundary-safe) field/param access helpers that accept port metadata (e.g. offsets/stride or `PortManifest` entries) rather than string field names
@@ -584,7 +584,7 @@ crates/cfd2_macros/tests/*        # trybuild + compile-fail tests
 ## Success Criteria
 
 - [x] `cargo test` passes
-- [ ] Zero string-based field lookups in migrated modules
+- [x] Zero string-based field lookups in migrated modules
 - [ ] Compile-time dimension checking works where Rust can express it (ports + structurally-identical typed IR); runtime `validate_units()` remains the backstop for semantically-equal-but-structurally-different dimensions
 - [ ] Runtime validation catches invalid configs
 - [ ] Generated WGSL diffs are empty (or equivalent check passes)
@@ -599,7 +599,7 @@ crates/cfd2_macros/tests/*        # trybuild + compile-fail tests
 
 ## Current Status
 
-As of **2026-01-31**:
+As of **2026-02-01**:
 - Canonical type-level dimensions (rational exponents) live in `crates/cfd2_ir/src/solver/dimensions.rs` and are re-exported through the main crate for ports
 - A typed IR builder layer exists at `crates/cfd2_ir/src/solver/model/backend/typed_ast.rs` for **best-effort** compile-time unit checking when building `EquationSystem`s in Rust
 - Attempted full dimension canonicalization is **blocked** on stable Rust today; the type-level dimension system cannot prove equivalence of semantically-equal-but-structurally-different expressions (see “Type-Level Dimensions Migration”, Step 3)
@@ -614,6 +614,7 @@ As of **2026-01-31**:
 - Derived/dynamic field name support is implemented via a centralized interner (`src/solver/model/ports/intern.rs`); `PortRegistry::{register_field,register_scalar_field,register_vector2_field,register_vector3_field}` accept `&str`
 - `rhie_chow` publishes a `PortManifest` (dp, grad_p, grad_p_old, momentum) and pre-resolves momentum/pressure coupling at module creation; kernel generators use `PortRegistry` to resolve offsets/stride in both runtime and build-script contexts (no legacy `StateLayout` fallback path)
 - `flux_module_gradients_wgsl` consumes pre-resolved `PortManifest.gradient_targets` during kernel WGSL generation; target discovery still scans `StateLayout` during module creation; resolved target offset resolution now uses `PortRegistry` in both runtime and build-script contexts (no legacy `StateLayout::component_offset`/`offset_for` fallback path)
+- `flux_module` module construction no longer calls `StateLayout::field(...)` directly; gradient-target resolution and state-slot resolver use precomputed layout metadata + `PortRegistry` (module code has zero direct string-based `StateLayout` probing)
 - `flux_module_wgsl` consumes pre-resolved `PortManifest.resolved_state_slots` (IR-safe `ResolvedStateSlotsSpec`) and no longer probes `StateLayout`; golden WGSL tests cover compressible + incompressible_momentum
 - Low-Mach preconditioning now affects compressible Kurganov dissipation via `c_eff2` scaling (smoke-tested: Off/WeissSmith/Legacy yield distinct deltas)
 - `SolverRecipe::from_model()` builds/stores a `PortRegistry` (`SolverRecipe.port_registry`) from module port manifests when present

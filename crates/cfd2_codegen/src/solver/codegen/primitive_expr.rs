@@ -119,7 +119,7 @@ pub fn lower_primitive_expr(
 mod tests {
     use super::*;
     use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
-    use crate::solver::units::si;
+    use cfd2_ir::solver::dimensions::{Area, Density, Length, MomentumDensity, Pressure, UnitDimension, Velocity};
 
     /// Helper to create a ResolvedStateSlotsSpec for testing.
     fn test_slots_from_fields(
@@ -145,8 +145,8 @@ mod tests {
     #[test]
     fn primitive_expr_lowers_field_access_and_ops() {
         let slots = test_slots_from_fields(vec![
-            ("rho", PortFieldKind::Scalar, si::DENSITY),
-            ("rho_u", PortFieldKind::Vector2, si::MOMENTUM_DENSITY),
+            ("rho", PortFieldKind::Scalar, Density::UNIT),
+            ("rho_u", PortFieldKind::Vector2, MomentumDensity::UNIT),
         ]);
 
         // (rho_u_x / rho) - a dimensionally consistent expression
@@ -166,8 +166,8 @@ mod tests {
     #[test]
     fn primitive_expr_dyn_tracks_units() {
         let slots = test_slots_from_fields(vec![
-            ("rho", PortFieldKind::Scalar, si::DENSITY),
-            ("rho_u", PortFieldKind::Vector2, si::MOMENTUM_DENSITY),
+            ("rho", PortFieldKind::Scalar, Density::UNIT),
+            ("rho_u", PortFieldKind::Vector2, MomentumDensity::UNIT),
         ]);
 
         // rho_u_x / rho produces velocity units
@@ -184,14 +184,14 @@ mod tests {
         assert!(dyn_expr.expr.to_string().contains("state[i * 3u + 0u]"));
 
         // Verify the resulting unit is velocity (momentum_density / density = velocity)
-        assert_eq!(dyn_expr.unit, si::VELOCITY);
+        assert_eq!(dyn_expr.unit, Velocity::UNIT);
         assert_eq!(dyn_expr.ty, DslType::f32());
     }
 
     #[test]
     fn primitive_expr_dyn_tracks_component_units() {
         let slots = test_slots_from_fields(vec![
-            ("U", PortFieldKind::Vector2, si::VELOCITY),
+            ("U", PortFieldKind::Vector2, Velocity::UNIT),
         ]);
 
         // Access U_x component - should have velocity units
@@ -200,7 +200,7 @@ mod tests {
         let cell_idx = Expr::ident("i");
         let dyn_expr = lower_primitive_expr_dyn(&expr, &slots, cell_idx, "state");
 
-        assert_eq!(dyn_expr.unit, si::VELOCITY);
+        assert_eq!(dyn_expr.unit, Velocity::UNIT);
         assert_eq!(dyn_expr.expr.to_string(), "state[i * 2u + 0u]");
     }
 
@@ -219,8 +219,8 @@ mod tests {
     #[test]
     fn primitive_expr_dyn_mul_combines_units() {
         let slots = test_slots_from_fields(vec![
-            ("rho", PortFieldKind::Scalar, si::DENSITY),
-            ("U", PortFieldKind::Vector2, si::VELOCITY),
+            ("rho", PortFieldKind::Scalar, Density::UNIT),
+            ("U", PortFieldKind::Vector2, Velocity::UNIT),
         ]);
 
         // rho * U_x produces momentum density
@@ -232,13 +232,13 @@ mod tests {
         let cell_idx = Expr::ident("i");
         let dyn_expr = lower_primitive_expr_dyn(&expr, &slots, cell_idx, "state");
 
-        assert_eq!(dyn_expr.unit, si::MOMENTUM_DENSITY);
+        assert_eq!(dyn_expr.unit, MomentumDensity::UNIT);
     }
 
     #[test]
     fn primitive_expr_dyn_sqrt_applies_sqrt_to_units() {
         let slots = test_slots_from_fields(vec![
-            ("area", PortFieldKind::Scalar, si::AREA),
+            ("area", PortFieldKind::Scalar, Area::UNIT),
         ]);
 
         // sqrt(area) produces length
@@ -247,7 +247,7 @@ mod tests {
         let cell_idx = Expr::ident("i");
         let dyn_expr = lower_primitive_expr_dyn(&expr, &slots, cell_idx, "state");
 
-        assert_eq!(dyn_expr.unit, si::LENGTH);
+        assert_eq!(dyn_expr.unit, Length::UNIT);
         assert!(dyn_expr.expr.to_string().contains("sqrt"));
     }
 
@@ -255,8 +255,8 @@ mod tests {
     #[should_panic(expected = "typed add failed")]
     fn primitive_expr_dyn_panics_on_unit_mismatch_add() {
         let slots = test_slots_from_fields(vec![
-            ("rho", PortFieldKind::Scalar, si::DENSITY),
-            ("U", PortFieldKind::Scalar, si::VELOCITY),
+            ("rho", PortFieldKind::Scalar, Density::UNIT),
+            ("U", PortFieldKind::Scalar, Velocity::UNIT),
         ]);
 
         // rho + U is a unit mismatch (density + velocity)
@@ -274,8 +274,8 @@ mod tests {
     #[should_panic(expected = "typed sub failed")]
     fn primitive_expr_dyn_panics_on_unit_mismatch_sub() {
         let slots = test_slots_from_fields(vec![
-            ("p", PortFieldKind::Scalar, si::PRESSURE),
-            ("rho", PortFieldKind::Scalar, si::DENSITY),
+            ("p", PortFieldKind::Scalar, Pressure::UNIT),
+            ("rho", PortFieldKind::Scalar, Density::UNIT),
         ]);
 
         // p - rho is a unit mismatch (pressure - density)

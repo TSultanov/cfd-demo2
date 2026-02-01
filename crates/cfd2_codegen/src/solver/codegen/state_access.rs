@@ -252,8 +252,7 @@ pub fn state_component_slot_dim<D: UnitDimension>(
 mod tests {
     use super::*;
     use crate::solver::ir::ports::PortFieldKind;
-    use crate::solver::units::si;
-    use cfd2_ir::solver::dimensions::{Pressure, Velocity};
+    use cfd2_ir::solver::dimensions::{Density, MomentumDensity, Pressure, Velocity};
 
     /// Helper to create a ResolvedStateSlotsSpec from field definitions for testing.
     fn test_slots_from_fields(
@@ -283,8 +282,8 @@ mod tests {
     #[test]
     fn slot_based_state_access_builds_scalar_and_vector_exprs() {
         let slots = test_slots_from_fields(vec![
-            ("U", PortFieldKind::Vector2, si::VELOCITY),
-            ("p", PortFieldKind::Scalar, si::PRESSURE),
+            ("U", PortFieldKind::Vector2, Velocity::UNIT),
+            ("p", PortFieldKind::Scalar, Pressure::UNIT),
         ]);
 
         let p_slot = find_slot(&slots, "p").unwrap();
@@ -309,8 +308,8 @@ mod tests {
     #[test]
     fn slot_based_typed_state_access_tracks_units() {
         let slots = test_slots_from_fields(vec![
-            ("U", PortFieldKind::Vector2, si::VELOCITY),
-            ("p", PortFieldKind::Scalar, si::PRESSURE),
+            ("U", PortFieldKind::Vector2, Velocity::UNIT),
+            ("p", PortFieldKind::Scalar, Pressure::UNIT),
         ]);
 
         let p_slot = find_slot(&slots, "p").unwrap();
@@ -319,13 +318,13 @@ mod tests {
         // Test typed scalar access
         let p = state_scalar_slot_typed(slots.stride, "state", "idx", p_slot);
         assert_eq!(p.ty, DslType::f32());
-        assert_eq!(p.unit, si::PRESSURE);
+        assert_eq!(p.unit, Pressure::UNIT);
         assert_eq!(p.expr.to_string(), "state[idx * 3u + 2u]");
 
         // Test typed vec2 access
         let u = state_vec2_slot_typed(slots.stride, "state", "idx", u_slot);
         assert_eq!(u.ty, DslType::vec2_f32());
-        assert_eq!(u.unit, si::VELOCITY);
+        assert_eq!(u.unit, Velocity::UNIT);
         assert_eq!(
             u.expr.to_string(),
             "vec2<f32>(state[idx * 3u + 0u], state[idx * 3u + 1u])"
@@ -335,7 +334,7 @@ mod tests {
     #[test]
     fn slot_based_typed_dim_state_scalar_access_works() {
         let slots = test_slots_from_fields(vec![
-            ("p", PortFieldKind::Scalar, si::PRESSURE),
+            ("p", PortFieldKind::Scalar, Pressure::UNIT),
         ]);
 
         let p_slot = find_slot(&slots, "p").unwrap();
@@ -348,14 +347,14 @@ mod tests {
 
         // Verify into_dyn().unit matches the slot unit
         let dyn_p = p.into_dyn();
-        assert_eq!(dyn_p.unit, si::PRESSURE);
+        assert_eq!(dyn_p.unit, Pressure::UNIT);
         assert_eq!(dyn_p.ty, DslType::f32());
     }
 
     #[test]
     fn slot_based_typed_dim_state_vec2_access_works() {
         let slots = test_slots_from_fields(vec![
-            ("U", PortFieldKind::Vector2, si::VELOCITY),
+            ("U", PortFieldKind::Vector2, Velocity::UNIT),
         ]);
 
         let u_slot = find_slot(&slots, "U").unwrap();
@@ -371,14 +370,14 @@ mod tests {
 
         // Verify into_dyn().unit matches the slot unit
         let dyn_u = u.into_dyn();
-        assert_eq!(dyn_u.unit, si::VELOCITY);
+        assert_eq!(dyn_u.unit, Velocity::UNIT);
         assert_eq!(dyn_u.ty, DslType::vec2_f32());
     }
 
     #[test]
     fn slot_based_typed_dim_state_component_access_works() {
         let slots = test_slots_from_fields(vec![
-            ("U", PortFieldKind::Vector2, si::VELOCITY),
+            ("U", PortFieldKind::Vector2, Velocity::UNIT),
         ]);
 
         let u_slot = find_slot(&slots, "U").unwrap();
@@ -392,7 +391,7 @@ mod tests {
 
         // Verify into_dyn().unit matches the slot unit
         let dyn_u_x = u_x.into_dyn();
-        assert_eq!(dyn_u_x.unit, si::VELOCITY);
+        assert_eq!(dyn_u_x.unit, Velocity::UNIT);
         assert_eq!(dyn_u_x.ty, DslType::f32());
     }
 
@@ -400,7 +399,7 @@ mod tests {
     #[should_panic(expected = "unit mismatch for field 'p'")]
     fn slot_based_typed_dim_state_scalar_unit_mismatch_panics() {
         let slots = test_slots_from_fields(vec![
-            ("p", PortFieldKind::Scalar, si::PRESSURE),
+            ("p", PortFieldKind::Scalar, Pressure::UNIT),
         ]);
 
         let p_slot = find_slot(&slots, "p").unwrap();
@@ -413,7 +412,7 @@ mod tests {
     #[should_panic(expected = "unit mismatch for field 'U'")]
     fn slot_based_typed_dim_state_vec2_unit_mismatch_panics() {
         let slots = test_slots_from_fields(vec![
-            ("U", PortFieldKind::Vector2, si::VELOCITY),
+            ("U", PortFieldKind::Vector2, Velocity::UNIT),
         ]);
 
         let u_slot = find_slot(&slots, "U").unwrap();
@@ -426,7 +425,7 @@ mod tests {
     #[should_panic(expected = "field 'p' is not vec2")]
     fn slot_based_typed_dim_state_kind_mismatch_scalar_to_vec2_panics() {
         let slots = test_slots_from_fields(vec![
-            ("p", PortFieldKind::Scalar, si::PRESSURE),
+            ("p", PortFieldKind::Scalar, Pressure::UNIT),
         ]);
 
         let p_slot = find_slot(&slots, "p").unwrap();
@@ -439,7 +438,7 @@ mod tests {
     #[should_panic(expected = "field 'U' is not scalar")]
     fn slot_based_typed_dim_state_kind_mismatch_vec2_to_scalar_panics() {
         let slots = test_slots_from_fields(vec![
-            ("U", PortFieldKind::Vector2, si::VELOCITY),
+            ("U", PortFieldKind::Vector2, Velocity::UNIT),
         ]);
 
         let u_slot = find_slot(&slots, "U").unwrap();
@@ -451,7 +450,7 @@ mod tests {
     #[test]
     fn slot_based_typed_kind_mismatch_panics() {
         let slots = test_slots_from_fields(vec![
-            ("p", PortFieldKind::Scalar, si::PRESSURE),
+            ("p", PortFieldKind::Scalar, Pressure::UNIT),
         ]);
 
         let p_slot = find_slot(&slots, "p").unwrap();
@@ -466,8 +465,8 @@ mod tests {
     #[test]
     fn find_slot_locates_correct_slot() {
         let slots = test_slots_from_fields(vec![
-            ("rho", PortFieldKind::Scalar, si::DENSITY),
-            ("rho_u", PortFieldKind::Vector2, si::MOMENTUM_DENSITY),
+            ("rho", PortFieldKind::Scalar, Density::UNIT),
+            ("rho_u", PortFieldKind::Vector2, MomentumDensity::UNIT),
         ]);
 
         // Direct field access

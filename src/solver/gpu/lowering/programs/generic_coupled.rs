@@ -2054,7 +2054,7 @@ mod tests {
         incompressible_momentum_model, BoundarySpec, ModelLinearSolverSpec,
         ModelPreconditionerSpec, SchurBlockLayout,
     };
-    use crate::solver::units::si;
+    use crate::solver::dimensions::{Pressure, UnitDimension, Velocity};
 
     /// Helper to create a PortRegistry with all state fields registered.
     fn create_port_registry_for_test(model: &ModelSpec) -> PortRegistry {
@@ -2087,8 +2087,8 @@ mod tests {
 
     #[test]
     fn schur_accepts_vector3_velocity_layout() {
-        let u = vol_vector3("U", si::VELOCITY);
-        let p = vol_scalar("p", si::PRESSURE);
+        let u = vol_vector3("U", Velocity::UNIT);
+        let p = vol_scalar("p", Pressure::UNIT);
 
         let mut system = EquationSystem::new();
         system.add_equation(fvm::ddt(u).eqn(u));
@@ -2133,8 +2133,8 @@ mod tests {
     #[test]
     fn runtime_mapping_fails_when_field_not_registered() {
         // Create a model with fields
-        let u = vol_vector3("U", si::VELOCITY);
-        let p = vol_scalar("p", si::PRESSURE);
+        let u = vol_vector3("U", Velocity::UNIT);
+        let p = vol_scalar("p", Pressure::UNIT);
 
         let mut system = EquationSystem::new();
         system.add_equation(fvm::ddt(u).eqn(u));
@@ -2166,8 +2166,8 @@ mod tests {
     #[test]
     fn runtime_mapping_succeeds_with_all_fields_registered() {
         // Create a model with scalar and vector fields
-        let u = vol_vector3("U", si::VELOCITY);
-        let p = vol_scalar("p", si::PRESSURE);
+        let u = vol_vector3("U", Velocity::UNIT);
+        let p = vol_scalar("p", Pressure::UNIT);
 
         let mut system = EquationSystem::new();
         system.add_equation(fvm::ddt(u).eqn(u));

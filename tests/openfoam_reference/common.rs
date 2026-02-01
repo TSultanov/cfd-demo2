@@ -1,3 +1,5 @@
+// This module is #[path]-included by multiple integration tests; each test crate only
+// uses a subset of helpers, so we suppress dead_code warnings at the module level.
 #![allow(dead_code)]
 
 use cfd2::solver::mesh::Mesh;
@@ -177,78 +179,6 @@ pub fn max_cell_rel_error_vec2(
         abs: max_abs,
         idx: max_idx,
     }
-}
-
-pub fn best_shift(a: &[f64], b: &[f64]) -> f64 {
-    assert_eq!(a.len(), b.len());
-    if a.is_empty() {
-        return 0.0;
-    }
-    let mut sum = 0.0f64;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        sum += y - x;
-    }
-    sum / a.len() as f64
-}
-
-/// Relative L2 error after applying the best constant offset to `a` (least-squares fit):
-///   a_shifted = a + shift, where shift = mean(b - a).
-pub fn rel_l2_best_shift(a: &[f64], b: &[f64], floor: f64) -> (f64, f64) {
-    assert_eq!(a.len(), b.len());
-    if a.is_empty() {
-        return (0.0, 0.0);
-    }
-    let mut sum = 0.0;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        sum += y - x;
-    }
-    let shift = sum / a.len() as f64;
-
-    let mut num = 0.0;
-    let mut den = 0.0;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        let d = (x + shift) - y;
-        num += d * d;
-        den += y * y;
-    }
-    let n = a.len() as f64;
-    let err = (num / n).sqrt() / (den / n).sqrt().max(floor);
-    (err, shift)
-}
-
-/// Relative L2 error after applying the best affine map to `a` (least-squares fit):
-///   a_fit = scale * a + shift.
-pub fn rel_l2_best_affine(a: &[f64], b: &[f64], floor: f64) -> (f64, f64, f64) {
-    assert_eq!(a.len(), b.len());
-    if a.is_empty() {
-        return (0.0, 1.0, 0.0);
-    }
-
-    let n = a.len() as f64;
-    let mean_a = a.iter().sum::<f64>() / n;
-    let mean_b = b.iter().sum::<f64>() / n;
-
-    let mut var_a = 0.0;
-    let mut cov_ab = 0.0;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        let da = x - mean_a;
-        var_a += da * da;
-        cov_ab += da * (y - mean_b);
-    }
-
-    let scale = if var_a > 1e-30 { cov_ab / var_a } else { 0.0 };
-    let shift = mean_b - scale * mean_a;
-
-    let mut num = 0.0;
-    let mut den = 0.0;
-    for (&x, &y) in a.iter().zip(b.iter()) {
-        let d = (scale * x + shift) - y;
-        num += d * d;
-        den += y * y;
-    }
-
-    let err = (num / n).sqrt() / (den / n).sqrt().max(floor);
-    (err, scale, shift)
 }
 
 pub fn yx_key(x: f64, y: f64) -> (i64, i64) {

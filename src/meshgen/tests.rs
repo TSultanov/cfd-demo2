@@ -1,7 +1,6 @@
 use super::*;
 use nalgebra::{Point2, Vector2};
 
-#[allow(dead_code)]
 struct CircleObstacle {
     center: Point2<f64>,
     radius: f64,

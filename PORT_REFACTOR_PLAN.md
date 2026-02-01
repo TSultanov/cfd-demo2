@@ -622,6 +622,7 @@ As of **2026-01-31**:
 - `cfd2_codegen` WGSL codegen unit tests migrated to typed `*_dim` constructors (no `solver::units::si` usage in `wgsl.rs` tests).
 - `cfd2_codegen` coefficient expression builder now uses canonical type-level dimensions (no `solver::units::si` usage in `coeff_expr.rs`).
 - `cfd2_codegen` state access + primitive expr unit tests migrated to canonical type-level dimensions (no `solver::units::si` usage in those tests).
+- `cfd2_codegen` constants helper tests + IR test fixtures migrated to canonical type-level dimensions (no `solver::units::si` usage outside the `dsl::units` re-export).
 - Build-time codegen consumes port manifests for uniform params (e.g. EOS `Constants` fields); string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 
 **Next (recommended)**:

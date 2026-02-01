@@ -620,6 +620,7 @@ As of **2026-01-31**:
 - `ModelSpec::validate_module_manifests()` now validates using `PortRegistry` in both runtime and build-script contexts (legacy `StateLayout`-only validation path removed)
 - `cfd2_build_script` cfg hack removed: build.rs no longer injects a custom cfg, and build-script vs runtime now compile the same ports/runtime code (DashMap interner + proc-macros available in build-dependencies), so no dual code paths remain.
 - `cfd2_codegen` WGSL codegen unit tests migrated to typed `*_dim` constructors (no `solver::units::si` usage in `wgsl.rs` tests).
+- `cfd2_codegen` coefficient expression builder now uses canonical type-level dimensions (no `solver::units::si` usage in `coeff_expr.rs`).
 - Build-time codegen consumes port manifests for uniform params (e.g. EOS `Constants` fields); string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 
 **Next (recommended)**:

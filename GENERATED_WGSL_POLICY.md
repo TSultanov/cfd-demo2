@@ -66,8 +66,26 @@ Today, module manifests can contribute:
 - **Flux module configuration** (0 or 1 module may define a flux module)
 - **Named parameter keys** (the set of `plan.set_named_param()` keys accepted)
 - **Typed invariants** (state-layout / equation-system requirements validated early)
+- **PortManifest** (IR-safe port declarations for fields, params, buffers, and pre-resolved metadata)
 
 Conflicts are **explicit errors** (e.g. multiple modules defining a method or flux module).
+
+### PortManifest and PortRegistry
+
+Modules declare their ports via `PortManifest` attached to `KernelBundleModule.port_manifest`:
+
+- **Fields**: Declare required state fields with expected kind (Scalar/Vector2/Vector3) and physical dimension
+- **Params**: Declare uniform parameters with WGSL type and dimension
+- **Buffers**: Declare required buffer bindings with type and access mode
+- **Pre-resolved metadata**: Store `gradient_targets`, `resolved_state_slots`, etc. for WGSL generation
+
+At runtime (and build-time), `PortRegistry` consumes the `PortManifest` to:
+- Validate declared fields exist in `StateLayout` with correct kind/dimension
+- Register ports idempotently (conflicting specs return errors)
+- Provide typed access to offsets, strides, and component indices
+- Support the `AnyDimension` escape hatch for genuinely dynamic fields
+
+This enables **module WGSL generators** to consume pre-resolved slot/target metadata without probing `StateLayout` directly.
 
 ### EOS-implied low-mach policy
 

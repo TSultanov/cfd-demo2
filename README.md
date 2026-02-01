@@ -6,6 +6,8 @@
 
 - Codegen + solver unification plan: `CODEGEN_PLAN.md`
 - Generated WGSL policy: `GENERATED_WGSL_POLICY.md`
+- Port refactor plan: `PORT_REFACTOR_PLAN.md`
+- Port refactor migration guide: `MIGRATION_PORT_REFACTOR.md` (type-level dimensions + port-based field access)
 
 ## How to Run
 

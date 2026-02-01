@@ -571,7 +571,7 @@ mod tests {
         
         // Mass * Velocity = MomentumDensity (or Mass * L / T)
         type Momentum = MulDim<cfd2_ir::solver::dimensions::Mass, Velocity>;
-        let momentum: TypedExpr<Momentum> = mass * velocity;
+        let _momentum: TypedExpr<Momentum> = mass * velocity;
         
         // Momentum should have M: 1, L: 1, T: -1
         assert_eq!(<Momentum as UnitDimension>::M, (1, 1));

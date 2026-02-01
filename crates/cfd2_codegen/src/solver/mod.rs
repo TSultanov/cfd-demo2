@@ -8,10 +8,6 @@ pub mod gpu {
 
 pub mod ir {
     pub use cfd2_ir::solver::ir::*;
-
-    // Minimal fixtures for codegen-only tests.
-    #[cfg(test)]
-    pub mod test_fixtures;
 }
 
 pub mod scheme {

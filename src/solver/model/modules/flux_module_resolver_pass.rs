@@ -43,12 +43,13 @@ pub fn resolve_flux_module_state_slots(
     primitives: &[(String, PrimitiveExpr)],
     layout: &StateLayout,
 ) -> Result<ResolvedStateSlotsSpec, String> {
+    let field_map = build_field_metadata_map(layout);
     let primitive_map: HashMap<&str, &PrimitiveExpr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
     let mut fields = HashSet::<String>::new();
-    collect_fields_from_flux_spec(spec, &primitive_map, layout, &mut fields)?;
-    resolve_fields_against_layout(fields, layout)
+    collect_fields_from_flux_spec(spec, &primitive_map, &field_map, &mut fields)?;
+    resolve_fields_against_layout(fields, &field_map, layout.stride())
 }
 
 pub fn resolve_flux_module_state_slots_runtime_scheme(
@@ -56,29 +57,30 @@ pub fn resolve_flux_module_state_slots_runtime_scheme(
     primitives: &[(String, PrimitiveExpr)],
     layout: &StateLayout,
 ) -> Result<ResolvedStateSlotsSpec, String> {
+    let field_map = build_field_metadata_map(layout);
     let primitive_map: HashMap<&str, &PrimitiveExpr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
     let mut fields = HashSet::<String>::new();
     for (_, spec) in variants {
-        collect_fields_from_flux_spec(spec, &primitive_map, layout, &mut fields)?;
+        collect_fields_from_flux_spec(spec, &primitive_map, &field_map, &mut fields)?;
     }
-    resolve_fields_against_layout(fields, layout)
+    resolve_fields_against_layout(fields, &field_map, layout.stride())
 }
 
 fn collect_fields_from_flux_spec(
     spec: &FluxModuleKernelSpec,
     primitives: &HashMap<&str, &PrimitiveExpr>,
-    layout: &StateLayout,
+    field_map: &HashMap<String, FieldMetadata>,
     out: &mut HashSet<String>,
 ) -> Result<(), String> {
     match spec {
         FluxModuleKernelSpec::ScalarReplicated { phi } => {
-            collect_from_scalar_expr(phi, primitives, layout, out)?;
+            collect_from_scalar_expr(phi, primitives, field_map, out)?;
         }
         FluxModuleKernelSpec::ScalarPerComponent { flux, .. } => {
             for expr in flux {
-                collect_from_scalar_expr(expr, primitives, layout, out)?;
+                collect_from_scalar_expr(expr, primitives, field_map, out)?;
             }
         }
         FluxModuleKernelSpec::CentralUpwind {
@@ -91,19 +93,19 @@ fn collect_fields_from_flux_spec(
             ..
         } => {
             for expr in u_left {
-                collect_from_scalar_expr(expr, primitives, layout, out)?;
+                collect_from_scalar_expr(expr, primitives, field_map, out)?;
             }
             for expr in u_right {
-                collect_from_scalar_expr(expr, primitives, layout, out)?;
+                collect_from_scalar_expr(expr, primitives, field_map, out)?;
             }
             for expr in flux_left {
-                collect_from_scalar_expr(expr, primitives, layout, out)?;
+                collect_from_scalar_expr(expr, primitives, field_map, out)?;
             }
             for expr in flux_right {
-                collect_from_scalar_expr(expr, primitives, layout, out)?;
+                collect_from_scalar_expr(expr, primitives, field_map, out)?;
             }
-            collect_from_scalar_expr(a_plus, primitives, layout, out)?;
-            collect_from_scalar_expr(a_minus, primitives, layout, out)?;
+            collect_from_scalar_expr(a_plus, primitives, field_map, out)?;
+            collect_from_scalar_expr(a_minus, primitives, field_map, out)?;
         }
     }
 
@@ -113,7 +115,7 @@ fn collect_fields_from_flux_spec(
 fn collect_from_scalar_expr(
     expr: &FaceScalarExpr,
     primitives: &HashMap<&str, &PrimitiveExpr>,
-    layout: &StateLayout,
+    field_map: &HashMap<String, FieldMetadata>,
     out: &mut HashSet<String>,
 ) -> Result<(), String> {
     match expr {
@@ -130,12 +132,12 @@ fn collect_from_scalar_expr(
             let prim = primitives
                 .get(name.as_str())
                 .ok_or_else(|| format!("flux_module: primitive '{name}' not found"))?;
-            collect_from_primitive_expr(prim, layout, out)?;
+            collect_from_primitive_expr(prim, field_map, out)?;
         }
 
         FaceScalarExpr::Dot(a, b) => {
-            collect_from_vec2_expr(a, primitives, layout, out)?;
-            collect_from_vec2_expr(b, primitives, layout, out)?;
+            collect_from_vec2_expr(a, primitives, field_map, out)?;
+            collect_from_vec2_expr(b, primitives, field_map, out)?;
         }
 
         FaceScalarExpr::Add(a, b)
@@ -145,12 +147,12 @@ fn collect_from_scalar_expr(
         | FaceScalarExpr::Max(a, b)
         | FaceScalarExpr::Min(a, b)
         | FaceScalarExpr::Lerp(a, b) => {
-            collect_from_scalar_expr(a, primitives, layout, out)?;
-            collect_from_scalar_expr(b, primitives, layout, out)?;
+            collect_from_scalar_expr(a, primitives, field_map, out)?;
+            collect_from_scalar_expr(b, primitives, field_map, out)?;
         }
 
         FaceScalarExpr::Neg(a) | FaceScalarExpr::Abs(a) | FaceScalarExpr::Sqrt(a) => {
-            collect_from_scalar_expr(a, primitives, layout, out)?;
+            collect_from_scalar_expr(a, primitives, field_map, out)?;
         }
     }
 
@@ -160,7 +162,7 @@ fn collect_from_scalar_expr(
 fn collect_from_vec2_expr(
     expr: &FaceVec2Expr,
     primitives: &HashMap<&str, &PrimitiveExpr>,
-    layout: &StateLayout,
+    field_map: &HashMap<String, FieldMetadata>,
     out: &mut HashSet<String>,
 ) -> Result<(), String> {
     match expr {
@@ -171,20 +173,20 @@ fn collect_from_vec2_expr(
         }
 
         FaceVec2Expr::Vec2(x, y) => {
-            collect_from_scalar_expr(x, primitives, layout, out)?;
-            collect_from_scalar_expr(y, primitives, layout, out)?;
+            collect_from_scalar_expr(x, primitives, field_map, out)?;
+            collect_from_scalar_expr(y, primitives, field_map, out)?;
         }
 
         FaceVec2Expr::Add(a, b) | FaceVec2Expr::Sub(a, b) | FaceVec2Expr::Lerp(a, b) => {
-            collect_from_vec2_expr(a, primitives, layout, out)?;
-            collect_from_vec2_expr(b, primitives, layout, out)?;
+            collect_from_vec2_expr(a, primitives, field_map, out)?;
+            collect_from_vec2_expr(b, primitives, field_map, out)?;
         }
 
-        FaceVec2Expr::Neg(a) => collect_from_vec2_expr(a, primitives, layout, out)?,
+        FaceVec2Expr::Neg(a) => collect_from_vec2_expr(a, primitives, field_map, out)?,
 
         FaceVec2Expr::MulScalar(v, s) => {
-            collect_from_vec2_expr(v, primitives, layout, out)?;
-            collect_from_scalar_expr(s, primitives, layout, out)?;
+            collect_from_vec2_expr(v, primitives, field_map, out)?;
+            collect_from_scalar_expr(s, primitives, field_map, out)?;
         }
     }
 
@@ -193,15 +195,14 @@ fn collect_from_vec2_expr(
 
 fn collect_from_primitive_expr(
     expr: &PrimitiveExpr,
-    layout: &StateLayout,
+    field_map: &HashMap<String, FieldMetadata>,
     out: &mut HashSet<String>,
 ) -> Result<(), String> {
     match expr {
         PrimitiveExpr::Literal(_) => {}
 
         PrimitiveExpr::Field(name) => {
-            let field_map = build_field_metadata_map(layout);
-            let base = resolve_primitive_field_base(&field_map, name)?;
+            let base = resolve_primitive_field_base(field_map, name)?;
             out.insert(base);
         }
 
@@ -209,12 +210,12 @@ fn collect_from_primitive_expr(
         | PrimitiveExpr::Sub(a, b)
         | PrimitiveExpr::Mul(a, b)
         | PrimitiveExpr::Div(a, b) => {
-            collect_from_primitive_expr(a, layout, out)?;
-            collect_from_primitive_expr(b, layout, out)?;
+            collect_from_primitive_expr(a, field_map, out)?;
+            collect_from_primitive_expr(b, field_map, out)?;
         }
 
         PrimitiveExpr::Sqrt(inner) | PrimitiveExpr::Neg(inner) => {
-            collect_from_primitive_expr(inner, layout, out)?;
+            collect_from_primitive_expr(inner, field_map, out)?;
         }
     }
 
@@ -259,10 +260,9 @@ fn resolve_primitive_field_base(
 
 fn resolve_fields_against_layout(
     fields: HashSet<String>,
-    layout: &StateLayout,
+    field_map: &HashMap<String, FieldMetadata>,
+    stride: u32,
 ) -> Result<ResolvedStateSlotsSpec, String> {
-    let field_map = build_field_metadata_map(layout);
-
     let mut slots = Vec::new();
     for name in fields {
         let meta = field_map.get(&name).ok_or_else(|| {
@@ -285,10 +285,7 @@ fn resolve_fields_against_layout(
 
     slots.sort_by(|a, b| a.name.cmp(&b.name));
 
-    Ok(ResolvedStateSlotsSpec {
-        stride: layout.stride(),
-        slots,
-    })
+    Ok(ResolvedStateSlotsSpec { stride, slots })
 }
 
 #[cfg(test)]

@@ -23,28 +23,8 @@ pub fn lower_flux_scheme(
 mod tests {
     use super::*;
 
-    fn is_state_named(expr: &S, name: &str) -> bool {
-        matches!(
-            expr,
-            S::State {
-                name: n,
-                ..
-            } if n == name
-        )
-    }
-
     fn is_lit(expr: &S, value: f32) -> bool {
         matches!(expr, S::Literal(v) if *v == value)
-    }
-
-    fn is_mul_named_states(expr: &S, a: &str, b: &str) -> bool {
-        match expr {
-            S::Mul(x, y) => {
-                (is_state_named(x, a) && is_state_named(y, b))
-                    || (is_state_named(x, b) && is_state_named(y, a))
-            }
-            _ => false,
-        }
     }
 
     fn contains_sign_guard_for_states(expr: &S, a: &str, b: &str) -> bool {

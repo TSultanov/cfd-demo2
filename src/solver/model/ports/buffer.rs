@@ -314,6 +314,17 @@ impl BufferTypeKind {
         }
     }
 
+    pub fn from_wgsl_type(elem_type: &str) -> Option<Self> {
+        match elem_type {
+            "f32" => Some(BufferTypeKind::F32),
+            "u32" => Some(BufferTypeKind::U32),
+            "i32" => Some(BufferTypeKind::I32),
+            "vec2<f32>" => Some(BufferTypeKind::Vec2F32),
+            "vec3<f32>" => Some(BufferTypeKind::Vec3F32),
+            _ => None,
+        }
+    }
+
     pub fn element_size(self) -> usize {
         match self {
             BufferTypeKind::F32 => 4,

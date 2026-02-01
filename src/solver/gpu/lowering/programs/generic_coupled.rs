@@ -60,16 +60,6 @@ impl ResolvedUnknownMapping {
         let idx = equation * self.max_components + component;
         Some(self.offsets[idx])
     }
-
-    /// Get the target name for a given equation.
-    pub fn get_target_name(&self, equation: usize) -> Option<&str> {
-        self.target_names.get(equation).map(|s| s.as_str())
-    }
-
-    /// Get the component count for a given equation.
-    pub fn get_component_count(&self, equation: usize) -> Option<usize> {
-        self.component_counts.get(equation).copied()
-    }
 }
 
 /// Resolve the unknown-to-state mapping from equation targets using PortRegistry.
@@ -155,9 +145,6 @@ pub(crate) struct GenericCoupledProgramResources {
     _b_bc_kind: wgpu::Buffer,
     _b_bc_value: wgpu::Buffer,
     boundary_faces: Vec<Vec<u32>>,
-    /// Pre-resolved unknown-to-state mapping for GPU operations.
-    /// This is computed at model build time to avoid repeated StateLayout lookups.
-    unknown_mapping: ResolvedUnknownMapping,
 }
 
 struct GenericCoupledSchurResources {
@@ -662,7 +649,6 @@ impl GenericCoupledProgramResources {
             _b_bc_kind: b_bc_kind,
             _b_bc_value: b_bc_value,
             boundary_faces,
-            unknown_mapping,
         })
     }
 }

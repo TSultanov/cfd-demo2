@@ -4,10 +4,10 @@
 // and buffer ports, mapping them to their underlying resources.
 
 use super::{
-    AccessMode, BufferPort, BufferType, FieldKind, FieldPort, ParamPort, ParamType, PortId,
-    PortValidationError,
+    BufferPort, FieldKind, FieldPort, ParamPort, ParamType, PortId, PortValidationError,
 };
 
+use super::buffer::{AccessModeKind, BufferTypeKind, IntoAccessModeKind, IntoBufferTypeKind};
 
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::ports::dimensions::{AnyDimension, UnitDimension};
@@ -132,66 +132,6 @@ struct BufferPortEntry {
     binding: u32,
     buffer_type: BufferTypeKind,
     access_mode: AccessModeKind,
-}
-
-/// Enum representing buffer element types for storage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BufferTypeKind {
-    F32,
-    U32,
-    I32,
-    Vec2F32,
-    Vec3F32,
-}
-
-impl BufferTypeKind {
-    fn from_type<T: BufferType>() -> Self {
-        use super::{BufferF32, BufferI32, BufferU32, BufferVec2F32, BufferVec3F32};
-        // This is a bit hacky but works for our marker types
-        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<BufferF32>() {
-            BufferTypeKind::F32
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<BufferU32>() {
-            BufferTypeKind::U32
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<BufferI32>() {
-            BufferTypeKind::I32
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<BufferVec2F32>() {
-            BufferTypeKind::Vec2F32
-        } else if std::any::TypeId::of::<T>() == std::any::TypeId::of::<BufferVec3F32>() {
-            BufferTypeKind::Vec3F32
-        } else {
-            panic!("Unknown buffer type")
-        }
-    }
-
-    /// Parse a WGSL element type string into a BufferTypeKind.
-    pub fn from_wgsl_type(elem_type: &str) -> Option<Self> {
-        match elem_type {
-            "f32" => Some(BufferTypeKind::F32),
-            "u32" => Some(BufferTypeKind::U32),
-            "i32" => Some(BufferTypeKind::I32),
-            "vec2<f32>" => Some(BufferTypeKind::Vec2F32),
-            "vec3<f32>" => Some(BufferTypeKind::Vec3F32),
-            _ => None,
-        }
-    }
-}
-
-/// Enum representing access modes for storage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AccessModeKind {
-    ReadOnly,
-    ReadWrite,
-}
-
-impl AccessModeKind {
-    fn from_mode<A: AccessMode>() -> Self {
-        use super::{ReadOnly, ReadWrite};
-        if std::any::TypeId::of::<A>() == std::any::TypeId::of::<ReadOnly>() {
-            AccessModeKind::ReadOnly
-        } else {
-            AccessModeKind::ReadWrite
-        }
-    }
 }
 
 impl PortRegistry {
@@ -587,7 +527,7 @@ impl PortRegistry {
     ///
     /// - `T`: The buffer element type
     /// - `A`: The access mode
-    pub fn register_buffer<T: BufferType, A: AccessMode>(
+    pub fn register_buffer<T: IntoBufferTypeKind, A: IntoAccessModeKind>(
         &mut self,
         name: &'static str,
         group: u32,
@@ -603,7 +543,7 @@ impl PortRegistry {
         if let Some(&existing_id) = self.buffer_key_to_id.get(&buffer_key) {
             let entry = self.buffer_ports.get(&existing_id).expect("entry exists");
             // Verify type matches
-            let expected_type = BufferTypeKind::from_type::<T>();
+            let expected_type = T::into_kind();
             if entry.buffer_type != expected_type {
                 return Err(PortRegistryError::BufferTypeConflict {
                     name: name.to_string(),
@@ -614,7 +554,7 @@ impl PortRegistry {
                 });
             }
             // Verify access mode matches
-            let expected_mode = AccessModeKind::from_mode::<A>();
+            let expected_mode = A::into_kind();
             if entry.access_mode != expected_mode {
                 return Err(PortRegistryError::BufferAccessConflict {
                     name: name.to_string(),
@@ -637,8 +577,8 @@ impl PortRegistry {
                 name: name.to_string(),
                 group,
                 binding,
-                buffer_type: BufferTypeKind::from_type::<T>(),
-                access_mode: AccessModeKind::from_mode::<A>(),
+                buffer_type: T::into_kind(),
+                access_mode: A::into_kind(),
             },
         );
         self.buffer_key_to_id.insert(buffer_key, id);
@@ -702,15 +642,6 @@ impl PortRegistry {
     }
 
     /// Get a parameter port entry by ID.
-    pub fn get_param_entry(&self, id: PortId) -> Option<&ParamPortEntry> {
-        self.param_ports.get(&id)
-    }
-
-    /// Get a buffer port entry by ID.
-    pub fn get_buffer_entry(&self, id: PortId) -> Option<&BufferPortEntry> {
-        self.buffer_ports.get(&id)
-    }
-
     /// Register all ports from a manifest.
     ///
     /// This method iterates through all params, fields, and buffers in the manifest
@@ -1764,7 +1695,7 @@ mod tests {
         let dt_id = registry
             .lookup_param("test.dt")
             .expect("should find dt param");
-        let dt_entry = registry.get_param_entry(dt_id).unwrap();
+        let dt_entry = registry.param_ports.get(&dt_id).unwrap();
         assert_eq!(dt_entry.key, "test.dt");
         assert_eq!(dt_entry.wgsl_field, "dt");
 
@@ -1778,7 +1709,7 @@ mod tests {
         let buf_id = registry
             .lookup_buffer("test_buffer", 1, 0)
             .expect("should find buffer");
-        let buf_entry = registry.get_buffer_entry(buf_id).unwrap();
+        let buf_entry = registry.buffer_ports.get(&buf_id).unwrap();
         assert_eq!(buf_entry.name, "test_buffer");
         assert_eq!(buf_entry.group, 1);
         assert_eq!(buf_entry.binding, 0);

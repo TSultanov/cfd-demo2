@@ -5,7 +5,7 @@ use super::dsl::EnumExpr;
 use super::ir::{DiscreteOp, DiscreteOpKind, DiscreteSystem};
 use super::wgsl_ast::{Block, Expr, Function, Item, Module, Param, Stmt, Type};
 use super::wgsl_dsl as dsl;
-use crate::solver::ir::{Coefficient, Discretization, FieldKind};
+use crate::solver::ir::{Coefficient, FieldKind};
 
 pub fn generate_wgsl(system: &DiscreteSystem) -> String {
     generate_wgsl_module(system).to_wgsl()
@@ -799,19 +799,6 @@ fn scheme_name(scheme: Scheme) -> &'static str {
     scheme.as_str()
 }
 
-#[allow(dead_code)]
-fn scheme_id(scheme: Scheme) -> u32 {
-    scheme.gpu_id()
-}
-
-#[allow(dead_code)]
-fn discretization_id(discretization: Discretization) -> u32 {
-    match discretization {
-        Discretization::Implicit => 0,
-        Discretization::Explicit => 1,
-    }
-}
-
 fn sanitize_ident(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     for ch in value.chars() {
@@ -930,11 +917,9 @@ mod tests {
         assert_eq!(scheme_name(Scheme::Upwind), "upwind");
         assert_eq!(scheme_name(Scheme::SecondOrderUpwind), "sou");
         assert_eq!(scheme_name(Scheme::QUICK), "quick");
-        assert_eq!(scheme_id(Scheme::Upwind), 0);
-        assert_eq!(scheme_id(Scheme::SecondOrderUpwind), 1);
-        assert_eq!(scheme_id(Scheme::QUICK), 2);
-        assert_eq!(discretization_id(Discretization::Implicit), 0);
-        assert_eq!(discretization_id(Discretization::Explicit), 1);
+        assert_eq!(Scheme::Upwind.gpu_id(), 0);
+        assert_eq!(Scheme::SecondOrderUpwind.gpu_id(), 1);
+        assert_eq!(Scheme::QUICK.gpu_id(), 2);
     }
 
     #[test]

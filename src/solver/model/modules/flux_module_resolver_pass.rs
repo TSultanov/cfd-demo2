@@ -262,13 +262,13 @@ fn resolve_fields_against_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::ir::{vol_scalar, vol_vector, FaceScalarExpr, FaceSide, FluxModuleKernelSpec};
-    use crate::solver::units::si;
+    use crate::solver::dimensions::{Density, MomentumDensity};
+    use crate::solver::ir::{vol_scalar_dim, vol_vector_dim, FaceScalarExpr, FaceSide, FluxModuleKernelSpec};
 
     #[test]
     fn primitive_field_component_selectors_resolve_to_base() {
-        let rho = vol_scalar("rho", si::DENSITY);
-        let rho_u = vol_vector("rho_u", si::MOMENTUM_DENSITY);
+        let rho = vol_scalar_dim::<Density>("rho");
+        let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
         let layout = StateLayout::new(vec![rho, rho_u]);
 
         assert_eq!(
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn primitive_field_missing_component_fails() {
-        let rho_u = vol_vector("rho_u", si::MOMENTUM_DENSITY);
+        let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
         let layout = StateLayout::new(vec![rho_u]);
 
         let err = resolve_primitive_field_base(&layout, "rho_u_z").unwrap_err();
@@ -299,8 +299,8 @@ mod tests {
 
     #[test]
     fn resolves_state_slots_from_spec_and_primitives() {
-        let rho = vol_scalar("rho", si::DENSITY);
-        let rho_u = vol_vector("rho_u", si::MOMENTUM_DENSITY);
+        let rho = vol_scalar_dim::<Density>("rho");
+        let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
         let layout = StateLayout::new(vec![rho, rho_u]);
 
         let primitives = vec![(

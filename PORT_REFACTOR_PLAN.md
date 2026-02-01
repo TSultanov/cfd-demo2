@@ -479,7 +479,7 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 
 **Goal**: Remove all legacy code
 
-- [ ] Delete deprecated module functions
+- [x] Delete deprecated module functions
 - [x] Remove `NamedParamKey` enum
 - [x] Remove old `ModuleManifest`
 - [x] Delete string-based codegen functions
@@ -588,7 +588,7 @@ crates/cfd2_macros/tests/*        # trybuild + compile-fail tests
 - [x] Compile-time dimension checking works where Rust can express it (ports + structurally-identical typed IR); runtime `validate_units()` remains the backstop for semantically-equal-but-structurally-different dimensions
 - [x] Runtime validation catches invalid configs
 - [x] Generated WGSL diffs are empty (or equivalent check passes)
-- [ ] Hard cutoff removes all deprecated APIs
+- [x] Hard cutoff removes all deprecated APIs
 
 ## Notes
 

@@ -31,9 +31,9 @@ pub fn generate_flux_module_gradients_wgsl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::ir::{vol_scalar, vol_vector, FluxComponent, StateLayout};
+    use crate::solver::dimensions::{Density, DivDim, Length, MomentumDensity};
+    use crate::solver::ir::{vol_scalar_dim, vol_vector_dim, FluxComponent, StateLayout};
     use crate::solver::model::modules::flux_module::resolve_flux_module_gradients_targets;
-    use crate::solver::units::si;
 
     #[test]
     fn flux_module_gradients_wgsl_matches_committed_incompressible_momentum() {
@@ -91,11 +91,11 @@ mod tests {
 
     #[test]
     fn flux_module_gradients_accepts_vector_component_gradients() {
-        let rho_u = vol_vector("rho_u", si::MOMENTUM_DENSITY);
-        let grad_rho_u_x = vol_vector("grad_rho_u_x", si::MOMENTUM_DENSITY / si::LENGTH);
-        let grad_rho_u_y = vol_vector("grad_rho_u_y", si::MOMENTUM_DENSITY / si::LENGTH);
-        let rho = vol_scalar("rho", si::DENSITY);
-        let grad_rho = vol_vector("grad_rho", si::DENSITY / si::LENGTH);
+        let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
+        let grad_rho_u_x = vol_vector_dim::<DivDim<MomentumDensity, Length>>("grad_rho_u_x");
+        let grad_rho_u_y = vol_vector_dim::<DivDim<MomentumDensity, Length>>("grad_rho_u_y");
+        let rho = vol_scalar_dim::<Density>("rho");
+        let grad_rho = vol_vector_dim::<DivDim<Density, Length>>("grad_rho");
 
         let layout = StateLayout::new(vec![rho_u, grad_rho_u_x, grad_rho_u_y, rho, grad_rho]);
 
@@ -132,8 +132,8 @@ mod tests {
         // Regression test: when a grad_<field> exists and base field exists,
         // but the base field component is missing (e.g., trying to access component 5 of a vec2),
         // the resolver should return a clear error containing the field name.
-        let rho = vol_scalar("rho", si::DENSITY);
-        let grad_rho = vol_vector("grad_rho", si::DENSITY / si::LENGTH);
+        let rho = vol_scalar_dim::<Density>("rho");
+        let grad_rho = vol_vector_dim::<DivDim<Density, Length>>("grad_rho");
 
         let layout = StateLayout::new(vec![rho, grad_rho]);
 
@@ -154,8 +154,8 @@ mod tests {
         );
 
         // Now test with a vector component selector that exceeds the field's component count
-        let rho_u = vol_vector("rho_u", si::MOMENTUM_DENSITY);
-        let grad_rho_u_z = vol_vector("grad_rho_u_z", si::MOMENTUM_DENSITY / si::LENGTH);
+        let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
+        let grad_rho_u_z = vol_vector_dim::<DivDim<MomentumDensity, Length>>("grad_rho_u_z");
         // Note: rho_u only has x,y components (0,1), but we're requesting z (component 2)
 
         let layout2 = StateLayout::new(vec![rho_u, grad_rho_u_z]);

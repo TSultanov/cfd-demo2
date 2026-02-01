@@ -12,6 +12,7 @@ use cfd2_ir::solver::dimensions::{
 };
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
+use crate::solver::model::ports::PortRegistry;
 
 #[derive(Debug, Clone)]
 pub struct IncompressibleMomentumFields {
@@ -319,18 +320,30 @@ fn rhie_chow_flux_module_kernel(
         }
     }
 
-    fn density_face_expr(layout: &StateLayout) -> S {
+    // Create a PortRegistry for runtime validation of fields
+    let registry = PortRegistry::new(layout.clone());
+
+    fn density_face_expr(registry: &PortRegistry) -> Result<S, String> {
         // Prefer a state-layout density when present (variable-density extension);
         // otherwise fall back to the global constant density uniform.
-        if let Some(rho) = layout.field("rho") {
-            if rho.kind() == FieldKind::Scalar {
-                return S::Lerp(
-                    Box::new(S::state(FaceSide::Owner, "rho")),
-                    Box::new(S::state(FaceSide::Neighbor, "rho")),
-                );
+        // Use PortRegistry validation to check for existence, kind, and dimension.
+        match registry.validate_scalar_field::<Density>(
+            "rhie_chow_flux_module_kernel",
+            "rho",
+        ) {
+            Ok(()) => Ok(S::Lerp(
+                Box::new(S::state(FaceSide::Owner, "rho")),
+                Box::new(S::state(FaceSide::Neighbor, "rho")),
+            )),
+            Err(crate::solver::model::ports::PortValidationError::MissingField { .. }) => {
+                // rho is not in state layout; fall back to uniform density
+                Ok(S::constant("density"))
             }
+            Err(e) => Err(format!(
+                "rho field exists but has wrong kind or unit: {}",
+                e
+            )),
         }
-        S::constant("density")
     }
 
     // Infer (momentum, pressure) coupling from the declared equation system.
@@ -410,21 +423,33 @@ fn rhie_chow_flux_module_kernel(
     };
     let mut coeff_fields = Vec::new();
     collect_coeff_fields(coeff, &mut coeff_fields);
-    let layout_coeff_fields: Vec<_> = coeff_fields
-        .into_iter()
-        .filter(|f| layout.field(f.name()).is_some())
-        .collect();
-    let d_p = match layout_coeff_fields.as_slice() {
-        [only] => only.name().to_string(),
+    // Use PortRegistry validation to filter for scalar fields with D_P dimension
+    let mut d_p_candidates: Vec<String> = Vec::new();
+    for f in &coeff_fields {
+        match registry.validate_scalar_field::<cfd2_ir::solver::dimensions::D_P>(
+            "rhie_chow_flux_module_kernel",
+            f.name(),
+        ) {
+            Ok(()) => d_p_candidates.push(f.name().to_string()),
+            Err(crate::solver::model::ports::PortValidationError::MissingField { .. }) => {
+                // Field is not in state layout; not a candidate
+            }
+            Err(_) => {
+                // Field exists but has wrong kind or unit; not a candidate
+            }
+        }
+    }
+    let d_p = match d_p_candidates.as_slice() {
+        [only] => only.clone(),
         [] => {
             return Err(format!(
-                "pressure laplacian coefficient for '{pressure}' does not reference any state-layout scalar fields"
+                "pressure laplacian coefficient for '{pressure}' does not reference any state-layout scalar fields with D_P units"
             ));
         }
         many => {
             return Err(format!(
-                "pressure laplacian coefficient for '{pressure}' references multiple state-layout fields; cannot derive unique d_p: [{}]",
-                many.iter().map(|f| f.name()).collect::<Vec<_>>().join(", ")
+                "pressure laplacian coefficient for '{pressure}' references multiple state-layout fields with D_P units; cannot derive unique d_p: [{}]",
+                many.join(", ")
             ));
         }
     };
@@ -447,7 +472,7 @@ fn rhie_chow_flux_module_kernel(
     //
     // This definition is intentionally "general": it only relies on the model-declared
     // momentum/pressure coupling and the presence of `(d_p, grad_p)` in the state layout.
-    let rho_face = density_face_expr(layout);
+    let rho_face = density_face_expr(&registry)?;
 
     let d_p_face = S::Lerp(
         Box::new(S::state(FaceSide::Owner, fields.d_p.clone())),

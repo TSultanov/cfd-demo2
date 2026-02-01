@@ -130,8 +130,8 @@ pub fn rhie_chow_aux_module(
     ];
 
     // Build PortManifest with required fields
+    use crate::solver::dimensions::{D_P, PressureGradient, UnitDimension};
     use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
-    use crate::solver::units::si;
 
     let port_manifest = Some(PortManifest {
         fields: vec![
@@ -139,19 +139,19 @@ pub fn rhie_chow_aux_module(
             FieldSpec {
                 name: dp_field,
                 kind: PortFieldKind::Scalar,
-                unit: si::D_P,
+                unit: D_P::UNIT,
             },
             // grad_p field: Vector2 with PRESSURE_GRADIENT unit
             FieldSpec {
                 name: grad_p_name,
                 kind: PortFieldKind::Vector2,
-                unit: si::PRESSURE_GRADIENT,
+                unit: PressureGradient::UNIT,
             },
             // grad_p_old field: Vector2 with PRESSURE_GRADIENT unit
             FieldSpec {
                 name: grad_p_old_name,
                 kind: PortFieldKind::Vector2,
-                unit: si::PRESSURE_GRADIENT,
+                unit: PressureGradient::UNIT,
             },
             // momentum field: Vector2 with ANY_DIMENSION (dynamic dimension)
             FieldSpec {
@@ -392,23 +392,26 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver::dimensions::{
+        D_P, Density, DynamicViscosity, MassFlux, Pressure, PressureGradient, UnitDimension,
+        Velocity,
+    };
     use crate::solver::model::backend::ast::{
         fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, EquationSystem,
     };
     use crate::solver::model::backend::state_layout::StateLayout;
     use crate::solver::model::{BoundarySpec, PrimitiveDerivations};
-    use crate::solver::units::si;
 
     #[test]
     fn contract_rhie_chow_aux_kernel_generators_honor_dp_field_name() {
-        let u = vol_vector("U", si::VELOCITY);
-        let p = vol_scalar("p", si::PRESSURE);
-        let phi = surface_scalar("phi", si::MASS_FLUX);
-        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
-        let rho = vol_scalar("rho", si::DENSITY);
-        let dp_custom = vol_scalar("dp_custom", si::D_P);
-        let grad_p = vol_vector("grad_p", si::PRESSURE_GRADIENT);
-        let grad_p_old = vol_vector("grad_p_old", si::PRESSURE_GRADIENT);
+        let u = vol_vector("U", Velocity::UNIT);
+        let p = vol_scalar("p", Pressure::UNIT);
+        let phi = surface_scalar("phi", MassFlux::UNIT);
+        let mu = vol_scalar("mu", DynamicViscosity::UNIT);
+        let rho = vol_scalar("rho", Density::UNIT);
+        let dp_custom = vol_scalar("dp_custom", D_P::UNIT);
+        let grad_p = vol_vector("grad_p", PressureGradient::UNIT);
+        let grad_p_old = vol_vector("grad_p_old", PressureGradient::UNIT);
 
         let momentum = (fvm::ddt_coeff(Coefficient::field(rho).expect("rho must be scalar"), u)
             + fvm::div(phi, u)
@@ -469,13 +472,13 @@ mod tests {
     fn missing_grad_p_old_returns_clear_error() {
         // Regression test: when grad_p_old is missing, the generator should
         // return a clear error containing the missing field name.
-        let u = vol_vector("U", si::VELOCITY);
-        let p = vol_scalar("p", si::PRESSURE);
-        let phi = surface_scalar("phi", si::MASS_FLUX);
-        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
-        let rho = vol_scalar("rho", si::DENSITY);
-        let dp = vol_scalar("dp", si::D_P);
-        let grad_p = vol_vector("grad_p", si::PRESSURE_GRADIENT);
+        let u = vol_vector("U", Velocity::UNIT);
+        let p = vol_scalar("p", Pressure::UNIT);
+        let phi = surface_scalar("phi", MassFlux::UNIT);
+        let mu = vol_scalar("mu", DynamicViscosity::UNIT);
+        let rho = vol_scalar("rho", Density::UNIT);
+        let dp = vol_scalar("dp", D_P::UNIT);
+        let grad_p = vol_vector("grad_p", PressureGradient::UNIT);
         // Note: grad_p_old is intentionally missing
 
         let momentum = (fvm::ddt_coeff(Coefficient::field(rho).expect("rho must be scalar"), u)
@@ -544,14 +547,14 @@ mod tests {
     #[test]
     fn rhie_chow_module_has_port_manifest() {
         // Verify that rhie_chow_aux_module produces a PortManifest with expected fields.
-        let u = vol_vector("U", si::VELOCITY);
-        let p = vol_scalar("p", si::PRESSURE);
-        let phi = surface_scalar("phi", si::MASS_FLUX);
-        let mu = vol_scalar("mu", si::DYNAMIC_VISCOSITY);
-        let rho = vol_scalar("rho", si::DENSITY);
-        let dp = vol_scalar("dp", si::D_P);
-        let grad_p = vol_vector("grad_p", si::PRESSURE_GRADIENT);
-        let grad_p_old = vol_vector("grad_p_old", si::PRESSURE_GRADIENT);
+        let u = vol_vector("U", Velocity::UNIT);
+        let p = vol_scalar("p", Pressure::UNIT);
+        let phi = surface_scalar("phi", MassFlux::UNIT);
+        let mu = vol_scalar("mu", DynamicViscosity::UNIT);
+        let rho = vol_scalar("rho", Density::UNIT);
+        let dp = vol_scalar("dp", D_P::UNIT);
+        let grad_p = vol_vector("grad_p", PressureGradient::UNIT);
+        let grad_p_old = vol_vector("grad_p_old", PressureGradient::UNIT);
 
         let momentum = (fvm::ddt_coeff(Coefficient::field(rho).expect("rho must be scalar"), u)
             + fvm::div(phi, u)
@@ -592,7 +595,7 @@ mod tests {
             .find(|f| f.name == "dp")
             .expect("dp field spec");
         assert_eq!(dp_field.kind, crate::solver::ir::ports::PortFieldKind::Scalar);
-        assert_eq!(dp_field.unit, crate::solver::units::si::D_P);
+        assert_eq!(dp_field.unit, D_P::UNIT);
 
         let grad_p_field = port_manifest
             .fields
@@ -603,7 +606,7 @@ mod tests {
             grad_p_field.kind,
             crate::solver::ir::ports::PortFieldKind::Vector2
         );
-        assert_eq!(grad_p_field.unit, crate::solver::units::si::PRESSURE_GRADIENT);
+        assert_eq!(grad_p_field.unit, PressureGradient::UNIT);
 
         let grad_p_old_field = port_manifest
             .fields
@@ -614,10 +617,7 @@ mod tests {
             grad_p_old_field.kind,
             crate::solver::ir::ports::PortFieldKind::Vector2
         );
-        assert_eq!(
-            grad_p_old_field.unit,
-            crate::solver::units::si::PRESSURE_GRADIENT
-        );
+        assert_eq!(grad_p_old_field.unit, PressureGradient::UNIT);
 
         let momentum_field = port_manifest
             .fields

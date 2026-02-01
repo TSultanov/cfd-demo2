@@ -9,8 +9,34 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
-use crate::solver::ir::{FaceScalarExpr, FaceVec2Expr, FluxModuleKernelSpec, StateLayout};
+use crate::solver::ir::{FaceScalarExpr, FaceVec2Expr, FieldKind, FluxModuleKernelSpec, StateLayout};
 use crate::solver::shared::PrimitiveExpr;
+use crate::solver::units::UnitDim;
+
+/// Field metadata for precomputed layout lookups.
+struct FieldMetadata {
+    kind: FieldKind,
+    unit: UnitDim,
+    offset: u32,
+    component_count: u32,
+}
+
+/// Build a map of field metadata from the state layout.
+fn build_field_metadata_map(layout: &StateLayout) -> HashMap<String, FieldMetadata> {
+    layout
+        .fields()
+        .iter()
+        .map(|f| {
+            let meta = FieldMetadata {
+                kind: f.kind(),
+                unit: f.unit(),
+                offset: f.offset(),
+                component_count: f.component_count(),
+            };
+            (f.name().to_string(), meta)
+        })
+        .collect()
+}
 
 pub fn resolve_flux_module_state_slots(
     spec: &FluxModuleKernelSpec,
@@ -174,7 +200,8 @@ fn collect_from_primitive_expr(
         PrimitiveExpr::Literal(_) => {}
 
         PrimitiveExpr::Field(name) => {
-            let base = resolve_primitive_field_base(layout, name)?;
+            let field_map = build_field_metadata_map(layout);
+            let base = resolve_primitive_field_base(&field_map, name)?;
             out.insert(base);
         }
 
@@ -194,9 +221,12 @@ fn collect_from_primitive_expr(
     Ok(())
 }
 
-fn resolve_primitive_field_base(layout: &StateLayout, name: &str) -> Result<String, String> {
-    if let Some(field) = layout.field(name) {
-        if field.kind() == crate::solver::ir::FieldKind::Scalar {
+fn resolve_primitive_field_base(
+    field_map: &HashMap<String, FieldMetadata>,
+    name: &str,
+) -> Result<String, String> {
+    if let Some(meta) = field_map.get(name) {
+        if meta.kind == FieldKind::Scalar {
             return Ok(name.to_string());
         }
     }
@@ -215,10 +245,10 @@ fn resolve_primitive_field_base(layout: &StateLayout, name: &str) -> Result<Stri
         }
     };
 
-    let base_field = layout.field(base).ok_or_else(|| {
+    let base_meta = field_map.get(base).ok_or_else(|| {
         format!("flux_module: primitive field '{name}' not found in state layout")
     })?;
-    if component >= base_field.component_count() {
+    if component >= base_meta.component_count {
         return Err(format!(
             "flux_module: primitive field '{name}' not found in state layout"
         ));
@@ -231,23 +261,25 @@ fn resolve_fields_against_layout(
     fields: HashSet<String>,
     layout: &StateLayout,
 ) -> Result<ResolvedStateSlotsSpec, String> {
+    let field_map = build_field_metadata_map(layout);
+
     let mut slots = Vec::new();
     for name in fields {
-        let field = layout.field(&name).ok_or_else(|| {
+        let meta = field_map.get(&name).ok_or_else(|| {
             format!("flux_module: state field '{name}' not found in state layout")
         })?;
 
-        let kind = match field.kind() {
-            crate::solver::ir::FieldKind::Scalar => PortFieldKind::Scalar,
-            crate::solver::ir::FieldKind::Vector2 => PortFieldKind::Vector2,
-            crate::solver::ir::FieldKind::Vector3 => PortFieldKind::Vector3,
+        let kind = match meta.kind {
+            FieldKind::Scalar => PortFieldKind::Scalar,
+            FieldKind::Vector2 => PortFieldKind::Vector2,
+            FieldKind::Vector3 => PortFieldKind::Vector3,
         };
 
         slots.push(ResolvedStateSlotSpec {
             name,
             kind,
-            unit: field.unit(),
-            base_offset: field.offset(),
+            unit: meta.unit,
+            base_offset: meta.offset,
         });
     }
 
@@ -270,17 +302,18 @@ mod tests {
         let rho = vol_scalar_dim::<Density>("rho");
         let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
         let layout = StateLayout::new(vec![rho, rho_u]);
+        let field_map = build_field_metadata_map(&layout);
 
         assert_eq!(
-            resolve_primitive_field_base(&layout, "rho").unwrap(),
+            resolve_primitive_field_base(&field_map, "rho").unwrap(),
             "rho".to_string()
         );
         assert_eq!(
-            resolve_primitive_field_base(&layout, "rho_u_x").unwrap(),
+            resolve_primitive_field_base(&field_map, "rho_u_x").unwrap(),
             "rho_u".to_string()
         );
         assert_eq!(
-            resolve_primitive_field_base(&layout, "rho_u_y").unwrap(),
+            resolve_primitive_field_base(&field_map, "rho_u_y").unwrap(),
             "rho_u".to_string()
         );
     }
@@ -289,8 +322,9 @@ mod tests {
     fn primitive_field_missing_component_fails() {
         let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
         let layout = StateLayout::new(vec![rho_u]);
+        let field_map = build_field_metadata_map(&layout);
 
-        let err = resolve_primitive_field_base(&layout, "rho_u_z").unwrap_err();
+        let err = resolve_primitive_field_base(&field_map, "rho_u_z").unwrap_err();
         assert!(
             err.contains("rho_u_z"),
             "expected error to mention missing field: {err}"

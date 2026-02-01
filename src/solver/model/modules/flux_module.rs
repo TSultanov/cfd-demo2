@@ -1,4 +1,5 @@
 use crate::solver::ir::{FieldKind, FluxLayout, StateLayout};
+use std::collections::HashSet;
 use crate::solver::model::flux_module::FluxModuleSpec;
 use crate::solver::model::kernel::{
     DispatchKindId, KernelConditionId, KernelPhaseId, ModelKernelGeneratorSpec, ModelKernelSpec,
@@ -63,6 +64,9 @@ pub fn resolve_flux_module_gradients_targets(
 
 /// Collect gradient field pairs (base_component_name, grad_field_name) from layout.
 fn collect_gradient_targets(layout: &StateLayout) -> Result<Vec<(String, String)>, String> {
+    // Precompute a HashSet of state field names for O(1) membership checks
+    let state_field_names: HashSet<&str> = layout.fields().iter().map(|f| f.name()).collect();
+
     let mut out = Vec::new();
     for field in layout.fields() {
         let name = field.name();
@@ -79,14 +83,14 @@ fn collect_gradient_targets(layout: &StateLayout) -> Result<Vec<(String, String)
         // Gradient targets are declared implicitly by naming convention:
         // - `grad_<scalar>` computes gradients for scalar fields.
         // - `grad_<vec>_x` / `grad_<vec>_y` compute gradients for individual components.
-        if layout.field(base).is_some() {
+        if state_field_names.contains(base) {
             out.push((base.to_string(), name.to_string()));
             continue;
         }
 
         if let Some((base_field, component)) = base.rsplit_once('_') {
             let comp_ok = matches!(component, "x" | "y" | "z");
-            if comp_ok && layout.field(base_field).is_some() {
+            if comp_ok && state_field_names.contains(base_field) {
                 out.push((base.to_string(), name.to_string()));
             }
         }
@@ -112,41 +116,48 @@ fn build_resolved_targets(
     use crate::solver::model::ports::{PortRegistry, Scalar, Vector2, Vector3};
 
     let mut registry = PortRegistry::new(layout.clone());
+    let layout_meta = build_layout_metadata(layout);
     let mut targets = Vec::new();
 
     for (component, grad) in gradients {
-        let (base_field, base_component) = resolve_base_scalar(layout, component)?;
+        let (base_field, base_component) = resolve_base_scalar(&layout_meta, component)?;
 
-        // Register base field and get offset
-        let base_offset = if let Some(field) = layout.field(&base_field) {
-            match field.kind() {
-                FieldKind::Scalar => {
-                    let port = registry
-                        .register_scalar_field::<AnyDimension>(base_field.as_str())
-                        .map_err(|e| format!("flux_module_gradients: {e}"))?;
-                    port.offset()
-                }
-                FieldKind::Vector2 => {
-                    let port = registry
-                        .register_vector2_field::<AnyDimension>(base_field.as_str())
-                        .map_err(|e| format!("flux_module_gradients: {e}"))?;
-                    port.component(base_component)
-                        .map(|c| c.full_offset())
-                        .ok_or_else(|| format!("flux_module_gradients: invalid component {base_component} for '{base_field}'"))?
-                }
-                FieldKind::Vector3 => {
-                    let port = registry
-                        .register_vector3_field::<AnyDimension>(base_field.as_str())
-                        .map_err(|e| format!("flux_module_gradients: {e}"))?;
-                    port.component(base_component)
-                        .map(|c| c.full_offset())
-                        .ok_or_else(|| format!("flux_module_gradients: invalid component {base_component} for '{base_field}'"))?
-                }
+        // Get base field metadata and compute offset
+        let base_meta = layout_meta.fields_by_name.get(&base_field).ok_or_else(|| {
+            format!("flux_module_gradients: base field '{base_field}' not found")
+        })?;
+
+        let base_offset = match base_meta.component_count {
+            1 => {
+                // Scalar field
+                let port = registry
+                    .register_scalar_field::<AnyDimension>(base_field.as_str())
+                    .map_err(|e| format!("flux_module_gradients: {e}"))?;
+                port.offset()
             }
-        } else {
-            return Err(format!(
-                "flux_module_gradients: base field '{base_field}' not found"
-            ));
+            2 => {
+                // Vector2 field
+                let port = registry
+                    .register_vector2_field::<AnyDimension>(base_field.as_str())
+                    .map_err(|e| format!("flux_module_gradients: {e}"))?;
+                port.component(base_component)
+                    .map(|c| c.full_offset())
+                    .ok_or_else(|| format!("flux_module_gradients: invalid component {base_component} for '{base_field}'"))?
+            }
+            3 => {
+                // Vector3 field
+                let port = registry
+                    .register_vector3_field::<AnyDimension>(base_field.as_str())
+                    .map_err(|e| format!("flux_module_gradients: {e}"))?;
+                port.component(base_component)
+                    .map(|c| c.full_offset())
+                    .ok_or_else(|| format!("flux_module_gradients: invalid component {base_component} for '{base_field}'"))?
+            }
+            n => {
+                return Err(format!(
+                    "flux_module_gradients: unsupported component count {n} for '{base_field}'"
+                ));
+            }
         };
 
         // Register grad field and get component offsets
@@ -194,14 +205,40 @@ fn build_resolved_targets(
     Ok(targets)
 }
 
-fn resolve_base_scalar(layout: &StateLayout, component: &str) -> Result<(String, u32), String> {
-    if let Some(field) = layout.field(component) {
-        if field.kind() != FieldKind::Scalar {
-            return Err(format!(
-                "flux_module_gradients expects '{component}' to be scalar or a <field>_<component> selector"
-            ));
+/// Precomputed layout metadata for efficient field lookups without StateLayout::field() probing.
+struct LayoutMetadata {
+    fields_by_name: std::collections::HashMap<String, FieldMetadata>,
+}
+
+struct FieldMetadata {
+    kind: FieldKind,
+    component_count: u32,
+}
+
+fn build_layout_metadata(layout: &StateLayout) -> LayoutMetadata {
+    let mut fields_by_name = std::collections::HashMap::new();
+    for f in layout.fields() {
+        fields_by_name.insert(
+            f.name().to_string(),
+            FieldMetadata {
+                kind: f.kind(),
+                component_count: f.component_count(),
+            },
+        );
+    }
+    LayoutMetadata { fields_by_name }
+}
+
+fn resolve_base_scalar(
+    layout_meta: &LayoutMetadata,
+    component: &str,
+) -> Result<(String, u32), String> {
+    // Check if component exists as a scalar field
+    if let Some(meta) = layout_meta.fields_by_name.get(component) {
+        if meta.kind == FieldKind::Scalar {
+            return Ok((component.to_string(), 0));
         }
-        return Ok((component.to_string(), 0));
+        // Field exists but is not scalar; fall through to component selector logic
     }
 
     let (base, component_name) = component
@@ -218,16 +255,14 @@ fn resolve_base_scalar(layout: &StateLayout, component: &str) -> Result<(String,
         }
     };
 
-    let Some(base_field) = layout.field(base) else {
-        return Err(format!(
-            "flux_module_gradients: base field '{base}' not found for '{component}'"
-        ));
-    };
+    let base_meta = layout_meta.fields_by_name.get(base).ok_or_else(|| {
+        format!("flux_module_gradients: base field '{base}' not found for '{component}'")
+    })?;
 
-    if component_idx as u32 >= base_field.component_count() {
+    if component_idx as u32 >= base_meta.component_count {
         return Err(format!(
             "flux_module_gradients: base field '{base}' has {} components, cannot select '{component}'",
-            base_field.component_count()
+            base_meta.component_count
         ));
     }
 

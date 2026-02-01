@@ -2,6 +2,7 @@ use crate::solver::model::eos::EosSpec;
 use crate::solver::model::kernel::{ModelKernelGeneratorSpec, ModelKernelSpec};
 
 /// Re-export IR-safe port manifest types for convenience.
+#[allow(unused_imports)]
 pub use cfd2_ir::solver::ir::ports::{
     BufferAccess, BufferSpec, FieldSpec, ParamSpec, PortFieldKind, PortManifest,
 };

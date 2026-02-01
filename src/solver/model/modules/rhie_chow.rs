@@ -184,7 +184,7 @@ fn generate_dp_init_kernel_wgsl(
     dp_field: &str,
 ) -> Result<KernelWgsl, String> {
     use crate::solver::model::ports::dimensions::D_P;
-    use crate::solver::model::ports::{PortRegistry, Scalar};
+    use crate::solver::model::ports::PortRegistry;
 
     let mut registry = PortRegistry::new(model.state_layout.clone());
 
@@ -203,7 +203,7 @@ fn generate_dp_update_from_diag_kernel_wgsl(
     coupling: crate::solver::model::invariants::MomentumPressureCoupling,
 ) -> Result<KernelWgsl, String> {
     use crate::solver::model::ports::dimensions::{AnyDimension, D_P};
-    use crate::solver::model::ports::{PortRegistry, Scalar, Vector2};
+    use crate::solver::model::ports::PortRegistry;
 
     let mut registry = PortRegistry::new(model.state_layout.clone());
 
@@ -268,7 +268,7 @@ fn generate_rhie_chow_store_grad_p_kernel_wgsl(
     grad_p_old_name: &'static str,
 ) -> Result<KernelWgsl, String> {
     use crate::solver::model::ports::dimensions::PressureGradient;
-    use crate::solver::model::ports::{PortRegistry, Vector2};
+    use crate::solver::model::ports::PortRegistry;
 
     let mut registry = PortRegistry::new(model.state_layout.clone());
 
@@ -323,7 +323,7 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
 ) -> Result<KernelWgsl, String> {
     use crate::solver::model::ports::dimensions::{AnyDimension, D_P};
     use crate::solver::model::ports::dimensions::PressureGradient;
-    use crate::solver::model::ports::{PortRegistry, Scalar, Vector2};
+    use crate::solver::model::ports::PortRegistry;
 
     let mut registry = PortRegistry::new(model.state_layout.clone());
 

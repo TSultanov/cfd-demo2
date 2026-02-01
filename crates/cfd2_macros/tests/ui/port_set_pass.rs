@@ -3,7 +3,7 @@
 use cfd2::solver::model::backend::ast::vol_scalar;
 use cfd2::solver::model::backend::state_layout::StateLayout;
 use cfd2::solver::model::ports::{
-    Dimensionless, FieldPort, ParamPort, Port, PortRegistry, PortSetTrait, Scalar, Time, F32,
+    FieldPort, ParamPort, Port, PortRegistry, PortSetTrait, Scalar, Time, F32, Pressure,
 };
 use cfd2::solver::units::si;
 use cfd2_macros::PortSet;
@@ -17,7 +17,7 @@ pub struct TestParams {
 #[derive(PortSet)]
 pub struct TestFields {
     #[field(name = "p")]
-    pub pressure: FieldPort<Dimensionless, Scalar>,
+    pub pressure: FieldPort<Pressure, Scalar>,
 }
 
 fn main() {

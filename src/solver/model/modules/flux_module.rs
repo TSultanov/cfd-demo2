@@ -113,7 +113,7 @@ fn build_resolved_targets(
     gradients: &[(String, String)],
 ) -> Result<Vec<ResolvedGradientTarget>, String> {
     use crate::solver::model::ports::dimensions::AnyDimension;
-    use crate::solver::model::ports::{PortRegistry, Scalar, Vector2, Vector3};
+    use crate::solver::model::ports::PortRegistry;
 
     let mut registry = PortRegistry::new(layout.clone());
     let layout_meta = build_layout_metadata(layout);

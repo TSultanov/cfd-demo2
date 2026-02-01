@@ -34,31 +34,39 @@ pub mod traits;
 #[cfg(test)]
 mod tests;
 
+#[allow(unused_imports)]
 pub use buffer::{
     bind_groups, AccessMode, BufferBindingGroup, BufferBindingGroupBuilder, BufferF32, BufferI32,
     BufferPort, BufferType, BufferU32, BufferVec2F32, BufferVec3F32, ReadOnly, ReadWrite,
 };
+#[allow(unused_imports)]
 pub use dimensions::{
     Acceleration, AnyDimension, Area, Density, DimCompatible, Dimensionless, DivDim,
     DynamicViscosity, Energy, EnergyDensity, Force, InvTime, KinematicViscosity, Length, Mass,
     MassFlux, MomentumDensity, MulDim, PowDim, Pressure, PressureGradient, SqrtDim, Temperature,
     Time, UnitDimension, Velocity, Volume, D_P,
 };
+#[allow(unused_imports)]
 pub use field::{
     ComponentOffset, FieldKind, FieldPort, FieldPortError, FieldPortProvider, Scalar, Vector2,
     Vector3,
 };
+#[allow(unused_imports)]
 pub use intern::{intern, intern_string};
+#[allow(unused_imports)]
 pub use params::{
     ParamPort, ParamPortError, ParamPortProvider, ParamPortSet, ParamPortSetBuilder, ParamType,
     F32, F64, I32, U32,
 };
+#[allow(unused_imports)]
 pub use registry::{PortRegistry, PortRegistryError, TypedPortRegistry};
 
 // Re-export derive macros from cfd2_macros
+#[allow(unused_imports)]
 pub use cfd2_macros::{ModulePorts, PortSet};
 
 // Re-export traits
+#[allow(unused_imports)]
 pub use traits::{ModulePorts as ModulePortsTrait, PortSet as PortSetTrait, PortValidationError};
 
 /// A unique identifier for a port within a registry.

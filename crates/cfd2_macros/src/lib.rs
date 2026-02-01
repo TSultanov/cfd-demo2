@@ -5,7 +5,7 @@
 //! - `PortSet` - Derive parameter/field port sets
 
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 use syn::{parse_macro_input, DeriveInput, Expr, Lit, Meta, Type};
 
 /// Derive macro for module port requirements.
@@ -67,11 +67,7 @@ pub fn derive_port_set(input: TokenStream) -> TokenStream {
         .filter_map(|field| generate_register_field(field))
         .collect();
 
-    // Generate from_registry code for each field
-    let from_registry_fields: Vec<_> = fields
-        .iter()
-        .filter_map(|field| generate_from_registry_field(field))
-        .collect();
+
 
     // Generate field names for struct construction
     let field_names: Vec<_> = fields
@@ -103,17 +99,7 @@ pub fn derive_port_set(input: TokenStream) -> TokenStream {
         .filter_map(|field| generate_buffer_spec(field))
         .collect();
 
-    // Debug: Check if we found any specs
-    if param_specs.is_empty() && field_specs.is_empty() && buffer_specs.is_empty() {
-        return syn::Error::new_spanned(
-            &input.ident,
-            "PortSet derive requires at least one field with #[param], #[field], or #[buffer] attribute",
-        )
-        .to_compile_error()
-        .into();
-    }
-
-    // Debug: Check if we found any specs
+    // Check if we found any specs
     if param_specs.is_empty() && field_specs.is_empty() && buffer_specs.is_empty() {
         return syn::Error::new_spanned(
             &input.ident,
@@ -175,18 +161,18 @@ fn generate_register_field(field: &syn::Field) -> Option<proc_macro2::TokenStrea
     let field_name = field.ident.as_ref()?;
 
     // Check for param attribute
-    if let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("param")) {
-        return generate_param_registration(field, field_name, attr);
+    if let Some(_attr) = field.attrs.iter().find(|a| a.path().is_ident("param")) {
+        return generate_param_registration(field, field_name);
     }
 
     // Check for field attribute
-    if let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("field")) {
-        return generate_field_registration(field, field_name, attr);
+    if let Some(_attr) = field.attrs.iter().find(|a| a.path().is_ident("field")) {
+        return generate_field_registration(field, field_name);
     }
 
     // Check for buffer attribute
-    if let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("buffer")) {
-        return generate_buffer_registration(field, field_name, attr);
+    if let Some(_attr) = field.attrs.iter().find(|a| a.path().is_ident("buffer")) {
+        return generate_buffer_registration(field, field_name);
     }
 
     None
@@ -194,11 +180,14 @@ fn generate_register_field(field: &syn::Field) -> Option<proc_macro2::TokenStrea
 
 /// Generate parameter registration code.
 fn generate_param_registration(
-    _field: &syn::Field,
+    field: &syn::Field,
     field_name: &syn::Ident,
-    attr: &syn::Attribute,
 ) -> Option<proc_macro2::TokenStream> {
-    let args = parse_param_args(attr).ok()?;
+    let args = field
+        .attrs
+        .iter()
+        .find(|a| a.path().is_ident("param"))
+        .and_then(|attr| parse_param_args(attr).ok())?;
 
     let name = args.name?;
     let wgsl = args.wgsl?;
@@ -215,9 +204,12 @@ fn generate_param_registration(
 fn generate_field_registration(
     field: &syn::Field,
     field_name: &syn::Ident,
-    attr: &syn::Attribute,
 ) -> Option<proc_macro2::TokenStream> {
-    let args = parse_field_args(attr).ok()?;
+    let args = field
+        .attrs
+        .iter()
+        .find(|a| a.path().is_ident("field"))
+        .and_then(|attr| parse_field_args(attr).ok())?;
     let name = args.name?;
 
     // Extract dimension and kind from the field type
@@ -233,9 +225,12 @@ fn generate_field_registration(
 fn generate_buffer_registration(
     field: &syn::Field,
     field_name: &syn::Ident,
-    attr: &syn::Attribute,
 ) -> Option<proc_macro2::TokenStream> {
-    let args = parse_buffer_args(attr).ok()?;
+    let args = field
+        .attrs
+        .iter()
+        .find(|a| a.path().is_ident("buffer"))
+        .and_then(|attr| parse_buffer_args(attr).ok())?;
 
     let name = args.name?;
     let group = args.group.unwrap_or(0);
@@ -254,11 +249,6 @@ fn generate_buffer_registration(
     })
 }
 
-/// Generate from_registry field construction code.
-fn generate_from_registry_field(field: &syn::Field) -> Option<proc_macro2::TokenStream> {
-    // This is the same as registration since we use idempotent registration
-    generate_register_field(field)
-}
 
 /// Generate compile-time validations.
 fn generate_validations(fields: &syn::Fields) -> proc_macro2::TokenStream {
@@ -340,7 +330,7 @@ fn generate_validations(fields: &syn::Fields) -> proc_macro2::TokenStream {
         }
 
         // Check buffer attributes
-        if let Some(attr) = field.attrs.iter().find(|a| a.path().is_ident("buffer")) {
+        if field.attrs.iter().any(|a| a.path().is_ident("buffer")) {
             // Validate field type is BufferPort
             if !is_buffer_port_type(&field.ty) {
                 let msg = format!(
@@ -548,8 +538,11 @@ fn generate_param_spec(field: &syn::Field) -> Option<proc_macro2::TokenStream> {
 
 /// Generate a FieldSpec for the port manifest.
 fn generate_field_spec(field: &syn::Field) -> Option<proc_macro2::TokenStream> {
-    let attr = field.attrs.iter().find(|a| a.path().is_ident("field"))?;
-    let args = parse_field_args(attr).ok()?;
+    let args = field
+        .attrs
+        .iter()
+        .find(|a| a.path().is_ident("field"))
+        .and_then(|attr| parse_field_args(attr).ok())?;
 
     let name = args.name?;
 

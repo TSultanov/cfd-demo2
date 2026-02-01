@@ -64,18 +64,24 @@ impl UiPortSet {
     pub fn from_layout(layout: &StateLayout) -> Self {
         let stride = layout.stride();
 
-        // Try "U" first, then "u" for velocity - must be Vector2
-        let u_offset = layout
-            .field("U")
-            .or_else(|| layout.field("u"))
-            .filter(|field| field.kind() == FieldKind::Vector2)
-            .map(|field| field.offset());
+        // Scan layout.fields() once to collect offsets by name/kind
+        let mut u_offset: Option<u32> = None;
+        let mut p_offset: Option<u32> = None;
 
-        // Get pressure field - must be Scalar
-        let p_offset = layout
-            .field("p")
-            .filter(|field| field.kind() == FieldKind::Scalar)
-            .map(|field| field.offset());
+        for field in layout.fields() {
+            let name = field.name();
+            let kind = field.kind();
+            let offset = field.offset();
+
+            // Try "U" first, then "u" for velocity - must be Vector2
+            if kind == FieldKind::Vector2 && (name == "U" || (name == "u" && u_offset.is_none())) {
+                u_offset = Some(offset);
+            }
+            // Get pressure field - must be Scalar
+            else if kind == FieldKind::Scalar && name == "p" {
+                p_offset = Some(offset);
+            }
+        }
 
         Self {
             stride,

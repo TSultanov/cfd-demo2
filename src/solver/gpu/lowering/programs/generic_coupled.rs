@@ -132,62 +132,6 @@ pub fn resolve_unknown_mapping_runtime(
     })
 }
 
-/// Resolve the unknown-to-state mapping from equation targets using StateLayout.
-///
-/// This is the build-script fallback path (used during code generation) that
-/// directly queries the StateLayout without PortRegistry.
-pub fn resolve_unknown_mapping_build_script(
-    model: &ModelSpec,
-) -> Result<ResolvedUnknownMapping, String> {
-    let layout = &model.state_layout;
-    let equations: Vec<_> = model.system.equations().iter().collect();
-    let num_equations = equations.len();
-    let max_components = equations
-        .iter()
-        .map(|eq| eq.target().kind().component_count())
-        .max()
-        .unwrap_or(1);
-
-    let mut offsets = vec![0u32; num_equations * max_components];
-    let mut target_names = Vec::with_capacity(num_equations);
-    let mut component_counts = Vec::with_capacity(num_equations);
-
-    for (eq_idx, eq) in equations.iter().enumerate() {
-        let target = eq.target();
-        let name = target.name();
-        let kind = target.kind();
-        let comps = kind.component_count();
-
-        target_names.push(name.to_string());
-        component_counts.push(comps);
-
-        match kind {
-            FieldKind::Scalar => {
-                let off = layout
-                    .offset_for(name)
-                    .ok_or_else(|| format!("Missing '{}' in state layout", name))?;
-                offsets[eq_idx * max_components] = off;
-            }
-            _ => {
-                for comp in 0..comps {
-                    let off = layout
-                        .component_offset(name, comp as u32)
-                        .ok_or_else(|| format!("Missing '{}' component {} in state layout", name, comp))?;
-                    offsets[eq_idx * max_components + comp] = off;
-                }
-            }
-        }
-    }
-
-    Ok(ResolvedUnknownMapping {
-        offsets,
-        num_equations,
-        max_components,
-        target_names,
-        component_counts,
-    })
-}
-
 pub(crate) struct GenericCoupledProgramResources {
     runtime: GpuCsrRuntime,
     fields: UnifiedFieldResources,

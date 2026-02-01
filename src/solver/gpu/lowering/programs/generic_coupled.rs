@@ -44,20 +44,19 @@ pub struct ResolvedUnknownMapping {
     pub num_equations: usize,
     /// Maximum components per equation (for indexing)
     pub max_components: usize,
-    /// Target names for each equation
-    pub target_names: Vec<String>,
-    /// Component counts for each equation
-    pub component_counts: Vec<usize>,
 }
 
 impl ResolvedUnknownMapping {
+    const UNMAPPED_OFFSET: u32 = u32::MAX;
+
     /// Get the state offset for a given equation and component.
     pub fn get_offset(&self, equation: usize, component: usize) -> Option<u32> {
-        if equation >= self.num_equations || component >= self.component_counts[equation] {
+        if equation >= self.num_equations || component >= self.max_components {
             return None;
         }
         let idx = equation * self.max_components + component;
-        Some(self.offsets[idx])
+        let offset = self.offsets[idx];
+        (offset != Self::UNMAPPED_OFFSET).then_some(offset)
     }
 }
 
@@ -77,18 +76,13 @@ pub fn resolve_unknown_mapping_runtime(
         .max()
         .unwrap_or(1);
 
-    let mut offsets = vec![0u32; num_equations * max_components];
-    let mut target_names = Vec::with_capacity(num_equations);
-    let mut component_counts = Vec::with_capacity(num_equations);
+    let mut offsets = vec![ResolvedUnknownMapping::UNMAPPED_OFFSET; num_equations * max_components];
 
     for (eq_idx, eq) in equations.iter().enumerate() {
         let target = eq.target();
         let name = target.name();
         let kind = target.kind();
         let comps = kind.component_count();
-
-        target_names.push(name.to_string());
-        component_counts.push(comps);
 
         // Get offsets from PortRegistry
         match kind {
@@ -116,8 +110,6 @@ pub fn resolve_unknown_mapping_runtime(
         offsets,
         num_equations,
         max_components,
-        target_names,
-        component_counts,
     })
 }
 
@@ -2122,8 +2114,7 @@ mod tests {
 
         // Verify the mapping is correct
         assert_eq!(mapping.num_equations, 2);
-        assert_eq!(mapping.target_names, vec!["U", "p"]);
-        assert_eq!(mapping.component_counts, vec![3, 1]);
+        assert_eq!(mapping.max_components, 3);
 
         // Verify offsets match StateLayout
         // U is at offset 0, p is at offset 3 (after U's 3 components)
@@ -2131,5 +2122,6 @@ mod tests {
         assert_eq!(mapping.get_offset(0, 1), Some(1)); // U y
         assert_eq!(mapping.get_offset(0, 2), Some(2)); // U z
         assert_eq!(mapping.get_offset(1, 0), Some(3)); // p
+        assert_eq!(mapping.get_offset(1, 1), None);
     }
 }

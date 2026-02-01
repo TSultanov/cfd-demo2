@@ -625,6 +625,7 @@ As of **2026-01-31**:
 - `cfd2_codegen` constants helper tests + IR test fixtures migrated to canonical type-level dimensions (no `solver::units::si` usage outside the `dsl::units` re-export).
 - Module port manifests for `eos` and `generic_coupled` now use canonical type-level dimensions (no `solver::units::si` usage in `*_ports.rs`).
 - `flux_module_gradients_wgsl` unit tests migrated to typed `*_dim` constructors (no `solver::units::si` usage in those tests).
+- `flux_module_resolver_pass` unit tests migrated to typed `*_dim` constructors (no `solver::units::si` usage in those tests).
 - Build-time codegen consumes port manifests for uniform params (e.g. EOS `Constants` fields); string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 
 **Next (recommended)**:

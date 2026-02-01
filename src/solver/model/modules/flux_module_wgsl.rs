@@ -130,10 +130,10 @@ pub fn generate_flux_module_wgsl_runtime_scheme(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver::dimensions::{Dimensionless, MomentumDensity};
     use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
-    use crate::solver::ir::{vol_scalar, vol_vector, FaceSide, FluxComponent, StateLayout};
+    use crate::solver::ir::{vol_scalar_dim, vol_vector_dim, FaceSide, FluxComponent, StateLayout};
     use crate::solver::scheme::Scheme;
-    use crate::solver::units::si;
 
     /// Helper to build ResolvedStateSlotsSpec from StateLayout for tests.
     fn build_resolved_slots(layout: &StateLayout) -> ResolvedStateSlotsSpec {
@@ -159,8 +159,8 @@ mod tests {
 
     #[test]
     fn flux_module_codegen_accepts_cell_to_face_reconstruction_exprs() {
-        let phi = vol_scalar("phi", si::DIMENSIONLESS);
-        let grad_phi = vol_vector("grad_phi", si::DIMENSIONLESS);
+        let phi = vol_scalar_dim::<Dimensionless>("phi");
+        let grad_phi = vol_vector_dim::<Dimensionless>("grad_phi");
         let layout = StateLayout::new(vec![phi, grad_phi]);
         let resolved = build_resolved_slots(&layout);
         let flux_layout = FluxLayout {
@@ -214,8 +214,8 @@ mod tests {
         //
         // The simplest way to ensure this in codegen is to force neighbor-side gradients to
         // zero on boundary faces, so `phi_cell + dot(grad, r)` collapses to `phi_cell`.
-        let phi = vol_scalar("phi", si::DIMENSIONLESS);
-        let grad_phi = vol_vector("grad_phi", si::DIMENSIONLESS);
+        let phi = vol_scalar_dim::<Dimensionless>("phi");
+        let grad_phi = vol_vector_dim::<Dimensionless>("grad_phi");
         let layout = StateLayout::new(vec![phi, grad_phi]);
         let resolved = build_resolved_slots(&layout);
         let flux_layout = FluxLayout {
@@ -250,7 +250,7 @@ mod tests {
         // should resolve correctly to state offsets via PortRegistry.
         use crate::solver::shared::PrimitiveExpr;
 
-        let rho_u = vol_vector("rho_u", si::MOMENTUM_DENSITY);
+        let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
         let layout = StateLayout::new(vec![rho_u]);
         let resolved = build_resolved_slots(&layout);
         let flux_layout = FluxLayout {

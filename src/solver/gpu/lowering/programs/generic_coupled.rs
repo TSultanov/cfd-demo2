@@ -30,7 +30,6 @@ use crate::solver::model::ports::PortRegistry;
 use bytemuck::{bytes_of, Pod, Zeroable};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 /// Pre-resolved mapping from unknown indices to state layout slots.
 ///

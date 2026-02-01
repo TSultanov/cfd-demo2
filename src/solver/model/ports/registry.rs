@@ -116,7 +116,6 @@ impl FieldPortEntry {
 /// Storage for parameter port metadata.
 #[derive(Debug, Clone)]
 struct ParamPortEntry {
-    id: PortId,
     key: String,
     wgsl_field: String,
     runtime_dim: UnitDim,
@@ -126,7 +125,6 @@ struct ParamPortEntry {
 /// Storage for buffer port metadata.
 #[derive(Debug, Clone)]
 struct BufferPortEntry {
-    id: PortId,
     name: String,
     group: u32,
     binding: u32,
@@ -505,7 +503,6 @@ impl PortRegistry {
         self.param_ports.insert(
             id,
             ParamPortEntry {
-                id,
                 key: key.to_string(),
                 wgsl_field: wgsl_field_name.to_string(),
                 runtime_dim,
@@ -573,7 +570,6 @@ impl PortRegistry {
         self.buffer_ports.insert(
             id,
             BufferPortEntry {
-                id,
                 name: name.to_string(),
                 group,
                 binding,
@@ -735,7 +731,6 @@ impl PortRegistry {
         self.param_ports.insert(
             id,
             ParamPortEntry {
-                id,
                 key: param.key.to_string(),
                 wgsl_field: param.wgsl_field.to_string(),
                 runtime_dim: param.unit,
@@ -891,7 +886,6 @@ impl PortRegistry {
         self.buffer_ports.insert(
             id,
             BufferPortEntry {
-                id,
                 name: buffer.name.to_string(),
                 group: buffer.group,
                 binding: buffer.binding,

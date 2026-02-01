@@ -444,10 +444,10 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 
 ### 5) End-state success criteria for dimensions
 
-- [ ] All dimensional invariants are enforced by Rust types wherever construction happens in Rust (models, IR builders, port definitions, codegen DSL).
+- [x] All dimensional invariants are enforced by Rust types wherever construction happens in Rust (models, IR builders, port definitions, codegen DSL).
   - [x] Added typed `vol_*_dim` / `surface_*_dim` constructors and migrated built-in model definitions to use type-level dimensions for field/flux units (including compressible `grad_*` fields).
   - [x] Added typed `BoundaryCondition::*_dim` constructors and migrated built-in model definitions to use type-level dimensions for boundary-condition units.
-- [ ] Runtime `UnitDim` remains only for:
+- [x] Runtime `UnitDim` remains only for:
   - Serialization/debug output
   - Reading units off runtime `StateLayout` metadata
   - Validating runtime layouts/configurations against typed expectations
@@ -483,8 +483,8 @@ This avoids making the existing untyped IR (`FieldRef { unit: UnitDim }`) generi
 - [x] Remove `NamedParamKey` enum
 - [x] Remove old `ModuleManifest`
 - [x] Delete string-based codegen functions
-- [ ] Update documentation
-- [ ] Breaking change commit with migration guide
+- [x] Update documentation
+- [x] Breaking change commit with migration guide
 
 ## Design Decisions (Confirmed)
 
@@ -585,9 +585,9 @@ crates/cfd2_macros/tests/*        # trybuild + compile-fail tests
 
 - [x] `cargo test` passes
 - [x] Zero string-based field lookups in migrated modules
-- [ ] Compile-time dimension checking works where Rust can express it (ports + structurally-identical typed IR); runtime `validate_units()` remains the backstop for semantically-equal-but-structurally-different dimensions
-- [ ] Runtime validation catches invalid configs
-- [ ] Generated WGSL diffs are empty (or equivalent check passes)
+- [x] Compile-time dimension checking works where Rust can express it (ports + structurally-identical typed IR); runtime `validate_units()` remains the backstop for semantically-equal-but-structurally-different dimensions
+- [x] Runtime validation catches invalid configs
+- [x] Generated WGSL diffs are empty (or equivalent check passes)
 - [ ] Hard cutoff removes all deprecated APIs
 
 ## Notes

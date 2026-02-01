@@ -630,6 +630,7 @@ As of **2026-01-31**:
 - `rhie_chow` module port manifest + tests migrated to canonical type-level dimensions (no `solver::units::si` usage in `rhie_chow.rs`).
 - Model definitions/boundary validation now use canonical type-level dimensions (no `solver::units::si` usage in `src/solver/model/definitions.rs`).
 - `generic_coupled` GPU lowering unit tests migrated to canonical type-level dimensions (no `solver::units::si` usage in those tests).
+- `incompressible_momentum` Rhie–Chow flux derivation now uses `PortRegistry` validation (no direct `StateLayout::field` probing for optional `rho` or `d_p` inference).
 - Build-time codegen consumes port manifests for uniform params (e.g. EOS `Constants` fields); string-based lookups remain in core hotspots (see “Module Migration Playbook”)
 
 **Next (recommended)**:

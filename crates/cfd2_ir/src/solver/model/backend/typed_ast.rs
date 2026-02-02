@@ -83,7 +83,7 @@ impl<D: UnitDimension, K: Kind> TypedFieldRef<D, K> {
     }
 
     /// Convert to the underlying untyped FieldRef.
-    pub fn to_untyped(&self) -> FieldRef {
+    pub fn to_untyped(self) -> FieldRef {
         FieldRef::new(self.name, K::RUNTIME, D::UNIT)
     }
 
@@ -112,7 +112,7 @@ impl<D: UnitDimension, K: Kind> TypedFluxRef<D, K> {
     }
 
     /// Convert to the underlying untyped FluxRef.
-    pub fn to_untyped(&self) -> FluxRef {
+    pub fn to_untyped(self) -> FluxRef {
         FluxRef::new(self.name, K::RUNTIME, D::UNIT)
     }
 
@@ -352,11 +352,11 @@ impl TypedEquationSystem {
 
     /// Add a typed equation to the system.
     pub fn add_typed_equation<D: UnitDimension, K: Kind>(&mut self, equation: TypedEquation<D, K>) {
-        self.inner.add_equation(equation.to_untyped());
+        self.inner.add_equation(equation.into_untyped());
     }
 
     /// Convert to the underlying untyped EquationSystem.
-    pub fn to_untyped(self) -> EquationSystem {
+    pub fn into_untyped(self) -> EquationSystem {
         self.inner
     }
 
@@ -393,7 +393,7 @@ impl<D: UnitDimension, K: Kind> TypedEquation<D, K> {
     }
 
     /// Convert to the underlying untyped Equation.
-    pub fn to_untyped(self) -> Equation {
+    pub fn into_untyped(self) -> Equation {
         let mut eqn = Equation::new(self.target.to_untyped());
         for term in self.terms {
             eqn.add_term(term);

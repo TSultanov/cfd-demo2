@@ -117,13 +117,13 @@ impl GeneratedKernelsModule {
     fn dispatch_cells_or_faces(&self, items: u32) -> (u32, u32, u32) {
         const WORKGROUP_SIZE_X: u32 = 64;
 
-        let groups = (items + WORKGROUP_SIZE_X - 1) / WORKGROUP_SIZE_X;
+        let groups = items.div_ceil(WORKGROUP_SIZE_X);
         if groups <= self.max_compute_workgroups_per_dimension {
             return (groups, 1, 1);
         }
 
         let x = self.max_compute_workgroups_per_dimension;
-        let y = (groups + x - 1) / x;
+        let y = groups.div_ceil(x);
         assert!(
             y <= self.max_compute_workgroups_per_dimension,
             "dispatch requires more than 2D grid: groups={groups} max={x}"

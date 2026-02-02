@@ -41,6 +41,12 @@ impl IncompressibleMomentumFields {
     }
 }
 
+impl Default for IncompressibleMomentumFields {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn build_incompressible_momentum_system(_fields: &IncompressibleMomentumFields) -> EquationSystem {
     // NOTE: This model uses typed builder APIs with explicit cast_to() calls to align
     // terms to canonical dimension types. The type-level dimension expressions are not

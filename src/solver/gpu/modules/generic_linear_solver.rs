@@ -179,16 +179,9 @@ pub fn create_fgmres_resources<P: FgmresPreconditionerModule>(
 /// Note: A true identity preconditioner would simply copy input to output.
 /// For FGMRES, this is not typically useful, but we provide it for completeness.
 /// In practice, use at least Jacobi preconditioning.
+#[derive(Default)]
 pub struct IdentityPreconditioner {
     copy_pipeline: Option<wgpu::ComputePipeline>,
-}
-
-impl Default for IdentityPreconditioner {
-    fn default() -> Self {
-        Self {
-            copy_pipeline: None,
-        }
-    }
 }
 
 impl IdentityPreconditioner {

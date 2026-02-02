@@ -14,6 +14,7 @@ use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
 /// Configuration for building a unified op registry.
 ///
 /// Any handler left as None will be registered as a safe no-op default.
+#[derive(Default)]
 pub struct UnifiedOpRegistryConfig {
     pub prepare: Option<HostOpHandler>,
     pub finalize: Option<HostOpHandler>,
@@ -37,31 +38,6 @@ pub struct UnifiedOpRegistryConfig {
     pub coupled_init_prepare_graph: Option<GraphOpHandler>,
     pub coupled_before_iter: Option<HostOpHandler>,
     pub coupled_outer_iters: Option<CountOpHandler>,
-}
-
-impl Default for UnifiedOpRegistryConfig {
-    fn default() -> Self {
-        Self {
-            prepare: None,
-            finalize: None,
-            solve: None,
-            assembly_graph: None,
-            update_graph: None,
-            gradients_graph: None,
-            apply_graph: None,
-            implicit_update_graph: None,
-            implicit_snapshot_graph: None,
-            implicit_before_iter: None,
-            implicit_after_solve: None,
-            implicit_before_apply: None,
-            implicit_after_apply: None,
-            implicit_advance_outer_idx: None,
-            implicit_outer_iters: None,
-            coupled_init_prepare_graph: None,
-            coupled_before_iter: None,
-            coupled_outer_iters: None,
-        }
-    }
 }
 
 fn noop_host(_plan: &mut GpuProgramPlan) {}

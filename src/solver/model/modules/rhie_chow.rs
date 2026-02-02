@@ -385,7 +385,16 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
         .ok_or("grad_old component 1")?;
 
     Ok(wgsl::generate_rhie_chow_correct_velocity_delta_wgsl(
-        stride, u_x, u_y, d_p_offset, grad_p_x, grad_p_y, grad_old_x, grad_old_y,
+        wgsl::RhieChowCorrectVelocityDeltaParams {
+            state_stride: stride,
+            u_x_offset: u_x,
+            u_y_offset: u_y,
+            d_p_offset,
+            grad_p_x_offset: grad_p_x,
+            grad_p_y_offset: grad_p_y,
+            grad_old_x_offset: grad_old_x,
+            grad_old_y_offset: grad_old_y,
+        },
     ))
 }
 

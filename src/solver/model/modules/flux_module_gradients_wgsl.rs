@@ -316,44 +316,42 @@ fn main_fn(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientTar
 fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientTarget]) -> Block {
     let unknown_stride = flux_layout.stride;
 
-    let mut stmts = Vec::new();
-
-    stmts.push(dsl::let_expr(
-        "idx",
-        Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
-            + Expr::ident("global_id").field("x"),
-    ));
-    stmts.push(dsl::if_block_expr(
-        Expr::ident("idx").ge(Expr::call_named(
-            "arrayLength",
-            vec![Expr::ident("cell_vols").addr_of()],
-        )),
-        dsl::block(vec![Stmt::Return(None)]),
-        None,
-    ));
-
-    stmts.push(dsl::let_expr(
-        "cell_center",
-        dsl::array_access("cell_centers", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_typed_expr(
-        "cell_center_vec",
-        Type::vec2_f32(),
-        typed::VecExpr::<2>::from_xy_fields(Expr::ident("cell_center")).expr(),
-    ));
-
-    stmts.push(dsl::let_expr(
-        "vol",
-        dsl::array_access("cell_vols", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "start",
-        dsl::array_access("cell_face_offsets", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "end",
-        dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
-    ));
+    let mut stmts = vec![
+        dsl::let_expr(
+            "idx",
+            Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+                + Expr::ident("global_id").field("x"),
+        ),
+        dsl::if_block_expr(
+            Expr::ident("idx").ge(Expr::call_named(
+                "arrayLength",
+                vec![Expr::ident("cell_vols").addr_of()],
+            )),
+            dsl::block(vec![Stmt::Return(None)]),
+            None,
+        ),
+        dsl::let_expr(
+            "cell_center",
+            dsl::array_access("cell_centers", Expr::ident("idx")),
+        ),
+        dsl::let_typed_expr(
+            "cell_center_vec",
+            Type::vec2_f32(),
+            typed::VecExpr::<2>::from_xy_fields(Expr::ident("cell_center")).expr(),
+        ),
+        dsl::let_expr(
+            "vol",
+            dsl::array_access("cell_vols", Expr::ident("idx")),
+        ),
+        dsl::let_expr(
+            "start",
+            dsl::array_access("cell_face_offsets", Expr::ident("idx")),
+        ),
+        dsl::let_expr(
+            "end",
+            dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
+        ),
+    ];
 
     // Accumulators: one vec2 per gradient.
     for target in targets {
@@ -367,50 +365,51 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
 
     // Face loop.
     let face_loop_body = {
-        let mut body = Vec::new();
-        body.push(dsl::let_expr(
-            "face_idx",
-            dsl::array_access("cell_faces", Expr::ident("k")),
-        ));
-        body.push(dsl::let_expr(
-            "owner",
-            dsl::array_access("face_owner", Expr::ident("face_idx")),
-        ));
-        body.push(dsl::let_expr(
-            "neighbor_raw",
-            dsl::array_access("face_neighbor", Expr::ident("face_idx")),
-        ));
-        body.push(dsl::let_expr(
-            "is_boundary",
-            Expr::ident("neighbor_raw").eq(-1),
-        ));
-        body.push(dsl::let_expr(
-            "boundary_type",
-            dsl::array_access("face_boundary", Expr::ident("face_idx")),
-        ));
-        body.push(dsl::let_expr(
-            "area",
-            dsl::array_access("face_areas", Expr::ident("face_idx")),
-        ));
-        body.push(dsl::let_expr(
-            "face_center",
-            dsl::array_access("face_centers", Expr::ident("face_idx")),
-        ));
-        body.push(dsl::let_typed_expr(
-            "face_center_vec",
-            Type::vec2_f32(),
-            typed::VecExpr::<2>::from_xy_fields(Expr::ident("face_center")).expr(),
-        ));
-        body.push(dsl::var_typed_expr(
-            "normal_vec",
-            Type::vec2_f32(),
-            Some(
-                typed::VecExpr::<2>::from_xy_fields(
-                    Expr::ident("face_normals").index(Expr::ident("face_idx")),
-                )
-                .expr(),
+        let mut body = vec![
+            dsl::let_expr(
+                "face_idx",
+                dsl::array_access("cell_faces", Expr::ident("k")),
             ),
-        ));
+            dsl::let_expr(
+                "owner",
+                dsl::array_access("face_owner", Expr::ident("face_idx")),
+            ),
+            dsl::let_expr(
+                "neighbor_raw",
+                dsl::array_access("face_neighbor", Expr::ident("face_idx")),
+            ),
+            dsl::let_expr(
+                "is_boundary",
+                Expr::ident("neighbor_raw").eq(-1),
+            ),
+            dsl::let_expr(
+                "boundary_type",
+                dsl::array_access("face_boundary", Expr::ident("face_idx")),
+            ),
+            dsl::let_expr(
+                "area",
+                dsl::array_access("face_areas", Expr::ident("face_idx")),
+            ),
+            dsl::let_expr(
+                "face_center",
+                dsl::array_access("face_centers", Expr::ident("face_idx")),
+            ),
+            dsl::let_typed_expr(
+                "face_center_vec",
+                Type::vec2_f32(),
+                typed::VecExpr::<2>::from_xy_fields(Expr::ident("face_center")).expr(),
+            ),
+            dsl::var_typed_expr(
+                "normal_vec",
+                Type::vec2_f32(),
+                Some(
+                    typed::VecExpr::<2>::from_xy_fields(
+                        Expr::ident("face_normals").index(Expr::ident("face_idx")),
+                    )
+                    .expr(),
+                ),
+            ),
+        ];
         let cell_to_face = typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec")).sub(
             &typed::VecExpr::<2>::from_expr(Expr::ident("cell_center_vec")),
         );
@@ -514,16 +513,16 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
             let mut other_val = if let Some(off) = target.bc_unknown_offset {
                 let bc_table_idx =
                     Expr::ident("face_idx") * Expr::from(unknown_stride) + Expr::from(off);
-                let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
+                let kind = dsl::array_access("bc_kind", bc_table_idx);
                 let value = dsl::array_access("bc_value", bc_table_idx);
                 let from_bc = dsl::select(
-                    dsl::select(cell_val.clone(), value.clone(), kind.eq(Expr::from(1u32))),
-                    cell_val.clone() + value * Expr::ident("d_own"),
+                    dsl::select(cell_val, value, kind.eq(Expr::from(1u32))),
+                    cell_val + value * Expr::ident("d_own"),
                     kind.eq(Expr::from(2u32)),
                 );
                 dsl::select(interior_other, from_bc, Expr::ident("is_boundary"))
             } else {
-                dsl::select(interior_other, cell_val.clone(), Expr::ident("is_boundary"))
+                dsl::select(interior_other, cell_val, Expr::ident("is_boundary"))
             };
 
             // SlipWall projection for velocity-like vec2 fields: enforce zero normal component at
@@ -539,10 +538,10 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
                     let vy = Expr::ident("state").index(Expr::ident("idx") * stride + vec_y_off);
                     let nx = Expr::ident("normal_vec").field("x");
                     let ny = Expr::ident("normal_vec").field("y");
-                    let un = vx.clone() * nx.clone() + vy.clone() * ny.clone();
+                    let un = vx * nx + vy * ny;
 
                     let projected = match target.base_component {
-                        0 => vx - un.clone() * nx,
+                        0 => vx - un * nx,
                         1 => vy - un * ny,
                         _ => unreachable!("base_component <= 1 guarded above"),
                     };
@@ -587,10 +586,10 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
             grad_vec,
         ));
 
-        let out = Expr::ident(&format!("grad_out_{}", target.component));
+        let out = Expr::ident(format!("grad_out_{}", target.component));
         stmts.push(dsl::assign_expr(
             Expr::ident("state").index(Expr::ident("idx") * stride + target.grad_x_offset),
-            out.clone().field("x"),
+            out.field("x"),
         ));
         stmts.push(dsl::assign_expr(
             Expr::ident("state").index(Expr::ident("idx") * stride + target.grad_y_offset),

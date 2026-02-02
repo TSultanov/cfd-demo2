@@ -2,7 +2,6 @@
 ///
 /// Maps primitive field names (e.g., "p", "u_x") to expressions over conserved state.
 /// Codegen uses these to generate primitive recovery kernels without hardcoding physics.
-
 use crate::solver::shared::PrimitiveExpr;
 use std::collections::HashMap;
 use std::collections::{BTreeSet, VecDeque};

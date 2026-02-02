@@ -96,7 +96,6 @@ impl KernelId {
 ///
 /// To support pluggable numerical modules (Gap 0 in `CODEGEN_PLAN.md`), per-model kernel WGSL
 /// generators are looked up via the model's module list.
-
 /// Model-owned kernel phase classification (GPU-agnostic).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KernelPhaseId {

@@ -678,7 +678,7 @@ fn validate_schur_model(
     let mut scalar_targets = std::collections::BTreeSet::new();
     for (eq_idx, eq) in model.system.equations().iter().enumerate() {
         let target = eq.target();
-        let comps = target.kind().component_count() as usize;
+        let comps = target.kind().component_count();
         
         match target.kind() {
             crate::solver::model::backend::ast::FieldKind::Scalar => {
@@ -1134,7 +1134,7 @@ pub(crate) fn spec_set_bc_value(
     unknown_component: u32,
     value: f32,
 ) -> Result<(), String> {
-    let coupled_stride = plan.model.system.unknowns_per_cell() as u32;
+    let coupled_stride = plan.model.system.unknowns_per_cell();
     if coupled_stride == 0 {
         return Err("model has no coupled unknowns".into());
     }
@@ -1157,8 +1157,8 @@ pub(crate) fn spec_set_bc_value(
         .get(boundary_idx as usize)
         .ok_or_else(|| format!("missing boundary_faces[{boundary_idx}]"))?;
     for &face_idx in faces {
-        let offset_bytes = ((face_idx as u64 * coupled_stride as u64 + unknown_component as u64)
-            * 4) as u64;
+        let offset_bytes =
+            (face_idx as u64 * coupled_stride as u64 + unknown_component as u64) * 4;
         plan.context
             .queue
             .write_buffer(&res(plan)._b_bc_value, offset_bytes, bytes_of(&value));

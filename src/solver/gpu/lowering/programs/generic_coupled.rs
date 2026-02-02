@@ -10,7 +10,7 @@ use crate::solver::gpu::modules::coupled_schur::CoupledPressureSolveKind;
 use crate::solver::gpu::modules::graph::{ModuleGraph, RuntimeDims};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
-use crate::solver::gpu::modules::linear_solver::solve_fgmres;
+use crate::solver::gpu::modules::linear_solver::{solve_fgmres, SolveFgmresArgs};
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::modules::runtime_preconditioner::{RuntimePreconditionerInputs, RuntimePreconditionerModule};
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
@@ -1041,17 +1041,19 @@ impl PlanLinearSystemDebug for GenericCoupledProgramResources {
                 .min(schur.solver.fgmres.max_restart());
 
             Ok(solve_fgmres(
-                &self.runtime.common.context,
                 &mut schur.solver,
-                system,
-                n,
-                self.runtime.common.num_cells,
-                schur.dispatch,
-                max_restart,
-                max_iters,
-                tol,
-                tol * 1e-4,
-                "GenericCoupled Schur (debug)",
+                SolveFgmresArgs {
+                    context: &self.runtime.common.context,
+                    system,
+                    n,
+                    num_cells: self.runtime.common.num_cells,
+                    dispatch: schur.dispatch,
+                    max_restart,
+                    max_iters,
+                    tol,
+                    tol_abs: tol * 1e-4,
+                    precond_label: "GenericCoupled Schur (debug)",
+                },
             ))
         } else if let Some(krylov) = &mut self.krylov {
             let system = LinearSystemView {
@@ -1064,17 +1066,19 @@ impl PlanLinearSystemDebug for GenericCoupledProgramResources {
                 _ => 30,
             };
             Ok(solve_fgmres(
-                &self.runtime.common.context,
                 &mut krylov.solver,
-                system,
-                n,
-                self.runtime.common.num_cells,
-                krylov.dispatch,
-                max_restart.max(1),
-                max_iters,
-                tol,
-                tol * 1e-4,
-                "GenericCoupled FGMRES (debug)",
+                SolveFgmresArgs {
+                    context: &self.runtime.common.context,
+                    system,
+                    n,
+                    num_cells: self.runtime.common.num_cells,
+                    dispatch: krylov.dispatch,
+                    max_restart: max_restart.max(1),
+                    max_iters,
+                    tol,
+                    tol_abs: tol * 1e-4,
+                    precond_label: "GenericCoupled FGMRES (debug)",
+                },
             ))
         } else {
             Ok(self.runtime.solve_linear_system_cg(max_iters, tol))
@@ -1272,17 +1276,19 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
         let max_restart = max_restart.max(1);
 
         let stats = solve_fgmres(
-            &context,
             &mut schur.solver,
-            system,
-            r.runtime.num_dofs,
-            r.runtime.common.num_cells,
-            schur.dispatch,
-            max_restart,
-            r.linear_solver.max_iters,
-            r.linear_solver.tolerance,
-            r.linear_solver.tolerance_abs,
-            "generic_coupled:schur",
+            SolveFgmresArgs {
+                context: &context,
+                system,
+                n: r.runtime.num_dofs,
+                num_cells: r.runtime.common.num_cells,
+                dispatch: schur.dispatch,
+                max_restart,
+                max_iters: r.linear_solver.max_iters,
+                tol: r.linear_solver.tolerance,
+                tol_abs: r.linear_solver.tolerance_abs,
+                precond_label: "generic_coupled:schur",
+            },
         );
         plan.last_linear_stats = stats;
         plan.step_linear_stats.push(stats);
@@ -1301,17 +1307,19 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
         };
 
         let stats = solve_fgmres(
-            &context,
             &mut krylov.solver,
-            system,
-            r.runtime.num_dofs,
-            r.runtime.common.num_cells,
-            krylov.dispatch,
-            max_restart.max(1),
-            r.linear_solver.max_iters,
-            r.linear_solver.tolerance,
-            r.linear_solver.tolerance_abs,
-            "generic_coupled:fgmres",
+            SolveFgmresArgs {
+                context: &context,
+                system,
+                n: r.runtime.num_dofs,
+                num_cells: r.runtime.common.num_cells,
+                dispatch: krylov.dispatch,
+                max_restart: max_restart.max(1),
+                max_iters: r.linear_solver.max_iters,
+                tol: r.linear_solver.tolerance,
+                tol_abs: r.linear_solver.tolerance_abs,
+                precond_label: "generic_coupled:fgmres",
+            },
         );
         plan.last_linear_stats = stats;
         plan.step_linear_stats.push(stats);

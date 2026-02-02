@@ -3,24 +3,41 @@ use crate::solver::gpu::linear_solver::fgmres::{
     write_params, FgmresSolveOnceConfig, IterParams, RawFgmresParams,
 };
 use crate::solver::gpu::modules::krylov_precond::{FgmresPreconditionerModule, KrylovDispatch};
-use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
+use crate::solver::gpu::modules::krylov_solve::{KrylovSolveModule, SolveOnceArgs};
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::structs::LinearSolverStats;
 use std::time::Instant;
 
+/// Arguments for the `solve_fgmres` function to reduce parameter count.
+pub struct SolveFgmresArgs<'a> {
+    pub context: &'a GpuContext,
+    pub system: LinearSystemView<'a>,
+    pub n: u32,
+    pub num_cells: u32,
+    pub dispatch: KrylovDispatch,
+    pub max_restart: usize,
+    pub max_iters: u32,
+    pub tol: f32,
+    pub tol_abs: f32,
+    pub precond_label: &'a str,
+}
+
 pub fn solve_fgmres<P: FgmresPreconditionerModule>(
-    context: &GpuContext,
     krylov: &mut KrylovSolveModule<P>,
-    system: LinearSystemView<'_>,
-    n: u32,
-    num_cells: u32,
-    dispatch: KrylovDispatch,
-    max_restart: usize,
-    max_iters: u32,
-    tol: f32,
-    tol_abs: f32,
-    precond_label: &str,
+    args: SolveFgmresArgs<'_>,
 ) -> LinearSolverStats {
+    let SolveFgmresArgs {
+        context,
+        system,
+        n,
+        num_cells,
+        dispatch,
+        max_restart,
+        max_iters,
+        tol,
+        tol_abs,
+        precond_label,
+    } = args;
     let start = Instant::now();
 
     let debug_fgmres = std::env::var("CFD2_DEBUG_FGMRES")
@@ -154,20 +171,20 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
             _pad2: 0,
         };
 
-        let solve = krylov.solve_once(
+        let solve = krylov.solve_once(SolveOnceArgs {
             context,
             system,
-            rel_scale,
+            rhs_norm: rel_scale,
             params,
             iter_params,
-            FgmresSolveOnceConfig {
+            config: FgmresSolveOnceConfig {
                 tol_rel: tol,
                 tol_abs,
                 reset_x_before_update: false,
             },
-            dispatch.grids,
+            dispatch: dispatch.grids,
             precond_label,
-        );
+        });
 
         total_iters = total_iters.saturating_add(solve.basis_size as u32);
         residual = solve.residual_est;

@@ -11,6 +11,18 @@ pub struct KrylovSolveModule<P> {
     pub precond: P,
 }
 
+/// Arguments for the `solve_once` method to reduce parameter count.
+pub struct SolveOnceArgs<'a> {
+    pub context: &'a GpuContext,
+    pub system: LinearSystemView<'a>,
+    pub rhs_norm: f32,
+    pub params: RawFgmresParams,
+    pub iter_params: IterParams,
+    pub config: FgmresSolveOnceConfig,
+    pub dispatch: DispatchGrids,
+    pub precond_label: &'a str,
+}
+
 impl<P> KrylovSolveModule<P> {
     pub fn new(fgmres: FgmresWorkspace, precond: P) -> Self {
         Self { fgmres, precond }
@@ -27,17 +39,17 @@ impl<P> KrylovSolveModule<P> {
 }
 
 impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {
-    pub fn solve_once(
-        &mut self,
-        context: &GpuContext,
-        system: LinearSystemView<'_>,
-        rhs_norm: f32,
-        params: RawFgmresParams,
-        iter_params: IterParams,
-        config: FgmresSolveOnceConfig,
-        dispatch: DispatchGrids,
-        precond_label: &str,
-    ) -> FgmresSolveOnceResult {
+    pub fn solve_once(&mut self, args: SolveOnceArgs<'_>) -> FgmresSolveOnceResult {
+        let SolveOnceArgs {
+            context,
+            system,
+            rhs_norm,
+            params,
+            iter_params,
+            config,
+            dispatch,
+            precond_label,
+        } = args;
         let core = self.fgmres.core(&context.device, &context.queue);
         fgmres_solve_once_with_preconditioner(
             &core,

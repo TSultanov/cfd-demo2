@@ -7,7 +7,6 @@
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
-use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::recipe::{LinearSolverSpec, LinearSolverType};
 use crate::solver::gpu::structs::LinearSolverStats;
 
@@ -148,30 +147,6 @@ pub struct SolveResult {
     pub stats: LinearSolverStats,
     pub precond_setup_time: f64,
     pub solve_time: f64,
-}
-
-/// Helper to create FGMRES resources for any preconditioner type.
-pub fn create_fgmres_resources<P: FgmresPreconditionerModule>(
-    device: &wgpu::Device,
-    n: u32,
-    num_cells: u32,
-    max_restart: usize,
-    system: LinearSystemView<'_>,
-    precond_bindings: FgmresPrecondBindings<'_>,
-    precond: P,
-    label: &str,
-) -> KrylovSolveModule<P> {
-    let fgmres = FgmresWorkspace::new_from_system(
-        device,
-        n,
-        num_cells,
-        max_restart,
-        system,
-        precond_bindings,
-        label,
-    );
-
-    KrylovSolveModule::new(fgmres, precond)
 }
 
 /// Identity preconditioner (no preconditioning).

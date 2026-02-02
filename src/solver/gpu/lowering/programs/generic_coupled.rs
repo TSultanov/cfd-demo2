@@ -2,7 +2,10 @@ use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExe
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
 use super::universal::UniversalProgramResources;
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
-use crate::solver::gpu::modules::generic_coupled_schur::GenericCoupledSchurPreconditioner;
+use crate::solver::gpu::modules::generic_coupled_schur::{
+    GenericCoupledSchurPreconditioner, GenericCoupledSchurPreconditionerInputs,
+    GenericCoupledSchurSetupBindGroupInputs,
+};
 use crate::solver::gpu::modules::coupled_schur::CoupledPressureSolveKind;
 use crate::solver::gpu::modules::graph::{ModuleGraph, RuntimeDims};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
@@ -849,13 +852,15 @@ fn build_generic_schur(
     let setup_bg = GenericCoupledSchurPreconditioner::build_setup_bind_group(
         device,
         &setup_pipeline,
-        scalar_row_offsets,
-        diagonal_indices,
-        matrix_values,
-        &b_diag_u,
-        &b_diag_p,
-        &b_p_matrix_values,
-        &b_setup_params,
+        GenericCoupledSchurSetupBindGroupInputs {
+            scalar_row_offsets,
+            diagonal_indices,
+            matrix_values,
+            diag_u_inv: &b_diag_u,
+            diag_p_inv: &b_diag_p,
+            p_matrix_values: &b_p_matrix_values,
+            setup_params: &b_setup_params,
+        },
     )?;
 
     let system = LinearSystemView {
@@ -880,25 +885,27 @@ fn build_generic_schur(
 
     let precond = GenericCoupledSchurPreconditioner::new(
         device,
-        num_cells,
-        scalar_row_offsets,
-        scalar_col_indices,
-        &b_p_matrix_values,
-        runtime.common.mesh.scalar_row_offsets.clone(),
-        runtime.common.mesh.scalar_col_indices.clone(),
-        scalar_nnz,
-        &b_diag_u,
-        &b_diag_p,
-        &b_precond_params,
-        setup_bg,
-        setup_pipeline,
-        b_setup_params,
-        model.system.unknowns_per_cell(),
-        layout.p,
-        u_len,
-        u0123,
-        u4567,
-        CoupledPressureSolveKind::from_config(recipe.linear_solver.preconditioner),
+        GenericCoupledSchurPreconditionerInputs {
+            num_cells,
+            pressure_row_offsets: scalar_row_offsets,
+            pressure_col_indices: scalar_col_indices,
+            pressure_values: &b_p_matrix_values,
+            pressure_row_offsets_host: runtime.common.mesh.scalar_row_offsets.clone(),
+            pressure_col_indices_host: runtime.common.mesh.scalar_col_indices.clone(),
+            pressure_num_nonzeros: scalar_nnz,
+            diag_u_inv: &b_diag_u,
+            diag_p_inv: &b_diag_p,
+            precond_params: &b_precond_params,
+            setup_bg,
+            setup_pipeline,
+            setup_params: b_setup_params,
+            unknowns_per_cell: model.system.unknowns_per_cell(),
+            p: layout.p,
+            u_len,
+            u0123,
+            u4567,
+            pressure_kind: CoupledPressureSolveKind::from_config(recipe.linear_solver.preconditioner),
+        },
     );
 
     let dispatch = DispatchGrids::for_sizes(num_dofs, num_cells);

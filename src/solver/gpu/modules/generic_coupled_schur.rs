@@ -10,6 +10,40 @@ use crate::solver::model::KernelId;
 
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 
+/// Input struct for [`GenericCoupledSchurPreconditioner::new`] to reduce argument count.
+pub struct GenericCoupledSchurPreconditionerInputs<'a> {
+    pub num_cells: u32,
+    pub pressure_row_offsets: &'a wgpu::Buffer,
+    pub pressure_col_indices: &'a wgpu::Buffer,
+    pub pressure_values: &'a wgpu::Buffer,
+    pub pressure_row_offsets_host: Vec<u32>,
+    pub pressure_col_indices_host: Vec<u32>,
+    pub pressure_num_nonzeros: u64,
+    pub diag_u_inv: &'a wgpu::Buffer,
+    pub diag_p_inv: &'a wgpu::Buffer,
+    pub precond_params: &'a wgpu::Buffer,
+    pub setup_bg: wgpu::BindGroup,
+    pub setup_pipeline: wgpu::ComputePipeline,
+    pub setup_params: wgpu::Buffer,
+    pub unknowns_per_cell: u32,
+    pub p: u32,
+    pub u_len: u32,
+    pub u0123: [u32; 4],
+    pub u4567: [u32; 4],
+    pub pressure_kind: CoupledPressureSolveKind,
+}
+
+/// Input struct for [`GenericCoupledSchurPreconditioner::build_setup_bind_group`].
+pub struct GenericCoupledSchurSetupBindGroupInputs<'a> {
+    pub scalar_row_offsets: &'a wgpu::Buffer,
+    pub diagonal_indices: &'a wgpu::Buffer,
+    pub matrix_values: &'a wgpu::Buffer,
+    pub diag_u_inv: &'a wgpu::Buffer,
+    pub diag_p_inv: &'a wgpu::Buffer,
+    pub p_matrix_values: &'a wgpu::Buffer,
+    pub setup_params: &'a wgpu::Buffer,
+}
+
 pub struct GenericCoupledSchurPreconditioner {
     schur: CoupledSchurModule,
     setup_pipeline: wgpu::ComputePipeline,
@@ -28,40 +62,19 @@ pub struct GenericCoupledSchurPreconditioner {
 }
 
 impl GenericCoupledSchurPreconditioner {
-    pub fn new(
-        device: &wgpu::Device,
-        num_cells: u32,
-        pressure_row_offsets: &wgpu::Buffer,
-        pressure_col_indices: &wgpu::Buffer,
-        pressure_values: &wgpu::Buffer,
-        pressure_row_offsets_host: Vec<u32>,
-        pressure_col_indices_host: Vec<u32>,
-        pressure_num_nonzeros: u64,
-        diag_u_inv: &wgpu::Buffer,
-        diag_p_inv: &wgpu::Buffer,
-        precond_params: &wgpu::Buffer,
-        setup_bg: wgpu::BindGroup,
-        setup_pipeline: wgpu::ComputePipeline,
-        setup_params: wgpu::Buffer,
-        unknowns_per_cell: u32,
-        p: u32,
-        u_len: u32,
-        u0123: [u32; 4],
-        u4567: [u32; 4],
-        pressure_kind: CoupledPressureSolveKind,
-    ) -> Self {
+    pub fn new(device: &wgpu::Device, inputs: GenericCoupledSchurPreconditionerInputs<'_>) -> Self {
         Self {
             schur: CoupledSchurModule::new(
                 device,
                 CoupledSchurInputs {
-                    num_cells,
-                    pressure_row_offsets,
-                    pressure_col_indices,
-                    pressure_values,
-                    diag_u_inv,
-                    diag_p_inv,
-                    precond_params,
-                    pressure_kind,
+                    num_cells: inputs.num_cells,
+                    pressure_row_offsets: inputs.pressure_row_offsets,
+                    pressure_col_indices: inputs.pressure_col_indices,
+                    pressure_values: inputs.pressure_values,
+                    diag_u_inv: inputs.diag_u_inv,
+                    diag_p_inv: inputs.diag_p_inv,
+                    precond_params: inputs.precond_params,
+                    pressure_kind: inputs.pressure_kind,
                     kernels: CoupledSchurKernelIds {
                         predict_and_form: KernelId::SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM,
                         relax_pressure: KernelId::SCHUR_GENERIC_PRECOND_RELAX_PRESSURE,
@@ -69,19 +82,19 @@ impl GenericCoupledSchurPreconditioner {
                     },
                 },
             ),
-            setup_pipeline,
-            setup_bg,
-            setup_params,
-            pressure_values: pressure_values.clone(),
-            pressure_row_offsets: pressure_row_offsets_host,
-            pressure_col_indices: pressure_col_indices_host,
-            pressure_num_nonzeros,
-            num_cells,
-            unknowns_per_cell,
-            p,
-            u_len,
-            u0123,
-            u4567,
+            setup_pipeline: inputs.setup_pipeline,
+            setup_bg: inputs.setup_bg,
+            setup_params: inputs.setup_params,
+            pressure_values: inputs.pressure_values.clone(),
+            pressure_row_offsets: inputs.pressure_row_offsets_host,
+            pressure_col_indices: inputs.pressure_col_indices_host,
+            pressure_num_nonzeros: inputs.pressure_num_nonzeros,
+            num_cells: inputs.num_cells,
+            unknowns_per_cell: inputs.unknowns_per_cell,
+            p: inputs.p,
+            u_len: inputs.u_len,
+            u0123: inputs.u0123,
+            u4567: inputs.u4567,
         }
     }
 
@@ -97,13 +110,7 @@ impl GenericCoupledSchurPreconditioner {
     pub fn build_setup_bind_group(
         device: &wgpu::Device,
         pipeline: &wgpu::ComputePipeline,
-        scalar_row_offsets: &wgpu::Buffer,
-        diagonal_indices: &wgpu::Buffer,
-        matrix_values: &wgpu::Buffer,
-        diag_u_inv: &wgpu::Buffer,
-        diag_p_inv: &wgpu::Buffer,
-        p_matrix_values: &wgpu::Buffer,
-        setup_params: &wgpu::Buffer,
+        inputs: GenericCoupledSchurSetupBindGroupInputs<'_>,
     ) -> Result<wgpu::BindGroup, String> {
         let src = kernel_registry::kernel_source_by_id(
             "",
@@ -112,13 +119,13 @@ impl GenericCoupledSchurPreconditioner {
         let bgl = pipeline.get_bind_group_layout(0);
 
         let base_registry = ResourceRegistry::new()
-            .with_buffer("scalar_row_offsets", scalar_row_offsets)
-            .with_buffer("diagonal_indices", diagonal_indices)
-            .with_buffer("matrix_values", matrix_values)
-            .with_buffer("diag_u_inv", diag_u_inv)
-            .with_buffer("diag_p_inv", diag_p_inv)
-            .with_buffer("p_matrix_values", p_matrix_values)
-            .with_buffer("params", setup_params);
+            .with_buffer("scalar_row_offsets", inputs.scalar_row_offsets)
+            .with_buffer("diagonal_indices", inputs.diagonal_indices)
+            .with_buffer("matrix_values", inputs.matrix_values)
+            .with_buffer("diag_u_inv", inputs.diag_u_inv)
+            .with_buffer("diag_p_inv", inputs.diag_p_inv)
+            .with_buffer("p_matrix_values", inputs.p_matrix_values)
+            .with_buffer("params", inputs.setup_params);
 
         wgsl_reflect::create_bind_group_from_bindings(
             device,

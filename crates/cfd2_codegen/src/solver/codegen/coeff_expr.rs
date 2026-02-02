@@ -34,7 +34,7 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
         "inv_dt" => {
             let dt = Expr::ident("constants").field("dt");
             let dtau = Expr::ident("constants").field("dtau");
-            let dt_eff = Expr::call_named("select", vec![dt, dtau.clone(), dtau.clone().gt(0.0)]);
+            let dt_eff = Expr::call_named("select", vec![dt, dtau, dtau.gt(0.0)]);
             let expr = Expr::from(1.0) / dt_eff;
             Some(DynExpr::new(expr, DslType::f32(), InvTime::UNIT))
         }
@@ -408,7 +408,7 @@ mod tests {
     fn coeff_expr_dyn_product_combines_units() {
         let rho = vol_scalar_dim::<Density>("rho");
         let d_p = vol_scalar_dim::<D_P>("d_p");
-        let layout = crate::solver::ir::StateLayout::new(vec![rho.clone(), d_p.clone()]);
+        let layout = crate::solver::ir::StateLayout::new(vec![rho, d_p]);
         let slots = slots_from_layout(&layout);
         
         // Create a product: rho * d_p
@@ -444,7 +444,7 @@ mod tests {
     fn coeff_expr_dyn_mag_sqr_scalar_squares_unit() {
         // Scalar field: MagSqr should square the unit
         let p = vol_scalar_dim::<Pressure>("p");
-        let layout = crate::solver::ir::StateLayout::new(vec![p.clone()]);
+        let layout = crate::solver::ir::StateLayout::new(vec![p]);
         let slots = slots_from_layout(&layout);
         
         let coeff = Coefficient::MagSqr(p);
@@ -460,7 +460,7 @@ mod tests {
     fn coeff_expr_dyn_mag_sqr_vector2_squares_unit() {
         // Vector2 field: MagSqr (dot product) should square the unit
         let u = vol_vector_dim::<Velocity>("U");
-        let layout = crate::solver::ir::StateLayout::new(vec![u.clone()]);
+        let layout = crate::solver::ir::StateLayout::new(vec![u]);
         let slots = slots_from_layout(&layout);
         
         let coeff = Coefficient::MagSqr(u);
@@ -476,7 +476,7 @@ mod tests {
     fn coeff_expr_dyn_mag_sqr_vector3_squares_unit() {
         // Vector3 field: MagSqr (dot product) should square the unit
         let u = vol_vector3_dim::<Velocity>("U");
-        let layout = crate::solver::ir::StateLayout::new(vec![u.clone()]);
+        let layout = crate::solver::ir::StateLayout::new(vec![u]);
         let slots = slots_from_layout(&layout);
         
         let coeff = Coefficient::MagSqr(u);
@@ -503,7 +503,7 @@ mod tests {
     #[test]
     fn coeff_face_expr_dyn_interpolates_with_correct_units() {
         let rho = vol_scalar_dim::<Density>("rho");
-        let layout = crate::solver::ir::StateLayout::new(vec![rho.clone()]);
+        let layout = crate::solver::ir::StateLayout::new(vec![rho]);
         let slots = slots_from_layout(&layout);
         
         let coeff = Coefficient::field(rho).unwrap();

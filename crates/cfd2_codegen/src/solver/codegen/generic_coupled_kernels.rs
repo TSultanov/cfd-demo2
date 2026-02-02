@@ -70,63 +70,6 @@ pub fn generate_generic_coupled_apply_wgsl(eos_params: &[ParamSpec]) -> KernelWg
     KernelWgsl::from(module)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::solver::codegen::ir::lower_system;
-    use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
-    use crate::solver::ir::{fvm, vol_scalar_dim, Equation, EquationSystem, SchemeRegistry};
-    use crate::solver::scheme::Scheme;
-
-    /// Helper to create a ResolvedStateSlotsSpec from a StateLayout for testing.
-    fn slots_from_layout(layout: &crate::solver::ir::StateLayout) -> ResolvedStateSlotsSpec {
-        let mut slots = Vec::new();
-        for field in layout.fields() {
-            let kind = match field.kind() {
-                crate::solver::ir::FieldKind::Scalar => PortFieldKind::Scalar,
-                crate::solver::ir::FieldKind::Vector2 => PortFieldKind::Vector2,
-                crate::solver::ir::FieldKind::Vector3 => PortFieldKind::Vector3,
-            };
-            slots.push(ResolvedStateSlotSpec {
-                name: field.name().to_string(),
-                kind,
-                unit: field.unit(),
-                base_offset: field.offset(),
-            });
-        }
-        ResolvedStateSlotsSpec {
-            stride: layout.stride(),
-            slots,
-        }
-    }
-
-    #[test]
-    fn generic_coupled_ddt_adds_dtau_diagonal_when_enabled() {
-        let u = vol_scalar_dim::<cfd2_ir::solver::dimensions::Velocity>("u");
-
-        let mut eqn = Equation::new(u.clone());
-        eqn.add_term(fvm::ddt(u.clone()));
-
-        let mut system = EquationSystem::new();
-        system.add_equation(eqn);
-
-        let layout = crate::solver::ir::StateLayout::new(vec![u]);
-        let slots = slots_from_layout(&layout);
-        let schemes = SchemeRegistry::new(Scheme::Upwind);
-        let discrete = lower_system(&system, &schemes).expect("lower_system");
-
-        let wgsl = generate_generic_coupled_assembly_wgsl(&discrete, &slots, false, &[]).to_wgsl();
-        assert!(
-            wgsl.contains("constants.dtau > 0.0"),
-            "expected assembly WGSL to gate dual-time term on constants.dtau"
-        );
-        assert!(
-            wgsl.contains("/ constants.dtau"),
-            "expected assembly WGSL to include a 1/dtau diagonal contribution"
-        );
-    }
-}
-
 fn vector2_struct() -> StructDef {
     StructDef::new(
         "Vector2",
@@ -302,32 +245,32 @@ fn base_assembly_items(needs_gradients: bool, eos_params: &[ParamSpec]) -> Vec<I
 }
 
 fn base_update_items(eos_params: &[ParamSpec]) -> Vec<Item> {
-    let mut items = Vec::new();
-    items.push(Item::Struct(vector2_struct()));
-    items.push(Item::Struct(constants_struct(eos_params)));
-    items.push(Item::Comment("Group 0: Fields".to_string()));
-    items.push(storage_var(
-        "state",
-        Type::array(Type::F32),
-        0,
-        0,
-        AccessMode::ReadWrite,
-    ));
-    items.push(uniform_var(
-        "constants",
-        Type::Custom("Constants".to_string()),
-        0,
-        1,
-    ));
-    items.push(Item::Comment("Group 1: Solution".to_string()));
-    items.push(storage_var(
-        "x",
-        Type::array(Type::F32),
-        1,
-        0,
-        AccessMode::ReadWrite,
-    ));
-    items
+    vec![
+        Item::Struct(vector2_struct()),
+        Item::Struct(constants_struct(eos_params)),
+        Item::Comment("Group 0: Fields".to_string()),
+        storage_var(
+            "state",
+            Type::array(Type::F32),
+            0,
+            0,
+            AccessMode::ReadWrite,
+        ),
+        uniform_var(
+            "constants",
+            Type::Custom("Constants".to_string()),
+            0,
+            1,
+        ),
+        Item::Comment("Group 1: Solution".to_string()),
+        storage_var(
+            "x",
+            Type::array(Type::F32),
+            1,
+            0,
+            AccessMode::ReadWrite,
+        ),
+    ]
 }
 
 fn base_apply_items(eos_params: &[ParamSpec]) -> Vec<Item> {
@@ -419,52 +362,51 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
         typed::UnitDim::dimensionless(),
     );
 
-    let mut stmts = Vec::new();
-    stmts.push(dsl::let_expr(
-        "idx",
-        Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
-            + Expr::ident("global_id").field("x"),
-    ));
-    stmts.push(dsl::if_block_expr(
-        Expr::ident("idx").ge(Expr::call_named(
-            "arrayLength",
-            vec![Expr::ident("cell_vols").addr_of()],
-        )),
-        dsl::block(vec![Stmt::Return(None)]),
-        None,
-    ));
-
-    stmts.push(dsl::let_expr(
-        "center",
-        dsl::array_access("cell_centers", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "vol",
-        dsl::array_access("cell_vols", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "start",
-        dsl::array_access("cell_face_offsets", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "end",
-        dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
-    ));
-    stmts.push(dsl::let_expr(
-        "scalar_offset",
-        dsl::array_access("scalar_row_offsets", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "num_neighbors",
-        dsl::array_access("scalar_row_offsets", Expr::ident("idx") + 1u32)
-            - Expr::ident("scalar_offset"),
-    ));
-
-    // start_row_i = scalar_offset * block_stride + num_neighbors * coupled_stride * i
-    stmts.push(dsl::let_expr(
-        "start_row_0",
-        Expr::ident("scalar_offset") * block_stride,
-    ));
+    let mut stmts = vec![
+        dsl::let_expr(
+            "idx",
+            Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+                + Expr::ident("global_id").field("x"),
+        ),
+        dsl::if_block_expr(
+            Expr::ident("idx").ge(Expr::call_named(
+                "arrayLength",
+                vec![Expr::ident("cell_vols").addr_of()],
+            )),
+            dsl::block(vec![Stmt::Return(None)]),
+            None,
+        ),
+        dsl::let_expr(
+            "center",
+            dsl::array_access("cell_centers", Expr::ident("idx")),
+        ),
+        dsl::let_expr(
+            "vol",
+            dsl::array_access("cell_vols", Expr::ident("idx")),
+        ),
+        dsl::let_expr(
+            "start",
+            dsl::array_access("cell_face_offsets", Expr::ident("idx")),
+        ),
+        dsl::let_expr(
+            "end",
+            dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
+        ),
+        dsl::let_expr(
+            "scalar_offset",
+            dsl::array_access("scalar_row_offsets", Expr::ident("idx")),
+        ),
+        dsl::let_expr(
+            "num_neighbors",
+            dsl::array_access("scalar_row_offsets", Expr::ident("idx") + 1u32)
+                - Expr::ident("scalar_offset"),
+        ),
+        // start_row_i = scalar_offset * block_stride + num_neighbors * coupled_stride * i
+        dsl::let_expr(
+            "start_row_0",
+            Expr::ident("scalar_offset") * block_stride,
+        ),
+    ];
     for row in 1..coupled_stride {
         let name = format!("start_row_{row}");
         stmts.push(dsl::let_expr(
@@ -513,9 +455,9 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
             .expect("missing target offset");
         let rho_expr = coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
         let base_coeff =
-            Expr::ident("vol") * rho_expr.clone() / Expr::ident("constants").field("dt");
+            Expr::ident("vol") * rho_expr / Expr::ident("constants").field("dt");
         let dtau = Expr::ident("constants").field("dtau");
-        let dual_time_coeff = Expr::ident("vol") * rho_expr / dtau.clone();
+        let dual_time_coeff = Expr::ident("vol") * rho_expr / dtau;
 
         let dt = Expr::ident("constants").field("dt");
         let dt_old = Expr::ident("constants").field("dt_old");
@@ -552,22 +494,22 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
             stmts.push(dsl::assign_op_expr(
                 AssignOp::Add,
                 Expr::ident(format!("diag_{u_idx}")),
-                base_coeff.clone(),
+                base_coeff,
             ));
             stmts.push(dsl::assign_op_expr(
                 AssignOp::Add,
                 Expr::ident(format!("rhs_{u_idx}")),
-                base_coeff.clone() * phi_n.clone(),
+                base_coeff * phi_n,
             ));
 
             // Optional BDF2.
             stmts.push(dsl::if_block_expr(
                 time_scheme.eq(TimeScheme::BDF2),
                 dsl::block(vec![
-                    dsl::let_expr("r", dt.clone() / dt_old.clone()),
+                    dsl::let_expr("r", dt / dt_old),
                     dsl::let_expr(
                         "diag_bdf2",
-                        base_coeff.clone() * (Expr::ident("r") * 2.0 + 1.0)
+                        base_coeff * (Expr::ident("r") * 2.0 + 1.0)
                             / (Expr::ident("r") + 1.0),
                     ),
                     dsl::let_expr("factor_n", Expr::ident("r") + 1.0),
@@ -577,13 +519,13 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
                     ),
                     dsl::assign_expr(
                         Expr::ident(format!("diag_{u_idx}")),
-                        Expr::ident(format!("diag_{u_idx}")) - base_coeff.clone()
+                        Expr::ident(format!("diag_{u_idx}")) - base_coeff
                             + Expr::ident("diag_bdf2"),
                     ),
                     dsl::assign_expr(
                         Expr::ident(format!("rhs_{u_idx}")),
-                        Expr::ident(format!("rhs_{u_idx}")) - base_coeff.clone() * phi_n.clone()
-                            + base_coeff.clone()
+                        Expr::ident(format!("rhs_{u_idx}")) - base_coeff * phi_n
+                            + base_coeff
                                 * (Expr::ident("factor_n") * phi_n
                                     - Expr::ident("factor_nm1") * phi_nm1),
                     ),
@@ -595,17 +537,17 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
             // Add a diagonal `rho/dtau` term along with the matching RHS term so the
             // converged physical-time solution remains unchanged.
             stmts.push(dsl::if_block_expr(
-                dtau.clone().gt(0.0),
+                dtau.gt(0.0),
                 dsl::block(vec![
                     dsl::assign_op_expr(
                         AssignOp::Add,
                         Expr::ident(format!("diag_{u_idx}")),
-                        dual_time_coeff.clone(),
+                        dual_time_coeff,
                     ),
                     dsl::assign_op_expr(
                         AssignOp::Add,
                         Expr::ident(format!("rhs_{u_idx}")),
-                        dual_time_coeff.clone() * phi_iter,
+                        dual_time_coeff * phi_iter,
                     ),
                 ]),
                 None,
@@ -615,11 +557,12 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
 
     // Face loop for diffusion contributions (implicit only).
     let face_loop_body = {
-        let mut body = Vec::new();
-        body.push(dsl::let_expr(
-            "face_idx",
-            dsl::array_access("cell_faces", Expr::ident("k")),
-        ));
+        let mut body = vec![
+            dsl::let_expr(
+                "face_idx",
+                dsl::array_access("cell_faces", Expr::ident("k")),
+            ),
+        ];
         body.push(dsl::let_expr(
             "owner",
             dsl::array_access("face_owner", Expr::ident("face_idx")),
@@ -771,7 +714,7 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
             let diff_coeff_name = format!("diff_coeff_{}", equation.target.name());
             body.push(dsl::let_expr(
                 &diff_coeff_name,
-                kappa.clone() * Expr::ident("area") / Expr::ident("dist"),
+                kappa * Expr::ident("area") / Expr::ident("dist"),
             ));
 
             for component in 0..equation.target.kind().component_count() as u32 {
@@ -798,7 +741,7 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
                     ),
                 ]);
 
-                let neumann_rhs = -(kappa.clone() * Expr::ident("area") * bc_value_expr.clone());
+                let neumann_rhs = -(kappa * Expr::ident("area") * bc_value_expr);
                 let boundary_contrib = dsl::block(vec![dsl::if_block_expr(
                     bc_kind_expr.eq(GpuBcKind::Dirichlet),
                     dsl::block(vec![
@@ -810,7 +753,7 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
                         dsl::assign_op_expr(
                             AssignOp::Add,
                             Expr::ident(format!("rhs_{u_idx}")),
-                            Expr::ident(&diff_coeff_name) * bc_value_expr.clone(),
+                            Expr::ident(&diff_coeff_name) * bc_value_expr,
                         ),
                     ]),
                     Some(dsl::block(vec![dsl::if_block_expr(
@@ -913,7 +856,7 @@ fn main_update_fn(
         let target = state_component_slot(slots.stride, "state", "idx", field_slot, *component);
         let x_entry =
             dsl::array_access_linear("x", Expr::ident("idx"), coupled_stride, u_idx as u32);
-        let value = x_entry.clone();
+        let value = x_entry;
 
         // Under-relaxation for SIMPLE-like coupled solvers.
         //
@@ -941,19 +884,19 @@ fn main_update_fn(
         } else {
             Expr::lit_f32(1.0)
         };
-        let prev = target.clone();
+        let prev = target;
         let prev_is_finite =
-            prev.clone().eq(prev.clone()) & dsl::abs(prev.clone()).lt(Expr::lit_f32(3.4e38));
+            prev.eq(prev) & dsl::abs(prev).lt(Expr::lit_f32(3.4e38));
         let value_is_finite =
-            value.clone().eq(value.clone()) & dsl::abs(value.clone()).lt(Expr::lit_f32(3.4e38));
+            value.eq(value) & dsl::abs(value).lt(Expr::lit_f32(3.4e38));
 
         // Avoid propagating NaN/Inf from the linear solver into the state.
         // If the previous iterate is already non-finite, prefer a finite `value`.
-        let relaxed = Expr::call_named("mix", vec![prev.clone(), value.clone(), alpha]);
-        let candidate = dsl::select(value.clone(), relaxed, prev_is_finite);
-        let out = dsl::select(prev.clone(), candidate, value_is_finite);
+        let relaxed = Expr::call_named("mix", vec![prev, value, alpha]);
+        let candidate = dsl::select(value, relaxed, prev_is_finite);
+        let out = dsl::select(prev, candidate, value_is_finite);
 
-        stmts.push(dsl::assign_expr(target, out.clone()));
+        stmts.push(dsl::assign_expr(target, out));
         stmts.push(dsl::assign_expr(x_entry, out));
     }
 
@@ -966,7 +909,7 @@ fn main_update_fn(
     if !primitives.is_empty() {
         let cell_idx = Expr::ident("idx");
         for (offset, expr) in primitives {
-            let value = lower_primitive_expr(expr, slots, cell_idx.clone(), "state");
+            let value = lower_primitive_expr(expr, slots, cell_idx, "state");
             let target = dsl::array_access_linear("state", Expr::ident("idx"), stride, *offset);
             stmts.push(dsl::assign_expr(target, value));
         }
@@ -988,48 +931,49 @@ fn main_apply_fn() -> Function {
         vec![Attribute::Builtin("global_invocation_id".to_string())],
     )];
 
-    let mut stmts = Vec::new();
-    stmts.push(dsl::let_expr(
-        "row",
-        Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
-            + Expr::ident("global_id").field("x"),
-    ));
-    stmts.push(dsl::let_expr(
-        "n",
-        Expr::call_named("arrayLength", vec![Expr::ident("row_offsets").addr_of()]) - 1u32,
-    ));
-    stmts.push(dsl::if_block_expr(
-        Expr::ident("row").ge(Expr::ident("n")),
-        dsl::block(vec![Stmt::Return(None)]),
-        None,
-    ));
-    stmts.push(dsl::let_expr(
-        "start",
-        dsl::array_access("row_offsets", Expr::ident("row")),
-    ));
-    stmts.push(dsl::let_expr(
-        "end",
-        dsl::array_access("row_offsets", Expr::ident("row") + 1u32),
-    ));
-    stmts.push(dsl::var_typed_expr("sum", Type::F32, Some(0.0.into())));
-    stmts.push(dsl::for_loop_expr(
-        dsl::for_init_var_expr("i", Expr::ident("start")),
-        Expr::ident("i").lt(Expr::ident("end")),
-        dsl::for_step_increment_expr(Expr::ident("i")),
-        dsl::block(vec![
-            dsl::let_expr("col", dsl::array_access("col_indices", Expr::ident("i"))),
-            dsl::let_expr(
-                "val",
-                dsl::array_access("matrix_values", Expr::ident("i")),
-            ),
-            dsl::let_expr("x_val", dsl::array_access("x", Expr::ident("col"))),
-            dsl::assign_op_expr(
-                AssignOp::Add,
-                Expr::ident("sum"),
-                Expr::ident("val") * Expr::ident("x_val"),
-            ),
-        ]),
-    ));
+    let mut stmts = vec![
+        dsl::let_expr(
+            "row",
+            Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+                + Expr::ident("global_id").field("x"),
+        ),
+        dsl::let_expr(
+            "n",
+            Expr::call_named("arrayLength", vec![Expr::ident("row_offsets").addr_of()]) - 1u32,
+        ),
+        dsl::if_block_expr(
+            Expr::ident("row").ge(Expr::ident("n")),
+            dsl::block(vec![Stmt::Return(None)]),
+            None,
+        ),
+        dsl::let_expr(
+            "start",
+            dsl::array_access("row_offsets", Expr::ident("row")),
+        ),
+        dsl::let_expr(
+            "end",
+            dsl::array_access("row_offsets", Expr::ident("row") + 1u32),
+        ),
+        dsl::var_typed_expr("sum", Type::F32, Some(0.0.into())),
+        dsl::for_loop_expr(
+            dsl::for_init_var_expr("i", Expr::ident("start")),
+            Expr::ident("i").lt(Expr::ident("end")),
+            dsl::for_step_increment_expr(Expr::ident("i")),
+            dsl::block(vec![
+                dsl::let_expr("col", dsl::array_access("col_indices", Expr::ident("i"))),
+                dsl::let_expr(
+                    "val",
+                    dsl::array_access("matrix_values", Expr::ident("i")),
+                ),
+                dsl::let_expr("x_val", dsl::array_access("x", Expr::ident("col"))),
+                dsl::assign_op_expr(
+                    AssignOp::Add,
+                    Expr::ident("sum"),
+                    Expr::ident("val") * Expr::ident("x_val"),
+                ),
+            ]),
+        ),
+    ];
     stmts.push(dsl::assign_expr(
         dsl::array_access("y", Expr::ident("row")),
         Expr::ident("sum"),
@@ -1042,4 +986,60 @@ fn main_apply_fn() -> Function {
         vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
         Block::new(stmts),
     )
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::codegen::ir::lower_system;
+    use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
+    use crate::solver::ir::{fvm, vol_scalar_dim, Equation, EquationSystem, SchemeRegistry};
+    use crate::solver::scheme::Scheme;
+
+    /// Helper to create a ResolvedStateSlotsSpec from a StateLayout for testing.
+    fn slots_from_layout(layout: &crate::solver::ir::StateLayout) -> ResolvedStateSlotsSpec {
+        let mut slots = vec![];
+        for field in layout.fields() {
+            let kind = match field.kind() {
+                crate::solver::ir::FieldKind::Scalar => PortFieldKind::Scalar,
+                crate::solver::ir::FieldKind::Vector2 => PortFieldKind::Vector2,
+                crate::solver::ir::FieldKind::Vector3 => PortFieldKind::Vector3,
+            };
+            slots.push(ResolvedStateSlotSpec {
+                name: field.name().to_string(),
+                kind,
+                unit: field.unit(),
+                base_offset: field.offset(),
+            });
+        }
+        ResolvedStateSlotsSpec {
+            stride: layout.stride(),
+            slots,
+        }
+    }
+
+    #[test]
+    fn generic_coupled_ddt_adds_dtau_diagonal_when_enabled() {
+        let u = vol_scalar_dim::<cfd2_ir::solver::dimensions::Velocity>("u");
+
+        let mut eqn = Equation::new(u);
+        eqn.add_term(fvm::ddt(u));
+
+        let mut system = EquationSystem::new();
+        system.add_equation(eqn);
+
+        let layout = crate::solver::ir::StateLayout::new(vec![u]);
+        let slots = slots_from_layout(&layout);
+        let schemes = SchemeRegistry::new(Scheme::Upwind);
+        let discrete = lower_system(&system, &schemes).expect("lower_system");
+
+        let wgsl = generate_generic_coupled_assembly_wgsl(&discrete, &slots, false, &[]).to_wgsl();
+        assert!(
+            wgsl.contains("constants.dtau > 0.0"),
+            "expected assembly WGSL to gate dual-time term on constants.dtau"
+        );
+        assert!(
+            wgsl.contains("/ constants.dtau"),
+            "expected assembly WGSL to include a 1/dtau diagonal contribution"
+        );
+    }
 }

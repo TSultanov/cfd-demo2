@@ -73,7 +73,7 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
                 BoundaryCondition::zero_gradient_dim::<DimensionlessGradient>(),
             ),
     );
-    let model = ModelSpec {
+    ModelSpec {
         id: "generic_diffusion_demo",
         system,
         state_layout: layout,
@@ -91,9 +91,7 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
         ],
         linear_solver: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
-    };
-
-    model
+    }
 }
 
 pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
@@ -148,7 +146,7 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
                 BoundaryCondition::zero_gradient_dim::<DimensionlessGradient>(),
             ),
     );
-    let model = ModelSpec {
+    ModelSpec {
         id: "generic_diffusion_demo_neumann",
         system,
         state_layout: layout,
@@ -166,7 +164,5 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
         ],
         linear_solver: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
-    };
-
-    model
+    }
 }

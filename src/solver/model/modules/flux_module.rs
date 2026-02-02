@@ -174,7 +174,7 @@ fn build_resolved_targets(
             .map(|c| c.full_offset())
             .ok_or_else(|| format!("flux_module_gradients: missing '{grad}[1]'"))?;
 
-        let bc_unknown_offset = flux_layout.offset_for(component).map(|v| v as u32);
+        let bc_unknown_offset = flux_layout.offset_for(component);
 
         // SlipWall offsets for velocity-like vec2 fields
         let (slip_vec2_x_offset, slip_vec2_y_offset) = match base_field.as_str() {
@@ -259,7 +259,7 @@ fn resolve_base_scalar(
         format!("flux_module_gradients: base field '{base}' not found for '{component}'")
     })?;
 
-    if component_idx as u32 >= base_meta.component_count {
+    if component_idx >= base_meta.component_count {
         return Err(format!(
             "flux_module_gradients: base field '{base}' has {} components, cannot select '{component}'",
             base_meta.component_count

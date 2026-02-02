@@ -259,7 +259,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         crate::solver::model::modules::rhie_chow::rhie_chow_aux_module(&system, "d_p", true, true)
             .expect("failed to create rhie_chow_aux_module");
 
-    let model = ModelSpec {
+    ModelSpec {
         id: "incompressible_momentum",
         system,
         state_layout: layout,
@@ -286,9 +286,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             ..Default::default()
         }),
         primitives,
-    };
-
-    model
+    }
 }
 
 #[derive(Debug, Clone)]

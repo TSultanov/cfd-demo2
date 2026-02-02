@@ -125,9 +125,7 @@ impl ModelSpec {
         let method = self.method()?;
         let flux = self.flux_module()?;
 
-        let caps = match method {
-            crate::solver::model::method::MethodSpec::Coupled(caps) => caps,
-        };
+        let crate::solver::model::method::MethodSpec::Coupled(caps) = method;
         if caps.requires_flux_module && flux.is_none() {
             return Err("Coupled method requires a flux_module-providing module".to_string());
         }

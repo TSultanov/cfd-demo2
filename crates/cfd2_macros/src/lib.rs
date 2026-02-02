@@ -64,7 +64,7 @@ pub fn derive_port_set(input: TokenStream) -> TokenStream {
     // Generate registration code for each field
     let register_fields: Vec<_> = fields
         .iter()
-        .filter_map(|field| generate_register_field(field))
+        .filter_map(generate_register_field)
         .collect();
 
 
@@ -86,17 +86,17 @@ pub fn derive_port_set(input: TokenStream) -> TokenStream {
     // Generate port manifest entries
     let param_specs: Vec<_> = fields
         .iter()
-        .filter_map(|field| generate_param_spec(field))
+        .filter_map(generate_param_spec)
         .collect();
 
     let field_specs: Vec<_> = fields
         .iter()
-        .filter_map(|field| generate_field_spec(field))
+        .filter_map(generate_field_spec)
         .collect();
 
     let buffer_specs: Vec<_> = fields
         .iter()
-        .filter_map(|field| generate_buffer_spec(field))
+        .filter_map(generate_buffer_spec)
         .collect();
 
     // Check if we found any specs

@@ -1652,8 +1652,6 @@ impl CFDApp {
 
                         if let Some(renderer) = &self.cfd_renderer {
                             let renderer = renderer.clone();
-                            let min_val = min_val as f32;
-                            let max_val = max_val as f32;
                             let viewport_size = [rect.width(), rect.height()];
 
                             // Compute bounds
@@ -1711,7 +1709,7 @@ impl CFDApp {
                         Plot::new("cfd_plot").data_aspect(1.0).show(ui, |plot_ui| {
                             for (i, polygon_points) in cells.iter().enumerate() {
                                 let val = vals.get(i).copied().unwrap_or_default();
-                                let t = (val - min_val) / (max_val - min_val);
+                                let t = (val - min_val as f64) / (max_val - min_val) as f64;
                                 let color = get_color(t);
 
                                 plot_ui.polygon(
@@ -2483,7 +2481,7 @@ impl eframe::App for CFDApp {
         let (min_val, max_val) = self
             .plot_cache
             .as_ref()
-            .map(|cache| (cache.min, cache.max))
+            .map(|cache| (cache.min as f32, cache.max as f32))
             .unwrap_or((0.0, 1.0));
 
         self.render_right_panel(ctx, has_solver, min_val, max_val);

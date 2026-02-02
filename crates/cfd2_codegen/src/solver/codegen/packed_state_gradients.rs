@@ -170,51 +170,48 @@ fn main_fn(layout: &StateLayout, unknown_stride: u32) -> Function {
 fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
     let stride = layout.stride();
 
-    let mut stmts = Vec::new();
-
-    stmts.push(dsl::let_expr(
-        "idx",
-        Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
-            + Expr::ident("global_id").field("x"),
-    ));
-    stmts.push(dsl::if_block_expr(
-        Expr::ident("idx").ge(Expr::call_named(
-            "arrayLength",
-            vec![Expr::ident("cell_vols").addr_of()],
-        )),
-        dsl::block(vec![Stmt::Return(None)]),
-        None,
-    ));
-
-    // Skip the full Green–Gauss pass for first-order upwind to keep overhead low.
-    stmts.push(dsl::if_block_expr(
-        Expr::ident("constants").field("scheme").eq(Expr::from(0u32)),
-        dsl::block(vec![Stmt::Return(None)]),
-        None,
-    ));
-
-    stmts.push(dsl::let_expr(
-        "cell_center",
-        dsl::array_access("cell_centers", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_typed_expr(
-        "cell_center_vec",
-        Type::vec2_f32(),
-        typed::VecExpr::<2>::from_xy_fields(Expr::ident("cell_center")).expr(),
-    ));
-
-    stmts.push(dsl::let_expr(
-        "vol",
-        dsl::array_access("cell_vols", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "start",
-        dsl::array_access("cell_face_offsets", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "end",
-        dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
-    ));
+    let mut stmts = vec![
+        dsl::let_expr(
+            "idx",
+            Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+                + Expr::ident("global_id").field("x"),
+        ),
+        dsl::if_block_expr(
+            Expr::ident("idx").ge(Expr::call_named(
+                "arrayLength",
+                vec![Expr::ident("cell_vols").addr_of()],
+            )),
+            dsl::block(vec![Stmt::Return(None)]),
+            None,
+        ),
+        // Skip the full Green–Gauss pass for first-order upwind to keep overhead low.
+        dsl::if_block_expr(
+            Expr::ident("constants").field("scheme").eq(Expr::from(0u32)),
+            dsl::block(vec![Stmt::Return(None)]),
+            None,
+        ),
+        dsl::let_expr(
+            "cell_center",
+            dsl::array_access("cell_centers", Expr::ident("idx")),
+        ),
+        dsl::let_typed_expr(
+            "cell_center_vec",
+            Type::vec2_f32(),
+            typed::VecExpr::<2>::from_xy_fields(Expr::ident("cell_center")).expr(),
+        ),
+        dsl::let_expr(
+            "vol",
+            dsl::array_access("cell_vols", Expr::ident("idx")),
+        ),
+        dsl::let_expr(
+            "start",
+            dsl::array_access("cell_face_offsets", Expr::ident("idx")),
+        ),
+        dsl::let_expr(
+            "end",
+            dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
+        ),
+    ];
 
     // Accumulators: one vec2 per coupled unknown component.
     for component in 0..unknown_stride {
@@ -228,24 +225,24 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
 
     // Face loop.
     let face_loop_body = {
-        let mut body = Vec::new();
-
-        body.push(dsl::let_expr(
-            "face_idx",
-            dsl::array_access("cell_faces", Expr::ident("k")),
-        ));
-        body.push(dsl::let_expr(
-            "owner",
-            dsl::array_access("face_owner", Expr::ident("face_idx")),
-        ));
-        body.push(dsl::let_expr(
-            "neighbor_raw",
-            dsl::array_access("face_neighbor", Expr::ident("face_idx")),
-        ));
-        body.push(dsl::let_expr(
-            "is_boundary",
-            Expr::ident("neighbor_raw").eq(-1),
-        ));
+        let mut body = vec![
+            dsl::let_expr(
+                "face_idx",
+                dsl::array_access("cell_faces", Expr::ident("k")),
+            ),
+            dsl::let_expr(
+                "owner",
+                dsl::array_access("face_owner", Expr::ident("face_idx")),
+            ),
+            dsl::let_expr(
+                "neighbor_raw",
+                dsl::array_access("face_neighbor", Expr::ident("face_idx")),
+            ),
+            dsl::let_expr(
+                "is_boundary",
+                Expr::ident("neighbor_raw").eq(-1),
+            ),
+        ];
         body.push(dsl::let_expr(
             "area",
             dsl::array_access("face_areas", Expr::ident("face_idx")),
@@ -356,11 +353,11 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
 
             let bc_table_idx =
                 Expr::ident("face_idx") * Expr::from(unknown_stride) + Expr::from(component);
-            let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
+            let kind = dsl::array_access("bc_kind", bc_table_idx);
             let value = dsl::array_access("bc_value", bc_table_idx);
             let from_bc = dsl::select(
-                dsl::select(cell_val.clone(), value.clone(), kind.eq(Expr::from(1u32))),
-                cell_val.clone() + value * Expr::ident("d_own"),
+                dsl::select(cell_val, value, kind.eq(Expr::from(1u32))),
+                cell_val + value * Expr::ident("d_own"),
                 kind.eq(Expr::from(2u32)),
             );
 
@@ -374,7 +371,7 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
                 .expr();
             body.push(dsl::assign_op_expr(
                 AssignOp::Add,
-                Expr::ident(&acc_name),
+                Expr::ident(acc_name),
                 contrib,
             ));
         }
@@ -392,7 +389,7 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
     // Write out gradients (divide by volume) into the packed `grad_state` buffer.
     for component in 0..unknown_stride {
         let acc_name = format!("grad_acc_{component}");
-        let grad_vec = typed::VecExpr::<2>::from_expr(Expr::ident(&acc_name))
+        let grad_vec = typed::VecExpr::<2>::from_expr(Expr::ident(acc_name))
             .mul_scalar(Expr::from(1.0) / dsl::max(Expr::ident("vol"), 1e-12))
             .expr();
         stmts.push(dsl::let_typed_expr(
@@ -401,11 +398,11 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
             grad_vec,
         ));
 
-        let out = Expr::ident(&format!("grad_out_{component}"));
+        let out = Expr::ident(format!("grad_out_{component}"));
         let out_idx = Expr::ident("idx") * stride + Expr::from(component);
         stmts.push(dsl::assign_expr(
-            Expr::ident("grad_state").index(out_idx.clone()).field("x"),
-            out.clone().field("x"),
+            Expr::ident("grad_state").index(out_idx).field("x"),
+            out.field("x"),
         ));
         stmts.push(dsl::assign_expr(
             Expr::ident("grad_state").index(out_idx).field("y"),

@@ -65,7 +65,7 @@ pub fn lower_system_unchecked(
             ops.push(lower_term(equation.target(), term, schemes));
         }
         equations.push(DiscreteEquation {
-            target: equation.target().clone(),
+            target: *equation.target(),
             ops,
         });
     }
@@ -94,13 +94,13 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
         TermOp::Source => DiscreteOpKind::Source,
     };
     DiscreteOp {
-        target: target.clone(),
+        target: *target,
         kind,
         term_op: term.op,
         discretization: term.discretization,
         scheme: schemes.scheme_for(term),
-        field: term.field.clone(),
-        flux: term.flux.clone(),
+        field: term.field,
+        flux: term.flux,
         coeff: term.coeff.clone(),
     }
 }
@@ -123,14 +123,14 @@ mod tests {
         let phi = surface_scalar_dim::<MassFlux>("phi");
         let mu = vol_scalar_dim::<DynamicViscosity>("mu");
 
-        let mut eqn = crate::solver::ir::Equation::new(u.clone());
-        eqn.add_term(fvm::ddt_coeff(Coefficient::field(rho).unwrap(), u.clone()));
-        eqn.add_term(fvm::div(phi.clone(), u.clone()));
-        eqn.add_term(fvc::grad(p.clone()));
-        eqn.add_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u.clone()));
+        let mut eqn = crate::solver::ir::Equation::new(u);
+        eqn.add_term(fvm::ddt_coeff(Coefficient::field(rho).unwrap(), u));
+        eqn.add_term(fvm::div(phi, u));
+        eqn.add_term(fvc::grad(p));
+        eqn.add_term(fvm::laplacian(Coefficient::field(mu).unwrap(), u));
         eqn.add_term(fvc::source_coeff(
             Coefficient::constant_unit(1.0, PressureGradient::UNIT),
-            u.clone(),
+            u,
         ));
 
         let mut system = EquationSystem::new();
@@ -155,8 +155,8 @@ mod tests {
         let u = vol_vector_dim::<Velocity>("U");
         let phi = surface_scalar_dim::<MassFlux>("phi");
 
-        let mut eqn = crate::solver::ir::Equation::new(u.clone());
-        eqn.add_term(fvm::div(phi.clone(), u.clone()));
+        let mut eqn = crate::solver::ir::Equation::new(u);
+        eqn.add_term(fvm::div(phi, u));
 
         let mut system = EquationSystem::new();
         system.add_equation(eqn);

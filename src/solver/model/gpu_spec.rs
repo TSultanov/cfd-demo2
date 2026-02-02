@@ -1,8 +1,9 @@
 use crate::solver::model::backend::FieldRef;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum GradientStorage {
     /// No gradient buffers are allocated/bound.
+    #[default]
     None,
     /// Gradients are stored per field name (e.g. `grad_U`, `grad_p`).
     ///
@@ -14,11 +15,6 @@ pub enum GradientStorage {
     PackedState,
 }
 
-impl Default for GradientStorage {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 pub fn expand_field_components(field: FieldRef) -> Vec<String> {
     match field.kind() {

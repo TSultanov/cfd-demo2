@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum EosSpec {
     /// Ideal gas equation of state with constant gamma.
     ///
@@ -22,6 +22,7 @@ pub enum EosSpec {
     ///
     /// This is intentionally minimal for now; methods that require thermodynamic closure
     /// (e.g. Euler EI) should reject this variant.
+    #[default]
     Constant,
 }
 
@@ -41,12 +42,6 @@ pub struct EosRuntimeParams {
     pub theta_ref: f32,
 }
 
-impl Default for EosSpec {
-    fn default() -> Self {
-        // Treat "no EOS provided" as incompressible/constant.
-        EosSpec::Constant
-    }
-}
 
 impl EosSpec {
     pub fn ideal_gas_gamma(&self) -> Option<f32> {

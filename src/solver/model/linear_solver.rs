@@ -87,12 +87,13 @@ impl SchurBlockLayout {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ModelPreconditionerSpec {
     /// Leave preconditioner selection to the runtime config.
     ///
     /// This is the default for most models while solver plumbing is being
     /// migrated to be fully model-owned.
+    #[default]
     Default,
 
     /// SIMPLE-like Schur complement preconditioner for saddle-point systems.
@@ -107,11 +108,6 @@ pub enum ModelPreconditionerSpec {
     },
 }
 
-impl Default for ModelPreconditionerSpec {
-    fn default() -> Self {
-        Self::Default
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelLinearSolverType {

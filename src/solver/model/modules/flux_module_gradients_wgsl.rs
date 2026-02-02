@@ -28,160 +28,6 @@ pub fn generate_flux_module_gradients_wgsl(
     KernelWgsl::from(module)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::solver::dimensions::{Density, DivDim, Length, MomentumDensity};
-    use crate::solver::ir::{vol_scalar_dim, vol_vector_dim, FluxComponent, StateLayout};
-    use crate::solver::model::modules::flux_module::resolve_flux_module_gradients_targets;
-
-    #[test]
-    fn flux_module_gradients_wgsl_matches_committed_incompressible_momentum() {
-        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
-        use crate::solver::model::incompressible_momentum_model;
-        use crate::solver::ir::SchemeRegistry;
-
-        let model = incompressible_momentum_model();
-        let schemes = SchemeRegistry::default();
-        let generated = generate_kernel_wgsl_for_model_by_id(
-            &model,
-            &schemes,
-            KernelId::FLUX_MODULE_GRADIENTS,
-        )
-        .expect("should generate flux_module_gradients WGSL");
-
-        let committed = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/solver/gpu/shaders/generated/flux_module_gradients_incompressible_momentum.wgsl"
-        ));
-
-        assert_eq!(
-            generated.trim_end(),
-            committed.trim_end(),
-            "generated flux_module_gradients WGSL for incompressible_momentum does not match committed file"
-        );
-    }
-
-    #[test]
-    fn flux_module_gradients_wgsl_matches_committed_compressible() {
-        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
-        use crate::solver::model::compressible_model;
-        use crate::solver::ir::SchemeRegistry;
-
-        let model = compressible_model();
-        let schemes = SchemeRegistry::default();
-        let generated = generate_kernel_wgsl_for_model_by_id(
-            &model,
-            &schemes,
-            KernelId::FLUX_MODULE_GRADIENTS,
-        )
-        .expect("should generate flux_module_gradients WGSL");
-
-        let committed = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/solver/gpu/shaders/generated/flux_module_gradients_compressible.wgsl"
-        ));
-
-        assert_eq!(
-            generated.trim_end(),
-            committed.trim_end(),
-            "generated flux_module_gradients WGSL for compressible does not match committed file"
-        );
-    }
-
-    #[test]
-    fn flux_module_gradients_accepts_vector_component_gradients() {
-        let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
-        let grad_rho_u_x = vol_vector_dim::<DivDim<MomentumDensity, Length>>("grad_rho_u_x");
-        let grad_rho_u_y = vol_vector_dim::<DivDim<MomentumDensity, Length>>("grad_rho_u_y");
-        let rho = vol_scalar_dim::<Density>("rho");
-        let grad_rho = vol_vector_dim::<DivDim<Density, Length>>("grad_rho");
-
-        let layout = StateLayout::new(vec![rho_u, grad_rho_u_x, grad_rho_u_y, rho, grad_rho]);
-
-        let flux_layout = FluxLayout {
-            stride: 3,
-            components: vec![
-                FluxComponent {
-                    name: "rho".to_string(),
-                    offset: 0,
-                },
-                FluxComponent {
-                    name: "rho_u_x".to_string(),
-                    offset: 1,
-                },
-                FluxComponent {
-                    name: "rho_u_y".to_string(),
-                    offset: 2,
-                },
-            ],
-        };
-
-        // Use resolver -> generator pattern
-        let targets = resolve_flux_module_gradients_targets(&layout, &flux_layout)
-            .expect("should resolve gradient targets");
-        let wgsl =
-            generate_flux_module_gradients_wgsl(layout.stride(), &flux_layout, &targets).to_wgsl();
-        assert!(wgsl.contains("grad_acc_rho"));
-        assert!(wgsl.contains("grad_acc_rho_u_x"));
-        assert!(wgsl.contains("grad_acc_rho_u_y"));
-    }
-
-    #[test]
-    fn missing_grad_field_component_returns_clear_error() {
-        // Regression test: when a grad_<field> exists and base field exists,
-        // but the base field component is missing (e.g., trying to access component 5 of a vec2),
-        // the resolver should return a clear error containing the field name.
-        let rho = vol_scalar_dim::<Density>("rho");
-        let grad_rho = vol_vector_dim::<DivDim<Density, Length>>("grad_rho");
-
-        let layout = StateLayout::new(vec![rho, grad_rho]);
-
-        let flux_layout = FluxLayout {
-            stride: 1,
-            components: vec![FluxComponent {
-                name: "rho".to_string(),
-                offset: 0,
-            }],
-        };
-
-        // This should succeed since rho is a scalar (component 0)
-        let result = resolve_flux_module_gradients_targets(&layout, &flux_layout);
-        assert!(
-            result.is_ok(),
-            "should succeed for scalar field: {:?}",
-            result.err()
-        );
-
-        // Now test with a vector component selector that exceeds the field's component count
-        let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
-        let grad_rho_u_z = vol_vector_dim::<DivDim<MomentumDensity, Length>>("grad_rho_u_z");
-        // Note: rho_u only has x,y components (0,1), but we're requesting z (component 2)
-
-        let layout2 = StateLayout::new(vec![rho_u, grad_rho_u_z]);
-        let flux_layout2 = FluxLayout {
-            stride: 2,
-            components: vec![
-                FluxComponent {
-                    name: "rho_u_x".to_string(),
-                    offset: 0,
-                },
-                FluxComponent {
-                    name: "rho_u_y".to_string(),
-                    offset: 1,
-                },
-            ],
-        };
-
-        let result2 = resolve_flux_module_gradients_targets(&layout2, &flux_layout2);
-        let err = result2.expect_err("should fail when requesting component z of vec2 field");
-        assert!(
-            err.contains("rho_u_z") || err.contains("rho_u") || err.contains("component"),
-            "error should contain field name or component info: {err}"
-        );
-    }
-}
-
 fn base_items() -> Vec<Item> {
     let mut items = Vec::new();
     items.push(Item::Struct(vector2_struct()));
@@ -598,4 +444,158 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
     }
 
     Block::new(stmts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::dimensions::{Density, DivDim, Length, MomentumDensity};
+    use crate::solver::ir::{vol_scalar_dim, vol_vector_dim, FluxComponent, StateLayout};
+    use crate::solver::model::modules::flux_module::resolve_flux_module_gradients_targets;
+
+    #[test]
+    fn flux_module_gradients_wgsl_matches_committed_incompressible_momentum() {
+        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
+        use crate::solver::model::incompressible_momentum_model;
+        use crate::solver::ir::SchemeRegistry;
+
+        let model = incompressible_momentum_model();
+        let schemes = SchemeRegistry::default();
+        let generated = generate_kernel_wgsl_for_model_by_id(
+            &model,
+            &schemes,
+            KernelId::FLUX_MODULE_GRADIENTS,
+        )
+        .expect("should generate flux_module_gradients WGSL");
+
+        let committed = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/solver/gpu/shaders/generated/flux_module_gradients_incompressible_momentum.wgsl"
+        ));
+
+        assert_eq!(
+            generated.trim_end(),
+            committed.trim_end(),
+            "generated flux_module_gradients WGSL for incompressible_momentum does not match committed file"
+        );
+    }
+
+    #[test]
+    fn flux_module_gradients_wgsl_matches_committed_compressible() {
+        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
+        use crate::solver::model::compressible_model;
+        use crate::solver::ir::SchemeRegistry;
+
+        let model = compressible_model();
+        let schemes = SchemeRegistry::default();
+        let generated = generate_kernel_wgsl_for_model_by_id(
+            &model,
+            &schemes,
+            KernelId::FLUX_MODULE_GRADIENTS,
+        )
+        .expect("should generate flux_module_gradients WGSL");
+
+        let committed = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/solver/gpu/shaders/generated/flux_module_gradients_compressible.wgsl"
+        ));
+
+        assert_eq!(
+            generated.trim_end(),
+            committed.trim_end(),
+            "generated flux_module_gradients WGSL for compressible does not match committed file"
+        );
+    }
+
+    #[test]
+    fn flux_module_gradients_accepts_vector_component_gradients() {
+        let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
+        let grad_rho_u_x = vol_vector_dim::<DivDim<MomentumDensity, Length>>("grad_rho_u_x");
+        let grad_rho_u_y = vol_vector_dim::<DivDim<MomentumDensity, Length>>("grad_rho_u_y");
+        let rho = vol_scalar_dim::<Density>("rho");
+        let grad_rho = vol_vector_dim::<DivDim<Density, Length>>("grad_rho");
+
+        let layout = StateLayout::new(vec![rho_u, grad_rho_u_x, grad_rho_u_y, rho, grad_rho]);
+
+        let flux_layout = FluxLayout {
+            stride: 3,
+            components: vec![
+                FluxComponent {
+                    name: "rho".to_string(),
+                    offset: 0,
+                },
+                FluxComponent {
+                    name: "rho_u_x".to_string(),
+                    offset: 1,
+                },
+                FluxComponent {
+                    name: "rho_u_y".to_string(),
+                    offset: 2,
+                },
+            ],
+        };
+
+        // Use resolver -> generator pattern
+        let targets = resolve_flux_module_gradients_targets(&layout, &flux_layout)
+            .expect("should resolve gradient targets");
+        let wgsl =
+            generate_flux_module_gradients_wgsl(layout.stride(), &flux_layout, &targets).to_wgsl();
+        assert!(wgsl.contains("grad_acc_rho"));
+        assert!(wgsl.contains("grad_acc_rho_u_x"));
+        assert!(wgsl.contains("grad_acc_rho_u_y"));
+    }
+
+    #[test]
+    fn missing_grad_field_component_returns_clear_error() {
+        // Regression test: when a grad_<field> exists and base field exists,
+        // but the base field component is missing (e.g., trying to access component 5 of a vec2),
+        // the resolver should return a clear error containing the field name.
+        let rho = vol_scalar_dim::<Density>("rho");
+        let grad_rho = vol_vector_dim::<DivDim<Density, Length>>("grad_rho");
+
+        let layout = StateLayout::new(vec![rho, grad_rho]);
+
+        let flux_layout = FluxLayout {
+            stride: 1,
+            components: vec![FluxComponent {
+                name: "rho".to_string(),
+                offset: 0,
+            }],
+        };
+
+        // This should succeed since rho is a scalar (component 0)
+        let result = resolve_flux_module_gradients_targets(&layout, &flux_layout);
+        assert!(
+            result.is_ok(),
+            "should succeed for scalar field: {:?}",
+            result.err()
+        );
+
+        // Now test with a vector component selector that exceeds the field's component count
+        let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
+        let grad_rho_u_z = vol_vector_dim::<DivDim<MomentumDensity, Length>>("grad_rho_u_z");
+        // Note: rho_u only has x,y components (0,1), but we're requesting z (component 2)
+
+        let layout2 = StateLayout::new(vec![rho_u, grad_rho_u_z]);
+        let flux_layout2 = FluxLayout {
+            stride: 2,
+            components: vec![
+                FluxComponent {
+                    name: "rho_u_x".to_string(),
+                    offset: 0,
+                },
+                FluxComponent {
+                    name: "rho_u_y".to_string(),
+                    offset: 1,
+                },
+            ],
+        };
+
+        let result2 = resolve_flux_module_gradients_targets(&layout2, &flux_layout2);
+        let err = result2.expect_err("should fail when requesting component z of vec2 field");
+        assert!(
+            err.contains("rho_u_z") || err.contains("rho_u") || err.contains("component"),
+            "error should contain field name or component info: {err}"
+        );
+    }
 }

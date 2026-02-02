@@ -113,6 +113,13 @@ pub fn resolve_unknown_mapping_runtime(
     })
 }
 
+/// Boundary condition data bundled to reduce constructor argument count.
+pub struct BoundaryConditionData {
+    pub b_bc_kind: wgpu::Buffer,
+    pub b_bc_value: wgpu::Buffer,
+    pub boundary_faces: Vec<Vec<u32>>,
+}
+
 pub(crate) struct GenericCoupledProgramResources {
     runtime: GpuCsrRuntime,
     fields: UnifiedFieldResources,
@@ -511,10 +518,13 @@ impl GenericCoupledProgramResources {
         kernels: GeneratedKernelsModule,
         model: &ModelSpec,
         recipe: &SolverRecipe,
-        b_bc_kind: wgpu::Buffer,
-        b_bc_value: wgpu::Buffer,
-        boundary_faces: Vec<Vec<u32>>,
+        bc_data: BoundaryConditionData,
     ) -> Result<Self, String> {
+        let BoundaryConditionData {
+            b_bc_kind,
+            b_bc_value,
+            boundary_faces,
+        } = bc_data;
         // Build graphs from recipe using unified graph builder.
         //
         // Some models (e.g., compressible KT flux) require a gradient stage before flux.

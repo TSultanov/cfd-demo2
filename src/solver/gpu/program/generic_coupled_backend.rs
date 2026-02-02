@@ -2,7 +2,9 @@ use bytemuck::cast_slice;
 use wgpu::util::DeviceExt;
 
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::lowering::programs::generic_coupled::GenericCoupledProgramResources;
+use crate::solver::gpu::lowering::programs::generic_coupled::{
+    BoundaryConditionData, GenericCoupledProgramResources,
+};
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
@@ -171,15 +173,18 @@ pub(crate) async fn build_generic_coupled_backend(
     };
     let profiling_stats = std::sync::Arc::clone(&runtime.common.profiling_stats);
 
+    let bc_data = BoundaryConditionData {
+        b_bc_kind,
+        b_bc_value,
+        boundary_faces,
+    };
     let backend = GenericCoupledProgramResources::new(
         runtime,
         fields,
         kernels,
         &model,
         &recipe,
-        b_bc_kind,
-        b_bc_value,
-        boundary_faces,
+        bc_data,
     )?;
 
     Ok(GenericCoupledBuilt {

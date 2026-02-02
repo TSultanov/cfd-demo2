@@ -149,17 +149,19 @@ pub struct FgmresWorkspace {
 }
 
 impl FgmresWorkspace {
-    pub fn new(
+    pub fn new_from_system(
         device: &wgpu::Device,
         n: u32,
         num_cells: u32,
         max_restart: usize,
-        matrix_row_offsets: &wgpu::Buffer,
-        matrix_col_indices: &wgpu::Buffer,
-        matrix_values: &wgpu::Buffer,
+        system: LinearSystemView<'_>,
         precond: FgmresPrecondBindings<'_>,
         label_prefix: &str,
     ) -> Self {
+        let matrix_row_offsets = system.row_offsets();
+        let matrix_col_indices = system.col_indices();
+        let matrix_values = system.values();
+
         let num_dot_groups = workgroups_for_size(n);
 
         let min_alignment = 256u64;
@@ -535,28 +537,6 @@ impl FgmresWorkspace {
             pipeline_reduce_dots_cgs,
             pipeline_update_w_cgs,
         }
-    }
-
-    pub fn new_from_system(
-        device: &wgpu::Device,
-        n: u32,
-        num_cells: u32,
-        max_restart: usize,
-        system: LinearSystemView<'_>,
-        precond: FgmresPrecondBindings<'_>,
-        label_prefix: &str,
-    ) -> Self {
-        Self::new(
-            device,
-            n,
-            num_cells,
-            max_restart,
-            system.row_offsets(),
-            system.col_indices(),
-            system.values(),
-            precond,
-            label_prefix,
-        )
     }
 
     pub fn core<'a>(&'a self, device: &'a wgpu::Device, queue: &'a wgpu::Queue) -> FgmresCore<'a> {

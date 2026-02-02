@@ -1,9 +1,9 @@
 use super::constants::constants_struct;
 use super::dsl as typed;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
-    StorageClass, StructDef, StructField, Type,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt, Type,
 };
+use super::wgsl_bindings::{boundary_bindings, storage_var, uniform_var, vector2_struct};
 use super::wgsl_dsl as dsl;
 use super::KernelWgsl;
 use crate::solver::ir::ports::ParamSpec;
@@ -47,38 +47,6 @@ fn base_items(eos_params: &[ParamSpec]) -> Vec<Item> {
     ));
     items.extend(boundary_bindings());
     items
-}
-
-fn vector2_struct() -> StructDef {
-    StructDef::new(
-        "Vector2",
-        vec![
-            StructField::new("x", Type::F32),
-            StructField::new("y", Type::F32),
-        ],
-    )
-}
-
-// Use the shared constants helper from the constants module.
-
-fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
-    Item::GlobalVar(GlobalVar::new(
-        name,
-        ty,
-        StorageClass::Storage,
-        Some(access),
-        vec![Attribute::Group(group), Attribute::Binding(binding)],
-    ))
-}
-
-fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
-    Item::GlobalVar(GlobalVar::new(
-        name,
-        ty,
-        StorageClass::Uniform,
-        None,
-        vec![Attribute::Group(group), Attribute::Binding(binding)],
-    ))
 }
 
 fn mesh_bindings() -> Vec<Item> {
@@ -128,12 +96,7 @@ fn mesh_bindings() -> Vec<Item> {
 fn state_bindings() -> Vec<Item> {
     vec![
         storage_var("state", Type::array(Type::F32), 1, 0, AccessMode::Read),
-        uniform_var(
-            "constants",
-            Type::Custom("Constants".to_string()),
-            1,
-            3,
-        ),
+        uniform_var("constants", Type::Custom("Constants".to_string()), 1, 3),
         storage_var(
             "grad_state",
             Type::array(Type::Custom("Vector2".to_string())),
@@ -141,13 +104,6 @@ fn state_bindings() -> Vec<Item> {
             4,
             AccessMode::ReadWrite,
         ),
-    ]
-}
-
-fn boundary_bindings() -> Vec<Item> {
-    vec![
-        storage_var("bc_kind", Type::array(Type::U32), 2, 0, AccessMode::Read),
-        storage_var("bc_value", Type::array(Type::F32), 2, 1, AccessMode::Read),
     ]
 }
 
@@ -186,7 +142,9 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
         ),
         // Skip the full Green–Gauss pass for first-order upwind to keep overhead low.
         dsl::if_block_expr(
-            Expr::ident("constants").field("scheme").eq(Expr::from(0u32)),
+            Expr::ident("constants")
+                .field("scheme")
+                .eq(Expr::from(0u32)),
             dsl::block(vec![Stmt::Return(None)]),
             None,
         ),
@@ -199,10 +157,7 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
             Type::vec2_f32(),
             typed::VecExpr::<2>::from_xy_fields(Expr::ident("cell_center")).expr(),
         ),
-        dsl::let_expr(
-            "vol",
-            dsl::array_access("cell_vols", Expr::ident("idx")),
-        ),
+        dsl::let_expr("vol", dsl::array_access("cell_vols", Expr::ident("idx"))),
         dsl::let_expr(
             "start",
             dsl::array_access("cell_face_offsets", Expr::ident("idx")),
@@ -238,10 +193,7 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
                 "neighbor_raw",
                 dsl::array_access("face_neighbor", Expr::ident("face_idx")),
             ),
-            dsl::let_expr(
-                "is_boundary",
-                Expr::ident("neighbor_raw").eq(-1),
-            ),
+            dsl::let_expr("is_boundary", Expr::ident("neighbor_raw").eq(-1)),
         ];
         body.push(dsl::let_expr(
             "area",
@@ -266,8 +218,9 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
                 .expr(),
             ),
         ));
-        let cell_to_face = typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec"))
-            .sub(&typed::VecExpr::<2>::from_expr(Expr::ident("cell_center_vec")));
+        let cell_to_face = typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec")).sub(
+            &typed::VecExpr::<2>::from_expr(Expr::ident("cell_center_vec")),
+        );
         body.push(dsl::if_block_expr(
             cell_to_face
                 .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec")))
@@ -321,11 +274,17 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
 
         body.push(dsl::let_expr(
             "d_own",
-            dsl::distance(Expr::ident("cell_center_vec"), Expr::ident("face_center_vec")),
+            dsl::distance(
+                Expr::ident("cell_center_vec"),
+                Expr::ident("face_center_vec"),
+            ),
         ));
         body.push(dsl::let_expr(
             "d_neigh",
-            dsl::distance(Expr::ident("other_center_vec"), Expr::ident("face_center_vec")),
+            dsl::distance(
+                Expr::ident("other_center_vec"),
+                Expr::ident("face_center_vec"),
+            ),
         ));
         body.push(dsl::let_expr(
             "total_dist",
@@ -346,8 +305,8 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
         ));
 
         for component in 0..unknown_stride {
-            let cell_val = Expr::ident("state")
-                .index(Expr::ident("idx") * stride + Expr::from(component));
+            let cell_val =
+                Expr::ident("state").index(Expr::ident("idx") * stride + Expr::from(component));
             let interior_other = Expr::ident("state")
                 .index(Expr::ident("other_idx") * stride + Expr::from(component));
 

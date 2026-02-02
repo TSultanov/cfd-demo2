@@ -1,4 +1,4 @@
-use crate::solver::codegen::dsl::{DynExpr, DslType};
+use crate::solver::codegen::dsl::{DslType, DynExpr};
 use crate::solver::codegen::state_access::{
     state_scalar_slot_typed, state_vec2_slot_typed, state_vec3_slot_typed,
 };
@@ -6,8 +6,8 @@ use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotsSpec};
 use crate::solver::ir::Coefficient;
 use cfd2_ir::solver::dimensions::{
-    UnitDimension, MulDim, DivDim, Density, InvTime, DynamicViscosity, Pressure, Temperature,
-    Power, Length, Dimensionless,
+    Density, Dimensionless, DivDim, DynamicViscosity, InvTime, Length, MulDim, Power, Pressure,
+    Temperature, UnitDimension,
 };
 
 #[derive(Clone)]
@@ -110,20 +110,23 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
     }
 }
 
-
-
 /// Find a slot by name in the resolved state slots spec.
-fn find_slot<'a>(slots: &'a ResolvedStateSlotsSpec, field: &str) -> Option<&'a crate::solver::ir::ports::ResolvedStateSlotSpec> {
+fn find_slot<'a>(
+    slots: &'a ResolvedStateSlotsSpec,
+    field: &str,
+) -> Option<&'a crate::solver::ir::ports::ResolvedStateSlotSpec> {
     slots.slots.iter().find(|s| s.name == field)
 }
 
 /// Coefficient expression with unit tracking (dynamic version).
 /// Mirrors `coeff_expr` but uses `DynExpr` operations for unit checking.
-fn coeff_expr_dyn(slots: &ResolvedStateSlotsSpec, coeff: &Coefficient, sample: CoeffSample<'_>) -> DynExpr {
+fn coeff_expr_dyn(
+    slots: &ResolvedStateSlotsSpec,
+    coeff: &Coefficient,
+    sample: CoeffSample<'_>,
+) -> DynExpr {
     match coeff {
-        Coefficient::Constant { value, unit } => {
-            DynExpr::f32(*value as f32, *unit)
-        }
+        Coefficient::Constant { value, unit } => DynExpr::f32(*value as f32, *unit),
         Coefficient::Field(field) => {
             if let Some(slot) = find_slot(slots, field.name()) {
                 if slot.kind != PortFieldKind::Scalar {
@@ -139,7 +142,8 @@ fn coeff_expr_dyn(slots: &ResolvedStateSlotsSpec, coeff: &Coefficient, sample: C
                         interp,
                     } => {
                         let own = state_scalar_slot_typed(slots.stride, "state", owner_idx, slot);
-                        let neigh = state_scalar_slot_typed(slots.stride, "state", neighbor_idx, slot);
+                        let neigh =
+                            state_scalar_slot_typed(slots.stride, "state", neighbor_idx, slot);
                         // interp is dimensionless scalar
                         let interp_dyn = DynExpr::new(interp, DslType::f32(), Dimensionless::UNIT);
                         let one = DynExpr::f32(1.0, Dimensionless::UNIT);
@@ -272,10 +276,10 @@ pub fn coeff_face_expr(
 mod tests {
     use super::*;
     use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
-    use crate::solver::ir::{vol_scalar_dim, vol_vector_dim, vol_vector3_dim};
+    use crate::solver::ir::{vol_scalar_dim, vol_vector3_dim, vol_vector_dim};
     use cfd2_ir::solver::dimensions::{
-        Density, Pressure, Temperature, Velocity, Dimensionless, InvTime, DynamicViscosity,
-        Power, Length, D_P, MulDim, DivDim,
+        Density, Dimensionless, DivDim, DynamicViscosity, InvTime, Length, MulDim, Power, Pressure,
+        Temperature, Velocity, D_P,
     };
 
     /// Helper to create a ResolvedStateSlotsSpec from a StateLayout for testing.
@@ -410,15 +414,16 @@ mod tests {
         let d_p = vol_scalar_dim::<D_P>("d_p");
         let layout = crate::solver::ir::StateLayout::new(vec![rho, d_p]);
         let slots = slots_from_layout(&layout);
-        
+
         // Create a product: rho * d_p
         let coeff = Coefficient::product(
             Coefficient::field(rho).unwrap(),
             Coefficient::field(d_p).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
-        
+
         // Expected unit: DENSITY * D_P
         let expected_unit = MulDim::<Density, D_P>::UNIT;
         assert_eq!(dyn_expr.unit, expected_unit);
@@ -427,14 +432,17 @@ mod tests {
 
     #[test]
     fn coeff_expr_dyn_constant_preserves_unit() {
-        let coeff = Coefficient::Constant { value: 3.25, unit: Pressure::UNIT };
+        let coeff = Coefficient::Constant {
+            value: 3.25,
+            unit: Pressure::UNIT,
+        };
         let slots = ResolvedStateSlotsSpec {
             stride: 0,
             slots: vec![],
         };
-        
+
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
-        
+
         assert_eq!(dyn_expr.unit, Pressure::UNIT);
         assert_eq!(dyn_expr.ty, DslType::f32());
         assert_eq!(dyn_expr.expr.to_string(), "3.25");
@@ -446,10 +454,10 @@ mod tests {
         let p = vol_scalar_dim::<Pressure>("p");
         let layout = crate::solver::ir::StateLayout::new(vec![p]);
         let slots = slots_from_layout(&layout);
-        
+
         let coeff = Coefficient::MagSqr(p);
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
-        
+
         // Expected unit: PRESSURE^2
         let expected_unit = MulDim::<Pressure, Pressure>::UNIT;
         assert_eq!(dyn_expr.unit, expected_unit);
@@ -462,10 +470,10 @@ mod tests {
         let u = vol_vector_dim::<Velocity>("U");
         let layout = crate::solver::ir::StateLayout::new(vec![u]);
         let slots = slots_from_layout(&layout);
-        
+
         let coeff = Coefficient::MagSqr(u);
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
-        
+
         // Expected unit: VELOCITY^2
         let expected_unit = MulDim::<Velocity, Velocity>::UNIT;
         assert_eq!(dyn_expr.unit, expected_unit);
@@ -478,10 +486,10 @@ mod tests {
         let u = vol_vector3_dim::<Velocity>("U");
         let layout = crate::solver::ir::StateLayout::new(vec![u]);
         let slots = slots_from_layout(&layout);
-        
+
         let coeff = Coefficient::MagSqr(u);
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
-        
+
         // Expected unit: VELOCITY^2
         let expected_unit = MulDim::<Velocity, Velocity>::UNIT;
         assert_eq!(dyn_expr.unit, expected_unit);
@@ -493,9 +501,9 @@ mod tests {
         let layout = crate::solver::ir::StateLayout::new(vec![]);
         let slots = slots_from_layout(&layout);
         let fallback = DynExpr::f32(42.0, Pressure::UNIT);
-        
+
         let result = coeff_cell_expr_dyn(&slots, None, "i", fallback.clone());
-        
+
         assert_eq!(result.unit, fallback.unit);
         assert_eq!(result.expr.to_string(), "42.0");
     }
@@ -505,13 +513,14 @@ mod tests {
         let rho = vol_scalar_dim::<Density>("rho");
         let layout = crate::solver::ir::StateLayout::new(vec![rho]);
         let slots = slots_from_layout(&layout);
-        
+
         let coeff = Coefficient::field(rho).unwrap();
         let interp = Expr::from(0.75);
         let fallback = DynExpr::f32(0.0, Dimensionless::UNIT);
-        
-        let dyn_expr = coeff_face_expr_dyn(&slots, Some(&coeff), "owner", "neigh", interp, fallback);
-        
+
+        let dyn_expr =
+            coeff_face_expr_dyn(&slots, Some(&coeff), "owner", "neigh", interp, fallback);
+
         // Result should have DENSITY unit
         assert_eq!(dyn_expr.unit, Density::UNIT);
         assert_eq!(dyn_expr.ty, DslType::f32());

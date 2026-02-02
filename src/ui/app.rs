@@ -196,7 +196,9 @@ enum SolverWorkerCommand {
 }
 
 enum SolverWorkerEvent {
-    Stats { stats: CachedGpuStats },
+    Stats {
+        stats: CachedGpuStats,
+    },
     Snapshot {
         u: Vec<(f64, f64)>,
         p: Vec<f64>,
@@ -563,9 +565,10 @@ impl CFDApp {
             header,
         });
         if !self.last_init_trace_events.is_empty() {
-            self.solver_worker.send(SolverWorkerCommand::AppendTraceInit {
-                events: self.last_init_trace_events.clone(),
-            });
+            self.solver_worker
+                .send(SolverWorkerCommand::AppendTraceInit {
+                    events: self.last_init_trace_events.clone(),
+                });
         }
     }
 
@@ -911,19 +914,15 @@ impl CFDApp {
             let cx = mesh.cell_cx[i];
             let cy = mesh.cell_cy[i];
 
-            // // Add small perturbation to break symmetry
-            // let perturbation = (rng.gen::<f64>() - 0.5) * 0.01;
-            // vel.1 += perturbation;
-
             if cx < max_cell_size {
                 match selected_geometry {
                     GeometryType::BackwardsStep => {
                         if cy > 0.5 {
-                            // *vel = (1.0, 0.0); // Removed to match shader ramp
+                            // Inlet ramp handled by shader
                         }
                     }
                     GeometryType::ChannelObstacle => {
-                        // *vel = (1.0, 0.0);
+                        // Inlet handled by shader
                     }
                 }
             }
@@ -1295,78 +1294,77 @@ impl CFDApp {
         );
 
         let renderer_start = std::time::Instant::now();
-        let (renderer, viz_field) =
-            if let (Some(device), Some(queue)) = (&request.wgpu_device, &request.wgpu_queue) {
-                let state_size_bytes =
-                    mesh.num_cells() as u64 * model_caps.plot_stride as u64 * 4;
+        let (renderer, viz_field) = if let (Some(device), Some(queue)) =
+            (&request.wgpu_device, &request.wgpu_queue)
+        {
+            let state_size_bytes = mesh.num_cells() as u64 * model_caps.plot_stride as u64 * 4;
             let viz_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("CFD Viz Field Buffer 0"),
-                    size: state_size_bytes.max(4),
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
+                label: Some("CFD Viz Field Buffer 0"),
+                size: state_size_bytes.max(4),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let viz_buffer_1 = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("CFD Viz Field Buffer 1"),
+                size: state_size_bytes.max(4),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let viz_buffer_2 = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("CFD Viz Field Buffer 2"),
+                size: state_size_bytes.max(4),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            if state_size_bytes > 0 {
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("cfd_viz:init_copy_state"),
                 });
-                let viz_buffer_1 = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("CFD Viz Field Buffer 1"),
-                    size: state_size_bytes.max(4),
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                let viz_buffer_2 = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("CFD Viz Field Buffer 2"),
-                    size: state_size_bytes.max(4),
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                if state_size_bytes > 0 {
-                    let mut encoder =
-                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("cfd_viz:init_copy_state"),
-                        });
-                    encoder.copy_buffer_to_buffer(
-                        gpu_solver.state_buffer(),
-                        0,
-                        &viz_buffer,
-                        0,
-                        state_size_bytes,
-                    );
-                    encoder.copy_buffer_to_buffer(
-                        gpu_solver.state_buffer(),
-                        0,
-                        &viz_buffer_1,
-                        0,
-                        state_size_bytes,
-                    );
-                    encoder.copy_buffer_to_buffer(
-                        gpu_solver.state_buffer(),
-                        0,
-                        &viz_buffer_2,
-                        0,
-                        state_size_bytes,
-                    );
-                    queue.submit(Some(encoder.finish()));
-                }
-
-                let mut renderer = cfd_renderer::CfdRenderResources::new(
-                    device,
-                    request.target_format,
-                    mesh.num_cells() * 10,
+                encoder.copy_buffer_to_buffer(
+                    gpu_solver.state_buffer(),
+                    0,
+                    &viz_buffer,
+                    0,
+                    state_size_bytes,
                 );
-                let vertices = cfd_renderer::build_mesh_vertices(&cached_cells);
-                let line_vertices = cfd_renderer::build_line_vertices(&cached_cells);
-                renderer.update_mesh(queue, &vertices, &line_vertices);
-                renderer.update_bind_group(device, &viz_buffer);
-                (
-                    Some(renderer),
-                    Some(VizFieldBuffers {
-                        buffers: [viz_buffer, viz_buffer_1, viz_buffer_2],
-                        size_bytes: state_size_bytes,
-                        front_idx: Arc::new(AtomicUsize::new(0)),
-                        ready_idx: Arc::new(AtomicUsize::new(0)),
-                    }),
-                )
-            } else {
-                (None, None)
-            };
+                encoder.copy_buffer_to_buffer(
+                    gpu_solver.state_buffer(),
+                    0,
+                    &viz_buffer_1,
+                    0,
+                    state_size_bytes,
+                );
+                encoder.copy_buffer_to_buffer(
+                    gpu_solver.state_buffer(),
+                    0,
+                    &viz_buffer_2,
+                    0,
+                    state_size_bytes,
+                );
+                queue.submit(Some(encoder.finish()));
+            }
+
+            let mut renderer = cfd_renderer::CfdRenderResources::new(
+                device,
+                request.target_format,
+                mesh.num_cells() * 10,
+            );
+            let vertices = cfd_renderer::build_mesh_vertices(&cached_cells);
+            let line_vertices = cfd_renderer::build_line_vertices(&cached_cells);
+            renderer.update_mesh(queue, &vertices, &line_vertices);
+            renderer.update_bind_group(device, &viz_buffer);
+            (
+                Some(renderer),
+                Some(VizFieldBuffers {
+                    buffers: [viz_buffer, viz_buffer_1, viz_buffer_2],
+                    size_bytes: state_size_bytes,
+                    front_idx: Arc::new(AtomicUsize::new(0)),
+                    ready_idx: Arc::new(AtomicUsize::new(0)),
+                }),
+            )
+        } else {
+            (None, None)
+        };
         CFDApp::push_trace_init_event(
             &mut trace_init_events,
             "renderer.init",
@@ -2496,9 +2494,7 @@ fn solver_worker_apply_params(solver: &mut UnifiedSolver, params: RuntimeParams)
         let _ = solver.set_precond_theta_floor(params.low_mach_theta_floor);
     }
     if has_param("low_mach.pressure_coupling_alpha") {
-        let _ = solver.set_precond_pressure_coupling_alpha(
-            params.low_mach_pressure_coupling_alpha,
-        );
+        let _ = solver.set_precond_pressure_coupling_alpha(params.low_mach_pressure_coupling_alpha);
     }
 
     if has_param("advection_scheme") {
@@ -2566,7 +2562,10 @@ fn trace_runtime_params_from_worker(params: RuntimeParams) -> tracefmt::TraceRun
     }
 }
 
-fn solver_worker_stop_trace(trace: &mut Option<SolverTraceSession>, solver: &mut Option<UnifiedSolver>) {
+fn solver_worker_stop_trace(
+    trace: &mut Option<SolverTraceSession>,
+    solver: &mut Option<UnifiedSolver>,
+) {
     let Some(mut session) = trace.take() else {
         return;
     };
@@ -2681,9 +2680,11 @@ fn solver_worker_stop_trace(trace: &mut Option<SolverTraceSession>, solver: &mut
         }
     }
 
-    let _ = session.writer.write_event(&tracefmt::TraceEvent::Footer(tracefmt::TraceFooter {
-        closed_unix_ms: tracefmt::now_unix_ms(),
-    }));
+    let _ = session
+        .writer
+        .write_event(&tracefmt::TraceEvent::Footer(tracefmt::TraceFooter {
+            closed_unix_ms: tracefmt::now_unix_ms(),
+        }));
 
     let path = session.writer.path().display().to_string();
     let _ = session.writer.close();
@@ -3177,9 +3178,7 @@ fn solver_worker_handle_cmd(
         SolverWorkerCommand::AppendTraceInit { events } => {
             if let Some(trace) = trace.as_mut() {
                 for init in events {
-                    let _ = trace
-                        .writer
-                        .write_event(&tracefmt::TraceEvent::Init(init));
+                    let _ = trace.writer.write_event(&tracefmt::TraceEvent::Init(init));
                 }
             }
         }

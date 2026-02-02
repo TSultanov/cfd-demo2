@@ -896,9 +896,7 @@ fn render_expr(expr: Expr, f: &mut fmt::Formatter<'_>, parent_prec: Precedence) 
             Ok(())
         }
         ExprNode::Binary { left, op, right } => {
-            if let Some(simplified) =
-                simplify_binary_expr(*left, *op, *right, f, parent_prec)
-            {
+            if let Some(simplified) = simplify_binary_expr(*left, *op, *right, f, parent_prec) {
                 return simplified;
             }
 
@@ -1513,15 +1511,27 @@ impl CseBuilder {
         enum NodeKey {
             Literal(Literal),
             Ident(String),
-            Field { base: Expr, field: String },
-            Index { base: Expr, index: Expr },
-            Unary { op: UnaryOp, expr: Expr },
+            Field {
+                base: Expr,
+                field: String,
+            },
+            Index {
+                base: Expr,
+                index: Expr,
+            },
+            Unary {
+                op: UnaryOp,
+                expr: Expr,
+            },
             Binary {
                 left: Expr,
                 op: BinaryOp,
                 right: Expr,
             },
-            Call { callee: Expr, args: Vec<Expr> },
+            Call {
+                callee: Expr,
+                args: Vec<Expr>,
+            },
         }
 
         #[derive(Default)]
@@ -1572,7 +1582,11 @@ impl CseBuilder {
             expr.with_node(|node| matches!(node, ExprNode::Literal(_) | ExprNode::Ident(_)))
         }
 
-        fn expr_size(expr: Expr, canon: &mut Canonicalizer, memo: &mut IndexMap<Expr, usize>) -> usize {
+        fn expr_size(
+            expr: Expr,
+            canon: &mut Canonicalizer,
+            memo: &mut IndexMap<Expr, usize>,
+        ) -> usize {
             let rep = canon.canon(expr);
             if let Some(size) = memo.get(&rep).copied() {
                 return size;
@@ -1600,7 +1614,11 @@ impl CseBuilder {
             size
         }
 
-        fn count_subexprs(expr: Expr, canon: &mut Canonicalizer, counts: &mut IndexMap<Expr, usize>) {
+        fn count_subexprs(
+            expr: Expr,
+            canon: &mut Canonicalizer,
+            counts: &mut IndexMap<Expr, usize>,
+        ) {
             let rep = canon.canon(expr);
             *counts.entry(rep).or_insert(0) += 1;
             expr.with_node(|node| match node {

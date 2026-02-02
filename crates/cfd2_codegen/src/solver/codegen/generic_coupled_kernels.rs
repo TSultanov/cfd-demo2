@@ -5,9 +5,9 @@ use super::constants::constants_struct;
 use super::dsl as typed;
 use super::state_access::state_component_slot;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
-    StorageClass, StructDef, StructField, Type,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt, Type,
 };
+use super::wgsl_bindings::{storage_var, uniform_var, vector2_struct};
 use super::wgsl_dsl as dsl;
 use super::KernelWgsl;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
@@ -68,37 +68,6 @@ pub fn generate_generic_coupled_apply_wgsl(eos_params: &[ParamSpec]) -> KernelWg
     module.extend(base_apply_items(eos_params));
     module.push(Item::Function(main_apply_fn()));
     KernelWgsl::from(module)
-}
-
-fn vector2_struct() -> StructDef {
-    StructDef::new(
-        "Vector2",
-        vec![
-            StructField::new("x", Type::F32),
-            StructField::new("y", Type::F32),
-        ],
-    )
-}
-
-
-fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
-    Item::GlobalVar(GlobalVar::new(
-        name,
-        ty,
-        StorageClass::Storage,
-        Some(access),
-        vec![Attribute::Group(group), Attribute::Binding(binding)],
-    ))
-}
-
-fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
-    Item::GlobalVar(GlobalVar::new(
-        name,
-        ty,
-        StorageClass::Uniform,
-        None,
-        vec![Attribute::Group(group), Attribute::Binding(binding)],
-    ))
 }
 
 fn base_mesh_items(eos_params: &[ParamSpec]) -> Vec<Item> {
@@ -249,27 +218,10 @@ fn base_update_items(eos_params: &[ParamSpec]) -> Vec<Item> {
         Item::Struct(vector2_struct()),
         Item::Struct(constants_struct(eos_params)),
         Item::Comment("Group 0: Fields".to_string()),
-        storage_var(
-            "state",
-            Type::array(Type::F32),
-            0,
-            0,
-            AccessMode::ReadWrite,
-        ),
-        uniform_var(
-            "constants",
-            Type::Custom("Constants".to_string()),
-            0,
-            1,
-        ),
+        storage_var("state", Type::array(Type::F32), 0, 0, AccessMode::ReadWrite),
+        uniform_var("constants", Type::Custom("Constants".to_string()), 0, 1),
         Item::Comment("Group 1: Solution".to_string()),
-        storage_var(
-            "x",
-            Type::array(Type::F32),
-            1,
-            0,
-            AccessMode::ReadWrite,
-        ),
+        storage_var("x", Type::array(Type::F32), 1, 0, AccessMode::ReadWrite),
     ]
 }
 
@@ -301,12 +253,7 @@ fn base_apply_items(eos_params: &[ParamSpec]) -> Vec<Item> {
         Item::Comment("Group 1: vectors".to_string()),
         storage_var("x", Type::array(Type::F32), 1, 0, AccessMode::Read),
         storage_var("y", Type::array(Type::F32), 1, 1, AccessMode::ReadWrite),
-        uniform_var(
-            "constants",
-            Type::Custom("Constants".to_string()),
-            1,
-            2,
-        ),
+        uniform_var("constants", Type::Custom("Constants".to_string()), 1, 2),
     ]
 }
 
@@ -380,10 +327,7 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
             "center",
             dsl::array_access("cell_centers", Expr::ident("idx")),
         ),
-        dsl::let_expr(
-            "vol",
-            dsl::array_access("cell_vols", Expr::ident("idx")),
-        ),
+        dsl::let_expr("vol", dsl::array_access("cell_vols", Expr::ident("idx"))),
         dsl::let_expr(
             "start",
             dsl::array_access("cell_face_offsets", Expr::ident("idx")),
@@ -402,10 +346,7 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
                 - Expr::ident("scalar_offset"),
         ),
         // start_row_i = scalar_offset * block_stride + num_neighbors * coupled_stride * i
-        dsl::let_expr(
-            "start_row_0",
-            Expr::ident("scalar_offset") * block_stride,
-        ),
+        dsl::let_expr("start_row_0", Expr::ident("scalar_offset") * block_stride),
     ];
     for row in 1..coupled_stride {
         let name = format!("start_row_{row}");
@@ -454,8 +395,7 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
             .get(equation.target.name())
             .expect("missing target offset");
         let rho_expr = coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
-        let base_coeff =
-            Expr::ident("vol") * rho_expr / Expr::ident("constants").field("dt");
+        let base_coeff = Expr::ident("vol") * rho_expr / Expr::ident("constants").field("dt");
         let dtau = Expr::ident("constants").field("dtau");
         let dual_time_coeff = Expr::ident("vol") * rho_expr / dtau;
 
@@ -471,22 +411,15 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
                 .iter()
                 .find(|s| s.name == equation.target.name())
                 .unwrap_or_else(|| {
-                    panic!("missing field '{}' in resolved state slots", equation.target.name())
+                    panic!(
+                        "missing field '{}' in resolved state slots",
+                        equation.target.name()
+                    )
                 });
-            let phi_n = state_component_slot(
-                slots.stride,
-                "state_old",
-                "idx",
-                target_slot,
-                component,
-            );
-            let phi_nm1 = state_component_slot(
-                slots.stride,
-                "state_old_old",
-                "idx",
-                target_slot,
-                component,
-            );
+            let phi_n =
+                state_component_slot(slots.stride, "state_old", "idx", target_slot, component);
+            let phi_nm1 =
+                state_component_slot(slots.stride, "state_old_old", "idx", target_slot, component);
             let phi_iter =
                 state_component_slot(slots.stride, "state_iter", "idx", target_slot, component);
 
@@ -509,8 +442,7 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
                     dsl::let_expr("r", dt / dt_old),
                     dsl::let_expr(
                         "diag_bdf2",
-                        base_coeff * (Expr::ident("r") * 2.0 + 1.0)
-                            / (Expr::ident("r") + 1.0),
+                        base_coeff * (Expr::ident("r") * 2.0 + 1.0) / (Expr::ident("r") + 1.0),
                     ),
                     dsl::let_expr("factor_n", Expr::ident("r") + 1.0),
                     dsl::let_expr(
@@ -557,12 +489,10 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
 
     // Face loop for diffusion contributions (implicit only).
     let face_loop_body = {
-        let mut body = vec![
-            dsl::let_expr(
-                "face_idx",
-                dsl::array_access("cell_faces", Expr::ident("k")),
-            ),
-        ];
+        let mut body = vec![dsl::let_expr(
+            "face_idx",
+            dsl::array_access("cell_faces", Expr::ident("k")),
+        )];
         body.push(dsl::let_expr(
             "owner",
             dsl::array_access("face_owner", Expr::ident("face_idx")),
@@ -850,9 +780,7 @@ fn main_update_fn(
             .slots
             .iter()
             .find(|s| s.name == field.name())
-            .unwrap_or_else(|| {
-                panic!("missing field '{}' in resolved state slots", field.name())
-            });
+            .unwrap_or_else(|| panic!("missing field '{}' in resolved state slots", field.name()));
         let target = state_component_slot(slots.stride, "state", "idx", field_slot, *component);
         let x_entry =
             dsl::array_access_linear("x", Expr::ident("idx"), coupled_stride, u_idx as u32);
@@ -885,10 +813,8 @@ fn main_update_fn(
             Expr::lit_f32(1.0)
         };
         let prev = target;
-        let prev_is_finite =
-            prev.eq(prev) & dsl::abs(prev).lt(Expr::lit_f32(3.4e38));
-        let value_is_finite =
-            value.eq(value) & dsl::abs(value).lt(Expr::lit_f32(3.4e38));
+        let prev_is_finite = prev.eq(prev) & dsl::abs(prev).lt(Expr::lit_f32(3.4e38));
+        let value_is_finite = value.eq(value) & dsl::abs(value).lt(Expr::lit_f32(3.4e38));
 
         // Avoid propagating NaN/Inf from the linear solver into the state.
         // If the previous iterate is already non-finite, prefer a finite `value`.
@@ -961,10 +887,7 @@ fn main_apply_fn() -> Function {
             dsl::for_step_increment_expr(Expr::ident("i")),
             dsl::block(vec![
                 dsl::let_expr("col", dsl::array_access("col_indices", Expr::ident("i"))),
-                dsl::let_expr(
-                    "val",
-                    dsl::array_access("matrix_values", Expr::ident("i")),
-                ),
+                dsl::let_expr("val", dsl::array_access("matrix_values", Expr::ident("i"))),
                 dsl::let_expr("x_val", dsl::array_access("x", Expr::ident("col"))),
                 dsl::assign_op_expr(
                     AssignOp::Add,

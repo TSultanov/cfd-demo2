@@ -20,4 +20,3 @@ impl From<Module> for KernelWgsl {
         Self::new(module)
     }
 }
-

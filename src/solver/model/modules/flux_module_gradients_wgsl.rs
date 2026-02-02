@@ -3,8 +3,10 @@ use crate::solver::model::modules::flux_module::ResolvedGradientTarget;
 use cfd2_codegen::solver::codegen::constants::constants_struct;
 use cfd2_codegen::solver::codegen::dsl as typed;
 use cfd2_codegen::solver::codegen::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
-    StorageClass, StructDef, StructField, Type,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt, Type,
+};
+use cfd2_codegen::solver::codegen::wgsl_bindings::{
+    boundary_bindings, storage_var, uniform_var, vector2_struct,
 };
 use cfd2_codegen::solver::codegen::wgsl_dsl as dsl;
 use cfd2_codegen::solver::codegen::KernelWgsl;
@@ -43,39 +45,9 @@ fn base_items() -> Vec<Item> {
     items
 }
 
-fn vector2_struct() -> StructDef {
-    StructDef::new(
-        "Vector2",
-        vec![
-            StructField::new("x", Type::F32),
-            StructField::new("y", Type::F32),
-        ],
-    )
-}
-
-fn base_constants_struct() -> StructDef {
+fn base_constants_struct() -> cfd2_codegen::solver::codegen::wgsl_ast::StructDef {
     // Use shared helper for base Constants struct (no extra params)
     constants_struct(&[])
-}
-
-fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
-    Item::GlobalVar(GlobalVar::new(
-        name,
-        ty,
-        StorageClass::Storage,
-        Some(access),
-        vec![Attribute::Group(group), Attribute::Binding(binding)],
-    ))
-}
-
-fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
-    Item::GlobalVar(GlobalVar::new(
-        name,
-        ty,
-        StorageClass::Uniform,
-        None,
-        vec![Attribute::Group(group), Attribute::Binding(binding)],
-    ))
 }
 
 fn mesh_bindings() -> Vec<Item> {
@@ -136,13 +108,6 @@ fn state_bindings() -> Vec<Item> {
     ]
 }
 
-fn boundary_bindings() -> Vec<Item> {
-    vec![
-        storage_var("bc_kind", Type::array(Type::U32), 2, 0, AccessMode::Read),
-        storage_var("bc_value", Type::array(Type::F32), 2, 1, AccessMode::Read),
-    ]
-}
-
 fn main_fn(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientTarget]) -> Function {
     let params = vec![Param::new(
         "global_id",
@@ -185,10 +150,7 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
             Type::vec2_f32(),
             typed::VecExpr::<2>::from_xy_fields(Expr::ident("cell_center")).expr(),
         ),
-        dsl::let_expr(
-            "vol",
-            dsl::array_access("cell_vols", Expr::ident("idx")),
-        ),
+        dsl::let_expr("vol", dsl::array_access("cell_vols", Expr::ident("idx"))),
         dsl::let_expr(
             "start",
             dsl::array_access("cell_face_offsets", Expr::ident("idx")),
@@ -224,10 +186,7 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
                 "neighbor_raw",
                 dsl::array_access("face_neighbor", Expr::ident("face_idx")),
             ),
-            dsl::let_expr(
-                "is_boundary",
-                Expr::ident("neighbor_raw").eq(-1),
-            ),
+            dsl::let_expr("is_boundary", Expr::ident("neighbor_raw").eq(-1)),
             dsl::let_expr(
                 "boundary_type",
                 dsl::array_access("face_boundary", Expr::ident("face_idx")),
@@ -455,18 +414,15 @@ mod tests {
 
     #[test]
     fn flux_module_gradients_wgsl_matches_committed_incompressible_momentum() {
-        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
-        use crate::solver::model::incompressible_momentum_model;
         use crate::solver::ir::SchemeRegistry;
+        use crate::solver::model::incompressible_momentum_model;
+        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
 
         let model = incompressible_momentum_model();
         let schemes = SchemeRegistry::default();
-        let generated = generate_kernel_wgsl_for_model_by_id(
-            &model,
-            &schemes,
-            KernelId::FLUX_MODULE_GRADIENTS,
-        )
-        .expect("should generate flux_module_gradients WGSL");
+        let generated =
+            generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE_GRADIENTS)
+                .expect("should generate flux_module_gradients WGSL");
 
         let committed = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -482,18 +438,15 @@ mod tests {
 
     #[test]
     fn flux_module_gradients_wgsl_matches_committed_compressible() {
-        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
-        use crate::solver::model::compressible_model;
         use crate::solver::ir::SchemeRegistry;
+        use crate::solver::model::compressible_model;
+        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
 
         let model = compressible_model();
         let schemes = SchemeRegistry::default();
-        let generated = generate_kernel_wgsl_for_model_by_id(
-            &model,
-            &schemes,
-            KernelId::FLUX_MODULE_GRADIENTS,
-        )
-        .expect("should generate flux_module_gradients WGSL");
+        let generated =
+            generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE_GRADIENTS)
+                .expect("should generate flux_module_gradients WGSL");
 
         let committed = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),

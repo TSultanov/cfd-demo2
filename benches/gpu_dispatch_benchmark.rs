@@ -6,8 +6,8 @@
 use cfd2::solver::gpu::structs::PreconditionerType;
 use cfd2::solver::gpu::unified_solver::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
-use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::model::helpers::SolverRuntimeParamsExt;
+use cfd2::solver::model::incompressible_momentum_model;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use nalgebra::Vector2;
 
@@ -202,10 +202,6 @@ fn bench_fine_mesh(c: &mut Criterion) {
     solver_default_order.set_preconditioner(PreconditionerType::Amg);
     solver_default_order.step();
 
-    // let (mut solver_reordered, _) = setup_solver(cell_size, true);
-    // solver_reordered.set_preconditioner(PreconditionerType::Amg);
-    // solver_reordered.step();
-
     group.throughput(Throughput::Elements(num_cells as u64));
 
     group.bench_function(BenchmarkId::new("default_order", num_cells), |b| {
@@ -213,12 +209,6 @@ fn bench_fine_mesh(c: &mut Criterion) {
             solver_default_order.step();
         });
     });
-
-    // group.bench_function(BenchmarkId::new("reordered", num_cells), |b| {
-    //     b.iter(|| {
-    //         solver_reordered.step();
-    //     });
-    // });
 
     group.finish();
 }

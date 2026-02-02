@@ -5,9 +5,9 @@ use super::constants::constants_struct;
 use super::dsl as typed;
 use super::state_access::state_component_slot;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
-    StorageClass, StructDef, StructField, Type,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt, Type,
 };
+use super::wgsl_bindings::{storage_var, uniform_var, vector2_struct};
 use super::wgsl_dsl as dsl;
 use super::KernelWgsl;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
@@ -41,7 +41,11 @@ pub fn generate_unified_assembly_wgsl(
         panic!("unified_assembly requires flux_stride > 0 when convection ops are present");
     }
 
-    module.extend(base_assembly_items(needs_gradients, needs_fluxes, eos_params));
+    module.extend(base_assembly_items(
+        needs_gradients,
+        needs_fluxes,
+        eos_params,
+    ));
     module.push(Item::Function(main_assembly_fn(
         system,
         slots,
@@ -51,37 +55,7 @@ pub fn generate_unified_assembly_wgsl(
     KernelWgsl::from(module)
 }
 
-fn vector2_struct() -> StructDef {
-    StructDef::new(
-        "Vector2",
-        vec![
-            StructField::new("x", Type::F32),
-            StructField::new("y", Type::F32),
-        ],
-    )
-}
-
 // Use the shared constants helper from the constants module.
-
-fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
-    Item::GlobalVar(GlobalVar::new(
-        name,
-        ty,
-        StorageClass::Storage,
-        Some(access),
-        vec![Attribute::Group(group), Attribute::Binding(binding)],
-    ))
-}
-
-fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
-    Item::GlobalVar(GlobalVar::new(
-        name,
-        ty,
-        StorageClass::Uniform,
-        None,
-        vec![Attribute::Group(group), Attribute::Binding(binding)],
-    ))
-}
 
 fn base_mesh_items(eos_params: &[ParamSpec]) -> Vec<Item> {
     vec![
@@ -187,7 +161,11 @@ fn base_state_items(needs_gradients: bool, needs_fluxes: bool) -> Vec<Item> {
     items
 }
 
-fn base_assembly_items(needs_gradients: bool, needs_fluxes: bool, eos_params: &[ParamSpec]) -> Vec<Item> {
+fn base_assembly_items(
+    needs_gradients: bool,
+    needs_fluxes: bool,
+    eos_params: &[ParamSpec],
+) -> Vec<Item> {
     let mut items = Vec::new();
     items.extend(base_mesh_items(eos_params));
     items.extend(base_state_items(needs_gradients, needs_fluxes));
@@ -306,9 +284,15 @@ fn main_assembly_fn(
             dsl::block(vec![Stmt::Return(None)]),
             None,
         ),
-        dsl::let_expr("center", dsl::array_access("cell_centers", Expr::ident("idx"))),
+        dsl::let_expr(
+            "center",
+            dsl::array_access("cell_centers", Expr::ident("idx")),
+        ),
         dsl::let_expr("vol", dsl::array_access("cell_vols", Expr::ident("idx"))),
-        dsl::let_expr("start", dsl::array_access("cell_face_offsets", Expr::ident("idx"))),
+        dsl::let_expr(
+            "start",
+            dsl::array_access("cell_face_offsets", Expr::ident("idx")),
+        ),
         dsl::let_expr(
             "end",
             dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
@@ -319,7 +303,8 @@ fn main_assembly_fn(
         ),
         dsl::let_expr(
             "diag_rank",
-            dsl::array_access("diagonal_indices", Expr::ident("idx")) - Expr::ident("scalar_offset"),
+            dsl::array_access("diagonal_indices", Expr::ident("idx"))
+                - Expr::ident("scalar_offset"),
         ),
         dsl::let_expr(
             "num_neighbors",
@@ -392,29 +377,17 @@ fn main_assembly_fn(
                 .iter()
                 .find(|s| s.name == equation.target.name())
                 .unwrap_or_else(|| {
-                    panic!("missing field '{}' in resolved state slots", equation.target.name())
+                    panic!(
+                        "missing field '{}' in resolved state slots",
+                        equation.target.name()
+                    )
                 });
-            let phi_n = state_component_slot(
-                slots.stride,
-                "state_old",
-                "idx",
-                target_slot,
-                component,
-            );
-            let phi_nm1 = state_component_slot(
-                slots.stride,
-                "state_old_old",
-                "idx",
-                target_slot,
-                component,
-            );
-            let phi_iter = state_component_slot(
-                slots.stride,
-                "state_iter",
-                "idx",
-                target_slot,
-                component,
-            );
+            let phi_n =
+                state_component_slot(slots.stride, "state_old", "idx", target_slot, component);
+            let phi_nm1 =
+                state_component_slot(slots.stride, "state_old_old", "idx", target_slot, component);
+            let phi_iter =
+                state_component_slot(slots.stride, "state_iter", "idx", target_slot, component);
 
             // Default BDF1
             stmts.push(dsl::assign_op_expr(
@@ -435,8 +408,7 @@ fn main_assembly_fn(
                     dsl::let_expr("r", dt / dt_old),
                     dsl::let_expr(
                         "diag_bdf2",
-                        base_coeff * (Expr::ident("r") * 2.0 + 1.0)
-                            / (Expr::ident("r") + 1.0),
+                        base_coeff * (Expr::ident("r") * 2.0 + 1.0) / (Expr::ident("r") + 1.0),
                     ),
                     dsl::let_expr("factor_n", Expr::ident("r") + 1.0),
                     dsl::let_expr(
@@ -551,8 +523,14 @@ fn main_assembly_fn(
     // Face loop for diffusion contributions (implicit only).
     let face_loop_body = {
         let mut body = vec![
-            dsl::let_expr("face_idx", dsl::array_access("cell_faces", Expr::ident("k"))),
-            dsl::let_expr("owner", dsl::array_access("face_owner", Expr::ident("face_idx"))),
+            dsl::let_expr(
+                "face_idx",
+                dsl::array_access("cell_faces", Expr::ident("k")),
+            ),
+            dsl::let_expr(
+                "owner",
+                dsl::array_access("face_owner", Expr::ident("face_idx")),
+            ),
             dsl::let_expr(
                 "neighbor_raw",
                 dsl::array_access("face_neighbor", Expr::ident("face_idx")),
@@ -561,7 +539,10 @@ fn main_assembly_fn(
                 "boundary_type",
                 dsl::array_access("face_boundary", Expr::ident("face_idx")),
             ),
-            dsl::let_expr("area", dsl::array_access("face_areas", Expr::ident("face_idx"))),
+            dsl::let_expr(
+                "area",
+                dsl::array_access("face_areas", Expr::ident("face_idx")),
+            ),
             dsl::let_expr(
                 "f_center",
                 dsl::array_access("face_centers", Expr::ident("face_idx")),
@@ -968,23 +949,22 @@ fn main_assembly_fn(
                         let bc_rho_val = dsl::array_access("bc_value", bc_rho_idx);
                         let bc_rho_u_val = dsl::array_access("bc_value", bc_rho_u_idx);
 
-                        let rho_slot = slots
-                            .slots
-                            .iter()
-                            .find(|s| s.name == "rho")
-                            .unwrap_or_else(|| {
-                                panic!("missing field 'rho' in resolved state slots")
-                            });
-                        let rho_own = state_component_slot(slots.stride, "state", "idx", rho_slot, 0);
+                        let rho_slot =
+                            slots
+                                .slots
+                                .iter()
+                                .find(|s| s.name == "rho")
+                                .unwrap_or_else(|| {
+                                    panic!("missing field 'rho' in resolved state slots")
+                                });
+                        let rho_own =
+                            state_component_slot(slots.stride, "state", "idx", rho_slot, 0);
                         let rho_bc =
                             dsl::select(rho_own, bc_rho_val, bc_rho_kind.eq(GpuBcKind::Dirichlet));
                         let rho_bc_safe = dsl::max(rho_bc, 1e-12);
                         let u_bc = bc_rho_u_val / rho_bc_safe;
-                        let u_other = dsl::select(
-                            phi_own,
-                            u_bc,
-                            bc_rho_u_kind.eq(GpuBcKind::Dirichlet),
-                        );
+                        let u_other =
+                            dsl::select(phi_own, u_bc, bc_rho_u_kind.eq(GpuBcKind::Dirichlet));
 
                         dsl::block(vec![dsl::assign_op_expr(
                             AssignOp::Add,
@@ -1031,7 +1011,11 @@ fn main_assembly_fn(
                             u_idx,
                         );
 
-                        body.push(dsl::var_typed_expr(&flux_var, Type::F32, Some(flux_val_expr)));
+                        body.push(dsl::var_typed_expr(
+                            &flux_var,
+                            Type::F32,
+                            Some(flux_val_expr),
+                        ));
                         body.push(dsl::if_block_expr(
                             Expr::ident("owner").ne(Expr::ident("idx")),
                             dsl::block(vec![dsl::assign_op_expr(
@@ -1060,7 +1044,11 @@ fn main_assembly_fn(
                             flux_stride,
                             u_idx,
                         );
-                        body.push(dsl::var_typed_expr(&flux_var, Type::F32, Some(flux_val_expr)));
+                        body.push(dsl::var_typed_expr(
+                            &flux_var,
+                            Type::F32,
+                            Some(flux_val_expr),
+                        ));
                         body.push(dsl::if_block_expr(
                             Expr::ident("owner").ne(Expr::ident("idx")),
                             dsl::block(vec![dsl::assign_op_expr(
@@ -1078,8 +1066,13 @@ fn main_assembly_fn(
                             .unwrap_or_else(|| {
                                 panic!("missing field '{}' in resolved state slots", field_name)
                             });
-                        let phi_own =
-                            state_component_slot(slots.stride, "state", "idx", field_slot, component);
+                        let phi_own = state_component_slot(
+                            slots.stride,
+                            "state",
+                            "idx",
+                            field_slot,
+                            component,
+                        );
                         let phi_neigh = state_component_slot(
                             slots.stride,
                             "state",
@@ -1109,10 +1102,7 @@ fn main_assembly_fn(
                             .find(|s| s.name == field_name)
                             .map(|s| s.base_offset)
                             .unwrap_or_else(|| {
-                                panic!(
-                                    "missing field '{}' in resolved state slots",
-                                    field_name
-                                )
+                                panic!("missing field '{}' in resolved state slots", field_name)
                             });
                         let (grad_own, grad_neigh) = if needs_gradients {
                             let grad_own = dsl::array_access_linear(
@@ -1231,8 +1221,7 @@ fn main_assembly_fn(
                     .unwrap_or_else(|| {
                         panic!("missing field '{}' in resolved state slots", field_name)
                     });
-                let phi_own =
-                    state_component_slot(slots.stride, "state", "idx", field_slot, 0);
+                let phi_own = state_component_slot(slots.stride, "state", "idx", field_slot, 0);
                 let phi_neigh =
                     state_component_slot(slots.stride, "state", "other_idx", field_slot, 0);
 

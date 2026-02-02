@@ -10,8 +10,10 @@ use crate::solver::shared::PrimitiveExpr;
 use cfd2_codegen::solver::codegen::constants::constants_struct;
 use cfd2_codegen::solver::codegen::dsl as typed;
 use cfd2_codegen::solver::codegen::wgsl_ast::{
-    AccessMode, Attribute, Block, CseBuilder, Expr, Function, GlobalVar, Item, Module, Param, Stmt,
-    StorageClass, StructDef, StructField, Type,
+    AccessMode, Attribute, Block, CseBuilder, Expr, Function, Item, Module, Param, Stmt, Type,
+};
+use cfd2_codegen::solver::codegen::wgsl_bindings::{
+    boundary_bindings, low_mach_params_struct, storage_var, uniform_var, vector2_struct,
 };
 use cfd2_codegen::solver::codegen::wgsl_dsl as dsl;
 use cfd2_codegen::solver::codegen::KernelWgsl;
@@ -294,8 +296,8 @@ mod tests {
             ],
         };
 
-        let wgsl =
-            generate_flux_module_wgsl(&resolved, &flux_layout, 2, &primitives, &spec, &[]).to_wgsl();
+        let wgsl = generate_flux_module_wgsl(&resolved, &flux_layout, 2, &primitives, &spec, &[])
+            .to_wgsl();
 
         // Should contain state accesses for both components
         // rho_u_x is at offset 0, rho_u_y is at offset 1
@@ -312,13 +314,14 @@ mod tests {
     #[test]
     fn flux_module_wgsl_matches_committed_incompressible_momentum() {
         use crate::solver::ir::SchemeRegistry;
-        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
         use crate::solver::model::incompressible_momentum_model;
+        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
 
         let model = incompressible_momentum_model();
         let schemes = SchemeRegistry::default();
-        let generated = generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE)
-            .expect("should generate flux_module WGSL");
+        let generated =
+            generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE)
+                .expect("should generate flux_module WGSL");
 
         let committed = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -335,13 +338,14 @@ mod tests {
     #[test]
     fn flux_module_wgsl_matches_committed_compressible() {
         use crate::solver::ir::SchemeRegistry;
-        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
         use crate::solver::model::compressible_model;
+        use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
 
         let model = compressible_model();
         let schemes = SchemeRegistry::default();
-        let generated = generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE)
-            .expect("should generate flux_module WGSL");
+        let generated =
+            generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE)
+                .expect("should generate flux_module WGSL");
 
         let committed = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -373,28 +377,6 @@ fn base_items(include_low_mach_params: bool, eos_params: &[ParamSpec]) -> Vec<It
     items.extend(boundary_bindings());
     items.push(Item::Function(bc_neighbor_scalar_fn()));
     items
-}
-
-fn vector2_struct() -> StructDef {
-    StructDef::new(
-        "Vector2",
-        vec![
-            StructField::new("x", Type::F32),
-            StructField::new("y", Type::F32),
-        ],
-    )
-}
-
-fn low_mach_params_struct() -> StructDef {
-    StructDef::new(
-        "LowMachParams",
-        vec![
-            StructField::new("model", Type::U32),
-            StructField::new("theta_floor", Type::F32),
-            StructField::new("pressure_coupling_alpha", Type::F32),
-            StructField::new("_pad0", Type::F32),
-        ],
-    )
 }
 
 fn bc_neighbor_scalar_fn() -> Function {
@@ -435,26 +417,6 @@ fn bc_neighbor_scalar_fn() -> Function {
             ))),
         ]),
     )
-}
-
-fn storage_var(name: &str, ty: Type, group: u32, binding: u32, access: AccessMode) -> Item {
-    Item::GlobalVar(GlobalVar::new(
-        name,
-        ty,
-        StorageClass::Storage,
-        Some(access),
-        vec![Attribute::Group(group), Attribute::Binding(binding)],
-    ))
-}
-
-fn uniform_var(name: &str, ty: Type, group: u32, binding: u32) -> Item {
-    Item::GlobalVar(GlobalVar::new(
-        name,
-        ty,
-        StorageClass::Uniform,
-        None,
-        vec![Attribute::Group(group), Attribute::Binding(binding)],
-    ))
 }
 
 fn mesh_bindings() -> Vec<Item> {
@@ -530,13 +492,6 @@ fn state_bindings(include_low_mach_params: bool) -> Vec<Item> {
     bindings
 }
 
-fn boundary_bindings() -> Vec<Item> {
-    vec![
-        storage_var("bc_kind", Type::array(Type::U32), 2, 0, AccessMode::Read),
-        storage_var("bc_value", Type::array(Type::F32), 2, 1, AccessMode::Read),
-    ]
-}
-
 fn main_fn(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
@@ -602,10 +557,7 @@ fn main_body(
             dsl::block(vec![Stmt::Return(None)]),
             None,
         ),
-        dsl::let_expr(
-            "owner",
-            dsl::array_access("face_owner", Expr::ident("idx")),
-        ),
+        dsl::let_expr("owner", dsl::array_access("face_owner", Expr::ident("idx"))),
         dsl::let_expr(
             "neighbor",
             dsl::array_access("face_neighbor", Expr::ident("idx")),
@@ -613,11 +565,7 @@ fn main_body(
         dsl::let_expr("is_boundary", Expr::ident("neighbor").eq(-1)),
         // For boundary faces, we treat the "neighbor" side as the owner cell (zero-gradient
         // extrapolation). Boundary-aware flux formulas can still use `boundary_type`.
-        dsl::var_typed_expr(
-            "neigh_idx",
-            Type::U32,
-            Some(Expr::ident("owner")),
-        ),
+        dsl::var_typed_expr("neigh_idx", Type::U32, Some(Expr::ident("owner"))),
         dsl::if_block_expr(
             Expr::ident("neighbor").ne(-1),
             dsl::block(vec![dsl::assign_expr(
@@ -626,10 +574,7 @@ fn main_body(
             )]),
             None,
         ),
-        dsl::let_expr(
-            "area",
-            dsl::array_access("face_areas", Expr::ident("idx")),
-        ),
+        dsl::let_expr("area", dsl::array_access("face_areas", Expr::ident("idx"))),
     ];
     stmts.push(dsl::let_expr(
         "boundary_type",
@@ -714,10 +659,7 @@ fn main_body_runtime_scheme(
             dsl::block(vec![Stmt::Return(None)]),
             None,
         ),
-        dsl::let_expr(
-            "owner",
-            dsl::array_access("face_owner", Expr::ident("idx")),
-        ),
+        dsl::let_expr("owner", dsl::array_access("face_owner", Expr::ident("idx"))),
         dsl::let_expr(
             "neighbor",
             dsl::array_access("face_neighbor", Expr::ident("idx")),
@@ -725,11 +667,7 @@ fn main_body_runtime_scheme(
         dsl::let_expr("is_boundary", Expr::ident("neighbor").eq(-1)),
         // For boundary faces, we treat the "neighbor" side as the owner cell (zero-gradient
         // extrapolation). Boundary-aware flux formulas can still use `boundary_type`.
-        dsl::var_typed_expr(
-            "neigh_idx",
-            Type::U32,
-            Some(Expr::ident("owner")),
-        ),
+        dsl::var_typed_expr("neigh_idx", Type::U32, Some(Expr::ident("owner"))),
         dsl::if_block_expr(
             Expr::ident("neighbor").ne(-1),
             dsl::block(vec![dsl::assign_expr(
@@ -738,10 +676,7 @@ fn main_body_runtime_scheme(
             )]),
             None,
         ),
-        dsl::let_expr(
-            "area",
-            dsl::array_access("face_areas", Expr::ident("idx")),
-        ),
+        dsl::let_expr("area", dsl::array_access("face_areas", Expr::ident("idx"))),
     ];
     stmts.push(dsl::let_expr(
         "boundary_type",
@@ -812,12 +747,10 @@ fn face_stmts(
     primitives: &HashMap<&str, &PrimitiveExpr>,
     spec: &FluxModuleKernelSpec,
 ) -> Vec<Stmt> {
-    let mut body = vec![
-        dsl::let_expr(
-            "c_neigh",
-            dsl::array_access("cell_centers", Expr::ident("neigh_idx")),
-        ),
-    ];
+    let mut body = vec![dsl::let_expr(
+        "c_neigh",
+        dsl::array_access("cell_centers", Expr::ident("neigh_idx")),
+    )];
     body.push(dsl::var_typed_expr(
         "c_neigh_vec",
         Type::vec2_f32(),

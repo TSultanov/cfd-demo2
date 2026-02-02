@@ -54,10 +54,7 @@ pub struct DiscreteSystem {
 /// This is a "trusted" variant for systems that have already been validated
 /// (e.g., built with the typed builder). Prefer `lower_system` for untyped
 /// construction paths where validation is needed as a backstop.
-pub fn lower_system_unchecked(
-    system: &EquationSystem,
-    schemes: &SchemeRegistry,
-) -> DiscreteSystem {
+pub fn lower_system_unchecked(system: &EquationSystem, schemes: &SchemeRegistry) -> DiscreteSystem {
     let mut equations = Vec::new();
     for equation in system.equations() {
         let mut ops = Vec::new();
@@ -108,9 +105,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::ir::{
-        fvc, fvm, surface_scalar_dim, vol_scalar_dim, vol_vector_dim,
-    };
+    use crate::solver::ir::{fvc, fvm, surface_scalar_dim, vol_scalar_dim, vol_vector_dim};
     use cfd2_ir::solver::dimensions::{
         Density, DynamicViscosity, MassFlux, Pressure, PressureGradient, UnitDimension, Velocity,
     };

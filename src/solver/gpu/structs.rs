@@ -9,6 +9,41 @@ pub struct LinearSolverStats {
     pub time: std::time::Duration,
 }
 
+impl LinearSolverStats {
+    /// Create stats for a diverged solve (non-finite residual, etc.).
+    pub fn diverged(iterations: u32, residual: f32, time: std::time::Duration) -> Self {
+        Self {
+            iterations,
+            residual,
+            converged: false,
+            diverged: true,
+            time,
+        }
+    }
+
+    /// Create stats for a converged solve.
+    pub fn converged(iterations: u32, residual: f32, time: std::time::Duration) -> Self {
+        Self {
+            iterations,
+            residual,
+            converged: true,
+            diverged: false,
+            time,
+        }
+    }
+
+    /// Create stats for a solve that hit max iterations without converging.
+    pub fn max_iterations(iterations: u32, residual: f32, time: std::time::Duration) -> Self {
+        Self {
+            iterations,
+            residual,
+            converged: false,
+            diverged: false,
+            time,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum PreconditionerType {
     Jacobi = 0,

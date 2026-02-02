@@ -4,7 +4,10 @@ use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedSta
 use cfd2_ir::solver::dimensions::UnitDimension;
 
 /// Find a slot by name in the resolved state slots spec.
-pub fn find_slot<'a>(slots: &'a ResolvedStateSlotsSpec, field: &str) -> Option<&'a ResolvedStateSlotSpec> {
+pub fn find_slot<'a>(
+    slots: &'a ResolvedStateSlotsSpec,
+    field: &str,
+) -> Option<&'a ResolvedStateSlotSpec> {
     slots.slots.iter().find(|s| s.name == field)
 }
 
@@ -49,24 +52,14 @@ pub fn state_scalar_slot(
 }
 
 /// Access a vec2 state field by slot (no name lookup).
-pub fn state_vec2_slot(
-    stride: u32,
-    buffer: &str,
-    idx: &str,
-    slot: &ResolvedStateSlotSpec,
-) -> Expr {
+pub fn state_vec2_slot(stride: u32, buffer: &str, idx: &str, slot: &ResolvedStateSlotSpec) -> Expr {
     let x_expr = state_component_slot(stride, buffer, idx, slot, 0);
     let y_expr = state_component_slot(stride, buffer, idx, slot, 1);
     Expr::call_named("vec2<f32>", vec![x_expr, y_expr])
 }
 
 /// Access a vec3 state field by slot (no name lookup).
-pub fn state_vec3_slot(
-    stride: u32,
-    buffer: &str,
-    idx: &str,
-    slot: &ResolvedStateSlotSpec,
-) -> Expr {
+pub fn state_vec3_slot(stride: u32, buffer: &str, idx: &str, slot: &ResolvedStateSlotSpec) -> Expr {
     let x_expr = state_component_slot(stride, buffer, idx, slot, 0);
     let y_expr = state_component_slot(stride, buffer, idx, slot, 1);
     let z_expr = state_component_slot(stride, buffer, idx, slot, 2);
@@ -86,7 +79,7 @@ pub fn state_component_slot_typed(
 }
 
 /// Access a scalar state field by slot with unit tracking (no name lookup).
-/// 
+///
 /// Panics if the slot is not a scalar.
 pub fn state_scalar_slot_typed(
     stride: u32,
@@ -95,13 +88,16 @@ pub fn state_scalar_slot_typed(
     slot: &ResolvedStateSlotSpec,
 ) -> DynExpr {
     if slot.kind != PortFieldKind::Scalar {
-        panic!("field '{}' is not scalar (kind: {:?})", slot.name, slot.kind);
+        panic!(
+            "field '{}' is not scalar (kind: {:?})",
+            slot.name, slot.kind
+        );
     }
     state_component_slot_typed(stride, buffer, idx, slot, 0)
 }
 
 /// Access a vec2 state field by slot with unit tracking (no name lookup).
-/// 
+///
 /// Panics if the slot is not a Vector2.
 pub fn state_vec2_slot_typed(
     stride: u32,
@@ -122,7 +118,7 @@ pub fn state_vec2_slot_typed(
 }
 
 /// Access a vec3 state field by slot with unit tracking (no name lookup).
-/// 
+///
 /// Panics if the slot is not a Vector3.
 pub fn state_vec3_slot_typed(
     stride: u32,
@@ -144,7 +140,7 @@ pub fn state_vec3_slot_typed(
 }
 
 /// Access a scalar state field by slot with compile-time unit checking (no name lookup).
-/// 
+///
 /// Panics if:
 /// - The slot is not a scalar
 /// - The slot unit does not match the type-level dimension `D`
@@ -155,12 +151,17 @@ pub fn state_scalar_slot_dim<D: UnitDimension>(
     slot: &ResolvedStateSlotSpec,
 ) -> TypedExpr<D> {
     if slot.kind != PortFieldKind::Scalar {
-        panic!("field '{}' is not scalar (kind: {:?})", slot.name, slot.kind);
+        panic!(
+            "field '{}' is not scalar (kind: {:?})",
+            slot.name, slot.kind
+        );
     }
     if slot.unit != D::UNIT {
         panic!(
             "unit mismatch for field '{}': expected {:?}, got {:?}",
-            slot.name, D::UNIT, slot.unit
+            slot.name,
+            D::UNIT,
+            slot.unit
         );
     }
     let expr = state_component_slot(stride, buffer, idx, slot, 0);
@@ -168,7 +169,7 @@ pub fn state_scalar_slot_dim<D: UnitDimension>(
 }
 
 /// Access a vec2 state field by slot with compile-time unit checking (no name lookup).
-/// 
+///
 /// Panics if:
 /// - The slot is not a Vector2
 /// - The slot unit does not match the type-level dimension `D`
@@ -184,7 +185,9 @@ pub fn state_vec2_slot_dim<D: UnitDimension>(
     if slot.unit != D::UNIT {
         panic!(
             "unit mismatch for field '{}': expected {:?}, got {:?}",
-            slot.name, D::UNIT, slot.unit
+            slot.name,
+            D::UNIT,
+            slot.unit
         );
     }
     let x_expr = state_component_slot(stride, buffer, idx, slot, 0);
@@ -194,7 +197,7 @@ pub fn state_vec2_slot_dim<D: UnitDimension>(
 }
 
 /// Access a vec3 state field by slot with compile-time unit checking (no name lookup).
-/// 
+///
 /// Panics if:
 /// - The slot is not a Vector3
 /// - The slot unit does not match the type-level dimension `D`
@@ -210,7 +213,9 @@ pub fn state_vec3_slot_dim<D: UnitDimension>(
     if slot.unit != D::UNIT {
         panic!(
             "unit mismatch for field '{}': expected {:?}, got {:?}",
-            slot.name, D::UNIT, slot.unit
+            slot.name,
+            D::UNIT,
+            slot.unit
         );
     }
     let x_expr = state_component_slot(stride, buffer, idx, slot, 0);
@@ -221,7 +226,7 @@ pub fn state_vec3_slot_dim<D: UnitDimension>(
 }
 
 /// Access a single component of a state field by slot with compile-time unit checking (no name lookup).
-/// 
+///
 /// Panics if:
 /// - The component is out of range for the slot's kind
 /// - The slot unit does not match the type-level dimension `D`
@@ -241,7 +246,9 @@ pub fn state_component_slot_dim<D: UnitDimension>(
     if slot.unit != D::UNIT {
         panic!(
             "unit mismatch for field '{}': expected {:?}, got {:?}",
-            slot.name, D::UNIT, slot.unit
+            slot.name,
+            D::UNIT,
+            slot.unit
         );
     }
     let expr = state_component_slot(stride, buffer, idx, slot, component);
@@ -333,9 +340,7 @@ mod tests {
 
     #[test]
     fn slot_based_typed_dim_state_scalar_access_works() {
-        let slots = test_slots_from_fields(vec![
-            ("p", PortFieldKind::Scalar, Pressure::UNIT),
-        ]);
+        let slots = test_slots_from_fields(vec![("p", PortFieldKind::Scalar, Pressure::UNIT)]);
 
         let p_slot = find_slot(&slots, "p").unwrap();
 
@@ -353,9 +358,7 @@ mod tests {
 
     #[test]
     fn slot_based_typed_dim_state_vec2_access_works() {
-        let slots = test_slots_from_fields(vec![
-            ("U", PortFieldKind::Vector2, Velocity::UNIT),
-        ]);
+        let slots = test_slots_from_fields(vec![("U", PortFieldKind::Vector2, Velocity::UNIT)]);
 
         let u_slot = find_slot(&slots, "U").unwrap();
 
@@ -376,9 +379,7 @@ mod tests {
 
     #[test]
     fn slot_based_typed_dim_state_component_access_works() {
-        let slots = test_slots_from_fields(vec![
-            ("U", PortFieldKind::Vector2, Velocity::UNIT),
-        ]);
+        let slots = test_slots_from_fields(vec![("U", PortFieldKind::Vector2, Velocity::UNIT)]);
 
         let u_slot = find_slot(&slots, "U").unwrap();
 
@@ -398,9 +399,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "unit mismatch for field 'p'")]
     fn slot_based_typed_dim_state_scalar_unit_mismatch_panics() {
-        let slots = test_slots_from_fields(vec![
-            ("p", PortFieldKind::Scalar, Pressure::UNIT),
-        ]);
+        let slots = test_slots_from_fields(vec![("p", PortFieldKind::Scalar, Pressure::UNIT)]);
 
         let p_slot = find_slot(&slots, "p").unwrap();
 
@@ -411,9 +410,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "unit mismatch for field 'U'")]
     fn slot_based_typed_dim_state_vec2_unit_mismatch_panics() {
-        let slots = test_slots_from_fields(vec![
-            ("U", PortFieldKind::Vector2, Velocity::UNIT),
-        ]);
+        let slots = test_slots_from_fields(vec![("U", PortFieldKind::Vector2, Velocity::UNIT)]);
 
         let u_slot = find_slot(&slots, "U").unwrap();
 
@@ -424,9 +421,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "field 'p' is not vec2")]
     fn slot_based_typed_dim_state_kind_mismatch_scalar_to_vec2_panics() {
-        let slots = test_slots_from_fields(vec![
-            ("p", PortFieldKind::Scalar, Pressure::UNIT),
-        ]);
+        let slots = test_slots_from_fields(vec![("p", PortFieldKind::Scalar, Pressure::UNIT)]);
 
         let p_slot = find_slot(&slots, "p").unwrap();
 
@@ -437,9 +432,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "field 'U' is not scalar")]
     fn slot_based_typed_dim_state_kind_mismatch_vec2_to_scalar_panics() {
-        let slots = test_slots_from_fields(vec![
-            ("U", PortFieldKind::Vector2, Velocity::UNIT),
-        ]);
+        let slots = test_slots_from_fields(vec![("U", PortFieldKind::Vector2, Velocity::UNIT)]);
 
         let u_slot = find_slot(&slots, "U").unwrap();
 
@@ -449,9 +442,7 @@ mod tests {
 
     #[test]
     fn slot_based_typed_kind_mismatch_panics() {
-        let slots = test_slots_from_fields(vec![
-            ("p", PortFieldKind::Scalar, Pressure::UNIT),
-        ]);
+        let slots = test_slots_from_fields(vec![("p", PortFieldKind::Scalar, Pressure::UNIT)]);
 
         let p_slot = find_slot(&slots, "p").unwrap();
 

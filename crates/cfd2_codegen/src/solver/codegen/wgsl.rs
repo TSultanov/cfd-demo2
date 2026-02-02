@@ -862,7 +862,7 @@ mod tests {
         fvc, fvm, surface_scalar_dim, vol_scalar_dim, vol_vector_dim, SchemeRegistry,
     };
     use cfd2_ir::solver::dimensions::{
-        Density, DynamicViscosity, InvTime, MassFlux, Pressure, Velocity, D_P, UnitDimension,
+        Density, DynamicViscosity, InvTime, MassFlux, Pressure, UnitDimension, Velocity, D_P,
     };
 
     #[test]
@@ -925,8 +925,7 @@ mod tests {
     #[test]
     fn generated_line_omits_optional_fields_when_absent() {
         let u = vol_vector_dim::<Velocity>("U");
-        let eqn = crate::solver::ir::Equation::new(u)
-            .with_term(fvc::grad(u));
+        let eqn = crate::solver::ir::Equation::new(u).with_term(fvc::grad(u));
 
         let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
@@ -975,8 +974,7 @@ mod tests {
     fn term_function_name_includes_flux_and_scheme() {
         let u = vol_vector_dim::<Velocity>("U");
         let phi = surface_scalar_dim::<MassFlux>("phi.face");
-        let eqn = crate::solver::ir::Equation::new(u)
-            .with_term(fvm::div(phi, u));
+        let eqn = crate::solver::ir::Equation::new(u).with_term(fvm::div(phi, u));
 
         let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);
@@ -1057,8 +1055,7 @@ mod tests {
     #[test]
     fn generate_wgsl_library_omits_conv_coeff_when_no_convection() {
         let u = vol_vector_dim::<Velocity>("U");
-        let eqn = crate::solver::ir::Equation::new(u)
-            .with_term(fvm::ddt(u));
+        let eqn = crate::solver::ir::Equation::new(u).with_term(fvm::ddt(u));
 
         let mut system = crate::solver::ir::EquationSystem::new();
         system.add_equation(eqn);

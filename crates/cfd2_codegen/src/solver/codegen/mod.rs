@@ -12,12 +12,14 @@ pub mod state_access;
 pub mod unified_assembly;
 pub mod wgsl;
 pub mod wgsl_ast;
+pub mod wgsl_bindings;
 pub mod wgsl_dsl;
 
-pub use kernel_wgsl::KernelWgsl;
 pub use ir::{
-    lower_system, lower_system_unchecked, DiscreteEquation, DiscreteOp, DiscreteOpKind, DiscreteSystem,
+    lower_system, lower_system_unchecked, DiscreteEquation, DiscreteOp, DiscreteOpKind,
+    DiscreteSystem,
 };
+pub use kernel_wgsl::KernelWgsl;
 pub use packed_state_gradients::generate_packed_state_gradients_wgsl;
 // Slot-based state access helpers are publicly available via state_access module
 pub use wgsl::{generate_wgsl, generate_wgsl_library};

@@ -2,7 +2,9 @@ use super::dsl as typed;
 use super::dsl::EnumExpr;
 use super::wgsl_ast::{Expr, Stmt};
 use super::wgsl_dsl as dsl;
-use crate::solver::ir::reconstruction::{limited_linear_face_value, quick_face_value, ReconstructionBuilder};
+use crate::solver::ir::reconstruction::{
+    limited_linear_face_value, quick_face_value, ReconstructionBuilder,
+};
 use crate::solver::ir::LimiterSpec;
 use crate::solver::scheme::Scheme;
 
@@ -364,10 +366,7 @@ pub fn limited_linear_reconstruct_face(
                 Expr::ident(&max_diff),
             ),
         ),
-        dsl::let_expr(
-            &phi_face,
-            phi_cell + Expr::ident(&delta_limited),
-        ),
+        dsl::let_expr(&phi_face, phi_cell + Expr::ident(&delta_limited)),
     ];
 
     (stmts, Expr::ident(&phi_face))

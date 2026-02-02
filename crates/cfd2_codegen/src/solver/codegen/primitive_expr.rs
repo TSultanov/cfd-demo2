@@ -1,4 +1,4 @@
-use crate::solver::codegen::dsl::{DynExpr, DslType};
+use crate::solver::codegen::dsl::{DslType, DynExpr};
 use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::ir::ports::{ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
 use crate::solver::shared::PrimitiveExpr;
@@ -56,9 +56,13 @@ pub fn lower_primitive_expr_dyn(
         }
 
         PrimitiveExpr::Field(name) => {
-            let (slot, component) = resolve_field_slot_component(slots, name).unwrap_or_else(|| {
-                panic!("primitive field '{}' not found in resolved state slots", name)
-            });
+            let (slot, component) =
+                resolve_field_slot_component(slots, name).unwrap_or_else(|| {
+                    panic!(
+                        "primitive field '{}' not found in resolved state slots",
+                        name
+                    )
+                });
             let offset = slot.base_offset + component;
             let stride = slots.stride;
             let expr = Expr::ident(state_array).index(cell_idx * stride + offset);
@@ -119,7 +123,9 @@ pub fn lower_primitive_expr(
 mod tests {
     use super::*;
     use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
-    use cfd2_ir::solver::dimensions::{Area, Density, Length, MomentumDensity, Pressure, UnitDimension, Velocity};
+    use cfd2_ir::solver::dimensions::{
+        Area, Density, Length, MomentumDensity, Pressure, UnitDimension, Velocity,
+    };
 
     /// Helper to create a ResolvedStateSlotsSpec for testing.
     fn test_slots_from_fields(
@@ -190,9 +196,7 @@ mod tests {
 
     #[test]
     fn primitive_expr_dyn_tracks_component_units() {
-        let slots = test_slots_from_fields(vec![
-            ("U", PortFieldKind::Vector2, Velocity::UNIT),
-        ]);
+        let slots = test_slots_from_fields(vec![("U", PortFieldKind::Vector2, Velocity::UNIT)]);
 
         // Access U_x component - should have velocity units
         let expr = PrimitiveExpr::field("U_x");
@@ -237,9 +241,7 @@ mod tests {
 
     #[test]
     fn primitive_expr_dyn_sqrt_applies_sqrt_to_units() {
-        let slots = test_slots_from_fields(vec![
-            ("area", PortFieldKind::Scalar, Area::UNIT),
-        ]);
+        let slots = test_slots_from_fields(vec![("area", PortFieldKind::Scalar, Area::UNIT)]);
 
         // sqrt(area) produces length
         let expr = PrimitiveExpr::Sqrt(Box::new(PrimitiveExpr::field("area")));

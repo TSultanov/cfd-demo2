@@ -25,13 +25,3 @@ fn dimension_compatibility() {
     // Different dimensions should not be compatible
     assert!(!Velocity::IS_COMPATIBLE_WITH::<Pressure>());
 }
-
-// Note: Derive macros use ::cfd2:: paths which don't work in tests.
-// The macro infrastructure is in place - testing will be done through
-// actual module migrations in Phase 2.
-
-#[test]
-fn macro_infrastructure_placeholder() {
-    // Placeholder test to verify tests module compiles
-    // Real testing happens through module migrations
-}

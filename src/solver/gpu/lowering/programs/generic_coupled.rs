@@ -177,10 +177,8 @@ struct GpuOuterConvergenceTargetDesc {
 struct OuterConvergenceMonitor {
     target_names: Vec<String>,
     pipeline: wgpu::ComputePipeline,
-    #[allow(dead_code)]
     _b_params_x: wgpu::Buffer,
     b_params_state: wgpu::Buffer,
-    #[allow(dead_code)]
     _b_descs_x: wgpu::Buffer,
     b_descs_state: wgpu::Buffer,
     b_out_bits: wgpu::Buffer,

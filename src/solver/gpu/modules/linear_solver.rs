@@ -51,17 +51,10 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
         );
     }
     if !rhs_norm.is_finite() {
-        let stats = LinearSolverStats {
-            iterations: 0,
-            residual: rhs_norm,
-            converged: false,
-            diverged: true,
-            time: start.elapsed(),
-        };
         if debug_fgmres {
             eprintln!("[cfd2][fgmres] early-exit: rhs_norm non-finite");
         }
-        return stats;
+        return LinearSolverStats::diverged(0, rhs_norm, start.elapsed());
     }
 
     // Use the existing `x` buffer contents as the initial guess.
@@ -120,17 +113,10 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
             )
         };
         if !residual.is_finite() {
-            let stats = LinearSolverStats {
-                iterations: total_iters,
-                residual,
-                converged: false,
-                diverged: true,
-                time: start.elapsed(),
-            };
             if debug_fgmres {
                 eprintln!("[cfd2][fgmres] diverged: residual non-finite at iters={total_iters}");
             }
-            return stats;
+            return LinearSolverStats::diverged(total_iters, residual, start.elapsed());
         }
         if rel_scale.is_none() {
             // Avoid declaring convergence purely because the RHS happens to have a much larger
@@ -207,12 +193,10 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
         };
     }
 
-    let stats = LinearSolverStats {
-        iterations: total_iters,
-        residual,
-        converged,
-        diverged: false,
-        time: start.elapsed(),
+    let stats = if converged {
+        LinearSolverStats::converged(total_iters, residual, start.elapsed())
+    } else {
+        LinearSolverStats::max_iterations(total_iters, residual, start.elapsed())
     };
     if debug_fgmres {
         let rel_scale = rel_scale.unwrap_or(rhs_norm);

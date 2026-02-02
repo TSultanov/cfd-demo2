@@ -275,7 +275,7 @@ impl GpuUnifiedSolver {
         field: &str,
         values: &[f32],
     ) -> Result<(), String> {
-        let coupled_stride = self.model.system.unknowns_per_cell() as u32;
+        let coupled_stride = self.model.system.unknowns_per_cell();
         if coupled_stride == 0 {
             return Err("model has no coupled unknowns".into());
         }
@@ -543,7 +543,7 @@ impl GpuUnifiedSolver {
         let n = self.coupled_unknowns()?;
         Ok(FgmresSizing {
             num_unknowns: n,
-            num_dot_groups: (n + 63) / 64,
+            num_dot_groups: n.div_ceil(64),
         })
     }
 

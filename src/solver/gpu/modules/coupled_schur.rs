@@ -30,6 +30,19 @@ pub struct CoupledSchurKernelIds {
     pub correct_velocity: KernelId,
 }
 
+/// Input parameters for [`CoupledSchurModule`].
+pub struct CoupledSchurInputs<'a> {
+    pub num_cells: u32,
+    pub pressure_row_offsets: &'a wgpu::Buffer,
+    pub pressure_col_indices: &'a wgpu::Buffer,
+    pub pressure_values: &'a wgpu::Buffer,
+    pub diag_u_inv: &'a wgpu::Buffer,
+    pub diag_p_inv: &'a wgpu::Buffer,
+    pub precond_params: &'a wgpu::Buffer,
+    pub pressure_kind: CoupledPressureSolveKind,
+    pub kernels: CoupledSchurKernelIds,
+}
+
 pub struct CoupledSchurModule {
     num_cells: u32,
     pressure_kind: CoupledPressureSolveKind,
@@ -59,21 +72,10 @@ pub struct CoupledSchurModule {
 }
 
 impl CoupledSchurModule {
-    pub fn new(
-        device: &wgpu::Device,
-        num_cells: u32,
-        pressure_row_offsets: &wgpu::Buffer,
-        pressure_col_indices: &wgpu::Buffer,
-        pressure_values: &wgpu::Buffer,
-        diag_u_inv: &wgpu::Buffer,
-        diag_p_inv: &wgpu::Buffer,
-        precond_params: &wgpu::Buffer,
-        pressure_kind: CoupledPressureSolveKind,
-        kernels: CoupledSchurKernelIds,
-    ) -> Self {
+    pub fn new(device: &wgpu::Device, inputs: CoupledSchurInputs<'_>) -> Self {
         let b_temp_p = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Schur temp_p"),
-            size: (num_cells as u64) * 4,
+            size: (inputs.num_cells as u64) * 4,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
@@ -82,25 +84,25 @@ impl CoupledSchurModule {
 
         let b_p_sol = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Schur p_sol"),
-            size: (num_cells as u64) * 4,
+            size: (inputs.num_cells as u64) * 4,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 
-        let schur_src = kernel_registry::kernel_source_by_id("", kernels.predict_and_form)
+        let schur_src = kernel_registry::kernel_source_by_id("", inputs.kernels.predict_and_form)
             .expect("schur_precond predict_and_form shader missing from kernel registry");
         let schur_bindings = schur_src.bindings;
 
         let pipeline_predict_and_form = (schur_src.create_pipeline)(device);
         let pipeline_relax_pressure = {
-            let src = kernel_registry::kernel_source_by_id("", kernels.relax_pressure)
+            let src = kernel_registry::kernel_source_by_id("", inputs.kernels.relax_pressure)
                 .expect("schur_precond relax_pressure shader missing from kernel registry");
             (src.create_pipeline)(device)
         };
         let pipeline_correct_vel = {
-            let src = kernel_registry::kernel_source_by_id("", kernels.correct_velocity)
+            let src = kernel_registry::kernel_source_by_id("", inputs.kernels.correct_velocity)
                 .expect("schur_precond correct_velocity shader missing from kernel registry");
             (src.create_pipeline)(device)
         };
@@ -110,9 +112,9 @@ impl CoupledSchurModule {
         let bgl_pressure_matrix = pipeline_predict_and_form.get_bind_group_layout(3);
         let bg_schur_precond = {
             let registry = ResourceRegistry::new()
-                .with_buffer("diag_u_inv", diag_u_inv)
-                .with_buffer("diag_p_inv", diag_p_inv)
-                .with_buffer("params", precond_params);
+                .with_buffer("diag_u_inv", inputs.diag_u_inv)
+                .with_buffer("diag_p_inv", inputs.diag_p_inv)
+                .with_buffer("params", inputs.precond_params);
             wgsl_reflect::create_bind_group_from_bindings(
                 device,
                 "Schur Precond BG",
@@ -125,9 +127,9 @@ impl CoupledSchurModule {
         };
         let bg_pressure_matrix = {
             let registry = ResourceRegistry::new()
-                .with_buffer("p_row_offsets", pressure_row_offsets)
-                .with_buffer("p_col_indices", pressure_col_indices)
-                .with_buffer("p_matrix_values", pressure_values);
+                .with_buffer("p_row_offsets", inputs.pressure_row_offsets)
+                .with_buffer("p_col_indices", inputs.pressure_col_indices)
+                .with_buffer("p_matrix_values", inputs.pressure_values);
             wgsl_reflect::create_bind_group_from_bindings(
                 device,
                 "Schur Pressure Matrix BG",
@@ -140,8 +142,8 @@ impl CoupledSchurModule {
         };
 
         Self {
-            num_cells,
-            pressure_kind,
+            num_cells: inputs.num_cells,
+            pressure_kind: inputs.pressure_kind,
             b_temp_p,
             b_p_sol,
             bgl_schur_vectors,

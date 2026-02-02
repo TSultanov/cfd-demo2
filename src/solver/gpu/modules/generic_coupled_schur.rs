@@ -1,7 +1,7 @@
 use crate::solver::gpu::linear_solver::amg::CsrMatrix;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::coupled_schur::{
-    CoupledPressureSolveKind, CoupledSchurKernelIds, CoupledSchurModule,
+    CoupledPressureSolveKind, CoupledSchurInputs, CoupledSchurKernelIds, CoupledSchurModule,
 };
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
 use crate::solver::gpu::structs::GpuGenericCoupledSchurSetupParams;
@@ -53,18 +53,20 @@ impl GenericCoupledSchurPreconditioner {
         Self {
             schur: CoupledSchurModule::new(
                 device,
-                num_cells,
-                pressure_row_offsets,
-                pressure_col_indices,
-                pressure_values,
-                diag_u_inv,
-                diag_p_inv,
-                precond_params,
-                pressure_kind,
-                CoupledSchurKernelIds {
-                    predict_and_form: KernelId::SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM,
-                    relax_pressure: KernelId::SCHUR_GENERIC_PRECOND_RELAX_PRESSURE,
-                    correct_velocity: KernelId::SCHUR_GENERIC_PRECOND_CORRECT_VELOCITY,
+                CoupledSchurInputs {
+                    num_cells,
+                    pressure_row_offsets,
+                    pressure_col_indices,
+                    pressure_values,
+                    diag_u_inv,
+                    diag_p_inv,
+                    precond_params,
+                    pressure_kind,
+                    kernels: CoupledSchurKernelIds {
+                        predict_and_form: KernelId::SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM,
+                        relax_pressure: KernelId::SCHUR_GENERIC_PRECOND_RELAX_PRESSURE,
+                        correct_velocity: KernelId::SCHUR_GENERIC_PRECOND_CORRECT_VELOCITY,
+                    },
                 },
             ),
             setup_pipeline,

@@ -1,6 +1,6 @@
 use glob::glob;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use wgsl_bindgen::{WgslBindgenOptionBuilder, WgslTypeSerializeStrategy};
 
 #[allow(dead_code)]
@@ -293,6 +293,48 @@ fn main() {
     }
 
     builder.build().unwrap().generate().unwrap();
+
+    // Post-process: add clippy::too_many_arguments to the allow list in the generated file
+    postprocess_bindings_for_clippy("src/solver/gpu/bindings.rs");
+}
+
+/// Idempotently adds clippy::too_many_arguments to the allow list in the generated bindings file.
+fn postprocess_bindings_for_clippy(bindings_path: &str) {
+    let content = fs::read_to_string(bindings_path).unwrap_or_else(|err| {
+        panic!("Failed to read {bindings_path}: {err}");
+    });
+
+    // Check if already contains too_many_arguments
+    if content.contains("clippy::too_many_arguments") {
+        return;
+    }
+
+    // Find the existing #![allow(...)] line and add clippy::too_many_arguments to it
+    // The line looks like: #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
+    let updated = if let Some(start_pos) = content.find("#![allow(unused,") {
+        // Find the closing ']' after the opening #![allow(
+        let search_start = start_pos + "#![allow(unused,".len();
+        if let Some(relative_end) = content[search_start..].find(']') {
+            let end_pos = search_start + relative_end;
+            let before = &content[..end_pos];
+            let after = &content[end_pos..];
+            format!("{before}, clippy::too_many_arguments{after}")
+        } else {
+            content.clone()
+        }
+    } else {
+        // Fallback: insert a new allow after the header comment block
+        let after_header = content
+            .find("#![allow(")
+            .unwrap_or(0);
+        let before = &content[..after_header];
+        let after = &content[after_header..];
+        format!("{before}#![allow(clippy::too_many_arguments)]\n{after}")
+    };
+
+    fs::write(bindings_path, updated).unwrap_or_else(|err| {
+        panic!("Failed to write {bindings_path}: {err}");
+    });
 }
 
 fn enforce_codegen_ir_boundary(manifest_dir: &str) {
@@ -359,12 +401,16 @@ fn enforce_codegen_ir_boundary(manifest_dir: &str) {
     }
 }
 
+type WgslBinding = (u32, u32, String);
+type PerModelEntry = (String, String, String, Vec<WgslBinding>);
+type SharedEntry = (String, String, Vec<WgslBinding>);
+
 fn generate_kernel_registry_map(manifest_dir: &str, models: &[solver::model::ModelSpec]) {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = PathBuf::from(out_dir).join("kernel_registry_map.rs");
 
-    let mut per_model_entries: Vec<(String, String, String, Vec<(u32, u32, String)>)> = Vec::new();
-    let mut shared_entries: Vec<(String, String, Vec<(u32, u32, String)>)> = Vec::new();
+    let mut per_model_entries: Vec<PerModelEntry> = Vec::new();
+    let mut shared_entries: Vec<SharedEntry> = Vec::new();
 
     let shader_dir = PathBuf::from(manifest_dir)
         .join("src")
@@ -452,8 +498,7 @@ fn generate_kernel_registry_map(manifest_dir: &str, models: &[solver::model::Mod
     shared_entries.sort_by(|a, b| a.0.cmp(&b.0));
     shared_entries.dedup_by(|a, b| a.0 == b.0);
 
-    let mut handwritten_entries: Vec<(String, String, String, Vec<(u32, u32, String)>)> =
-        Vec::new();
+    let mut handwritten_entries: Vec<PerModelEntry> = Vec::new();
     for path in list_wgsl_files_recursive(&shader_dir) {
         // Handwritten kernels only: generated WGSL is mapped separately via per-model/shared entries.
         if path.starts_with(&generated_dir) {
@@ -744,21 +789,22 @@ fn parse_var_name(line: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-fn list_wgsl_files_recursive(dir: &PathBuf) -> Vec<PathBuf> {
+fn list_wgsl_files_recursive(dir: &Path) -> Vec<PathBuf> {
     let pattern = dir.join("**/*.wgsl").to_string_lossy().to_string();
     let mut out = Vec::new();
-    for entry in glob(&pattern).unwrap_or_else(|err| {
-        panic!("Failed to read glob pattern '{pattern}': {err:?}");
-    }) {
-        if let Ok(path) = entry {
-            out.push(path);
-        }
+    for path in glob(&pattern)
+        .unwrap_or_else(|err| {
+            panic!("Failed to read glob pattern '{pattern}': {err:?}");
+        })
+        .flatten()
+    {
+        out.push(path);
     }
     out.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
     out
 }
 
-fn wgsl_relative_stem(shader_dir: &PathBuf, path: &PathBuf) -> String {
+fn wgsl_relative_stem(shader_dir: &Path, path: &Path) -> String {
     let rel = path.strip_prefix(shader_dir).unwrap_or_else(|_| {
         panic!(
             "WGSL path '{}' is not under '{}'",

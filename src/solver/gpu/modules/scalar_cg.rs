@@ -6,6 +6,38 @@ use crate::solver::gpu::structs::{LinearSolverStats, SolverParams};
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
 
+/// Input resources for constructing a [`ScalarCgModule`].
+pub struct ScalarCgModuleInputs<'a> {
+    pub capacity: u32,
+    pub b_rhs: &'a wgpu::Buffer,
+    pub b_x: &'a wgpu::Buffer,
+    pub b_matrix_values: &'a wgpu::Buffer,
+    pub b_r: &'a wgpu::Buffer,
+    pub b_r0: &'a wgpu::Buffer,
+    pub b_p: &'a wgpu::Buffer,
+    pub b_v: &'a wgpu::Buffer,
+    pub b_dot_result: &'a wgpu::Buffer,
+    pub b_dot_result_2: &'a wgpu::Buffer,
+    pub b_scalars: &'a wgpu::Buffer,
+    pub b_solver_params: &'a wgpu::Buffer,
+    pub b_staging_scalar: &'a wgpu::Buffer,
+    pub bg_linear_matrix: &'a wgpu::BindGroup,
+    pub bg_linear_state: &'a wgpu::BindGroup,
+    pub bg_dot_params: &'a wgpu::BindGroup,
+    pub bg_dot_p_v: &'a wgpu::BindGroup,
+    pub bg_dot_r_r: &'a wgpu::BindGroup,
+    pub bg_scalars: &'a wgpu::BindGroup,
+    pub pipeline_spmv_p_v: &'a wgpu::ComputePipeline,
+    pub pipeline_dot: &'a wgpu::ComputePipeline,
+    pub pipeline_dot_pair: &'a wgpu::ComputePipeline,
+    pub pipeline_cg_update_x_r: &'a wgpu::ComputePipeline,
+    pub pipeline_cg_update_p: &'a wgpu::ComputePipeline,
+    pub pipeline_init_cg_scalars: &'a wgpu::ComputePipeline,
+    pub pipeline_reduce_r0_v: &'a wgpu::ComputePipeline,
+    pub pipeline_reduce_rho_new_r_r: &'a wgpu::ComputePipeline,
+    pub device: &'a wgpu::Device,
+}
+
 pub struct ScalarCgModule {
     capacity: u32,
 
@@ -48,48 +80,19 @@ pub struct ScalarCgModule {
 impl ScalarCgModule {
     const WORKGROUP_SIZE: u32 = 64;
 
-    pub fn new(
-        capacity: u32,
-        b_rhs: &wgpu::Buffer,
-        b_x: &wgpu::Buffer,
-        b_matrix_values: &wgpu::Buffer,
-        b_r: &wgpu::Buffer,
-        b_r0: &wgpu::Buffer,
-        b_p: &wgpu::Buffer,
-        b_v: &wgpu::Buffer,
-        b_dot_result: &wgpu::Buffer,
-        b_dot_result_2: &wgpu::Buffer,
-        b_scalars: &wgpu::Buffer,
-        b_solver_params: &wgpu::Buffer,
-        b_staging_scalar: &wgpu::Buffer,
-        bg_linear_matrix: &wgpu::BindGroup,
-        bg_linear_state: &wgpu::BindGroup,
-        bg_dot_params: &wgpu::BindGroup,
-        bg_dot_p_v: &wgpu::BindGroup,
-        bg_dot_r_r: &wgpu::BindGroup,
-        bg_scalars: &wgpu::BindGroup,
-        pipeline_spmv_p_v: &wgpu::ComputePipeline,
-        pipeline_dot: &wgpu::ComputePipeline,
-        pipeline_dot_pair: &wgpu::ComputePipeline,
-        pipeline_cg_update_x_r: &wgpu::ComputePipeline,
-        pipeline_cg_update_p: &wgpu::ComputePipeline,
-        pipeline_init_cg_scalars: &wgpu::ComputePipeline,
-        pipeline_reduce_r0_v: &wgpu::ComputePipeline,
-        pipeline_reduce_rho_new_r_r: &wgpu::ComputePipeline,
-        device: &wgpu::Device,
-    ) -> Self {
-        let bgl_dot_pair_inputs = pipeline_dot_pair.get_bind_group_layout(1);
+    pub fn new(inputs: &ScalarCgModuleInputs<'_>) -> Self {
+        let bgl_dot_pair_inputs = inputs.pipeline_dot_pair.get_bind_group_layout(1);
         let dot_pair_src = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT_PAIR)
             .unwrap_or_else(|err| panic!("missing dot_product_pair kernel: {err}"));
         let registry = ResourceRegistry::new()
-            .with_buffer("dot_result_a", b_dot_result)
-            .with_buffer("dot_result_b", b_dot_result_2)
-            .with_buffer("dot_a0", b_r0)
-            .with_buffer("dot_b0", b_r)
-            .with_buffer("dot_a1", b_r)
-            .with_buffer("dot_b1", b_r);
+            .with_buffer("dot_result_a", inputs.b_dot_result)
+            .with_buffer("dot_result_b", inputs.b_dot_result_2)
+            .with_buffer("dot_a0", inputs.b_r0)
+            .with_buffer("dot_b0", inputs.b_r)
+            .with_buffer("dot_a1", inputs.b_r)
+            .with_buffer("dot_b1", inputs.b_r);
         let bg_dot_pair_r0r_rr = wgsl_reflect::create_bind_group_from_bindings(
-            device,
+            inputs.device,
             "Dot Pair R0R RR Bind Group (CG module)",
             &bgl_dot_pair_inputs,
             dot_pair_src.bindings,
@@ -99,34 +102,34 @@ impl ScalarCgModule {
         .unwrap_or_else(|err| panic!("CG dot pair BG creation failed: {err}"));
 
         Self {
-            capacity,
-            b_rhs: b_rhs.clone(),
-            b_x: b_x.clone(),
-            b_matrix_values: b_matrix_values.clone(),
-            b_r: b_r.clone(),
-            b_r0: b_r0.clone(),
-            b_p: b_p.clone(),
-            b_v: b_v.clone(),
-            b_dot_result: b_dot_result.clone(),
-            b_dot_result_2: b_dot_result_2.clone(),
-            b_scalars: b_scalars.clone(),
-            b_solver_params: b_solver_params.clone(),
-            b_staging_scalar: b_staging_scalar.clone(),
-            bg_linear_matrix: bg_linear_matrix.clone(),
-            bg_linear_state: bg_linear_state.clone(),
-            bg_dot_params: bg_dot_params.clone(),
-            bg_dot_p_v: bg_dot_p_v.clone(),
-            bg_dot_r_r: bg_dot_r_r.clone(),
+            capacity: inputs.capacity,
+            b_rhs: inputs.b_rhs.clone(),
+            b_x: inputs.b_x.clone(),
+            b_matrix_values: inputs.b_matrix_values.clone(),
+            b_r: inputs.b_r.clone(),
+            b_r0: inputs.b_r0.clone(),
+            b_p: inputs.b_p.clone(),
+            b_v: inputs.b_v.clone(),
+            b_dot_result: inputs.b_dot_result.clone(),
+            b_dot_result_2: inputs.b_dot_result_2.clone(),
+            b_scalars: inputs.b_scalars.clone(),
+            b_solver_params: inputs.b_solver_params.clone(),
+            b_staging_scalar: inputs.b_staging_scalar.clone(),
+            bg_linear_matrix: inputs.bg_linear_matrix.clone(),
+            bg_linear_state: inputs.bg_linear_state.clone(),
+            bg_dot_params: inputs.bg_dot_params.clone(),
+            bg_dot_p_v: inputs.bg_dot_p_v.clone(),
+            bg_dot_r_r: inputs.bg_dot_r_r.clone(),
             bg_dot_pair_r0r_rr,
-            bg_scalars: bg_scalars.clone(),
-            pipeline_spmv_p_v: pipeline_spmv_p_v.clone(),
-            pipeline_dot: pipeline_dot.clone(),
-            pipeline_dot_pair: pipeline_dot_pair.clone(),
-            pipeline_cg_update_x_r: pipeline_cg_update_x_r.clone(),
-            pipeline_cg_update_p: pipeline_cg_update_p.clone(),
-            pipeline_init_cg_scalars: pipeline_init_cg_scalars.clone(),
-            pipeline_reduce_r0_v: pipeline_reduce_r0_v.clone(),
-            pipeline_reduce_rho_new_r_r: pipeline_reduce_rho_new_r_r.clone(),
+            bg_scalars: inputs.bg_scalars.clone(),
+            pipeline_spmv_p_v: inputs.pipeline_spmv_p_v.clone(),
+            pipeline_dot: inputs.pipeline_dot.clone(),
+            pipeline_dot_pair: inputs.pipeline_dot_pair.clone(),
+            pipeline_cg_update_x_r: inputs.pipeline_cg_update_x_r.clone(),
+            pipeline_cg_update_p: inputs.pipeline_cg_update_p.clone(),
+            pipeline_init_cg_scalars: inputs.pipeline_init_cg_scalars.clone(),
+            pipeline_reduce_r0_v: inputs.pipeline_reduce_r0_v.clone(),
+            pipeline_reduce_rho_new_r_r: inputs.pipeline_reduce_rho_new_r_r.clone(),
         }
     }
 
@@ -206,8 +209,10 @@ impl ScalarCgModule {
         self.copy_buffer(context, &self.b_rhs, &self.b_p, buffer_size);
         self.copy_buffer(context, &self.b_rhs, &self.b_r0, buffer_size);
 
-        let mut stats = LinearSolverStats::default();
-        stats.converged = false;
+        let mut stats = LinearSolverStats {
+            converged: false,
+            ..LinearSolverStats::default()
+        };
 
         {
             let mut encoder = context

@@ -296,15 +296,17 @@ impl SolverRecipe {
 
         // Initialize constants purely from the EOS module (and override only the EOS fields).
         let eos_params = eos.runtime_params();
-        let mut initial_constants = GpuConstants::default();
-        initial_constants.eos_gamma = eos_params.gamma;
-        initial_constants.eos_gm1 = eos_params.gm1;
-        initial_constants.eos_r = eos_params.r;
-        initial_constants.eos_dp_drho = eos_params.dp_drho;
-        initial_constants.eos_p_offset = eos_params.p_offset;
-        initial_constants.eos_theta_ref = eos_params.theta_ref;
-        initial_constants.scheme = advection_scheme.gpu_id();
-        initial_constants.time_scheme = time_scheme as u32;
+        let mut initial_constants = GpuConstants {
+            eos_gamma: eos_params.gamma,
+            eos_gm1: eos_params.gm1,
+            eos_r: eos_params.r,
+            eos_dp_drho: eos_params.dp_drho,
+            eos_p_offset: eos_params.p_offset,
+            eos_theta_ref: eos_params.theta_ref,
+            scheme: advection_scheme.gpu_id(),
+            time_scheme: time_scheme as u32,
+            ..Default::default()
+        };
         if model.id == "compressible" {
             // Compressible dual-time stepping is most stable with conservative relaxation by
             // default. These parameters are only applied in the update kernel when `dtau > 0`.

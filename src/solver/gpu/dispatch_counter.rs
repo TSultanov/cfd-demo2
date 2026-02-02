@@ -201,6 +201,12 @@ impl DispatchScope {
     }
 }
 
+impl Default for DispatchScope {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for DispatchScope {
     fn drop(&mut self) {
         global_dispatch_counter().disable();

@@ -76,7 +76,7 @@ impl RuntimePreconditionerModule {
         if self.num_cells == 0 {
             return None;
         }
-        if self.num_dofs % self.num_cells != 0 {
+        if !self.num_dofs.is_multiple_of(self.num_cells) {
             return None;
         }
         let unknowns_per_cell = self.num_dofs / self.num_cells;

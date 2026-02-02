@@ -292,56 +292,43 @@ fn main_assembly_fn(
         typed::UnitDim::dimensionless(),
     );
 
-    let mut stmts = Vec::new();
-    stmts.push(dsl::let_expr(
-        "idx",
-        Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
-            + Expr::ident("global_id").field("x"),
-    ));
-    stmts.push(dsl::if_block_expr(
-        Expr::ident("idx").ge(Expr::call_named(
-            "arrayLength",
-            vec![Expr::ident("cell_vols").addr_of()],
-        )),
-        dsl::block(vec![Stmt::Return(None)]),
-        None,
-    ));
-
-    stmts.push(dsl::let_expr(
-        "center",
-        dsl::array_access("cell_centers", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "vol",
-        dsl::array_access("cell_vols", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "start",
-        dsl::array_access("cell_face_offsets", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "end",
-        dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
-    ));
-    stmts.push(dsl::let_expr(
-        "scalar_offset",
-        dsl::array_access("scalar_row_offsets", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "diag_rank",
-        dsl::array_access("diagonal_indices", Expr::ident("idx")) - Expr::ident("scalar_offset"),
-    ));
-    stmts.push(dsl::let_expr(
-        "num_neighbors",
-        dsl::array_access("scalar_row_offsets", Expr::ident("idx") + 1u32)
-            - Expr::ident("scalar_offset"),
-    ));
-
-    // start_row_i = scalar_offset * block_stride + num_neighbors * coupled_stride * i
-    stmts.push(dsl::let_expr(
-        "start_row_0",
-        Expr::ident("scalar_offset") * block_stride,
-    ));
+    let mut stmts = vec![
+        dsl::let_expr(
+            "idx",
+            Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+                + Expr::ident("global_id").field("x"),
+        ),
+        dsl::if_block_expr(
+            Expr::ident("idx").ge(Expr::call_named(
+                "arrayLength",
+                vec![Expr::ident("cell_vols").addr_of()],
+            )),
+            dsl::block(vec![Stmt::Return(None)]),
+            None,
+        ),
+        dsl::let_expr("center", dsl::array_access("cell_centers", Expr::ident("idx"))),
+        dsl::let_expr("vol", dsl::array_access("cell_vols", Expr::ident("idx"))),
+        dsl::let_expr("start", dsl::array_access("cell_face_offsets", Expr::ident("idx"))),
+        dsl::let_expr(
+            "end",
+            dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
+        ),
+        dsl::let_expr(
+            "scalar_offset",
+            dsl::array_access("scalar_row_offsets", Expr::ident("idx")),
+        ),
+        dsl::let_expr(
+            "diag_rank",
+            dsl::array_access("diagonal_indices", Expr::ident("idx")) - Expr::ident("scalar_offset"),
+        ),
+        dsl::let_expr(
+            "num_neighbors",
+            dsl::array_access("scalar_row_offsets", Expr::ident("idx") + 1u32)
+                - Expr::ident("scalar_offset"),
+        ),
+        // start_row_i = scalar_offset * block_stride + num_neighbors * coupled_stride * i
+        dsl::let_expr("start_row_0", Expr::ident("scalar_offset") * block_stride),
+    ];
     for row in 1..coupled_stride {
         let name = format!("start_row_{row}");
         stmts.push(dsl::let_expr(
@@ -389,10 +376,9 @@ fn main_assembly_fn(
             .get(equation.target.name())
             .expect("missing target offset");
         let rho_expr = coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
-        let base_coeff =
-            Expr::ident("vol") * rho_expr.clone() / Expr::ident("constants").field("dt");
+        let base_coeff = Expr::ident("vol") * rho_expr / Expr::ident("constants").field("dt");
         let dtau = Expr::ident("constants").field("dtau");
-        let dual_time_coeff = Expr::ident("vol") * rho_expr / dtau.clone();
+        let dual_time_coeff = Expr::ident("vol") * rho_expr / dtau;
 
         let dt = Expr::ident("constants").field("dt");
         let dt_old = Expr::ident("constants").field("dt_old");
@@ -434,22 +420,22 @@ fn main_assembly_fn(
             stmts.push(dsl::assign_op_expr(
                 AssignOp::Add,
                 Expr::ident(format!("diag_{u_idx}")),
-                base_coeff.clone(),
+                base_coeff,
             ));
             stmts.push(dsl::assign_op_expr(
                 AssignOp::Add,
                 Expr::ident(format!("rhs_{u_idx}")),
-                base_coeff.clone() * phi_n.clone(),
+                base_coeff * phi_n,
             ));
 
             // Optional BDF2.
             stmts.push(dsl::if_block_expr(
                 time_scheme.eq(TimeScheme::BDF2),
                 dsl::block(vec![
-                    dsl::let_expr("r", dt.clone() / dt_old.clone()),
+                    dsl::let_expr("r", dt / dt_old),
                     dsl::let_expr(
                         "diag_bdf2",
-                        base_coeff.clone() * (Expr::ident("r") * 2.0 + 1.0)
+                        base_coeff * (Expr::ident("r") * 2.0 + 1.0)
                             / (Expr::ident("r") + 1.0),
                     ),
                     dsl::let_expr("factor_n", Expr::ident("r") + 1.0),
@@ -459,13 +445,13 @@ fn main_assembly_fn(
                     ),
                     dsl::assign_expr(
                         Expr::ident(format!("diag_{u_idx}")),
-                        Expr::ident(format!("diag_{u_idx}")) - base_coeff.clone()
+                        Expr::ident(format!("diag_{u_idx}")) - base_coeff
                             + Expr::ident("diag_bdf2"),
                     ),
                     dsl::assign_expr(
                         Expr::ident(format!("rhs_{u_idx}")),
-                        Expr::ident(format!("rhs_{u_idx}")) - base_coeff.clone() * phi_n.clone()
-                            + base_coeff.clone()
+                        Expr::ident(format!("rhs_{u_idx}")) - base_coeff * phi_n
+                            + base_coeff
                                 * (Expr::ident("factor_n") * phi_n
                                     - Expr::ident("factor_nm1") * phi_nm1),
                     ),
@@ -477,17 +463,17 @@ fn main_assembly_fn(
             // Add a diagonal `rho/dtau` term along with the matching RHS term so the
             // converged physical-time solution remains unchanged.
             stmts.push(dsl::if_block_expr(
-                dtau.clone().gt(0.0),
+                dtau.gt(0.0),
                 dsl::block(vec![
                     dsl::assign_op_expr(
                         AssignOp::Add,
                         Expr::ident(format!("diag_{u_idx}")),
-                        dual_time_coeff.clone(),
+                        dual_time_coeff,
                     ),
                     dsl::assign_op_expr(
                         AssignOp::Add,
                         Expr::ident(format!("rhs_{u_idx}")),
-                        dual_time_coeff.clone() * phi_iter,
+                        dual_time_coeff * phi_iter,
                     ),
                 ]),
                 None,
@@ -537,14 +523,14 @@ fn main_assembly_fn(
                         stmts.push(dsl::assign_op_expr(
                             AssignOp::Sub,
                             Expr::ident(format!("diag_{row_u_idx}")),
-                            term.clone(),
+                            term,
                         ));
                     } else {
                         // Cross-coupled source term: contribute to the (row, col) block entry.
                         stmts.push(dsl::assign_op_expr(
                             AssignOp::Sub,
                             diag_block.entry(row_u_idx as u8, col_u_idx as u8).expr,
-                            term.clone(),
+                            term,
                         ));
                     }
                 }
@@ -555,7 +541,7 @@ fn main_assembly_fn(
                     stmts.push(dsl::assign_op_expr(
                         AssignOp::Add,
                         Expr::ident(format!("rhs_{u_idx}")),
-                        term.clone(),
+                        term,
                     ));
                 }
             }
@@ -564,67 +550,46 @@ fn main_assembly_fn(
 
     // Face loop for diffusion contributions (implicit only).
     let face_loop_body = {
-        let mut body = Vec::new();
-        body.push(dsl::let_expr(
-            "face_idx",
-            dsl::array_access("cell_faces", Expr::ident("k")),
-        ));
-        body.push(dsl::let_expr(
-            "owner",
-            dsl::array_access("face_owner", Expr::ident("face_idx")),
-        ));
-        body.push(dsl::let_expr(
-            "neighbor_raw",
-            dsl::array_access("face_neighbor", Expr::ident("face_idx")),
-        ));
-        body.push(dsl::let_expr(
-            "boundary_type",
-            dsl::array_access("face_boundary", Expr::ident("face_idx")),
-        ));
-        body.push(dsl::let_expr(
-            "area",
-            dsl::array_access("face_areas", Expr::ident("face_idx")),
-        ));
-        body.push(dsl::let_expr(
-            "f_center",
-            dsl::array_access("face_centers", Expr::ident("face_idx")),
-        ));
-        body.push(dsl::var_typed_expr(
-            "normal",
-            Type::Custom("Vector2".to_string()),
-            Some(dsl::array_access("face_normals", Expr::ident("face_idx"))),
-        ));
-        body.push(dsl::var_typed_expr(
-            "is_boundary",
-            Type::Bool,
-            Some(false.into()),
-        ));
-        body.push(dsl::var_typed_expr(
-            "other_idx",
-            Type::U32,
-            Some(Expr::ident("idx")),
-        ));
-        body.push(dsl::var_typed_expr(
-            "other_center",
-            Type::Custom("Vector2".to_string()),
-            None,
-        ));
-
-        // Make normal outward from `idx`.
-        body.push(dsl::if_block_expr(
-            Expr::ident("owner").ne(Expr::ident("idx")),
-            dsl::block(vec![
-                dsl::assign_expr(
-                    Expr::ident("normal").field("x"),
-                    -Expr::ident("normal").field("x"),
-                ),
-                dsl::assign_expr(
-                    Expr::ident("normal").field("y"),
-                    -Expr::ident("normal").field("y"),
-                ),
-            ]),
-            None,
-        ));
+        let mut body = vec![
+            dsl::let_expr("face_idx", dsl::array_access("cell_faces", Expr::ident("k"))),
+            dsl::let_expr("owner", dsl::array_access("face_owner", Expr::ident("face_idx"))),
+            dsl::let_expr(
+                "neighbor_raw",
+                dsl::array_access("face_neighbor", Expr::ident("face_idx")),
+            ),
+            dsl::let_expr(
+                "boundary_type",
+                dsl::array_access("face_boundary", Expr::ident("face_idx")),
+            ),
+            dsl::let_expr("area", dsl::array_access("face_areas", Expr::ident("face_idx"))),
+            dsl::let_expr(
+                "f_center",
+                dsl::array_access("face_centers", Expr::ident("face_idx")),
+            ),
+            dsl::var_typed_expr(
+                "normal",
+                Type::Custom("Vector2".to_string()),
+                Some(dsl::array_access("face_normals", Expr::ident("face_idx"))),
+            ),
+            dsl::var_typed_expr("is_boundary", Type::Bool, Some(false.into())),
+            dsl::var_typed_expr("other_idx", Type::U32, Some(Expr::ident("idx"))),
+            dsl::var_typed_expr("other_center", Type::Custom("Vector2".to_string()), None),
+            // Make normal outward from `idx`.
+            dsl::if_block_expr(
+                Expr::ident("owner").ne(Expr::ident("idx")),
+                dsl::block(vec![
+                    dsl::assign_expr(
+                        Expr::ident("normal").field("x"),
+                        -Expr::ident("normal").field("x"),
+                    ),
+                    dsl::assign_expr(
+                        Expr::ident("normal").field("y"),
+                        -Expr::ident("normal").field("y"),
+                    ),
+                ]),
+                None,
+            ),
+        ];
 
         let interior_block = dsl::block(vec![
             dsl::let_expr(
@@ -738,15 +703,15 @@ fn main_assembly_fn(
                     coefficient_value_expr(slots, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
                 // Use arithmetic mean for interior faces; for boundaries use owner value.
                 let kappa = dsl::select(
-                    kappa_own.clone(),
-                    (kappa_own.clone() + kappa_other) * 0.5,
+                    kappa_own,
+                    (kappa_own + kappa_other) * 0.5,
                     !Expr::ident("is_boundary"),
                 );
 
                 let diff_coeff_name = format!("diff_coeff_{}", equation.target.name());
                 body.push(dsl::let_expr(
                     &diff_coeff_name,
-                    kappa.clone() * Expr::ident("area") / Expr::ident("dist"),
+                    kappa * Expr::ident("area") / Expr::ident("dist"),
                 ));
 
                 for component in 0..equation.target.kind().component_count() as u32 {
@@ -793,8 +758,7 @@ fn main_assembly_fn(
                         ),
                     ]);
 
-                    let neumann_rhs =
-                        -(kappa.clone() * Expr::ident("area") * bc_value_expr.clone());
+                    let neumann_rhs = -(kappa * Expr::ident("area") * bc_value_expr);
                     let boundary_contrib = {
                         let is_velocity_field = matches!(field_name, "u" | "U" | "rho_u" | "rhoU");
                         let is_slipwall = Expr::ident("boundary_type").eq(Expr::from(4u32));
@@ -819,10 +783,10 @@ fn main_assembly_fn(
                                 state_component_slot(slots.stride, "state", "idx", field_slot, 1);
                             let nx = Expr::ident("normal").field("x");
                             let ny = Expr::ident("normal").field("y");
-                            let un = vx.clone() * nx.clone() + vy.clone() * ny.clone();
+                            let un = vx * nx + vy * ny;
 
                             Some(if component == 0 {
-                                vx - un.clone() * nx
+                                vx - un * nx
                             } else {
                                 vy - un * ny
                             })
@@ -862,7 +826,7 @@ fn main_assembly_fn(
                                 dsl::assign_op_expr(
                                     AssignOp::Add,
                                     Expr::ident(format!("rhs_{row_u_idx}")),
-                                    Expr::ident(&diff_coeff_name) * bc_value_expr.clone(),
+                                    Expr::ident(&diff_coeff_name) * bc_value_expr,
                                 ),
                             ]),
                             Some(dsl::block(vec![dsl::if_block_expr(
@@ -917,8 +881,8 @@ fn main_assembly_fn(
                 let kappa_other =
                     coefficient_value_expr(slots, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
                 let kappa_face = dsl::select(
-                    kappa_own.clone(),
-                    (kappa_own.clone() + kappa_other) * 0.5,
+                    kappa_own,
+                    (kappa_own + kappa_other) * 0.5,
                     !Expr::ident("is_boundary"),
                 );
 
@@ -931,8 +895,8 @@ fn main_assembly_fn(
 
                 let field_offset_opt = offsets.get(field_name).copied();
                 let is_derived_u = matches!(field_name, "u" | "U")
-                    && offsets.get("rho").is_some()
-                    && offsets.get("rho_u").is_some();
+                    && offsets.contains_key("rho")
+                    && offsets.contains_key("rho_u");
 
                 for component in 0..equation.target.kind().component_count() as u32 {
                     let u_idx = base_offset + component;
@@ -956,7 +920,7 @@ fn main_assembly_fn(
                     let interior_contrib = dsl::block(vec![dsl::assign_op_expr(
                         AssignOp::Add,
                         Expr::ident(format!("rhs_{u_idx}")),
-                        Expr::ident(&diff_coeff_name) * (phi_neigh - phi_own.clone()),
+                        Expr::ident(&diff_coeff_name) * (phi_neigh - phi_own),
                     )]);
 
                     let boundary_contrib = if let Some(field_base_offset) = field_offset_opt {
@@ -967,16 +931,14 @@ fn main_assembly_fn(
                         );
                         let bc_value_expr = dsl::array_access("bc_value", bc_table_idx);
 
-                        let neumann_rhs =
-                            -(kappa_own.clone() * Expr::ident("area") * bc_value_expr.clone());
+                        let neumann_rhs = -(kappa_own * Expr::ident("area") * bc_value_expr);
 
                         dsl::block(vec![dsl::if_block_expr(
                             bc_kind_expr.eq(GpuBcKind::Dirichlet),
                             dsl::block(vec![dsl::assign_op_expr(
                                 AssignOp::Add,
                                 Expr::ident(format!("rhs_{u_idx}")),
-                                Expr::ident(&diff_coeff_name)
-                                    * (bc_value_expr.clone() - phi_own.clone()),
+                                Expr::ident(&diff_coeff_name) * (bc_value_expr - phi_own),
                             )]),
                             Some(dsl::block(vec![dsl::if_block_expr(
                                 bc_kind_expr.eq(GpuBcKind::Neumann),
@@ -1019,7 +981,7 @@ fn main_assembly_fn(
                         let rho_bc_safe = dsl::max(rho_bc, 1e-12);
                         let u_bc = bc_rho_u_val / rho_bc_safe;
                         let u_other = dsl::select(
-                            phi_own.clone(),
+                            phi_own,
                             u_bc,
                             bc_rho_u_kind.eq(GpuBcKind::Dirichlet),
                         );
@@ -1027,7 +989,7 @@ fn main_assembly_fn(
                         dsl::block(vec![dsl::assign_op_expr(
                             AssignOp::Add,
                             Expr::ident(format!("rhs_{u_idx}")),
-                            Expr::ident(&diff_coeff_name) * (u_other - phi_own.clone()),
+                            Expr::ident(&diff_coeff_name) * (u_other - phi_own),
                         )])
                     } else {
                         // No BC information for this derived field; default to zero-gradient.
@@ -1053,7 +1015,6 @@ fn main_assembly_fn(
                 //
                 // Flux population is handled by an optional flux module kernel; assembly only
                 // assumes the packed `(face_idx, u_idx)` layout.
-                let flux_stride = flux_stride;
 
                 // `DivFlux` terms represent conservative flux divergence:
                 // the face flux is precomputed (e.g., KT) and should contribute RHS-only:
@@ -1070,11 +1031,7 @@ fn main_assembly_fn(
                             u_idx,
                         );
 
-                        body.push(dsl::var_typed_expr(
-                            &flux_var,
-                            Type::F32,
-                            Some(flux_val_expr.clone()),
-                        ));
+                        body.push(dsl::var_typed_expr(&flux_var, Type::F32, Some(flux_val_expr)));
                         body.push(dsl::if_block_expr(
                             Expr::ident("owner").ne(Expr::ident("idx")),
                             dsl::block(vec![dsl::assign_op_expr(
@@ -1103,11 +1060,7 @@ fn main_assembly_fn(
                             flux_stride,
                             u_idx,
                         );
-                        body.push(dsl::var_typed_expr(
-                            &flux_var,
-                            Type::F32,
-                            Some(flux_val_expr.clone()),
-                        ));
+                        body.push(dsl::var_typed_expr(&flux_var, Type::F32, Some(flux_val_expr)));
                         body.push(dsl::if_block_expr(
                             Expr::ident("owner").ne(Expr::ident("idx")),
                             dsl::block(vec![dsl::assign_op_expr(
@@ -1176,16 +1129,16 @@ fn main_assembly_fn(
                             );
                             (grad_own, grad_neigh)
                         } else {
-                            let diff = phi_neigh.clone() - phi_own.clone();
+                            let diff = phi_neigh - phi_own;
                             let denom = dsl::max(
                                 Expr::ident("dx") * Expr::ident("dx")
                                     + Expr::ident("dy") * Expr::ident("dy"),
                                 1e-12,
                             );
-                            let g_x = diff.clone() * Expr::ident("dx") / denom.clone();
+                            let g_x = diff * Expr::ident("dx") / denom;
                             let g_y = diff * Expr::ident("dy") / denom;
                             let grad = dsl::vec2_f32(g_x, g_y);
-                            (grad.clone(), grad)
+                            (grad, grad)
                         };
 
                         let rec = scalar_reconstruction(
@@ -1211,19 +1164,19 @@ fn main_assembly_fn(
                             dsl::assign_op_expr(
                                 AssignOp::Add,
                                 Expr::ident(format!("diag_{u_idx}")),
-                                flux_pos.clone(),
+                                flux_pos,
                             ),
                             dsl::assign_op_expr(
                                 AssignOp::Add,
                                 block_matrix
                                     .entry(&Expr::ident("neighbor_rank"), u_idx as u8, u_idx as u8)
                                     .expr,
-                                flux_neg.clone(),
+                                flux_neg,
                             ),
                             dsl::assign_op_expr(
                                 AssignOp::Sub,
                                 Expr::ident(format!("rhs_{u_idx}")),
-                                dc_term.clone(),
+                                dc_term,
                             ),
                         ]);
 
@@ -1239,12 +1192,12 @@ fn main_assembly_fn(
                                 dsl::assign_op_expr(
                                     AssignOp::Add,
                                     Expr::ident(format!("diag_{u_idx}")),
-                                    flux_pos.clone(),
+                                    flux_pos,
                                 ),
                                 dsl::assign_op_expr(
                                     AssignOp::Sub,
                                     Expr::ident(format!("rhs_{u_idx}")),
-                                    flux_neg.clone() * bc_value_expr.clone(),
+                                    flux_neg * bc_value_expr,
                                 ),
                             ]),
                             Some(dsl::block(vec![dsl::assign_op_expr(
@@ -1295,29 +1248,36 @@ fn main_assembly_fn(
                         Expr::ident("normal").field("y")
                     };
 
-                    let term_common = factor.clone() * n_comp;
+                    let term_common = factor * n_comp;
 
-                    if grad_op.discretization == Discretization::Implicit && p_offset_opt.is_some()
-                    {
-                        let p_idx = *p_offset_opt.unwrap();
-                        let diag_block = block_matrix.row_entry(&Expr::ident("diag_rank"));
+                    if let Some(&p_idx) = p_offset_opt {
+                        if grad_op.discretization == Discretization::Implicit {
+                            let diag_block = block_matrix.row_entry(&Expr::ident("diag_rank"));
 
-                        // Owner p contribution -> Diag block (u, p)
-                        body.push(dsl::assign_op_expr(
-                            AssignOp::Add,
-                            diag_block.entry(u_idx as u8, p_idx as u8).expr,
-                            term_common.clone(),
-                        ));
-                        // Neighbor p contribution -> Neighbor block (u, p)
-                        body.push(dsl::assign_op_expr(
-                            AssignOp::Add,
-                            block_matrix
-                                .entry(&Expr::ident("neighbor_rank"), u_idx as u8, p_idx as u8)
-                                .expr,
-                            term_common.clone(),
-                        ));
+                            // Owner p contribution -> Diag block (u, p)
+                            body.push(dsl::assign_op_expr(
+                                AssignOp::Add,
+                                diag_block.entry(u_idx as u8, p_idx as u8).expr,
+                                term_common,
+                            ));
+                            // Neighbor p contribution -> Neighbor block (u, p)
+                            body.push(dsl::assign_op_expr(
+                                AssignOp::Add,
+                                block_matrix
+                                    .entry(&Expr::ident("neighbor_rank"), u_idx as u8, p_idx as u8)
+                                    .expr,
+                                term_common,
+                            ));
+                        } else {
+                            let val = term_common * (phi_own + phi_neigh);
+                            body.push(dsl::assign_op_expr(
+                                AssignOp::Sub,
+                                Expr::ident(format!("rhs_{u_idx}")),
+                                val,
+                            ));
+                        }
                     } else {
-                        let val = term_common.clone() * (phi_own + phi_neigh);
+                        let val = term_common * (phi_own + phi_neigh);
                         body.push(dsl::assign_op_expr(
                             AssignOp::Sub,
                             Expr::ident(format!("rhs_{u_idx}")),

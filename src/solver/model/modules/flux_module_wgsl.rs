@@ -588,50 +588,49 @@ fn main_body(
     primitives: &HashMap<&str, &PrimitiveExpr>,
     spec: &FluxModuleKernelSpec,
 ) -> Block {
-    let mut stmts = Vec::new();
-
-    stmts.push(dsl::let_expr(
-        "idx",
-        Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
-            + Expr::ident("global_id").field("x"),
-    ));
-    stmts.push(dsl::if_block_expr(
-        Expr::ident("idx").ge(Expr::call_named(
-            "arrayLength",
-            vec![Expr::ident("face_areas").addr_of()],
-        )),
-        dsl::block(vec![Stmt::Return(None)]),
-        None,
-    ));
-
-    stmts.push(dsl::let_expr(
-        "owner",
-        dsl::array_access("face_owner", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "neighbor",
-        dsl::array_access("face_neighbor", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr("is_boundary", Expr::ident("neighbor").eq(-1)));
-    // For boundary faces, we treat the "neighbor" side as the owner cell (zero-gradient
-    // extrapolation). Boundary-aware flux formulas can still use `boundary_type`.
-    stmts.push(dsl::var_typed_expr(
-        "neigh_idx",
-        Type::U32,
-        Some(Expr::ident("owner")),
-    ));
-    stmts.push(dsl::if_block_expr(
-        Expr::ident("neighbor").ne(-1),
-        dsl::block(vec![dsl::assign_expr(
-            Expr::ident("neigh_idx"),
-            Expr::call_named("u32", vec![Expr::ident("neighbor")]),
-        )]),
-        None,
-    ));
-    stmts.push(dsl::let_expr(
-        "area",
-        dsl::array_access("face_areas", Expr::ident("idx")),
-    ));
+    let mut stmts = vec![
+        dsl::let_expr(
+            "idx",
+            Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+                + Expr::ident("global_id").field("x"),
+        ),
+        dsl::if_block_expr(
+            Expr::ident("idx").ge(Expr::call_named(
+                "arrayLength",
+                vec![Expr::ident("face_areas").addr_of()],
+            )),
+            dsl::block(vec![Stmt::Return(None)]),
+            None,
+        ),
+        dsl::let_expr(
+            "owner",
+            dsl::array_access("face_owner", Expr::ident("idx")),
+        ),
+        dsl::let_expr(
+            "neighbor",
+            dsl::array_access("face_neighbor", Expr::ident("idx")),
+        ),
+        dsl::let_expr("is_boundary", Expr::ident("neighbor").eq(-1)),
+        // For boundary faces, we treat the "neighbor" side as the owner cell (zero-gradient
+        // extrapolation). Boundary-aware flux formulas can still use `boundary_type`.
+        dsl::var_typed_expr(
+            "neigh_idx",
+            Type::U32,
+            Some(Expr::ident("owner")),
+        ),
+        dsl::if_block_expr(
+            Expr::ident("neighbor").ne(-1),
+            dsl::block(vec![dsl::assign_expr(
+                Expr::ident("neigh_idx"),
+                Expr::call_named("u32", vec![Expr::ident("neighbor")]),
+            )]),
+            None,
+        ),
+        dsl::let_expr(
+            "area",
+            dsl::array_access("face_areas", Expr::ident("idx")),
+        ),
+    ];
     stmts.push(dsl::let_expr(
         "boundary_type",
         dsl::array_access("face_boundary", Expr::ident("idx")),
@@ -701,50 +700,49 @@ fn main_body_runtime_scheme(
     primitives: &HashMap<&str, &PrimitiveExpr>,
     variants: &[(Scheme, FluxModuleKernelSpec)],
 ) -> Block {
-    let mut stmts = Vec::new();
-
-    stmts.push(dsl::let_expr(
-        "idx",
-        Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
-            + Expr::ident("global_id").field("x"),
-    ));
-    stmts.push(dsl::if_block_expr(
-        Expr::ident("idx").ge(Expr::call_named(
-            "arrayLength",
-            vec![Expr::ident("face_areas").addr_of()],
-        )),
-        dsl::block(vec![Stmt::Return(None)]),
-        None,
-    ));
-
-    stmts.push(dsl::let_expr(
-        "owner",
-        dsl::array_access("face_owner", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr(
-        "neighbor",
-        dsl::array_access("face_neighbor", Expr::ident("idx")),
-    ));
-    stmts.push(dsl::let_expr("is_boundary", Expr::ident("neighbor").eq(-1)));
-    // For boundary faces, we treat the "neighbor" side as the owner cell (zero-gradient
-    // extrapolation). Boundary-aware flux formulas can still use `boundary_type`.
-    stmts.push(dsl::var_typed_expr(
-        "neigh_idx",
-        Type::U32,
-        Some(Expr::ident("owner")),
-    ));
-    stmts.push(dsl::if_block_expr(
-        Expr::ident("neighbor").ne(-1),
-        dsl::block(vec![dsl::assign_expr(
-            Expr::ident("neigh_idx"),
-            Expr::call_named("u32", vec![Expr::ident("neighbor")]),
-        )]),
-        None,
-    ));
-    stmts.push(dsl::let_expr(
-        "area",
-        dsl::array_access("face_areas", Expr::ident("idx")),
-    ));
+    let mut stmts = vec![
+        dsl::let_expr(
+            "idx",
+            Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+                + Expr::ident("global_id").field("x"),
+        ),
+        dsl::if_block_expr(
+            Expr::ident("idx").ge(Expr::call_named(
+                "arrayLength",
+                vec![Expr::ident("face_areas").addr_of()],
+            )),
+            dsl::block(vec![Stmt::Return(None)]),
+            None,
+        ),
+        dsl::let_expr(
+            "owner",
+            dsl::array_access("face_owner", Expr::ident("idx")),
+        ),
+        dsl::let_expr(
+            "neighbor",
+            dsl::array_access("face_neighbor", Expr::ident("idx")),
+        ),
+        dsl::let_expr("is_boundary", Expr::ident("neighbor").eq(-1)),
+        // For boundary faces, we treat the "neighbor" side as the owner cell (zero-gradient
+        // extrapolation). Boundary-aware flux formulas can still use `boundary_type`.
+        dsl::var_typed_expr(
+            "neigh_idx",
+            Type::U32,
+            Some(Expr::ident("owner")),
+        ),
+        dsl::if_block_expr(
+            Expr::ident("neighbor").ne(-1),
+            dsl::block(vec![dsl::assign_expr(
+                Expr::ident("neigh_idx"),
+                Expr::call_named("u32", vec![Expr::ident("neighbor")]),
+            )]),
+            None,
+        ),
+        dsl::let_expr(
+            "area",
+            dsl::array_access("face_areas", Expr::ident("idx")),
+        ),
+    ];
     stmts.push(dsl::let_expr(
         "boundary_type",
         dsl::array_access("face_boundary", Expr::ident("idx")),
@@ -814,12 +812,12 @@ fn face_stmts(
     primitives: &HashMap<&str, &PrimitiveExpr>,
     spec: &FluxModuleKernelSpec,
 ) -> Vec<Stmt> {
-    let mut body = Vec::new();
-
-    body.push(dsl::let_expr(
-        "c_neigh",
-        dsl::array_access("cell_centers", Expr::ident("neigh_idx")),
-    ));
+    let mut body = vec![
+        dsl::let_expr(
+            "c_neigh",
+            dsl::array_access("cell_centers", Expr::ident("neigh_idx")),
+        ),
+    ];
     body.push(dsl::var_typed_expr(
         "c_neigh_vec",
         Type::vec2_f32(),
@@ -1015,31 +1013,31 @@ fn face_stmts_runtime_scheme(
         a_minus: &'a FaceScalarExpr,
     }
 
-    let mut body = Vec::new();
-
     // --- Geometry preamble (kept in sync with `face_stmts`) ---
-    body.push(dsl::let_expr(
-        "c_neigh",
-        dsl::array_access("cell_centers", Expr::ident("neigh_idx")),
-    ));
-    body.push(dsl::var_typed_expr(
-        "c_neigh_vec",
-        Type::vec2_f32(),
-        Some(typed::VecExpr::<2>::from_xy_fields(Expr::ident("c_neigh")).expr()),
-    ));
-    body.push(dsl::let_typed_expr(
-        "c_neigh_cell_vec",
-        Type::vec2_f32(),
-        Expr::ident("c_neigh_vec"),
-    ));
-    body.push(dsl::if_block_expr(
-        Expr::ident("is_boundary"),
-        dsl::block(vec![dsl::assign_expr(
+    let mut body = vec![
+        dsl::let_expr(
+            "c_neigh",
+            dsl::array_access("cell_centers", Expr::ident("neigh_idx")),
+        ),
+        dsl::var_typed_expr(
+            "c_neigh_vec",
+            Type::vec2_f32(),
+            Some(typed::VecExpr::<2>::from_xy_fields(Expr::ident("c_neigh")).expr()),
+        ),
+        dsl::let_typed_expr(
+            "c_neigh_cell_vec",
+            Type::vec2_f32(),
             Expr::ident("c_neigh_vec"),
-            Expr::ident("face_center_vec"),
-        )]),
-        None,
-    ));
+        ),
+        dsl::if_block_expr(
+            Expr::ident("is_boundary"),
+            dsl::block(vec![dsl::assign_expr(
+                Expr::ident("c_neigh_vec"),
+                Expr::ident("face_center_vec"),
+            )]),
+            None,
+        ),
+    ];
 
     // Match OpenFOAM's `surfaceInterpolation::weights()` (basicFvGeometryScheme).
     let d_own = dsl::abs(
@@ -1750,12 +1748,12 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
                 let is_boundary = Expr::ident("is_boundary");
                 let zero_cond = if field == "grad_p" {
                     let is_outlet = Expr::ident("boundary_type").eq(Expr::from(2u32));
-                    is_boundary.clone() & !is_outlet
+                    is_boundary & !is_outlet
                 } else {
-                    is_boundary.clone()
+                    is_boundary
                 };
                 return typed::VecExpr::<2>::from_components([
-                    dsl::select(x, Expr::from(0.0), zero_cond.clone()),
+                    dsl::select(x, Expr::from(0.0), zero_cond),
                     dsl::select(y, Expr::from(0.0), zero_cond),
                 ]);
             }
@@ -1768,7 +1766,7 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
                 FaceSide::Neighbor => Expr::ident("neigh_idx"),
             };
             typed::VecExpr::<2>::from_components([
-                state_component_at_resolver(ctx.resolver, "state", idx.clone(), field.as_str(), 0),
+                state_component_at_resolver(ctx.resolver, "state", idx, field.as_str(), 0),
                 state_component_at_resolver(ctx.resolver, "state", idx, field.as_str(), 1),
             ])
         }
@@ -1903,7 +1901,7 @@ fn state_component_at_side_resolver(
     if let Some(unknown_offset) = flux_layout.offset_for(&comp_name) {
         let bc_table_idx =
             Expr::ident("idx") * Expr::from(flux_layout.stride) + Expr::from(unknown_offset);
-        let kind = dsl::array_access("bc_kind", bc_table_idx.clone());
+        let kind = dsl::array_access("bc_kind", bc_table_idx);
         let value = dsl::array_access("bc_value", bc_table_idx);
 
         let base = if side == FaceSide::Owner {
@@ -1915,8 +1913,8 @@ fn state_component_at_side_resolver(
             Expr::call_named(
                 "bc_neighbor_scalar",
                 vec![
-                    owner.clone(),
-                    owner.clone(),
+                    owner,
+                    owner,
                     kind,
                     value,
                     Expr::ident("d_own"),
@@ -1928,7 +1926,7 @@ fn state_component_at_side_resolver(
                 "bc_neighbor_scalar",
                 vec![
                     interior,
-                    owner.clone(),
+                    owner,
                     kind,
                     value,
                     Expr::ident("d_own"),
@@ -1979,16 +1977,16 @@ fn apply_slipwall_velocity_reflection_resolver(
     // For Wall (no-slip) boundaries, respect the scalar BC table (typically Dirichlet=0 for
     // both components). Projecting the owner-cell velocity would incorrectly introduce
     // tangential slip into the convective flux.
-    let is_slipwall = is_boundary.clone() & boundary_type.clone().eq(Expr::from(4u32));
+    let is_slipwall = is_boundary & boundary_type.eq(Expr::from(4u32));
     let ux = state_component_at_resolver(resolver, buffer, Expr::ident("owner"), field, 0);
     let uy = state_component_at_resolver(resolver, buffer, Expr::ident("owner"), field, 1);
     let nx = Expr::ident("normal_vec").field("x");
     let ny = Expr::ident("normal_vec").field("y");
-    let un = ux.clone() * nx.clone() + uy.clone() * ny.clone();
+    let un = ux * nx + uy * ny;
 
     let slip_projected = match component {
-        0 => ux.clone() - un.clone() * nx.clone(),
-        1 => uy.clone() - un.clone() * ny.clone(),
+        0 => ux - un * nx,
+        1 => uy - un * ny,
         _ => return base,
     };
 

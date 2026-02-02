@@ -235,23 +235,19 @@ impl UnitDim {
     ///
     /// ```rust,ignore
     /// // Create m^(1/2) * kg^(-1/2) * s^0 * K^0
-    /// let dim = UnitDim::from_rational(1, 2, -1, 2, 0, 1, 0, 1);
+    /// let dim = UnitDim::from_rational((1, 2), (-1, 2), (0, 1), (0, 1));
     /// ```
     pub const fn from_rational(
-        m_num: i32,
-        m_den: i32,
-        l_num: i32,
-        l_den: i32,
-        t_num: i32,
-        t_den: i32,
-        temp_num: i32,
-        temp_den: i32,
+        m: (i32, i32),
+        l: (i32, i32),
+        t: (i32, i32),
+        temp: (i32, i32),
     ) -> Self {
         Self {
-            m: UnitExp::new(m_num, m_den),
-            l: UnitExp::new(l_num, l_den),
-            t: UnitExp::new(t_num, t_den),
-            temp: UnitExp::new(temp_num, temp_den),
+            m: UnitExp::new(m.0, m.1),
+            l: UnitExp::new(l.0, l.1),
+            t: UnitExp::new(t.0, t.1),
+            temp: UnitExp::new(temp.0, temp.1),
         }
     }
 }

@@ -358,9 +358,10 @@ pub enum FluxModuleKernelSpec {
 }
 
 /// Slope limiter for high-order reconstruction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LimiterSpec {
     /// No limiting (can be unstable).
+    #[default]
     None,
     /// MinMod limiter.
     MinMod,
@@ -380,11 +381,5 @@ pub mod reconstruction;
 
 // Re-export port types for convenience
 pub use ports::{BufferAccess, BufferSpec, FieldSpec, ParamSpec, PortFieldKind, PortManifest};
-
-impl Default for LimiterSpec {
-    fn default() -> Self {
-        LimiterSpec::None
-    }
-}
 
 // Intentionally no test fixtures here: `cfd2_ir` must not depend on model definitions.

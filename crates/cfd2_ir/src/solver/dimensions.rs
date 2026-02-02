@@ -54,16 +54,7 @@ pub trait UnitDimension: 'static + Copy + Send + Sync + Eq + PartialEq + std::fm
     const TEMP: (i32, i32);
 
     /// The runtime unit constant derived from this type-level dimension.
-    const UNIT: UnitDim = UnitDim::from_rational(
-        Self::M.0,
-        Self::M.1,
-        Self::L.0,
-        Self::L.1,
-        Self::T.0,
-        Self::T.1,
-        Self::TEMP.0,
-        Self::TEMP.1,
-    );
+    const UNIT: UnitDim = UnitDim::from_rational(Self::M, Self::L, Self::T, Self::TEMP);
 
     /// Convert to runtime UnitDim for error messages and serialization.
     fn to_runtime() -> UnitDim {

@@ -70,7 +70,7 @@ impl FluxRef {
     }
 
     pub fn name(&self) -> &str {
-        &self.name
+        self.name
     }
 
     pub fn kind(&self) -> FieldKind {
@@ -721,20 +721,20 @@ mod tests {
         let rho = vol_scalar("rho", si::DENSITY);
         let phi = surface_scalar("phi", si::MASS_FLUX);
 
-        let term = fvm::ddt(u.clone());
+        let term = fvm::ddt(u);
         assert_eq!(term.op, TermOp::Ddt);
         assert_eq!(term.discretization, Discretization::Implicit);
         assert_eq!(term.field, u);
 
-        let term = fvc::div(phi.clone(), p.clone());
+        let term = fvc::div(phi, p);
         assert_eq!(term.op, TermOp::Div);
         assert_eq!(term.discretization, Discretization::Explicit);
         assert_eq!(term.flux, Some(phi));
 
         let coeff = Coefficient::field(rho).unwrap();
-        let term = fvm::laplacian(coeff, p.clone());
+        let term = fvm::laplacian(coeff, p);
         assert_eq!(term.op, TermOp::Laplacian);
-        assert_eq!(term.coeff.is_some(), true);
+        assert!(term.coeff.is_some());
         assert_eq!(term.field, p);
     }
 
@@ -743,15 +743,15 @@ mod tests {
         let u = vol_vector("U", si::VELOCITY);
         let phi = surface_scalar("phi", si::MASS_FLUX);
 
-        let eqn = Equation::new(u.clone())
-            .with_term(fvm::ddt(u.clone()))
-            .with_term(fvm::div(phi, u.clone()));
+        let eqn = Equation::new(u)
+            .with_term(fvm::ddt(u))
+            .with_term(fvm::div(phi, u));
 
         let mut system = EquationSystem::new();
         system.add_equation(eqn);
 
         assert_eq!(system.equations().len(), 1);
-        assert_eq!(system.equations()[0].target(), &u);
+        assert_eq!(*system.equations()[0].target(), u);
         assert_eq!(system.equations()[0].terms().len(), 2);
         assert_eq!(system.equations()[0].terms()[0].field.name(), "U");
     }
@@ -761,7 +761,7 @@ mod tests {
         let u = vol_vector("U", si::VELOCITY);
         let phi = surface_scalar("phi", si::MASS_FLUX);
 
-        let eqn = (fvm::ddt(u.clone()) + fvm::div(phi, u.clone())).eqn(u.clone());
+        let eqn = (fvm::ddt(u) + fvm::div(phi, u)).eqn(u);
 
         assert_eq!(eqn.target(), &u);
         assert_eq!(eqn.terms().len(), 2);
@@ -772,7 +772,7 @@ mod tests {
     #[test]
     fn term_eqn_creates_single_term_equation() {
         let u = vol_vector("U", si::VELOCITY);
-        let eqn = fvc::source(u.clone()).eqn(u.clone());
+        let eqn = fvc::source(u).eqn(u);
 
         assert_eq!(eqn.target(), &u);
         assert_eq!(eqn.terms().len(), 1);
@@ -812,7 +812,7 @@ mod tests {
     #[test]
     fn validate_units_rejects_mismatched_terms() {
         let u = vol_vector("U", si::VELOCITY);
-        let eqn = (fvm::ddt(u.clone()) + fvm::source(u.clone())).eqn(u.clone());
+        let eqn = (fvm::ddt(u) + fvm::source(u)).eqn(u);
 
         let mut system = EquationSystem::new();
         system.add_equation(eqn);
@@ -825,7 +825,7 @@ mod tests {
     fn validate_units_rejects_flux_kind_mismatch() {
         let u = vol_vector("U", si::VELOCITY);
         let phi = surface_scalar("phi", si::MASS_FLUX);
-        let eqn = fvm::div_flux(phi, u.clone()).eqn(u.clone());
+        let eqn = fvm::div_flux(phi, u).eqn(u);
 
         let mut system = EquationSystem::new();
         system.add_equation(eqn);

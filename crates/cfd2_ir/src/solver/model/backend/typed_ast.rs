@@ -169,7 +169,7 @@ impl<D: UnitDimension> TypedCoeff<D> {
     }
 
     /// Multiply two coefficients.
-    pub fn mul<OtherD: UnitDimension>(
+    pub fn multiply<OtherD: UnitDimension>(
         self,
         other: TypedCoeff<OtherD>,
     ) -> TypedCoeff<crate::solver::dimensions::MulDim<D, OtherD>> {
@@ -182,6 +182,21 @@ impl<D: UnitDimension> TypedCoeff<D> {
     /// Convert to the underlying untyped Coefficient.
     pub fn to_untyped(&self) -> Coefficient {
         self.inner.clone()
+    }
+}
+
+impl<D, OtherD> std::ops::Mul<TypedCoeff<OtherD>> for TypedCoeff<D>
+where
+    D: UnitDimension,
+    OtherD: UnitDimension,
+{
+    type Output = TypedCoeff<crate::solver::dimensions::MulDim<D, OtherD>>;
+
+    fn mul(self, other: TypedCoeff<OtherD>) -> Self::Output {
+        TypedCoeff {
+            inner: Coefficient::Product(Box::new(self.inner), Box::new(other.inner)),
+            _dim: PhantomData,
+        }
     }
 }
 
@@ -802,8 +817,8 @@ mod tests {
         let p = TypedFieldRef::<Pressure, Scalar>::new("p");
 
         // Two ddt terms on the same field - these have matching units
-        let term1 = typed_fvm::ddt(p.clone());
-        let term2 = typed_fvm::ddt(p.clone());
+        let term1 = typed_fvm::ddt(p);
+        let term2 = typed_fvm::ddt(p);
         let sum = term1 + term2;
 
         assert_eq!(sum.to_untyped().terms().len(), 2);
@@ -814,7 +829,7 @@ mod tests {
         // Build a simple pressure equation: ddt(p) = 0 (transient only)
         let p = TypedFieldRef::<Pressure, Scalar>::new("p");
 
-        let eqn = typed_fvm::ddt(p.clone()).eqn(p.clone());
+        let eqn = typed_fvm::ddt(p).eqn(p);
 
         let mut system = TypedEquationSystem::new();
         system.add_equation(eqn);
@@ -899,7 +914,7 @@ mod tests {
         let coeff1 = TypedCoeff::<Density>::from_field(rho);
         let coeff2 = TypedCoeff::<Dimensionless>::constant(0.5);
 
-        let product = coeff1.mul(coeff2);
+        let product = coeff1 * coeff2;
 
         // Product should have dimension: Density * Dimensionless = Density
         let untyped = product.to_untyped();
@@ -914,7 +929,7 @@ mod tests {
         let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
 
         // Typed construction - simple pressure equation
-        let eqn_typed = typed_fvm::ddt(p_typed.clone()).eqn(p_typed.clone());
+        let eqn_typed = typed_fvm::ddt(p_typed).eqn(p_typed);
 
         let mut typed_system = TypedEquationSystem::new();
         typed_system.add_equation(eqn_typed);
@@ -923,7 +938,7 @@ mod tests {
         let p_untyped = FieldRef::new("p", FieldKind::Scalar, si::PRESSURE);
 
         let eqn_untyped =
-            crate::solver::model::backend::ast::fvm::ddt(p_untyped.clone()).eqn(p_untyped.clone());
+            crate::solver::model::backend::ast::fvm::ddt(p_untyped).eqn(p_untyped);
 
         let mut untyped_system = EquationSystem::new();
         untyped_system.add_equation(eqn_untyped);
@@ -937,7 +952,7 @@ mod tests {
     fn explicit_terms_use_correct_discretization() {
         let p = TypedFieldRef::<Pressure, Scalar>::new("p");
 
-        let ddt_term = typed_fvc::ddt(p.clone());
+        let ddt_term = typed_fvc::ddt(p);
 
         assert_eq!(
             ddt_term.to_untyped().discretization,

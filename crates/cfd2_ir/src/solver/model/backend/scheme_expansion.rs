@@ -85,7 +85,7 @@ mod tests {
         let phi = surface_scalar("phi", si::MASS_FLUX);
 
         let mut system = EquationSystem::new();
-        system.add_equation((fvm::div(phi.clone(), u)).eqn(u));
+        system.add_equation((fvm::div(phi, u)).eqn(u));
         system.add_equation((fvm::div(phi, p)).eqn(p));
 
         let mut registry = SchemeRegistry::new(Scheme::Upwind);

@@ -1,9 +1,9 @@
-/// High-level primitive expression language for model-defined derived primitives.
-///
-/// Models define primitive derivations using this algebra.
-///
-/// Note: this type is intentionally WGSL/AST-agnostic. Lowering to WGSL is performed
-/// by the codegen layer to avoid coupling shared/model code to a specific WGSL AST arena.
+//! High-level primitive expression language for model-defined derived primitives.
+//!
+//! Models define primitive derivations using this algebra.
+//!
+//! Note: this type is intentionally WGSL/AST-agnostic. Lowering to WGSL is performed
+//! by the codegen layer to avoid coupling shared/model code to a specific WGSL AST arena.
 
 /// Primitive expression over conserved state fields.
 ///

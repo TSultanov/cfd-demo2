@@ -1539,6 +1539,208 @@ impl CFDApp {
     fn update_gpu_preconditioner(&self) {
         self.sync_worker_params();
     }
+
+    /// Render the right panel showing mesh stats and color legend.
+    fn render_right_panel(
+        &self,
+        ctx: &egui::Context,
+        has_solver: bool,
+        min_val: f32,
+        max_val: f32,
+    ) {
+        egui::SidePanel::right("legend").show(ctx, |ui| {
+            if let Some(mesh) = &self.mesh {
+                ui.heading("Mesh Stats");
+                ui.label(format!("Cells: {}", mesh.num_cells()));
+                ui.label(format!("Faces: {}", mesh.num_faces()));
+                ui.label(format!("Vertices: {}", mesh.num_vertices()));
+                if !mesh.cell_vol.is_empty() {
+                    let min_vol = mesh.cell_vol.iter().cloned().fold(f64::INFINITY, f64::min);
+                    let max_vol = mesh
+                        .cell_vol
+                        .iter()
+                        .cloned()
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    ui.label(format!("Cell vol: {:.2e} - {:.2e}", min_vol, max_vol));
+                }
+                ui.separator();
+            }
+
+            if has_solver {
+                ui.heading("Legend");
+                ui.label(format!("Max: {:.4}", max_val));
+
+                let (rect, _response) =
+                    ui.allocate_at_least(egui::vec2(30.0, 200.0), egui::Sense::hover());
+                if ui.is_rect_visible(rect) {
+                    let mut mesh = egui::Mesh::default();
+                    let n_steps = 20;
+                    for i in 0..n_steps {
+                        let t0 = i as f32 / n_steps as f32;
+                        let y0 = rect.max.y - t0 * rect.height();
+                        let y1 = rect.max.y - (i as f32 + 1.0) / n_steps as f32 * rect.height();
+                        let c0 = get_color(t0 as f64);
+
+                        mesh.add_colored_rect(
+                            egui::Rect::from_min_max(
+                                egui::pos2(rect.min.x, y1),
+                                egui::pos2(rect.max.x, y0),
+                            ),
+                            c0,
+                        );
+                    }
+                    ui.painter().add(mesh);
+                }
+
+                ui.label(format!("Min: {:.4}", min_val));
+            }
+        });
+    }
+
+    /// Render the bottom panel with plot field selection and render mode.
+    fn render_bottom_panel(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::bottom("plot_controls").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Plot Field:");
+                let old_field = self.plot_field;
+                ui.radio_value(&mut self.plot_field, PlotField::Pressure, "Pressure");
+                ui.radio_value(&mut self.plot_field, PlotField::VelocityX, "Velocity X");
+                ui.radio_value(&mut self.plot_field, PlotField::VelocityY, "Velocity Y");
+                ui.radio_value(&mut self.plot_field, PlotField::VelocityMag, "Velocity Mag");
+                if old_field != self.plot_field {
+                    self.update_renderer_field();
+                    self.invalidate_plot_cache();
+                }
+
+                ui.separator();
+                ui.checkbox(&mut self.show_mesh_lines, "Show Mesh Lines");
+
+                ui.separator();
+                ui.label("Render Mode:");
+                ui.radio_value(&mut self.render_mode, RenderMode::GpuDirect, "Direct");
+                ui.radio_value(&mut self.render_mode, RenderMode::EguiPlot, "Plot (Slow)");
+            });
+        });
+    }
+
+    /// Render the central panel with the CFD visualization.
+    fn render_central_panel(
+        &self,
+        ctx: &egui::Context,
+        is_initializing: bool,
+        has_solver: bool,
+        min_val: f32,
+        max_val: f32,
+    ) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if self.is_running {
+                // GPU solver runs in background thread
+            }
+
+            let cells = if has_solver && !self.cached_cells.is_empty() {
+                Some(self.cached_cells.as_slice())
+            } else {
+                None
+            };
+
+            if let Some(cells) = cells {
+                match self.render_mode {
+                    RenderMode::GpuDirect => {
+                        let rect = ui.available_rect_before_wrap();
+                        let (rect, _response) =
+                            ui.allocate_exact_size(rect.size(), egui::Sense::drag());
+
+                        if let Some(renderer) = &self.cfd_renderer {
+                            let renderer = renderer.clone();
+                            let min_val = min_val as f32;
+                            let max_val = max_val as f32;
+                            let viewport_size = [rect.width(), rect.height()];
+
+                            // Compute bounds
+                            let (min_x, max_x, min_y, max_y) = cfd_renderer::compute_bounds(cells);
+                            let mesh_width = max_x - min_x;
+                            let mesh_height = max_y - min_y;
+
+                            // Fit to screen preserving aspect ratio
+                            let s = (rect.width() / mesh_width as f32)
+                                .min(rect.height() / mesh_height as f32);
+
+                            let scale_x = s / rect.width();
+                            let scale_y = s / rect.height();
+
+                            let mesh_center_x = (min_x + max_x) / 2.0;
+                            let mesh_center_y = (min_y + max_y) / 2.0;
+
+                            let tx = 0.5 - mesh_center_x as f32 * scale_x;
+                            let ty = 0.5 - mesh_center_y as f32 * scale_y;
+
+                            let (stride, offset, mode) = self.render_layout_for_field();
+
+                            let cb = eframe::egui_wgpu::Callback::new_paint_callback(
+                                rect,
+                                CfdRenderCallback {
+                                    renderer: renderer.clone(),
+                                    uniforms: cfd_renderer::CfdUniforms {
+                                        transform: [scale_x, scale_y, tx, ty],
+                                        viewport_size,
+                                        range: [min_val, max_val],
+                                        stride,
+                                        offset,
+                                        mode,
+                                        _padding: 0,
+                                    },
+                                    draw_lines: self.show_mesh_lines,
+                                },
+                            );
+
+                            ui.painter().add(cb);
+                        }
+                    }
+                    RenderMode::EguiPlot => {
+                        let Some(vals) = self
+                            .plot_cache
+                            .as_ref()
+                            .and_then(|cache| cache.values.as_deref())
+                        else {
+                            ui.centered_and_justified(|ui| {
+                                ui.label("Waiting for field snapshot...");
+                            });
+                            return;
+                        };
+
+                        Plot::new("cfd_plot").data_aspect(1.0).show(ui, |plot_ui| {
+                            for (i, polygon_points) in cells.iter().enumerate() {
+                                let val = vals.get(i).copied().unwrap_or_default();
+                                let t = (val - min_val) / (max_val - min_val);
+                                let color = get_color(t);
+
+                                plot_ui.polygon(
+                                    Polygon::new("", PlotPoints::new(polygon_points.clone()))
+                                        .fill_color(color)
+                                        .stroke(if self.show_mesh_lines {
+                                            egui::Stroke::new(1.0, egui::Color32::BLACK)
+                                        } else {
+                                            egui::Stroke::NONE
+                                        }),
+                                );
+                            }
+                        });
+                    }
+                }
+            } else {
+                ui.centered_and_justified(|ui| {
+                    if is_initializing {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Initializing solver...");
+                        });
+                    } else {
+                        ui.label("Press Initialize to start");
+                    }
+                });
+            }
+        });
+    }
 }
 
 impl eframe::App for CFDApp {
@@ -2284,185 +2486,9 @@ impl eframe::App for CFDApp {
             .map(|cache| (cache.min, cache.max))
             .unwrap_or((0.0, 1.0));
 
-        egui::SidePanel::right("legend").show(ctx, |ui| {
-            if let Some(mesh) = &self.mesh {
-                ui.heading("Mesh Stats");
-                ui.label(format!("Cells: {}", mesh.num_cells()));
-                ui.label(format!("Faces: {}", mesh.num_faces()));
-                ui.label(format!("Vertices: {}", mesh.num_vertices()));
-                if !mesh.cell_vol.is_empty() {
-                    let min_vol = mesh.cell_vol.iter().cloned().fold(f64::INFINITY, f64::min);
-                    let max_vol = mesh
-                        .cell_vol
-                        .iter()
-                        .cloned()
-                        .fold(f64::NEG_INFINITY, f64::max);
-                    ui.label(format!("Cell vol: {:.2e} - {:.2e}", min_vol, max_vol));
-                }
-                ui.separator();
-            }
-
-            if has_solver {
-                ui.heading("Legend");
-                ui.label(format!("Max: {:.4}", max_val));
-
-                let (rect, _response) =
-                    ui.allocate_at_least(egui::vec2(30.0, 200.0), egui::Sense::hover());
-                if ui.is_rect_visible(rect) {
-                    let mut mesh = egui::Mesh::default();
-                    let n_steps = 20;
-                    for i in 0..n_steps {
-                        let t0 = i as f32 / n_steps as f32;
-                        let y0 = rect.max.y - t0 * rect.height();
-                        let y1 = rect.max.y - (i as f32 + 1.0) / n_steps as f32 * rect.height();
-                        let c0 = get_color(t0 as f64);
-
-                        mesh.add_colored_rect(
-                            egui::Rect::from_min_max(
-                                egui::pos2(rect.min.x, y1),
-                                egui::pos2(rect.max.x, y0),
-                            ),
-                            c0,
-                        );
-                    }
-                    ui.painter().add(mesh);
-                }
-
-                ui.label(format!("Min: {:.4}", min_val));
-            }
-        });
-
-        egui::TopBottomPanel::bottom("plot_controls").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Plot Field:");
-                let old_field = self.plot_field;
-                ui.radio_value(&mut self.plot_field, PlotField::Pressure, "Pressure");
-                ui.radio_value(&mut self.plot_field, PlotField::VelocityX, "Velocity X");
-                ui.radio_value(&mut self.plot_field, PlotField::VelocityY, "Velocity Y");
-                ui.radio_value(&mut self.plot_field, PlotField::VelocityMag, "Velocity Mag");
-                if old_field != self.plot_field {
-                    self.update_renderer_field();
-                    self.invalidate_plot_cache();
-                }
-
-                ui.separator();
-                ui.checkbox(&mut self.show_mesh_lines, "Show Mesh Lines");
-
-                ui.separator();
-                ui.label("Render Mode:");
-                ui.radio_value(&mut self.render_mode, RenderMode::GpuDirect, "Direct");
-                ui.radio_value(&mut self.render_mode, RenderMode::EguiPlot, "Plot (Slow)");
-            });
-        });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if self.is_running {
-                // GPU solver runs in background thread
-            }
-
-            let cells = if has_solver && !self.cached_cells.is_empty() {
-                Some(self.cached_cells.as_slice())
-            } else {
-                None
-            };
-
-            if let Some(cells) = cells {
-                match self.render_mode {
-                    RenderMode::GpuDirect => {
-                        let rect = ui.available_rect_before_wrap();
-                        let (rect, _response) =
-                            ui.allocate_exact_size(rect.size(), egui::Sense::drag());
-
-                        if let Some(renderer) = &self.cfd_renderer {
-                            let renderer = renderer.clone();
-                            let min_val = min_val as f32;
-                            let max_val = max_val as f32;
-                            let viewport_size = [rect.width(), rect.height()];
-
-                            // Compute bounds
-                            let (min_x, max_x, min_y, max_y) = cfd_renderer::compute_bounds(cells);
-                            let mesh_width = max_x - min_x;
-                            let mesh_height = max_y - min_y;
-
-                            // Fit to screen preserving aspect ratio
-                            let s = (rect.width() / mesh_width as f32)
-                                .min(rect.height() / mesh_height as f32);
-
-                            let scale_x = s / rect.width();
-                            let scale_y = s / rect.height();
-
-                            let mesh_center_x = (min_x + max_x) / 2.0;
-                            let mesh_center_y = (min_y + max_y) / 2.0;
-
-                            let tx = 0.5 - mesh_center_x as f32 * scale_x;
-                            let ty = 0.5 - mesh_center_y as f32 * scale_y;
-
-                            let (stride, offset, mode) = self.render_layout_for_field();
-
-                            let cb = eframe::egui_wgpu::Callback::new_paint_callback(
-                                rect,
-                                CfdRenderCallback {
-                                    renderer: renderer.clone(),
-                                    uniforms: cfd_renderer::CfdUniforms {
-                                        transform: [scale_x, scale_y, tx, ty],
-                                        viewport_size,
-                                        range: [min_val, max_val],
-                                        stride,
-                                        offset,
-                                        mode,
-                                        _padding: 0,
-                                    },
-                                    draw_lines: self.show_mesh_lines,
-                                },
-                            );
-
-                            ui.painter().add(cb);
-                        }
-                    }
-                    RenderMode::EguiPlot => {
-                        let Some(vals) = self
-                            .plot_cache
-                            .as_ref()
-                            .and_then(|cache| cache.values.as_deref())
-                        else {
-                            ui.centered_and_justified(|ui| {
-                                ui.label("Waiting for field snapshot...");
-                            });
-                            return;
-                        };
-
-                        Plot::new("cfd_plot").data_aspect(1.0).show(ui, |plot_ui| {
-                            for (i, polygon_points) in cells.iter().enumerate() {
-                                let val = vals.get(i).copied().unwrap_or_default();
-                                let t = (val - min_val) / (max_val - min_val);
-                                let color = get_color(t);
-
-                                plot_ui.polygon(
-                                    Polygon::new("", PlotPoints::new(polygon_points.clone()))
-                                        .fill_color(color)
-                                        .stroke(if self.show_mesh_lines {
-                                            egui::Stroke::new(1.0, egui::Color32::BLACK)
-                                        } else {
-                                            egui::Stroke::NONE
-                                        }),
-                                );
-                            }
-                        });
-                    }
-                }
-            } else {
-                ui.centered_and_justified(|ui| {
-                    if is_initializing {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label("Initializing solver...");
-                        });
-                    } else {
-                        ui.label("Press Initialize to start");
-                    }
-                });
-            }
-        });
+        self.render_right_panel(ctx, has_solver, min_val, max_val);
+        self.render_bottom_panel(ctx);
+        self.render_central_panel(ctx, is_initializing, has_solver, min_val, max_val);
     }
 }
 

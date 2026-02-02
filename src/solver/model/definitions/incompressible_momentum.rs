@@ -58,7 +58,7 @@ fn build_incompressible_momentum_system(_fields: &IncompressibleMomentumFields) 
     // Build coefficients
     let rho_coeff = TypedCoeff::from_field(rho_typed);
     let mu_coeff = TypedCoeff::from_field(mu_typed);
-    let rho_dp_coeff = TypedCoeff::from_field(rho_typed).mul(TypedCoeff::from_field(d_p_typed));
+    let rho_dp_coeff = TypedCoeff::from_field(rho_typed).multiply(TypedCoeff::from_field(d_p_typed));
 
     // Build momentum equation terms
     // ddt(rho, U): integrated unit is MomentumDensity * Volume / Time = Force

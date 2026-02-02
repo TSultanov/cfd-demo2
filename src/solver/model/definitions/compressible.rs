@@ -123,8 +123,8 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     let minus_one_coeff: TypedCoeff<Dimensionless> = TypedCoeff::constant(-1.0);
 
     // Coefficients for u recovery
-    let rho_over_dt = rho_coeff.clone().mul(inv_dt_coeff.clone());
-    let minus_rho_over_dt = minus_one_coeff.clone().mul(rho_over_dt);
+    let rho_over_dt = rho_coeff.clone().multiply(inv_dt_coeff.clone());
+    let minus_rho_over_dt = minus_one_coeff.clone().multiply(rho_over_dt);
 
     let u_source_1 = typed_fvm::source_coeff(minus_rho_over_dt, u_typed);
     let u_source_2 = typed_fvm::source_coeff(inv_dt_coeff.clone(), rho_u_typed);
@@ -143,21 +143,21 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     let half_coeff: TypedCoeff<Dimensionless> = TypedCoeff::constant(0.5);
 
     // minus_gm1/dt
-    let minus_gm1 = minus_one_coeff.clone().mul(gm1_typed.clone());
-    let minus_gm1_over_dt = minus_gm1.mul(inv_dt_coeff.clone());
+    let minus_gm1 = minus_one_coeff.clone().multiply(gm1_typed.clone());
+    let minus_gm1_over_dt = minus_gm1.multiply(inv_dt_coeff.clone());
 
     // 0.5 * gm1 / dt * |u|^2
     let u2 = TypedCoeff::mag_sqr(u_typed);
-    let half_gm1_over_dt = half_coeff.mul(gm1_typed).mul(inv_dt_coeff.clone());
-    let rho_coeff_term = half_gm1_over_dt.mul(u2);
+    let half_gm1_over_dt = half_coeff.multiply(gm1_typed).multiply(inv_dt_coeff.clone());
+    let rho_coeff_term = half_gm1_over_dt.multiply(u2);
 
     // minus_dp_drho/dt
-    let minus_dp_drho = minus_one_coeff.clone().mul(dp_drho_typed);
-    let minus_dp_drho_over_dt = minus_dp_drho.mul(inv_dt_coeff.clone());
+    let minus_dp_drho = minus_one_coeff.clone().multiply(dp_drho_typed);
+    let minus_dp_drho_over_dt = minus_dp_drho.multiply(inv_dt_coeff.clone());
 
     // minus_p_offset/dt
-    let minus_p_offset = minus_one_coeff.clone().mul(p_offset_typed);
-    let minus_p_offset_over_dt = minus_p_offset.mul(inv_dt_coeff.clone());
+    let minus_p_offset = minus_one_coeff.clone().multiply(p_offset_typed);
+    let minus_p_offset_over_dt = minus_p_offset.multiply(inv_dt_coeff.clone());
 
     let p_source_1 = typed_fvm::source_coeff(inv_dt_coeff.clone(), p_typed);
     let p_source_2 = typed_fvm::source_coeff(minus_gm1_over_dt, rho_e_typed);
@@ -181,8 +181,8 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
         TypedFieldRef::<cfd2_ir::solver::dimensions::DivDim<Pressure, MulDim<Density, Temperature>>, Scalar>::new("eos_r")
     );
 
-    let rho_r_over_dt = rho_coeff.mul(r_typed).mul(inv_dt_coeff.clone());
-    let minus_inv_dt = minus_one_coeff.mul(inv_dt_coeff);
+    let rho_r_over_dt = rho_coeff.multiply(r_typed).multiply(inv_dt_coeff.clone());
+    let minus_inv_dt = minus_one_coeff.multiply(inv_dt_coeff);
 
     let t_source_1 = typed_fvm::source_coeff(rho_r_over_dt, t_typed);
     let t_source_2 = typed_fvm::source_coeff(minus_inv_dt, p_typed);

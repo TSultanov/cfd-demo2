@@ -31,7 +31,7 @@ pub fn intern(s: &str) -> &'static str {
 
     // Fast path: check if already interned
     if let Some(entry) = interner.get(s) {
-        return *entry.value();
+        return entry.value();
     }
 
     // Slow path: intern the string
@@ -55,7 +55,7 @@ pub fn intern_string(s: String) -> &'static str {
 
     // Fast path: check if already interned
     if let Some(entry) = interner.get(&s) {
-        return *entry.value();
+        return entry.value();
     }
 
     // Slow path: intern the string

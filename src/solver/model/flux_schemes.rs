@@ -19,110 +19,6 @@ pub fn lower_flux_scheme(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn is_lit(expr: &S, value: f32) -> bool {
-        matches!(expr, S::Literal(v) if *v == value)
-    }
-
-    fn contains_sign_guard_for_states(expr: &S, a: &str, b: &str) -> bool {
-        fn contains_state(expr: &S, name: &str) -> bool {
-            match expr {
-                S::State { name: n, .. } => n == name,
-                S::Add(x, y)
-                | S::Sub(x, y)
-                | S::Mul(x, y)
-                | S::Div(x, y)
-                | S::Max(x, y)
-                | S::Min(x, y)
-                | S::Lerp(x, y) => contains_state(x, name) || contains_state(y, name),
-                S::Neg(x) | S::Abs(x) | S::Sqrt(x) => contains_state(x, name),
-                S::Dot(_, _)
-                | S::Literal(_)
-                | S::Builtin(_)
-                | S::Constant { .. }
-                | S::LowMachParam(_)
-                | S::Primitive { .. } => false,
-            }
-        }
-
-        fn depends_on_states(expr: &S, a: &str, b: &str) -> bool {
-            contains_state(expr, a) && contains_state(expr, b)
-        }
-
-        fn walk(expr: &S, f: &mut impl FnMut(&S)) {
-            f(expr);
-            match expr {
-                S::Add(x, y)
-                | S::Sub(x, y)
-                | S::Mul(x, y)
-                | S::Div(x, y)
-                | S::Max(x, y)
-                | S::Min(x, y)
-                | S::Lerp(x, y) => {
-                    walk(x, f);
-                    walk(y, f);
-                }
-                S::Neg(x) | S::Abs(x) | S::Sqrt(x) => walk(x, f),
-                S::Dot(_, _) => {}
-                S::Literal(_)
-                | S::Builtin(_)
-                | S::Constant { .. }
-                | S::LowMachParam(_)
-                | S::State { .. }
-                | S::Primitive { .. } => {}
-            }
-        }
-
-        let mut found = false;
-        walk(expr, &mut |node| {
-            let S::Div(num, denom) = node else {
-                return;
-            };
-
-            fn is_max_of(
-                expr: &S,
-                mut a: impl FnMut(&S) -> bool,
-                mut b: impl FnMut(&S) -> bool,
-            ) -> bool {
-                match expr {
-                    S::Max(x, y) => (a(x) && b(y)) || (a(y) && b(x)),
-                    _ => false,
-                }
-            }
-
-            let p = |e: &S| depends_on_states(e, a, b);
-            let abs_p = |e: &S| matches!(e, S::Abs(inner) if p(inner));
-            let num_ok = is_max_of(num, p, |e| is_lit(e, 0.0));
-            let denom_ok = is_max_of(denom, abs_p, |e| is_lit(e, crate::solver::ir::VANLEER_EPS));
-
-            if num_ok && denom_ok {
-                found = true;
-            }
-        });
-
-        found
-    }
-
-    #[test]
-    fn contract_flux_module_vanleer_has_opposite_slope_sign_guard() {
-        // This is a structural/IR contract (not a brittle WGSL string match):
-        // VanLeer MUSCL must include a guard that zeros the correction when diff*delta <= 0.
-        let diff = S::state(FaceSide::Owner, "diff");
-        let delta = S::state(FaceSide::Owner, "delta");
-        let delta_limited = crate::solver::ir::reconstruction::vanleer_delta_limited::<
-            FaceExprBuilder,
-        >(diff, delta);
-
-        assert!(
-            contains_sign_guard_for_states(&delta_limited, "diff", "delta"),
-            "expected VanLeer sign-guard structure (max(p,0)/max(abs(p),eps))"
-        );
-    }
-}
-
 fn euler_central_upwind(
     system: &EquationSystem,
     reconstruction: Scheme,
@@ -940,4 +836,108 @@ fn euler_central_upwind(
     }
 
     Ok(FluxModuleKernelSpec::ScalarPerComponent { components, flux })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn is_lit(expr: &S, value: f32) -> bool {
+        matches!(expr, S::Literal(v) if *v == value)
+    }
+
+    fn contains_sign_guard_for_states(expr: &S, a: &str, b: &str) -> bool {
+        fn contains_state(expr: &S, name: &str) -> bool {
+            match expr {
+                S::State { name: n, .. } => n == name,
+                S::Add(x, y)
+                | S::Sub(x, y)
+                | S::Mul(x, y)
+                | S::Div(x, y)
+                | S::Max(x, y)
+                | S::Min(x, y)
+                | S::Lerp(x, y) => contains_state(x, name) || contains_state(y, name),
+                S::Neg(x) | S::Abs(x) | S::Sqrt(x) => contains_state(x, name),
+                S::Dot(_, _)
+                | S::Literal(_)
+                | S::Builtin(_)
+                | S::Constant { .. }
+                | S::LowMachParam(_)
+                | S::Primitive { .. } => false,
+            }
+        }
+
+        fn depends_on_states(expr: &S, a: &str, b: &str) -> bool {
+            contains_state(expr, a) && contains_state(expr, b)
+        }
+
+        fn walk(expr: &S, f: &mut impl FnMut(&S)) {
+            f(expr);
+            match expr {
+                S::Add(x, y)
+                | S::Sub(x, y)
+                | S::Mul(x, y)
+                | S::Div(x, y)
+                | S::Max(x, y)
+                | S::Min(x, y)
+                | S::Lerp(x, y) => {
+                    walk(x, f);
+                    walk(y, f);
+                }
+                S::Neg(x) | S::Abs(x) | S::Sqrt(x) => walk(x, f),
+                S::Dot(_, _) => {}
+                S::Literal(_)
+                | S::Builtin(_)
+                | S::Constant { .. }
+                | S::LowMachParam(_)
+                | S::State { .. }
+                | S::Primitive { .. } => {}
+            }
+        }
+
+        let mut found = false;
+        walk(expr, &mut |node| {
+            let S::Div(num, denom) = node else {
+                return;
+            };
+
+            fn is_max_of(
+                expr: &S,
+                mut a: impl FnMut(&S) -> bool,
+                mut b: impl FnMut(&S) -> bool,
+            ) -> bool {
+                match expr {
+                    S::Max(x, y) => (a(x) && b(y)) || (a(y) && b(x)),
+                    _ => false,
+                }
+            }
+
+            let p = |e: &S| depends_on_states(e, a, b);
+            let abs_p = |e: &S| matches!(e, S::Abs(inner) if p(inner));
+            let num_ok = is_max_of(num, p, |e| is_lit(e, 0.0));
+            let denom_ok = is_max_of(denom, abs_p, |e| is_lit(e, crate::solver::ir::VANLEER_EPS));
+
+            if num_ok && denom_ok {
+                found = true;
+            }
+        });
+
+        found
+    }
+
+    #[test]
+    fn contract_flux_module_vanleer_has_opposite_slope_sign_guard() {
+        // This is a structural/IR contract (not a brittle WGSL string match):
+        // VanLeer MUSCL must include a guard that zeros the correction when diff*delta <= 0.
+        let diff = S::state(FaceSide::Owner, "diff");
+        let delta = S::state(FaceSide::Owner, "delta");
+        let delta_limited = crate::solver::ir::reconstruction::vanleer_delta_limited::<
+            FaceExprBuilder,
+        >(diff, delta);
+
+        assert!(
+            contains_sign_guard_for_states(&delta_limited, "diff", "delta"),
+            "expected VanLeer sign-guard structure (max(p,0)/max(abs(p),eps))"
+        );
+    }
 }

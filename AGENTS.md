@@ -5,7 +5,7 @@
 
 ### Core loop (plan → run → review → update plan → repeat)
 
-Treat the “overarching plan” file path as a parameter (it is `PORT_REFACTOR_PLAN.md` today, but may change later):
+Treat the “overarching plan” file path as a parameter:
 
 1. **Choose the plan slice**
    - Read the overarching plan file (`$PLAN_FILE`) and pick the next *small, coherent* chunk of work (aim for ≤1–3 related checklist items).

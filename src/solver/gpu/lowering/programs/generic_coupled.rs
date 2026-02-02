@@ -213,7 +213,7 @@ impl OuterConvergenceMonitor {
             let name = target.name();
 
             let kind = target.kind();
-            let comps = kind.component_count() as usize;
+            let comps = kind.component_count();
             if comps == 0 {
                 continue;
             }
@@ -224,17 +224,17 @@ impl OuterConvergenceMonitor {
             }
 
             let mut offsets_x = [0u32; 4];
-            for comp in 0..comps {
-                offsets_x[comp] = unknown_offset_cursor + comp as u32;
+            for (comp, offset) in offsets_x.iter_mut().enumerate().take(comps) {
+                *offset = unknown_offset_cursor + comp as u32;
             }
             unknown_offset_cursor += comps as u32;
 
             // Get state offsets from the pre-resolved mapping
             let mut offsets_state = [0u32; 4];
             let mut has_all_offsets = true;
-            for comp in 0..comps {
+            for (comp, offset) in offsets_state.iter_mut().enumerate().take(comps) {
                 match unknown_mapping.get_offset(eq_idx, comp) {
-                    Some(off) => offsets_state[comp] = off,
+                    Some(off) => *offset = off,
                     None => {
                         has_all_offsets = false;
                         break;
@@ -363,8 +363,8 @@ impl OuterConvergenceMonitor {
         });
 
         let zero_out_words = vec![0u32; target_descs_x.len()];
-        let dispatch_cells = (num_cells + OUTER_CONVERGENCE_WORKGROUP_SIZE - 1)
-            / OUTER_CONVERGENCE_WORKGROUP_SIZE;
+        let dispatch_cells =
+            num_cells.div_ceil(OUTER_CONVERGENCE_WORKGROUP_SIZE);
 
         Ok(Some(Self {
             target_names,

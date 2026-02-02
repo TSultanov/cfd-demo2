@@ -131,9 +131,8 @@ pub fn build_prolongation(
     let mut p = CsrMatrix::new(fine_size, num_aggregates);
 
     let mut count = 0;
-    for i in 0..fine_size {
+    for (i, &agg) in aggregates.iter().take(fine_size).enumerate() {
         p.row_offsets[i] = count as u32;
-        let agg = aggregates[i];
         if agg < num_aggregates {
             p.col_indices.push(agg as u32);
             p.values.push(1.0);
@@ -155,18 +154,22 @@ pub fn transpose(matrix: &CsrMatrix) -> CsrMatrix {
 
     // Build row offsets
     let mut count = 0;
-    for i in 0..matrix.num_cols {
+    for (i, &row_count) in row_counts.iter().enumerate() {
         t.row_offsets[i] = count;
-        count += row_counts[i];
+        count += row_count;
     }
     t.row_offsets[matrix.num_cols] = count;
 
     // Fill
     // Re-do with vec of vecs for simplicity
     let mut rows = vec![Vec::new(); matrix.num_cols];
-    for i in 0..matrix.num_rows {
-        let start = matrix.row_offsets[i] as usize;
-        let end = matrix.row_offsets[i + 1] as usize;
+    for (i, (&start, &end)) in matrix.row_offsets[..matrix.num_rows]
+        .iter()
+        .zip(&matrix.row_offsets[1..])
+        .enumerate()
+    {
+        let start = start as usize;
+        let end = end as usize;
         for k in start..end {
             let j = matrix.col_indices[k] as usize;
             let val = matrix.values[k];
@@ -177,9 +180,9 @@ pub fn transpose(matrix: &CsrMatrix) -> CsrMatrix {
     t.col_indices.clear();
     t.values.clear();
     let mut offset = 0;
-    for i in 0..matrix.num_cols {
+    for (i, row) in rows.iter().enumerate() {
         t.row_offsets[i] = offset;
-        for (col, val) in &rows[i] {
+        for (col, val) in row {
             t.col_indices.push(*col);
             t.values.push(*val);
             offset += 1;

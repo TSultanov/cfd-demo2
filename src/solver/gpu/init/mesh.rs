@@ -213,7 +213,7 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
             // indexing well-defined and matches the intended "ghost equals owner" convention.
             let target_col = match neighbor {
                 Some(n) => n as u32,
-                None => i as u32,
+                None => i,
             };
 
             let row_start = scalar_row_offsets[i as usize] as usize;

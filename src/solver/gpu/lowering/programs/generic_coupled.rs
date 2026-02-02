@@ -1098,7 +1098,6 @@ fn res_mut(plan: &mut GpuProgramPlan) -> &mut GenericCoupledProgramResources {
 
 /// Register ops using the unified registry builder.
 /// The recipe's stepping mode determines which ops are registered.
-
 pub(crate) fn named_params_for_recipe(
     model: &crate::solver::model::ModelSpec,
     _recipe: &SolverRecipe,

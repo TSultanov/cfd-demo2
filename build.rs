@@ -659,12 +659,18 @@ fn generate_named_param_registry(manifest_dir: &str) {
     code.push('\n');
 
     code.push_str("pub(crate) fn named_param_registry_exists(module: &str) -> bool {\n");
-    code.push_str("    match module {\n");
-    for (name, _ident) in &modules {
-        code.push_str(&format!("        \"{name}\" => true,\n"));
+    if modules.is_empty() {
+        code.push_str("    false\n");
+    } else {
+        code.push_str("    matches!(module, ");
+        for (idx, (name, _ident)) in modules.iter().enumerate() {
+            if idx > 0 {
+                code.push_str(" | ");
+            }
+            code.push_str(&format!("\"{name}\""));
+        }
+        code.push_str(")\n");
     }
-    code.push_str("        _ => false,\n");
-    code.push_str("    }\n");
     code.push_str("}\n\n");
 
     code.push_str("pub(crate) fn named_param_handler_for_key(\n");

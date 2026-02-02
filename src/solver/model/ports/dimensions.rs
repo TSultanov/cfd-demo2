@@ -114,9 +114,10 @@ mod tests {
 
     #[test]
     fn compatibility_trait_works() {
-        fn assert_compatible<A: UnitDimension, B: UnitDimension>()
+        fn assert_compatible<A, B>()
         where
-            A: DimCompatible<B>,
+            A: UnitDimension + DimCompatible<B>,
+            B: UnitDimension,
         {
         }
 

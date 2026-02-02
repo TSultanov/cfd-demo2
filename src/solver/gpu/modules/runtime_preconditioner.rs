@@ -9,6 +9,17 @@ use crate::solver::model::KernelId;
 
 const MAX_BLOCK_JACOBI: u32 = 16;
 
+/// Input parameters for [`RuntimePreconditionerModule`].
+pub(crate) struct RuntimePreconditionerInputs {
+    pub(crate) kind: PreconditionerType,
+    pub(crate) num_cells: u32,
+    pub(crate) num_dofs: u32,
+    pub(crate) num_nonzeros: u32,
+    pub(crate) row_offsets: Vec<u32>,
+    pub(crate) col_indices: Vec<u32>,
+    pub(crate) matrix_values: wgpu::Buffer,
+}
+
 pub(crate) struct RuntimePreconditionerModule {
     kind: PreconditionerType,
     identity: IdentityPreconditioner,
@@ -30,25 +41,16 @@ pub(crate) struct RuntimePreconditionerModule {
 }
 
 impl RuntimePreconditionerModule {
-    pub(crate) fn new(
-        device: &wgpu::Device,
-        kind: PreconditionerType,
-        num_cells: u32,
-        num_dofs: u32,
-        num_nonzeros: u32,
-        row_offsets: Vec<u32>,
-        col_indices: Vec<u32>,
-        matrix_values: wgpu::Buffer,
-    ) -> Self {
+    pub(crate) fn new(device: &wgpu::Device, inputs: RuntimePreconditionerInputs) -> Self {
         let b_rhs = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("runtime_preconditioner:rhs"),
-            size: (num_dofs as u64) * 4,
+            size: (inputs.num_dofs as u64) * 4,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         Self {
-            kind,
+            kind: inputs.kind,
             identity: IdentityPreconditioner::new(),
             amg: None,
             amg_init_failed: false,
@@ -59,12 +61,12 @@ impl RuntimePreconditionerModule {
             b_block_inv: None,
             bg_block_inv: None,
             b_rhs,
-            num_cells,
-            num_dofs,
-            num_nonzeros,
-            row_offsets,
-            col_indices,
-            matrix_values,
+            num_cells: inputs.num_cells,
+            num_dofs: inputs.num_dofs,
+            num_nonzeros: inputs.num_nonzeros,
+            row_offsets: inputs.row_offsets,
+            col_indices: inputs.col_indices,
+            matrix_values: inputs.matrix_values,
         }
     }
 

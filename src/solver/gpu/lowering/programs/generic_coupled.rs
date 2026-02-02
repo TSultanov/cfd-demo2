@@ -9,7 +9,7 @@ use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch}
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_solver::solve_fgmres;
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
-use crate::solver::gpu::modules::runtime_preconditioner::RuntimePreconditionerModule;
+use crate::solver::gpu::modules::runtime_preconditioner::{RuntimePreconditionerInputs, RuntimePreconditionerModule};
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::unified_graph::{
@@ -977,21 +977,21 @@ fn build_generic_krylov(
         unknowns_per_cell,
     );
 
+    let precond_inputs = RuntimePreconditionerInputs {
+        kind: recipe.linear_solver.preconditioner,
+        num_cells,
+        num_dofs: n,
+        num_nonzeros: runtime.num_nonzeros,
+        row_offsets,
+        col_indices,
+        matrix_values: runtime
+            .linear_port_space
+            .buffer(runtime.linear_ports.values)
+            .clone(),
+    };
     let solver = KrylovSolveModule::new(
         fgmres,
-        RuntimePreconditionerModule::new(
-            device,
-            recipe.linear_solver.preconditioner,
-            num_cells,
-            n,
-            runtime.num_nonzeros,
-            row_offsets,
-            col_indices,
-            runtime
-                .linear_port_space
-                .buffer(runtime.linear_ports.values)
-                .clone(),
-        ),
+        RuntimePreconditionerModule::new(device, precond_inputs),
     );
     let dispatch = DispatchGrids::for_sizes(n, num_cells);
 

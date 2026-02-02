@@ -1,4 +1,4 @@
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
 use cfd2::solver::model::compressible_model;
 use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverRuntimeParamsExt};
 use cfd2::solver::scheme::Scheme;
@@ -16,10 +16,7 @@ fn low_mach_knob_changes_compressible_implicit_update() {
         1,
         1.0,
         1.0,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
+        BoundarySides::wall(),
     );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(

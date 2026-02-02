@@ -1,7 +1,7 @@
 #[path = "openfoam_reference/common.rs"]
 mod common;
 
-use cfd2::solver::mesh::{generate_structured_trapezoid_mesh, BoundaryType};
+use cfd2::solver::mesh::{generate_structured_trapezoid_mesh, BoundarySides, BoundaryType};
 use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
@@ -35,10 +35,12 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
         length,
         height,
         ramp_height,
-        BoundaryType::Inlet,
-        BoundaryType::Outlet,
-        BoundaryType::Wall,
-        BoundaryType::Outlet,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Outlet,
+        },
     );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(

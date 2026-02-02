@@ -1,7 +1,8 @@
 #![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
 use cfd2::solver::mesh::{
-    generate_cut_cell_mesh, generate_structured_rect_mesh, BoundaryType, ChannelWithObstacle, Mesh,
+    generate_cut_cell_mesh, generate_structured_rect_mesh, BoundarySides, BoundaryType,
+    ChannelWithObstacle, Mesh,
 };
 use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
@@ -462,10 +463,12 @@ fn incompressible_structured_mesh_preserves_rest_state() {
         8,
         1.0,
         0.5,
-        BoundaryType::Inlet,
-        BoundaryType::Outlet,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
     );
     let config = SolverConfig {
         advection_scheme: Scheme::Upwind,
@@ -514,10 +517,12 @@ fn compressible_acoustic_pulse_structured_1d_plot() {
         ny,
         length,
         height,
-        BoundaryType::Outlet,
-        BoundaryType::Outlet,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
+        BoundarySides {
+            left: BoundaryType::Outlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
     );
 
     let gamma: f64 = 1.4;
@@ -974,10 +979,12 @@ fn compressible_sod_shock_tube_structured_1d_plot() {
         ny,
         length,
         height,
-        BoundaryType::Outlet,
-        BoundaryType::Outlet,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
+        BoundarySides {
+            left: BoundaryType::Outlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
     );
 
     let gamma: f64 = 1.4;

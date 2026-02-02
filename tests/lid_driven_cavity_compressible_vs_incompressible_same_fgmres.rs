@@ -13,7 +13,7 @@
 //! 2. Physical formulation differences (viscous flux, pressure coupling)
 
 use cfd2::solver::gpu::enums::GpuBoundaryType;
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
 use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
@@ -38,9 +38,16 @@ fn lid_driven_cavity_compressible_vs_incompressible_both_fgmres() {
 
     // Incompressible solver
     let mesh_inc = generate_structured_rect_mesh(
-        nx, ny, length, height,
-        BoundaryType::Wall, BoundaryType::Wall,
-        BoundaryType::Wall, BoundaryType::MovingWall,
+        nx,
+        ny,
+        length,
+        height,
+        BoundarySides {
+            left: BoundaryType::Wall,
+            right: BoundaryType::Wall,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::MovingWall,
+        },
     );
 
     let mut solver_inc = pollster::block_on(UnifiedSolver::new(
@@ -70,9 +77,16 @@ fn lid_driven_cavity_compressible_vs_incompressible_both_fgmres() {
 
     // Compressible solver
     let mesh_comp = generate_structured_rect_mesh(
-        nx, ny, length, height,
-        BoundaryType::Wall, BoundaryType::Wall,
-        BoundaryType::Wall, BoundaryType::MovingWall,
+        nx,
+        ny,
+        length,
+        height,
+        BoundarySides {
+            left: BoundaryType::Wall,
+            right: BoundaryType::Wall,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::MovingWall,
+        },
     );
 
     let eos = EosSpec::IdealGas {

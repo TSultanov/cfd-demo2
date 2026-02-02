@@ -6,7 +6,7 @@ use cfd2::trace as tracefmt;
 use std::collections::BTreeMap;
 use std::io::BufRead;
 use std::time::Instant;
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
 
 fn usage() -> &'static str {
     "Usage:
@@ -636,10 +636,12 @@ fn cmd_init(opts: InitOpts) -> Result<(), String> {
         opts.ny,
         10.0,
         1.0,
-        BoundaryType::Inlet,
-        BoundaryType::Outlet,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
     );
 
     let model = if opts.model_id == "compressible" {

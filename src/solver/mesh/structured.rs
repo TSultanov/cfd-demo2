@@ -2,15 +2,33 @@ use super::structs::{BoundaryType, Mesh};
 use nalgebra::{Point2, Vector2};
 use std::collections::HashMap;
 
+/// Bundles the four boundary sides for structured mesh generators.
+#[derive(Clone, Copy, Debug)]
+pub struct BoundarySides {
+    pub left: BoundaryType,
+    pub right: BoundaryType,
+    pub bottom: BoundaryType,
+    pub top: BoundaryType,
+}
+
+impl BoundarySides {
+    /// Creates a new BoundarySides with all sides set to Wall.
+    pub fn wall() -> Self {
+        Self {
+            left: BoundaryType::Wall,
+            right: BoundaryType::Wall,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        }
+    }
+}
+
 pub fn generate_structured_rect_mesh(
     nx: usize,
     ny: usize,
     length: f64,
     height: f64,
-    left: BoundaryType,
-    right: BoundaryType,
-    bottom: BoundaryType,
-    top: BoundaryType,
+    boundaries: BoundarySides,
 ) -> Mesh {
     assert!(nx > 0, "nx must be > 0");
     assert!(ny > 0, "ny must be > 0");
@@ -61,9 +79,9 @@ pub fn generate_structured_rect_mesh(
             let is_right = i == nx;
 
             let (owner, neighbor, bc, nx_out) = if is_left {
-                (cell_id(0, j), None, Some(left), -1.0)
+                (cell_id(0, j), None, Some(boundaries.left), -1.0)
             } else if is_right {
-                (cell_id(nx - 1, j), None, Some(right), 1.0)
+                (cell_id(nx - 1, j), None, Some(boundaries.right), 1.0)
             } else {
                 (cell_id(i - 1, j), Some(cell_id(i, j)), None, 1.0)
             };
@@ -92,9 +110,9 @@ pub fn generate_structured_rect_mesh(
             let is_top = j == ny;
 
             let (owner, neighbor, bc, ny_out) = if is_bottom {
-                (cell_id(i, 0), None, Some(bottom), -1.0)
+                (cell_id(i, 0), None, Some(boundaries.bottom), -1.0)
             } else if is_top {
-                (cell_id(i, ny - 1), None, Some(top), 1.0)
+                (cell_id(i, ny - 1), None, Some(boundaries.top), 1.0)
             } else {
                 (cell_id(i, j - 1), Some(cell_id(i, j)), None, 1.0)
             };
@@ -176,10 +194,7 @@ fn generate_structured_mesh_from_vertex_grid<F>(
     vx: Vec<f64>,
     vy: Vec<f64>,
     cell_exists: F,
-    left: BoundaryType,
-    right: BoundaryType,
-    bottom: BoundaryType,
-    top: BoundaryType,
+    boundaries: BoundarySides,
 ) -> Mesh
 where
     F: Fn(usize, usize) -> bool,
@@ -225,28 +240,28 @@ where
         match edge {
             CellEdge::Left => {
                 if i == 0 {
-                    left
+                    boundaries.left
                 } else {
                     BoundaryType::Wall
                 }
             }
             CellEdge::Right => {
                 if i + 1 == nx {
-                    right
+                    boundaries.right
                 } else {
                     BoundaryType::Wall
                 }
             }
             CellEdge::Bottom => {
                 if j == 0 {
-                    bottom
+                    boundaries.bottom
                 } else {
                     BoundaryType::Wall
                 }
             }
             CellEdge::Top => {
                 if j + 1 == ny {
-                    top
+                    boundaries.top
                 } else {
                     BoundaryType::Wall
                 }
@@ -366,10 +381,12 @@ pub fn generate_structured_backwards_step_mesh(
         vx,
         vy,
         cell_exists,
-        BoundaryType::Inlet,
-        BoundaryType::Outlet,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
     )
 }
 
@@ -379,10 +396,7 @@ pub fn generate_structured_trapezoid_mesh(
     length: f64,
     height: f64,
     ramp_height: f64,
-    left: BoundaryType,
-    right: BoundaryType,
-    bottom: BoundaryType,
-    top: BoundaryType,
+    boundaries: BoundarySides,
 ) -> Mesh {
     assert!(nx > 0 && ny > 0);
     assert!(length > 0.0 && height > 0.0);
@@ -412,9 +426,6 @@ pub fn generate_structured_trapezoid_mesh(
         vx,
         vy,
         |_i, _j| true,
-        left,
-        right,
-        bottom,
-        top,
+        boundaries,
     )
 }

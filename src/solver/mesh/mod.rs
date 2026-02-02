@@ -4,7 +4,7 @@ pub mod structured;
 pub use structs::{BoundaryType, Mesh};
 pub use structured::{
     generate_structured_backwards_step_mesh, generate_structured_rect_mesh,
-    generate_structured_trapezoid_mesh,
+    generate_structured_trapezoid_mesh, BoundarySides,
 };
 
 #[cfg(feature = "meshgen")]

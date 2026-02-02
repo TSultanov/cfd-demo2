@@ -2,7 +2,7 @@
 mod common;
 
 use cfd2::solver::gpu::enums::GpuBoundaryType;
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
 use cfd2::solver::model::helpers::{
     SolverFieldAliasesExt, SolverRuntimeParamsExt,
 };
@@ -32,10 +32,12 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
         ny,
         length,
         height,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
-        BoundaryType::MovingWall,
+        BoundarySides {
+            left: BoundaryType::Wall,
+            right: BoundaryType::Wall,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::MovingWall,
+        },
     );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(

@@ -1,4 +1,4 @@
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
 use cfd2::solver::model::compressible_model;
 use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverRuntimeParamsExt,
@@ -15,10 +15,12 @@ fn compressible_dual_time_preserves_uniform_state() {
         2,
         1.0,
         0.5,
-        BoundaryType::SlipWall,
-        BoundaryType::SlipWall,
-        BoundaryType::SlipWall,
-        BoundaryType::SlipWall,
+        BoundarySides {
+            left: BoundaryType::SlipWall,
+            right: BoundaryType::SlipWall,
+            bottom: BoundaryType::SlipWall,
+            top: BoundaryType::SlipWall,
+        },
     );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(

@@ -1,7 +1,7 @@
 #[path = "openfoam_reference/common.rs"]
 mod common;
 
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
 use cfd2::solver::model::helpers::{
     SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
 };
@@ -29,10 +29,12 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
         ny,
         length,
         height,
-        BoundaryType::Inlet,
-        BoundaryType::Outlet,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
     );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(

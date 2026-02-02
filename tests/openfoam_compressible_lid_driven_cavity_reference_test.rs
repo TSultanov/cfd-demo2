@@ -2,7 +2,7 @@
 mod common;
 
 use cfd2::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel};
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
 use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
@@ -36,11 +36,13 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
         ny,
         length,
         height,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
-        BoundaryType::Wall,
-        // Moving lid with Dirichlet velocity (tangential) while keeping scalars zeroGradient.
-        BoundaryType::MovingWall,
+        BoundarySides {
+            left: BoundaryType::Wall,
+            right: BoundaryType::Wall,
+            bottom: BoundaryType::Wall,
+            // Moving lid with Dirichlet velocity (tangential) while keeping scalars zeroGradient.
+            top: BoundaryType::MovingWall,
+        },
     );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(

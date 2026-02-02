@@ -1,7 +1,7 @@
 #[path = "openfoam_reference/common.rs"]
 mod common;
 
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundaryType};
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
 use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
@@ -32,10 +32,12 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
         ny,
         length,
         height,
-        BoundaryType::SlipWall,
-        BoundaryType::SlipWall,
-        BoundaryType::SlipWall,
-        BoundaryType::SlipWall,
+        BoundarySides {
+            left: BoundaryType::SlipWall,
+            right: BoundaryType::SlipWall,
+            bottom: BoundaryType::SlipWall,
+            top: BoundaryType::SlipWall,
+        },
     );
 
     let mut solver = pollster::block_on(UnifiedSolver::new(

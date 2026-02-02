@@ -5,16 +5,14 @@
 
 #[allow(unused_imports)]
 pub use crate::solver::model::backend::{
+    ast::{
+        surface_scalar, surface_scalar_dim, surface_vector, surface_vector3, surface_vector3_dim,
+        surface_vector_dim, vol_scalar, vol_scalar_dim, vol_vector, vol_vector3, vol_vector3_dim,
+        vol_vector_dim, CodegenError, UnitValidationError,
+    },
     expand_schemes, expand_schemes_unchecked, fvc, fvm, Coefficient, Discretization, Equation,
     EquationSystem, FieldKind, FieldRef, FluxRef, SchemeExpansion, SchemeRegistry, StateField,
     StateLayout, Term, TermKey, TermOp,
-};
-
-#[allow(unused_imports)]
-pub use crate::solver::model::backend::ast::{
-    surface_scalar, surface_scalar_dim, surface_vector, surface_vector3, surface_vector3_dim,
-    surface_vector_dim, vol_scalar, vol_scalar_dim, vol_vector, vol_vector3, vol_vector3_dim,
-    vol_vector_dim, CodegenError, UnitValidationError,
 };
 
 use crate::solver::scheme::Scheme;

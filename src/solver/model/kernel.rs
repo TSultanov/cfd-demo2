@@ -476,20 +476,17 @@ pub fn emit_shared_kernels_wgsl_with_ids_for_models(
                 let kernel = spec
                     .generator
                     .as_ref()(model, schemes)
-                    .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+                    .map_err(std::io::Error::other)?;
                 let wgsl = kernel.to_wgsl();
 
                 if let Some(prev) = wgsl_by_id.insert(spec.id, wgsl.clone()) {
                     if prev != wgsl {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            format!(
-                                "shared kernel '{}' generated different WGSL across models (latest from model '{}' module '{}')",
-                                spec.id.as_str(),
-                                model.id,
-                                module.name()
-                            ),
-                        ));
+                        return Err(std::io::Error::other(format!(
+                            "shared kernel '{}' generated different WGSL across models (latest from model '{}' module '{}')",
+                            spec.id.as_str(),
+                            model.id,
+                            module.name()
+                        )));
                     }
                 }
             }
@@ -501,7 +498,7 @@ pub fn emit_shared_kernels_wgsl_with_ids_for_models(
 
     for kernel_id in shared_ids {
         let filename = kernel_output_name_for_model("", kernel_id)
-            .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+            .map_err(std::io::Error::other)?;
         let wgsl = wgsl_by_id
             .get(&kernel_id)
             .expect("shared kernel id disappeared from table");
@@ -532,7 +529,7 @@ pub fn emit_model_kernels_wgsl_with_ids(
     let mut outputs = Vec::new();
 
     let specs = derive_kernel_specs_for_model(model)
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+        .map_err(std::io::Error::other)?;
 
     let mut seen: std::collections::HashSet<KernelId> = std::collections::HashSet::new();
     for spec in specs {
@@ -562,9 +559,9 @@ pub fn emit_model_kernel_wgsl_by_id(
 ) -> std::io::Result<std::path::PathBuf> {
     let base_dir = base_dir.as_ref();
     let filename = kernel_output_name_for_model(model.id, kernel_id)
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+        .map_err(std::io::Error::other)?;
     let wgsl = generate_kernel_wgsl_for_model_by_id(model, schemes, kernel_id)
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+        .map_err(std::io::Error::other)?;
     cfd2_codegen::compiler::write_generated_wgsl(base_dir, filename, &wgsl)
 }
 

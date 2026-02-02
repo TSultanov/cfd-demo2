@@ -12,6 +12,14 @@ pub struct ScalarReconstruction {
     pub phi_ho: Expr,
 }
 
+/// Geometry points needed for face reconstruction.
+#[derive(Debug, Clone, Copy)]
+pub struct GeometryPoints {
+    pub center: Expr,
+    pub other_center: Expr,
+    pub face_center: Expr,
+}
+
 struct WgslExprBuilder;
 
 impl ReconstructionBuilder for WgslExprBuilder {
@@ -66,112 +74,110 @@ pub fn scalar_reconstruction(
     phi_neigh: Expr,
     grad_own: Expr,
     grad_neigh: Expr,
-    center: Expr,
-    other_center: Expr,
-    face_center: Expr,
+    geom: GeometryPoints,
 ) -> ScalarReconstruction {
     let xy = |point: &Expr| dsl::vec2_f32(point.field("x"), point.field("y"));
 
     let phi_upwind = dsl::select(phi_own, phi_neigh, flux.lt(0.0));
 
-    let grad_own_vec = dsl::vec2_f32_from_xy_fields(grad_own.clone());
-    let grad_neigh_vec = dsl::vec2_f32_from_xy_fields(grad_neigh.clone());
-    let r_own = xy(&face_center) - xy(&center);
-    let r_neigh = xy(&face_center) - xy(&other_center);
+    let grad_own_vec = dsl::vec2_f32_from_xy_fields(grad_own);
+    let grad_neigh_vec = dsl::vec2_f32_from_xy_fields(grad_neigh);
+    let r_own = xy(&geom.face_center) - xy(&geom.center);
+    let r_neigh = xy(&geom.face_center) - xy(&geom.other_center);
 
     let sou_pos = limited_linear_face_value::<WgslExprBuilder>(
-        phi_own.clone(),
-        phi_neigh.clone(),
-        grad_own_vec.clone(),
-        r_own.clone(),
+        phi_own,
+        phi_neigh,
+        grad_own_vec,
+        r_own,
         LimiterSpec::None,
     );
     let sou_neg = limited_linear_face_value::<WgslExprBuilder>(
-        phi_neigh.clone(),
-        phi_own.clone(),
-        grad_neigh_vec.clone(),
-        r_neigh.clone(),
+        phi_neigh,
+        phi_own,
+        grad_neigh_vec,
+        r_neigh,
         LimiterSpec::None,
     );
     let phi_sou = dsl::select(sou_neg, sou_pos, flux.gt(0.0));
 
     let sou_pos_mm = limited_linear_face_value::<WgslExprBuilder>(
-        phi_own.clone(),
-        phi_neigh.clone(),
-        grad_own_vec.clone(),
-        r_own.clone(),
+        phi_own,
+        phi_neigh,
+        grad_own_vec,
+        r_own,
         LimiterSpec::MinMod,
     );
     let sou_neg_mm = limited_linear_face_value::<WgslExprBuilder>(
-        phi_neigh.clone(),
-        phi_own.clone(),
-        grad_neigh_vec.clone(),
-        r_neigh.clone(),
+        phi_neigh,
+        phi_own,
+        grad_neigh_vec,
+        r_neigh,
         LimiterSpec::MinMod,
     );
     let phi_sou_mm = dsl::select(sou_neg_mm, sou_pos_mm, flux.gt(0.0));
 
     let sou_pos_vl = limited_linear_face_value::<WgslExprBuilder>(
-        phi_own.clone(),
-        phi_neigh.clone(),
-        grad_own_vec.clone(),
-        r_own.clone(),
+        phi_own,
+        phi_neigh,
+        grad_own_vec,
+        r_own,
         LimiterSpec::VanLeer,
     );
     let sou_neg_vl = limited_linear_face_value::<WgslExprBuilder>(
-        phi_neigh.clone(),
-        phi_own.clone(),
-        grad_neigh_vec.clone(),
-        r_neigh.clone(),
+        phi_neigh,
+        phi_own,
+        grad_neigh_vec,
+        r_neigh,
         LimiterSpec::VanLeer,
     );
     let phi_sou_vl = dsl::select(sou_neg_vl, sou_pos_vl, flux.gt(0.0));
 
-    let d_pos = xy(&other_center) - xy(&center);
-    let d_neg = xy(&center) - xy(&other_center);
+    let d_pos = xy(&geom.other_center) - xy(&geom.center);
+    let d_neg = xy(&geom.center) - xy(&geom.other_center);
 
     let quick_pos = quick_face_value::<WgslExprBuilder>(
-        phi_own.clone(),
-        phi_neigh.clone(),
-        grad_own_vec.clone(),
-        d_pos.clone(),
+        phi_own,
+        phi_neigh,
+        grad_own_vec,
+        d_pos,
         LimiterSpec::None,
     );
     let quick_neg = quick_face_value::<WgslExprBuilder>(
-        phi_neigh.clone(),
-        phi_own.clone(),
-        grad_neigh_vec.clone(),
-        d_neg.clone(),
+        phi_neigh,
+        phi_own,
+        grad_neigh_vec,
+        d_neg,
         LimiterSpec::None,
     );
     let phi_quick = dsl::select(quick_neg, quick_pos, flux.gt(0.0));
 
     let quick_pos_mm = quick_face_value::<WgslExprBuilder>(
-        phi_own.clone(),
-        phi_neigh.clone(),
-        grad_own_vec.clone(),
-        d_pos.clone(),
+        phi_own,
+        phi_neigh,
+        grad_own_vec,
+        d_pos,
         LimiterSpec::MinMod,
     );
     let quick_neg_mm = quick_face_value::<WgslExprBuilder>(
-        phi_neigh.clone(),
-        phi_own.clone(),
-        grad_neigh_vec.clone(),
-        d_neg.clone(),
+        phi_neigh,
+        phi_own,
+        grad_neigh_vec,
+        d_neg,
         LimiterSpec::MinMod,
     );
     let phi_quick_mm = dsl::select(quick_neg_mm, quick_pos_mm, flux.gt(0.0));
 
     let quick_pos_vl = quick_face_value::<WgslExprBuilder>(
-        phi_own.clone(),
-        phi_neigh.clone(),
+        phi_own,
+        phi_neigh,
         grad_own_vec,
         d_pos,
         LimiterSpec::VanLeer,
     );
     let quick_neg_vl = quick_face_value::<WgslExprBuilder>(
-        phi_neigh.clone(),
-        phi_own.clone(),
+        phi_neigh,
+        phi_own,
         grad_neigh_vec,
         d_neg,
         LimiterSpec::VanLeer,
@@ -221,9 +227,11 @@ mod tests {
             Expr::ident("phi_neigh"),
             Expr::ident("grad_own"),
             Expr::ident("grad_neigh"),
-            Expr::ident("center"),
-            Expr::ident("other_center"),
-            Expr::ident("face_center"),
+            GeometryPoints {
+                center: Expr::ident("center"),
+                other_center: Expr::ident("other_center"),
+                face_center: Expr::ident("face_center"),
+            },
         );
 
         let body = Block::new(vec![Stmt::Return(Some(rec.phi_ho))]);
@@ -295,9 +303,7 @@ pub fn vec2_reconstruction_xy(
     phi_neigh: typed::VecExpr<2>,
     grad_own: [Expr; 2],
     grad_neigh: [Expr; 2],
-    center: Expr,
-    other_center: Expr,
-    face_center: Expr,
+    geom: GeometryPoints,
 ) -> Vec2Reconstruction {
     let rec_x = scalar_reconstruction(
         scheme,
@@ -306,9 +312,7 @@ pub fn vec2_reconstruction_xy(
         phi_neigh.component(0),
         grad_own[0],
         grad_neigh[0],
-        center,
-        other_center,
-        face_center,
+        geom,
     );
     let rec_y = scalar_reconstruction(
         scheme,
@@ -317,9 +321,7 @@ pub fn vec2_reconstruction_xy(
         phi_neigh.component(1),
         grad_own[1],
         grad_neigh[1],
-        center,
-        other_center,
-        face_center,
+        geom,
     );
 
     Vec2Reconstruction {
@@ -344,28 +346,29 @@ pub fn limited_linear_reconstruct_face(
     let delta_limited = format!("delta_{prefix}_{side}_limited");
     let phi_face = format!("{prefix}_{side}_face");
 
-    let mut stmts = Vec::new();
-    stmts.push(dsl::let_expr(&diff, phi_other - phi_cell));
-    stmts.push(dsl::let_expr(&min_diff, dsl::min(Expr::ident(&diff), 0.0)));
-    stmts.push(dsl::let_expr(&max_diff, dsl::max(Expr::ident(&diff), 0.0)));
-    stmts.push(dsl::let_expr(
-        &delta,
-        dsl::dot(
-            dsl::vec2_f32_from_xy_fields(grad_cell),
-            dsl::vec2_f32(r_x, r_y),
+    let stmts = vec![
+        dsl::let_expr(&diff, phi_other - phi_cell),
+        dsl::let_expr(&min_diff, dsl::min(Expr::ident(&diff), 0.0)),
+        dsl::let_expr(&max_diff, dsl::max(Expr::ident(&diff), 0.0)),
+        dsl::let_expr(
+            &delta,
+            dsl::dot(
+                dsl::vec2_f32_from_xy_fields(grad_cell),
+                dsl::vec2_f32(r_x, r_y),
+            ),
         ),
-    ));
-    stmts.push(dsl::let_expr(
-        &delta_limited,
-        dsl::min(
-            dsl::max(Expr::ident(&delta), Expr::ident(&min_diff)),
-            Expr::ident(&max_diff),
+        dsl::let_expr(
+            &delta_limited,
+            dsl::min(
+                dsl::max(Expr::ident(&delta), Expr::ident(&min_diff)),
+                Expr::ident(&max_diff),
+            ),
         ),
-    ));
-    stmts.push(dsl::let_expr(
-        &phi_face,
-        phi_cell + Expr::ident(&delta_limited),
-    ));
+        dsl::let_expr(
+            &phi_face,
+            phi_cell + Expr::ident(&delta_limited),
+        ),
+    ];
 
     (stmts, Expr::ident(&phi_face))
 }

@@ -1195,9 +1195,11 @@ fn main_assembly_fn(
                             phi_neigh,
                             grad_own,
                             grad_neigh,
-                            Expr::ident("center"),
-                            Expr::ident("other_center"),
-                            Expr::ident("f_center"),
+                            super::reconstruction::GeometryPoints {
+                                center: Expr::ident("center"),
+                                other_center: Expr::ident("other_center"),
+                                face_center: Expr::ident("f_center"),
+                            },
                         );
 
                         let flux_pos = dsl::max(Expr::ident(&flux_var), 0.0);

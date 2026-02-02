@@ -591,7 +591,7 @@ enum ExprNode {
 }
 
 thread_local! {
-    static EXPR_ARENA: RefCell<Vec<ExprNode>> = RefCell::new(Vec::new());
+    static EXPR_ARENA: RefCell<Vec<ExprNode>> = const { RefCell::new(Vec::new()) };
 }
 
 impl Expr {

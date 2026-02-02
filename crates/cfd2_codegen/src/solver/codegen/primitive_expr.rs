@@ -66,25 +66,25 @@ pub fn lower_primitive_expr_dyn(
         }
 
         PrimitiveExpr::Add(lhs, rhs) => {
-            let lhs_dyn = lower_primitive_expr_dyn(lhs, slots, cell_idx.clone(), state_array);
+            let lhs_dyn = lower_primitive_expr_dyn(lhs, slots, cell_idx, state_array);
             let rhs_dyn = lower_primitive_expr_dyn(rhs, slots, cell_idx, state_array);
             lhs_dyn + rhs_dyn
         }
 
         PrimitiveExpr::Sub(lhs, rhs) => {
-            let lhs_dyn = lower_primitive_expr_dyn(lhs, slots, cell_idx.clone(), state_array);
+            let lhs_dyn = lower_primitive_expr_dyn(lhs, slots, cell_idx, state_array);
             let rhs_dyn = lower_primitive_expr_dyn(rhs, slots, cell_idx, state_array);
             lhs_dyn - rhs_dyn
         }
 
         PrimitiveExpr::Mul(lhs, rhs) => {
-            let lhs_dyn = lower_primitive_expr_dyn(lhs, slots, cell_idx.clone(), state_array);
+            let lhs_dyn = lower_primitive_expr_dyn(lhs, slots, cell_idx, state_array);
             let rhs_dyn = lower_primitive_expr_dyn(rhs, slots, cell_idx, state_array);
             lhs_dyn * rhs_dyn
         }
 
         PrimitiveExpr::Div(lhs, rhs) => {
-            let lhs_dyn = lower_primitive_expr_dyn(lhs, slots, cell_idx.clone(), state_array);
+            let lhs_dyn = lower_primitive_expr_dyn(lhs, slots, cell_idx, state_array);
             let rhs_dyn = lower_primitive_expr_dyn(rhs, slots, cell_idx, state_array);
             lhs_dyn / rhs_dyn
         }

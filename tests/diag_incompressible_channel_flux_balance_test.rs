@@ -189,12 +189,9 @@ fn diag_incompressible_channel_flux_balance() {
             BoundaryType::Outlet => m_out_u += flux_u,
             BoundaryType::Wall | BoundaryType::SlipWall | BoundaryType::MovingWall => {}
         }
-        match b.unwrap() {
-            BoundaryType::Outlet => {
-                m_out_u_minus += flux_u_minus;
-                m_out_u_plus += flux_u_plus;
-            }
-            _ => {}
+        if let BoundaryType::Outlet = b.unwrap() {
+            m_out_u_minus += flux_u_minus;
+            m_out_u_plus += flux_u_plus;
         }
     }
 

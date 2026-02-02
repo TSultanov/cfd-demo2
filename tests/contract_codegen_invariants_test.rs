@@ -986,12 +986,12 @@ fn contract_reconstruction_paths_share_vanleer_eps_constant() {
     let flux_path = repo_root().join("src/solver/model/flux_schemes.rs");
     let flux_src = read_utf8(&flux_path);
     let flux_impl = flux_src.split("#[cfg(test)]").next().unwrap_or(&flux_src);
-    assert_not_contains(&flux_impl, "1e-8", "flux_schemes.rs");
-    assert_contains(&flux_impl, "limited_linear_face_value", "flux_schemes.rs");
+    assert_not_contains(flux_impl, "1e-8", "flux_schemes.rs");
+    assert_contains(flux_impl, "limited_linear_face_value", "flux_schemes.rs");
 
     let ua_path = repo_root().join("crates/cfd2_codegen/src/solver/codegen/reconstruction.rs");
     let ua_src = read_utf8(&ua_path);
     let ua_impl = ua_src.split("#[cfg(test)]").next().unwrap_or(&ua_src);
-    assert_not_contains(&ua_impl, "1e-8", "reconstruction.rs");
-    assert_contains(&ua_impl, "limited_linear_face_value", "reconstruction.rs");
+    assert_not_contains(ua_impl, "1e-8", "reconstruction.rs");
+    assert_contains(ua_impl, "limited_linear_face_value", "reconstruction.rs");
 }

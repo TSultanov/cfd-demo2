@@ -295,36 +295,38 @@ fn colormap_diverging(t: f64) -> Rgb<u8> {
     }
 }
 
-fn save_scalar_image_with_scale(
-    path: &Path,
-    mesh: &Mesh,
-    values: &[f64],
+struct ScalarImageParams<'a> {
+    path: &'a Path,
+    mesh: &'a Mesh,
+    values: &'a [f64],
     width: usize,
     height: usize,
     min_val: f64,
     max_val: f64,
     diverging: bool,
-) {
-    if values.len() != mesh.num_cells() || width == 0 || height == 0 {
+}
+
+fn save_scalar_image_with_scale(params: ScalarImageParams<'_>) {
+    if params.values.len() != params.mesh.num_cells() || params.width == 0 || params.height == 0 {
         return;
     }
 
-    let (min_x, max_x, min_y, max_y) = mesh_bounds(mesh);
+    let (min_x, max_x, min_y, max_y) = mesh_bounds(params.mesh);
     let mesh_w = (max_x - min_x).max(1e-12);
     let mesh_h = (max_y - min_y).max(1e-12);
-    let scale_x = (width as f64 - 1.0) / mesh_w;
-    let scale_y = (height as f64 - 1.0) / mesh_h;
+    let scale_x = (params.width as f64 - 1.0) / mesh_w;
+    let scale_y = (params.height as f64 - 1.0) / mesh_h;
     let scale = scale_x.min(scale_y);
     let center_x = 0.5 * (min_x + max_x);
     let center_y = 0.5 * (min_y + max_y);
-    let offset_x = (width as f64 - 1.0) * 0.5;
-    let offset_y = (height as f64 - 1.0) * 0.5;
+    let offset_x = (params.width as f64 - 1.0) * 0.5;
+    let offset_y = (params.height as f64 - 1.0) * 0.5;
 
-    let mut sum = vec![0.0; width * height];
-    let mut count = vec![0u32; width * height];
+    let mut sum = vec![0.0; params.width * params.height];
+    let mut count = vec![0u32; params.width * params.height];
 
-    for cell in 0..mesh.num_cells() {
-        let poly = cell_polygon(mesh, cell);
+    for (cell, &value) in params.values.iter().enumerate().take(params.mesh.num_cells()) {
+        let poly = cell_polygon(params.mesh, cell);
         if poly.len() < 3 {
             continue;
         }
@@ -343,43 +345,43 @@ fn save_scalar_image_with_scale(
             poly_px.push([x, y]);
         }
         let x0 = min_px.floor().max(0.0) as i32;
-        let x1 = max_px.ceil().min(width as f64 - 1.0) as i32;
+        let x1 = max_px.ceil().min(params.width as f64 - 1.0) as i32;
         let y0 = min_py.floor().max(0.0) as i32;
-        let y1 = max_py.ceil().min(height as f64 - 1.0) as i32;
+        let y1 = max_py.ceil().min(params.height as f64 - 1.0) as i32;
         for yi in y0..=y1 {
             for xi in x0..=x1 {
                 let px = xi as f64 + 0.5;
                 let py = yi as f64 + 0.5;
                 if point_in_poly(px, py, &poly_px) {
-                    let idx = yi as usize * width + xi as usize;
-                    sum[idx] += values[cell];
+                    let idx = yi as usize * params.width + xi as usize;
+                    sum[idx] += value;
                     count[idx] += 1;
                 }
             }
         }
     }
 
-    let mut img = RgbImage::new(width as u32, height as u32);
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
+    let mut img = RgbImage::new(params.width as u32, params.height as u32);
+    for y in 0..params.height {
+        for x in 0..params.width {
+            let idx = y * params.width + x;
             let color = if count[idx] == 0 {
                 Rgb([10, 10, 10])
             } else {
                 let val = sum[idx] / count[idx] as f64;
-                if diverging {
-                    let denom = max_val.abs().max(min_val.abs()).max(1e-12);
+                if params.diverging {
+                    let denom = params.max_val.abs().max(params.min_val.abs()).max(1e-12);
                     colormap_diverging(val / denom)
                 } else {
-                    let denom = (max_val - min_val).max(1e-12);
-                    let t = (val - min_val) / denom;
+                    let denom = (params.max_val - params.min_val).max(1e-12);
+                    let t = (val - params.min_val) / denom;
                     colormap_sequential(t)
                 }
             };
             img.put_pixel(x as u32, y as u32, color);
         }
     }
-    let _ = img.save(path);
+    let _ = img.save(params.path);
 }
 
 fn range_min_max(values: &[f64]) -> (f64, f64) {
@@ -451,84 +453,84 @@ pub fn save_openfoam_field_plots(
     let maxabs_p = max_abs_two(&p_ref_c, &p_sol_c).max(1e-12);
     let (min_speed, max_speed) = range_min_max_two(&speed_ref, &speed_sol);
 
-    save_scalar_image_with_scale(
-        &base_dir.join("u_x_ref.png"),
+    save_scalar_image_with_scale(ScalarImageParams {
+        path: &base_dir.join("u_x_ref.png"),
         mesh,
-        &ux_ref,
+        values: &ux_ref,
         width,
         height,
-        -maxabs_ux,
-        maxabs_ux,
-        true,
-    );
-    save_scalar_image_with_scale(
-        &base_dir.join("u_x_sol.png"),
+        min_val: -maxabs_ux,
+        max_val: maxabs_ux,
+        diverging: true,
+    });
+    save_scalar_image_with_scale(ScalarImageParams {
+        path: &base_dir.join("u_x_sol.png"),
         mesh,
-        &ux_sol,
+        values: &ux_sol,
         width,
         height,
-        -maxabs_ux,
-        maxabs_ux,
-        true,
-    );
-    save_scalar_image_with_scale(
-        &base_dir.join("u_y_ref.png"),
+        min_val: -maxabs_ux,
+        max_val: maxabs_ux,
+        diverging: true,
+    });
+    save_scalar_image_with_scale(ScalarImageParams {
+        path: &base_dir.join("u_y_ref.png"),
         mesh,
-        &uy_ref,
+        values: &uy_ref,
         width,
         height,
-        -maxabs_uy,
-        maxabs_uy,
-        true,
-    );
-    save_scalar_image_with_scale(
-        &base_dir.join("u_y_sol.png"),
+        min_val: -maxabs_uy,
+        max_val: maxabs_uy,
+        diverging: true,
+    });
+    save_scalar_image_with_scale(ScalarImageParams {
+        path: &base_dir.join("u_y_sol.png"),
         mesh,
-        &uy_sol,
+        values: &uy_sol,
         width,
         height,
-        -maxabs_uy,
-        maxabs_uy,
-        true,
-    );
-    save_scalar_image_with_scale(
-        &base_dir.join("u_mag_ref.png"),
+        min_val: -maxabs_uy,
+        max_val: maxabs_uy,
+        diverging: true,
+    });
+    save_scalar_image_with_scale(ScalarImageParams {
+        path: &base_dir.join("u_mag_ref.png"),
         mesh,
-        &speed_ref,
+        values: &speed_ref,
         width,
         height,
-        min_speed,
-        max_speed.max(min_speed + 1e-12),
-        false,
-    );
-    save_scalar_image_with_scale(
-        &base_dir.join("u_mag_sol.png"),
+        min_val: min_speed,
+        max_val: max_speed.max(min_speed + 1e-12),
+        diverging: false,
+    });
+    save_scalar_image_with_scale(ScalarImageParams {
+        path: &base_dir.join("u_mag_sol.png"),
         mesh,
-        &speed_sol,
+        values: &speed_sol,
         width,
         height,
-        min_speed,
-        max_speed.max(min_speed + 1e-12),
-        false,
-    );
-    save_scalar_image_with_scale(
-        &base_dir.join("p_ref.png"),
+        min_val: min_speed,
+        max_val: max_speed.max(min_speed + 1e-12),
+        diverging: false,
+    });
+    save_scalar_image_with_scale(ScalarImageParams {
+        path: &base_dir.join("p_ref.png"),
         mesh,
-        &p_ref_c,
+        values: &p_ref_c,
         width,
         height,
-        -maxabs_p,
-        maxabs_p,
-        true,
-    );
-    save_scalar_image_with_scale(
-        &base_dir.join("p_sol.png"),
+        min_val: -maxabs_p,
+        max_val: maxabs_p,
+        diverging: true,
+    });
+    save_scalar_image_with_scale(ScalarImageParams {
+        path: &base_dir.join("p_sol.png"),
         mesh,
-        &p_sol_c,
+        values: &p_sol_c,
         width,
         height,
-        -maxabs_p,
-        maxabs_p,
-        true,
-    );
+        min_val: -maxabs_p,
+        max_val: maxabs_p,
+        diverging: true,
+    });
 }

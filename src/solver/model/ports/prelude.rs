@@ -19,30 +19,26 @@
 // }
 // ```
 
+#![allow(unused_imports)]
+
 // Derive macros for port sets and module ports
-#[allow(unused_imports)]
 pub use cfd2_macros::{ModulePorts, PortSet};
 
 // Core port types and field kinds
-#[allow(unused_imports)]
 pub use super::{
     BufferPort, FieldPort, FieldKind, ParamPort, Scalar, Vector2, Vector3,
 };
 
 // Access modes for buffer ports
-#[allow(unused_imports)]
 pub use super::{ReadOnly, ReadWrite};
 
 // Parameter types
-#[allow(unused_imports)]
 pub use super::{F32, F64, I32, U32};
 
 // Port registry and errors
-#[allow(unused_imports)]
 pub use super::{PortRegistry, PortRegistryError, PortValidationError};
 
 // Core dimension trait and common dimension aliases
-#[allow(unused_imports)]
 pub use super::{
     Acceleration, Area, Density, Dimensionless, DynamicViscosity, Energy, EnergyDensity, Force,
     InvTime, KinematicViscosity, Length, Mass, MassFlux, MomentumDensity, Pressure,

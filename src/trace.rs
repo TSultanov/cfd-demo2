@@ -241,7 +241,7 @@ impl TraceRuntimeParams {
         solver.set_dt(self.requested_dt);
 
         let named_params = solver.model().named_param_keys();
-        let has_param = |key: &str| named_params.iter().any(|&k| k == key);
+        let has_param = |key: &str| named_params.contains(&key);
 
         if has_param("dtau") {
             let _ = solver.set_dtau(self.dtau);
@@ -673,7 +673,7 @@ impl TraceWriter {
             .write_all(b"\n")
             .map_err(|err| format!("failed to write trace event: {err}"))?;
         self.events_written += 1;
-        if self.events_written % self.flush_every == 0 {
+        if self.events_written.is_multiple_of(self.flush_every) {
             let _ = self.writer.flush();
         }
         Ok(())

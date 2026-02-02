@@ -71,24 +71,6 @@ pub(crate) fn validate_model_owned_preconditioner_config(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::solver::gpu::structs::PreconditionerType;
-    use crate::solver::model::{incompressible_momentum_model, ModelPreconditionerSpec};
-
-    #[test]
-    fn model_owned_schur_allows_preconditioner_config() {
-        let model = incompressible_momentum_model();
-        assert!(matches!(
-            model.linear_solver.unwrap().preconditioner,
-            ModelPreconditionerSpec::Schur { .. }
-        ));
-        validate_model_owned_preconditioner_config(&model, PreconditionerType::Amg)
-            .expect("AMG pressure solve should be allowed for model-owned Schur");
-    }
-}
-
 async fn lower_parts_for_model(
     mesh: &Mesh,
     model: &ModelSpec,
@@ -139,4 +121,22 @@ async fn lower_parts_for_model(
             linear_debug: Some(programs::universal::linear_debug_provider),
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::gpu::structs::PreconditionerType;
+    use crate::solver::model::{incompressible_momentum_model, ModelPreconditionerSpec};
+
+    #[test]
+    fn model_owned_schur_allows_preconditioner_config() {
+        let model = incompressible_momentum_model();
+        assert!(matches!(
+            model.linear_solver.unwrap().preconditioner,
+            ModelPreconditionerSpec::Schur { .. }
+        ));
+        validate_model_owned_preconditioner_config(&model, PreconditionerType::Amg)
+            .expect("AMG pressure solve should be allowed for model-owned Schur");
+    }
 }

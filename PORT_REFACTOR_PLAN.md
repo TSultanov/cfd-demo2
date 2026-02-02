@@ -23,8 +23,8 @@ Based on design discussions, the implementation follows these principles:
 | 3. PortManifest + Module Integration | **Done** | 100% | IR-safe `PortManifest` is wired through runtime + build-time; named-param allowlisting consumes `port_manifest.params`; WGSL `Constants` generation consumes manifest params (no ad-hoc string lists) |
 | 4. Low-Risk Migration | **Done** | 100% | `eos` + `generic_coupled` publish `PortManifest` for uniform params; `generic_coupled_apply` wrapper removed (kernel remains in `generic_coupled`) |
 | 5. Field-Access Migration | **Done** | 100% | `flux_module_gradients_wgsl` no longer scans `StateLayout` during WGSL generation (targets pre-resolved); `flux_module_wgsl` consumes pre-resolved `ResolvedStateSlotsSpec` from `PortManifest` (no `StateLayout` probing) and has WGSL goldens; `rhie_chow` kernel generators migrated to PortRegistry (no build-script fallback); `generic_coupled` GPU lowering migrated to use pre-resolved unknown-to-state mapping via PortRegistry (runtime path works correctly with all StateLayout fields pre-registered; tests cover the runtime resolver); flux-module gradient targets now stored in IR-safe `PortManifest` |
-| 6. Codegen Replacement | **In Progress** | ~15% | Replace string-based codegen |
-| 7. Hard Cutoff | Pending | 0% | Remove deprecated APIs |
+| 6. Codegen Replacement | **Done** | 100% | Replace string-based codegen |
+| 7. Hard Cutoff | **Done** | 100% | Remove deprecated APIs |
 
 ## Implementation Phases
 

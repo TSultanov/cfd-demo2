@@ -486,6 +486,12 @@ impl FieldBoundarySpec {
     }
 }
 
+impl Default for FieldBoundarySpec {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BoundaryCondition {
     pub kind: GpuBcKind,

@@ -51,6 +51,12 @@ impl CompressibleFields {
     }
 }
 
+impl Default for CompressibleFields {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     // NOTE: This model uses typed builder APIs with explicit cast_to() calls to align
     // terms to canonical dimension types. Type-level dimension expressions are not normalized,

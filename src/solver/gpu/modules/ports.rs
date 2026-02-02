@@ -28,14 +28,9 @@ impl<T> Port<T> {
     }
 }
 
+#[derive(Default)]
 pub struct PortRegistry {
     next: u32,
-}
-
-impl Default for PortRegistry {
-    fn default() -> Self {
-        Self { next: 0 }
-    }
 }
 
 impl PortRegistry {
@@ -54,16 +49,9 @@ impl PortRegistry {
     }
 }
 
+#[derive(Default)]
 pub struct LoweredBuffers {
     buffers: HashMap<PortId, wgpu::Buffer>,
-}
-
-impl Default for LoweredBuffers {
-    fn default() -> Self {
-        Self {
-            buffers: HashMap::new(),
-        }
-    }
 }
 
 impl LoweredBuffers {

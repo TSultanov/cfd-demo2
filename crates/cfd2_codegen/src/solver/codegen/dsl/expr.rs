@@ -504,15 +504,15 @@ mod tests {
 
     #[test]
     fn dyn_expr_cast_to_typed_succeeds_when_units_match() {
-        let dyn_expr = DynExpr::f32(3.14, UnitDim::new(0, 1, 0));
+        let dyn_expr = DynExpr::f32(3.25, UnitDim::new(0, 1, 0));
         let typed: TypedExpr<Length> = dyn_expr.cast_to().expect("cast should succeed");
         assert_eq!(typed.ty, DslType::f32());
-        assert_eq!(typed.expr.to_string(), "3.14");
+        assert_eq!(typed.expr.to_string(), "3.25");
     }
 
     #[test]
     fn dyn_expr_cast_to_typed_fails_when_units_mismatch() {
-        let dyn_expr = DynExpr::f32(3.14, UnitDim::new(0, 0, 1)); // Time units
+        let dyn_expr = DynExpr::f32(3.25, UnitDim::new(0, 0, 1)); // Time units
         let result: Result<TypedExpr<Length>, _> = dyn_expr.cast_to();
         assert!(matches!(result, Err(DslError::UnitMismatch { .. })));
     }

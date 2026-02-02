@@ -427,7 +427,7 @@ mod tests {
 
     #[test]
     fn coeff_expr_dyn_constant_preserves_unit() {
-        let coeff = Coefficient::Constant { value: 3.14, unit: Pressure::UNIT };
+        let coeff = Coefficient::Constant { value: 3.25, unit: Pressure::UNIT };
         let slots = ResolvedStateSlotsSpec {
             stride: 0,
             slots: vec![],
@@ -437,7 +437,7 @@ mod tests {
         
         assert_eq!(dyn_expr.unit, Pressure::UNIT);
         assert_eq!(dyn_expr.ty, DslType::f32());
-        assert_eq!(dyn_expr.expr.to_string(), "3.14");
+        assert_eq!(dyn_expr.expr.to_string(), "3.25");
     }
 
     #[test]

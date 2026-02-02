@@ -208,12 +208,12 @@ mod tests {
     fn primitive_expr_dyn_literal_is_dimensionless() {
         let slots = test_slots_from_fields(vec![]);
 
-        let expr = PrimitiveExpr::lit(3.14);
+        let expr = PrimitiveExpr::lit(3.25);
         let cell_idx = Expr::ident("i");
         let dyn_expr = lower_primitive_expr_dyn(&expr, &slots, cell_idx, "state");
 
         assert_eq!(dyn_expr.unit, UnitDim::dimensionless());
-        assert_eq!(dyn_expr.expr.to_string(), "3.14");
+        assert_eq!(dyn_expr.expr.to_string(), "3.25");
     }
 
     #[test]

@@ -14,7 +14,7 @@ const TRACE_FORMAT_VERSION: u32 = 2;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum TraceEvent {
-    Header(TraceHeader),
+    Header(Box<TraceHeader>),
     Init(TraceInitEvent),
     Params(TraceParamsEvent),
     Step(TraceStepEvent),

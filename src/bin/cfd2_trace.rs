@@ -58,7 +58,7 @@ fn load_trace(path: &str) -> Result<LoadedTrace, String> {
                         line_idx + 1
                     ));
                 }
-                header = Some(h);
+                header = Some(*h);
             }
             tracefmt::TraceEvent::Init(init) => {
                 if init.stage == "init.total" && init_total_ms.is_none() {

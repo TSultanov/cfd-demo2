@@ -3150,7 +3150,7 @@ fn solver_worker_handle_cmd(
             match tracefmt::TraceWriter::create(&path) {
                 Ok(mut writer) => {
                     let profiling_enabled = header.ui.profiling_enabled;
-                    let event = tracefmt::TraceEvent::Header(header);
+                    let event = tracefmt::TraceEvent::Header(Box::new(header));
                     let _ = writer.write_event(&event);
 
                     if let Some(s) = solver.as_mut() {

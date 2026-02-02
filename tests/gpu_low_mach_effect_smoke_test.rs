@@ -1,4 +1,4 @@
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides};
 use cfd2::solver::model::compressible_model;
 use cfd2::solver::model::helpers::{SolverCompressibleIdealGasExt, SolverRuntimeParamsExt};
 use cfd2::solver::scheme::Scheme;

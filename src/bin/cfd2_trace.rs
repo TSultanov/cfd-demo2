@@ -143,7 +143,7 @@ fn build_config(
     };
 
     let named_params = model.named_param_keys();
-    let supports_preconditioner = named_params.iter().any(|&k| k == "preconditioner");
+    let supports_preconditioner = named_params.contains(&"preconditioner");
     let config_preconditioner = if supports_preconditioner {
         PreconditionerType::from(trace.header.initial_params.preconditioner)
     } else {
@@ -422,7 +422,7 @@ fn cmd_replay(path: &str, opts: ReplayOpts) -> Result<(), String> {
         .apply_to_solver(&mut solver);
 
     if trace.header.case.model_id == "compressible" {
-        let eos: cfd2::solver::model::EosSpec = trace.header.initial_params.eos.clone().into();
+        let eos: cfd2::solver::model::EosSpec = trace.header.initial_params.eos.into();
         let rho = trace.header.initial_params.density;
         let p_ref = eos.pressure_for_density(rho as f64) as f32;
         solver.set_uniform_state(rho, [0.0, 0.0], p_ref);
@@ -553,7 +553,7 @@ fn cmd_replay(path: &str, opts: ReplayOpts) -> Result<(), String> {
     Ok(())
 }
 
-fn print_init_report(init_ms: f64, init_events: &mut Vec<tracefmt::TraceInitEvent>) {
+fn print_init_report(init_ms: f64, init_events: &mut [tracefmt::TraceInitEvent]) {
     println!("Init wall time: {:.3} ms", init_ms);
     if init_events.is_empty() {
         return;
@@ -658,7 +658,7 @@ fn cmd_init(opts: InitOpts) -> Result<(), String> {
     };
 
     let named_params = model.named_param_keys();
-    let stepping = if named_params.iter().any(|&k| k == "eos.gamma") {
+    let stepping = if named_params.contains(&"eos.gamma") {
         SteppingMode::Implicit { outer_iters: 1 }
     } else {
         SteppingMode::Coupled

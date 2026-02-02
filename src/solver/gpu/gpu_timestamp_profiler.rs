@@ -176,7 +176,7 @@ impl GpuTimestampProfiler {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         label: &'static str,
-        category: KernelCategory,
+        _category: KernelCategory,
     ) -> Option<u32> {
         if !self.config.enabled || !self.recording {
             return None;
@@ -264,7 +264,7 @@ impl GpuTimestampProfiler {
             0,
         );
 
-        context.queue.submit(Some(encoder.finish()));
+        let submission_index = context.queue.submit(Some(encoder.finish()));
 
         // Map and read results
         let slice = resolve_buffer.slice(..(self.current_query * 8) as u64);
@@ -274,8 +274,11 @@ impl GpuTimestampProfiler {
             let _ = tx.send(result);
         });
 
-        context.device.poll(wgpu::PollType::Wait).ok()?;
-        rx.recv().ok()??.ok()?;
+        let _ = context.device.poll(wgpu::PollType::Wait {
+            submission_index: Some(submission_index),
+            timeout: None,
+        });
+        rx.recv().ok().and_then(|v| v.ok())?;
 
         let data = slice.get_mapped_range();
         let timestamps: &[u64] = bytemuck::cast_slice(&data);

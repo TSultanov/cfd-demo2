@@ -137,6 +137,8 @@ pub(crate) struct GenericCoupledProgramResources {
     update_graph: ModuleGraph<GeneratedKernelsModule>,
     explicit_graph: ModuleGraph<GeneratedKernelsModule>,
     outer_iters: usize,
+    outer_tol: f32,
+    outer_tol_abs: f32,
     nonconverged_relax: f32,
     implicit_base_alpha_u: Option<f32>,
     linear_solver: crate::solver::gpu::recipe::LinearSolverSpec,
@@ -642,6 +644,8 @@ impl GenericCoupledProgramResources {
             update_graph,
             explicit_graph,
             outer_iters,
+            outer_tol: 1e-3,
+            outer_tol_abs: 1e-6,
             nonconverged_relax: 1.0,
             implicit_base_alpha_u: None,
             linear_solver,
@@ -1194,6 +1198,7 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     plan.outer_residual_u = None;
     plan.outer_residual_p = None;
     plan.outer_field_residuals.clear();
+    plan.outer_field_residuals_scaled.clear();
     plan.repeat_break = false;
 
     let device = plan.context.device.clone();
@@ -1342,7 +1347,7 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
         return;
     }
 
-    let (lin_tol, lin_tol_abs, state, monitor) = {
+    let (_lin_tol, _lin_tol_abs, state, monitor) = {
         let r = res_mut(plan);
         (
             r.linear_solver.tolerance,
@@ -1356,7 +1361,7 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
         return;
     };
 
-    if outer_iters > 1 {
+    if outer_iters > 1 || plan.collect_convergence_stats {
         if let Err(err) = monitor.ensure_state_scale(plan, &state) {
             eprintln!("[cfd2][outer] failed to compute state scale: {err}");
         }
@@ -1381,6 +1386,14 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
         return;
     }
 
+    // Compute state scale for normalization (if available and outer_iters > 1, or when explicitly collecting stats)
+    let scale: Option<Vec<f32>> = if outer_iters > 1 || plan.collect_convergence_stats {
+        monitor.state_scale().map(|s| s.to_vec())
+    } else {
+        None
+    };
+
+    // Store absolute residuals
     plan.outer_field_residuals.clear();
     plan.outer_field_residuals.extend(
         monitor
@@ -1389,6 +1402,20 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
             .cloned()
             .zip(delta.iter().copied()),
     );
+
+    // Store scaled residuals (normalized by state scale)
+    plan.outer_field_residuals_scaled.clear();
+    if let Some(ref s) = scale {
+        if s.len() == delta.len() {
+            plan.outer_field_residuals_scaled.extend(
+                monitor
+                    .target_names()
+                    .iter()
+                    .cloned()
+                    .zip(delta.iter().zip(s.iter()).map(|(&d, &s_val)| d / s_val.max(1.0))),
+            );
+        }
+    }
 
     let mut residual_u: Option<f32> = None;
     let mut residual_p: Option<f32> = None;
@@ -1407,7 +1434,7 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
         return;
     }
 
-    let Some(scale) = monitor.state_scale() else {
+    let Some(ref scale) = scale else {
         res_mut(plan).outer_convergence = Some(monitor);
         return;
     };
@@ -1418,8 +1445,8 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
 
     // Outer-loop convergence: stop iterating once the maximum correction magnitude is
     // sufficiently small relative to the current state scale.
-    let tol_rel = (lin_tol * 10.0).clamp(1e-8, 1e-2);
-    let tol_abs = (lin_tol_abs * 10.0).max(0.0);
+    let tol_rel = res(plan).outer_tol;
+    let tol_abs = res(plan).outer_tol_abs;
 
     let mut converged = true;
     for (&d, &s) in delta.iter().zip(scale.iter()) {
@@ -1588,6 +1615,28 @@ pub(crate) fn param_outer_iters(
         return Err("OuterIters expects Usize".to_string());
     };
     res_mut(plan).outer_iters = iters.max(1);
+    Ok(())
+}
+
+pub(crate) fn param_outer_tol(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(tol) = value else {
+        return Err("OuterTol expects F32".to_string());
+    };
+    res_mut(plan).outer_tol = tol.max(0.0);
+    Ok(())
+}
+
+pub(crate) fn param_outer_tol_abs(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(tol_abs) = value else {
+        return Err("OuterTolAbs expects F32".to_string());
+    };
+    res_mut(plan).outer_tol_abs = tol_abs.max(0.0);
     Ok(())
 }
 

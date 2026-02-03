@@ -19,6 +19,8 @@ pub(crate) fn handler_for_key(key: &'static str) -> Option<ProgramParamHandler> 
         "alpha_p" => Some(generic_coupled::param_alpha_p),
         "nonconverged_relax" => Some(generic_coupled::param_nonconverged_relax),
         "outer_iters" => Some(generic_coupled::param_outer_iters),
+        "outer_tol" => Some(generic_coupled::param_outer_tol),
+        "outer_tol_abs" => Some(generic_coupled::param_outer_tol_abs),
         "detailed_profiling_enabled" => Some(generic_coupled::param_detailed_profiling),
         _ => None,
     }

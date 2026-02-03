@@ -2975,7 +2975,22 @@ fn solver_worker_main(
                 let outer_str = step_stats
                     .outer_iterations
                     .map(|iters| {
-                        if let Some(fields) = solver.outer_field_residuals() {
+                        let abs_residuals = solver.outer_field_residuals();
+                        let scaled_residuals = solver.outer_field_residuals_scaled();
+
+                        if let (Some(abs), Some(scaled)) = (abs_residuals, scaled_residuals) {
+                            // Both absolute and scaled residuals available
+                            let fields = abs
+                                .iter()
+                                .zip(scaled.iter())
+                                .map(|((name, abs_res), (_, scaled_res))| {
+                                    format!("{name}={scaled_res:.3e} (abs={abs_res:.3e})")
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            format!(" outer(iters={iters}, res=[{fields}])")
+                        } else if let Some(fields) = abs_residuals {
+                            // Only absolute residuals available
                             let fields = fields
                                 .iter()
                                 .map(|(name, res)| format!("{name}={res:.3e}"))

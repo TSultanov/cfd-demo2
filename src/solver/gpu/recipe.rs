@@ -36,11 +36,11 @@ pub struct LinearSolverSpec {
 impl Default for LinearSolverSpec {
     fn default() -> Self {
         Self {
-            solver_type: LinearSolverType::Fgmres { max_restart: 30 },
+            solver_type: LinearSolverType::Fgmres { max_restart: 60 },
             preconditioner: PreconditionerType::Jacobi,
-            max_iters: 100,
-            tolerance: 1e-6,
-            tolerance_abs: 1e-10,
+            max_iters: 200,
+            tolerance: 1e-12,
+            tolerance_abs: 1e-12,
         }
     }
 }

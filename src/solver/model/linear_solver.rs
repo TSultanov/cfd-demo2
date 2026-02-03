@@ -108,7 +108,6 @@ pub enum ModelPreconditionerSpec {
     },
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelLinearSolverType {
     /// FGMRES with flexible preconditioning.
@@ -129,10 +128,10 @@ pub struct ModelLinearSolverSettings {
 impl Default for ModelLinearSolverSettings {
     fn default() -> Self {
         Self {
-            solver_type: ModelLinearSolverType::Fgmres { max_restart: 30 },
-            max_iters: 100,
-            tolerance: 1e-6,
-            tolerance_abs: 1e-10,
+            solver_type: ModelLinearSolverType::Fgmres { max_restart: 60 },
+            max_iters: 200,
+            tolerance: 1e-12,
+            tolerance_abs: 1e-12,
         }
     }
 }

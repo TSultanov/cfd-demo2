@@ -1,6 +1,7 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{
-    surface_scalar_dim, surface_vector_dim, vol_scalar_dim, vol_vector_dim, EquationSystem, FieldRef, FluxRef,
+    surface_scalar_dim, surface_vector_dim, vol_scalar_dim, vol_vector_dim, EquationSystem,
+    FieldRef, FluxRef,
 };
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::backend::typed_ast::{
@@ -8,8 +9,8 @@ use crate::solver::model::backend::typed_ast::{
 };
 // si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_ir::solver::dimensions::{
-    Density, Dimensionless, DivDim, DynamicViscosity, EnergyDensity, Force, InvTime, Length, MassFlux,
-    MomentumDensity, MulDim, Power, Pressure, Temperature, Velocity,
+    Density, Dimensionless, DivDim, DynamicViscosity, EnergyDensity, Force, InvTime, Length,
+    MassFlux, MomentumDensity, MulDim, Power, Pressure, Temperature, Velocity,
 };
 // Type-level dimensions for boundary conditions (re-exported for convenience)
 type DensityGradient = DivDim<Density, Length>;
@@ -105,9 +106,10 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     // Energy equation: ddt(rho_e) + div(phi_rho_e, rho_e) - laplacian(kappa, T) = 0
     // ========================================
     // Thermal conductivity field coefficient: kappa has unit Power/(Length*Temperature)
-    let kappa_typed = TypedCoeff::from_field(
-        TypedFieldRef::<cfd2_ir::solver::dimensions::DivDim<Power, MulDim<Length, Temperature>>, Scalar>::new("kappa")
-    );
+    let kappa_typed = TypedCoeff::from_field(TypedFieldRef::<
+        cfd2_ir::solver::dimensions::DivDim<Power, MulDim<Length, Temperature>>,
+        Scalar,
+    >::new("kappa"));
 
     let rho_e_ddt = typed_fvm::ddt(rho_e_typed);
     let rho_e_div = typed_fvm::div_flux(phi_rho_e_typed, rho_e_typed);
@@ -142,10 +144,12 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     // ========================================
     // EOS field-based coefficients (preserving original semantics)
     let gm1_typed = TypedCoeff::from_field(TypedFieldRef::<Dimensionless, Scalar>::new("eos_gm1"));
-    let dp_drho_typed = TypedCoeff::from_field(
-        TypedFieldRef::<cfd2_ir::solver::dimensions::DivDim<Pressure, Density>, Scalar>::new("eos_dp_drho")
-    );
-    let p_offset_typed = TypedCoeff::from_field(TypedFieldRef::<Pressure, Scalar>::new("eos_p_offset"));
+    let dp_drho_typed = TypedCoeff::from_field(TypedFieldRef::<
+        cfd2_ir::solver::dimensions::DivDim<Pressure, Density>,
+        Scalar,
+    >::new("eos_dp_drho"));
+    let p_offset_typed =
+        TypedCoeff::from_field(TypedFieldRef::<Pressure, Scalar>::new("eos_p_offset"));
     let half_coeff: TypedCoeff<Dimensionless> = TypedCoeff::constant(0.5);
 
     // minus_gm1/dt
@@ -154,7 +158,9 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
 
     // 0.5 * gm1 / dt * |u|^2
     let u2 = TypedCoeff::mag_sqr(u_typed);
-    let half_gm1_over_dt = half_coeff.multiply(gm1_typed).multiply(inv_dt_coeff.clone());
+    let half_gm1_over_dt = half_coeff
+        .multiply(gm1_typed)
+        .multiply(inv_dt_coeff.clone());
     let rho_coeff_term = half_gm1_over_dt.multiply(u2);
 
     // minus_dp_drho/dt
@@ -183,9 +189,10 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     // Implemented as: (rho*R/dt) * T = (1/dt) * p
     // ========================================
     // EOS gas constant field coefficient (preserving original semantics)
-    let r_typed = TypedCoeff::from_field(
-        TypedFieldRef::<cfd2_ir::solver::dimensions::DivDim<Pressure, MulDim<Density, Temperature>>, Scalar>::new("eos_r")
-    );
+    let r_typed = TypedCoeff::from_field(TypedFieldRef::<
+        cfd2_ir::solver::dimensions::DivDim<Pressure, MulDim<Density, Temperature>>,
+        Scalar,
+    >::new("eos_r"));
 
     let rho_r_over_dt = rho_coeff.multiply(r_typed).multiply(inv_dt_coeff.clone());
     let minus_inv_dt = minus_one_coeff.multiply(inv_dt_coeff);
@@ -487,20 +494,8 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
             flux_module_module,
             crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
         ],
-        // The compressible model couples conserved and primitive fields in a single solve.
-        // Use tighter defaults than the generic solver so small-magnitude velocity updates are
-        // not lost when residual norms are dominated by large pressure/energy components.
-        linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
-            preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Default,
-            solver: crate::solver::model::linear_solver::ModelLinearSolverSettings {
-                solver_type: crate::solver::model::linear_solver::ModelLinearSolverType::Fgmres {
-                    max_restart: 60,
-                },
-                max_iters: 200,
-                tolerance: 1e-10,
-                tolerance_abs: 1e-12,
-            },
-        }),
+        // Use global defaults.
+        linear_solver: None,
         primitives,
     }
 }

@@ -165,6 +165,8 @@ pub trait SolverRuntimeParamsExt {
     fn set_alpha_u(&mut self, alpha_u: f32) -> Result<(), String>;
     fn set_alpha_p(&mut self, alpha_p: f32) -> Result<(), String>;
     fn set_outer_iters(&mut self, iters: usize) -> Result<(), String>;
+    fn set_outer_tolerance(&mut self, tol: f32) -> Result<(), String>;
+    fn set_outer_tolerance_abs(&mut self, tol_abs: f32) -> Result<(), String>;
     fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String>;
     fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String>;
     fn set_precond_pressure_coupling_alpha(&mut self, alpha: f32) -> Result<(), String>;
@@ -207,6 +209,14 @@ impl SolverRuntimeParamsExt for GpuUnifiedSolver {
 
     fn set_outer_iters(&mut self, iters: usize) -> Result<(), String> {
         self.set_named_param("outer_iters", PlanParamValue::Usize(iters))
+    }
+
+    fn set_outer_tolerance(&mut self, tol: f32) -> Result<(), String> {
+        self.set_named_param("outer_tol", PlanParamValue::F32(tol))
+    }
+
+    fn set_outer_tolerance_abs(&mut self, tol_abs: f32) -> Result<(), String> {
+        self.set_named_param("outer_tol_abs", PlanParamValue::F32(tol_abs))
     }
 
     fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String> {

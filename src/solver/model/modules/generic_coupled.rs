@@ -30,6 +30,8 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
         "linear_solver.tolerance",
         "linear_solver.tolerance_abs",
         "outer_iters",
+        "outer_tol",
+        "outer_tol_abs",
         "detailed_profiling_enabled",
     ];
 

@@ -370,6 +370,7 @@ pub(crate) struct GpuProgramPlan {
     pub outer_residual_u: Option<f32>,
     pub outer_residual_p: Option<f32>,
     pub outer_field_residuals: Vec<(String, f32)>,
+    pub outer_field_residuals_scaled: Vec<(String, f32)>,
     pub repeat_break: bool,
 }
 
@@ -397,6 +398,7 @@ impl GpuProgramPlan {
             outer_residual_u: None,
             outer_residual_p: None,
             outer_field_residuals: Vec::new(),
+            outer_field_residuals_scaled: Vec::new(),
             repeat_break: false,
         }
     }

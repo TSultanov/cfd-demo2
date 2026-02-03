@@ -215,6 +215,14 @@ impl GpuUnifiedSolver {
         }
     }
 
+    pub fn outer_field_residuals_scaled(&self) -> Option<&[(String, f32)]> {
+        if self.plan.outer_field_residuals_scaled.is_empty() {
+            None
+        } else {
+            Some(&self.plan.outer_field_residuals_scaled)
+        }
+    }
+
     pub fn step_graph_timings(&self) -> &[StepGraphTiming] {
         &self.plan.step_graph_timings
     }

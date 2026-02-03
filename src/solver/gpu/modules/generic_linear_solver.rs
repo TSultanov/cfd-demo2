@@ -25,9 +25,9 @@ impl Default for GenericLinearSolverConfig {
         Self {
             n: 0,
             num_cells: 0,
-            max_restart: 30,
-            tol: 1e-6,
-            tol_abs: 1e-10,
+            max_restart: 60,
+            tol: 1e-12,
+            tol_abs: 1e-12,
         }
     }
 }

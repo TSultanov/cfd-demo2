@@ -276,7 +276,6 @@ fn euler_central_upwind(
 
     let rho_u_x = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ex.clone()));
     let rho_u_y = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ey.clone()));
-    let u_n = |side: FaceSide| S::Dot(Box::new(u_vec(side)), Box::new(V::normal()));
 
     let c2 = |side: FaceSide| {
         // Generalized wave speed:
@@ -294,9 +293,14 @@ fn euler_central_upwind(
         )
     };
 
-    let u_n2 = |side: FaceSide| {
-        let un = u_n(side);
-        S::Mul(Box::new(un.clone()), Box::new(un))
+    // Low-Mach preconditioning should be driven by a representative local Mach number.
+    //
+    // Using only the *normal* velocity can drive `c_eff` unrealistically low for shear-driven
+    // flows (e.g., lid-driven cavity, wall-bounded shear) where `u_n ≈ 0` but `|u|` is not.
+    // This can severely reduce dissipation and destabilize the central-upwind flux.
+    let u_mag2 = |side: FaceSide| {
+        let u = u_vec(side);
+        S::Dot(Box::new(u.clone()), Box::new(u))
     };
 
     let low_mach_model = S::low_mach_model();
@@ -321,7 +325,7 @@ fn euler_central_upwind(
 
     let c_eff2_legacy = |side: FaceSide| {
         let c2_side = c2(side);
-        S::Min(Box::new(u_n2(side)), Box::new(c2_side))
+        S::Min(Box::new(u_mag2(side)), Box::new(c2_side))
     };
 
     let c_eff2_weiss_smith = |side: FaceSide| {
@@ -331,13 +335,31 @@ fn euler_central_upwind(
             Box::new(c2_side.clone()),
         );
         S::Min(
-            Box::new(S::Max(Box::new(u_n2(side)), Box::new(floor))),
+            Box::new(S::Max(Box::new(u_mag2(side)), Box::new(floor))),
             Box::new(c2_side),
         )
     };
 
+    // Low-Mach preconditioning in `cfd2` is intended for pseudo-transient/dual-time stepping
+    // (`dtau > 0`). In time-accurate mode (`dtau == 0`), it can destabilize low-Mach transient
+    // cases and distort transient acoustics.
+    //
+    // Gate preconditioning on `dtau > 0` so the same solver config can be used safely across
+    // both modes.
+    let dtau = S::constant("dtau");
+    let dtau_eps = S::lit(1e-12);
+    let dtau_enable = S::Div(
+        Box::new(dtau.clone()),
+        Box::new(S::Add(Box::new(dtau), Box::new(dtau_eps))),
+    );
+    let dtau_enable = S::Min(
+        Box::new(S::lit(1.0)),
+        Box::new(S::Max(Box::new(S::lit(0.0)), Box::new(dtau_enable))),
+    );
+    let dtau_disable = S::Sub(Box::new(S::lit(1.0)), Box::new(dtau_enable.clone()));
+
     // Effective sound speed squared for preconditioning (blended across models).
-    let c_eff2 = |side: FaceSide| {
+    let c_eff2_low_mach = |side: FaceSide| {
         let c2_side = c2(side);
         S::Add(
             Box::new(S::Add(
@@ -354,6 +376,15 @@ fn euler_central_upwind(
         )
     };
 
+    // Disable preconditioning in time-accurate mode by falling back to the physical wave speed.
+    let c_eff2 = |side: FaceSide| {
+        let c2_side = c2(side);
+        S::Add(
+            Box::new(S::Mul(Box::new(dtau_enable.clone()), Box::new(c_eff2_low_mach(side)))),
+            Box::new(S::Mul(Box::new(dtau_disable.clone()), Box::new(c2_side))),
+        )
+    };
+
     // --- Low-Mach pressure coupling ---
     //
     // At low Mach numbers, a purely density-based continuity flux can decouple pressure on
@@ -361,7 +392,10 @@ fn euler_central_upwind(
     // perturbation contribution to the density state used by the central-upwind dissipation
     // term (leaves the physical mass flux unchanged).
     let pressure_coupling_alpha = S::low_mach_pressure_coupling_alpha();
-    let low_mach_enabled = S::Sub(Box::new(S::lit(1.0)), Box::new(w_off.clone()));
+    let low_mach_enabled = S::Mul(
+        Box::new(dtau_enable.clone()),
+        Box::new(S::Sub(Box::new(S::lit(1.0)), Box::new(w_off.clone()))),
+    );
 
     // Convert a pressure perturbation to an equivalent density perturbation using the *physical*
     // compressibility (ρ' ≈ p'/c^2).
@@ -686,25 +720,26 @@ fn euler_central_upwind(
     let p_neg = p(FaceSide::Neighbor);
     let pressure_diff = S::Sub(Box::new(p_pos.clone()), Box::new(p_neg.clone()));
     
-    // Pressure coupling term: rho' = alpha * (p' / c^2)
-    let rho_couple_pos = S::Div(
-        Box::new(S::Mul(Box::new(pressure_coupling_alpha.clone()), Box::new(pressure_diff.clone()))),
-        Box::new(c_couple2_safe(FaceSide::Owner)),
+    // Pressure coupling term: rho' = alpha * (p' / c^2) with a face-averaged compressibility.
+    //
+    // Note: keep this symmetric across owner/neighbor. Using a single face term avoids
+    // double-counting the coupling.
+    let inv_c2_pos = S::Div(Box::new(S::lit(1.0)), Box::new(c_couple2_safe(FaceSide::Owner)));
+    let inv_c2_neg = S::Div(Box::new(S::lit(1.0)), Box::new(c_couple2_safe(FaceSide::Neighbor)));
+    let inv_c2_face = S::Mul(
+        Box::new(S::lit(0.5)),
+        Box::new(S::Add(Box::new(inv_c2_pos), Box::new(inv_c2_neg))),
     );
-    let rho_couple_neg = S::Div(
-        Box::new(S::Mul(Box::new(pressure_coupling_alpha.clone()), Box::new(pressure_diff.clone()))),
-        Box::new(c_couple2_safe(FaceSide::Neighbor)),
+    let rho_couple = S::Mul(
+        Box::new(S::Mul(
+            Box::new(pressure_coupling_alpha.clone()),
+            Box::new(pressure_diff.clone()),
+        )),
+        Box::new(inv_c2_face),
     );
-    
-    // Apply low-Mach enablement weight and area
-    let area = S::area();
-    let phi_couple_pos = S::Mul(
-        Box::new(S::Mul(Box::new(rho_couple_pos), Box::new(low_mach_enabled.clone()))),
-        Box::new(area.clone()),
-    );
-    let phi_couple_neg = S::Mul(
-        Box::new(S::Mul(Box::new(rho_couple_neg), Box::new(low_mach_enabled.clone()))),
-        Box::new(area),
+    let phi_couple = S::Mul(
+        Box::new(S::Mul(Box::new(rho_couple), Box::new(low_mach_enabled.clone()))),
+        Box::new(S::area()),
     );
 
     let phi = {
@@ -713,12 +748,9 @@ fn euler_central_upwind(
         S::Add(
             Box::new(S::Add(
                 Box::new(S::Mul(Box::new(aphiv_pos.clone()), Box::new(rho_pos))),
-                Box::new(phi_couple_pos),
-            )),
-            Box::new(S::Add(
                 Box::new(S::Mul(Box::new(aphiv_neg.clone()), Box::new(rho_neg))),
-                Box::new(phi_couple_neg),
             )),
+            Box::new(phi_couple),
         )
     };
 

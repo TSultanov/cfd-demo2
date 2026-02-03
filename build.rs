@@ -311,11 +311,10 @@ fn postprocess_bindings_for_clippy(bindings_path: &str) {
 
     // Find the existing #![allow(...)] line and add clippy::too_many_arguments to it
     // The line looks like: #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
-    let updated = if let Some(start_pos) = content.find("#![allow(unused,") {
-        // Find the closing ']' after the opening #![allow(
-        let search_start = start_pos + "#![allow(unused,".len();
-        if let Some(relative_end) = content[search_start..].find(']') {
-            let end_pos = search_start + relative_end;
+    let updated = if let Some(start_pos) = content.find("#![allow(") {
+        // Insert inside the allow-list parentheses: before the closing `)]`.
+        if let Some(relative_end) = content[start_pos..].find(")]") {
+            let end_pos = start_pos + relative_end; // points at the `)` in `)]`
             let before = &content[..end_pos];
             let after = &content[end_pos..];
             format!("{before}, clippy::too_many_arguments{after}")

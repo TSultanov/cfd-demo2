@@ -19,7 +19,7 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 ///
 /// # Known Limitations
 /// This test shows ~60% velocity error at t=0.003s due to solver formulation differences
-/// at early transient times. See `COMPRESSIBLE_SOLVER_INVESTIGATION.md` for details.
+/// at early transient times. See `OPENFOAM_DISCREPANCY_PLAN.md` for details.
 #[test]
 #[ignore]
 fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
@@ -191,6 +191,17 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     );
 
     if common::diag_enabled() {
+        // For low-Mach cases, absolute pressure is dominated by the ~101325 Pa baseline.
+        // Report mean-free pressure diagnostics as well.
+        let p_ref_mean = common::mean(&p_ref);
+        let p_sol_mean = common::mean(&p_sol);
+        let p_ref_dp: Vec<f64> = p_ref.iter().map(|v| v - p_ref_mean).collect();
+        let p_sol_dp: Vec<f64> = p_sol.iter().map(|v| v - p_ref_mean).collect();
+        let dp_scale = common::rms(&p_ref_dp).max(1e-12);
+        let dp_max = common::max_cell_rel_error_scalar(&p_sol_dp, &p_ref_dp, dp_scale);
+        let dp_ref_max = common::max_abs(&p_ref_dp);
+        let dp_sol_max = common::max_abs(&p_sol_dp);
+
         let (x_u, y_u) = (sol_rows[u_max.idx].0, sol_rows[u_max.idx].1);
         let (x_p, y_p) = (sol_rows[p_max.idx].0, sol_rows[p_max.idx].1);
         let (u_sol_x, u_sol_y) = u_sol[u_max.idx];
@@ -209,6 +220,18 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
             y_p,
             u_scale,
             p_scale,
+        );
+        eprintln!(
+            "[openfoam][compressible_lid] mean-free p: mean_ref={:.3} mean_sol={:.3} | dp_rms_ref={:.3e} max_abs_dp_ref={:.3e} max_abs_dp_sol={:.3e} | max_cell rel dp={:.6} abs={:.3} at (x={:.4}, y={:.4})",
+            p_ref_mean,
+            p_sol_mean,
+            dp_scale,
+            dp_ref_max,
+            dp_sol_max,
+            dp_max.rel,
+            dp_max.abs,
+            sol_rows[dp_max.idx].0,
+            sol_rows[dp_max.idx].1,
         );
         eprintln!(
             "[openfoam][compressible_lid] u@max: sol=({u_sol_x:.6},{u_sol_y:.6}) ref=({u_ref_x:.6},{u_ref_y:.6})"

@@ -96,7 +96,7 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
   - [x] `Off` vs `Safe` parity,
   - [x] `Safe` vs `Aggressive` parity where expected.
 - [ ] Performance checks:
-  - [x] dispatch count reduction (incompressible coupled `Safe` vs `Aggressive` now validated by compile-time schedule test: update-phase dispatches drop by 3 after `dp_init`+Rhie-Chow full-chain fusion),
+  - [x] dispatch count reduction (incompressible coupled `Safe` vs `Aggressive` validated by runtime dispatch-counter test: kernel-graph dispatches drop by 3 per outer-iteration after `dp_init`+Rhie-Chow full-chain fusion),
   - [ ] no regression in wall-clock for representative cases.
 
 ## 9) Rollout and Cleanup

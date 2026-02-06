@@ -1,3 +1,4 @@
+use cfd2::solver::gpu::dispatch_counter::{get_dispatch_stats, DispatchScope};
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
 use cfd2::solver::model::helpers::{
     SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
@@ -63,6 +64,58 @@ fn run_with_policy(mesh: &Mesh, policy: KernelFusionPolicy) -> RhieChowSnapshot 
         grad_p_old: pollster::block_on(solver.get_field_vec2("grad_p_old"))
             .expect("read grad_p_old from solver state"),
     }
+}
+
+fn run_with_policy_kernel_graph_dispatches(
+    mesh: &Mesh,
+    policy: KernelFusionPolicy,
+    steps: usize,
+    outer_iters: usize,
+) -> u64 {
+    let mut model = incompressible_momentum_model();
+    let mut linear_solver = model
+        .linear_solver
+        .expect("incompressible model missing linear solver");
+    linear_solver.solver.kernel_fusion_policy = policy;
+    model.linear_solver = Some(linear_solver);
+
+    let config = SolverConfig {
+        advection_scheme: Scheme::Upwind,
+        time_scheme: TimeScheme::BDF2,
+        preconditioner: PreconditionerType::Jacobi,
+        stepping: SteppingMode::Coupled,
+    };
+
+    let mut solver = pollster::block_on(UnifiedSolver::new(mesh, model, config, None, None))
+        .expect("solver init");
+
+    solver.set_dt(0.02);
+    solver.set_dtau(0.0).expect("set dtau");
+    solver.set_density(1.0).expect("set density");
+    solver.set_viscosity(0.01).expect("set viscosity");
+    solver.set_inlet_velocity(1.0).expect("set inlet velocity");
+    solver.set_alpha_u(0.7).expect("set alpha_u");
+    solver.set_alpha_p(0.3).expect("set alpha_p");
+    solver
+        .set_outer_iters(outer_iters)
+        .expect("set outer iters");
+    solver
+        .set_outer_tolerance(0.0)
+        .expect("set outer relative tolerance");
+    solver
+        .set_outer_tolerance_abs(0.0)
+        .expect("set outer absolute tolerance");
+
+    solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
+    solver.set_p(&vec![0.0; mesh.num_cells()]);
+    solver.initialize_history();
+
+    let _dispatch_scope = DispatchScope::new();
+    for _ in 0..steps {
+        solver.step();
+    }
+    let stats = get_dispatch_stats();
+    stats.by_category.get("Kernel Graph").copied().unwrap_or(0)
 }
 
 fn assert_snapshots_match(
@@ -190,4 +243,47 @@ fn rhie_chow_aggressive_matches_safe_within_tolerance() {
 
     let rel_tol = 1e-3f64;
     assert_snapshots_match("safe", &safe, "aggressive", &aggressive, rel_tol);
+}
+
+#[test]
+fn rhie_chow_aggressive_reduces_kernel_graph_dispatches_vs_safe() {
+    std::env::set_var("CFD2_QUIET", "1");
+
+    let mesh = generate_structured_rect_mesh(
+        16,
+        8,
+        1.0,
+        0.2,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
+    );
+
+    let steps = 3usize;
+    let outer_iters = 4usize;
+    let safe = run_with_policy_kernel_graph_dispatches(
+        &mesh,
+        KernelFusionPolicy::Safe,
+        steps,
+        outer_iters,
+    );
+    let aggressive = run_with_policy_kernel_graph_dispatches(
+        &mesh,
+        KernelFusionPolicy::Aggressive,
+        steps,
+        outer_iters,
+    );
+
+    // Aggressive replaces three update-phase dispatches per coupled outer-iteration.
+    // Additional graph-level deltas may appear from policy-dependent convergence behavior,
+    // so enforce a lower bound tied to the guaranteed schedule reduction.
+    let expected_min_drop = (steps * outer_iters * 3) as u64;
+    let actual_drop = safe.saturating_sub(aggressive);
+    assert!(
+        actual_drop >= expected_min_drop,
+        "unexpected kernel-graph dispatch drop (safe={safe}, aggressive={aggressive}, actual_drop={actual_drop}, expected_min_drop={expected_min_drop})"
+    );
 }

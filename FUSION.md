@@ -2,9 +2,17 @@
 
 This checklist tracks the implementation of full compile-time, DSL-based kernel fusion.
 
+## Success Criteria (Full DSL-Based Compile-Time Fusion)
+
+- Fusion replacement kernels are synthesized at build time from DSL `KernelProgram` inputs.
+- Runtime selection remains recipe/schedule-driven (`fusion_schedule_registry`) with no ad-hoc
+  fusion pass during stepping.
+- `KernelFusionPolicy::Off|Safe|Aggressive` semantics are explicit and test-covered.
+- Fused kernel IDs stay stable so runtime graph wiring does not churn across migrations.
+
 ## 0) Scope and Contracts
 
-- [ ] Define and document "full DSL-based fusion" success criteria (compile-time only, no runtime fusion pass).
+- [x] Define and document "full DSL-based fusion" success criteria (compile-time only, no runtime fusion pass).
 - [x] Confirm fusion remains recipe-schedule driven in `src/solver/gpu/recipe.rs` via `fusion_schedule_registry::schedule_for_model`.
 - [x] Add a contract test that fused kernels are resolved through generated registries (not handwritten runtime lookup glue).
 - [x] Add a contract test that runtime code does not call `apply_model_fusion_rules`.
@@ -57,12 +65,12 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 
 ## 6) Policy Semantics and Expansion
 
-- [ ] Codify policy semantics:
-  - [ ] `Off`: no fusion,
-  - [ ] `Safe`: strict hazard-checked fusion,
-  - [ ] `Aggressive`: broader candidate set + optional algebraic cleanup passes.
-- [ ] Implement explicit aggressive-only transforms behind policy guard.
-- [ ] Add tests proving `Aggressive` can differ from `Safe` only where intended.
+- [x] Codify policy semantics:
+  - [x] `Off`: no fusion,
+  - [x] `Safe`: strict hazard-checked fusion,
+  - [x] `Aggressive`: broader candidate set + optional algebraic cleanup passes.
+- [x] Implement explicit aggressive-only transforms behind policy guard.
+- [x] Add tests proving `Aggressive` can differ from `Safe` only where intended.
 
 ## 7) Broaden Coverage Beyond Pilot
 

@@ -146,8 +146,15 @@ pub struct ModelKernelSpec {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum KernelFusionPolicy {
+    /// Disable fusion entirely and keep the original ordered kernel list.
     Off,
+    /// Allow only strict hazard-checked fusion (default production policy).
+    /// This requires matching dispatch/indexing/launch contracts and rejects
+    /// programs that use barriers/atomics.
     Safe,
+    /// Enable broader fusion behavior for experimentation/perf tuning.
+    /// This includes safe matching plus aggressive-only cleanup transforms
+    /// during synthesized DSL fusion.
     Aggressive,
 }
 
@@ -847,6 +854,8 @@ fn synthesize_fusion_replacement_wgsl_for_model(
     });
 
     let selected = &matching_rules[0];
+    let synthesis_policy = fusion_safety_policy_for_rule(selected);
+
     let mut programs = Vec::with_capacity(selected.pattern.len());
     for atom in &selected.pattern {
         programs.push(generate_kernel_program_for_model_by_id(
@@ -858,11 +867,32 @@ fn synthesize_fusion_replacement_wgsl_for_model(
         replacement_id.as_str().to_string(),
         selected.name,
         &programs,
-        cfd2_codegen::solver::codegen::fusion::FusionSafetyPolicy::Safe,
+        synthesis_policy,
     )?;
     let wgsl =
         cfd2_codegen::solver::codegen::fusion::lower_kernel_program_to_wgsl(&fused_program)?;
     Ok(Some(wgsl.to_wgsl()))
+}
+
+fn fusion_safety_policy_for_rule(
+    rule: &ModelKernelFusionRule,
+) -> cfd2_codegen::solver::codegen::fusion::FusionSafetyPolicy {
+    rule.guards
+        .iter()
+        .filter_map(|guard| match guard {
+            FusionGuard::MinPolicy(policy) => Some(*policy),
+            _ => None,
+        })
+        .max()
+        .map(|policy| match policy {
+            KernelFusionPolicy::Off | KernelFusionPolicy::Safe => {
+                cfd2_codegen::solver::codegen::fusion::FusionSafetyPolicy::Safe
+            }
+            KernelFusionPolicy::Aggressive => {
+                cfd2_codegen::solver::codegen::fusion::FusionSafetyPolicy::Aggressive
+            }
+        })
+        .unwrap_or(cfd2_codegen::solver::codegen::fusion::FusionSafetyPolicy::Safe)
 }
 
 pub fn emit_model_kernels_wgsl_with_ids(
@@ -1366,6 +1396,50 @@ mod tests {
         assert_eq!(aggressive_out.kernels.len(), 1);
         assert_eq!(aggressive_out.kernels[0].id, fused.id);
         assert_eq!(aggressive_out.applied.len(), 1);
+    }
+
+    #[test]
+    fn fusion_synthesis_policy_tracks_min_policy_guard() {
+        let replacement = ModelKernelSpec {
+            id: KernelId("fusion/fused"),
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        };
+        let base_rule = ModelKernelFusionRule {
+            name: "rule",
+            priority: 1,
+            phase: KernelPhaseId::Update,
+            pattern: vec![KernelPatternAtom::id(KernelId("fusion/base"))],
+            replacement,
+            guards: Vec::new(),
+        };
+
+        let safe = fusion_safety_policy_for_rule(&base_rule);
+        assert_eq!(
+            safe,
+            cfd2_codegen::solver::codegen::fusion::FusionSafetyPolicy::Safe
+        );
+
+        let mut guarded_safe = base_rule.clone();
+        guarded_safe
+            .guards
+            .push(FusionGuard::MinPolicy(KernelFusionPolicy::Safe));
+        let safe_guarded_policy = fusion_safety_policy_for_rule(&guarded_safe);
+        assert_eq!(
+            safe_guarded_policy,
+            cfd2_codegen::solver::codegen::fusion::FusionSafetyPolicy::Safe
+        );
+
+        let mut guarded_aggressive = base_rule.clone();
+        guarded_aggressive
+            .guards
+            .push(FusionGuard::MinPolicy(KernelFusionPolicy::Aggressive));
+        let aggressive_policy = fusion_safety_policy_for_rule(&guarded_aggressive);
+        assert_eq!(
+            aggressive_policy,
+            cfd2_codegen::solver::codegen::fusion::FusionSafetyPolicy::Aggressive
+        );
     }
 
     #[test]

@@ -135,6 +135,10 @@ pub fn synthesize_fused_program(
     fused.local_symbols = local_symbols;
     fused.side_effects = side_effects;
 
+    if policy == FusionSafetyPolicy::Aggressive {
+        apply_aggressive_cleanup(&mut fused);
+    }
+
     // Attach an explicit synthesis marker as a deterministic first preamble line.
     fused
         .preamble
@@ -327,6 +331,35 @@ fn is_ident_boundary(src: &[u8], start: usize, end: usize) -> bool {
 
 fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
+}
+
+fn apply_aggressive_cleanup(program: &mut KernelProgram) {
+    program.body.retain(|line| !is_noop_local_self_assignment(line));
+}
+
+fn is_noop_local_self_assignment(line: &str) -> bool {
+    let trimmed = line.trim();
+    if !trimmed.ends_with(';') {
+        return false;
+    }
+    let stmt = trimmed.trim_end_matches(';').trim();
+    let Some((lhs, rhs)) = stmt.split_once('=') else {
+        return false;
+    };
+    let lhs = lhs.trim();
+    let rhs = rhs.trim();
+    lhs == rhs && is_identifier(lhs)
+}
+
+fn is_identifier(token: &str) -> bool {
+    let mut chars = token.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first == '_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+    chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
 }
 
 pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgsl, String> {
@@ -551,5 +584,59 @@ mod tests {
         assert_eq!(wgsl1.to_wgsl(), wgsl2.to_wgsl());
         assert!(wgsl1.to_wgsl().contains("@compute @workgroup_size(64, 1, 1)"));
         assert!(wgsl1.to_wgsl().contains("struct Constants"));
+    }
+
+    #[test]
+    fn aggressive_cleanup_removes_noop_local_self_assignment() {
+        let mut a = sample_program("a");
+        a.body.insert(0, "value = value;".to_string());
+        let b = sample_program("b");
+
+        let safe = synthesize_fused_program("fused", "rule/a_b", &[a.clone(), b.clone()], FusionSafetyPolicy::Safe)
+            .expect("safe fused synthesis");
+        let aggressive = synthesize_fused_program(
+            "fused",
+            "rule/a_b",
+            &[a, b],
+            FusionSafetyPolicy::Aggressive,
+        )
+        .expect("aggressive fused synthesis");
+
+        assert!(
+            safe.body.iter().any(|line| line.trim() == "value = value;"),
+            "safe policy should preserve no-op local assignment"
+        );
+        assert!(
+            aggressive
+                .body
+                .iter()
+                .all(|line| line.trim() != "value = value;"),
+            "aggressive policy should remove no-op local assignment"
+        );
+    }
+
+    #[test]
+    fn aggressive_differs_from_safe_only_when_cleanup_applies() {
+        let a = sample_program("a");
+        let b = sample_program("b");
+
+        let safe = synthesize_fused_program("fused", "rule/a_b", &[a.clone(), b.clone()], FusionSafetyPolicy::Safe)
+            .expect("safe fused synthesis");
+        let aggressive = synthesize_fused_program(
+            "fused",
+            "rule/a_b",
+            &[a, b],
+            FusionSafetyPolicy::Aggressive,
+        )
+        .expect("aggressive fused synthesis");
+
+        assert_eq!(
+            safe.preamble, aggressive.preamble,
+            "aggressive cleanup should not mutate preamble when no cleanup candidates exist"
+        );
+        assert_eq!(
+            safe.body, aggressive.body,
+            "aggressive cleanup should match safe output when no cleanup candidates exist"
+        );
     }
 }

@@ -25,7 +25,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
     if (idx >= (arrayLength(&state) / max(8u, 1u))) { return; }
     let base = idx * 8u;
-    let rho = max(constants.density, 1e-12);
+    let rho = max(constants.density, 0.000000000001);
     let dt = max(constants.dt, 0.0);
     let d_p = constants.alpha_u * dt / rho;
     state[base + 3u] = d_p;

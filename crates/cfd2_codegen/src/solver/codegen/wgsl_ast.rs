@@ -295,6 +295,22 @@ impl Block {
     }
 }
 
+/// Render a statement block into WGSL source lines without function/module wrappers.
+///
+/// This is useful when a caller stores kernel sections (indexing/preamble/body)
+/// independently and still wants those sections encoded from structured DSL statements.
+pub fn render_block_lines(block: &Block) -> Vec<String> {
+    let mut out = String::new();
+    let mut ctx = RenderContext::new(&mut out);
+    block.render(&mut ctx);
+    out.lines().map(|line| line.to_string()).collect()
+}
+
+/// Render a statement slice into WGSL source lines.
+pub fn render_stmt_lines(stmts: &[Stmt]) -> Vec<String> {
+    render_block_lines(&Block::new(stmts.to_vec()))
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Comment(String),

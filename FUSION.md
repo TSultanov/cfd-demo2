@@ -5,6 +5,7 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 ## Success Criteria (Full DSL-Based Compile-Time Fusion)
 
 - Fusion replacement kernels are synthesized at build time from DSL `KernelProgram` inputs.
+- Fusion-capable kernel implementations are authored via structured DSL/AST construction (WGSL DSL statements/expressions), not hand-written `Vec<String>` program sections.
 - Runtime selection remains recipe/schedule-driven (`fusion_schedule_registry`) with no ad-hoc
   fusion pass during stepping.
 - `KernelFusionPolicy::Off|Safe|Aggressive` semantics are explicit and test-covered.
@@ -13,6 +14,7 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 ## 0) Scope and Contracts
 
 - [x] Define and document "full DSL-based fusion" success criteria (compile-time only, no runtime fusion pass).
+- [x] Require structured DSL/AST kernel encoding for fusion-capable kernels (no manual string-array kernel body encoding).
 - [x] Confirm fusion remains recipe-schedule driven in `src/solver/gpu/recipe.rs` via `fusion_schedule_registry::schedule_for_model`.
 - [x] Add a contract test that fused kernels are resolved through generated registries (not handwritten runtime lookup glue).
 - [x] Add a contract test that runtime code does not call `apply_model_fusion_rules`.
@@ -81,16 +83,16 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 
 ## 8) Validation Matrix
 
-- [ ] Unit tests:
+- [x] Unit tests:
   - [x] fusion matcher,
   - [x] hazard analysis,
   - [x] symbol/bind merge,
   - [x] deterministic output naming.
-- [ ] Contract tests:
+- [x] Contract tests:
   - [x] compile-time-only schedule lookup,
   - [x] no runtime fusion path,
   - [x] registry completeness for fused kernels.
-- [ ] Numerical regression tests:
+- [x] Numerical regression tests:
   - [x] `Off` vs `Safe` parity,
   - [x] `Safe` vs `Aggressive` parity where expected.
 - [ ] Performance checks:
@@ -107,8 +109,17 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 
 ## 10) Exit Criteria (Definition of Done)
 
-- [ ] Fused kernels are generated from DSL at compile-time (not handwritten WGSL bodies).
+- [x] Fused kernels are generated from DSL at compile-time (not handwritten WGSL bodies).
+- [x] Fusion-capable kernels are encoded through structured DSL/AST builders, not manual `Vec<String>` sections.
 - [ ] Runtime remains registry-driven and model-driven, with no ad-hoc fusion logic.
-- [ ] At least one production fusion path (Rhie-Chow) fully migrated and validated.
+- [x] At least one production fusion path (Rhie-Chow) fully migrated and validated.
 - [x] Safe and Aggressive policy semantics are implemented, tested, and documented.
 - [ ] Full validation matrix passes in CI.
+
+## 11) Concrete Kernel Fusion Worklist
+
+- [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` (Safe and Aggressive via `rhie_chow:dp_update_store_grad_p_v1`).
+- [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` (Aggressive-only via `rhie_chow:dp_update_store_grad_p_grad_p_update_v1`).
+- [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` (Aggressive-only via `rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1`).
+- [ ] `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` as a standalone declared pair rule (currently covered by the larger 4-kernel aggressive rule).
+- [ ] `generic_coupled_assembly` + `generic_coupled_assembly_grad_state` (blocked by WGSL-only artifacts; requires DSL migration).

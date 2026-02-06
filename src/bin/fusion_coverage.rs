@@ -1,9 +1,10 @@
-use cfd2_codegen::solver::codegen::fusion::{synthesize_fused_program, FusionSafetyPolicy};
 use cfd2::solver::model;
 use cfd2::solver::model::kernel::{
-    DispatchKindId, KernelConditionId, KernelPhaseId, KernelWgslScope, ModelKernelArtifact,
+    DispatchKindId, FusionGuard, KernelConditionId, KernelFusionPolicy, KernelPhaseId,
+    KernelWgslScope, ModelKernelArtifact,
 };
 use cfd2::solver::scheme::Scheme;
+use cfd2_codegen::solver::codegen::fusion::{synthesize_fused_program, FusionSafetyPolicy};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone)]
@@ -23,6 +24,7 @@ struct ModelCoverage {
     model_id: &'static str,
     rows: Vec<KernelCoverageRow>,
     opportunities: Vec<FusionOpportunityRow>,
+    rule_reassessment: Vec<FusionRuleRow>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +41,19 @@ struct FusionOpportunityRow {
     safe_reason: String,
     aggressive_reason: String,
     note: String,
+    blocked_by_wgsl: bool,
+}
+
+#[derive(Debug, Clone)]
+struct FusionRuleRow {
+    name: &'static str,
+    replacement: &'static str,
+    pattern: Vec<&'static str>,
+    min_policy: KernelFusionPolicy,
+    safe_synthesizeable: bool,
+    aggressive_synthesizeable: bool,
+    safe_reason: String,
+    aggressive_reason: String,
     blocked_by_wgsl: bool,
 }
 
@@ -77,6 +92,14 @@ fn scope_name(scope: Option<KernelWgslScope>) -> &'static str {
         Some(KernelWgslScope::PerModel) => "PerModel",
         Some(KernelWgslScope::Shared) => "Shared",
         None => "-",
+    }
+}
+
+fn policy_name(policy: KernelFusionPolicy) -> &'static str {
+    match policy {
+        KernelFusionPolicy::Off => "Off",
+        KernelFusionPolicy::Safe => "Safe",
+        KernelFusionPolicy::Aggressive => "Aggressive",
     }
 }
 
@@ -125,8 +148,7 @@ fn collect_model_coverage(
     let rules = model::kernel::derive_kernel_fusion_rules_for_model(spec);
 
     let mut impl_by_id = BTreeMap::<&'static str, &'static str>::new();
-    let mut dsl_program_by_id =
-        BTreeMap::<&'static str, cfd2_ir::solver::ir::KernelProgram>::new();
+    let mut dsl_program_by_id = BTreeMap::<&'static str, cfd2_ir::solver::ir::KernelProgram>::new();
 
     let mut by_id = BTreeMap::<&'static str, KernelCoverageRow>::new();
     for module in &spec.modules {
@@ -149,9 +171,9 @@ fn collect_model_coverage(
             impl_by_id.insert(generator.id.as_str(), implementation);
 
             let phase = phase_by_id.get(generator.id.as_str()).copied();
-            let eligible_for_dsl_migration =
-                implementation == "WGSL" && generator.scope == KernelWgslScope::PerModel
-                    && matches!(phase, Some(KernelPhaseId::Assembly | KernelPhaseId::Update));
+            let eligible_for_dsl_migration = implementation == "WGSL"
+                && generator.scope == KernelWgslScope::PerModel
+                && matches!(phase, Some(KernelPhaseId::Assembly | KernelPhaseId::Update));
 
             let note = if replacement_set.contains(generator.id.as_str()) {
                 "replacement kernel has explicit generator".to_string()
@@ -204,8 +226,14 @@ fn collect_model_coverage(
             continue;
         }
 
-        let lhs_impl = impl_by_id.get(lhs.id.as_str()).copied().unwrap_or("Missing");
-        let rhs_impl = impl_by_id.get(rhs.id.as_str()).copied().unwrap_or("Missing");
+        let lhs_impl = impl_by_id
+            .get(lhs.id.as_str())
+            .copied()
+            .unwrap_or("Missing");
+        let rhs_impl = impl_by_id
+            .get(rhs.id.as_str())
+            .copied()
+            .unwrap_or("Missing");
 
         let existing_rule = rules
             .iter()
@@ -291,17 +319,97 @@ fn collect_model_coverage(
         });
     }
 
+    let mut rule_reassessment = Vec::<FusionRuleRow>::new();
+    for rule in &rules {
+        let min_policy = rule
+            .guards
+            .iter()
+            .filter_map(|guard| match guard {
+                FusionGuard::MinPolicy(policy) => Some(*policy),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(KernelFusionPolicy::Safe);
+        let pattern_ids: Vec<&'static str> = rule.pattern.iter().map(|a| a.id.as_str()).collect();
+
+        let mut all_dsl = true;
+        let mut rule_programs = Vec::with_capacity(pattern_ids.len());
+        for id in &pattern_ids {
+            if impl_by_id.get(id).copied() != Some("DSL") {
+                all_dsl = false;
+                break;
+            }
+            let Some(program) = dsl_program_by_id.get(id).cloned() else {
+                all_dsl = false;
+                break;
+            };
+            rule_programs.push(program);
+        }
+
+        let (
+            safe_synthesizeable,
+            aggressive_synthesizeable,
+            safe_reason,
+            aggressive_reason,
+            blocked_by_wgsl,
+        ) = if all_dsl {
+            let (safe_ok, safe_reason) = match synthesize_fused_program(
+                format!("reassess/rule_safe/{}", rule.replacement.id.as_str()),
+                rule.name,
+                &rule_programs,
+                FusionSafetyPolicy::Safe,
+            ) {
+                Ok(_) => (true, "compatible".to_string()),
+                Err(err) => (false, compact_error(&err)),
+            };
+            let (aggr_ok, aggr_reason) = match synthesize_fused_program(
+                format!("reassess/rule_aggressive/{}", rule.replacement.id.as_str()),
+                rule.name,
+                &rule_programs,
+                FusionSafetyPolicy::Aggressive,
+            ) {
+                Ok(_) => (true, "compatible".to_string()),
+                Err(err) => (false, compact_error(&err)),
+            };
+            (safe_ok, aggr_ok, safe_reason, aggr_reason, false)
+        } else {
+            (
+                false,
+                false,
+                "requires DSL migration".to_string(),
+                "requires DSL migration".to_string(),
+                true,
+            )
+        };
+
+        rule_reassessment.push(FusionRuleRow {
+            name: rule.name,
+            replacement: rule.replacement.id.as_str(),
+            pattern: pattern_ids,
+            min_policy,
+            safe_synthesizeable,
+            aggressive_synthesizeable,
+            safe_reason,
+            aggressive_reason,
+            blocked_by_wgsl,
+        });
+    }
+    rule_reassessment.sort_by(|a, b| a.name.cmp(b.name));
+
     Ok(ModelCoverage {
         model_id: spec.id,
         rows,
         opportunities,
+        rule_reassessment,
     })
 }
 
 fn render_report(coverages: &[ModelCoverage]) -> String {
     let mut out = String::new();
     out.push_str("# Kernel Fusion Coverage Report\n\n");
-    out.push_str("Generated by `cargo run --bin fusion_coverage -- --write FUSION_COVERAGE.md`.\n\n");
+    out.push_str(
+        "Generated by `cargo run --bin fusion_coverage -- --write FUSION_COVERAGE.md`.\n\n",
+    );
     out.push_str("## Summary\n\n");
     out.push_str(
         "| Model | DSL | WGSL | Synthesized | Legacy eligible for DSL migration | Pair opportunities (safe) | Pair opportunities (aggressive-only) | Pair opportunities blocked by WGSL |\n",
@@ -347,7 +455,14 @@ fn render_report(coverages: &[ModelCoverage]) -> String {
 
         out.push_str(&format!(
             "| `{}` | {} | {} | {} | {} | {} | {} | {} |\n",
-            coverage.model_id, dsl, wgsl, synthesized, eligible, safe_pairs, aggressive_only_pairs, blocked_pairs
+            coverage.model_id,
+            dsl,
+            wgsl,
+            synthesized,
+            eligible,
+            safe_pairs,
+            aggressive_only_pairs,
+            blocked_pairs
         ));
     }
 
@@ -408,6 +523,47 @@ fn render_report(coverages: &[ModelCoverage]) -> String {
                 note
             ));
         }
+
+        out.push_str("\n#### Declared Fusion Rule Reassessment\n\n");
+        out.push_str(
+            "| Rule | Min policy | Pattern | Replacement | Safe synthesizeable | Aggressive synthesizeable | Notes |\n",
+        );
+        out.push_str("|---|---|---|---|---|---|---|\n");
+        for row in &coverage.rule_reassessment {
+            let pattern = row
+                .pattern
+                .iter()
+                .map(|id| format!("`{id}`"))
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            let safe = if row.safe_synthesizeable {
+                "yes".to_string()
+            } else {
+                format!("no ({})", row.safe_reason)
+            };
+            let aggressive = if row.aggressive_synthesizeable {
+                "yes".to_string()
+            } else {
+                format!("no ({})", row.aggressive_reason)
+            };
+            let note = if row.blocked_by_wgsl {
+                "blocked by WGSL artifact(s)"
+            } else if !row.safe_synthesizeable && row.aggressive_synthesizeable {
+                "aggressive-only synthesis path"
+            } else {
+                "-"
+            };
+            out.push_str(&format!(
+                "| `{}` | {} | {} | `{}` | {} | {} | {} |\n",
+                row.name,
+                policy_name(row.min_policy),
+                pattern,
+                row.replacement,
+                safe,
+                aggressive,
+                note
+            ));
+        }
     }
 
     out
@@ -441,7 +597,10 @@ fn main() {
 
     for spec in model::all_models() {
         let coverage = collect_model_coverage(&spec, &schemes).unwrap_or_else(|err| {
-            eprintln!("Failed to collect fusion coverage for model '{}': {err}", spec.id);
+            eprintln!(
+                "Failed to collect fusion coverage for model '{}': {err}",
+                spec.id
+            );
             std::process::exit(1);
         });
         coverages.push(coverage);
@@ -453,7 +612,10 @@ fn main() {
     if let Some(path) = write_path {
         let path = std::path::PathBuf::from(path);
         write_report(&path, &report).unwrap_or_else(|err| {
-            eprintln!("Failed to write coverage report to '{}': {err}", path.display());
+            eprintln!(
+                "Failed to write coverage report to '{}': {err}",
+                path.display()
+            );
             std::process::exit(1);
         });
         println!("Wrote {}", path.display());

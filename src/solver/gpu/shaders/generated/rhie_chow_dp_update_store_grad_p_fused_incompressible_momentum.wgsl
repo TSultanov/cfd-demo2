@@ -27,12 +27,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let base = idx * 8u;
     // synthesized by fusion rule: rhie_chow:dp_update_store_grad_p_v1
     // begin fused segment: dp_update_from_diag
-    let rho = max(constants.density, 1e-12);
+    let rho = max(constants.density, 0.000000000001);
     let dt = max(constants.dt, 0.0);
     let d_p = constants.alpha_u * dt / rho;
-    // begin fused segment: rhie_chow/store_grad_p
     state[base + 3u] = d_p;
     // end fused segment: dp_update_from_diag
+    // begin fused segment: rhie_chow/store_grad_p
     state[base + 6u] = state[base + 4u];
     state[base + 7u] = state[base + 5u];
     // end fused segment: rhie_chow/store_grad_p

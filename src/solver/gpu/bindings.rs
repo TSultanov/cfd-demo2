@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 4f4e76ce4ab2200d8032393f63c13e57142abd9055d2f2d1029c2848328cdc58
+// SourceHash: be9b2dfd8548fc4f3435f94f5b9e84f3667f7af4a18698c08f6bdb67a2cf1bd1
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -37,6 +37,8 @@ pub enum ShaderEntry {
     GeneratedPackedStateGradientsIncompressibleMomentum,
     GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum,
     GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum,
+    GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum,
+    GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum,
     GeneratedRhieChowGradPUpdateIncompressibleMomentum,
     GeneratedRhieChowStoreGradPIncompressibleMomentum,
     GenericCoupledSchurSetup,
@@ -52,10 +54,10 @@ pub enum ShaderEntry {
 }
 impl ShaderEntry {
     pub fn create_pipeline_layout(&self, device: &wgpu::Device) -> wgpu::PipelineLayout {
-        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressible => generated :: flux_module_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: GmresUpdateFused => gmres_update_fused :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: OuterConvergence => outer_convergence :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
+        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressible => generated :: flux_module_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: GmresUpdateFused => gmres_update_fused :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: OuterConvergence => outer_convergence :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
     }
     pub fn create_shader_module_embed_source(&self, device: &wgpu::Device) -> wgpu::ShaderModule {
-        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressible => { generated :: flux_module_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: GmresUpdateFused => { gmres_update_fused :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: OuterConvergence => { outer_convergence :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
+        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressible => { generated :: flux_module_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: GmresUpdateFused => { gmres_update_fused :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: OuterConvergence => { outer_convergence :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
     }
 }
 mod _root {
@@ -2550,6 +2552,10 @@ pub mod layout_asserts {
         );
     };
     const GENERATED_RHIE_CHOW_DP_UPDATE_STORE_GRAD_P_FUSED_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: size_of :: < generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: Constants > () == 48) ; } ;
+    const GENERATED_RHIE_CHOW_DP_UPDATE_STORE_GRAD_P_GRAD_P_UPDATE_CORRECT_VELOCITY_DELTA_FUSED_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Vector2 > () == 8) ; } ;
+    const GENERATED_RHIE_CHOW_DP_UPDATE_STORE_GRAD_P_GRAD_P_UPDATE_CORRECT_VELOCITY_DELTA_FUSED_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: size_of :: < generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants > () == 48) ; } ;
+    const GENERATED_RHIE_CHOW_DP_UPDATE_STORE_GRAD_P_GRAD_P_UPDATE_FUSED_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Vector2 > () == 8) ; } ;
+    const GENERATED_RHIE_CHOW_DP_UPDATE_STORE_GRAD_P_GRAD_P_UPDATE_FUSED_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: size_of :: < generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants > () == 48) ; } ;
     const GENERATED_RHIE_CHOW_GRAD_P_UPDATE_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
@@ -3365,27 +3371,27 @@ struct AmgParams {
 
 const SCALAR_STOP: u32 = 8u;
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> row_offsets: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> col_indices: array<u32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> values: array<f32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> x: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage, read_write> b: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<uniform> params: AmgParams;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage> op_row_offsets: array<u32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage> op_col_indices: array<u32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<storage> op_values: array<f32>;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<storage, read_write> coarse_vec: array<f32>;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage> scalars: array<f32>;
 
 fn amg_should_stop() -> bool {
@@ -3393,7 +3399,7 @@ fn amg_should_stop() -> bool {
     return (_e2 > 0.5f);
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn smooth_op(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var sigma: f32 = 0f;
     var diag: f32 = 1f;
@@ -3450,7 +3456,7 @@ fn smooth_op(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_w
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn prolongate_op(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var correction: f32 = 0f;
     var k_1: u32;
@@ -3494,7 +3500,7 @@ fn prolongate_op(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn restrict_residual(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
     var sum: f32 = 0f;
     var k_2: u32;
@@ -3565,7 +3571,7 @@ fn restrict_residual(@builtin(global_invocation_id) global_id_2: vec3<u32>, @bui
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn clear(@builtin(global_invocation_id) global_id_3: vec3<u32>, @builtin(num_workgroups) num_workgroups_3: vec3<u32>) {
     let _e0 = amg_should_stop();
     if _e0 {
@@ -3812,6 +3818,14 @@ pub mod bytemuck_impls {
         for generated::rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum::Constants
     {
     }
+    unsafe impl bytemuck :: Zeroable for generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Vector2 { }
+    unsafe impl bytemuck :: Pod for generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Vector2 { }
+    unsafe impl bytemuck :: Zeroable for generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants { }
+    unsafe impl bytemuck :: Pod for generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants { }
+    unsafe impl bytemuck :: Zeroable for generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Vector2 { }
+    unsafe impl bytemuck :: Pod for generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Vector2 { }
+    unsafe impl bytemuck :: Zeroable for generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants { }
+    unsafe impl bytemuck :: Pod for generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants { }
     unsafe impl bytemuck::Zeroable
         for generated::rhie_chow_grad_p_update_incompressible_momentum::Vector2
     {
@@ -4114,14 +4128,14 @@ struct PackParams {
     _pad2_: u32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> input_buf: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage, read_write> output_buf: array<f32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<uniform> params: PackParams;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn pack_component(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     let stride_x = (num_workgroups.x * 64u);
     let idx = ((global_id.y * stride_x) + global_id.x);
@@ -4136,7 +4150,7 @@ fn pack_component(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn unpack_component(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     let stride_x_1 = (num_workgroups_1.x * 64u);
     let idx_1 = ((global_id_1.y * stride_x_1) + global_id_1.x);
@@ -4719,29 +4733,29 @@ struct IterParams {
 
 const MAX_BLOCK: u32 = 16u;
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> vec_x: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage, read_write> vec_y: array<f32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage, read_write> vec_z: array<f32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage> row_offsets: array<u32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> col_indices: array<u32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> matrix_values: array<f32>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> block_inv: array<f32>;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<uniform> params: GmresParams;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage, read_write> scalars: array<f32>;
-@group(3) @binding(2) 
+@group(3) @binding(2)
 var<uniform> iter_params: IterParams;
-@group(3) @binding(3) 
+@group(3) @binding(3)
 var<storage, read_write> hessenberg: array<f32>;
-@group(3) @binding(4) 
+@group(3) @binding(4)
 var<storage> y_sol: array<f32>;
 
 fn safe_inverse(val: f32) -> f32 {
@@ -4793,7 +4807,7 @@ fn swap_rows(a_1: ptr<function, array<array<f32, 16>, 16>>, b: ptr<function, arr
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn build_block_inv(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var a: array<array<f32, 16>, 16>;
     var inv: array<array<f32, 16>, 16>;
@@ -5118,7 +5132,7 @@ fn build_block_inv(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn apply_block_precond(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var r_5: u32 = 0u;
     var sum: f32;
@@ -5432,17 +5446,17 @@ struct SolverParams {
     padding: vec2<u32>,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<uniform> params: SolverParams;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> dot_result: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> dot_a: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> dot_b: array<f32>;
 var<workgroup> scratch: array<f32, 64>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) group_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var val: f32 = 0f;
     var i: u32 = 32u;
@@ -5802,24 +5816,24 @@ struct SolverParams {
     padding: vec2<u32>,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<uniform> params: SolverParams;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> dot_result_a: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage, read_write> dot_result_b: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> dot_a0_: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<storage> dot_b0_: array<f32>;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage> dot_a1_: array<f32>;
-@group(1) @binding(5) 
+@group(1) @binding(5)
 var<storage> dot_b1_: array<f32>;
 var<workgroup> scratch_a: array<f32, 64>;
 var<workgroup> scratch_b: array<f32, 64>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) group_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var val0_: f32 = 0f;
     var val1_: f32 = 0f;
@@ -6117,14 +6131,14 @@ struct Constants {
     time_scheme: u32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage, read_write> state: array<f32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<uniform> constants: Constants;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
@@ -6330,12 +6344,12 @@ struct Constants {
     time_scheme: u32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<uniform> constants: Constants;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
@@ -6988,35 +7002,35 @@ struct LowMachParams {
     _pad0_: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(12) 
+@group(0) @binding(12)
 var<storage> face_boundary: array<u32>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<storage, read_write> fluxes: array<f32>;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<uniform> constants: Constants;
-@group(1) @binding(5) 
+@group(1) @binding(5)
 var<uniform> low_mach_params: LowMachParams;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage> bc_value: array<f32>;
 
 fn bc_neighbor_scalar(interior: f32, owner: f32, kind: u32, value: f32, d_own: f32, is_boundary: bool) -> f32 {
@@ -7033,7 +7047,7 @@ fn bc_neighbor_scalar(interior: f32, owner: f32, kind: u32, value: f32, d_own: f
     return select(interior, _e13, is_boundary);
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var neigh_idx: u32;
     var normal_vec: vec2<f32>;
@@ -9247,36 +9261,36 @@ struct Constants {
     time_scheme: u32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(0) @binding(12) 
+@group(0) @binding(12)
 var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<uniform> constants: Constants;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var grad_acc_rho_u_x: vec2<f32> = vec2<f32>(0f, 0f);
     var grad_acc_rho_u_y: vec2<f32> = vec2<f32>(0f, 0f);
@@ -9875,36 +9889,36 @@ struct Constants {
     time_scheme: u32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(0) @binding(12) 
+@group(0) @binding(12)
 var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<uniform> constants: Constants;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var grad_acc_p: vec2<f32> = vec2<f32>(0f, 0f);
     var k: u32;
@@ -10517,33 +10531,33 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(12) 
+@group(0) @binding(12)
 var<storage> face_boundary: array<u32>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<storage, read_write> fluxes: array<f32>;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<uniform> constants: Constants;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage> bc_value: array<f32>;
 
 fn bc_neighbor_scalar(interior: f32, owner: f32, kind: u32, value: f32, d_own: f32, is_boundary: bool) -> f32 {
@@ -10560,7 +10574,7 @@ fn bc_neighbor_scalar(interior: f32, owner: f32, kind: u32, value: f32, d_own: f
     return select(interior, _e13, is_boundary);
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var neigh_idx: u32;
     var normal_vec: vec2<f32>;
@@ -11081,20 +11095,20 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> row_offsets: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> col_indices: array<u32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> matrix_values: array<f32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage> x: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage, read_write> y: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<uniform> constants: Constants;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var sum: f32 = 0f;
     var i: u32;
@@ -11849,54 +11863,54 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(0) @binding(10) 
+@group(0) @binding(10)
 var<storage> cell_face_matrix_indices: array<u32>;
-@group(0) @binding(11) 
+@group(0) @binding(11)
 var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(12) 
+@group(0) @binding(12)
 var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<uniform> constants: Constants;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage> state_iter: array<f32>;
-@group(1) @binding(6) 
+@group(1) @binding(6)
 var<storage, read_write> fluxes: array<f32>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> matrix_values: array<f32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage, read_write> rhs: array<f32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<storage> scalar_row_offsets: array<u32>;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rank: u32 = 0u;
     var diag_0_: f32 = 0f;
@@ -13085,52 +13099,52 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(0) @binding(10) 
+@group(0) @binding(10)
 var<storage> cell_face_matrix_indices: array<u32>;
-@group(0) @binding(11) 
+@group(0) @binding(11)
 var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(12) 
+@group(0) @binding(12)
 var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<uniform> constants: Constants;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage> state_iter: array<f32>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> matrix_values: array<f32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage, read_write> rhs: array<f32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<storage> scalar_row_offsets: array<u32>;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rank: u32 = 0u;
     var diag_0_: f32 = 0f;
@@ -13815,52 +13829,52 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(0) @binding(10) 
+@group(0) @binding(10)
 var<storage> cell_face_matrix_indices: array<u32>;
-@group(0) @binding(11) 
+@group(0) @binding(11)
 var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(12) 
+@group(0) @binding(12)
 var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<uniform> constants: Constants;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage> state_iter: array<f32>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> matrix_values: array<f32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage, read_write> rhs: array<f32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<storage> scalar_row_offsets: array<u32>;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rank: u32 = 0u;
     var diag_0_: f32 = 0f;
@@ -14549,56 +14563,56 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(0) @binding(10) 
+@group(0) @binding(10)
 var<storage> cell_face_matrix_indices: array<u32>;
-@group(0) @binding(11) 
+@group(0) @binding(11)
 var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(12) 
+@group(0) @binding(12)
 var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<uniform> constants: Constants;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage> state_iter: array<f32>;
-@group(1) @binding(5) 
+@group(1) @binding(5)
 var<storage> grad_state: array<Vector2_>;
-@group(1) @binding(6) 
+@group(1) @binding(6)
 var<storage, read_write> fluxes: array<f32>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> matrix_values: array<f32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage, read_write> rhs: array<f32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<storage> scalar_row_offsets: array<u32>;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rank: u32 = 0u;
     var diag_0_: f32 = 0f;
@@ -15804,54 +15818,54 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(0) @binding(10) 
+@group(0) @binding(10)
 var<storage> cell_face_matrix_indices: array<u32>;
-@group(0) @binding(11) 
+@group(0) @binding(11)
 var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(12) 
+@group(0) @binding(12)
 var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<uniform> constants: Constants;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage> state_iter: array<f32>;
-@group(1) @binding(5) 
+@group(1) @binding(5)
 var<storage> grad_state: array<Vector2_>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> matrix_values: array<f32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage, read_write> rhs: array<f32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<storage> scalar_row_offsets: array<u32>;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rank: u32 = 0u;
     var diag_0_: f32 = 0f;
@@ -16510,54 +16524,54 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(0) @binding(10) 
+@group(0) @binding(10)
 var<storage> cell_face_matrix_indices: array<u32>;
-@group(0) @binding(11) 
+@group(0) @binding(11)
 var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(12) 
+@group(0) @binding(12)
 var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<uniform> constants: Constants;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage> state_iter: array<f32>;
-@group(1) @binding(5) 
+@group(1) @binding(5)
 var<storage> grad_state: array<Vector2_>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> matrix_values: array<f32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage, read_write> rhs: array<f32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<storage> scalar_row_offsets: array<u32>;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rank: u32 = 0u;
     var diag_0_: f32 = 0f;
@@ -17221,56 +17235,56 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(0) @binding(10) 
+@group(0) @binding(10)
 var<storage> cell_face_matrix_indices: array<u32>;
-@group(0) @binding(11) 
+@group(0) @binding(11)
 var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(12) 
+@group(0) @binding(12)
 var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<uniform> constants: Constants;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage> state_iter: array<f32>;
-@group(1) @binding(5) 
+@group(1) @binding(5)
 var<storage> grad_state: array<Vector2_>;
-@group(1) @binding(6) 
+@group(1) @binding(6)
 var<storage, read_write> fluxes: array<f32>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> matrix_values: array<f32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage, read_write> rhs: array<f32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<storage> scalar_row_offsets: array<u32>;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rank: u32 = 0u;
     var diag_0_: f32 = 0f;
@@ -18784,54 +18798,54 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(0) @binding(10) 
+@group(0) @binding(10)
 var<storage> cell_face_matrix_indices: array<u32>;
-@group(0) @binding(11) 
+@group(0) @binding(11)
 var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(12) 
+@group(0) @binding(12)
 var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> state_old: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> state_old_old: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<uniform> constants: Constants;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage> state_iter: array<f32>;
-@group(1) @binding(6) 
+@group(1) @binding(6)
 var<storage, read_write> fluxes: array<f32>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> matrix_values: array<f32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage, read_write> rhs: array<f32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<storage> scalar_row_offsets: array<u32>;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rank: u32 = 0u;
     var diag_0_: f32 = 0f;
@@ -20260,14 +20274,14 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<uniform> constants: Constants;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> x: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
@@ -20757,14 +20771,14 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<uniform> constants: Constants;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> x: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
@@ -21074,14 +21088,14 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<uniform> constants: Constants;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> x: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
@@ -21385,14 +21399,14 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<uniform> constants: Constants;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage, read_write> x: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
@@ -22012,36 +22026,36 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage> state: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<uniform> constants: Constants;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage, read_write> grad_state: array<Vector2_>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var grad_acc_0_: vec2<f32> = vec2<f32>(0f, 0f);
     var grad_acc_1_: vec2<f32> = vec2<f32>(0f, 0f);
@@ -22664,36 +22678,36 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage> state: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<uniform> constants: Constants;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage, read_write> grad_state: array<Vector2_>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var grad_acc_0_: vec2<f32> = vec2<f32>(0f, 0f);
     var k: u32;
@@ -23198,36 +23212,36 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage> state: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<uniform> constants: Constants;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage, read_write> grad_state: array<Vector2_>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var grad_acc_0_: vec2<f32> = vec2<f32>(0f, 0f);
     var k: u32;
@@ -23724,36 +23738,36 @@ struct Constants {
     eos_theta_ref: f32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
+@group(0) @binding(13)
 var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
+@group(0) @binding(7)
 var<storage> cell_faces: array<u32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage> state: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<uniform> constants: Constants;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<storage, read_write> grad_state: array<Vector2_>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var grad_acc_0_: vec2<f32> = vec2<f32>(0f, 0f);
     var grad_acc_1_: vec2<f32> = vec2<f32>(0f, 0f);
@@ -24074,12 +24088,12 @@ struct Constants {
     time_scheme: u32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<uniform> constants: Constants;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
@@ -24279,12 +24293,12 @@ struct Constants {
     time_scheme: u32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<uniform> constants: Constants;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
@@ -24303,6 +24317,987 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     state[(base + 6u)] = _e42;
     let _e51 = state[(base + 5u)];
     state[(base + 7u)] = _e51;
+    return;
+}
+"#;
+    }
+    pub mod rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum::BindGroup0") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub face_owner: wgpu::BufferBinding<'a>,
+            pub face_neighbor: wgpu::BufferBinding<'a>,
+            pub face_areas: wgpu::BufferBinding<'a>,
+            pub face_normals: wgpu::BufferBinding<'a>,
+            pub cell_centers: wgpu::BufferBinding<'a>,
+            pub cell_vols: wgpu::BufferBinding<'a>,
+            pub cell_face_offsets: wgpu::BufferBinding<'a>,
+            pub cell_faces: wgpu::BufferBinding<'a>,
+            pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub face_owner: wgpu::BindGroupEntry<'a>,
+            pub face_neighbor: wgpu::BindGroupEntry<'a>,
+            pub face_areas: wgpu::BindGroupEntry<'a>,
+            pub face_normals: wgpu::BindGroupEntry<'a>,
+            pub cell_centers: wgpu::BindGroupEntry<'a>,
+            pub cell_vols: wgpu::BindGroupEntry<'a>,
+            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
+            pub cell_faces: wgpu::BindGroupEntry<'a>,
+            pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    face_owner: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.face_owner),
+                    },
+                    face_neighbor: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
+                    },
+                    face_areas: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.face_areas),
+                    },
+                    face_normals: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.face_normals),
+                    },
+                    cell_centers: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
+                    },
+                    cell_vols: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
+                    },
+                    cell_face_offsets: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
+                    },
+                    cell_faces: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
+                    },
+                    face_boundary: wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
+                    },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+                [
+                    self.face_owner,
+                    self.face_neighbor,
+                    self.face_areas,
+                    self.face_normals,
+                    self.cell_centers,
+                    self.cell_vols,
+                    self.cell_face_offsets,
+                    self.cell_faces,
+                    self.face_boundary,
+                    self.face_centers,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum::BindGroup1") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum::BindGroup2") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 3],
+            ) -> [wgpu::BindGroupLayout; 3] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device . create_pipeline_layout (& wgpu :: PipelineLayoutDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum::PipelineLayout") , bind_group_layouts : & [& WgpuBindGroup0 :: get_bind_group_layout (device) , & WgpuBindGroup1 :: get_bind_group_layout (device) , & WgpuBindGroup2 :: get_bind_group_layout (device)] , push_constant_ranges : & [] , })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device . create_shader_module (wgpu :: ShaderModuleDescriptor { label : Some ("rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum.wgsl") , source : wgpu :: ShaderSource :: Wgsl (source) })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+}
+
+@group(0) @binding(0)
+var<storage, read_write> state: array<f32>;
+@group(0) @binding(1)
+var<uniform> constants: Constants;
+@group(1) @binding(0)
+var<storage> face_owner: array<u32>;
+@group(1) @binding(1)
+var<storage> face_neighbor: array<i32>;
+@group(1) @binding(2)
+var<storage> face_areas: array<f32>;
+@group(1) @binding(3)
+var<storage> face_normals: array<Vector2_>;
+@group(1) @binding(4)
+var<storage> cell_centers: array<Vector2_>;
+@group(1) @binding(5)
+var<storage> cell_vols: array<f32>;
+@group(1) @binding(6)
+var<storage> cell_face_offsets: array<u32>;
+@group(1) @binding(7)
+var<storage> cell_faces: array<u32>;
+@group(1) @binding(12)
+var<storage> face_boundary: array<u32>;
+@group(1) @binding(13)
+var<storage> face_centers: array<Vector2_>;
+@group(2) @binding(0)
+var<storage> bc_kind: array<u32>;
+@group(2) @binding(1)
+var<storage> bc_value: array<f32>;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var k2_grad_acc_p: vec2<f32> = vec2<f32>(0f, 0f);
+    var k2_k: u32;
+    var k2_normal_vec: vec2<f32>;
+    var k2_other_idx: u32;
+    var k2_other_center_vec: vec2<f32>;
+    var k2_lambda: f32;
+
+    let _e6 = constants.stride_x;
+    let idx = ((global_id.y * _e6) + global_id.x);
+    if (idx >= (arrayLength((&state)) / 8u)) {
+        return;
+    }
+    let base = (idx * 8u);
+    let _e19 = constants.density;
+    let rho = max(_e19, 0.000000000001f);
+    let _e24 = constants.dt;
+    let dt = max(_e24, 0f);
+    let _e29 = constants.alpha_u;
+    let d_p = ((_e29 * dt) / rho);
+    state[(base + 3u)] = d_p;
+    let _e44 = state[(base + 4u)];
+    state[(base + 6u)] = _e44;
+    let _e53 = state[(base + 5u)];
+    state[(base + 7u)] = _e53;
+    let k2_cell_center = cell_centers[idx];
+    let k2_cell_center_vec = vec2<f32>(k2_cell_center.x, k2_cell_center.y);
+    let k2_vol = cell_vols[idx];
+    let k2_start = cell_face_offsets[idx];
+    let k2_end = cell_face_offsets[(idx + 1u)];
+    k2_k = k2_start;
+    loop {
+        let _e72 = k2_k;
+        if (_e72 < k2_end) {
+        } else {
+            break;
+        }
+        {
+            let _e75 = k2_k;
+            let k2_face_idx = cell_faces[_e75];
+            let k2_owner = face_owner[k2_face_idx];
+            let k2_neighbor_raw = face_neighbor[k2_face_idx];
+            let k2_is_boundary = (k2_neighbor_raw == -1i);
+            let k2_unused_boundary_type = face_boundary[k2_face_idx];
+            let k2_area = face_areas[k2_face_idx];
+            let k2_face_center = face_centers[k2_face_idx];
+            let k2_face_center_vec = vec2<f32>(k2_face_center.x, k2_face_center.y);
+            let _e101 = face_normals[k2_face_idx].x;
+            let _e105 = face_normals[k2_face_idx].y;
+            k2_normal_vec = vec2<f32>(_e101, _e105);
+            let _e109 = k2_normal_vec;
+            if (dot((k2_face_center_vec - k2_cell_center_vec), _e109) < 0f) {
+                let _e113 = k2_normal_vec;
+                k2_normal_vec = -(_e113);
+            }
+            k2_other_idx = idx;
+            k2_other_center_vec = k2_face_center_vec;
+            if (k2_neighbor_raw != -1i) {
+                let k2_neighbor = u32(k2_neighbor_raw);
+                k2_other_idx = k2_neighbor;
+                if (k2_owner != idx) {
+                    k2_other_idx = k2_owner;
+                }
+                let _e122 = k2_other_idx;
+                let k2_other_center = cell_centers[_e122];
+                k2_other_center_vec = vec2<f32>(k2_other_center.x, k2_other_center.y);
+            }
+            let _e129 = k2_normal_vec;
+            let k2_d_own = abs(dot((k2_face_center_vec - k2_cell_center_vec), _e129));
+            let _e132 = k2_other_center_vec;
+            let _e134 = k2_normal_vec;
+            let k2_d_neigh = abs(dot((_e132 - k2_face_center_vec), _e134));
+            let k2_total_dist = (k2_d_own + k2_d_neigh);
+            k2_lambda = 0.5f;
+            if (k2_total_dist > 0.000001f) {
+                k2_lambda = (k2_d_neigh / k2_total_dist);
+            }
+            let _e143 = k2_lambda;
+            let k2_lambda_other = (1f - _e143);
+            let _e146 = k2_normal_vec;
+            let _e151 = state[(base + 2u)];
+            let _e152 = k2_lambda;
+            let _e154 = k2_other_idx;
+            let _e161 = state[((_e154 * 8u) + 2u)];
+            let _e166 = state[(base + 2u)];
+            let _e173 = bc_value[((k2_face_idx * 3u) + 2u)];
+            let _e180 = bc_kind[((k2_face_idx * 3u) + 2u)];
+            let _e188 = state[(base + 2u)];
+            let _e195 = bc_value[((k2_face_idx * 3u) + 2u)];
+            let _e204 = bc_kind[((k2_face_idx * 3u) + 2u)];
+            let _e214 = k2_grad_acc_p;
+            k2_grad_acc_p = (_e214 + ((_e146 * ((_e151 * _e152) + (select(_e161, select(select(_e166, _e173, (_e180 == 1u)), (_e188 + (_e195 * k2_d_own)), (_e204 == 2u)), k2_is_boundary) * k2_lambda_other))) * k2_area));
+        }
+        continuing {
+            let _e217 = k2_k;
+            k2_k = (_e217 + 1u);
+        }
+    }
+    let _e219 = k2_grad_acc_p;
+    let k2_grad_out_p = (_e219 / vec2(max(k2_vol, 0.000000000001f)));
+    state[(base + 4u)] = k2_grad_out_p.x;
+    state[(base + 5u)] = k2_grad_out_p.y;
+    let k3_d_p = state[(base + 3u)];
+    let k3_grad_px = state[(base + 4u)];
+    let k3_grad_py = state[(base + 5u)];
+    let k3_grad_old_x = state[(base + 6u)];
+    let k3_grad_old_y = state[(base + 7u)];
+    let k3_corr_x = (k3_d_p * (k3_grad_px - k3_grad_old_x));
+    let k3_corr_y = (k3_d_p * (k3_grad_py - k3_grad_old_y));
+    let _e271 = state[(base + 0u)];
+    state[(base + 0u)] = (_e271 - k3_corr_x);
+    let _e281 = state[(base + 1u)];
+    state[(base + 1u)] = (_e281 - k3_corr_y);
+    return;
+}
+"#;
+    }
+    pub mod rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum::BindGroup0") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub face_owner: wgpu::BufferBinding<'a>,
+            pub face_neighbor: wgpu::BufferBinding<'a>,
+            pub face_areas: wgpu::BufferBinding<'a>,
+            pub face_normals: wgpu::BufferBinding<'a>,
+            pub cell_centers: wgpu::BufferBinding<'a>,
+            pub cell_vols: wgpu::BufferBinding<'a>,
+            pub cell_face_offsets: wgpu::BufferBinding<'a>,
+            pub cell_faces: wgpu::BufferBinding<'a>,
+            pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub face_owner: wgpu::BindGroupEntry<'a>,
+            pub face_neighbor: wgpu::BindGroupEntry<'a>,
+            pub face_areas: wgpu::BindGroupEntry<'a>,
+            pub face_normals: wgpu::BindGroupEntry<'a>,
+            pub cell_centers: wgpu::BindGroupEntry<'a>,
+            pub cell_vols: wgpu::BindGroupEntry<'a>,
+            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
+            pub cell_faces: wgpu::BindGroupEntry<'a>,
+            pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    face_owner: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.face_owner),
+                    },
+                    face_neighbor: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
+                    },
+                    face_areas: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.face_areas),
+                    },
+                    face_normals: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.face_normals),
+                    },
+                    cell_centers: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
+                    },
+                    cell_vols: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
+                    },
+                    cell_face_offsets: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
+                    },
+                    cell_faces: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
+                    },
+                    face_boundary: wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
+                    },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+                [
+                    self.face_owner,
+                    self.face_neighbor,
+                    self.face_areas,
+                    self.face_normals,
+                    self.cell_centers,
+                    self.cell_vols,
+                    self.cell_face_offsets,
+                    self.cell_faces,
+                    self.face_boundary,
+                    self.face_centers,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum::BindGroup1") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum::BindGroup2") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 3],
+            ) -> [wgpu::BindGroupLayout; 3] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device . create_pipeline_layout (& wgpu :: PipelineLayoutDescriptor { label : Some ("GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum::PipelineLayout") , bind_group_layouts : & [& WgpuBindGroup0 :: get_bind_group_layout (device) , & WgpuBindGroup1 :: get_bind_group_layout (device) , & WgpuBindGroup2 :: get_bind_group_layout (device)] , push_constant_ranges : & [] , })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device . create_shader_module (wgpu :: ShaderModuleDescriptor { label : Some ("rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum.wgsl") , source : wgpu :: ShaderSource :: Wgsl (source) })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+}
+
+@group(0) @binding(0)
+var<storage, read_write> state: array<f32>;
+@group(0) @binding(1)
+var<uniform> constants: Constants;
+@group(1) @binding(0)
+var<storage> face_owner: array<u32>;
+@group(1) @binding(1)
+var<storage> face_neighbor: array<i32>;
+@group(1) @binding(2)
+var<storage> face_areas: array<f32>;
+@group(1) @binding(3)
+var<storage> face_normals: array<Vector2_>;
+@group(1) @binding(4)
+var<storage> cell_centers: array<Vector2_>;
+@group(1) @binding(5)
+var<storage> cell_vols: array<f32>;
+@group(1) @binding(6)
+var<storage> cell_face_offsets: array<u32>;
+@group(1) @binding(7)
+var<storage> cell_faces: array<u32>;
+@group(1) @binding(12)
+var<storage> face_boundary: array<u32>;
+@group(1) @binding(13)
+var<storage> face_centers: array<Vector2_>;
+@group(2) @binding(0)
+var<storage> bc_kind: array<u32>;
+@group(2) @binding(1)
+var<storage> bc_value: array<f32>;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var k2_grad_acc_p: vec2<f32> = vec2<f32>(0f, 0f);
+    var k2_k: u32;
+    var k2_normal_vec: vec2<f32>;
+    var k2_other_idx: u32;
+    var k2_other_center_vec: vec2<f32>;
+    var k2_lambda: f32;
+
+    let _e6 = constants.stride_x;
+    let idx = ((global_id.y * _e6) + global_id.x);
+    if (idx >= (arrayLength((&state)) / 8u)) {
+        return;
+    }
+    let base = (idx * 8u);
+    let _e19 = constants.density;
+    let rho = max(_e19, 0.000000000001f);
+    let _e24 = constants.dt;
+    let dt = max(_e24, 0f);
+    let _e29 = constants.alpha_u;
+    let d_p = ((_e29 * dt) / rho);
+    state[(base + 3u)] = d_p;
+    let _e44 = state[(base + 4u)];
+    state[(base + 6u)] = _e44;
+    let _e53 = state[(base + 5u)];
+    state[(base + 7u)] = _e53;
+    let k2_cell_center = cell_centers[idx];
+    let k2_cell_center_vec = vec2<f32>(k2_cell_center.x, k2_cell_center.y);
+    let k2_vol = cell_vols[idx];
+    let k2_start = cell_face_offsets[idx];
+    let k2_end = cell_face_offsets[(idx + 1u)];
+    k2_k = k2_start;
+    loop {
+        let _e72 = k2_k;
+        if (_e72 < k2_end) {
+        } else {
+            break;
+        }
+        {
+            let _e75 = k2_k;
+            let k2_face_idx = cell_faces[_e75];
+            let k2_owner = face_owner[k2_face_idx];
+            let k2_neighbor_raw = face_neighbor[k2_face_idx];
+            let k2_is_boundary = (k2_neighbor_raw == -1i);
+            let k2_unused_boundary_type = face_boundary[k2_face_idx];
+            let k2_area = face_areas[k2_face_idx];
+            let k2_face_center = face_centers[k2_face_idx];
+            let k2_face_center_vec = vec2<f32>(k2_face_center.x, k2_face_center.y);
+            let _e101 = face_normals[k2_face_idx].x;
+            let _e105 = face_normals[k2_face_idx].y;
+            k2_normal_vec = vec2<f32>(_e101, _e105);
+            let _e109 = k2_normal_vec;
+            if (dot((k2_face_center_vec - k2_cell_center_vec), _e109) < 0f) {
+                let _e113 = k2_normal_vec;
+                k2_normal_vec = -(_e113);
+            }
+            k2_other_idx = idx;
+            k2_other_center_vec = k2_face_center_vec;
+            if (k2_neighbor_raw != -1i) {
+                let k2_neighbor = u32(k2_neighbor_raw);
+                k2_other_idx = k2_neighbor;
+                if (k2_owner != idx) {
+                    k2_other_idx = k2_owner;
+                }
+                let _e122 = k2_other_idx;
+                let k2_other_center = cell_centers[_e122];
+                k2_other_center_vec = vec2<f32>(k2_other_center.x, k2_other_center.y);
+            }
+            let _e129 = k2_normal_vec;
+            let k2_d_own = abs(dot((k2_face_center_vec - k2_cell_center_vec), _e129));
+            let _e132 = k2_other_center_vec;
+            let _e134 = k2_normal_vec;
+            let k2_d_neigh = abs(dot((_e132 - k2_face_center_vec), _e134));
+            let k2_total_dist = (k2_d_own + k2_d_neigh);
+            k2_lambda = 0.5f;
+            if (k2_total_dist > 0.000001f) {
+                k2_lambda = (k2_d_neigh / k2_total_dist);
+            }
+            let _e143 = k2_lambda;
+            let k2_lambda_other = (1f - _e143);
+            let _e146 = k2_normal_vec;
+            let _e151 = state[(base + 2u)];
+            let _e152 = k2_lambda;
+            let _e154 = k2_other_idx;
+            let _e161 = state[((_e154 * 8u) + 2u)];
+            let _e166 = state[(base + 2u)];
+            let _e173 = bc_value[((k2_face_idx * 3u) + 2u)];
+            let _e180 = bc_kind[((k2_face_idx * 3u) + 2u)];
+            let _e188 = state[(base + 2u)];
+            let _e195 = bc_value[((k2_face_idx * 3u) + 2u)];
+            let _e204 = bc_kind[((k2_face_idx * 3u) + 2u)];
+            let _e214 = k2_grad_acc_p;
+            k2_grad_acc_p = (_e214 + ((_e146 * ((_e151 * _e152) + (select(_e161, select(select(_e166, _e173, (_e180 == 1u)), (_e188 + (_e195 * k2_d_own)), (_e204 == 2u)), k2_is_boundary) * k2_lambda_other))) * k2_area));
+        }
+        continuing {
+            let _e217 = k2_k;
+            k2_k = (_e217 + 1u);
+        }
+    }
+    let _e219 = k2_grad_acc_p;
+    let k2_grad_out_p = (_e219 / vec2(max(k2_vol, 0.000000000001f)));
+    state[(base + 4u)] = k2_grad_out_p.x;
+    state[(base + 5u)] = k2_grad_out_p.y;
     return;
 }
 "#;
@@ -24402,32 +25397,83 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub const ENTRY_MAIN: &str = "main";
         #[derive(Debug)]
         pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowGradPUpdateIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: rhie_chow_grad_p_update_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedRhieChowGradPUpdateIncompressibleMomentum::BindGroup0"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
             pub face_owner: wgpu::BufferBinding<'a>,
             pub face_neighbor: wgpu::BufferBinding<'a>,
             pub face_areas: wgpu::BufferBinding<'a>,
             pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
             pub cell_centers: wgpu::BufferBinding<'a>,
             pub cell_vols: wgpu::BufferBinding<'a>,
             pub cell_face_offsets: wgpu::BufferBinding<'a>,
             pub cell_faces: wgpu::BufferBinding<'a>,
             pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup0Entries<'a> {
+        pub struct WgpuBindGroup1Entries<'a> {
             pub face_owner: wgpu::BindGroupEntry<'a>,
             pub face_neighbor: wgpu::BindGroupEntry<'a>,
             pub face_areas: wgpu::BindGroupEntry<'a>,
             pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
             pub cell_centers: wgpu::BindGroupEntry<'a>,
             pub cell_vols: wgpu::BindGroupEntry<'a>,
             pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
             pub cell_faces: wgpu::BindGroupEntry<'a>,
             pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
         }
-        impl<'a> WgpuBindGroup0Entries<'a> {
-            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
                 Self {
                     face_owner: wgpu::BindGroupEntry {
                         binding: 0,
@@ -24444,10 +25490,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     face_normals: wgpu::BindGroupEntry {
                         binding: 3,
                         resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
                     },
                     cell_centers: wgpu::BindGroupEntry {
                         binding: 4,
@@ -24469,6 +25511,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 12,
                         resource: wgpu::BindingResource::Buffer(params.face_boundary),
                     },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
                 }
             }
             pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
@@ -24477,64 +25523,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.face_neighbor,
                     self.face_areas,
                     self.face_normals,
-                    self.face_centers,
                     self.cell_centers,
                     self.cell_vols,
                     self.cell_face_offsets,
                     self.cell_faces,
                     self.face_boundary,
+                    self.face_centers,
                 ]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0(wgpu::BindGroup);
-        impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowGradPUpdateIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedRhieChowGradPUpdateIncompressibleMomentum::BindGroup0"),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(0, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1EntriesParams<'a> {
-            pub state: wgpu::BufferBinding<'a>,
-            pub constants: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup1Entries<'a> {
-            pub state: wgpu::BindGroupEntry<'a>,
-            pub constants: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup1Entries<'a> {
-            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
-                Self {
-                    state: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.state),
-                    },
-                    constants: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.constants),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-                [self.state, self.constants]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
                 self.into_array().into_iter().collect()
@@ -24543,7 +25538,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup1(wgpu::BindGroup);
         impl WgpuBindGroup1 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowGradPUpdateIncompressibleMomentum::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: rhie_chow_grad_p_update_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowGradPUpdateIncompressibleMomentum::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -24679,36 +25674,36 @@ struct Constants {
     time_scheme: u32,
 }
 
-@group(0) @binding(0) 
-var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
-var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
-var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
-var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(4) 
-var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
-var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
-var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
-var<storage> cell_faces: array<u32>;
-@group(0) @binding(12) 
-var<storage> face_boundary: array<u32>;
-@group(1) @binding(0) 
+@group(0) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(1) @binding(1) 
+@group(0) @binding(1)
 var<uniform> constants: Constants;
-@group(2) @binding(0) 
+@group(1) @binding(0)
+var<storage> face_owner: array<u32>;
+@group(1) @binding(1)
+var<storage> face_neighbor: array<i32>;
+@group(1) @binding(2)
+var<storage> face_areas: array<f32>;
+@group(1) @binding(3)
+var<storage> face_normals: array<Vector2_>;
+@group(1) @binding(4)
+var<storage> cell_centers: array<Vector2_>;
+@group(1) @binding(5)
+var<storage> cell_vols: array<f32>;
+@group(1) @binding(6)
+var<storage> cell_face_offsets: array<u32>;
+@group(1) @binding(7)
+var<storage> cell_faces: array<u32>;
+@group(1) @binding(12)
+var<storage> face_boundary: array<u32>;
+@group(1) @binding(13)
+var<storage> face_centers: array<Vector2_>;
+@group(2) @binding(0)
 var<storage> bc_kind: array<u32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage> bc_value: array<f32>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var grad_acc_p: vec2<f32> = vec2<f32>(0f, 0f);
     var k: u32;
@@ -24719,9 +25714,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let _e6 = constants.stride_x;
     let idx = ((global_id.y * _e6) + global_id.x);
-    if (idx >= arrayLength((&cell_vols))) {
+    if (idx >= (arrayLength((&state)) / 8u)) {
         return;
     }
+    let base = (idx * 8u);
     let cell_center = cell_centers[idx];
     let cell_center_vec = vec2<f32>(cell_center.x, cell_center.y);
     let vol = cell_vols[idx];
@@ -24729,28 +25725,28 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let end = cell_face_offsets[(idx + 1u)];
     k = start;
     loop {
-        let _e31 = k;
-        if (_e31 < end) {
+        let _e35 = k;
+        if (_e35 < end) {
         } else {
             break;
         }
         {
-            let _e34 = k;
-            let face_idx = cell_faces[_e34];
+            let _e38 = k;
+            let face_idx = cell_faces[_e38];
             let owner = face_owner[face_idx];
             let neighbor_raw = face_neighbor[face_idx];
             let is_boundary = (neighbor_raw == -1i);
-            let boundary_type = face_boundary[face_idx];
+            let _unused_boundary_type = face_boundary[face_idx];
             let area = face_areas[face_idx];
             let face_center = face_centers[face_idx];
             let face_center_vec = vec2<f32>(face_center.x, face_center.y);
-            let _e60 = face_normals[face_idx].x;
-            let _e64 = face_normals[face_idx].y;
-            normal_vec = vec2<f32>(_e60, _e64);
-            let _e68 = normal_vec;
-            if (dot((face_center_vec - cell_center_vec), _e68) < 0f) {
-                let _e72 = normal_vec;
-                normal_vec = -(_e72);
+            let _e64 = face_normals[face_idx].x;
+            let _e68 = face_normals[face_idx].y;
+            normal_vec = vec2<f32>(_e64, _e68);
+            let _e72 = normal_vec;
+            if (dot((face_center_vec - cell_center_vec), _e72) < 0f) {
+                let _e76 = normal_vec;
+                normal_vec = -(_e76);
             }
             other_idx = idx;
             other_center_vec = face_center_vec;
@@ -24760,45 +25756,45 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (owner != idx) {
                     other_idx = owner;
                 }
-                let _e81 = other_idx;
-                let other_center = cell_centers[_e81];
+                let _e85 = other_idx;
+                let other_center = cell_centers[_e85];
                 other_center_vec = vec2<f32>(other_center.x, other_center.y);
             }
-            let _e88 = normal_vec;
-            let d_own = abs(dot((face_center_vec - cell_center_vec), _e88));
-            let _e91 = other_center_vec;
-            let _e93 = normal_vec;
-            let d_neigh = abs(dot((_e91 - face_center_vec), _e93));
+            let _e92 = normal_vec;
+            let d_own = abs(dot((face_center_vec - cell_center_vec), _e92));
+            let _e95 = other_center_vec;
+            let _e97 = normal_vec;
+            let d_neigh = abs(dot((_e95 - face_center_vec), _e97));
             let total_dist = (d_own + d_neigh);
             lambda = 0.5f;
             if (total_dist > 0.000001f) {
                 lambda = (d_neigh / total_dist);
             }
-            let _e102 = lambda;
-            let lambda_other = (1f - _e102);
-            let _e105 = normal_vec;
-            let _e112 = state[((idx * 8u) + 2u)];
-            let _e113 = lambda;
-            let _e115 = other_idx;
-            let _e122 = state[((_e115 * 8u) + 2u)];
-            let _e129 = state[((idx * 8u) + 2u)];
+            let _e106 = lambda;
+            let lambda_other = (1f - _e106);
+            let _e109 = normal_vec;
+            let _e114 = state[(base + 2u)];
+            let _e115 = lambda;
+            let _e117 = other_idx;
+            let _e124 = state[((_e117 * 8u) + 2u)];
+            let _e129 = state[(base + 2u)];
             let _e136 = bc_value[((face_idx * 3u) + 2u)];
             let _e143 = bc_kind[((face_idx * 3u) + 2u)];
-            let _e153 = state[((idx * 8u) + 2u)];
-            let _e160 = bc_value[((face_idx * 3u) + 2u)];
-            let _e169 = bc_kind[((face_idx * 3u) + 2u)];
-            let _e179 = grad_acc_p;
-            grad_acc_p = (_e179 + ((_e105 * ((_e112 * _e113) + (select(_e122, select(select(_e129, _e136, (_e143 == 1u)), (_e153 + (_e160 * d_own)), (_e169 == 2u)), is_boundary) * lambda_other))) * area));
+            let _e151 = state[(base + 2u)];
+            let _e158 = bc_value[((face_idx * 3u) + 2u)];
+            let _e167 = bc_kind[((face_idx * 3u) + 2u)];
+            let _e177 = grad_acc_p;
+            grad_acc_p = (_e177 + ((_e109 * ((_e114 * _e115) + (select(_e124, select(select(_e129, _e136, (_e143 == 1u)), (_e151 + (_e158 * d_own)), (_e167 == 2u)), is_boundary) * lambda_other))) * area));
         }
         continuing {
-            let _e182 = k;
-            k = (_e182 + 1u);
+            let _e180 = k;
+            k = (_e180 + 1u);
         }
     }
-    let _e184 = grad_acc_p;
-    let grad_out_p = ((_e184 * 1f) / vec2(max(vol, 0.000000000001f)));
-    state[((idx * 8u) + 4u)] = grad_out_p.x;
-    state[((idx * 8u) + 5u)] = grad_out_p.y;
+    let _e182 = grad_acc_p;
+    let grad_out_p = (_e182 / vec2(max(vol, 0.000000000001f)));
+    state[(base + 4u)] = grad_out_p.x;
+    state[(base + 5u)] = grad_out_p.y;
     return;
 }
 "#;
@@ -24988,12 +25984,12 @@ struct Constants {
     time_scheme: u32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage, read_write> state: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<uniform> constants: Constants;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
@@ -25289,19 +26285,19 @@ struct SetupParams {
     u4567_: vec4<u32>,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> scalar_row_offsets: array<u32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> matrix_values: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage, read_write> diag_u_inv: array<f32>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage, read_write> diag_p_inv: array<f32>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage, read_write> p_matrix_values: array<f32>;
-@group(0) @binding(6) 
+@group(0) @binding(6)
 var<uniform> params: SetupParams;
 
 fn u_index(i_1: u32) -> u32 {
@@ -25320,7 +26316,7 @@ fn safe_inverse(val: f32) -> f32 {
     return 0f;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn build_diag_and_pressure(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var i: u32 = 0u;
     var rank: u32 = 0u;
@@ -25702,22 +26698,22 @@ struct Params {
 const WORKGROUP_SIZE: u32 = 64u;
 const SCALAR_STOP: u32 = 8u;
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<uniform> params: Params;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> b_basis: array<f32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage, read_write> b_w: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage, read_write> b_dot_partial: array<f32>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage, read_write> b_hessenberg: array<f32>;
-@group(0) @binding(5) 
+@group(0) @binding(5)
 var<storage> scalars: array<f32>;
 var<workgroup> sdata: array<f32, 64>;
 var<workgroup> sdata_vec4_: array<vec4<f32>, 64>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn calc_dots_cgs(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) group_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var w_val: f32 = 0f;
     var i: u32 = 0u;
@@ -25847,7 +26843,7 @@ fn calc_dots_cgs(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(l
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn reduce_dots_cgs(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(local_invocation_id) local_id_1: vec3<u32>, @builtin(workgroup_id) group_id_1: vec3<u32>) {
     var sum: f32 = 0f;
     var k: u32;
@@ -25929,7 +26925,7 @@ fn reduce_dots_cgs(@builtin(global_invocation_id) global_id_1: vec3<u32>, @built
     }
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn update_w_cgs(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var correction: f32 = 0f;
     var i_1: u32 = 0u;
@@ -26354,19 +27350,19 @@ const SCALAR_RESIDUAL_EST: u32 = 11u;
 const SCALAR_TOL_REL_RHS: u32 = 12u;
 const SCALAR_TOL_ABS: u32 = 13u;
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage, read_write> hessenberg: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage, read_write> givens: array<vec2<f32>>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage, read_write> g_rhs: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage, read_write> y_sol: array<f32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<uniform> iter_params: IterParams;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage, read_write> scalars: array<f32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage, read_write> indirect_args: array<vec4<u32>>;
 
 fn h_idx(row: u32, col: u32) -> u32 {
@@ -26374,7 +27370,7 @@ fn h_idx(row: u32, col: u32) -> u32 {
     return ((col * (_e2 + 1u)) + row);
 }
 
-@compute @workgroup_size(1, 1, 1) 
+@compute @workgroup_size(1, 1, 1)
 fn update_hessenberg_givens(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var i: u32 = 0u;
     var c: f32 = 1f;
@@ -26455,7 +27451,7 @@ fn update_hessenberg_givens(@builtin(global_invocation_id) global_id: vec3<u32>)
     }
 }
 
-@compute @workgroup_size(1, 1, 1) 
+@compute @workgroup_size(1, 1, 1)
 fn solve_triangular(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
     var loop_i: u32 = 0u;
     var sum: f32;
@@ -26513,7 +27509,7 @@ fn solve_triangular(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
     return;
 }
 
-@compute @workgroup_size(1, 1, 1) 
+@compute @workgroup_size(1, 1, 1)
 fn finish_norm(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
     let norm_sq = scalars[0];
     let norm = sqrt(norm_sq);
@@ -27314,33 +28310,33 @@ struct IterParams {
 const WORKGROUP_SIZE: u32 = 64u;
 const SCALAR_STOP: u32 = 8u;
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> vec_x: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage, read_write> vec_y: array<f32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage, read_write> vec_z: array<f32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage> row_offsets: array<u32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> col_indices: array<u32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> matrix_values: array<f32>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> diag_u: array<f32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage, read_write> diag_v: array<f32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<storage, read_write> diag_p: array<f32>;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<uniform> params: GmresParams;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage, read_write> scalars: array<f32>;
-@group(3) @binding(2) 
+@group(3) @binding(2)
 var<uniform> iter_params: IterParams;
-@group(3) @binding(3) 
+@group(3) @binding(3)
 var<storage, read_write> hessenberg: array<f32>;
-@group(3) @binding(4) 
+@group(3) @binding(4)
 var<storage> y_sol: array<f32>;
 var<workgroup> partial_sums: array<f32, 64>;
 
@@ -27363,7 +28359,7 @@ fn safe_inverse(val: f32) -> f32 {
     return 0f;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn spmv(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var sum: f32 = 0f;
     var k: u32;
@@ -27401,7 +28397,7 @@ fn spmv(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgr
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn axpy(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     let _e2 = global_index(global_id_1, num_workgroups_1);
     let _e5 = params.n;
@@ -27415,7 +28411,7 @@ fn axpy(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_work
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn axpy_from_y(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
     let _e2 = global_index(global_id_2, num_workgroups_2);
     let _e5 = params.n;
@@ -27430,7 +28426,7 @@ fn axpy_from_y(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(n
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn axpby(@builtin(global_invocation_id) global_id_3: vec3<u32>, @builtin(num_workgroups) num_workgroups_3: vec3<u32>) {
     let _e2 = global_index(global_id_3, num_workgroups_3);
     let _e5 = params.n;
@@ -27445,7 +28441,7 @@ fn axpby(@builtin(global_invocation_id) global_id_3: vec3<u32>, @builtin(num_wor
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn scale(@builtin(global_invocation_id) global_id_4: vec3<u32>, @builtin(num_workgroups) num_workgroups_4: vec3<u32>) {
     let _e2 = global_index(global_id_4, num_workgroups_4);
     let _e5 = params.n;
@@ -27458,7 +28454,7 @@ fn scale(@builtin(global_invocation_id) global_id_4: vec3<u32>, @builtin(num_wor
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn scale_in_place(@builtin(global_invocation_id) global_id_5: vec3<u32>, @builtin(num_workgroups) num_workgroups_5: vec3<u32>) {
     let _e2 = global_index(global_id_5, num_workgroups_5);
     let _e5 = params.n;
@@ -27471,7 +28467,7 @@ fn scale_in_place(@builtin(global_invocation_id) global_id_5: vec3<u32>, @builti
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn copy(@builtin(global_invocation_id) global_id_6: vec3<u32>, @builtin(num_workgroups) num_workgroups_6: vec3<u32>) {
     let _e2 = global_index(global_id_6, num_workgroups_6);
     let _e5 = params.n;
@@ -27483,7 +28479,7 @@ fn copy(@builtin(global_invocation_id) global_id_6: vec3<u32>, @builtin(num_work
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn dot_product_partial(@builtin(global_invocation_id) global_id_7: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>, @builtin(workgroup_id) group_id: vec3<u32>, @builtin(num_workgroups) num_workgroups_7: vec3<u32>) {
     var local_sum: f32 = 0f;
     var stride: u32 = 32u;
@@ -27536,7 +28532,7 @@ fn dot_product_partial(@builtin(global_invocation_id) global_id_7: vec3<u32>, @b
     }
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn norm_sq_partial(@builtin(global_invocation_id) global_id_8: vec3<u32>, @builtin(local_invocation_id) local_id_1: vec3<u32>, @builtin(workgroup_id) group_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_8: vec3<u32>) {
     var local_sum_1: f32 = 0f;
     var stride_1: u32 = 32u;
@@ -27588,7 +28584,7 @@ fn norm_sq_partial(@builtin(global_invocation_id) global_id_8: vec3<u32>, @built
     }
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn orthogonalize(@builtin(global_invocation_id) global_id_9: vec3<u32>, @builtin(num_workgroups) num_workgroups_9: vec3<u32>) {
     let _e2 = global_index(global_id_9, num_workgroups_9);
     let _e5 = params.n;
@@ -27602,7 +28598,7 @@ fn orthogonalize(@builtin(global_invocation_id) global_id_9: vec3<u32>, @builtin
     return;
 }
 
-@compute @workgroup_size(1, 1, 1) 
+@compute @workgroup_size(1, 1, 1)
 fn reduce_final(@builtin(global_invocation_id) global_id_10: vec3<u32>) {
     var total_sum: f32 = 0f;
     var i: u32 = 0u;
@@ -27633,7 +28629,7 @@ fn reduce_final(@builtin(global_invocation_id) global_id_10: vec3<u32>) {
     return;
 }
 
-@compute @workgroup_size(1, 1, 1) 
+@compute @workgroup_size(1, 1, 1)
 fn reduce_final_and_finish_norm(@builtin(global_invocation_id) global_id_11: vec3<u32>) {
     var total_sum_1: f32 = 0f;
     var i_1: u32 = 0u;
@@ -27673,7 +28669,7 @@ fn reduce_final_and_finish_norm(@builtin(global_invocation_id) global_id_11: vec
     }
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn extract_diag_inv(@builtin(global_invocation_id) global_id_12: vec3<u32>, @builtin(num_workgroups) num_workgroups_10: vec3<u32>) {
     var diag: f32 = 1f;
     var k_1: u32;
@@ -27715,7 +28711,7 @@ fn extract_diag_inv(@builtin(global_invocation_id) global_id_12: vec3<u32>, @bui
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn apply_diag_inv(@builtin(global_invocation_id) global_id_13: vec3<u32>, @builtin(num_workgroups) num_workgroups_11: vec3<u32>) {
     let _e2 = global_index(global_id_13, num_workgroups_11);
     let _e5 = params.n;
@@ -28316,40 +29312,40 @@ struct IterParams {
 const WORKGROUP_SIZE: u32 = 64u;
 const SCALAR_ITERS_USED: u32 = 10u;
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> vec_x: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage, read_write> vec_y: array<f32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage, read_write> vec_z: array<f32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage> row_offsets: array<u32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> col_indices: array<u32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> matrix_values: array<f32>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> diag_u: array<f32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage, read_write> diag_v: array<f32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<storage, read_write> diag_p: array<f32>;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<uniform> params: GmresParams;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage, read_write> scalars: array<f32>;
-@group(3) @binding(2) 
+@group(3) @binding(2)
 var<uniform> iter_params: IterParams;
-@group(3) @binding(3) 
+@group(3) @binding(3)
 var<storage, read_write> hessenberg: array<f32>;
-@group(3) @binding(4) 
+@group(3) @binding(4)
 var<storage> y_sol: array<f32>;
 
 fn global_index(global_id_1: vec3<u32>, num_workgroups_1: vec3<u32>) -> u32 {
     return ((global_id_1.y * (num_workgroups_1.x * WORKGROUP_SIZE)) + global_id_1.x);
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn accumulate_solution(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var acc: f32;
     var i: u32 = 0u;
@@ -28806,30 +29802,30 @@ struct SolverParams {
 
 const WORKGROUP_SIZE: u32 = 64u;
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage, read_write> x: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage, read_write> r: array<f32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage, read_write> p: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage, read_write> v: array<f32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage> row_offsets: array<u32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> col_indices: array<u32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> matrix_values: array<f32>;
-@group(1) @binding(3) 
+@group(1) @binding(3)
 var<storage, read_write> scalars: GpuScalars;
-@group(1) @binding(4) 
+@group(1) @binding(4)
 var<uniform> params: SolverParams;
 
 fn global_index(global_id_3: vec3<u32>, num_workgroups_3: vec3<u32>) -> u32 {
     return ((global_id_3.y * (num_workgroups_3.x * WORKGROUP_SIZE)) + global_id_3.x);
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn spmv_p_v(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var sum: f32 = 0f;
     var k: u32;
@@ -28867,7 +29863,7 @@ fn spmv_p_v(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_wo
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn cg_update_x_r(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var alpha: f32 = 0f;
 
@@ -28897,7 +29893,7 @@ fn cg_update_x_r(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn cg_update_p(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
     var beta: f32 = 0f;
 
@@ -29154,16 +30150,16 @@ struct TargetDesc {
     _pad0_: array<u32, 3>,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> input: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> targets: array<TargetDesc>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage, read_write> out_bits: array<atomic<u32>>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<uniform> params: Params;
 
-@compute @workgroup_size(256, 1, 1) 
+@compute @workgroup_size(256, 1, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var t: u32 = 0u;
     var mag2_: f32;
@@ -29500,18 +30496,18 @@ struct ReduceParams {
     num_groups: u32,
 }
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage, read_write> scalars: GpuScalars;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage> dot_result_1_: array<f32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage> dot_result_2_: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<uniform> params: ReduceParams;
 var<workgroup> scratch1_: array<f32, 64>;
 var<workgroup> scratch2_: array<f32, 64>;
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn reduce_rho_new_r_r(@builtin(local_invocation_id) local_id: vec3<u32>) {
     var sum1_: f32 = 0f;
     var sum2_: f32 = 0f;
@@ -29583,7 +30579,7 @@ fn reduce_rho_new_r_r(@builtin(local_invocation_id) local_id: vec3<u32>) {
     }
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn reduce_r0_v(@builtin(local_invocation_id) local_id_1: vec3<u32>) {
     var sum: f32 = 0f;
     var i_2: u32;
@@ -29642,7 +30638,7 @@ fn reduce_r0_v(@builtin(local_invocation_id) local_id_1: vec3<u32>) {
     }
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn init_cg_scalars(@builtin(local_invocation_id) local_id_2: vec3<u32>) {
     var sum_1: f32 = 0f;
     var i_4: u32;
@@ -30304,35 +31300,35 @@ struct PrecondParams {
 
 const WORKGROUP_SIZE: u32 = 64u;
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> r_in: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage, read_write> z_out: array<f32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage, read_write> temp_p: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage, read_write> p_sol: array<f32>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage, read_write> p_prev: array<f32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage> row_offsets: array<u32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> col_indices: array<u32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> matrix_values: array<f32>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> diag_u_inv: array<f32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage, read_write> diag_v_inv: array<f32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<storage, read_write> diag_p_inv: array<f32>;
-@group(2) @binding(3) 
+@group(2) @binding(3)
 var<uniform> params: PrecondParams;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<storage> p_row_offsets: array<u32>;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage> p_col_indices: array<u32>;
-@group(3) @binding(2) 
+@group(3) @binding(2)
 var<storage> p_matrix_values: array<f32>;
 
 fn safe_inverse(val: f32) -> f32 {
@@ -30346,7 +31342,7 @@ fn global_cell(global_id_3: vec3<u32>, num_workgroups_3: vec3<u32>) -> u32 {
     return ((global_id_3.y * (num_workgroups_3.x * WORKGROUP_SIZE)) + global_id_3.x);
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var sigma: f32 = 0f;
     var k: u32;
@@ -30392,7 +31388,7 @@ fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn correct_velocity(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var correction_u: f32 = 0f;
     var k_1: u32;
@@ -30482,7 +31478,7 @@ fn correct_velocity(@builtin(global_invocation_id) global_id_1: vec3<u32>, @buil
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn predict_and_form_schur(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
     var c: u32 = 0u;
     var rhs_p: f32;
@@ -31170,33 +32166,33 @@ struct PrecondParams {
 
 const WORKGROUP_SIZE: u32 = 64u;
 
-@group(0) @binding(0) 
+@group(0) @binding(0)
 var<storage> r_in: array<f32>;
-@group(0) @binding(1) 
+@group(0) @binding(1)
 var<storage, read_write> z_out: array<f32>;
-@group(0) @binding(2) 
+@group(0) @binding(2)
 var<storage, read_write> temp_p: array<f32>;
-@group(0) @binding(3) 
+@group(0) @binding(3)
 var<storage, read_write> p_sol: array<f32>;
-@group(0) @binding(4) 
+@group(0) @binding(4)
 var<storage, read_write> p_prev: array<f32>;
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage> row_offsets: array<u32>;
-@group(1) @binding(1) 
+@group(1) @binding(1)
 var<storage> col_indices: array<u32>;
-@group(1) @binding(2) 
+@group(1) @binding(2)
 var<storage> matrix_values: array<f32>;
-@group(2) @binding(0) 
+@group(2) @binding(0)
 var<storage, read_write> diag_u_inv: array<f32>;
-@group(2) @binding(1) 
+@group(2) @binding(1)
 var<storage, read_write> diag_p_inv: array<f32>;
-@group(2) @binding(2) 
+@group(2) @binding(2)
 var<uniform> params: PrecondParams;
-@group(3) @binding(0) 
+@group(3) @binding(0)
 var<storage> p_row_offsets: array<u32>;
-@group(3) @binding(1) 
+@group(3) @binding(1)
 var<storage> p_col_indices: array<u32>;
-@group(3) @binding(2) 
+@group(3) @binding(2)
 var<storage> p_matrix_values: array<f32>;
 
 fn safe_inverse(val: f32) -> f32 {
@@ -31219,7 +32215,7 @@ fn global_cell(global_id_3: vec3<u32>, num_workgroups_3: vec3<u32>) -> u32 {
     return ((global_id_3.y * (num_workgroups_3.x * WORKGROUP_SIZE)) + global_id_3.x);
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     var sigma: f32 = 0f;
     var k: u32;
@@ -31265,7 +32261,7 @@ fn relax_pressure(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn correct_velocity(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var i: u32 = 0u;
     var correction_u: f32;
@@ -31337,7 +32333,7 @@ fn correct_velocity(@builtin(global_invocation_id) global_id_1: vec3<u32>, @buil
     return;
 }
 
-@compute @workgroup_size(64, 1, 1) 
+@compute @workgroup_size(64, 1, 1)
 fn predict_and_form_schur(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
     var c: u32 = 0u;
     var i_1: u32 = 0u;

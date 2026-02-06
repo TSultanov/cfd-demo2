@@ -1059,7 +1059,7 @@ mod tests {
     }
 
     #[test]
-    fn recipe_aggressive_matches_safe_for_current_rhie_chow_schedule() {
+    fn recipe_aggressive_applies_extended_rhie_chow_fusion_rule() {
         let mut safe_model = incompressible_momentum_model();
         let mut safe_solver = safe_model
             .linear_solver
@@ -1091,14 +1091,43 @@ mod tests {
         )
         .expect("aggressive recipe");
 
-        assert_eq!(safe_recipe.applied_fusions, aggressive_recipe.applied_fusions);
-        let safe_kernel_ids: Vec<&str> = safe_recipe.kernels.iter().map(|k| k.id.as_str()).collect();
-        let aggressive_kernel_ids: Vec<&str> = aggressive_recipe
+        assert!(
+            safe_recipe
+                .applied_fusions
+                .contains(&"rhie_chow:dp_update_store_grad_p_v1"),
+            "safe recipe should keep the strict two-kernel rhie-chow fusion"
+        );
+        assert!(
+            aggressive_recipe.applied_fusions.contains(
+                &"rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1"
+            ),
+            "aggressive recipe should apply full rhie-chow fusion"
+        );
+        assert!(
+            aggressive_recipe.applied_fusions.len() >= safe_recipe.applied_fusions.len(),
+            "aggressive policy should not apply fewer fusion rules than safe"
+        );
+
+        assert!(aggressive_recipe.kernels.iter().any(|k| {
+            k.id.as_str()
+                == "rhie_chow/dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused"
+        }));
+        assert!(!aggressive_recipe
             .kernels
             .iter()
-            .map(|k| k.id.as_str())
-            .collect();
-        assert_eq!(safe_kernel_ids, aggressive_kernel_ids);
+            .any(|k| k.id.as_str() == "dp_update_from_diag"));
+        assert!(!aggressive_recipe
+            .kernels
+            .iter()
+            .any(|k| k.id.as_str() == "rhie_chow/store_grad_p"));
+        assert!(!aggressive_recipe
+            .kernels
+            .iter()
+            .any(|k| k.id.as_str() == "rhie_chow/grad_p_update"));
+        assert!(!aggressive_recipe
+            .kernels
+            .iter()
+            .any(|k| k.id.as_str() == "rhie_chow/correct_velocity_delta"));
     }
 
     #[test]

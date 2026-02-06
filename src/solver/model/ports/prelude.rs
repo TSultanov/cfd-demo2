@@ -25,9 +25,7 @@
 pub use cfd2_macros::{ModulePorts, PortSet};
 
 // Core port types and field kinds
-pub use super::{
-    BufferPort, FieldPort, FieldKind, ParamPort, Scalar, Vector2, Vector3,
-};
+pub use super::{BufferPort, FieldKind, FieldPort, ParamPort, Scalar, Vector2, Vector3};
 
 // Access modes for buffer ports
 pub use super::{ReadOnly, ReadWrite};

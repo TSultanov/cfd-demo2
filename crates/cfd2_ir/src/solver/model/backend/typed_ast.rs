@@ -937,8 +937,7 @@ mod tests {
         // Untyped construction
         let p_untyped = FieldRef::new("p", FieldKind::Scalar, si::PRESSURE);
 
-        let eqn_untyped =
-            crate::solver::model::backend::ast::fvm::ddt(p_untyped).eqn(p_untyped);
+        let eqn_untyped = crate::solver::model::backend::ast::fvm::ddt(p_untyped).eqn(p_untyped);
 
         let mut untyped_system = EquationSystem::new();
         untyped_system.add_equation(eqn_untyped);

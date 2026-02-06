@@ -1,9 +1,11 @@
-use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
 use super::generic_coupled as generic_coupled_program;
 use super::generic_coupled::GenericCoupledProgramResources;
+use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 use crate::solver::gpu::program::plan::{GpuProgramPlan, ProgramOpRegistry};
-use crate::solver::gpu::program::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanStepStats};
+use crate::solver::gpu::program::plan_instance::{
+    PlanFuture, PlanLinearSystemDebug, PlanStepStats,
+};
 use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
 use crate::solver::gpu::structs::LinearSolverStats;
 

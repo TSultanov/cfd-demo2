@@ -294,8 +294,15 @@ fn run_low_mach_equivalence_case(case_name: &str, mesh: &Mesh, y_sample: f64) {
     // Compare a 1D cut and pressure oscillation metrics; this is primarily a regression
     // guard against low-Mach compressible divergence/unphysical waves.
     let band = 0.35 * h_min;
-    let (_x, ux_incomp, ux_comp, p_incomp_c, p_comp_c) =
-        sample_line(mesh, y_sample, band, &u_incomp, &p_incomp, &u_comp, &p_pert_comp);
+    let (_x, ux_incomp, ux_comp, p_incomp_c, p_comp_c) = sample_line(
+        mesh,
+        y_sample,
+        band,
+        &u_incomp,
+        &p_incomp,
+        &u_comp,
+        &p_pert_comp,
+    );
 
     let dyn_pressure = 0.5 * density as f64 * (u_in as f64).powi(2);
     let ux_l2_over_uin = rms_diff(&ux_incomp, &ux_comp) / (u_in as f64).max(1e-9);

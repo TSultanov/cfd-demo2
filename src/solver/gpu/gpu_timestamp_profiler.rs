@@ -184,7 +184,10 @@ impl GpuTimestampProfiler {
 
         let query_idx = self.current_query;
         if query_idx >= self.config.max_queries {
-            log::warn!("GPU timestamp query limit exceeded, dropping query for {}", label);
+            log::warn!(
+                "GPU timestamp query limit exceeded, dropping query for {}",
+                label
+            );
             return None;
         }
 
@@ -205,7 +208,7 @@ impl GpuTimestampProfiler {
         category: KernelCategory,
     ) -> Option<u32> {
         let start_idx = self.write_timestamp(encoder, label, category)?;
-        
+
         self.queries.push(TimestampQuery {
             start_idx,
             end_idx: 0, // Will be set by end_kernel
@@ -257,19 +260,14 @@ impl GpuTimestampProfiler {
                 label: Some("Timestamp Resolve"),
             });
 
-        encoder.resolve_query_set(
-            query_set,
-            0..self.current_query,
-            resolve_buffer,
-            0,
-        );
+        encoder.resolve_query_set(query_set, 0..self.current_query, resolve_buffer, 0);
 
         let submission_index = context.queue.submit(Some(encoder.finish()));
 
         // Map and read results
         let slice = resolve_buffer.slice(..(self.current_query * 8) as u64);
         let (tx, rx) = std::sync::mpsc::channel();
-        
+
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
@@ -338,10 +336,10 @@ impl GpuTimestampProfiler {
         println!("Time by Category:");
         println!("{:<25} {:>12} {:>10}", "Category", "Time", "% of Total");
         println!("{}", "-".repeat(50));
-        
+
         let mut categories: Vec<_> = results.by_category.iter().collect();
         categories.sort_by(|a, b| b.1.cmp(a.1));
-        
+
         for (category, duration) in categories {
             let pct = if results.total_gpu_time.as_nanos() > 0 {
                 (duration.as_nanos() as f64 / results.total_gpu_time.as_nanos() as f64) * 100.0
@@ -355,17 +353,20 @@ impl GpuTimestampProfiler {
         println!("\nTop 20 Individual Kernels:");
         println!("{:<40} {:>12} {:>10}", "Kernel", "Time", "% of Total");
         println!("{}", "-".repeat(65));
-        
+
         let mut kernels = results.kernel_times.clone();
         kernels.sort_by(|a, b| b.duration.cmp(&a.duration));
-        
+
         for kernel in kernels.iter().take(20) {
             let label = if kernel.label.len() > 38 {
                 format!("{}..", &kernel.label[..38])
             } else {
                 kernel.label.clone()
             };
-            println!("{:<40} {:>12?} {:>9.1}%", label, kernel.duration, kernel.percentage);
+            println!(
+                "{:<40} {:>12?} {:>9.1}%",
+                label, kernel.duration, kernel.percentage
+            );
         }
 
         println!();

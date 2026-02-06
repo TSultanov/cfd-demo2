@@ -1,9 +1,9 @@
+use crate::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel};
 use crate::solver::gpu::program::plan_instance::PlanParamValue;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::GpuUnifiedSolver;
-use crate::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel};
-use crate::solver::model::linear_solver::FgmresSolutionUpdateStrategy;
 use crate::solver::model::eos::EosSpec;
+use crate::solver::model::linear_solver::FgmresSolutionUpdateStrategy;
 use crate::solver::model::ports::PortRegistry;
 use std::future::Future;
 use std::pin::Pin;
@@ -91,7 +91,11 @@ impl CompressibleConservedStateOffsets {
         let (u_x, u_y) = registry
             .get_field_entry_by_name(FIELD_U_LOWER)
             .filter(|e| e.component_count() == 2)
-            .or_else(|| registry.get_field_entry_by_name(FIELD_U_UPPER).filter(|e| e.component_count() == 2))
+            .or_else(|| {
+                registry
+                    .get_field_entry_by_name(FIELD_U_UPPER)
+                    .filter(|e| e.component_count() == 2)
+            })
             .map(|e| {
                 let base = e.offset() as usize;
                 (Some(base), Some(base + 1))

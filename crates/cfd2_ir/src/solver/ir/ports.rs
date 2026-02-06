@@ -9,7 +9,8 @@ use crate::solver::units::UnitDim;
 /// This constant represents a dimension that will not be validated against
 /// the actual field unit in StateLayout. Use this for dynamic-dimension fields
 /// where the unit is not known at compile time.
-pub const ANY_DIMENSION: UnitDim = UnitDim::from_rational((1000, 1), (1000, 1), (1000, 1), (1000, 1));
+pub const ANY_DIMENSION: UnitDim =
+    UnitDim::from_rational((1000, 1), (1000, 1), (1000, 1), (1000, 1));
 
 /// Check if a unit dimension is the "any dimension" sentinel.
 pub fn is_any_dimension(unit: UnitDim) -> bool {

@@ -946,10 +946,15 @@ fn contract_solver_gpu_has_no_low_mach_binding_aliases() {
 fn contract_low_mach_named_params_are_consumed_by_generated_kernels() {
     // Low-Mach params are part of the model-declared named-parameter interface; ensure at least
     // one generated kernel consumes the corresponding uniform buffer so the knob is not a no-op.
-    let shader_path = repo_root().join("src/solver/gpu/shaders/generated/flux_module_compressible.wgsl");
+    let shader_path =
+        repo_root().join("src/solver/gpu/shaders/generated/flux_module_compressible.wgsl");
     let shader_src = read_utf8(&shader_path);
 
-    assert_contains(&shader_src, "struct LowMachParams", "flux_module_compressible.wgsl");
+    assert_contains(
+        &shader_src,
+        "struct LowMachParams",
+        "flux_module_compressible.wgsl",
+    );
     assert_contains(
         &shader_src,
         "var<uniform> low_mach_params",
@@ -966,7 +971,11 @@ fn contract_compressible_flux_module_reflects_velocity_on_walls() {
         repo_root().join("src/solver/gpu/shaders/generated/flux_module_compressible.wgsl");
     let shader_src = read_utf8(&shader_path);
 
-    assert_contains(&shader_src, "boundary_type == 4u", "flux_module_compressible.wgsl");
+    assert_contains(
+        &shader_src,
+        "boundary_type == 4u",
+        "flux_module_compressible.wgsl",
+    );
 }
 
 #[test]

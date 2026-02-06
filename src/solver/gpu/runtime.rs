@@ -1,5 +1,5 @@
-use crate::solver::gpu::init::linear_solver;
 use crate::solver::gpu::csr::build_block_csr;
+use crate::solver::gpu::init::linear_solver;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::PortSpace;
 use crate::solver::gpu::modules::scalar_cg::ScalarCgModule;
@@ -39,8 +39,11 @@ impl GpuCsrRuntime {
             .checked_mul(unknowns_per_cell)
             .expect("num_dofs overflow");
 
-        let (row_offsets, col_indices) =
-            build_block_csr(&common.mesh.scalar_row_offsets, &common.mesh.scalar_col_indices, unknowns_per_cell);
+        let (row_offsets, col_indices) = build_block_csr(
+            &common.mesh.scalar_row_offsets,
+            &common.mesh.scalar_col_indices,
+            unknowns_per_cell,
+        );
 
         let cg = linear_solver::init_scalar_cg(
             &common.context.device,

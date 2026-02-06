@@ -1,11 +1,11 @@
 use crate::solver::gpu::context::GpuContext;
+use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::program::plan::{
     ModelGpuProgramSpec, ProgramF32Fn, ProgramInitRun, ProgramLinearDebugProvider,
-    ProgramOpDispatcher, ProgramOpRegistry, ProgramParamHandler, ProgramResources, ProgramSetBcValueFn,
-    ProgramSetNamedParamFallback, ProgramSpec, ProgramStateBufferFn,
+    ProgramOpDispatcher, ProgramOpRegistry, ProgramParamHandler, ProgramResources,
+    ProgramSetBcValueFn, ProgramSetNamedParamFallback, ProgramSpec, ProgramStateBufferFn,
     ProgramStepStatsFn, ProgramStepWithStatsFn, ProgramU32Fn, ProgramWriteStateFn,
 };
-use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::model::ModelSpec;
 use std::collections::HashMap;
 use std::sync::Arc;

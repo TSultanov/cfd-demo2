@@ -420,12 +420,5 @@ pub fn generate_structured_trapezoid_mesh(
         }
     }
 
-    generate_structured_mesh_from_vertex_grid(
-        nx,
-        ny,
-        vx,
-        vy,
-        |_i, _j| true,
-        boundaries,
-    )
+    generate_structured_mesh_from_vertex_grid(nx, ny, vx, vy, |_i, _j| true, boundaries)
 }

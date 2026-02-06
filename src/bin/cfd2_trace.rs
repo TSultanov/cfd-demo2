@@ -1,12 +1,12 @@
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
+use cfd2::solver::model::helpers::SolverCompressibleIdealGasExt;
 use cfd2::solver::model::{all_models, compressible_model_with_eos};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
-use cfd2::solver::model::helpers::SolverCompressibleIdealGasExt;
 use cfd2::trace as tracefmt;
 use std::collections::BTreeMap;
 use std::io::BufRead;
 use std::time::Instant;
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
 
 fn usage() -> &'static str {
     "Usage:
@@ -77,7 +77,8 @@ fn load_trace(path: &str) -> Result<LoadedTrace, String> {
         }
     }
 
-    let header = header.ok_or_else(|| format!("trace file '{}' is missing a Header event", path))?;
+    let header =
+        header.ok_or_else(|| format!("trace file '{}' is missing a Header event", path))?;
 
     let baseline_step = step_meta
         .first()
@@ -132,10 +133,7 @@ impl StatsAgg {
     }
 }
 
-fn build_config(
-    trace: &LoadedTrace,
-    model: &cfd2::solver::model::ModelSpec,
-) -> SolverConfig {
+fn build_config(trace: &LoadedTrace, model: &cfd2::solver::model::ModelSpec) -> SolverConfig {
     let stepping = match trace.header.case.stepping_mode {
         tracefmt::TraceSteppingMode::Explicit => SteppingMode::Explicit,
         tracefmt::TraceSteppingMode::Implicit => SteppingMode::Implicit { outer_iters: 1 },
@@ -167,7 +165,12 @@ fn cmd_info(path: &str) -> Result<(), String> {
     println!("  created_unix_ms: {}", trace.header.created_unix_ms);
     println!("  model_id: {}", trace.header.case.model_id);
     println!("  geometry: {:?}", trace.header.case.geometry);
-    println!("  mesh: cells={} faces={} vertices={}", mesh.num_cells(), mesh.face_v1.len(), mesh.vx.len());
+    println!(
+        "  mesh: cells={} faces={} vertices={}",
+        mesh.num_cells(),
+        mesh.face_v1.len(),
+        mesh.vx.len()
+    );
     println!(
         "  steps: {} (baseline step={})",
         trace.step_meta.len(),
@@ -177,10 +180,7 @@ fn cmd_info(path: &str) -> Result<(), String> {
         if let Some(total_ms) = trace.init_total_ms {
             println!("  init_total_ms: {:.3}", total_ms);
         }
-        println!(
-            "  init_events: {}",
-            trace.init_events.len(),
-        );
+        println!("  init_events: {}", trace.init_events.len(),);
 
         let mut slowest: Vec<&tracefmt::TraceInitEvent> = trace
             .init_events
@@ -246,10 +246,13 @@ fn cmd_info(path: &str) -> Result<(), String> {
             }
 
             for timing in &step.graph {
-                *graph_label_total_s.entry(timing.label.clone()).or_insert(0.0) += timing.seconds;
+                *graph_label_total_s
+                    .entry(timing.label.clone())
+                    .or_insert(0.0) += timing.seconds;
                 if let Some(nodes) = &timing.nodes {
                     for node in nodes {
-                        *graph_node_total_s.entry(node.label.clone()).or_insert(0.0) += node.seconds;
+                        *graph_node_total_s.entry(node.label.clone()).or_insert(0.0) +=
+                            node.seconds;
                     }
                 }
             }
@@ -417,9 +420,7 @@ fn cmd_replay(path: &str, opts: ReplayOpts) -> Result<(), String> {
     let n_cells = mesh.num_cells();
     let _ = solver.write_state_f32(&vec![0.0f32; n_cells * stride]);
 
-    trace.header
-        .initial_params
-        .apply_to_solver(&mut solver);
+    trace.header.initial_params.apply_to_solver(&mut solver);
 
     if trace.header.case.model_id == "compressible" {
         let eos: cfd2::solver::model::EosSpec = trace.header.initial_params.eos.into();
@@ -708,12 +709,10 @@ fn main() {
             Ok(opts) => cmd_init(opts),
             Err(err) => Err(err),
         },
-        "replay" => {
-            match parse_replay_opts(&args[2..]) {
-                Ok((path, opts)) => cmd_replay(&path, opts),
-                Err(err) => Err(err),
-            }
-        }
+        "replay" => match parse_replay_opts(&args[2..]) {
+            Ok((path, opts)) => cmd_replay(&path, opts),
+            Err(err) => Err(err),
+        },
         _ => Err(format!("unknown command '{}'\n\n{}", args[1], usage())),
     };
 

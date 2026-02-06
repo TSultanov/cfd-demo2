@@ -82,4 +82,3 @@ impl Fluid {
         self.eos.sound_speed(self.density)
     }
 }
-

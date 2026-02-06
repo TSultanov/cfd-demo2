@@ -89,8 +89,5 @@ pub fn infer_unique_momentum_pressure_coupling_referencing_dp(
     model: &ModelSpec,
     dp_field_name: &str,
 ) -> Result<MomentumPressureCoupling, String> {
-    infer_unique_momentum_pressure_coupling_referencing_dp_system(
-        &model.system,
-        dp_field_name,
-    )
+    infer_unique_momentum_pressure_coupling_referencing_dp_system(&model.system, dp_field_name)
 }

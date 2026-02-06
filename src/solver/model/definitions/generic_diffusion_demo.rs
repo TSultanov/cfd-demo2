@@ -3,9 +3,7 @@ use crate::solver::model::backend::ast::{vol_scalar_dim, EquationSystem};
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::backend::typed_ast::{typed_fvm, Scalar, TypedCoeff, TypedFieldRef};
 // si module no longer needed for boundary conditions - using type-level dimensions
-use cfd2_ir::solver::dimensions::{
-    Dimensionless, DivDim, Area, Length, Time, Volume,
-};
+use cfd2_ir::solver::dimensions::{Area, Dimensionless, DivDim, Length, Time, Volume};
 // Type alias for dimensionless gradient (used for boundary conditions)
 type DimensionlessGradient = DivDim<Dimensionless, Length>;
 

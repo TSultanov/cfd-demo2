@@ -72,9 +72,6 @@ fn compressible_dual_time_preserves_uniform_state() {
         );
     }
     for (a, b) in p.iter().zip(p0.iter()) {
-        assert!(
-            (a - b).abs() < tol_p,
-            "p drifted (a={a:.6e}, b={b:.6e})"
-        );
+        assert!((a - b).abs() < tol_p, "p drifted (a={a:.6e}, b={b:.6e})");
     }
 }

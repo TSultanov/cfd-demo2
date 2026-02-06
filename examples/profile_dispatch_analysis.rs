@@ -8,8 +8,8 @@
 use cfd2::solver::gpu::structs::PreconditionerType;
 use cfd2::solver::gpu::unified_solver::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
-use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::model::helpers::SolverRuntimeParamsExt;
+use cfd2::solver::model::incompressible_momentum_model;
 use nalgebra::Vector2;
 use std::time::{Duration, Instant};
 
@@ -63,11 +63,14 @@ fn analyze_step_timing() {
         let (mut solver, num_cells) = setup_solver(cell_size, PreconditionerType::Jacobi);
         let num_faces = num_cells * 2; // Approximation for structured grid
 
-        println!("--- Cell size: {:.3} ({} cells, {} faces) ---", cell_size, num_cells, num_faces);
+        println!(
+            "--- Cell size: {:.3} ({} cells, {} faces) ---",
+            cell_size, num_cells, num_faces
+        );
 
         // Collect timing samples
         let mut samples: Vec<Duration> = Vec::with_capacity(steps_per_test);
-        
+
         for _ in 0..steps_per_test {
             let start = Instant::now();
             solver.step();
@@ -80,15 +83,17 @@ fn analyze_step_timing() {
         let max = samples[samples.len() - 1];
         let median = samples[samples.len() / 2];
         let mean: Duration = samples.iter().sum::<Duration>() / samples.len() as u32;
-        
+
         // Calculate standard deviation
         let mean_secs = mean.as_secs_f64();
-        let variance: f64 = samples.iter()
+        let variance: f64 = samples
+            .iter()
             .map(|d| {
                 let diff = d.as_secs_f64() - mean_secs;
                 diff * diff
             })
-            .sum::<f64>() / samples.len() as f64;
+            .sum::<f64>()
+            / samples.len() as f64;
         let std_dev = Duration::from_secs_f64(variance.sqrt());
 
         // Throughput calculations
@@ -128,7 +133,7 @@ fn compare_preconditioners() {
 
         // Collect timing samples
         let mut samples: Vec<Duration> = Vec::with_capacity(steps_per_test);
-        
+
         for _ in 0..steps_per_test {
             let start = Instant::now();
             solver.step();
@@ -156,8 +161,10 @@ fn analyze_scaling() {
     let cell_sizes = [0.08, 0.04, 0.02, 0.01, 0.005];
     let steps_per_test = 30;
 
-    println!("{:>10} {:>12} {:>15} {:>15} {:>15}", 
-        "CellSize", "Cells", "Time/Step(ms)", "MCells/s", "Scaling");
+    println!(
+        "{:>10} {:>12} {:>15} {:>15} {:>15}",
+        "CellSize", "Cells", "Time/Step(ms)", "MCells/s", "Scaling"
+    );
     println!("{}", "-".repeat(75));
 
     let mut baseline_throughput: Option<f64> = None;
@@ -177,7 +184,7 @@ fn analyze_scaling() {
         }
         let total = start.elapsed();
         let mean = total / steps_per_test as u32;
-        
+
         let cells_per_sec = num_cells as f64 / mean.as_secs_f64();
         let time_ms = mean.as_secs_f64() * 1000.0;
 
@@ -189,8 +196,14 @@ fn analyze_scaling() {
             100.0
         };
 
-        println!("{:>10.4} {:>12} {:>15.3} {:>15.2} {:>14.1}%", 
-            cell_size, num_cells, time_ms, cells_per_sec / 1e6, scaling);
+        println!(
+            "{:>10.4} {:>12} {:>15.3} {:>15.2} {:>14.1}%",
+            cell_size,
+            num_cells,
+            time_ms,
+            cells_per_sec / 1e6,
+            scaling
+        );
     }
     println!();
 }
@@ -203,8 +216,10 @@ fn analyze_memory_usage() {
 
     let cell_sizes = [0.04, 0.02, 0.01];
 
-    println!("{:>10} {:>12} {:>12} {:>15} {:>15}", 
-        "CellSize", "Cells", "Faces", "State (MB)", "Total Est (MB)");
+    println!(
+        "{:>10} {:>12} {:>12} {:>15} {:>15}",
+        "CellSize", "Cells", "Faces", "State (MB)", "Total Est (MB)"
+    );
     println!("{}", "-".repeat(70));
 
     for &cell_size in &cell_sizes {
@@ -214,18 +229,19 @@ fn analyze_memory_usage() {
         // Rough estimates based on typical solver structure
         // State: 4 fields × 4 bytes × num_cells (U, V, P, and working buffers)
         let state_bytes = num_cells * 4 * 4;
-        
+
         // Faces: fluxes, ap coefficients, etc (rough estimate)
         let face_bytes = num_faces * 4 * 4;
-        
+
         // Linear solver working memory (estimate 10x state for FGMRES)
         let solver_bytes = state_bytes * 10;
-        
+
         let total_bytes = state_bytes + face_bytes + solver_bytes;
 
-        println!("{:>10.3} {:>12} {:>12} {:>15.2} {:>15.2}", 
-            cell_size, 
-            num_cells, 
+        println!(
+            "{:>10.3} {:>12} {:>12} {:>15.2} {:>15.2}",
+            cell_size,
+            num_cells,
             num_faces,
             state_bytes as f64 / 1e6,
             total_bytes as f64 / 1e6

@@ -325,7 +325,12 @@ fn save_scalar_image_with_scale(params: ScalarImageParams<'_>) {
     let mut sum = vec![0.0; params.width * params.height];
     let mut count = vec![0u32; params.width * params.height];
 
-    for (cell, &value) in params.values.iter().enumerate().take(params.mesh.num_cells()) {
+    for (cell, &value) in params
+        .values
+        .iter()
+        .enumerate()
+        .take(params.mesh.num_cells())
+    {
         let poly = cell_polygon(params.mesh, cell);
         if poly.len() < 3 {
             continue;

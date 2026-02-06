@@ -84,7 +84,10 @@ fn main() {
             }
         }
 
-        println!("Found {} bad connections in boundary cells", bad_connections);
+        println!(
+            "Found {} bad connections in boundary cells",
+            bad_connections
+        );
         assert!(
             bad_connections == 0,
             "Boundary cells have invalid connectivity (V connected to internal C)"

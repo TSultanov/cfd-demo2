@@ -11,7 +11,10 @@ pub fn generated_dir_for(base_dir: impl AsRef<Path>) -> PathBuf {
         .join("generated")
 }
 
-pub fn write_file_if_changed(output_path: impl AsRef<Path>, content: &str) -> std::io::Result<PathBuf> {
+pub fn write_file_if_changed(
+    output_path: impl AsRef<Path>,
+    content: &str,
+) -> std::io::Result<PathBuf> {
     let output_path = output_path.as_ref();
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)?;
@@ -33,4 +36,3 @@ pub fn write_generated_wgsl(
     let output_path = generated_dir_for(base_dir).join(filename);
     write_file_if_changed(output_path, wgsl)
 }
-

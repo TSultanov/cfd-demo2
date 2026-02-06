@@ -96,9 +96,7 @@ impl UnifiedFieldResources {
         for field_name in &recipe.gradient_fields {
             let size_per_cell = *gradient_sizes
                 .get(field_name.as_str())
-                .unwrap_or_else(|| {
-                    panic!("missing gradient buffer spec for field '{field_name}'")
-                });
+                .unwrap_or_else(|| panic!("missing gradient buffer spec for field '{field_name}'"));
             let grad_size = num_cells as usize * size_per_cell;
             let zero_grad = vec![0.0f32; grad_size];
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

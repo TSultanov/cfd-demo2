@@ -107,7 +107,7 @@ impl<P: Copy, B: Copy> ModuleNode<P, B> {
                 module.bind(spec.bind, &mut pass);
                 let (x, y, z) = module.dispatch(spec.dispatch, runtime);
                 pass.dispatch_workgroups(x, y, z);
-                
+
                 // Count this dispatch for profiling
                 crate::count_dispatch!("Kernel Graph", spec.label);
             }

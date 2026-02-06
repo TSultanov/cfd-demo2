@@ -40,7 +40,11 @@ pub(crate) async fn lower_program_model_driven(
     );
 
     // Apply the preconditioner config only if the model declares a handler for it.
-    if model.named_param_keys().into_iter().any(|k| k == "preconditioner") {
+    if model
+        .named_param_keys()
+        .into_iter()
+        .any(|k| k == "preconditioner")
+    {
         plan.set_named_param(
             "preconditioner",
             PlanParamValue::Preconditioner(config.preconditioner),
@@ -79,22 +83,22 @@ async fn lower_parts_for_model(
     queue: Option<wgpu::Queue>,
 ) -> Result<LoweredProgramParts, String> {
     // Otherwise, select the runtime backend based on the derived recipe structure.
-    let built = crate::solver::gpu::program::generic_coupled_backend::build_generic_coupled_backend(
-        mesh,
-        model.clone(),
-        recipe.clone(),
-        device,
-        queue,
-    )
-    .await?;
+    let built =
+        crate::solver::gpu::program::generic_coupled_backend::build_generic_coupled_backend(
+            mesh,
+            model.clone(),
+            recipe.clone(),
+            device,
+            queue,
+        )
+        .await?;
 
     let mut ops = ProgramOpRegistry::new();
     programs::universal::register_ops_from_recipe(&recipe, &mut ops)?;
 
     let mut resources = crate::solver::gpu::program::plan::ProgramResources::new();
-    resources.insert(programs::universal::UniversalProgramResources::new_generic_coupled(
-        built.backend,
-    ));
+    resources
+        .insert(programs::universal::UniversalProgramResources::new_generic_coupled(built.backend));
     // Store the port registry so helpers can access cached field offsets
     resources.insert(std::sync::Arc::clone(&recipe.port_registry));
 

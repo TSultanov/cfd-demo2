@@ -2,16 +2,14 @@
 ///
 /// Analyzes the number and types of GPU dispatches per solver step
 /// to identify overhead and optimization opportunities.
-use cfd2::solver::gpu::dispatch_counter::{
-    global_dispatch_counter, get_dispatch_stats,
-};
-use std::time::Duration;
+use cfd2::solver::gpu::dispatch_counter::{get_dispatch_stats, global_dispatch_counter};
 use cfd2::solver::gpu::structs::PreconditionerType;
 use cfd2::solver::gpu::unified_solver::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
-use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::model::helpers::SolverRuntimeParamsExt;
+use cfd2::solver::model::incompressible_momentum_model;
 use nalgebra::Vector2;
+use std::time::Duration;
 
 /// Setup solver
 fn setup_solver(cell_size: f64, preconditioner: PreconditionerType) -> (GpuUnifiedSolver, usize) {
@@ -66,7 +64,7 @@ fn analyze_dispatches() {
 
     for (name, precond) in &configs {
         println!("\n--- {} Preconditioner ---", name);
-        
+
         let (mut solver, num_cells) = setup_solver(cell_size, *precond);
 
         // Collect dispatch stats over multiple steps
@@ -76,9 +74,9 @@ fn analyze_dispatches() {
         for _ in 0..num_steps {
             global_dispatch_counter().reset();
             global_dispatch_counter().enable();
-            
+
             solver.step();
-            
+
             let stats = get_dispatch_stats();
             all_stats.push(stats);
         }
@@ -86,8 +84,16 @@ fn analyze_dispatches() {
         // Aggregate statistics
         let total_dispatches: u64 = all_stats.iter().map(|s| s.total_dispatches).sum();
         let avg_dispatches = total_dispatches as f64 / num_steps as f64;
-        let min_dispatches = all_stats.iter().map(|s| s.total_dispatches).min().unwrap_or(0);
-        let max_dispatches = all_stats.iter().map(|s| s.total_dispatches).max().unwrap_or(0);
+        let min_dispatches = all_stats
+            .iter()
+            .map(|s| s.total_dispatches)
+            .min()
+            .unwrap_or(0);
+        let max_dispatches = all_stats
+            .iter()
+            .map(|s| s.total_dispatches)
+            .max()
+            .unwrap_or(0);
 
         println!("  Mesh: {} cells", num_cells);
         println!("  Steps analyzed: {}", num_steps);
@@ -96,7 +102,8 @@ fn analyze_dispatches() {
         println!("  Max dispatches: {}", max_dispatches);
 
         // Aggregate by category
-        let mut category_totals: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
+        let mut category_totals: std::collections::HashMap<&str, u64> =
+            std::collections::HashMap::new();
         for stats in &all_stats {
             for (cat, count) in &stats.by_category {
                 *category_totals.entry(*cat).or_insert(0) += *count;
@@ -106,7 +113,7 @@ fn analyze_dispatches() {
         println!("\n  Dispatches by category (avg/step):");
         let mut categories: Vec<_> = category_totals.iter().collect();
         categories.sort_by(|a, b| b.1.cmp(a.1));
-        
+
         for (cat, total) in categories {
             let avg = *total as f64 / num_steps as f64;
             println!("    {:<25} {:.1}", cat, avg);
@@ -126,8 +133,10 @@ fn analyze_scaling() {
 
     let cell_sizes = [0.04, 0.02, 0.01];
 
-    println!("{:>10} {:>12} {:>15} {:>20}", 
-        "CellSize", "Cells", "Avg Dispatches", "Notes");
+    println!(
+        "{:>10} {:>12} {:>15} {:>20}",
+        "CellSize", "Cells", "Avg Dispatches", "Notes"
+    );
     println!("{}", "-".repeat(65));
 
     for &cell_size in &cell_sizes {
@@ -145,7 +154,7 @@ fn analyze_scaling() {
         }
 
         let avg_dispatches = total_dispatches as f64 / num_steps as f64;
-        
+
         let notes = if avg_dispatches > 100.0 {
             "High overhead (consider fusion)"
         } else if avg_dispatches > 50.0 {
@@ -154,8 +163,10 @@ fn analyze_scaling() {
             "Efficient"
         };
 
-        println!("{:>10.3} {:>12} {:>15.1} {:>20}", 
-            cell_size, num_cells, avg_dispatches, notes);
+        println!(
+            "{:>10.3} {:>12} {:>15.1} {:>20}",
+            cell_size, num_cells, avg_dispatches, notes
+        );
     }
     println!();
 }
@@ -187,15 +198,13 @@ fn estimate_overhead() {
     solver.step();
     let stats = get_dispatch_stats();
 
-    let estimated_dispatch_overhead = Duration::from_micros(
-        (stats.total_dispatches as f64 * DISPATCH_OVERHEAD_US) as u64
-    );
-    
+    let estimated_dispatch_overhead =
+        Duration::from_micros((stats.total_dispatches as f64 * DISPATCH_OVERHEAD_US) as u64);
+
     // Estimate submits (rough approximation)
     let estimated_submits = stats.total_dispatches / 5 + 1;
-    let estimated_sync_overhead = Duration::from_micros(
-        (estimated_submits as f64 * SYNC_OVERHEAD_US) as u64
-    );
+    let estimated_sync_overhead =
+        Duration::from_micros((estimated_submits as f64 * SYNC_OVERHEAD_US) as u64);
 
     let total_overhead = estimated_dispatch_overhead + estimated_sync_overhead;
     let overhead_pct = if time_per_step.as_nanos() > 0 {
@@ -209,9 +218,15 @@ fn estimate_overhead() {
     println!("Estimated submits: {}", estimated_submits);
     println!();
     println!("Time per step: {:?}", time_per_step);
-    println!("Estimated dispatch overhead: {:?}", estimated_dispatch_overhead);
+    println!(
+        "Estimated dispatch overhead: {:?}",
+        estimated_dispatch_overhead
+    );
     println!("Estimated sync overhead: {:?}", estimated_sync_overhead);
-    println!("Total estimated overhead: {:?} ({:.1}%)", total_overhead, overhead_pct);
+    println!(
+        "Total estimated overhead: {:?} ({:.1}%)",
+        total_overhead, overhead_pct
+    );
     println!();
 
     if overhead_pct > 30.0 {

@@ -1,16 +1,16 @@
 use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
+use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::program::build_program_plan;
+use crate::solver::gpu::program::plan::{GpuProgramPlan, StepGraphTiming};
 use crate::solver::gpu::program::plan_instance::{
     PlanAction, PlanInitConfig, PlanParamValue, PlanStepStats,
 };
-use crate::solver::gpu::program::plan::{GpuProgramPlan, StepGraphTiming};
-use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::recipe::SteppingMode;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
-use crate::solver::model::ModelSpec;
 use crate::solver::model::backend::{FieldKind, StateLayout};
 use crate::solver::model::ports::PortRegistry;
+use crate::solver::model::ModelSpec;
 use crate::solver::scheme::Scheme;
 use std::sync::Arc;
 
@@ -43,13 +43,13 @@ impl UiPortSet {
         let u_offset = registry
             .get_field_entry_by_name("U")
             .or_else(|| registry.get_field_entry_by_name("u"))
-            .filter(|entry| entry.component_count() == 2)  // must be vec2
+            .filter(|entry| entry.component_count() == 2) // must be vec2
             .map(|entry| entry.offset());
 
         // Get pressure field - must be scalar (1 component)
         let p_offset = registry
             .get_field_entry_by_name("p")
-            .filter(|entry| entry.component_count() == 1)  // must be scalar
+            .filter(|entry| entry.component_count() == 1) // must be scalar
             .map(|entry| entry.offset());
 
         Self {
@@ -167,7 +167,9 @@ impl GpuUnifiedSolver {
     /// Access the cached port registry from the plan resources.
     /// Returns `None` if the registry is not available.
     pub fn port_registry(&self) -> Option<&PortRegistry> {
-        self.plan.resources.get::<Arc<PortRegistry>>()
+        self.plan
+            .resources
+            .get::<Arc<PortRegistry>>()
             .map(|arc| arc.as_ref())
     }
 
@@ -297,8 +299,7 @@ impl GpuUnifiedSolver {
             ));
         }
         for (c, &v) in values.iter().enumerate() {
-            self.plan
-                .set_bc_value(boundary, base + c as u32, v)?;
+            self.plan.set_bc_value(boundary, base + c as u32, v)?;
         }
         Ok(())
     }
@@ -344,7 +345,10 @@ impl GpuUnifiedSolver {
         // If the plan rejects this param, keep the config unchanged.
         if self
             .plan
-            .set_named_param("preconditioner", PlanParamValue::Preconditioner(preconditioner))
+            .set_named_param(
+                "preconditioner",
+                PlanParamValue::Preconditioner(preconditioner),
+            )
             .is_ok()
         {
             self.config.preconditioner = preconditioner;
@@ -515,7 +519,6 @@ impl GpuUnifiedSolver {
             .collect())
     }
 
-
     pub fn set_linear_system(&mut self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
         let Some(debug) = self.plan.linear_system_debug() else {
             return Err("plan does not support linear system debug operations".into());
@@ -554,5 +557,4 @@ impl GpuUnifiedSolver {
             num_dot_groups: n.div_ceil(64),
         })
     }
-
 }

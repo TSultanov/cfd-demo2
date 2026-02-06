@@ -90,7 +90,9 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     solver.set_outer_iters(1).unwrap();
     // Use low-Mach preconditioning with minimal coupling to reduce checkerboarding
     // while not deviating too much from OpenFOAM's approach
-    solver.set_precond_model(GpuLowMachPrecondModel::WeissSmith).unwrap();
+    solver
+        .set_precond_model(GpuLowMachPrecondModel::WeissSmith)
+        .unwrap();
     solver.set_precond_theta_floor(1e-8).unwrap();
     solver.set_precond_pressure_coupling_alpha(0.01).unwrap();
     solver.set_uniform_state(rho0, [0.0, 0.0], p0);

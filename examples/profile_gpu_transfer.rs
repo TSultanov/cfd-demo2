@@ -19,7 +19,9 @@ fn main() {
 }
 
 fn print_help() {
-    println!("Usage: cargo run --features profiling --example profile_gpu_transfer [--all|--scaling]");
+    println!(
+        "Usage: cargo run --features profiling --example profile_gpu_transfer [--all|--scaling]"
+    );
     println!();
     println!("  (default)  Run the detailed GPU<->CPU transfer profile");
     println!("  --scaling  Run scaling analysis across mesh sizes");
@@ -227,7 +229,10 @@ fn run_transfer_profile() {
         }
 
         // Check for debug reads
-        let debug_reads: Vec<_> = location_stats.iter().filter(|(k, _)| k.contains("debug")).collect();
+        let debug_reads: Vec<_> = location_stats
+            .iter()
+            .filter(|(k, _)| k.contains("debug"))
+            .collect();
         if !debug_reads.is_empty() {
             let total_debug_time: std::time::Duration =
                 debug_reads.iter().map(|(_, s)| s.total_time).sum();
@@ -270,8 +275,12 @@ fn run_transfer_profile() {
         }
 
         let session_total = stats.get_session_total();
-        let gpu_read_time = gpu_read_stats.map(|(_, s)| s.total_time).unwrap_or_default();
-        let cpu_time = cpu_compute_stats.map(|(_, s)| s.total_time).unwrap_or_default();
+        let gpu_read_time = gpu_read_stats
+            .map(|(_, s)| s.total_time)
+            .unwrap_or_default();
+        let cpu_time = cpu_compute_stats
+            .map(|(_, s)| s.total_time)
+            .unwrap_or_default();
         let overhead = gpu_read_time + cpu_time;
         let overhead_pct = if session_total.as_nanos() > 0 {
             (overhead.as_nanos() as f64 / session_total.as_nanos() as f64) * 100.0
@@ -407,7 +416,10 @@ fn run_scaling_profile() {
                     let time_per_byte =
                         read_stats.total_time.as_nanos() as f64 / read_stats.total_bytes as f64;
                     println!("\n  GPU Read efficiency: {:.2} ns/byte", time_per_byte);
-                    println!("  Throughput: {:.1} MB/s", read_stats.throughput_mb_per_sec());
+                    println!(
+                        "  Throughput: {:.1} MB/s",
+                        read_stats.throughput_mb_per_sec()
+                    );
                 }
             }
         });

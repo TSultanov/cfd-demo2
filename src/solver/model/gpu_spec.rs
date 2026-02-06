@@ -15,7 +15,6 @@ pub enum GradientStorage {
     PackedState,
 }
 
-
 pub fn expand_field_components(field: FieldRef) -> Vec<String> {
     match field.kind() {
         crate::solver::model::backend::FieldKind::Scalar => vec![field.name().to_string()],

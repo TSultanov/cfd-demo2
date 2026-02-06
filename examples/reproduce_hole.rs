@@ -25,7 +25,8 @@ fn main() {
     println!("Generated mesh with {} cells", mesh.num_cells());
     assert!(mesh.num_cells() > 0, "Mesh should not be empty");
 
-    let expected_area = length * 1.0 - std::f64::consts::PI * geo.obstacle_radius * geo.obstacle_radius;
+    let expected_area =
+        length * 1.0 - std::f64::consts::PI * geo.obstacle_radius * geo.obstacle_radius;
     let total_area: f64 = mesh.cell_vol.iter().copied().sum();
 
     println!(

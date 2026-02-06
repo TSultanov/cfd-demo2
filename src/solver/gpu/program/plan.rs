@@ -1,6 +1,8 @@
+use super::plan_instance::{
+    PlanAction, PlanFuture, PlanLinearSystemDebug, PlanParamValue, PlanStepStats,
+};
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
-use super::plan_instance::{PlanAction, PlanFuture, PlanLinearSystemDebug, PlanParamValue, PlanStepStats};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -17,12 +19,8 @@ pub(crate) type ProgramU32Fn = fn(&GpuProgramPlan) -> u32;
 pub(crate) type ProgramF32Fn = fn(&GpuProgramPlan) -> f32;
 pub(crate) type ProgramStateBufferFn = for<'a> fn(&'a GpuProgramPlan) -> &'a wgpu::Buffer;
 pub(crate) type ProgramWriteStateFn = fn(&GpuProgramPlan, bytes: &[u8]) -> Result<(), String>;
-pub(crate) type ProgramSetBcValueFn = fn(
-    &GpuProgramPlan,
-    crate::solver::gpu::enums::GpuBoundaryType,
-    u32,
-    f32,
-) -> Result<(), String>;
+pub(crate) type ProgramSetBcValueFn =
+    fn(&GpuProgramPlan, crate::solver::gpu::enums::GpuBoundaryType, u32, f32) -> Result<(), String>;
 pub(crate) type ProgramStepStatsFn = fn(&GpuProgramPlan) -> PlanStepStats;
 pub(crate) type ProgramStepWithStatsFn =
     fn(&mut GpuProgramPlan) -> Result<Vec<LinearSolverStats>, String>;
@@ -419,7 +417,10 @@ impl GpuProgramPlan {
         Err(if known.is_empty() {
             format!("unknown named parameter '{name}'")
         } else {
-            format!("unknown named parameter '{name}'; known: {}", known.join(", "))
+            format!(
+                "unknown named parameter '{name}'; known: {}",
+                known.join(", ")
+            )
         })
     }
 
@@ -543,12 +544,9 @@ impl GpuProgramPlan {
         let nodes = self.spec.program.block(block).nodes.clone();
         for node in nodes {
             match node {
-                ProgramSpecNode::Graph {
-                    label,
-                    kind,
-                    mode,
-                } => {
-                    let (seconds, detail) = self.spec.ops.run_graph(kind, &*self, &self.context, mode);
+                ProgramSpecNode::Graph { label, kind, mode } => {
+                    let (seconds, detail) =
+                        self.spec.ops.run_graph(kind, &*self, &self.context, mode);
                     if self.collect_trace {
                         self.step_graph_timings.push(StepGraphTiming {
                             label,

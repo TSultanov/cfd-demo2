@@ -154,8 +154,14 @@ fn openfoam_incompressible_backwards_step_matches_reference_field() {
     let uy_ref_max = common::max_abs(&u_y_ref);
     let ux_sol_max = common::max_abs(&u_x_sol);
     let uy_sol_max = common::max_abs(&u_y_sol);
-    assert!(ux_ref_max > 0.8 && uy_ref_max > 0.05, "reference appears trivial: max_abs(u_x)={ux_ref_max:.3e} max_abs(u_y)={uy_ref_max:.3e}");
-    assert!(ux_sol_max > 0.3 && uy_sol_max > 0.01, "solver appears trivial: max_abs(u_x)={ux_sol_max:.3e} max_abs(u_y)={uy_sol_max:.3e}");
+    assert!(
+        ux_ref_max > 0.8 && uy_ref_max > 0.05,
+        "reference appears trivial: max_abs(u_x)={ux_ref_max:.3e} max_abs(u_y)={uy_ref_max:.3e}"
+    );
+    assert!(
+        ux_sol_max > 0.3 && uy_sol_max > 0.01,
+        "solver appears trivial: max_abs(u_x)={ux_sol_max:.3e} max_abs(u_y)={uy_sol_max:.3e}"
+    );
 
     if common::diag_enabled() {
         let (x_u, y_u) = (sol_rows[u_max.idx].0, sol_rows[u_max.idx].1);

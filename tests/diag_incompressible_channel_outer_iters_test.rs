@@ -60,4 +60,3 @@ fn diag_incompressible_channel_outer_iters_per_step() {
         stats.len()
     );
 }
-

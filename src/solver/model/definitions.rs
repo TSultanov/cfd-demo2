@@ -1,8 +1,8 @@
+use crate::solver::dimensions::{Length, UnitDimension};
 /// Model registry + model specs + boundary specs.
 use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
 use crate::solver::model::backend::ast::{EquationSystem, FieldRef};
 use crate::solver::model::backend::state_layout::StateLayout;
-use crate::solver::dimensions::{Length, UnitDimension};
 use crate::solver::units::UnitDim;
 use std::collections::HashMap;
 
@@ -150,9 +150,7 @@ impl ModelSpec {
             if matches!(gradients, Some(FluxModuleGradientsSpec::FromStateLayout)) {
                 // Find the unique module providing flux_module to access its port manifest.
                 // This uses the same uniqueness assumptions as ModelSpec::flux_module().
-                let flux_module_provider = self.modules.iter().find(|m| {
-                    m.flux_module.is_some()
-                });
+                let flux_module_provider = self.modules.iter().find(|m| m.flux_module.is_some());
 
                 let has_gradient_targets = flux_module_provider
                     .and_then(|m| m.port_manifest.as_ref())
@@ -586,11 +584,11 @@ pub fn all_models() -> Vec<ModelSpec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver::dimensions::{Density, DivDim, Length, Pressure, Velocity};
     use crate::solver::model::backend::ast::Coefficient;
     use crate::solver::model::backend::ast::TermOp;
     use crate::solver::model::kernel::derive_kernel_specs_for_model;
     use crate::solver::model::KernelId;
-    use crate::solver::dimensions::{Density, DivDim, Length, Pressure, Velocity};
 
     #[test]
     fn incompressible_momentum_system_contains_expected_terms() {
@@ -696,8 +694,13 @@ mod tests {
 
         // Now that gradient targets are resolved at module creation time,
         // the error should be caught when building the flux module.
-        let err = flux_module_module(with_gradients, &model.system, &model.state_layout, &model.primitives)
-            .unwrap_err();
+        let err = flux_module_module(
+            with_gradients,
+            &model.system,
+            &model.state_layout,
+            &model.primitives,
+        )
+        .unwrap_err();
         assert!(
             err.contains("no grad_<field> fields found") || err.contains("Vector2"),
             "Expected error about missing/invalid gradient fields, got: {}",
@@ -782,7 +785,7 @@ mod tests {
             name: "test_module",
             port_manifest: Some(PortManifest {
                 fields: vec![FieldSpec {
-                    name: "U", // U is Vector2 in incompressible_momentum_model
+                    name: "U",                   // U is Vector2 in incompressible_momentum_model
                     kind: PortFieldKind::Scalar, // But we claim it's Scalar
                     unit: Velocity::UNIT,
                 }],

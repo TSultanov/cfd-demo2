@@ -178,14 +178,8 @@ pub(crate) async fn build_generic_coupled_backend(
         b_bc_value,
         boundary_faces,
     };
-    let backend = GenericCoupledProgramResources::new(
-        runtime,
-        fields,
-        kernels,
-        &model,
-        &recipe,
-        bc_data,
-    )?;
+    let backend =
+        GenericCoupledProgramResources::new(runtime, fields, kernels, &model, &recipe, bc_data)?;
 
     Ok(GenericCoupledBuilt {
         model,

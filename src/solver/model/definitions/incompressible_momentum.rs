@@ -64,7 +64,8 @@ fn build_incompressible_momentum_system(_fields: &IncompressibleMomentumFields) 
     // Build coefficients
     let rho_coeff = TypedCoeff::from_field(rho_typed);
     let mu_coeff = TypedCoeff::from_field(mu_typed);
-    let rho_dp_coeff = TypedCoeff::from_field(rho_typed).multiply(TypedCoeff::from_field(d_p_typed));
+    let rho_dp_coeff =
+        TypedCoeff::from_field(rho_typed).multiply(TypedCoeff::from_field(d_p_typed));
 
     // Build momentum equation terms
     // ddt(rho, U): integrated unit is MomentumDensity * Volume / Time = Force
@@ -97,7 +98,9 @@ fn build_incompressible_momentum_system(_fields: &IncompressibleMomentumFields) 
     let p_div_flux_term = typed_fvm::div_flux(phi_typed, p_typed);
 
     // Cast all terms to MassFlux and add
-    let pressure_eqn = (p_laplacian_term.cast_to::<MassFlux>() + p_div_flux_term.cast_to::<MassFlux>()).eqn(p_typed);
+    let pressure_eqn = (p_laplacian_term.cast_to::<MassFlux>()
+        + p_div_flux_term.cast_to::<MassFlux>())
+    .eqn(p_typed);
 
     let mut system = EquationSystem::new();
     system.add_equation(momentum_eqn);
@@ -154,14 +157,8 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             .register_scalar_field::<Pressure>("p")
             .expect("p field registration failed");
 
-        let u0 = u_port
-            .component(0)
-            .expect("U component 0")
-            .full_offset();
-        let u1 = u_port
-            .component(1)
-            .expect("U component 1")
-            .full_offset();
+        let u0 = u_port.component(0).expect("U component 0").full_offset();
+        let u1 = u_port.component(1).expect("U component 1").full_offset();
         let p = p_port.offset();
         (u0, u1, p)
     };
@@ -331,10 +328,7 @@ fn rhie_chow_flux_module_kernel(
         // Prefer a state-layout density when present (variable-density extension);
         // otherwise fall back to the global constant density uniform.
         // Use PortRegistry validation to check for existence, kind, and dimension.
-        match registry.validate_scalar_field::<Density>(
-            "rhie_chow_flux_module_kernel",
-            "rho",
-        ) {
+        match registry.validate_scalar_field::<Density>("rhie_chow_flux_module_kernel", "rho") {
             Ok(()) => Ok(S::Lerp(
                 Box::new(S::state(FaceSide::Owner, "rho")),
                 Box::new(S::state(FaceSide::Neighbor, "rho")),

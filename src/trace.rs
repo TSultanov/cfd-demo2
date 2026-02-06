@@ -265,7 +265,8 @@ impl TraceRuntimeParams {
             let _ = solver.set_precond_theta_floor(self.low_mach_theta_floor);
         }
         if has_param("low_mach.pressure_coupling_alpha") {
-            let _ = solver.set_precond_pressure_coupling_alpha(self.low_mach_pressure_coupling_alpha);
+            let _ =
+                solver.set_precond_pressure_coupling_alpha(self.low_mach_pressure_coupling_alpha);
         }
 
         if has_param("advection_scheme") {
@@ -303,7 +304,8 @@ impl TraceRuntimeParams {
 
         if has_rho && has_rho_u && has_rho_e && has_u {
             let eos = crate::solver::model::EosSpec::from(self.eos);
-            let _ = solver.set_compressible_inlet_isothermal_x(self.density, self.inlet_velocity, &eos);
+            let _ =
+                solver.set_compressible_inlet_isothermal_x(self.density, self.inlet_velocity, &eos);
         } else {
             let _ = solver.set_inlet_velocity(self.inlet_velocity);
         }
@@ -543,9 +545,7 @@ impl TraceMesh {
     pub fn from_mesh(mesh: &Mesh) -> Result<Self, String> {
         fn to_u32_vec(src: &[usize], label: &str) -> Result<Vec<u32>, String> {
             src.iter()
-                .map(|&v| {
-                    u32::try_from(v).map_err(|_| format!("{label} index {v} overflows u32"))
-                })
+                .map(|&v| u32::try_from(v).map_err(|_| format!("{label} index {v} overflows u32")))
                 .collect()
         }
 
@@ -694,7 +694,11 @@ pub fn now_unix_ms() -> u64 {
         .as_millis() as u64
 }
 
-pub fn make_header(case: TraceCase, initial_params: TraceRuntimeParams, profiling_enabled: bool) -> TraceHeader {
+pub fn make_header(
+    case: TraceCase,
+    initial_params: TraceRuntimeParams,
+    profiling_enabled: bool,
+) -> TraceHeader {
     TraceHeader {
         format_version: TRACE_FORMAT_VERSION,
         created_unix_ms: now_unix_ms(),

@@ -128,7 +128,10 @@ impl ProfilingStats {
             (ProfileCategory::GpuSync, CategoryStats::default()),
             (ProfileCategory::GpuDispatch, CategoryStats::default()),
             (ProfileCategory::CpuCompute, CategoryStats::default()),
-            (ProfileCategory::GpuResourceCreation, CategoryStats::default()),
+            (
+                ProfileCategory::GpuResourceCreation,
+                CategoryStats::default(),
+            ),
             (ProfileCategory::Other, CategoryStats::default()),
         ]
     }
@@ -181,4 +184,3 @@ macro_rules! profile_scope {
     ($stats:expr, $category:expr, $location:expr) => {};
     ($stats:expr, $category:expr, $location:expr, $bytes:expr) => {};
 }
-

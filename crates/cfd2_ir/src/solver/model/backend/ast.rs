@@ -532,22 +532,30 @@ pub fn vol_vector_dim<D: crate::solver::dimensions::UnitDimension>(name: &'stati
 }
 
 /// Typed volume vector3 field constructor using type-level dimensions.
-pub fn vol_vector3_dim<D: crate::solver::dimensions::UnitDimension>(name: &'static str) -> FieldRef {
+pub fn vol_vector3_dim<D: crate::solver::dimensions::UnitDimension>(
+    name: &'static str,
+) -> FieldRef {
     FieldRef::new(name, FieldKind::Vector3, D::UNIT)
 }
 
 /// Typed surface scalar flux constructor using type-level dimensions.
-pub fn surface_scalar_dim<D: crate::solver::dimensions::UnitDimension>(name: &'static str) -> FluxRef {
+pub fn surface_scalar_dim<D: crate::solver::dimensions::UnitDimension>(
+    name: &'static str,
+) -> FluxRef {
     FluxRef::new(name, FieldKind::Scalar, D::UNIT)
 }
 
 /// Typed surface vector2 flux constructor using type-level dimensions.
-pub fn surface_vector_dim<D: crate::solver::dimensions::UnitDimension>(name: &'static str) -> FluxRef {
+pub fn surface_vector_dim<D: crate::solver::dimensions::UnitDimension>(
+    name: &'static str,
+) -> FluxRef {
     FluxRef::new(name, FieldKind::Vector2, D::UNIT)
 }
 
 /// Typed surface vector3 flux constructor using type-level dimensions.
-pub fn surface_vector3_dim<D: crate::solver::dimensions::UnitDimension>(name: &'static str) -> FluxRef {
+pub fn surface_vector3_dim<D: crate::solver::dimensions::UnitDimension>(
+    name: &'static str,
+) -> FluxRef {
     FluxRef::new(name, FieldKind::Vector3, D::UNIT)
 }
 

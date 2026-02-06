@@ -25,4 +25,3 @@ fn contract_dtau_is_used_by_compressible_assembly_wgsl() {
         );
     }
 }
-

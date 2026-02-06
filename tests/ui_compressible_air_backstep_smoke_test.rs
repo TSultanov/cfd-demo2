@@ -1,12 +1,12 @@
 #![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
     SolverRuntimeParamsExt,
 };
-use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 use nalgebra::Vector2;
@@ -100,7 +100,10 @@ fn ui_compressible_air_backstep_smoke() {
                 "step {step}: linear residual blew up: {:?}",
                 last
             );
-            assert!(!last.diverged, "step {step}: linear solver diverged: {last:?}");
+            assert!(
+                !last.diverged,
+                "step {step}: linear solver diverged: {last:?}"
+            );
         }
 
         let u = pollster::block_on(solver.get_u());
@@ -108,7 +111,10 @@ fn ui_compressible_air_backstep_smoke() {
 
         let mut max_vel = 0.0f64;
         for (vx, vy) in &u {
-            assert!(vx.is_finite() && vy.is_finite(), "step {step}: non-finite u");
+            assert!(
+                vx.is_finite() && vy.is_finite(),
+                "step {step}: non-finite u"
+            );
             let v = (vx * vx + vy * vy).sqrt();
             max_vel = max_vel.max(v);
         }

@@ -56,11 +56,11 @@ impl DispatchCounter {
         }
 
         self.total_dispatches.fetch_add(1, Ordering::Relaxed);
-        
+
         if let Ok(mut by_cat) = self.by_category.lock() {
             *by_cat.entry(category).or_insert(0) += 1;
         }
-        
+
         if let Ok(mut by_ker) = self.by_kernel.lock() {
             *by_ker.entry(kernel_label.to_string()).or_insert(0) += 1;
         }
@@ -144,11 +144,7 @@ impl DispatchCounter {
         }
 
         // Check for repeated kernels
-        let repeated: Vec<_> = stats
-            .by_kernel
-            .iter()
-            .filter(|(_, c)| **c > 10)
-            .collect();
+        let repeated: Vec<_> = stats.by_kernel.iter().filter(|(_, c)| **c > 10).collect();
         if !repeated.is_empty() {
             println!("\n  Note: Some kernels dispatched >10 times:");
             for (kernel, count) in repeated.iter().take(5) {

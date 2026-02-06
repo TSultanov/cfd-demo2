@@ -10,12 +10,13 @@ pub mod helpers;
 pub mod invariants;
 pub mod kernel;
 pub mod linear_solver;
-pub mod module;
 pub mod method;
+pub mod module;
 pub mod modules;
 pub mod ports;
 pub mod primitives;
 
+pub use crate::solver::ir::LimiterSpec;
 pub use definitions::{
     all_models, compressible_model, compressible_model_with_eos, compressible_system,
     generic_diffusion_demo_model, generic_diffusion_demo_neumann_model,
@@ -25,12 +26,11 @@ pub use definitions::{
 };
 pub use eos::EosSpec;
 pub use flux_layout::{FluxComponent, FluxLayout};
-pub use crate::solver::ir::LimiterSpec;
 pub use flux_module::FluxModuleSpec;
 pub use gpu_spec::{expand_field_components, GradientStorage};
 pub use kernel::KernelId;
 pub use linear_solver::SchurBlockLayout;
 pub use linear_solver::{ModelLinearSolverSpec, ModelPreconditionerSpec};
-pub use module::{KernelBundleModule, ModelModule};
 pub use method::MethodSpec;
+pub use module::{KernelBundleModule, ModelModule};
 pub use primitives::PrimitiveDerivations;

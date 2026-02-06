@@ -36,10 +36,11 @@ pub fn init_pipelines(
         .unwrap_or_else(|err| panic!("missing dot_product_pair kernel: {err}"));
     let pipeline_dot_pair = (dot_pair_src.create_pipeline)(device);
     let pipeline_cg_update_x_r = {
-        let source = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_CG_UPDATE_X_R)
-            .unwrap_or_else(|err| {
-                panic!("missing linear_solver/cg_update_x_r kernel registry entry: {err}")
-            });
+        let source =
+            kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_CG_UPDATE_X_R)
+                .unwrap_or_else(|err| {
+                    panic!("missing linear_solver/cg_update_x_r kernel registry entry: {err}")
+                });
         (source.create_pipeline)(device)
     };
     let pipeline_cg_update_p = {

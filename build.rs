@@ -323,9 +323,7 @@ fn postprocess_bindings_for_clippy(bindings_path: &str) {
         }
     } else {
         // Fallback: insert a new allow after the header comment block
-        let after_header = content
-            .find("#![allow(")
-            .unwrap_or(0);
+        let after_header = content.find("#![allow(").unwrap_or(0);
         let before = &content[..after_header];
         let after = &content[after_header..];
         format!("{before}#![allow(clippy::too_many_arguments)]\n{after}")

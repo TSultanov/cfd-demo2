@@ -1,34 +1,38 @@
+use super::universal::UniversalProgramResources;
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
-use super::universal::UniversalProgramResources;
+use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::gpu::modules::coupled_schur::CoupledPressureSolveKind;
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::modules::generic_coupled_schur::{
     GenericCoupledSchurPreconditioner, GenericCoupledSchurPreconditionerInputs,
     GenericCoupledSchurSetupBindGroupInputs,
 };
-use crate::solver::gpu::modules::coupled_schur::CoupledPressureSolveKind;
 use crate::solver::gpu::modules::graph::{ModuleGraph, RuntimeDims};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_solver::{solve_fgmres, SolveFgmresArgs};
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
-use crate::solver::gpu::modules::runtime_preconditioner::{RuntimePreconditionerInputs, RuntimePreconditionerModule};
+use crate::solver::gpu::modules::runtime_preconditioner::{
+    RuntimePreconditionerInputs, RuntimePreconditionerModule,
+};
 use crate::solver::gpu::modules::time_integration::TimeIntegrationModule;
 use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::unified_graph::{
     build_graph_for_phases, build_optional_graph_for_phase, build_optional_graph_for_phases,
 };
-use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::program::plan::{GpuProgramPlan, ProgramParamHandler};
-use crate::solver::gpu::program::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
+use crate::solver::gpu::program::plan_instance::{
+    PlanFuture, PlanLinearSystemDebug, PlanParamValue,
+};
 use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::structs::{
     GpuGenericCoupledSchurSetupParams, GpuSchurPrecondGenericParams, LinearSolverStats,
 };
-use crate::solver::model::{ModelPreconditionerSpec, ModelSpec};
 use crate::solver::model::backend::ast::FieldKind;
 use crate::solver::model::ports::PortRegistry;
+use crate::solver::model::{ModelPreconditionerSpec, ModelSpec};
 use bytemuck::{bytes_of, Pod, Zeroable};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -335,11 +339,7 @@ impl OuterConvergenceMonitor {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        queue.write_buffer(
-            &b_descs_state,
-            0,
-            bytemuck::cast_slice(&target_descs_state),
-        );
+        queue.write_buffer(&b_descs_state, 0, bytemuck::cast_slice(&target_descs_state));
 
         let b_out_bits = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outer_convergence:out_bits"),
@@ -374,8 +374,7 @@ impl OuterConvergenceMonitor {
         });
 
         let zero_out_words = vec![0u32; target_descs_x.len()];
-        let dispatch_cells =
-            num_cells.div_ceil(OUTER_CONVERGENCE_WORKGROUP_SIZE);
+        let dispatch_cells = num_cells.div_ceil(OUTER_CONVERGENCE_WORKGROUP_SIZE);
 
         Ok(Some(Self {
             target_names,
@@ -428,28 +427,31 @@ impl OuterConvergenceMonitor {
         label_prefix: &'static str,
     ) -> Result<Vec<f32>, String> {
         let bgl = self.pipeline.get_bind_group_layout(0);
-        let bg = plan.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(label_prefix),
-            layout: &bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: input.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: descs.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self.b_out_bits.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: params.as_entire_binding(),
-                },
-            ],
-        });
+        let bg = plan
+            .context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label_prefix),
+                layout: &bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: input.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: descs.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.b_out_bits.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: params.as_entire_binding(),
+                    },
+                ],
+            });
         self.compute_maxima_from_bind_group(plan, &bg, label_prefix)
     }
 
@@ -469,12 +471,12 @@ impl OuterConvergenceMonitor {
             bytemuck::cast_slice(&self.zero_out_words),
         );
 
-        let mut encoder = plan
-            .context
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some(label_prefix),
-            });
+        let mut encoder =
+            plan.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some(label_prefix),
+                });
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(label_prefix),
@@ -720,7 +722,7 @@ fn validate_schur_model(
     for (eq_idx, eq) in model.system.equations().iter().enumerate() {
         let target = eq.target();
         let comps = target.kind().component_count();
-        
+
         match target.kind() {
             crate::solver::model::backend::ast::FieldKind::Scalar => {
                 let idx = unknown_mapping
@@ -731,15 +733,13 @@ fn validate_schur_model(
             }
             _ => {
                 for comp in 0..comps {
-                    let idx = unknown_mapping
-                        .get_offset(eq_idx, comp)
-                        .ok_or_else(|| {
-                            format!(
-                                "missing '{}' component {} in unknown mapping",
-                                target.name(),
-                                comp
-                            )
-                        })?;
+                    let idx = unknown_mapping.get_offset(eq_idx, comp).ok_or_else(|| {
+                        format!(
+                            "missing '{}' component {} in unknown mapping",
+                            target.name(),
+                            comp
+                        )
+                    })?;
                     target_indices.insert(idx);
                 }
             }
@@ -825,13 +825,12 @@ fn build_generic_schur(
         mapped_at_creation: false,
     });
 
-    let b_precond_params =
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("GenericCoupled Schur precond_params"),
-            size: std::mem::size_of::<GpuSchurPrecondGenericParams>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+    let b_precond_params = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("GenericCoupled Schur precond_params"),
+        size: std::mem::size_of::<GpuSchurPrecondGenericParams>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
 
     let params = GpuSchurPrecondGenericParams {
         n: num_dofs,
@@ -933,7 +932,9 @@ fn build_generic_schur(
             u_len,
             u0123,
             u4567,
-            pressure_kind: CoupledPressureSolveKind::from_config(recipe.linear_solver.preconditioner),
+            pressure_kind: CoupledPressureSolveKind::from_config(
+                recipe.linear_solver.preconditioner,
+            ),
         },
     );
 
@@ -1208,8 +1209,7 @@ pub(crate) fn spec_set_bc_value(
         .get(boundary_idx as usize)
         .ok_or_else(|| format!("missing boundary_faces[{boundary_idx}]"))?;
     for &face_idx in faces {
-        let offset_bytes =
-            (face_idx as u64 * coupled_stride as u64 + unknown_component as u64) * 4;
+        let offset_bytes = (face_idx as u64 * coupled_stride as u64 + unknown_component as u64) * 4;
         plan.context
             .queue
             .write_buffer(&res(plan)._b_bc_value, offset_bytes, bytes_of(&value));
@@ -1434,11 +1434,12 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
     if let Some(ref s) = scale {
         if s.len() == delta.len() {
             plan.outer_field_residuals_scaled.extend(
-                monitor
-                    .target_names()
-                    .iter()
-                    .cloned()
-                    .zip(delta.iter().zip(s.iter()).map(|(&d, &s_val)| d / s_val.max(1.0))),
+                monitor.target_names().iter().cloned().zip(
+                    delta
+                        .iter()
+                        .zip(s.iter())
+                        .map(|(&d, &s_val)| d / s_val.max(1.0)),
+                ),
             );
         }
     }
@@ -2001,8 +2002,10 @@ pub(crate) fn param_linear_solver_solution_update_strategy(
     value: PlanParamValue,
 ) -> Result<(), String> {
     let PlanParamValue::FgmresSolutionUpdateStrategy(strategy) = value else {
-        return Err("linear_solver.solution_update_strategy expects FgmresSolutionUpdateStrategy"
-            .to_string());
+        return Err(
+            "linear_solver.solution_update_strategy expects FgmresSolutionUpdateStrategy"
+                .to_string(),
+        );
     };
 
     let r = res_mut(plan);
@@ -2086,6 +2089,7 @@ pub(crate) fn param_low_mach_pressure_coupling_alpha(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver::dimensions::{Pressure, UnitDimension, Velocity};
     use crate::solver::model::backend::ast::{fvm, vol_scalar, vol_vector3, EquationSystem};
     use crate::solver::model::ports::PortRegistry;
     use crate::solver::model::{eos, primitives};
@@ -2093,13 +2097,14 @@ mod tests {
         incompressible_momentum_model, BoundarySpec, ModelLinearSolverSpec,
         ModelPreconditionerSpec, SchurBlockLayout,
     };
-    use crate::solver::dimensions::{Pressure, UnitDimension, Velocity};
 
     /// Helper to create a PortRegistry with all state fields registered.
     fn create_port_registry_for_test(model: &ModelSpec) -> PortRegistry {
         let mut registry = PortRegistry::new(model.state_layout.clone());
         for field in model.state_layout.fields() {
-            registry.register_state_field(field.name()).expect("Failed to register field");
+            registry
+                .register_state_field(field.name())
+                .expect("Failed to register field");
         }
         registry
     }
@@ -2118,8 +2123,8 @@ mod tests {
 
         // Test runtime path: create PortRegistry with all fields registered
         let registry = create_port_registry_for_test(&model);
-        let unknown_mapping = resolve_unknown_mapping_runtime(&model, &registry)
-            .expect("runtime mapping failed");
+        let unknown_mapping =
+            resolve_unknown_mapping_runtime(&model, &registry).expect("runtime mapping failed");
         let err = validate_schur_model(&model, &unknown_mapping).unwrap_err();
         assert!(err.contains("equation targets"), "unexpected error: {err}");
     }
@@ -2163,8 +2168,8 @@ mod tests {
 
         // Test runtime path: create PortRegistry with all fields registered
         let registry = create_port_registry_for_test(&model);
-        let unknown_mapping = resolve_unknown_mapping_runtime(&model, &registry)
-            .expect("runtime mapping failed");
+        let unknown_mapping =
+            resolve_unknown_mapping_runtime(&model, &registry).expect("runtime mapping failed");
         validate_schur_model(&model, &unknown_mapping)
             .expect("Vector3 velocity Schur layout should validate");
     }

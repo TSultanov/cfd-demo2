@@ -42,7 +42,6 @@ pub struct EosRuntimeParams {
     pub theta_ref: f32,
 }
 
-
 impl EosSpec {
     pub fn ideal_gas_gamma(&self) -> Option<f32> {
         match *self {

@@ -62,12 +62,7 @@ pub fn derive_port_set(input: TokenStream) -> TokenStream {
     };
 
     // Generate registration code for each field
-    let register_fields: Vec<_> = fields
-        .iter()
-        .filter_map(generate_register_field)
-        .collect();
-
-
+    let register_fields: Vec<_> = fields.iter().filter_map(generate_register_field).collect();
 
     // Generate field names for struct construction
     let field_names: Vec<_> = fields
@@ -84,20 +79,11 @@ pub fn derive_port_set(input: TokenStream) -> TokenStream {
     let validations = generate_validations(fields);
 
     // Generate port manifest entries
-    let param_specs: Vec<_> = fields
-        .iter()
-        .filter_map(generate_param_spec)
-        .collect();
+    let param_specs: Vec<_> = fields.iter().filter_map(generate_param_spec).collect();
 
-    let field_specs: Vec<_> = fields
-        .iter()
-        .filter_map(generate_field_spec)
-        .collect();
+    let field_specs: Vec<_> = fields.iter().filter_map(generate_field_spec).collect();
 
-    let buffer_specs: Vec<_> = fields
-        .iter()
-        .filter_map(generate_buffer_spec)
-        .collect();
+    let buffer_specs: Vec<_> = fields.iter().filter_map(generate_buffer_spec).collect();
 
     // Check if we found any specs
     if param_specs.is_empty() && field_specs.is_empty() && buffer_specs.is_empty() {
@@ -248,7 +234,6 @@ fn generate_buffer_registration(
         )?;
     })
 }
-
 
 /// Generate compile-time validations.
 fn generate_validations(fields: &syn::Fields) -> proc_macro2::TokenStream {

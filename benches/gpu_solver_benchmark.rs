@@ -1,7 +1,7 @@
 use cfd2::solver::gpu::unified_solver::{GpuUnifiedSolver, SolverConfig};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
-use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::model::helpers::SolverRuntimeParamsExt;
+use cfd2::solver::model::incompressible_momentum_model;
 use criterion::{criterion_group, criterion_main, Criterion};
 use nalgebra::Vector2;
 

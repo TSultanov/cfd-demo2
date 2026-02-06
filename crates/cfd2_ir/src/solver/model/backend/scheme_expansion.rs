@@ -24,7 +24,10 @@ impl SchemeExpansion {
 /// This is a "trusted" variant for systems that have already been validated
 /// (e.g., built with the typed builder). Prefer `expand_schemes` for untyped
 /// construction paths where validation is needed as a backstop.
-pub fn expand_schemes_unchecked(system: &EquationSystem, schemes: &SchemeRegistry) -> SchemeExpansion {
+pub fn expand_schemes_unchecked(
+    system: &EquationSystem,
+    schemes: &SchemeRegistry,
+) -> SchemeExpansion {
     let mut seen: HashSet<String> = HashSet::new();
     let mut gradient_fields = Vec::new();
 

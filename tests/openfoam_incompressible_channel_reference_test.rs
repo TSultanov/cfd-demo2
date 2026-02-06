@@ -134,8 +134,14 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
         });
 
     // Non-triviality guards.
-    assert!(max_u_x_ref > 0.9, "reference appears trivial: max_u_x_ref={max_u_x_ref:.3e}");
-    assert!(max_u_x > 0.4, "solver appears trivial: max_u_x_sol={max_u_x:.3e}");
+    assert!(
+        max_u_x_ref > 0.9,
+        "reference appears trivial: max_u_x_ref={max_u_x_ref:.3e}"
+    );
+    assert!(
+        max_u_x > 0.4,
+        "solver appears trivial: max_u_x_sol={max_u_x:.3e}"
+    );
 
     // The code and OpenFOAM use different linear solver stacks and discretization details.
     // These tolerances are intended to catch gross regressions while allowing some drift.
@@ -150,7 +156,14 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
 
     let (u_ref_field, p_ref_field) =
         common::reference_fields_from_csv(&mesh, &table, x_idx, y_idx, ux_idx, Some(uy_idx), p_idx);
-    common::save_openfoam_field_plots("incompressible_channel", &mesh, &u_ref_field, &p_ref_field, &u, &p);
+    common::save_openfoam_field_plots(
+        "incompressible_channel",
+        &mesh,
+        &u_ref_field,
+        &p_ref_field,
+        &u,
+        &p,
+    );
 
     assert_eq!(
         table.rows.len(),

@@ -3,9 +3,7 @@
 // The port registry manages the creation and storage of field, parameter,
 // and buffer ports, mapping them to their underlying resources.
 
-use super::{
-    BufferPort, FieldKind, FieldPort, ParamPort, ParamType, PortId, PortValidationError,
-};
+use super::{BufferPort, FieldKind, FieldPort, ParamPort, ParamType, PortId, PortValidationError};
 
 use super::buffer::{AccessModeKind, BufferTypeKind, IntoAccessModeKind, IntoBufferTypeKind};
 
@@ -206,12 +204,13 @@ impl PortRegistry {
         module: &'static str,
         name: &str,
     ) -> Result<(), PortValidationError> {
-        let field = self.state_layout.field(name).ok_or_else(|| {
-            PortValidationError::MissingField {
-                module,
-                field: name.to_string(),
-            }
-        })?;
+        let field =
+            self.state_layout
+                .field(name)
+                .ok_or_else(|| PortValidationError::MissingField {
+                    module,
+                    field: name.to_string(),
+                })?;
 
         let expected_components = K::COMPONENT_COUNT;
         let actual_components = field.component_count();
@@ -490,7 +489,12 @@ impl PortRegistry {
                 }
             }
             // Return existing port
-            return Ok(ParamPort::new(existing_id, key, wgsl_field_name, entry.runtime_dim));
+            return Ok(ParamPort::new(
+                existing_id,
+                key,
+                wgsl_field_name,
+                entry.runtime_dim,
+            ));
         }
 
         let id = self.allocate_id();
@@ -1673,7 +1677,10 @@ mod tests {
         assert_eq!(registry.buffer_port_count(), 1);
 
         // Verify params
-        assert!(registry.lookup_param("test.dt").is_some(), "should find dt param");
+        assert!(
+            registry.lookup_param("test.dt").is_some(),
+            "should find dt param"
+        );
 
         // Verify fields
         let p_id = registry.lookup_field("p").expect("should find p field");
@@ -1682,7 +1689,10 @@ mod tests {
         assert_eq!(p_entry.component_count(), 1);
 
         // Verify buffers
-        assert!(registry.lookup_buffer("test_buffer", 1, 0).is_some(), "should find buffer");
+        assert!(
+            registry.lookup_buffer("test_buffer", 1, 0).is_some(),
+            "should find buffer"
+        );
     }
 
     #[test]

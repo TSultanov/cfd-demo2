@@ -181,7 +181,12 @@ pub async fn read_buffer_cached(
 
                 let t4 = Instant::now();
                 rx.recv().unwrap().unwrap();
-                profiling.record_location("read_buffer:channel_recv", ProfileCategory::Other, t4.elapsed(), 0);
+                profiling.record_location(
+                    "read_buffer:channel_recv",
+                    ProfileCategory::Other,
+                    t4.elapsed(),
+                    0,
+                );
             } else {
                 rx.recv().unwrap().unwrap();
             }
@@ -205,7 +210,12 @@ pub async fn read_buffer_cached(
                 drop(data);
                 staging_buffer.unmap();
                 profiling.record_cpu_alloc("read_buffer:cpu_copy", size);
-                profiling.record_location("read_buffer:memcpy", ProfileCategory::Other, t5.elapsed(), size);
+                profiling.record_location(
+                    "read_buffer:memcpy",
+                    ProfileCategory::Other,
+                    t5.elapsed(),
+                    size,
+                );
                 result
             } else {
                 let data = slice.get_mapped_range();

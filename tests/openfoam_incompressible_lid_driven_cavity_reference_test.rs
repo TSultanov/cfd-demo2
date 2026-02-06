@@ -3,9 +3,7 @@ mod common;
 
 use cfd2::solver::gpu::enums::GpuBoundaryType;
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
-use cfd2::solver::model::helpers::{
-    SolverFieldAliasesExt, SolverRuntimeParamsExt,
-};
+use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
@@ -59,7 +57,9 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     solver.set_density(1.0).unwrap();
     solver.set_viscosity(0.01).unwrap();
     // Set moving wall velocity for the lid (u_x = 1.0, u_y = 0.0)
-    solver.set_boundary_vec2(GpuBoundaryType::MovingWall, "U", [1.0, 0.0]).unwrap();
+    solver
+        .set_boundary_vec2(GpuBoundaryType::MovingWall, "U", [1.0, 0.0])
+        .unwrap();
     solver.set_alpha_u(0.7).unwrap();
     solver.set_alpha_p(0.3).unwrap();
     solver.set_outer_iters(50).unwrap();
@@ -74,8 +74,9 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     let u = pollster::block_on(solver.get_u());
     let p = pollster::block_on(solver.get_p());
 
-    let table =
-        common::load_csv(&common::data_path("incompressible_lid_driven_cavity_full_field.csv"));
+    let table = common::load_csv(&common::data_path(
+        "incompressible_lid_driven_cavity_full_field.csv",
+    ));
     let x_idx = common::column_idx(&table.header, "x");
     let y_idx = common::column_idx(&table.header, "y");
     let ux_idx = common::column_idx(&table.header, "u_x");
@@ -114,8 +115,14 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     for (i, (sol, rf)) in sol_rows.iter().zip(ref_rows.iter()).enumerate() {
         let (sx, sy, _, _, _) = *sol;
         let (rx, ry, _, _, _) = *rf;
-        assert!((sx - rx).abs() < 1e-12, "x mismatch at sorted row {i}: solver={sx} ref={rx}");
-        assert!((sy - ry).abs() < 1e-12, "y mismatch at sorted row {i}: solver={sy} ref={ry}");
+        assert!(
+            (sx - rx).abs() < 1e-12,
+            "x mismatch at sorted row {i}: solver={sx} ref={rx}"
+        );
+        assert!(
+            (sy - ry).abs() < 1e-12,
+            "y mismatch at sorted row {i}: solver={sy} ref={ry}"
+        );
     }
 
     let u_x_sol: Vec<f64> = sol_rows.iter().map(|r| r.2).collect();

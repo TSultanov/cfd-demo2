@@ -50,19 +50,13 @@ impl PrimitiveDerivations {
         // u_x = rho_u_x / rho
         derivations.insert(
             "u_x".into(),
-            E::Div(
-                Box::new(E::field("rho_u_x")),
-                Box::new(E::field("rho")),
-            ),
+            E::Div(Box::new(E::field("rho_u_x")), Box::new(E::field("rho"))),
         );
 
         // u_y = rho_u_y / rho
         derivations.insert(
             "u_y".into(),
-            E::Div(
-                Box::new(E::field("rho_u_y")),
-                Box::new(E::field("rho")),
-            ),
+            E::Div(Box::new(E::field("rho_u_y")), Box::new(E::field("rho"))),
         );
 
         // kinetic_energy = 0.5 * (rho_u_x^2 + rho_u_y^2) / rho
@@ -90,10 +84,7 @@ impl PrimitiveDerivations {
             "p".into(),
             E::Mul(
                 Box::new(E::lit(gamma - 1.0)),
-                Box::new(E::Sub(
-                    Box::new(E::field("rho_e")),
-                    Box::new(ke),
-                )),
+                Box::new(E::Sub(Box::new(E::field("rho_e")), Box::new(ke))),
             ),
         );
 
@@ -137,10 +128,7 @@ impl PrimitiveDerivations {
             "p".into(),
             E::Mul(
                 Box::new(E::lit(gamma - 1.0)),
-                Box::new(E::Sub(
-                    Box::new(E::field("rho_e")),
-                    Box::new(ke),
-                )),
+                Box::new(E::Sub(Box::new(E::field("rho_e")), Box::new(ke))),
             ),
         );
 
@@ -229,10 +217,7 @@ impl PrimitiveDerivations {
             let d = deps.get(name).expect("deps missing for node");
             indegree.insert(name.clone(), d.len());
             for dep in d {
-                reverse
-                    .entry(dep.clone())
-                    .or_default()
-                    .push(name.clone());
+                reverse.entry(dep.clone()).or_default().push(name.clone());
             }
         }
 
@@ -273,10 +258,8 @@ impl PrimitiveDerivations {
         }
 
         if ordered.len() != nodes.len() {
-            let mut remaining: Vec<String> = nodes
-                .into_iter()
-                .filter(|n| !ordered.contains(n))
-                .collect();
+            let mut remaining: Vec<String> =
+                nodes.into_iter().filter(|n| !ordered.contains(n)).collect();
             remaining.sort();
             return Err(format!(
                 "primitive derivations contain a dependency cycle: {:?}",

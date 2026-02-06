@@ -2,8 +2,8 @@
 
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::model::helpers::{
-    SolverFieldAliasesExt, SolverIncompressibleControlsExt, SolverRuntimeParamsExt,
-    SolverInletVelocityExt,
+    SolverFieldAliasesExt, SolverIncompressibleControlsExt, SolverInletVelocityExt,
+    SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
@@ -73,7 +73,10 @@ fn ui_incompressible_air_smoke_does_not_blow_up_immediately() {
                 "step {step}: linear residual blew up: {:?}",
                 last
             );
-            assert!(!last.diverged, "step {step}: linear solver diverged: {last:?}");
+            assert!(
+                !last.diverged,
+                "step {step}: linear solver diverged: {last:?}"
+            );
         }
 
         let u = pollster::block_on(solver.get_u());
@@ -81,7 +84,10 @@ fn ui_incompressible_air_smoke_does_not_blow_up_immediately() {
 
         let mut max_vel = 0.0f64;
         for (vx, vy) in &u {
-            assert!(vx.is_finite() && vy.is_finite(), "step {step}: non-finite u");
+            assert!(
+                vx.is_finite() && vy.is_finite(),
+                "step {step}: non-finite u"
+            );
             let v = (vx * vx + vy * vy).sqrt();
             max_vel = max_vel.max(v);
         }

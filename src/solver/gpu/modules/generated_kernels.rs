@@ -32,7 +32,8 @@ impl GeneratedKernelsModule {
         let total_start = Instant::now();
         let stage_prefix = format!("solver.new.kernels.{model_id}");
 
-        let max_compute_workgroups_per_dimension = device.limits().max_compute_workgroups_per_dimension;
+        let max_compute_workgroups_per_dimension =
+            device.limits().max_compute_workgroups_per_dimension;
         let mut pipelines = HashMap::new();
         let mut bind_groups = HashMap::new();
 
@@ -49,12 +50,7 @@ impl GeneratedKernelsModule {
                 None,
             );
 
-            let max_group = source
-                .bindings
-                .iter()
-                .map(|b| b.group)
-                .max()
-                .unwrap_or(0);
+            let max_group = source.bindings.iter().map(|b| b.group).max().unwrap_or(0);
 
             let bind_start = Instant::now();
             let mut groups_ping_pong = Vec::with_capacity((max_group as usize) + 1);

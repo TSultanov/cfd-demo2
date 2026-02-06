@@ -72,10 +72,7 @@ fn diag_incompressible_channel_flux_balance() {
     let p_c: Vec<f64> = p.iter().map(|v| v - p_mean).collect();
     let p_rms_c = common::rms(&p_c);
 
-    let dp_min = d_p
-        .iter()
-        .copied()
-        .fold(f64::INFINITY, |acc, v| acc.min(v));
+    let dp_min = d_p.iter().copied().fold(f64::INFINITY, |acc, v| acc.min(v));
     let dp_max = d_p
         .iter()
         .copied()

@@ -380,7 +380,10 @@ fn euler_central_upwind(
     let c_eff2 = |side: FaceSide| {
         let c2_side = c2(side);
         S::Add(
-            Box::new(S::Mul(Box::new(dtau_enable.clone()), Box::new(c_eff2_low_mach(side)))),
+            Box::new(S::Mul(
+                Box::new(dtau_enable.clone()),
+                Box::new(c_eff2_low_mach(side)),
+            )),
             Box::new(S::Mul(Box::new(dtau_disable.clone()), Box::new(c2_side))),
         )
     };
@@ -630,15 +633,14 @@ fn euler_central_upwind(
         )))
     };
 
-    let c_face_pre = |side: FaceSide| {
-        S::Mul(
-            Box::new(c_face_raw(side)),
-            Box::new(scale_factor(side)),
-        )
-    };
+    let c_face_pre =
+        |side: FaceSide| S::Mul(Box::new(c_face_raw(side)), Box::new(scale_factor(side)));
 
     let c_sf_pos = S::Mul(Box::new(c_face_pre(FaceSide::Owner)), Box::new(S::area()));
-    let c_sf_neg = S::Mul(Box::new(c_face_pre(FaceSide::Neighbor)), Box::new(S::area()));
+    let c_sf_neg = S::Mul(
+        Box::new(c_face_pre(FaceSide::Neighbor)),
+        Box::new(S::area()),
+    );
 
     let ap = S::Max(
         Box::new(S::Max(
@@ -719,13 +721,19 @@ fn euler_central_upwind(
     let p_pos = p(FaceSide::Owner);
     let p_neg = p(FaceSide::Neighbor);
     let pressure_diff = S::Sub(Box::new(p_pos.clone()), Box::new(p_neg.clone()));
-    
+
     // Pressure coupling term: rho' = alpha * (p' / c^2) with a face-averaged compressibility.
     //
     // Note: keep this symmetric across owner/neighbor. Using a single face term avoids
     // double-counting the coupling.
-    let inv_c2_pos = S::Div(Box::new(S::lit(1.0)), Box::new(c_couple2_safe(FaceSide::Owner)));
-    let inv_c2_neg = S::Div(Box::new(S::lit(1.0)), Box::new(c_couple2_safe(FaceSide::Neighbor)));
+    let inv_c2_pos = S::Div(
+        Box::new(S::lit(1.0)),
+        Box::new(c_couple2_safe(FaceSide::Owner)),
+    );
+    let inv_c2_neg = S::Div(
+        Box::new(S::lit(1.0)),
+        Box::new(c_couple2_safe(FaceSide::Neighbor)),
+    );
     let inv_c2_face = S::Mul(
         Box::new(S::lit(0.5)),
         Box::new(S::Add(Box::new(inv_c2_pos), Box::new(inv_c2_neg))),
@@ -738,7 +746,10 @@ fn euler_central_upwind(
         Box::new(inv_c2_face),
     );
     let phi_couple = S::Mul(
-        Box::new(S::Mul(Box::new(rho_couple), Box::new(low_mach_enabled.clone()))),
+        Box::new(S::Mul(
+            Box::new(rho_couple),
+            Box::new(low_mach_enabled.clone()),
+        )),
         Box::new(S::area()),
     );
 

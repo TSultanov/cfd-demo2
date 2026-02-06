@@ -11,13 +11,7 @@ use cfd2::solver::{
 fn low_mach_knob_changes_compressible_implicit_update() {
     std::env::set_var("CFD2_QUIET", "1");
 
-    let mesh = generate_structured_rect_mesh(
-        2,
-        1,
-        1.0,
-        1.0,
-        BoundarySides::wall(),
-    );
+    let mesh = generate_structured_rect_mesh(2, 1, 1.0, 1.0, BoundarySides::wall());
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
@@ -36,9 +30,7 @@ fn low_mach_knob_changes_compressible_implicit_update() {
     solver.set_dt(1e-4);
     solver.set_dtau(5e-5).expect("dtau");
     solver.set_viscosity(0.0).expect("viscosity");
-    solver
-        .set_precond_theta_floor(1e-2)
-        .expect("theta floor");
+    solver.set_precond_theta_floor(1e-2).expect("theta floor");
 
     let rho = vec![1.0f32; mesh.num_cells()];
     let u = vec![[0.0f32, 0.0f32]; mesh.num_cells()];
@@ -61,8 +53,7 @@ fn low_mach_knob_changes_compressible_implicit_update() {
     solver.set_state_fields(&rho, &u, &p);
     solver.initialize_history();
     solver.step();
-    let rho_e_legacy =
-        pollster::block_on(solver.get_field_scalar("rho_e")).expect("rho_e legacy");
+    let rho_e_legacy = pollster::block_on(solver.get_field_scalar("rho_e")).expect("rho_e legacy");
 
     solver
         .set_precond_model(GpuLowMachPrecondModel::WeissSmith)

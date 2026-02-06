@@ -8,6 +8,23 @@ use bytemuck::{bytes_of, Pod, Zeroable};
 pub const WORKGROUP_SIZE: u32 = 64;
 pub const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
 
+const FGMRES_SCALAR_COUNT: usize = 16;
+const FGMRES_SCALAR_STOP: usize = 8;
+const FGMRES_SCALAR_CONVERGED: usize = 9;
+const FGMRES_SCALAR_ITERS_USED: usize = 10;
+const FGMRES_SCALAR_RESIDUAL_EST: usize = 11;
+const FGMRES_SCALAR_TOL_REL_RHS: usize = 12;
+const FGMRES_SCALAR_TOL_ABS: usize = 13;
+
+const FGMRES_INDIRECT_DISPATCH_COUNT: usize = 3;
+const FGMRES_INDIRECT_ENTRY_STRIDE_BYTES: u64 = 16;
+const FGMRES_INDIRECT_DOFS_OFFSET: u64 = 0;
+const FGMRES_INDIRECT_CELLS_OFFSET: u64 = FGMRES_INDIRECT_ENTRY_STRIDE_BYTES;
+const FGMRES_INDIRECT_SCALAR_OFFSET: u64 = FGMRES_INDIRECT_ENTRY_STRIDE_BYTES * 2;
+
+const FGMRES_PARAMS_STRIDE_BYTES: u64 = std::mem::size_of::<RawFgmresParams>() as u64;
+const FGMRES_ITER_PARAMS_STRIDE_BYTES: u64 = std::mem::size_of::<IterParams>() as u64;
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct RawFgmresParams {
@@ -47,8 +64,13 @@ pub struct FgmresCore<'a> {
     pub b_temp: &'a wgpu::Buffer,
     pub b_dot_partial: &'a wgpu::Buffer,
     pub b_scalars: &'a wgpu::Buffer,
+    pub b_indirect_args: &'a wgpu::Buffer,
     pub b_params: &'a wgpu::Buffer,
     pub b_iter_params: &'a wgpu::Buffer,
+    pub b_params_table_iter: &'a wgpu::Buffer,
+    pub b_params_table_reduce: &'a wgpu::Buffer,
+    pub b_iter_table_j: &'a wgpu::Buffer,
+    pub b_iter_table_hessenberg: &'a wgpu::Buffer,
     pub b_staging_scalar: &'a wgpu::Buffer,
 
     pub bg_matrix: &'a wgpu::BindGroup,
@@ -110,8 +132,13 @@ pub struct FgmresWorkspace {
     b_temp: wgpu::Buffer,
     b_dot_partial: wgpu::Buffer,
     b_scalars: wgpu::Buffer,
+    b_indirect_args: wgpu::Buffer,
     b_params: wgpu::Buffer,
     b_iter_params: wgpu::Buffer,
+    b_params_table_iter: wgpu::Buffer,
+    b_params_table_reduce: wgpu::Buffer,
+    b_iter_table_j: wgpu::Buffer,
+    b_iter_table_hessenberg: wgpu::Buffer,
     b_hessenberg: wgpu::Buffer,
     b_givens: wgpu::Buffer,
     b_g: wgpu::Buffer,
@@ -226,6 +253,15 @@ impl FgmresWorkspace {
             mapped_at_creation: false,
         });
 
+        let b_indirect_args = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES indirect args")),
+            size: (FGMRES_INDIRECT_DISPATCH_COUNT as u64) * FGMRES_INDIRECT_ENTRY_STRIDE_BYTES,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::INDIRECT
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let b_params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label_prefix} FGMRES params")),
             size: std::mem::size_of::<RawFgmresParams>() as u64,
@@ -237,6 +273,32 @@ impl FgmresWorkspace {
             label: Some(&format!("{label_prefix} FGMRES iter params")),
             size: std::mem::size_of::<IterParams>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let table_capacity = max_restart.max(1) as u64;
+        let b_params_table_iter = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES params table iter")),
+            size: table_capacity * FGMRES_PARAMS_STRIDE_BYTES,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let b_params_table_reduce = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES params table reduce")),
+            size: table_capacity * FGMRES_PARAMS_STRIDE_BYTES,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let b_iter_table_j = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES iter table j")),
+            size: table_capacity * FGMRES_ITER_PARAMS_STRIDE_BYTES,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let b_iter_table_hessenberg = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES iter table hessenberg")),
+            size: table_capacity * FGMRES_ITER_PARAMS_STRIDE_BYTES,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -279,7 +341,7 @@ impl FgmresWorkspace {
 
         let b_staging_scalar = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label_prefix} FGMRES staging scalar")),
-            size: 4,
+            size: (FGMRES_SCALAR_COUNT as u64) * 4,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -446,7 +508,8 @@ impl FgmresWorkspace {
         let bg_logic_params = {
             let registry = ResourceRegistry::new()
                 .with_buffer("iter_params", &b_iter_params)
-                .with_buffer("scalars", &b_scalars);
+                .with_buffer("scalars", &b_scalars)
+                .with_buffer("indirect_args", &b_indirect_args);
             wgsl_reflect::create_bind_group_from_bindings(
                 device,
                 &format!("{label_prefix} FGMRES logic params BG"),
@@ -479,7 +542,8 @@ impl FgmresWorkspace {
                 .with_buffer("b_basis", &b_basis)
                 .with_buffer("b_w", &b_w)
                 .with_buffer("b_dot_partial", &b_dot_partial)
-                .with_buffer("b_hessenberg", &b_hessenberg);
+                .with_buffer("b_hessenberg", &b_hessenberg)
+                .with_buffer("scalars", &b_scalars);
             wgsl_reflect::create_bind_group_from_bindings(
                 device,
                 &format!("{label_prefix} FGMRES cgs BG"),
@@ -503,8 +567,13 @@ impl FgmresWorkspace {
             b_temp,
             b_dot_partial,
             b_scalars,
+            b_indirect_args,
             b_params,
             b_iter_params,
+            b_params_table_iter,
+            b_params_table_reduce,
+            b_iter_table_j,
+            b_iter_table_hessenberg,
             b_hessenberg,
             b_givens,
             b_g,
@@ -554,8 +623,13 @@ impl FgmresWorkspace {
             b_temp: &self.b_temp,
             b_dot_partial: &self.b_dot_partial,
             b_scalars: &self.b_scalars,
+            b_indirect_args: &self.b_indirect_args,
             b_params: &self.b_params,
             b_iter_params: &self.b_iter_params,
+            b_params_table_iter: &self.b_params_table_iter,
+            b_params_table_reduce: &self.b_params_table_reduce,
+            b_iter_table_j: &self.b_iter_table_j,
+            b_iter_table_hessenberg: &self.b_iter_table_hessenberg,
             b_staging_scalar: &self.b_staging_scalar,
             bg_matrix: &self.bg_matrix,
             bg_precond: &self.bg_precond,
@@ -753,6 +827,22 @@ impl FgmresWorkspace {
 
     pub fn scalars_buffer(&self) -> &wgpu::Buffer {
         &self.b_scalars
+    }
+
+    pub fn indirect_args_buffer(&self) -> &wgpu::Buffer {
+        &self.b_indirect_args
+    }
+
+    pub const fn indirect_dispatch_dofs_offset() -> u64 {
+        FGMRES_INDIRECT_DOFS_OFFSET
+    }
+
+    pub const fn indirect_dispatch_cells_offset() -> u64 {
+        FGMRES_INDIRECT_CELLS_OFFSET
+    }
+
+    pub const fn indirect_dispatch_scalar_offset() -> u64 {
+        FGMRES_INDIRECT_SCALAR_OFFSET
     }
 
     pub fn params_buffer(&self) -> &wgpu::Buffer {
@@ -1198,12 +1288,37 @@ pub fn read_scalar_after_submit(
     value
 }
 
+fn read_solver_scalars_after_submit(
+    core: &FgmresCore<'_>,
+    submission_index: wgpu::SubmissionIndex,
+) -> [f32; FGMRES_SCALAR_COUNT] {
+    let slice = core.b_staging_scalar.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |v| {
+        let _ = tx.send(v);
+    });
+    let _ = core.device.poll(wgpu::PollType::Wait {
+        submission_index: Some(submission_index),
+        timeout: None,
+    });
+    rx.recv().ok().and_then(|v| v.ok()).unwrap();
+
+    let data = slice.get_mapped_range();
+    let values: &[f32] = bytemuck::cast_slice(&data);
+    let mut out = [0.0_f32; FGMRES_SCALAR_COUNT];
+    let count = values.len().min(FGMRES_SCALAR_COUNT);
+    out[..count].copy_from_slice(&values[..count]);
+    drop(data);
+    core.b_staging_scalar.unmap();
+    out
+}
+
 pub fn fgmres_solve_once_with_preconditioner<'a>(
     core: &FgmresCore<'a>,
     x: &'a wgpu::Buffer,
     rhs_norm: f32,
     mut params: RawFgmresParams,
-    mut iter_params: IterParams,
+    iter_params: IterParams,
     config: FgmresSolveOnceConfig,
     mut precondition: impl FnMut(
         usize,
@@ -1216,17 +1331,16 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
     let vector_bytes = (n as u64) * 4;
     let workgroups = workgroups_for_size(n);
     let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
+    let cell_workgroups = workgroups_for_size(core.num_cells);
+    let (cell_dispatch_x, cell_dispatch_y) = dispatch_2d(cell_workgroups);
     let dispatch_x_threads = dispatch_x_threads(workgroups);
 
     let max_restart = iter_params.max_restart.max(1).min(core.max_restart as u32) as usize;
-    iter_params.max_restart = max_restart as u32;
 
     let tol_abs = config.tol_abs;
     let tol_rel_rhs = config.tol_rel * rhs_norm;
 
-    let mut basis_size = 0usize;
-    let mut residual_est = f32::INFINITY;
-    let mut converged = false;
+    let mut basis_size = max_restart;
 
     // Ensure vector ops see correct dispatch width and problem size.
     params.n = n;
@@ -1234,27 +1348,114 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
     params.max_restart = max_restart as u32;
     write_params(core, &params);
 
-    for j in 0..max_restart {
-        basis_size = j + 1;
+    let mut solver_scalars = [0.0_f32; FGMRES_SCALAR_COUNT];
+    solver_scalars[FGMRES_SCALAR_STOP] = 0.0;
+    solver_scalars[FGMRES_SCALAR_CONVERGED] = 0.0;
+    solver_scalars[FGMRES_SCALAR_ITERS_USED] = max_restart as f32;
+    solver_scalars[FGMRES_SCALAR_RESIDUAL_EST] = f32::INFINITY;
+    solver_scalars[FGMRES_SCALAR_TOL_REL_RHS] = tol_rel_rhs;
+    solver_scalars[FGMRES_SCALAR_TOL_ABS] = tol_abs;
+    write_scalars(core, &solver_scalars);
 
-        let z_buf = &core.z_vectors[j];
-        let vj = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j);
+    let indirect_args: [u32; FGMRES_INDIRECT_DISPATCH_COUNT * 4] = [
+        dispatch_x,
+        dispatch_y,
+        1,
+        0,
+        cell_dispatch_x,
+        cell_dispatch_y,
+        1,
+        0,
+        max_restart as u32,
+        1,
+        1,
+        0,
+    ];
+    core.queue.write_buffer(
+        core.b_indirect_args,
+        0,
+        bytemuck::cast_slice(&indirect_args),
+    );
 
-        // Update solver params for this iteration.
-        params.num_iters = j as u32;
-        write_params(core, &params);
+    let max_restart_u32 = max_restart as u32;
+    let params_iter_table: Vec<RawFgmresParams> = (0..max_restart)
+        .map(|j| RawFgmresParams {
+            num_iters: j as u32,
+            ..params
+        })
+        .collect();
 
-        // (1) Precondition, then w = A * z_j, then CGS, then norm partial reduction.
-        {
-            let mut encoder = core
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("FGMRES Iter: SpMV+CGS+NormPartial"),
-                });
+    let params_reduce_base = RawFgmresParams {
+        n: core.num_dot_groups,
+        dispatch_x: WORKGROUP_SIZE,
+        ..params
+    };
+    let params_reduce_table: Vec<RawFgmresParams> = (0..max_restart)
+        .map(|j| RawFgmresParams {
+            num_iters: j as u32,
+            ..params_reduce_base
+        })
+        .collect();
+
+    let iter_table_j: Vec<IterParams> = (0..max_restart)
+        .map(|j| IterParams {
+            current_idx: j as u32,
+            max_restart: max_restart_u32,
+            _pad1: 0,
+            _pad2: 0,
+        })
+        .collect();
+    let iter_table_hessenberg: Vec<IterParams> = (0..max_restart)
+        .map(|j| IterParams {
+            current_idx: (j as u32) * (max_restart_u32 + 1) + (j as u32 + 1),
+            max_restart: max_restart_u32,
+            _pad1: 0,
+            _pad2: 0,
+        })
+        .collect();
+
+    core.queue.write_buffer(
+        core.b_params_table_iter,
+        0,
+        bytemuck::cast_slice(&params_iter_table),
+    );
+    core.queue.write_buffer(
+        core.b_params_table_reduce,
+        0,
+        bytemuck::cast_slice(&params_reduce_table),
+    );
+    core.queue
+        .write_buffer(core.b_iter_table_j, 0, bytemuck::cast_slice(&iter_table_j));
+    core.queue.write_buffer(
+        core.b_iter_table_hessenberg,
+        0,
+        bytemuck::cast_slice(&iter_table_hessenberg),
+    );
+
+    let status_submission_index = {
+        let mut encoder = core
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("FGMRES restart body"),
+            });
+
+        for j in 0..max_restart {
+            let params_offset = (j as u64) * FGMRES_PARAMS_STRIDE_BYTES;
+            let iter_offset = (j as u64) * FGMRES_ITER_PARAMS_STRIDE_BYTES;
+
+            encoder.copy_buffer_to_buffer(
+                core.b_params_table_iter,
+                params_offset,
+                core.b_params,
+                0,
+                FGMRES_PARAMS_STRIDE_BYTES,
+            );
+
+            let z_buf = &core.z_vectors[j];
+            let vj = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j);
 
             precondition(j, &mut encoder, vj, z_buf);
 
-            // w = A * z_j
             let spmv_bg = create_vector_bind_group(
                 core.device,
                 core.bgl_vectors,
@@ -1274,10 +1475,12 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
                 pass.set_bind_group(1, core.bg_matrix, &[]);
                 pass.set_bind_group(2, core.bg_precond, &[]);
                 pass.set_bind_group(3, core.bg_params, &[]);
-                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+                pass.dispatch_workgroups_indirect(
+                    core.b_indirect_args,
+                    FGMRES_INDIRECT_DOFS_OFFSET,
+                );
             }
 
-            // CGS (writes H[i,j] for i=0..j)
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("FGMRES CGS Calc"),
@@ -1285,7 +1488,10 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
                 });
                 pass.set_pipeline(core.pipeline_calc_dots_cgs);
                 pass.set_bind_group(0, core.bg_cgs, &[]);
-                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+                pass.dispatch_workgroups_indirect(
+                    core.b_indirect_args,
+                    FGMRES_INDIRECT_DOFS_OFFSET,
+                );
             }
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1294,7 +1500,10 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
                 });
                 pass.set_pipeline(core.pipeline_reduce_dots_cgs);
                 pass.set_bind_group(0, core.bg_cgs, &[]);
-                pass.dispatch_workgroups((j + 1) as u32, 1, 1);
+                pass.dispatch_workgroups_indirect(
+                    core.b_indirect_args,
+                    FGMRES_INDIRECT_SCALAR_OFFSET,
+                );
             }
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1303,10 +1512,12 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
                 });
                 pass.set_pipeline(core.pipeline_update_w_cgs);
                 pass.set_bind_group(0, core.bg_cgs, &[]);
-                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+                pass.dispatch_workgroups_indirect(
+                    core.b_indirect_args,
+                    FGMRES_INDIRECT_DOFS_OFFSET,
+                );
             }
 
-            // Partial reduction of ||w||^2 into dot_partial.
             let norm_bg = create_vector_bind_group(
                 core.device,
                 core.bgl_vectors,
@@ -1326,150 +1537,176 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
                 pass.set_bind_group(1, core.bg_matrix, &[]);
                 pass.set_bind_group(2, core.bg_precond, &[]);
                 pass.set_bind_group(3, core.bg_params, &[]);
-                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+                pass.dispatch_workgroups_indirect(
+                    core.b_indirect_args,
+                    FGMRES_INDIRECT_DOFS_OFFSET,
+                );
             }
 
-            core.queue.submit(Some(encoder.finish()));
-        }
+            let reduce_bg = create_vector_bind_group(
+                core.device,
+                core.bgl_vectors,
+                core.vector_bindings,
+                core.b_dot_partial.as_entire_binding(),
+                core.b_temp.as_entire_binding(),
+                core.b_temp.as_entire_binding(),
+                "FGMRES Reduce BG",
+            );
 
-        // Compute norm of w and write H[j+1,j] plus scalars[0]=1/norm.
-        let h_idx = (j as u32) * (max_restart as u32 + 1) + (j as u32 + 1);
-        iter_params.current_idx = h_idx;
-        write_iter_params(core, &iter_params);
+            encoder.copy_buffer_to_buffer(
+                core.b_params_table_reduce,
+                params_offset,
+                core.b_params,
+                0,
+                FGMRES_PARAMS_STRIDE_BYTES,
+            );
+            encoder.copy_buffer_to_buffer(
+                core.b_iter_table_hessenberg,
+                iter_offset,
+                core.b_iter_params,
+                0,
+                FGMRES_ITER_PARAMS_STRIDE_BYTES,
+            );
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FGMRES Reduce Final & Finish Norm"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(core.pipeline_reduce_final_and_finish_norm);
+                pass.set_bind_group(0, &reduce_bg, &[]);
+                pass.set_bind_group(1, core.bg_matrix, &[]);
+                pass.set_bind_group(2, core.bg_precond, &[]);
+                pass.set_bind_group(3, core.bg_params, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
 
-        // Reduce + finish norm (single thread); hack params.n=num_dot_groups for this dispatch.
-        let reduce_params = RawFgmresParams {
-            n: core.num_dot_groups,
-            dispatch_x: WORKGROUP_SIZE,
-            ..params
-        };
-        write_params(core, &reduce_params);
+            let v_next = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j + 1);
+            let scale_bg = create_vector_bind_group(
+                core.device,
+                core.bgl_vectors,
+                core.vector_bindings,
+                core.b_w.as_entire_binding(),
+                v_next,
+                core.b_temp.as_entire_binding(),
+                "FGMRES Normalize Basis BG",
+            );
 
-        let reduce_bg = create_vector_bind_group(
-            core.device,
-            core.bgl_vectors,
-            core.vector_bindings,
-            core.b_dot_partial.as_entire_binding(),
-            core.b_temp.as_entire_binding(),
-            core.b_temp.as_entire_binding(),
-            "FGMRES Reduce BG",
-        );
-        dispatch_vector_pipeline(
-            core,
-            core.pipeline_reduce_final_and_finish_norm,
-            &reduce_bg,
-            1,
-            1,
-            "FGMRES Reduce Final & Finish Norm",
-        );
-
-        // Restore params for vector ops
-        write_params(core, &params);
-
-        // (3) v_{j+1} = (1/||w||) * w, update Hessenberg/Givens.
-        iter_params.current_idx = j as u32;
-        write_iter_params(core, &iter_params);
-
-        {
-            let submission_index = {
-                let mut encoder =
-                    core.device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("FGMRES Iter: Scale+Update"),
-                        });
-
-                // v_{j+1} = (1/||w||) * w
-                let v_next = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j + 1);
-                let scale_bg = create_vector_bind_group(
-                    core.device,
-                    core.bgl_vectors,
-                    core.vector_bindings,
-                    core.b_w.as_entire_binding(),
-                    v_next,
-                    core.b_temp.as_entire_binding(),
-                    "FGMRES Normalize Basis BG",
+            encoder.copy_buffer_to_buffer(
+                core.b_params_table_iter,
+                params_offset,
+                core.b_params,
+                0,
+                FGMRES_PARAMS_STRIDE_BYTES,
+            );
+            encoder.copy_buffer_to_buffer(
+                core.b_iter_table_j,
+                iter_offset,
+                core.b_iter_params,
+                0,
+                FGMRES_ITER_PARAMS_STRIDE_BYTES,
+            );
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FGMRES Normalize & Copy"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(core.pipeline_scale);
+                pass.set_bind_group(0, &scale_bg, &[]);
+                pass.set_bind_group(1, core.bg_matrix, &[]);
+                pass.set_bind_group(2, core.bg_precond, &[]);
+                pass.set_bind_group(3, core.bg_params, &[]);
+                pass.dispatch_workgroups_indirect(
+                    core.b_indirect_args,
+                    FGMRES_INDIRECT_DOFS_OFFSET,
                 );
-                {
-                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("FGMRES Normalize & Copy"),
-                        timestamp_writes: None,
-                    });
-                    pass.set_pipeline(core.pipeline_scale);
-                    pass.set_bind_group(0, &scale_bg, &[]);
-                    pass.set_bind_group(1, core.bg_matrix, &[]);
-                    pass.set_bind_group(2, core.bg_precond, &[]);
-                    pass.set_bind_group(3, core.bg_params, &[]);
-                    pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
-                }
+            }
 
-                // Update Hessenberg/Givens and residual estimate.
-                {
-                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("FGMRES Update Hessenberg"),
-                        timestamp_writes: None,
-                    });
-                    pass.set_pipeline(core.pipeline_update_hessenberg);
-                    pass.set_bind_group(0, core.bg_logic, &[]);
-                    pass.set_bind_group(1, core.bg_logic_params, &[]);
-                    pass.dispatch_workgroups(1, 1, 1);
-                }
-
-                // IMPORTANT: `update_hessenberg_givens` writes the current residual estimate to
-                // `scalars[0]`. We read it back *every iteration* to support early exit.
-                //
-                // Do not remove this readback without providing an alternative early-exit
-                // mechanism (or a benchmarked check interval). Only checking at the end forces
-                // `max_restart` iterations even when GMRES converges early, which is a major
-                // performance regression for many flows.
-                encoder.copy_buffer_to_buffer(core.b_scalars, 0, core.b_staging_scalar, 0, 4);
-                core.queue.submit(Some(encoder.finish()))
-            };
-
-            residual_est = read_scalar_after_submit(core, submission_index);
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FGMRES Update Hessenberg"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(core.pipeline_update_hessenberg);
+                pass.set_bind_group(0, core.bg_logic, &[]);
+                pass.set_bind_group(1, core.bg_logic_params, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
         }
 
-        if residual_est <= tol_rel_rhs || residual_est <= tol_abs {
-            converged = true;
-            break;
+        if max_restart > 0 {
+            encoder.copy_buffer_to_buffer(
+                core.b_iter_table_j,
+                0,
+                core.b_iter_params,
+                0,
+                FGMRES_ITER_PARAMS_STRIDE_BYTES,
+            );
         }
-    }
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("FGMRES Solve Triangular"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(core.pipeline_solve_triangular);
+            pass.set_bind_group(0, core.bg_logic, &[]);
+            pass.set_bind_group(1, core.bg_logic_params, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
 
-    // Solve upper triangular system for y (size=basis_size)
-    iter_params.current_idx = basis_size as u32;
-    write_iter_params(core, &iter_params);
-    dispatch_logic_pipeline(
-        core,
-        core.pipeline_solve_triangular,
-        1,
-        "FGMRES Solve Triangular",
-    );
+        if config.reset_x_before_update {
+            encoder.clear_buffer(x, 0, Some(vector_bytes));
+        }
 
-    if config.reset_x_before_update {
-        let size = x.size() as usize;
-        core.queue.write_buffer(x, 0, &vec![0u8; size]);
-    }
+        for i in 0..max_restart {
+            let iter_offset = (i as u64) * FGMRES_ITER_PARAMS_STRIDE_BYTES;
+            encoder.copy_buffer_to_buffer(
+                core.b_iter_table_j,
+                iter_offset,
+                core.b_iter_params,
+                0,
+                FGMRES_ITER_PARAMS_STRIDE_BYTES,
+            );
 
-    // x = x + sum_i y_i * z_i
-    for i in 0..basis_size {
-        iter_params.current_idx = i as u32;
-        write_iter_params(core, &iter_params);
-        let axpy_bg = create_vector_bind_group(
-            core.device,
-            core.bgl_vectors,
-            core.vector_bindings,
-            core.z_vectors[i].as_entire_binding(),
-            x.as_entire_binding(),
-            core.b_temp.as_entire_binding(),
-            "FGMRES Solution Update BG",
+            let axpy_bg = create_vector_bind_group(
+                core.device,
+                core.bgl_vectors,
+                core.vector_bindings,
+                core.z_vectors[i].as_entire_binding(),
+                x.as_entire_binding(),
+                core.b_temp.as_entire_binding(),
+                "FGMRES Solution Update BG",
+            );
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("FGMRES Solution Update"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(core.pipeline_axpy_from_y);
+            pass.set_bind_group(0, &axpy_bg, &[]);
+            pass.set_bind_group(1, core.bg_matrix, &[]);
+            pass.set_bind_group(2, core.bg_precond, &[]);
+            pass.set_bind_group(3, core.bg_params, &[]);
+            pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+        }
+
+        encoder.copy_buffer_to_buffer(
+            core.b_scalars,
+            0,
+            core.b_staging_scalar,
+            0,
+            (FGMRES_SCALAR_COUNT as u64) * 4,
         );
-        dispatch_vector_pipeline(
-            core,
-            core.pipeline_axpy_from_y,
-            &axpy_bg,
-            dispatch_x,
-            dispatch_y,
-            "FGMRES Solution Update",
-        );
+
+        core.queue.submit(Some(encoder.finish()))
+    };
+    let solver_scalars = read_solver_scalars_after_submit(core, status_submission_index);
+
+    let residual_est = solver_scalars[FGMRES_SCALAR_RESIDUAL_EST];
+    let converged = solver_scalars[FGMRES_SCALAR_CONVERGED] > 0.5;
+
+    let reported_basis = solver_scalars[FGMRES_SCALAR_ITERS_USED];
+    if reported_basis.is_finite() {
+        let reported_basis = reported_basis.round().clamp(1.0, max_restart as f32) as usize;
+        basis_size = reported_basis;
     }
 
     FgmresSolveOnceResult {

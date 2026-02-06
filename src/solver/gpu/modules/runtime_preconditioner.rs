@@ -106,13 +106,17 @@ impl RuntimePreconditionerModule {
 
     fn ensure_block_jacobi_pipelines(&mut self, device: &wgpu::Device) {
         if self.pipeline_block_jacobi_build.is_none() {
-            let src = kernel_registry::kernel_source_by_id("", KernelId::BLOCK_PRECOND_BUILD_BLOCK_INV)
-                .expect("block_precond/build_block_inv shader missing from kernel registry");
+            let src =
+                kernel_registry::kernel_source_by_id("", KernelId::BLOCK_PRECOND_BUILD_BLOCK_INV)
+                    .expect("block_precond/build_block_inv shader missing from kernel registry");
             self.pipeline_block_jacobi_build = Some((src.create_pipeline)(device));
         }
         if self.pipeline_block_jacobi_apply.is_none() {
-            let src = kernel_registry::kernel_source_by_id("", KernelId::BLOCK_PRECOND_APPLY_BLOCK_PRECOND)
-                .expect("block_precond/apply_block_precond shader missing from kernel registry");
+            let src = kernel_registry::kernel_source_by_id(
+                "",
+                KernelId::BLOCK_PRECOND_APPLY_BLOCK_PRECOND,
+            )
+            .expect("block_precond/apply_block_precond shader missing from kernel registry");
             self.pipeline_block_jacobi_apply = Some((src.create_pipeline)(device));
         }
     }
@@ -391,7 +395,10 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
             pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
             pass.set_bind_group(2, fgmres.precond_bg(), &[]);
             pass.set_bind_group(3, fgmres.params_bg(), &[]);
-            pass.dispatch_workgroups(dispatch.dofs.0, dispatch.dofs.1, 1);
+            pass.dispatch_workgroups_indirect(
+                fgmres.indirect_args_buffer(),
+                crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace::indirect_dispatch_dofs_offset(),
+            );
             return;
         }
 
@@ -422,7 +429,10 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
                 pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
                 pass.set_bind_group(2, fgmres.precond_bg(), &[]);
                 pass.set_bind_group(3, fgmres.params_bg(), &[]);
-                pass.dispatch_workgroups(dispatch.dofs.0, dispatch.dofs.1, 1);
+                pass.dispatch_workgroups_indirect(
+                    fgmres.indirect_args_buffer(),
+                    crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace::indirect_dispatch_dofs_offset(),
+                );
                 return;
             }
 
@@ -445,7 +455,10 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
             };
 
             let expected_bytes = (self.num_dofs as u64) * 4;
-            let available = input_binding.size.map(|s| s.get()).unwrap_or(expected_bytes);
+            let available = input_binding
+                .size
+                .map(|s| s.get())
+                .unwrap_or(expected_bytes);
             if available < expected_bytes {
                 return self
                     .identity
@@ -469,7 +482,10 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
             pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
             pass.set_bind_group(2, bg_block_inv, &[]);
             pass.set_bind_group(3, fgmres.params_bg(), &[]);
-            pass.dispatch_workgroups(dispatch.cells.0, dispatch.cells.1, 1);
+            pass.dispatch_workgroups_indirect(
+                fgmres.indirect_args_buffer(),
+                crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace::indirect_dispatch_cells_offset(),
+            );
             return;
         }
 
@@ -492,7 +508,10 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
         };
 
         let expected_bytes = (self.num_dofs as u64) * 4;
-        let available = input_binding.size.map(|s| s.get()).unwrap_or(expected_bytes);
+        let available = input_binding
+            .size
+            .map(|s| s.get())
+            .unwrap_or(expected_bytes);
         if available < expected_bytes {
             return self
                 .identity
@@ -521,7 +540,7 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
             &level0.b_params,
             "runtime_preconditioner:amg_level0_state_override",
         );
-
+        amg.sync_control_scalars(encoder, fgmres.scalars_buffer());
         amg.v_cycle(encoder, Some(&override_bg));
     }
 }

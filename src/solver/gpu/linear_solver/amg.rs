@@ -1,5 +1,5 @@
-use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::linear_solver::fgmres::dispatch_2d;
+use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
@@ -82,6 +82,7 @@ pub struct AmgResources {
     pub bgl_op: wgpu::BindGroupLayout, // For P and R
     pub bgl_state: wgpu::BindGroupLayout,
     pub bgl_cross: wgpu::BindGroupLayout,
+    b_control_scalars: wgpu::Buffer,
     bg_cross_dummy: wgpu::BindGroup,
     bindings: &'static [wgsl_reflect::WgslBindingDesc],
 }
@@ -258,8 +259,9 @@ impl AmgResources {
 
         let smooth_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_SMOOTH_OP)
             .expect("amg/smooth_op shader missing from kernel registry");
-        let restrict_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_RESTRICT_RESIDUAL)
-            .expect("amg/restrict_residual shader missing from kernel registry");
+        let restrict_src =
+            kernel_registry::kernel_source_by_id("", KernelId::AMG_RESTRICT_RESIDUAL)
+                .expect("amg/restrict_residual shader missing from kernel registry");
         let bindings = restrict_src.bindings;
         let prolongate_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_PROLONGATE_OP)
             .expect("amg/prolongate_op shader missing from kernel registry");
@@ -275,6 +277,15 @@ impl AmgResources {
         let bgl_state = pipeline_restrict_residual.get_bind_group_layout(1);
         let bgl_op = pipeline_restrict_residual.get_bind_group_layout(2);
         let bgl_cross = pipeline_restrict_residual.get_bind_group_layout(3);
+
+        let b_control_scalars = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("AMG Control Scalars"),
+            size: 64,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
 
         // Build Hierarchy
         for level_idx in 0..max_levels {
@@ -494,7 +505,9 @@ impl AmgResources {
             let coarse_x = &levels[i + 1].b_x;
 
             let bg_restrict = {
-                let registry = ResourceRegistry::new().with_buffer("coarse_vec", coarse_b);
+                let registry = ResourceRegistry::new()
+                    .with_buffer("coarse_vec", coarse_b)
+                    .with_buffer("scalars", &b_control_scalars);
                 wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     &format!("AMG L{i} Cross Restrict"),
@@ -507,7 +520,9 @@ impl AmgResources {
             };
 
             let bg_prolongate = {
-                let registry = ResourceRegistry::new().with_buffer("coarse_vec", coarse_x);
+                let registry = ResourceRegistry::new()
+                    .with_buffer("coarse_vec", coarse_x)
+                    .with_buffer("scalars", &b_control_scalars);
                 wgsl_reflect::create_bind_group_from_bindings(
                     device,
                     &format!("AMG L{i} Cross Prolongate"),
@@ -516,9 +531,7 @@ impl AmgResources {
                     3,
                     |name| registry.resolve(name),
                 )
-                .unwrap_or_else(|err| {
-                    panic!("AMG L{i} cross prolongate BG creation failed: {err}")
-                })
+                .unwrap_or_else(|err| panic!("AMG L{i} cross prolongate BG creation failed: {err}"))
             };
 
             levels[i].bg_restrict = Some(bg_restrict);
@@ -529,7 +542,9 @@ impl AmgResources {
             let coarsest = levels
                 .last()
                 .expect("AMG hierarchy must contain at least one level");
-            let registry = ResourceRegistry::new().with_buffer("coarse_vec", &coarsest.b_x);
+            let registry = ResourceRegistry::new()
+                .with_buffer("coarse_vec", &coarsest.b_x)
+                .with_buffer("scalars", &b_control_scalars);
             wgsl_reflect::create_bind_group_from_bindings(
                 device,
                 "AMG Cross Dummy BG",
@@ -551,9 +566,18 @@ impl AmgResources {
             bgl_op,
             bgl_state,
             bgl_cross,
+            b_control_scalars,
             bg_cross_dummy,
             bindings,
         }
+    }
+
+    pub(crate) fn sync_control_scalars(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        scalars: &wgpu::Buffer,
+    ) {
+        encoder.copy_buffer_to_buffer(scalars, 0, &self.b_control_scalars, 0, 64);
     }
 
     pub(crate) fn create_state_override_bind_group(
@@ -620,7 +644,11 @@ impl AmgResources {
             pass.set_bind_group(0, &fine.bg_matrix, &[]);
             pass.set_bind_group(1, state_bg(i), &[]);
             pass.set_bind_group(2, &fine.bg_r, &[]);
-            pass.set_bind_group(3, fine.bg_restrict.as_ref().unwrap_or(&self.bg_cross_dummy), &[]);
+            pass.set_bind_group(
+                3,
+                fine.bg_restrict.as_ref().unwrap_or(&self.bg_cross_dummy),
+                &[],
+            );
             pass.dispatch_workgroups(fine_dispatch_x, fine_dispatch_y, 1);
 
             // 2. Fused Residual + Restrict (r_fine implicit, r_coarse = R * (b - Ax))
@@ -643,7 +671,11 @@ impl AmgResources {
             pass.set_bind_group(0, &coarse.bg_matrix, &[]); // Dummy bind, just for layout
             pass.set_bind_group(1, state_bg(i + 1), &[]); // Binds coarse x
             pass.set_bind_group(2, &coarse.bg_r, &[]);
-            pass.set_bind_group(3, coarse.bg_restrict.as_ref().unwrap_or(&self.bg_cross_dummy), &[]);
+            pass.set_bind_group(
+                3,
+                coarse.bg_restrict.as_ref().unwrap_or(&self.bg_cross_dummy),
+                &[],
+            );
             pass.dispatch_workgroups(coarse_dispatch_x, coarse_dispatch_y, 1);
 
             pass.pop_debug_group();
@@ -690,7 +722,11 @@ impl AmgResources {
             pass.set_bind_group(0, &fine.bg_matrix, &[]);
             pass.set_bind_group(1, state_bg(i), &[]);
             pass.set_bind_group(2, &fine.bg_p, &[]);
-            pass.set_bind_group(3, fine.bg_prolongate.as_ref().unwrap_or(&self.bg_cross_dummy), &[]);
+            pass.set_bind_group(
+                3,
+                fine.bg_prolongate.as_ref().unwrap_or(&self.bg_cross_dummy),
+                &[],
+            );
             pass.dispatch_workgroups(fine_dispatch_x, fine_dispatch_y, 1);
 
             pass.pop_debug_group();

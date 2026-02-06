@@ -173,7 +173,7 @@ impl FgmresPreconditionerModule for IdentityPreconditioner {
         fgmres: &FgmresWorkspace,
         input: wgpu::BindingResource<'_>,
         output: &wgpu::Buffer,
-        dispatch: DispatchGrids,
+        _dispatch: DispatchGrids,
     ) {
         let _ = &self.copy_pipeline;
 
@@ -195,7 +195,10 @@ impl FgmresPreconditionerModule for IdentityPreconditioner {
             pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
             pass.set_bind_group(2, fgmres.precond_bg(), &[]);
             pass.set_bind_group(3, fgmres.params_bg(), &[]);
-            pass.dispatch_workgroups(dispatch.dofs.0, dispatch.dofs.1, 1);
+            pass.dispatch_workgroups_indirect(
+                fgmres.indirect_args_buffer(),
+                FgmresWorkspace::indirect_dispatch_dofs_offset(),
+            );
         }
     }
 }

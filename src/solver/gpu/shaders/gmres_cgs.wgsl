@@ -14,11 +14,13 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> b_w: array<f32>;
 @group(0) @binding(3) var<storage, read_write> b_dot_partial: array<f32>;
 @group(0) @binding(4) var<storage, read_write> b_hessenberg: array<f32>;
+@group(0) @binding(5) var<storage, read> scalars: array<f32>;
 
 var<workgroup> sdata: array<f32, 64>;
 var<workgroup> sdata_vec4: array<vec4<f32>, 64>;
 
 const WORKGROUP_SIZE: u32 = 64u;
+const SCALAR_STOP: u32 = 8u;
 
 // Kernel 1: Calculate partial dot products for all i in 0..=j
 // Dispatch: (num_groups_n, 1, 1)
@@ -32,6 +34,10 @@ fn calc_dots_cgs(
     @builtin(workgroup_id) group_id: vec3<u32>,
     @builtin(num_workgroups) num_workgroups: vec3<u32>
 ) {
+    if (scalars[SCALAR_STOP] > 0.5) {
+        return;
+    }
+
     let j = params.num_iters; // Current iteration index
     let n = params.n;
     let num_groups_n = (n + (WORKGROUP_SIZE - 1u)) / WORKGROUP_SIZE;
@@ -97,8 +103,15 @@ fn reduce_dots_cgs(
     @builtin(local_invocation_id) local_id: vec3<u32>,
     @builtin(workgroup_id) group_id: vec3<u32>
 ) {
+    if (scalars[SCALAR_STOP] > 0.5) {
+        return;
+    }
+
     let i = group_id.x; // Which vector V_i
     let j = params.num_iters; // Current iteration index
+    if (i > j || i >= params.max_restart) {
+        return;
+    }
     let num_groups_n = (params.n + 63u) / 64u; // Calculate from n
 
     var sum = 0.0;
@@ -134,6 +147,10 @@ fn update_w_cgs(
     @builtin(global_invocation_id) global_id: vec3<u32>,
     @builtin(num_workgroups) num_workgroups: vec3<u32>,
 ) {
+    if (scalars[SCALAR_STOP] > 0.5) {
+        return;
+    }
+
     let stride_x = num_workgroups.x * WORKGROUP_SIZE;
     let idx = global_id.y * stride_x + global_id.x;
     let j = params.num_iters;

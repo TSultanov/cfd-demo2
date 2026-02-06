@@ -1,12 +1,12 @@
 #![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
+use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
     SolverRuntimeParamsExt,
 };
-use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{
     GpuLowMachPrecondModel, PreconditionerType, SolverConfig, SteppingMode, TimeScheme,
@@ -84,13 +84,15 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
     if (cell - 0.025).abs() < 1e-12 {
         assert_eq!(mesh.num_cells(), 5200, "expected UI-like 5200-cell mesh");
     }
-    let (mut inlet_faces, mut outlet_faces, mut wall_faces, mut slip_faces) = (0usize, 0usize, 0usize, 0usize);
+    let (mut inlet_faces, mut outlet_faces, mut wall_faces, mut slip_faces) =
+        (0usize, 0usize, 0usize, 0usize);
     for b in &mesh.face_boundary {
         match b {
             Some(cfd2::solver::mesh::BoundaryType::Inlet) => inlet_faces += 1,
             Some(cfd2::solver::mesh::BoundaryType::Outlet) => outlet_faces += 1,
             Some(cfd2::solver::mesh::BoundaryType::Wall) => wall_faces += 1,
             Some(cfd2::solver::mesh::BoundaryType::SlipWall) => slip_faces += 1,
+            Some(cfd2::solver::mesh::BoundaryType::MovingWall) => wall_faces += 1,
             None => {}
         }
     }
@@ -191,10 +193,11 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
     // Sanity-check initialization: uniform pressure should be present before stepping.
     {
         let p0 = pollster::block_on(solver.get_p());
-        let (min_p0, max_p0) = p0.iter().fold(
-            (f64::INFINITY, f64::NEG_INFINITY),
-            |(mn, mx), &v| (mn.min(v), mx.max(v)),
-        );
+        let (min_p0, max_p0) = p0
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), &v| {
+                (mn.min(v), mx.max(v))
+            });
         assert!(
             min_p0 > 1e3 && (max_p0 - min_p0).abs() < 1e-6,
             "expected initialized uniform pressure, got p=[{min_p0:.3e},{max_p0:.3e}]"
@@ -252,14 +255,19 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
             last.residual.is_finite() && last.residual < 1e12,
             "step {step}: linear residual blew up: {last:?}"
         );
-        assert!(!last.diverged, "step {step}: linear solver diverged: {last:?}");
+        assert!(
+            !last.diverged,
+            "step {step}: linear solver diverged: {last:?}"
+        );
 
         // Debug: if the implicit solve early-exits, `x` may remain zero and clobber state in the update pass.
         if step == 0 {
             let x = pollster::block_on(solver.get_linear_solution()).expect("read linear x");
-            let (min_x, max_x) = x.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(mn, mx), &v| {
-                (mn.min(v), mx.max(v))
-            });
+            let (min_x, max_x) = x
+                .iter()
+                .fold((f32::INFINITY, f32::NEG_INFINITY), |(mn, mx), &v| {
+                    (mn.min(v), mx.max(v))
+                });
             eprintln!(
                 "[ui_dual_time_backstep] step={step} x_range=[{min_x:.3e},{max_x:.3e}] x0={:.3e} x4={:.3e} x6={:.3e}",
                 x.get(0).copied().unwrap_or_default(),
@@ -273,7 +281,10 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
 
         let mut max_vel = 0.0f64;
         for (vx, vy) in &u {
-            assert!(vx.is_finite() && vy.is_finite(), "step {step}: non-finite u");
+            assert!(
+                vx.is_finite() && vy.is_finite(),
+                "step {step}: non-finite u"
+            );
             let v = (vx * vx + vy * vy).sqrt();
             max_vel = max_vel.max(v);
         }

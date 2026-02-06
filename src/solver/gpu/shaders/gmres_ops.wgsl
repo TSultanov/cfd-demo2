@@ -20,6 +20,7 @@ struct GmresParams {
 }
 
 const WORKGROUP_SIZE: u32 = 64u;
+const SCALAR_STOP: u32 = 8u;
 
 fn global_index(global_id: vec3<u32>, num_workgroups: vec3<u32>) -> u32 {
     return global_id.y * (num_workgroups.x * WORKGROUP_SIZE) + global_id.x;
@@ -304,6 +305,10 @@ fn reduce_final(@builtin(global_invocation_id) global_id: vec3<u32>) {
 // Merged Reduce Final + Finish Norm
 @compute @workgroup_size(1)
 fn reduce_final_and_finish_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    if (scalars[SCALAR_STOP] > 0.5) {
+        return;
+    }
+
     var total_sum = 0.0;
     let num_partials = params.n;
     

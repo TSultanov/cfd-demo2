@@ -229,10 +229,9 @@ impl CoupledSchurModule {
         pipeline: &wgpu::ComputePipeline,
         fgmres: &FgmresWorkspace,
         schur_bg: &wgpu::BindGroup,
-        dispatch: (u32, u32),
+        _dispatch: (u32, u32),
         label: &str,
     ) {
-        let (dispatch_x, dispatch_y) = dispatch;
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some(label),
             timestamp_writes: None,
@@ -242,7 +241,10 @@ impl CoupledSchurModule {
         pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
         pass.set_bind_group(2, &self.bg_schur_precond, &[]);
         pass.set_bind_group(3, &self.bg_pressure_matrix, &[]);
-        pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+        pass.dispatch_workgroups_indirect(
+            fgmres.indirect_args_buffer(),
+            FgmresWorkspace::indirect_dispatch_cells_offset(),
+        );
     }
 
     fn create_schur_bg<'a>(
@@ -318,6 +320,7 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
                         .amg_level0_state_override
                         .as_ref()
                         .expect("AMG override bind group missing");
+                    amg.sync_control_scalars(encoder, fgmres.scalars_buffer());
                     amg.v_cycle(encoder, Some(override_bg));
                 }
             }
@@ -346,7 +349,10 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
                         &swap_bg
                     };
                     pass.set_bind_group(0, bg, &[]);
-                    pass.dispatch_workgroups(dispatch.cells.0, dispatch.cells.1, 1);
+                    pass.dispatch_workgroups_indirect(
+                        fgmres.indirect_args_buffer(),
+                        FgmresWorkspace::indirect_dispatch_cells_offset(),
+                    );
                     p_result_in_sol = !p_result_in_sol;
                 }
 

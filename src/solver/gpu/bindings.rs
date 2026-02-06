@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 0e36f349977a98abd9fa824d58450b36153cc1fe8e6bad6b392d04676c2510f7
+// SourceHash: 9aaed620a14ebc220cf8e270edab42b58bb9ae08e56052b6bafea920eaf4e6cc
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -2853,6 +2853,7 @@ pub mod amg {
             Self { n, omega, padding }
         }
     }
+    pub const SCALAR_STOP: u32 = 8u32;
     pub mod compute {
         use super::{_root, _root::*};
         pub const SMOOTH_OP_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -3210,10 +3211,12 @@ pub mod amg {
     #[derive(Debug)]
     pub struct WgpuBindGroup3EntriesParams<'a> {
         pub coarse_vec: wgpu::BufferBinding<'a>,
+        pub scalars: wgpu::BufferBinding<'a>,
     }
     #[derive(Clone, Debug)]
     pub struct WgpuBindGroup3Entries<'a> {
         pub coarse_vec: wgpu::BindGroupEntry<'a>,
+        pub scalars: wgpu::BindGroupEntry<'a>,
     }
     impl<'a> WgpuBindGroup3Entries<'a> {
         pub fn new(params: WgpuBindGroup3EntriesParams<'a>) -> Self {
@@ -3222,10 +3225,14 @@ pub mod amg {
                     binding: 0,
                     resource: wgpu::BindingResource::Buffer(params.coarse_vec),
                 },
+                scalars: wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(params.scalars),
+                },
             }
         }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 1] {
-            [self.coarse_vec]
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+            [self.coarse_vec, self.scalars]
         }
         pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
             self.into_array().into_iter().collect()
@@ -3244,6 +3251,17 @@ pub mod amg {
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(1): \"scalars\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -3324,6 +3342,8 @@ struct AmgParams {
     padding: vec2<u32>,
 }
 
+const SCALAR_STOP: u32 = 8u;
+
 @group(0) @binding(0) 
 var<storage> row_offsets: array<u32>;
 @group(0) @binding(1) 
@@ -3344,6 +3364,13 @@ var<storage> op_col_indices: array<u32>;
 var<storage> op_values: array<f32>;
 @group(3) @binding(0) 
 var<storage, read_write> coarse_vec: array<f32>;
+@group(3) @binding(1) 
+var<storage> scalars: array<f32>;
+
+fn amg_should_stop() -> bool {
+    let _e2 = scalars[8];
+    return (_e2 > 0.5f);
+}
 
 @compute @workgroup_size(64, 1, 1) 
 fn smooth_op(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
@@ -3351,50 +3378,54 @@ fn smooth_op(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_w
     var diag: f32 = 1f;
     var k: u32;
 
+    let _e2 = amg_should_stop();
+    if _e2 {
+        return;
+    }
     let stride_x = (num_workgroups.x * 64u);
     let i = ((global_id.y * stride_x) + global_id.x);
-    let _e13 = params.n;
-    if (i >= _e13) {
+    let _e14 = params.n;
+    if (i >= _e14) {
         return;
     }
     let start = row_offsets[i];
     let end = row_offsets[(i + 1u)];
     k = start;
     loop {
-        let _e24 = k;
-        if (_e24 < end) {
+        let _e25 = k;
+        if (_e25 < end) {
         } else {
             break;
         }
         {
-            let _e27 = k;
-            let col = col_indices[_e27];
-            let _e31 = k;
-            let val = values[_e31];
+            let _e28 = k;
+            let col = col_indices[_e28];
+            let _e32 = k;
+            let val = values[_e32];
             if (col == i) {
                 diag = val;
             } else {
-                let _e39 = x[col];
-                let _e41 = sigma;
-                sigma = (_e41 + (val * _e39));
+                let _e40 = x[col];
+                let _e42 = sigma;
+                sigma = (_e42 + (val * _e40));
             }
         }
         continuing {
-            let _e44 = k;
-            k = (_e44 + 1u);
+            let _e45 = k;
+            k = (_e45 + 1u);
         }
     }
-    let _e46 = diag;
-    if (abs(_e46) < 0.00000000000001f) {
+    let _e47 = diag;
+    if (abs(_e47) < 0.00000000000001f) {
         diag = 1f;
     }
-    let _e53 = b[i];
-    let _e54 = sigma;
-    let _e56 = diag;
-    let x_new = ((_e53 - _e54) / _e56);
-    let _e62 = x[i];
-    let _e65 = params.omega;
-    x[i] = mix(_e62, x_new, _e65);
+    let _e54 = b[i];
+    let _e55 = sigma;
+    let _e57 = diag;
+    let x_new = ((_e54 - _e55) / _e57);
+    let _e63 = x[i];
+    let _e66 = params.omega;
+    x[i] = mix(_e63, x_new, _e66);
     return;
 }
 
@@ -3403,38 +3434,42 @@ fn prolongate_op(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin
     var correction: f32 = 0f;
     var k_1: u32;
 
+    let _e1 = amg_should_stop();
+    if _e1 {
+        return;
+    }
     let stride_x_1 = (num_workgroups_1.x * 64u);
     let i_1 = ((global_id_1.y * stride_x_1) + global_id_1.x);
-    let _e12 = params.n;
-    if (i_1 >= _e12) {
+    let _e13 = params.n;
+    if (i_1 >= _e13) {
         return;
     }
     let start_1 = op_row_offsets[i_1];
     let end_1 = op_row_offsets[(i_1 + 1u)];
     k_1 = start_1;
     loop {
-        let _e23 = k_1;
-        if (_e23 < end_1) {
+        let _e24 = k_1;
+        if (_e24 < end_1) {
         } else {
             break;
         }
         {
-            let _e26 = k_1;
-            let coarse_idx = op_col_indices[_e26];
-            let _e30 = k_1;
-            let val_1 = op_values[_e30];
-            let _e36 = coarse_vec[coarse_idx];
-            let _e38 = correction;
-            correction = (_e38 + (val_1 * _e36));
+            let _e27 = k_1;
+            let coarse_idx = op_col_indices[_e27];
+            let _e31 = k_1;
+            let val_1 = op_values[_e31];
+            let _e37 = coarse_vec[coarse_idx];
+            let _e39 = correction;
+            correction = (_e39 + (val_1 * _e37));
         }
         continuing {
-            let _e41 = k_1;
-            k_1 = (_e41 + 1u);
+            let _e42 = k_1;
+            k_1 = (_e42 + 1u);
         }
     }
-    let _e45 = correction;
-    let _e46 = x[i_1];
-    x[i_1] = (_e46 + _e45);
+    let _e46 = correction;
+    let _e47 = x[i_1];
+    x[i_1] = (_e47 + _e46);
     return;
 }
 
@@ -3445,72 +3480,80 @@ fn restrict_residual(@builtin(global_invocation_id) global_id_2: vec3<u32>, @bui
     var ax: f32;
     var j: u32;
 
+    let _e1 = amg_should_stop();
+    if _e1 {
+        return;
+    }
     let stride_x_2 = (num_workgroups_2.x * 64u);
     let i_2 = ((global_id_2.y * stride_x_2) + global_id_2.x);
-    let _e12 = params.n;
-    if (i_2 >= _e12) {
+    let _e13 = params.n;
+    if (i_2 >= _e13) {
         return;
     }
     let start_2 = op_row_offsets[i_2];
     let end_2 = op_row_offsets[(i_2 + 1u)];
     k_2 = start_2;
     loop {
-        let _e23 = k_2;
-        if (_e23 < end_2) {
+        let _e24 = k_2;
+        if (_e24 < end_2) {
         } else {
             break;
         }
         {
-            let _e26 = k_2;
-            let fine_idx = op_col_indices[_e26];
-            let _e30 = k_2;
-            let r_val = op_values[_e30];
+            let _e27 = k_2;
+            let fine_idx = op_col_indices[_e27];
+            let _e31 = k_2;
+            let r_val = op_values[_e31];
             let a_start = row_offsets[fine_idx];
             let a_end = row_offsets[(fine_idx + 1u)];
             ax = 0f;
             j = a_start;
             loop {
-                let _e44 = j;
-                if (_e44 < a_end) {
+                let _e45 = j;
+                if (_e45 < a_end) {
                 } else {
                     break;
                 }
                 {
-                    let _e47 = j;
-                    let _e49 = values[_e47];
-                    let _e52 = j;
-                    let _e54 = col_indices[_e52];
-                    let _e56 = x[_e54];
-                    let _e58 = ax;
-                    ax = (_e58 + (_e49 * _e56));
+                    let _e48 = j;
+                    let _e50 = values[_e48];
+                    let _e53 = j;
+                    let _e55 = col_indices[_e53];
+                    let _e57 = x[_e55];
+                    let _e59 = ax;
+                    ax = (_e59 + (_e50 * _e57));
                 }
                 continuing {
-                    let _e61 = j;
-                    j = (_e61 + 1u);
+                    let _e62 = j;
+                    j = (_e62 + 1u);
                 }
             }
-            let _e65 = b[fine_idx];
-            let _e66 = ax;
-            let fine_r = (_e65 - _e66);
-            let _e70 = sum;
-            sum = (_e70 + (r_val * fine_r));
+            let _e66 = b[fine_idx];
+            let _e67 = ax;
+            let fine_r = (_e66 - _e67);
+            let _e71 = sum;
+            sum = (_e71 + (r_val * fine_r));
         }
         continuing {
-            let _e73 = k_2;
-            k_2 = (_e73 + 1u);
+            let _e74 = k_2;
+            k_2 = (_e74 + 1u);
         }
     }
-    let _e77 = sum;
-    coarse_vec[i_2] = _e77;
+    let _e78 = sum;
+    coarse_vec[i_2] = _e78;
     return;
 }
 
 @compute @workgroup_size(64, 1, 1) 
 fn clear(@builtin(global_invocation_id) global_id_3: vec3<u32>, @builtin(num_workgroups) num_workgroups_3: vec3<u32>) {
+    let _e0 = amg_should_stop();
+    if _e0 {
+        return;
+    }
     let stride_x_3 = (num_workgroups_3.x * 64u);
     let i_3 = ((global_id_3.y * stride_x_3) + global_id_3.x);
-    let _e11 = params.n;
-    if (i_3 >= _e11) {
+    let _e12 = params.n;
+    if (i_3 >= _e12) {
         return;
     }
     x[i_3] = 0f;
@@ -25191,6 +25234,7 @@ pub mod gmres_cgs {
         }
     }
     pub const WORKGROUP_SIZE: u32 = 64u32;
+    pub const SCALAR_STOP: u32 = 8u32;
     pub mod compute {
         use super::{_root, _root::*};
         pub const CALC_DOTS_CGS_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -25249,6 +25293,7 @@ pub mod gmres_cgs {
         pub b_w: wgpu::BufferBinding<'a>,
         pub b_dot_partial: wgpu::BufferBinding<'a>,
         pub b_hessenberg: wgpu::BufferBinding<'a>,
+        pub scalars: wgpu::BufferBinding<'a>,
     }
     #[derive(Clone, Debug)]
     pub struct WgpuBindGroup0Entries<'a> {
@@ -25257,6 +25302,7 @@ pub mod gmres_cgs {
         pub b_w: wgpu::BindGroupEntry<'a>,
         pub b_dot_partial: wgpu::BindGroupEntry<'a>,
         pub b_hessenberg: wgpu::BindGroupEntry<'a>,
+        pub scalars: wgpu::BindGroupEntry<'a>,
     }
     impl<'a> WgpuBindGroup0Entries<'a> {
         pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -25281,15 +25327,20 @@ pub mod gmres_cgs {
                     binding: 4,
                     resource: wgpu::BindingResource::Buffer(params.b_hessenberg),
                 },
+                scalars: wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Buffer(params.scalars),
+                },
             }
         }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 5] {
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 6] {
             [
                 self.params,
                 self.b_basis,
                 self.b_w,
                 self.b_dot_partial,
                 self.b_hessenberg,
+                self.scalars,
             ]
         }
         pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -25357,6 +25408,17 @@ pub mod gmres_cgs {
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(5): \"scalars\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -25432,6 +25494,7 @@ struct Params {
 }
 
 const WORKGROUP_SIZE: u32 = 64u;
+const SCALAR_STOP: u32 = 8u;
 
 @group(0) @binding(0) 
 var<uniform> params: Params;
@@ -25443,6 +25506,8 @@ var<storage, read_write> b_w: array<f32>;
 var<storage, read_write> b_dot_partial: array<f32>;
 @group(0) @binding(4) 
 var<storage, read_write> b_hessenberg: array<f32>;
+@group(0) @binding(5) 
+var<storage> scalars: array<f32>;
 var<workgroup> sdata: array<f32, 64>;
 var<workgroup> sdata_vec4_: array<vec4<f32>, 64>;
 
@@ -25452,6 +25517,10 @@ fn calc_dots_cgs(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(l
     var i: u32 = 0u;
     var v: vec4<f32>;
 
+    let _e4 = scalars[8];
+    if (_e4 > 0.5f) {
+        return;
+    }
     let j = params.num_iters;
     let n = params.n;
     let num_groups_n = ((n + 63u) / WORKGROUP_SIZE);
@@ -25464,109 +25533,109 @@ fn calc_dots_cgs(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(l
     let stride_bytes = (((n * 4u) + 255u) & 4294967040u);
     let stride_words = (stride_bytes / 4u);
     if (idx < n) {
-        let _e39 = b_w[idx];
-        w_val = _e39;
+        let _e44 = b_w[idx];
+        w_val = _e44;
     }
     loop {
-        let _e42 = i;
-        if (_e42 <= j) {
+        let _e47 = i;
+        if (_e47 <= j) {
         } else {
             break;
         }
         {
             v = vec4(0f);
             if (idx < n) {
-                let _e48 = i;
-                if (_e48 <= j) {
-                    let _e52 = i;
-                    let _e56 = b_basis[((_e52 * stride_words) + idx)];
-                    v.x = _e56;
+                let _e53 = i;
+                if (_e53 <= j) {
+                    let _e57 = i;
+                    let _e61 = b_basis[((_e57 * stride_words) + idx)];
+                    v.x = _e61;
                 }
-                let _e57 = i;
-                if ((_e57 + 1u) <= j) {
-                    let _e62 = i;
-                    let _e69 = b_basis[(((_e62 + 1u) * stride_words) + idx)];
-                    v.y = _e69;
+                let _e62 = i;
+                if ((_e62 + 1u) <= j) {
+                    let _e67 = i;
+                    let _e74 = b_basis[(((_e67 + 1u) * stride_words) + idx)];
+                    v.y = _e74;
                 }
-                let _e70 = i;
-                if ((_e70 + 2u) <= j) {
-                    let _e75 = i;
-                    let _e82 = b_basis[(((_e75 + 2u) * stride_words) + idx)];
-                    v.z = _e82;
+                let _e75 = i;
+                if ((_e75 + 2u) <= j) {
+                    let _e80 = i;
+                    let _e87 = b_basis[(((_e80 + 2u) * stride_words) + idx)];
+                    v.z = _e87;
                 }
-                let _e83 = i;
-                if ((_e83 + 3u) <= j) {
-                    let _e88 = i;
-                    let _e95 = b_basis[(((_e88 + 3u) * stride_words) + idx)];
-                    v.w = _e95;
+                let _e88 = i;
+                if ((_e88 + 3u) <= j) {
+                    let _e93 = i;
+                    let _e100 = b_basis[(((_e93 + 3u) * stride_words) + idx)];
+                    v.w = _e100;
                 }
             }
-            let _e96 = v;
-            let _e97 = w_val;
-            let prod = (_e96 * _e97);
+            let _e101 = v;
+            let _e102 = w_val;
+            let prod = (_e101 * _e102);
             sdata_vec4_[local_id.x] = prod;
             workgroupBarrier();
             if (local_id.x < 32u) {
-                let _e114 = sdata_vec4_[(local_id.x + 32u)];
-                let _e115 = sdata_vec4_[local_id.x];
-                sdata_vec4_[local_id.x] = (_e115 + _e114);
+                let _e119 = sdata_vec4_[(local_id.x + 32u)];
+                let _e120 = sdata_vec4_[local_id.x];
+                sdata_vec4_[local_id.x] = (_e120 + _e119);
             }
             workgroupBarrier();
             if (local_id.x < 16u) {
-                let _e128 = sdata_vec4_[(local_id.x + 16u)];
-                let _e129 = sdata_vec4_[local_id.x];
-                sdata_vec4_[local_id.x] = (_e129 + _e128);
+                let _e133 = sdata_vec4_[(local_id.x + 16u)];
+                let _e134 = sdata_vec4_[local_id.x];
+                sdata_vec4_[local_id.x] = (_e134 + _e133);
             }
             workgroupBarrier();
             if (local_id.x < 8u) {
-                let _e142 = sdata_vec4_[(local_id.x + 8u)];
-                let _e143 = sdata_vec4_[local_id.x];
-                sdata_vec4_[local_id.x] = (_e143 + _e142);
+                let _e147 = sdata_vec4_[(local_id.x + 8u)];
+                let _e148 = sdata_vec4_[local_id.x];
+                sdata_vec4_[local_id.x] = (_e148 + _e147);
             }
             workgroupBarrier();
             if (local_id.x < 4u) {
-                let _e156 = sdata_vec4_[(local_id.x + 4u)];
-                let _e157 = sdata_vec4_[local_id.x];
-                sdata_vec4_[local_id.x] = (_e157 + _e156);
+                let _e161 = sdata_vec4_[(local_id.x + 4u)];
+                let _e162 = sdata_vec4_[local_id.x];
+                sdata_vec4_[local_id.x] = (_e162 + _e161);
             }
             workgroupBarrier();
             if (local_id.x < 2u) {
-                let _e170 = sdata_vec4_[(local_id.x + 2u)];
-                let _e171 = sdata_vec4_[local_id.x];
-                sdata_vec4_[local_id.x] = (_e171 + _e170);
+                let _e175 = sdata_vec4_[(local_id.x + 2u)];
+                let _e176 = sdata_vec4_[local_id.x];
+                sdata_vec4_[local_id.x] = (_e176 + _e175);
             }
             workgroupBarrier();
             if (local_id.x < 1u) {
-                let _e184 = sdata_vec4_[(local_id.x + 1u)];
-                let _e185 = sdata_vec4_[local_id.x];
-                sdata_vec4_[local_id.x] = (_e185 + _e184);
+                let _e189 = sdata_vec4_[(local_id.x + 1u)];
+                let _e190 = sdata_vec4_[local_id.x];
+                sdata_vec4_[local_id.x] = (_e190 + _e189);
                 let sum_1 = sdata_vec4_[0];
-                let _e190 = i;
-                if (_e190 <= j) {
-                    let _e193 = i;
-                    b_dot_partial[((_e193 * num_groups_n) + group_flat)] = sum_1.x;
+                let _e195 = i;
+                if (_e195 <= j) {
+                    let _e198 = i;
+                    b_dot_partial[((_e198 * num_groups_n) + group_flat)] = sum_1.x;
                 }
-                let _e198 = i;
-                if ((_e198 + 1u) <= j) {
-                    let _e202 = i;
-                    b_dot_partial[(((_e202 + 1u) * num_groups_n) + group_flat)] = sum_1.y;
+                let _e203 = i;
+                if ((_e203 + 1u) <= j) {
+                    let _e207 = i;
+                    b_dot_partial[(((_e207 + 1u) * num_groups_n) + group_flat)] = sum_1.y;
                 }
-                let _e210 = i;
-                if ((_e210 + 2u) <= j) {
-                    let _e214 = i;
-                    b_dot_partial[(((_e214 + 2u) * num_groups_n) + group_flat)] = sum_1.z;
+                let _e215 = i;
+                if ((_e215 + 2u) <= j) {
+                    let _e219 = i;
+                    b_dot_partial[(((_e219 + 2u) * num_groups_n) + group_flat)] = sum_1.z;
                 }
-                let _e222 = i;
-                if ((_e222 + 3u) <= j) {
-                    let _e226 = i;
-                    b_dot_partial[(((_e226 + 3u) * num_groups_n) + group_flat)] = sum_1.w;
+                let _e227 = i;
+                if ((_e227 + 3u) <= j) {
+                    let _e231 = i;
+                    b_dot_partial[(((_e231 + 3u) * num_groups_n) + group_flat)] = sum_1.w;
                 }
             }
             workgroupBarrier();
         }
         continuing {
-            let _e235 = i;
-            i = (_e235 + 4u);
+            let _e240 = i;
+            i = (_e240 + 4u);
         }
     }
     return;
@@ -25577,69 +25646,77 @@ fn reduce_dots_cgs(@builtin(global_invocation_id) global_id_1: vec3<u32>, @built
     var sum: f32 = 0f;
     var k: u32;
 
+    let _e3 = scalars[8];
+    if (_e3 > 0.5f) {
+        return;
+    }
     let i_2 = group_id_1.x;
     let j_1 = params.num_iters;
-    let _e8 = params.n;
-    let num_groups_n_1 = ((_e8 + 63u) / 64u);
+    let _e14 = params.max_restart;
+    if ((i_2 > j_1) || (i_2 >= _e14)) {
+        return;
+    }
+    let _e19 = params.n;
+    let num_groups_n_1 = ((_e19 + 63u) / 64u);
     k = local_id_1.x;
     loop {
-        let _e16 = k;
-        if (_e16 < num_groups_n_1) {
+        let _e27 = k;
+        if (_e27 < num_groups_n_1) {
         } else {
             break;
         }
         {
-            let _e21 = k;
-            let _e24 = b_dot_partial[((i_2 * num_groups_n_1) + _e21)];
-            let _e25 = sum;
-            sum = (_e25 + _e24);
+            let _e32 = k;
+            let _e35 = b_dot_partial[((i_2 * num_groups_n_1) + _e32)];
+            let _e36 = sum;
+            sum = (_e36 + _e35);
         }
         continuing {
-            let _e28 = k;
-            k = (_e28 + 64u);
+            let _e39 = k;
+            k = (_e39 + 64u);
         }
     }
-    let _e33 = sum;
-    sdata[local_id_1.x] = _e33;
+    let _e44 = sum;
+    sdata[local_id_1.x] = _e44;
     workgroupBarrier();
     if (local_id_1.x < 32u) {
-        let _e45 = sdata[(local_id_1.x + 32u)];
-        let _e46 = sdata[local_id_1.x];
-        sdata[local_id_1.x] = (_e46 + _e45);
+        let _e56 = sdata[(local_id_1.x + 32u)];
+        let _e57 = sdata[local_id_1.x];
+        sdata[local_id_1.x] = (_e57 + _e56);
     }
     workgroupBarrier();
     if (local_id_1.x < 16u) {
-        let _e59 = sdata[(local_id_1.x + 16u)];
-        let _e60 = sdata[local_id_1.x];
-        sdata[local_id_1.x] = (_e60 + _e59);
+        let _e70 = sdata[(local_id_1.x + 16u)];
+        let _e71 = sdata[local_id_1.x];
+        sdata[local_id_1.x] = (_e71 + _e70);
     }
     workgroupBarrier();
     if (local_id_1.x < 8u) {
-        let _e73 = sdata[(local_id_1.x + 8u)];
-        let _e74 = sdata[local_id_1.x];
-        sdata[local_id_1.x] = (_e74 + _e73);
+        let _e84 = sdata[(local_id_1.x + 8u)];
+        let _e85 = sdata[local_id_1.x];
+        sdata[local_id_1.x] = (_e85 + _e84);
     }
     workgroupBarrier();
     if (local_id_1.x < 4u) {
-        let _e87 = sdata[(local_id_1.x + 4u)];
-        let _e88 = sdata[local_id_1.x];
-        sdata[local_id_1.x] = (_e88 + _e87);
+        let _e98 = sdata[(local_id_1.x + 4u)];
+        let _e99 = sdata[local_id_1.x];
+        sdata[local_id_1.x] = (_e99 + _e98);
     }
     workgroupBarrier();
     if (local_id_1.x < 2u) {
-        let _e101 = sdata[(local_id_1.x + 2u)];
-        let _e102 = sdata[local_id_1.x];
-        sdata[local_id_1.x] = (_e102 + _e101);
+        let _e112 = sdata[(local_id_1.x + 2u)];
+        let _e113 = sdata[local_id_1.x];
+        sdata[local_id_1.x] = (_e113 + _e112);
     }
     workgroupBarrier();
     if (local_id_1.x < 1u) {
-        let _e115 = sdata[(local_id_1.x + 1u)];
-        let _e116 = sdata[local_id_1.x];
-        sdata[local_id_1.x] = (_e116 + _e115);
+        let _e126 = sdata[(local_id_1.x + 1u)];
+        let _e127 = sdata[local_id_1.x];
+        sdata[local_id_1.x] = (_e127 + _e126);
         let max_restart = params.max_restart;
         let h_idx = ((j_1 * (max_restart + 1u)) + i_2);
-        let _e129 = sdata[0];
-        b_hessenberg[h_idx] = _e129;
+        let _e140 = sdata[0];
+        b_hessenberg[h_idx] = _e140;
         return;
     } else {
         return;
@@ -25651,6 +25728,10 @@ fn update_w_cgs(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(
     var correction: f32 = 0f;
     var i_1: u32 = 0u;
 
+    let _e4 = scalars[8];
+    if (_e4 > 0.5f) {
+        return;
+    }
     let stride_x_1 = (num_workgroups_1.x * WORKGROUP_SIZE);
     let idx_1 = ((global_id_2.y * stride_x_1) + global_id_2.x);
     let j_2 = params.num_iters;
@@ -25662,57 +25743,57 @@ fn update_w_cgs(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(
         return;
     }
     loop {
-        let _e30 = i_1;
-        if (_e30 <= j_2) {
+        let _e35 = i_1;
+        if (_e35 <= j_2) {
         } else {
             break;
         }
         {
-            let _e32 = i_1;
-            if (_e32 <= j_2) {
-                let _e38 = i_1;
-                let h_val = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + _e38)];
+            let _e37 = i_1;
+            if (_e37 <= j_2) {
                 let _e43 = i_1;
-                let v_val = b_basis[((_e43 * stride_words_1) + idx_1)];
-                let _e50 = correction;
-                correction = (_e50 + (h_val * v_val));
+                let h_val = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + _e43)];
+                let _e48 = i_1;
+                let v_val = b_basis[((_e48 * stride_words_1) + idx_1)];
+                let _e55 = correction;
+                correction = (_e55 + (h_val * v_val));
             }
-            let _e52 = i_1;
-            if ((_e52 + 1u) <= j_2) {
-                let _e59 = i_1;
-                let h_val_1 = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + (_e59 + 1u))];
-                let _e66 = i_1;
-                let v_val_1 = b_basis[(((_e66 + 1u) * stride_words_1) + idx_1)];
-                let _e75 = correction;
-                correction = (_e75 + (h_val_1 * v_val_1));
+            let _e57 = i_1;
+            if ((_e57 + 1u) <= j_2) {
+                let _e64 = i_1;
+                let h_val_1 = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + (_e64 + 1u))];
+                let _e71 = i_1;
+                let v_val_1 = b_basis[(((_e71 + 1u) * stride_words_1) + idx_1)];
+                let _e80 = correction;
+                correction = (_e80 + (h_val_1 * v_val_1));
             }
-            let _e77 = i_1;
-            if ((_e77 + 2u) <= j_2) {
-                let _e84 = i_1;
-                let h_val_2 = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + (_e84 + 2u))];
-                let _e91 = i_1;
-                let v_val_2 = b_basis[(((_e91 + 2u) * stride_words_1) + idx_1)];
-                let _e100 = correction;
-                correction = (_e100 + (h_val_2 * v_val_2));
+            let _e82 = i_1;
+            if ((_e82 + 2u) <= j_2) {
+                let _e89 = i_1;
+                let h_val_2 = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + (_e89 + 2u))];
+                let _e96 = i_1;
+                let v_val_2 = b_basis[(((_e96 + 2u) * stride_words_1) + idx_1)];
+                let _e105 = correction;
+                correction = (_e105 + (h_val_2 * v_val_2));
             }
-            let _e102 = i_1;
-            if ((_e102 + 3u) <= j_2) {
-                let _e109 = i_1;
-                let h_val_3 = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + (_e109 + 3u))];
-                let _e116 = i_1;
-                let v_val_3 = b_basis[(((_e116 + 3u) * stride_words_1) + idx_1)];
-                let _e125 = correction;
-                correction = (_e125 + (h_val_3 * v_val_3));
+            let _e107 = i_1;
+            if ((_e107 + 3u) <= j_2) {
+                let _e114 = i_1;
+                let h_val_3 = b_hessenberg[((j_2 * (max_restart_1 + 1u)) + (_e114 + 3u))];
+                let _e121 = i_1;
+                let v_val_3 = b_basis[(((_e121 + 3u) * stride_words_1) + idx_1)];
+                let _e130 = correction;
+                correction = (_e130 + (h_val_3 * v_val_3));
             }
         }
         continuing {
-            let _e128 = i_1;
-            i_1 = (_e128 + 4u);
+            let _e133 = i_1;
+            i_1 = (_e133 + 4u);
         }
     }
-    let _e134 = b_w[idx_1];
-    let _e135 = correction;
-    b_w[idx_1] = (_e134 - _e135);
+    let _e139 = b_w[idx_1];
+    let _e140 = correction;
+    b_w[idx_1] = (_e139 - _e140);
     return;
 }
 "#;
@@ -25741,6 +25822,12 @@ pub mod gmres_logic {
             }
         }
     }
+    pub const SCALAR_STOP: u32 = 8u32;
+    pub const SCALAR_CONVERGED: u32 = 9u32;
+    pub const SCALAR_ITERS_USED: u32 = 10u32;
+    pub const SCALAR_RESIDUAL_EST: u32 = 11u32;
+    pub const SCALAR_TOL_REL_RHS: u32 = 12u32;
+    pub const SCALAR_TOL_ABS: u32 = 13u32;
     pub mod compute {
         use super::{_root, _root::*};
         pub const UPDATE_HESSENBERG_GIVENS_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
@@ -25908,11 +25995,13 @@ pub mod gmres_logic {
     pub struct WgpuBindGroup1EntriesParams<'a> {
         pub iter_params: wgpu::BufferBinding<'a>,
         pub scalars: wgpu::BufferBinding<'a>,
+        pub indirect_args: wgpu::BufferBinding<'a>,
     }
     #[derive(Clone, Debug)]
     pub struct WgpuBindGroup1Entries<'a> {
         pub iter_params: wgpu::BindGroupEntry<'a>,
         pub scalars: wgpu::BindGroupEntry<'a>,
+        pub indirect_args: wgpu::BindGroupEntry<'a>,
     }
     impl<'a> WgpuBindGroup1Entries<'a> {
         pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
@@ -25925,10 +26014,14 @@ pub mod gmres_logic {
                     binding: 1,
                     resource: wgpu::BindingResource::Buffer(params.scalars),
                 },
+                indirect_args: wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(params.indirect_args),
+                },
             }
         }
-        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-            [self.iter_params, self.scalars]
+        pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
+            [self.iter_params, self.scalars, self.indirect_args]
         }
         pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
             self.into_array().into_iter().collect()
@@ -25959,6 +26052,17 @@ pub mod gmres_logic {
                     #[doc = " @binding(1): \"scalars\""]
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    #[doc = " @binding(2): \"indirect_args\""]
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -26037,6 +26141,13 @@ struct IterParams {
     _pad2_: u32,
 }
 
+const SCALAR_STOP: u32 = 8u;
+const SCALAR_CONVERGED: u32 = 9u;
+const SCALAR_ITERS_USED: u32 = 10u;
+const SCALAR_RESIDUAL_EST: u32 = 11u;
+const SCALAR_TOL_REL_RHS: u32 = 12u;
+const SCALAR_TOL_ABS: u32 = 13u;
+
 @group(0) @binding(0) 
 var<storage, read_write> hessenberg: array<f32>;
 @group(0) @binding(1) 
@@ -26049,6 +26160,8 @@ var<storage, read_write> y_sol: array<f32>;
 var<uniform> iter_params: IterParams;
 @group(1) @binding(1) 
 var<storage, read_write> scalars: array<f32>;
+@group(1) @binding(2) 
+var<storage, read_write> indirect_args: array<vec4<u32>>;
 
 fn h_idx(row: u32, col: u32) -> u32 {
     let _e2 = iter_params.max_restart;
@@ -26062,61 +26175,78 @@ fn update_hessenberg_givens(@builtin(global_invocation_id) global_id: vec3<u32>)
     var s: f32 = 0f;
     var rho: f32;
 
+    let _e5 = scalars[8];
+    if (_e5 > 0.5f) {
+        return;
+    }
     let j_1 = iter_params.current_idx;
     loop {
-        let _e7 = i;
-        if (_e7 < j_1) {
+        let _e12 = i;
+        if (_e12 < j_1) {
         } else {
             break;
         }
         {
-            let _e9 = i;
-            let _e10 = h_idx(_e9, j_1);
-            let _e11 = i;
-            let _e14 = h_idx((_e11 + 1u), j_1);
-            let h_ij = hessenberg[_e10];
-            let h_i1j = hessenberg[_e14];
-            let _e22 = i;
-            let cs = givens[_e22];
+            let _e14 = i;
+            let _e15 = h_idx(_e14, j_1);
+            let _e16 = i;
+            let _e19 = h_idx((_e16 + 1u), j_1);
+            let h_ij = hessenberg[_e15];
+            let h_i1j = hessenberg[_e19];
+            let _e27 = i;
+            let cs = givens[_e27];
             let c_1 = cs.x;
             let s_1 = cs.y;
-            hessenberg[_e10] = ((c_1 * h_ij) + (s_1 * h_i1j));
-            hessenberg[_e14] = ((-(s_1) * h_ij) + (c_1 * h_i1j));
+            hessenberg[_e15] = ((c_1 * h_ij) + (s_1 * h_i1j));
+            hessenberg[_e19] = ((-(s_1) * h_ij) + (c_1 * h_i1j));
         }
         continuing {
-            let _e39 = i;
-            i = (_e39 + 1u);
+            let _e44 = i;
+            i = (_e44 + 1u);
         }
     }
-    let _e41 = h_idx(j_1, j_1);
-    let _e44 = h_idx((j_1 + 1u), j_1);
-    let h_jj = hessenberg[_e41];
-    let h_j1j = hessenberg[_e44];
+    let _e46 = h_idx(j_1, j_1);
+    let _e49 = h_idx((j_1 + 1u), j_1);
+    let h_jj = hessenberg[_e46];
+    let h_j1j = hessenberg[_e49];
     rho = sqrt(((h_jj * h_jj) + (h_j1j * h_j1j)));
-    let _e56 = rho;
-    if (abs(_e56) > 0.00000000000000000001f) {
-        let _e60 = rho;
-        c = (h_jj / _e60);
-        let _e63 = rho;
-        s = (h_j1j / _e63);
+    let _e61 = rho;
+    if (abs(_e61) > 0.00000000000000000001f) {
+        let _e65 = rho;
+        c = (h_jj / _e65);
+        let _e68 = rho;
+        s = (h_j1j / _e68);
     }
-    let _e68 = c;
-    let _e69 = s;
-    givens[j_1] = vec2<f32>(_e68, _e69);
-    let _e73 = rho;
-    hessenberg[_e41] = _e73;
-    hessenberg[_e44] = 0f;
+    let _e73 = c;
+    let _e74 = s;
+    givens[j_1] = vec2<f32>(_e73, _e74);
+    let _e78 = rho;
+    hessenberg[_e46] = _e78;
+    hessenberg[_e49] = 0f;
     let g_j = g_rhs[j_1];
     let g_j1_ = g_rhs[(j_1 + 1u)];
-    let _e87 = c;
-    let _e89 = s;
-    g_rhs[j_1] = ((_e87 * g_j) + (_e89 * g_j1_));
-    let _e96 = s;
-    let _e99 = c;
-    g_rhs[(j_1 + 1u)] = ((-(_e96) * g_j) + (_e99 * g_j1_));
-    let _e108 = g_rhs[(j_1 + 1u)];
-    scalars[0] = abs(_e108);
-    return;
+    let _e92 = c;
+    let _e94 = s;
+    g_rhs[j_1] = ((_e92 * g_j) + (_e94 * g_j1_));
+    let _e101 = s;
+    let _e104 = c;
+    g_rhs[(j_1 + 1u)] = ((-(_e101) * g_j) + (_e104 * g_j1_));
+    let _e111 = g_rhs[(j_1 + 1u)];
+    let residual = abs(_e111);
+    scalars[11] = residual;
+    let tol_rel_rhs = scalars[12];
+    let tol_abs = scalars[13];
+    if ((residual <= tol_rel_rhs) || (residual <= tol_abs)) {
+        scalars[8] = 1f;
+        scalars[9] = 1f;
+        scalars[10] = f32((j_1 + 1u));
+        indirect_args[0] = vec4<u32>(0u, 0u, 0u, 0u);
+        indirect_args[1] = vec4<u32>(0u, 0u, 0u, 0u);
+        indirect_args[2] = vec4<u32>(0u, 0u, 0u, 0u);
+        return;
+    } else {
+        return;
+    }
 }
 
 @compute @workgroup_size(1, 1, 1) 
@@ -26125,51 +26255,53 @@ fn solve_triangular(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
     var sum: f32;
     var j: u32;
 
-    let k = iter_params.current_idx;
+    let _e3 = scalars[10];
+    let _e7 = iter_params.max_restart;
+    let k = u32(clamp(round(_e3), 1f, f32(_e7)));
     loop {
-        let _e5 = loop_i;
-        if (_e5 < k) {
+        let _e13 = loop_i;
+        if (_e13 < k) {
         } else {
             break;
         }
         {
-            let _e9 = loop_i;
-            let i_1 = ((k - 1u) - _e9);
-            let _e13 = g_rhs[i_1];
-            sum = _e13;
+            let _e17 = loop_i;
+            let i_1 = ((k - 1u) - _e17);
+            let _e21 = g_rhs[i_1];
+            sum = _e21;
             j = (i_1 + 1u);
             loop {
-                let _e18 = j;
-                if (_e18 < k) {
+                let _e26 = j;
+                if (_e26 < k) {
                 } else {
                     break;
                 }
                 {
-                    let _e20 = j;
-                    let _e21 = h_idx(i_1, _e20);
-                    let _e24 = hessenberg[_e21];
-                    let _e26 = j;
-                    let _e28 = y_sol[_e26];
-                    let _e30 = sum;
-                    sum = (_e30 - (_e24 * _e28));
+                    let _e28 = j;
+                    let _e29 = h_idx(i_1, _e28);
+                    let _e32 = hessenberg[_e29];
+                    let _e34 = j;
+                    let _e36 = y_sol[_e34];
+                    let _e38 = sum;
+                    sum = (_e38 - (_e32 * _e36));
                 }
                 continuing {
-                    let _e33 = j;
-                    j = (_e33 + 1u);
+                    let _e41 = j;
+                    j = (_e41 + 1u);
                 }
             }
-            let _e35 = h_idx(i_1, i_1);
-            let diag = hessenberg[_e35];
+            let _e43 = h_idx(i_1, i_1);
+            let diag = hessenberg[_e43];
             if (abs(diag) > 0.000000000001f) {
-                let _e44 = sum;
-                y_sol[i_1] = (_e44 / diag);
+                let _e52 = sum;
+                y_sol[i_1] = (_e52 / diag);
             } else {
                 y_sol[i_1] = 0f;
             }
         }
         continuing {
-            let _e50 = loop_i;
-            loop_i = (_e50 + 1u);
+            let _e58 = loop_i;
+            loop_i = (_e58 + 1u);
         }
     }
     return;
@@ -26259,6 +26391,7 @@ pub mod gmres_ops {
         }
     }
     pub const WORKGROUP_SIZE: u32 = 64u32;
+    pub const SCALAR_STOP: u32 = 8u32;
     pub mod compute {
         use super::{_root, _root::*};
         pub const SPMV_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -26973,6 +27106,7 @@ struct IterParams {
 }
 
 const WORKGROUP_SIZE: u32 = 64u;
+const SCALAR_STOP: u32 = 8u;
 
 @group(0) @binding(0) 
 var<storage> vec_x: array<f32>;
@@ -27298,28 +27432,32 @@ fn reduce_final_and_finish_norm(@builtin(global_invocation_id) global_id_11: vec
     var total_sum_1: f32 = 0f;
     var i_1: u32 = 0u;
 
+    let _e4 = scalars[8];
+    if (_e4 > 0.5f) {
+        return;
+    }
     let num_partials_1 = params.n;
     loop {
-        let _e6 = i_1;
-        if (_e6 < num_partials_1) {
+        let _e11 = i_1;
+        if (_e11 < num_partials_1) {
         } else {
             break;
         }
         {
-            let _e10 = i_1;
-            let _e12 = vec_x[_e10];
-            let _e13 = total_sum_1;
-            total_sum_1 = (_e13 + _e12);
+            let _e15 = i_1;
+            let _e17 = vec_x[_e15];
+            let _e18 = total_sum_1;
+            total_sum_1 = (_e18 + _e17);
         }
         continuing {
-            let _e16 = i_1;
-            i_1 = (_e16 + 1u);
+            let _e21 = i_1;
+            i_1 = (_e21 + 1u);
         }
     }
-    let _e18 = total_sum_1;
-    let norm = sqrt(_e18);
-    let _e23 = iter_params.current_idx;
-    hessenberg[_e23] = norm;
+    let _e23 = total_sum_1;
+    let norm = sqrt(_e23);
+    let _e28 = iter_params.current_idx;
+    hessenberg[_e28] = norm;
     if (norm > 0.00000000000000000001f) {
         scalars[0] = (1f / norm);
         return;

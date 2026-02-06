@@ -17,14 +17,25 @@ struct AmgParams {
 @group(2) @binding(1) var<storage, read> op_col_indices: array<u32>;
 @group(2) @binding(2) var<storage, read> op_values: array<f32>;
 
-// Additional bindings for cross-level operations
+// Additional bindings for cross-level operations and control state.
 @group(3) @binding(0) var<storage, read_write> coarse_vec: array<f32>; // r_coarse or x_coarse
+@group(3) @binding(1) var<storage, read> scalars: array<f32>;
+
+const SCALAR_STOP: u32 = 8u;
+
+fn amg_should_stop() -> bool {
+    return scalars[SCALAR_STOP] > 0.5;
+}
 
 @compute @workgroup_size(64)
 fn smooth_op(
     @builtin(global_invocation_id) global_id: vec3<u32>,
     @builtin(num_workgroups) num_workgroups: vec3<u32>,
 ) {
+    if (amg_should_stop()) {
+        return;
+    }
+
     let stride_x = num_workgroups.x * 64u;
     let i = global_id.y * stride_x + global_id.x;
     if (i >= params.n) {
@@ -62,6 +73,10 @@ fn prolongate_op(
     @builtin(global_invocation_id) global_id: vec3<u32>,
     @builtin(num_workgroups) num_workgroups: vec3<u32>,
 ) {
+    if (amg_should_stop()) {
+        return;
+    }
+
     let stride_x = num_workgroups.x * 64u;
     let i = global_id.y * stride_x + global_id.x; // Fine row index
     if (i >= params.n) { // params.n is fine size here
@@ -89,6 +104,10 @@ fn restrict_residual(
     @builtin(global_invocation_id) global_id: vec3<u32>,
     @builtin(num_workgroups) num_workgroups: vec3<u32>,
 ) {
+    if (amg_should_stop()) {
+        return;
+    }
+
     let stride_x = num_workgroups.x * 64u;
     let i = global_id.y * stride_x + global_id.x; // Coarse row index
     if (i >= params.n) { // params.n is COLUMNS of R (coarse size)
@@ -127,6 +146,10 @@ fn clear(
     @builtin(global_invocation_id) global_id: vec3<u32>,
     @builtin(num_workgroups) num_workgroups: vec3<u32>,
 ) {
+    if (amg_should_stop()) {
+        return;
+    }
+
     let stride_x = num_workgroups.x * 64u;
     let i = global_id.y * stride_x + global_id.x;
     if (i >= params.n) {

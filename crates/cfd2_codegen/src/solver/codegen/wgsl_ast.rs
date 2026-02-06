@@ -311,6 +311,59 @@ pub fn render_stmt_lines(stmts: &[Stmt]) -> Vec<String> {
     render_block_lines(&Block::new(stmts.to_vec()))
 }
 
+/// Collect local symbol declarations (`let`/`var` and loop init symbols)
+/// from a statement slice in deterministic first-seen order.
+pub fn collect_local_symbols(stmts: &[Stmt]) -> Vec<String> {
+    fn push_unique_symbol(out: &mut Vec<String>, name: &str) {
+        if !out.iter().any(|existing| existing == name) {
+            out.push(name.to_string());
+        }
+    }
+
+    fn visit_stmt(stmt: &Stmt, out: &mut Vec<String>) {
+        match stmt {
+            Stmt::Let { name, .. } | Stmt::Var { name, .. } => push_unique_symbol(out, name),
+            Stmt::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                for inner in &then_block.stmts {
+                    visit_stmt(inner, out);
+                }
+                if let Some(else_block) = else_block {
+                    for inner in &else_block.stmts {
+                        visit_stmt(inner, out);
+                    }
+                }
+            }
+            Stmt::For { init, body, .. } => {
+                match init {
+                    ForInit::Let { name, .. } | ForInit::Var { name, .. } => {
+                        push_unique_symbol(out, name)
+                    }
+                    ForInit::Assign { .. } => {}
+                }
+                for inner in &body.stmts {
+                    visit_stmt(inner, out);
+                }
+            }
+            Stmt::Comment(_)
+            | Stmt::Assign { .. }
+            | Stmt::AssignOp { .. }
+            | Stmt::Return(_)
+            | Stmt::Call(_)
+            | Stmt::Increment(_) => {}
+        }
+    }
+
+    let mut out = Vec::new();
+    for stmt in stmts {
+        visit_stmt(stmt, &mut out);
+    }
+    out
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Comment(String),
@@ -1925,5 +1978,48 @@ mod tests {
         assert!(output.contains("struct Foo"));
         assert!(output.contains("fn main()"));
         assert!(output.contains("return;"));
+    }
+
+    #[test]
+    fn collect_local_symbols_walks_nested_blocks_in_order() {
+        let stmts = vec![
+            Stmt::Let {
+                name: "a".to_string(),
+                ty: None,
+                expr: 1.0.into(),
+            },
+            Stmt::For {
+                init: ForInit::Var {
+                    name: "k".to_string(),
+                    ty: Some(Type::U32),
+                    expr: 0u32.into(),
+                },
+                cond: Expr::ident("k").lt(4u32),
+                step: ForStep::Increment(Expr::ident("k")),
+                body: Block::new(vec![Stmt::If {
+                    cond: Expr::ident("k").eq(0u32),
+                    then_block: Block::new(vec![Stmt::Var {
+                        name: "inner".to_string(),
+                        ty: Some(Type::F32),
+                        expr: Some(0.0.into()),
+                    }]),
+                    else_block: Some(Block::new(vec![Stmt::Let {
+                        name: "alt".to_string(),
+                        ty: None,
+                        expr: 2.0.into(),
+                    }])),
+                }]),
+            },
+            Stmt::Var {
+                name: "a".to_string(),
+                ty: Some(Type::F32),
+                expr: Some(3.0.into()),
+            },
+        ];
+
+        assert_eq!(
+            collect_local_symbols(&stmts),
+            vec!["a", "k", "inner", "alt"]
+        );
     }
 }

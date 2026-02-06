@@ -123,4 +123,12 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 - [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` (Aggressive-only via `rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1`).
 - [x] `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` as a standalone declared pair rule (Aggressive-only via `rhie_chow:store_grad_p_grad_p_update_v1`).
 - [x] `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` as a standalone declared pair rule (Aggressive-only via `rhie_chow:grad_p_update_correct_velocity_delta_v1`).
-- [ ] `generic_coupled_assembly` + `generic_coupled_assembly_grad_state` (blocked by WGSL-only artifacts; requires DSL migration).
+- [x] `generic_coupled_assembly` + `generic_coupled_assembly_grad_state` DSL migration prerequisite completed (both kernels now emitted as DSL artifacts; rule declaration remains optional because conditions are mutually exclusive at runtime).
+
+## 12) Fusion Opportunity Reassessment (Post Assembly DSL Migration)
+
+- [x] Regenerate `FUSION_COVERAGE.md` after migrating `generic_coupled_assembly*` to DSL.
+- [x] Reconfirm active Rhie-Chow fusion opportunities and rule synthesis status.
+- [x] Reconfirm `generic_coupled_assembly -> generic_coupled_assembly_grad_state` is technically synthesizeable (`Safe` and `Aggressive`) once both kernels are DSL.
+- [ ] Decide whether to declare an explicit assembly-pair fusion rule despite mutually-exclusive kernel conditions.
+- [ ] Migrate `generic_coupled_update` to DSL to unlock reassessment of additional update-phase fusion opportunities.

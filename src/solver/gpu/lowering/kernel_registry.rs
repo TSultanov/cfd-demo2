@@ -99,9 +99,7 @@ mod tests {
             "incompressible_momentum",
             KernelId("rhie_chow/store_grad_p_grad_p_update_fused"),
         )
-        .expect(
-            "missing standalone store_grad_p_grad_p_update fused kernel in generated registry"
-        );
+        .expect("missing standalone store_grad_p_grad_p_update fused kernel in generated registry");
         assert!(
             !src.bindings.is_empty(),
             "standalone store_grad_p_grad_p_update fused kernel registry entry should include reflected bindings"

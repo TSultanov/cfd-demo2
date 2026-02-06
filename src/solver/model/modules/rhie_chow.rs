@@ -347,58 +347,12 @@ fn rhie_chow_section_lines(stmts: Vec<Stmt>) -> Vec<String> {
     cfd2_codegen::solver::codegen::wgsl_ast::render_block_lines(&Block::new(stmts))
 }
 
-fn push_unique_symbol(out: &mut Vec<String>, name: &str) {
-    if !out.iter().any(|existing| existing == name) {
-        out.push(name.to_string());
-    }
-}
-
-fn collect_stmt_local_symbols(stmt: &Stmt, out: &mut Vec<String>) {
-    match stmt {
-        Stmt::Let { name, .. } | Stmt::Var { name, .. } => push_unique_symbol(out, name),
-        Stmt::If {
-            then_block,
-            else_block,
-            ..
-        } => {
-            for inner in &then_block.stmts {
-                collect_stmt_local_symbols(inner, out);
-            }
-            if let Some(else_block) = else_block {
-                for inner in &else_block.stmts {
-                    collect_stmt_local_symbols(inner, out);
-                }
-            }
-        }
-        Stmt::For { init, body, .. } => {
-            match init {
-                cfd2_codegen::solver::codegen::wgsl_ast::ForInit::Let { name, .. }
-                | cfd2_codegen::solver::codegen::wgsl_ast::ForInit::Var { name, .. } => {
-                    push_unique_symbol(out, name)
-                }
-                cfd2_codegen::solver::codegen::wgsl_ast::ForInit::Assign { .. } => {}
-            }
-            for inner in &body.stmts {
-                collect_stmt_local_symbols(inner, out);
-            }
-        }
-        Stmt::Comment(_)
-        | Stmt::Assign { .. }
-        | Stmt::AssignOp { .. }
-        | Stmt::Return(_)
-        | Stmt::Call(_)
-        | Stmt::Increment(_) => {}
-    }
-}
-
 fn rhie_chow_collect_local_symbols_sections(sections: &[&[Stmt]]) -> Vec<String> {
-    let mut out = Vec::new();
+    let mut merged = Vec::new();
     for section in sections {
-        for stmt in *section {
-            collect_stmt_local_symbols(stmt, &mut out);
-        }
+        merged.extend((*section).iter().cloned());
     }
-    out
+    cfd2_codegen::solver::codegen::wgsl_ast::collect_local_symbols(&merged)
 }
 
 fn rhie_chow_grad_p_update_bindings() -> Vec<KernelBinding> {

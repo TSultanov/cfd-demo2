@@ -1,4 +1,6 @@
 use super::KernelWgsl;
+use cfd2_ir::solver::dimensions::{Dimensionless, UnitDimension};
+use cfd2_ir::solver::ir::ports::ParamSpec;
 use cfd2_ir::solver::ir::{
     BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelProgram, SideEffectMetadata,
 };
@@ -346,6 +348,49 @@ fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
+fn program_references_constants_field(program: &KernelProgram, field: &str) -> bool {
+    let needle = format!("constants.{field}");
+    let mut sections = program.indexing.iter().chain(program.preamble.iter());
+    if sections.any(|line| line.contains(&needle)) {
+        return true;
+    }
+    if program.body.iter().any(|line| line.contains(&needle)) {
+        return true;
+    }
+    if program.launch.invocation_index_expr.contains(&needle) {
+        return true;
+    }
+    program
+        .launch
+        .bounds_check_expr
+        .as_ref()
+        .map(|expr| expr.contains(&needle))
+        .unwrap_or(false)
+}
+
+fn constants_extra_params_for_program(program: &KernelProgram) -> Vec<ParamSpec> {
+    let known_eos_fields = [
+        ("eos.gamma", "eos_gamma"),
+        ("eos.gm1", "eos_gm1"),
+        ("eos.r", "eos_r"),
+        ("eos.dp_drho", "eos_dp_drho"),
+        ("eos.p_offset", "eos_p_offset"),
+        ("eos.theta_ref", "eos_theta_ref"),
+    ];
+    let mut extras = Vec::new();
+    for (key, field) in known_eos_fields {
+        if program_references_constants_field(program, field) {
+            extras.push(ParamSpec {
+                key,
+                wgsl_field: field,
+                wgsl_type: "f32",
+                unit: Dimensionless::UNIT,
+            });
+        }
+    }
+    extras
+}
+
 fn apply_aggressive_cleanup(program: &mut KernelProgram) {
     program
         .body
@@ -425,8 +470,9 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
             ));
         }
         if needs_constants_struct {
+            let extra_constants = constants_extra_params_for_program(program);
             shared_structs_module.push(super::wgsl_ast::Item::Struct(
-                super::constants::constants_struct(&[]),
+                super::constants::constants_struct(&extra_constants),
             ));
         }
         lines.push(shared_structs_module.to_wgsl());
@@ -598,6 +644,40 @@ mod tests {
             .to_wgsl()
             .contains("@compute @workgroup_size(64, 1, 1)"));
         assert!(wgsl1.to_wgsl().contains("struct Constants"));
+    }
+
+    #[test]
+    fn lowering_emits_eos_constants_when_program_references_them() {
+        let launch = LaunchSemantics::new(
+            [64, 1, 1],
+            "global_id.y * constants.stride_x + global_id.x",
+            Some("idx >= arrayLength(&state) / 2u"),
+        );
+        let mut program = KernelProgram::new(
+            "eos_constants_case",
+            DispatchDomain::Cells,
+            launch,
+            vec![
+                KernelBinding::new(0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage),
+                KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
+            ],
+        );
+        program.body = vec![
+            "let c = constants.eos_gamma / max(constants.eos_gm1, 1e-12);".to_string(),
+            "state[idx] = c;".to_string(),
+        ];
+
+        let wgsl = lower_kernel_program_to_wgsl(&program).expect("lowering should succeed");
+        let src = wgsl.to_wgsl();
+        assert!(
+            src.contains("eos_gamma: f32"),
+            "missing eos_gamma in Constants"
+        );
+        assert!(src.contains("eos_gm1: f32"), "missing eos_gm1 in Constants");
+        assert!(
+            !src.contains("eos_dp_drho: f32"),
+            "unused eos fields must stay absent"
+        );
     }
 
     #[test]

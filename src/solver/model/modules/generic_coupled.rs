@@ -79,13 +79,13 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                 PACKED_STATE_GRADIENTS,
                 crate::solver::model::kernel::generate_packed_state_gradients_kernel_wgsl,
             ),
-            ModelKernelGeneratorSpec::new(
+            ModelKernelGeneratorSpec::new_dsl(
                 KernelId::GENERIC_COUPLED_ASSEMBLY,
-                crate::solver::model::kernel::generate_generic_coupled_assembly_kernel_wgsl,
+                crate::solver::model::kernel::generate_generic_coupled_assembly_kernel_program,
             ),
-            ModelKernelGeneratorSpec::new(
+            ModelKernelGeneratorSpec::new_dsl(
                 KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE,
-                crate::solver::model::kernel::generate_generic_coupled_assembly_grad_state_kernel_wgsl,
+                crate::solver::model::kernel::generate_generic_coupled_assembly_grad_state_kernel_program,
             ),
             ModelKernelGeneratorSpec::new_shared(
                 KernelId::GENERIC_COUPLED_APPLY,

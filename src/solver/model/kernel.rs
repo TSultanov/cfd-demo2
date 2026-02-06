@@ -543,16 +543,15 @@ pub(crate) fn extract_eos_params(model: &crate::solver::model::ModelSpec) -> Vec
         })
 }
 
-pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
+fn generate_generic_coupled_assembly_kernel_program_impl(
+    kernel_id: &str,
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<KernelWgsl, String> {
+    needs_gradients: bool,
+) -> Result<crate::solver::ir::KernelProgram, String> {
     // Use unchecked variant: model.system is already validated during construction.
     let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(&model.system, schemes);
 
-    // `generic_coupled_assembly` is the no-grad_state variant.
-    // The grad_state-binding variant is emitted under `KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE`.
-    let needs_gradients = false;
     let flux_stride = model
         .flux_module()
         .map_err(|e| e.to_string())?
@@ -560,21 +559,32 @@ pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
         .unwrap_or(0);
     let slots = resolved_slots_from_layout(&model.state_layout);
     let eos_params = extract_eos_params(model);
-    Ok(
-        cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
-            &discrete,
-            &slots,
-            flux_stride,
-            needs_gradients,
-            &eos_params,
-        ),
+    cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_kernel_program(
+        kernel_id,
+        &discrete,
+        &slots,
+        flux_stride,
+        needs_gradients,
+        &eos_params,
     )
 }
 
-pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_wgsl(
+pub(crate) fn generate_generic_coupled_assembly_kernel_program(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<KernelWgsl, String> {
+) -> Result<crate::solver::ir::KernelProgram, String> {
+    generate_generic_coupled_assembly_kernel_program_impl(
+        KernelId::GENERIC_COUPLED_ASSEMBLY.as_str(),
+        model,
+        schemes,
+        false,
+    )
+}
+
+pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_program(
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+) -> Result<crate::solver::ir::KernelProgram, String> {
     use crate::solver::model::GradientStorage;
 
     let method = model.method().map_err(|e| e.to_string())?;
@@ -589,25 +599,11 @@ pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_wgsl(
         );
     }
 
-    // Use unchecked variant: model.system is already validated during construction.
-    let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(&model.system, schemes);
-
-    let needs_gradients = true;
-    let flux_stride = model
-        .flux_module()
-        .map_err(|e| e.to_string())?
-        .map(|_| model.system.unknowns_per_cell())
-        .unwrap_or(0);
-    let slots = resolved_slots_from_layout(&model.state_layout);
-    let eos_params = extract_eos_params(model);
-    Ok(
-        cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
-            &discrete,
-            &slots,
-            flux_stride,
-            needs_gradients,
-            &eos_params,
-        ),
+    generate_generic_coupled_assembly_kernel_program_impl(
+        KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE.as_str(),
+        model,
+        schemes,
+        true,
     )
 }
 
@@ -839,10 +835,11 @@ fn synthesize_fusion_replacement_wgsl_for_model(
     schemes: &crate::solver::ir::SchemeRegistry,
     replacement_id: KernelId,
 ) -> Result<Option<String>, String> {
-    let mut matching_rules: Vec<ModelKernelFusionRule> = derive_kernel_fusion_rules_for_model(model)
-        .into_iter()
-        .filter(|rule| rule.replacement.id == replacement_id)
-        .collect();
+    let mut matching_rules: Vec<ModelKernelFusionRule> =
+        derive_kernel_fusion_rules_for_model(model)
+            .into_iter()
+            .filter(|rule| rule.replacement.id == replacement_id)
+            .collect();
     if matching_rules.is_empty() {
         return Ok(None);
     }
@@ -869,8 +866,7 @@ fn synthesize_fusion_replacement_wgsl_for_model(
         &programs,
         synthesis_policy,
     )?;
-    let wgsl =
-        cfd2_codegen::solver::codegen::fusion::lower_kernel_program_to_wgsl(&fused_program)?;
+    let wgsl = cfd2_codegen::solver::codegen::fusion::lower_kernel_program_to_wgsl(&fused_program)?;
     Ok(Some(wgsl.to_wgsl()))
 }
 
@@ -928,9 +924,13 @@ pub fn emit_model_kernels_wgsl_with_ids(
                         kernel_id.as_str()
                     )));
                 };
-                let filename =
-                    kernel_output_name_for_model(model.id, kernel_id).map_err(std::io::Error::other)?;
-                let path = cfd2_codegen::compiler::write_generated_wgsl(base_dir.as_ref(), filename, &wgsl)?;
+                let filename = kernel_output_name_for_model(model.id, kernel_id)
+                    .map_err(std::io::Error::other)?;
+                let path = cfd2_codegen::compiler::write_generated_wgsl(
+                    base_dir.as_ref(),
+                    filename,
+                    &wgsl,
+                )?;
                 outputs.push((kernel_id, path));
             }
             continue;
@@ -983,10 +983,8 @@ mod contract_tests {
     fn contract_dsl_kernel_generator(
         kernel_id: &'static str,
         body_stmt: &'static str,
-    ) -> impl Fn(
-        &ModelSpec,
-        &crate::solver::ir::SchemeRegistry,
-    ) -> Result<KernelProgram, String> + Send
+    ) -> impl Fn(&ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<KernelProgram, String>
+           + Send
            + Sync
            + 'static {
         move |_model, _schemes| {
@@ -1447,16 +1445,31 @@ mod tests {
         let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
         let model = crate::solver::model::compressible_model();
 
-        for kernel_id in [
-            KernelId::GENERIC_COUPLED_ASSEMBLY,
-            KernelId::GENERIC_COUPLED_UPDATE,
-            KernelId::FLUX_MODULE,
-        ] {
+        for kernel_id in [KernelId::GENERIC_COUPLED_UPDATE, KernelId::FLUX_MODULE] {
             let artifact = generate_kernel_artifact_for_model_by_id(&model, &schemes, kernel_id)
                 .expect("legacy WGSL kernel generator should remain available");
             assert!(
                 matches!(artifact, ModelKernelArtifact::Wgsl(_)),
                 "kernel '{}' should remain a WGSL standalone artifact",
+                kernel_id.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn generic_coupled_assembly_kernels_are_dsl_artifacts() {
+        let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
+        let model = crate::solver::model::compressible_model();
+
+        for kernel_id in [
+            KernelId::GENERIC_COUPLED_ASSEMBLY,
+            KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE,
+        ] {
+            let artifact = generate_kernel_artifact_for_model_by_id(&model, &schemes, kernel_id)
+                .expect("generic coupled assembly generator should resolve");
+            assert!(
+                matches!(artifact, ModelKernelArtifact::DslProgram(_)),
+                "kernel '{}' should be emitted as a DSL artifact",
                 kernel_id.as_str()
             );
         }

@@ -5,7 +5,8 @@ use super::constants::constants_struct;
 use super::dsl as typed;
 use super::state_access::state_component_slot;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt, Type,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt,
+    StorageClass, Type,
 };
 use super::wgsl_bindings::{storage_var, uniform_var, vector2_struct};
 use super::wgsl_dsl as dsl;
@@ -15,8 +16,27 @@ use crate::solver::codegen::reconstruction::scalar_reconstruction;
 use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::ir::ports::{ParamSpec, ResolvedStateSlotsSpec};
-use crate::solver::ir::{Coefficient, Discretization, TermOp};
+use crate::solver::ir::{
+    BindingAccess, Coefficient, Discretization, DispatchDomain, KernelBinding, KernelProgram,
+    LaunchSemantics, TermOp,
+};
 use crate::solver::scheme::Scheme;
+
+const UNIFIED_ASSEMBLY_WORKGROUP_SIZE: u32 = 64;
+
+fn unified_assembly_needs_fluxes(system: &DiscreteSystem) -> bool {
+    system.equations.iter().any(|eq| {
+        eq.ops
+            .iter()
+            .any(|op| op.kind == DiscreteOpKind::Convection)
+    })
+}
+
+fn validate_unified_assembly_inputs(needs_fluxes: bool, flux_stride: u32) {
+    if needs_fluxes && flux_stride == 0 {
+        panic!("unified_assembly requires flux_stride > 0 when convection ops are present");
+    }
+}
 
 pub fn generate_unified_assembly_wgsl(
     system: &DiscreteSystem,
@@ -31,15 +51,8 @@ pub fn generate_unified_assembly_wgsl(
     ));
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
 
-    let needs_fluxes = system.equations.iter().any(|eq| {
-        eq.ops
-            .iter()
-            .any(|op| op.kind == DiscreteOpKind::Convection)
-    });
-
-    if needs_fluxes && flux_stride == 0 {
-        panic!("unified_assembly requires flux_stride > 0 when convection ops are present");
-    }
+    let needs_fluxes = unified_assembly_needs_fluxes(system);
+    validate_unified_assembly_inputs(needs_fluxes, flux_stride);
 
     module.extend(base_assembly_items(
         needs_gradients,
@@ -55,7 +68,114 @@ pub fn generate_unified_assembly_wgsl(
     KernelWgsl::from(module)
 }
 
+pub fn generate_unified_assembly_kernel_program(
+    id: &str,
+    system: &DiscreteSystem,
+    slots: &ResolvedStateSlotsSpec,
+    flux_stride: u32,
+    needs_gradients: bool,
+    eos_params: &[ParamSpec],
+) -> Result<KernelProgram, String> {
+    let needs_fluxes = unified_assembly_needs_fluxes(system);
+    validate_unified_assembly_inputs(needs_fluxes, flux_stride);
+
+    let items = base_assembly_items(needs_gradients, needs_fluxes, eos_params);
+    let bindings = kernel_bindings_from_items(&items)?;
+    let main = main_assembly_fn(system, slots, flux_stride, needs_gradients);
+    let (launch, consumed_stmts) = launch_from_main_statements(&main.body.stmts)?;
+    let kernel_stmts = &main.body.stmts[consumed_stmts..];
+
+    let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
+    program.body = super::wgsl_ast::render_stmt_lines(kernel_stmts);
+    program.local_symbols = super::wgsl_ast::collect_local_symbols(kernel_stmts);
+    Ok(program)
+}
+
 // Use the shared constants helper from the constants module.
+
+fn kernel_bindings_from_items(items: &[Item]) -> Result<Vec<KernelBinding>, String> {
+    let mut bindings = Vec::new();
+    for item in items {
+        let Item::GlobalVar(var) = item else {
+            continue;
+        };
+        let Some((group, binding)) = group_binding_from_attributes(&var.attributes) else {
+            continue;
+        };
+        let access = match var.storage {
+            StorageClass::Storage => match var.access {
+                Some(AccessMode::Read) => BindingAccess::ReadOnlyStorage,
+                Some(AccessMode::ReadWrite) => BindingAccess::ReadWriteStorage,
+                None => {
+                    return Err(format!(
+                        "unified_assembly: storage var '{}' missing access mode",
+                        var.name
+                    ));
+                }
+            },
+            StorageClass::Uniform => BindingAccess::Uniform,
+            StorageClass::Workgroup => continue,
+        };
+        bindings.push(KernelBinding::new(
+            group,
+            binding,
+            &var.name,
+            var.ty.to_string(),
+            access,
+        ));
+    }
+    Ok(bindings)
+}
+
+fn group_binding_from_attributes(attrs: &[Attribute]) -> Option<(u32, u32)> {
+    let mut group = None;
+    let mut binding = None;
+    for attr in attrs {
+        match attr {
+            Attribute::Group(value) => group = Some(*value),
+            Attribute::Binding(value) => binding = Some(*value),
+            _ => {}
+        }
+    }
+    group.zip(binding)
+}
+
+fn launch_from_main_statements(stmts: &[Stmt]) -> Result<(LaunchSemantics, usize), String> {
+    let idx_expr = match stmts.first() {
+        Some(Stmt::Let { name, expr, .. }) if name == "idx" => expr.to_string(),
+        _ => {
+            return Err(
+                "unified_assembly: expected first statement to define idx launch expression"
+                    .to_string(),
+            )
+        }
+    };
+    let bounds_expr = match stmts.get(1) {
+        Some(Stmt::If {
+            cond,
+            then_block,
+            else_block,
+        }) if else_block.is_none()
+            && then_block.stmts.len() == 1
+            && matches!(then_block.stmts.first(), Some(Stmt::Return(None))) =>
+        {
+            cond.to_string()
+        }
+        _ => {
+            return Err(
+                "unified_assembly: expected second statement to be idx bounds guard".to_string(),
+            )
+        }
+    };
+    Ok((
+        LaunchSemantics::new(
+            [UNIFIED_ASSEMBLY_WORKGROUP_SIZE, 1, 1],
+            idx_expr,
+            Some(bounds_expr),
+        ),
+        2,
+    ))
+}
 
 fn base_mesh_items(eos_params: &[ParamSpec]) -> Vec<Item> {
     vec![
@@ -1305,7 +1425,10 @@ fn main_assembly_fn(
         "main",
         params,
         None,
-        vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
+        vec![
+            Attribute::Compute,
+            Attribute::WorkgroupSize(UNIFIED_ASSEMBLY_WORKGROUP_SIZE),
+        ],
         Block::new(stmts),
     )
 }

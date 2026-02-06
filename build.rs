@@ -461,7 +461,9 @@ fn generate_kernel_registry_map(manifest_dir: &str, models: &[solver::model::Mod
                 }
             }
         }
-        for replacement_id in solver::model::kernel::derive_fusion_replacement_kernel_ids_for_model(model) {
+        for replacement_id in
+            solver::model::kernel::derive_fusion_replacement_kernel_ids_for_model(model)
+        {
             per_model_ids.insert(replacement_id);
         }
 
@@ -860,7 +862,9 @@ fn collect_per_model_generated_kernel_ids(
                 }
             }
         }
-        for replacement_id in solver::model::kernel::derive_fusion_replacement_kernel_ids_for_model(model) {
+        for replacement_id in
+            solver::model::kernel::derive_fusion_replacement_kernel_ids_for_model(model)
+        {
             ids.insert(replacement_id.as_str().to_string());
         }
     }

@@ -2,9 +2,15 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 42a6b0164df9d4f2414c6b1e8c9785064b2168bfebbbf1cc6db217813116c9bc
+// SourceHash: dbd37d58a6699eefa1b1e9a8340332b98072c96df0fe4d98d90604625cf7c160
 
-#![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
+#![allow(
+    unused,
+    non_snake_case,
+    non_camel_case_types,
+    non_upper_case_globals,
+    clippy::too_many_arguments
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShaderEntry {
     Amg,
@@ -795,14 +801,8 @@ pub mod layout_asserts {
             ) == 64
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_compressible::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<generated::generic_coupled_assembly_compressible::Constants>()
-                == 72
+                == 68
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GENERIC_DIFFUSION_DEMO_VECTOR2_ASSERTS: () = {
@@ -897,45 +897,9 @@ pub mod layout_asserts {
             ) == 44
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                eos_gamma
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                eos_gm1
-            ) == 52
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                eos_r
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                eos_dp_drho
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                eos_p_offset
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_generic_diffusion_demo::Constants,
-            >() == 72
+            >() == 48
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GENERIC_DIFFUSION_DEMO_NEUMANN_VECTOR2_ASSERTS: () = {
@@ -1031,45 +995,9 @@ pub mod layout_asserts {
             ) == 44
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                eos_gamma
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                eos_gm1
-            ) == 52
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                eos_r
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                eos_dp_drho
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                eos_p_offset
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_generic_diffusion_demo_neumann::Constants,
-            >() == 72
+            >() == 48
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_COMPRESSIBLE_VECTOR2_ASSERTS: () = {
@@ -1194,15 +1122,9 @@ pub mod layout_asserts {
             ) == 64
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_grad_state_compressible::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_grad_state_compressible::Constants,
-            >() == 72
+            >() == 68
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_GENERIC_DIFFUSION_DEMO_VECTOR2_ASSERTS: () = {
@@ -1299,49 +1221,13 @@ pub mod layout_asserts {
             ) == 44
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_grad_state_generic_diffusion_demo::Constants,
-                eos_gamma
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_grad_state_generic_diffusion_demo::Constants,
-                eos_gm1
-            ) == 52
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_grad_state_generic_diffusion_demo::Constants,
-                eos_r
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_grad_state_generic_diffusion_demo::Constants,
-                eos_dp_drho
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_grad_state_generic_diffusion_demo::Constants,
-                eos_p_offset
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_grad_state_generic_diffusion_demo::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_grad_state_generic_diffusion_demo::Constants,
-            >() == 72
+            >() == 48
         );
     };
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_GENERIC_DIFFUSION_DEMO_NEUMANN_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Vector2 > () == 8) ; } ;
-    const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_GENERIC_DIFFUSION_DEMO_NEUMANN_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants > () == 72) ; } ;
+    const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_GENERIC_DIFFUSION_DEMO_NEUMANN_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: Constants > () == 48) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: (
     ) = {
         assert!(
@@ -1362,7 +1248,7 @@ pub mod layout_asserts {
             >() == 8
         );
     };
-    const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants > () == 72) ; } ;
+    const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: Constants > () == 48) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
@@ -1455,45 +1341,9 @@ pub mod layout_asserts {
             ) == 44
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                eos_gamma
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                eos_gm1
-            ) == 52
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                eos_r
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                eos_dp_drho
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                eos_p_offset
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_assembly_incompressible_momentum::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_assembly_incompressible_momentum::Constants,
-            >() == 72
+            >() == 48
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_COMPRESSIBLE_CONSTANTS_ASSERTS: () = {
@@ -11226,8 +11076,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub eos_dp_drho: f32,
             #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -11248,7 +11096,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 eos_r: f32,
                 eos_dp_drho: f32,
                 eos_p_offset: f32,
-                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -11268,7 +11115,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     eos_r,
                     eos_dp_drho,
                     eos_p_offset,
-                    eos_theta_ref,
                 }
             }
         }
@@ -11297,7 +11143,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BufferBinding<'a>,
             pub face_areas: wgpu::BufferBinding<'a>,
             pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
             pub cell_centers: wgpu::BufferBinding<'a>,
             pub cell_vols: wgpu::BufferBinding<'a>,
             pub cell_face_offsets: wgpu::BufferBinding<'a>,
@@ -11305,6 +11150,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
             pub diagonal_indices: wgpu::BufferBinding<'a>,
             pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -11312,7 +11158,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BindGroupEntry<'a>,
             pub face_areas: wgpu::BindGroupEntry<'a>,
             pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
             pub cell_centers: wgpu::BindGroupEntry<'a>,
             pub cell_vols: wgpu::BindGroupEntry<'a>,
             pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
@@ -11320,6 +11165,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
             pub diagonal_indices: wgpu::BindGroupEntry<'a>,
             pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -11339,10 +11185,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     face_normals: wgpu::BindGroupEntry {
                         binding: 3,
                         resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
                     },
                     cell_centers: wgpu::BindGroupEntry {
                         binding: 4,
@@ -11372,6 +11214,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 12,
                         resource: wgpu::BindingResource::Buffer(params.face_boundary),
                     },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
                 }
             }
             pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
@@ -11380,7 +11226,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.face_neighbor,
                     self.face_areas,
                     self.face_normals,
-                    self.face_centers,
                     self.cell_centers,
                     self.cell_vols,
                     self.cell_face_offsets,
@@ -11388,6 +11233,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.cell_face_matrix_indices,
                     self.diagonal_indices,
                     self.face_boundary,
+                    self.face_centers,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -11439,17 +11285,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         #[doc = " @binding(3): \"face_normals\""]
                         wgpu::BindGroupLayoutEntry {
                             binding: 3,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        #[doc = " @binding(13): \"face_centers\""]
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 13,
                             visibility: wgpu::ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -11527,6 +11362,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         #[doc = " @binding(12): \"face_boundary\""]
                         wgpu::BindGroupLayoutEntry {
                             binding: 12,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(13): \"face_centers\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 13,
                             visibility: wgpu::ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -11886,7 +11732,6 @@ struct Constants {
     eos_r: f32,
     eos_dp_drho: f32,
     eos_p_offset: f32,
-    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -11897,8 +11742,6 @@ var<storage> face_neighbor: array<i32>;
 var<storage> face_areas: array<f32>;
 @group(0) @binding(3) 
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
 @group(0) @binding(4) 
 var<storage> cell_centers: array<Vector2_>;
 @group(0) @binding(5) 
@@ -11913,6 +11756,8 @@ var<storage> cell_face_matrix_indices: array<u32>;
 var<storage> diagonal_indices: array<u32>;
 @group(0) @binding(12) 
 var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
 @group(1) @binding(0) 
 var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) 
@@ -12667,18 +12512,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub stride_x: u32,
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -12694,12 +12527,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -12714,12 +12541,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
                 }
             }
         }
@@ -12748,7 +12569,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BufferBinding<'a>,
             pub face_areas: wgpu::BufferBinding<'a>,
             pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
             pub cell_centers: wgpu::BufferBinding<'a>,
             pub cell_vols: wgpu::BufferBinding<'a>,
             pub cell_face_offsets: wgpu::BufferBinding<'a>,
@@ -12756,6 +12576,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
             pub diagonal_indices: wgpu::BufferBinding<'a>,
             pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -12763,7 +12584,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BindGroupEntry<'a>,
             pub face_areas: wgpu::BindGroupEntry<'a>,
             pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
             pub cell_centers: wgpu::BindGroupEntry<'a>,
             pub cell_vols: wgpu::BindGroupEntry<'a>,
             pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
@@ -12771,6 +12591,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
             pub diagonal_indices: wgpu::BindGroupEntry<'a>,
             pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -12790,10 +12611,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     face_normals: wgpu::BindGroupEntry {
                         binding: 3,
                         resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
                     },
                     cell_centers: wgpu::BindGroupEntry {
                         binding: 4,
@@ -12823,6 +12640,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 12,
                         resource: wgpu::BindingResource::Buffer(params.face_boundary),
                     },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
                 }
             }
             pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
@@ -12831,7 +12652,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.face_neighbor,
                     self.face_areas,
                     self.face_normals,
-                    self.face_centers,
                     self.cell_centers,
                     self.cell_vols,
                     self.cell_face_offsets,
@@ -12839,6 +12659,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.cell_face_matrix_indices,
                     self.diagonal_indices,
                     self.face_boundary,
+                    self.face_centers,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -12848,7 +12669,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGenericDiffusionDemo::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGenericDiffusionDemo::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -13117,12 +12938,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -13133,8 +12948,6 @@ var<storage> face_neighbor: array<i32>;
 var<storage> face_areas: array<f32>;
 @group(0) @binding(3) 
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
 @group(0) @binding(4) 
 var<storage> cell_centers: array<Vector2_>;
 @group(0) @binding(5) 
@@ -13149,6 +12962,8 @@ var<storage> cell_face_matrix_indices: array<u32>;
 var<storage> diagonal_indices: array<u32>;
 @group(0) @binding(12) 
 var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
 @group(1) @binding(0) 
 var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) 
@@ -13387,18 +13202,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub stride_x: u32,
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -13414,12 +13217,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -13434,12 +13231,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
                 }
             }
         }
@@ -13468,7 +13259,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BufferBinding<'a>,
             pub face_areas: wgpu::BufferBinding<'a>,
             pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
             pub cell_centers: wgpu::BufferBinding<'a>,
             pub cell_vols: wgpu::BufferBinding<'a>,
             pub cell_face_offsets: wgpu::BufferBinding<'a>,
@@ -13476,6 +13266,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
             pub diagonal_indices: wgpu::BufferBinding<'a>,
             pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -13483,7 +13274,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BindGroupEntry<'a>,
             pub face_areas: wgpu::BindGroupEntry<'a>,
             pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
             pub cell_centers: wgpu::BindGroupEntry<'a>,
             pub cell_vols: wgpu::BindGroupEntry<'a>,
             pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
@@ -13491,6 +13281,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
             pub diagonal_indices: wgpu::BindGroupEntry<'a>,
             pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -13510,10 +13301,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     face_normals: wgpu::BindGroupEntry {
                         binding: 3,
                         resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
                     },
                     cell_centers: wgpu::BindGroupEntry {
                         binding: 4,
@@ -13543,6 +13330,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 12,
                         resource: wgpu::BindingResource::Buffer(params.face_boundary),
                     },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
                 }
             }
             pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
@@ -13551,7 +13342,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.face_neighbor,
                     self.face_areas,
                     self.face_normals,
-                    self.face_centers,
                     self.cell_centers,
                     self.cell_vols,
                     self.cell_face_offsets,
@@ -13559,6 +13349,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.cell_face_matrix_indices,
                     self.diagonal_indices,
                     self.face_boundary,
+                    self.face_centers,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -13568,7 +13359,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -13847,12 +13638,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -13863,8 +13648,6 @@ var<storage> face_neighbor: array<i32>;
 var<storage> face_areas: array<f32>;
 @group(0) @binding(3) 
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
 @group(0) @binding(4) 
 var<storage> cell_centers: array<Vector2_>;
 @group(0) @binding(5) 
@@ -13879,6 +13662,8 @@ var<storage> cell_face_matrix_indices: array<u32>;
 var<storage> diagonal_indices: array<u32>;
 @group(0) @binding(12) 
 var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
 @group(1) @binding(0) 
 var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) 
@@ -14127,8 +13912,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub eos_dp_drho: f32,
             #[doc = "offset: 64, size: 4, type: `f32`"]
             pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -14149,7 +13932,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 eos_r: f32,
                 eos_dp_drho: f32,
                 eos_p_offset: f32,
-                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -14169,7 +13951,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     eos_r,
                     eos_dp_drho,
                     eos_p_offset,
-                    eos_theta_ref,
                 }
             }
         }
@@ -14198,7 +13979,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BufferBinding<'a>,
             pub face_areas: wgpu::BufferBinding<'a>,
             pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
             pub cell_centers: wgpu::BufferBinding<'a>,
             pub cell_vols: wgpu::BufferBinding<'a>,
             pub cell_face_offsets: wgpu::BufferBinding<'a>,
@@ -14206,6 +13986,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
             pub diagonal_indices: wgpu::BufferBinding<'a>,
             pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -14213,7 +13994,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BindGroupEntry<'a>,
             pub face_areas: wgpu::BindGroupEntry<'a>,
             pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
             pub cell_centers: wgpu::BindGroupEntry<'a>,
             pub cell_vols: wgpu::BindGroupEntry<'a>,
             pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
@@ -14221,6 +14001,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
             pub diagonal_indices: wgpu::BindGroupEntry<'a>,
             pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -14240,10 +14021,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     face_normals: wgpu::BindGroupEntry {
                         binding: 3,
                         resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
                     },
                     cell_centers: wgpu::BindGroupEntry {
                         binding: 4,
@@ -14273,6 +14050,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 12,
                         resource: wgpu::BindingResource::Buffer(params.face_boundary),
                     },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
                 }
             }
             pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
@@ -14281,7 +14062,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.face_neighbor,
                     self.face_areas,
                     self.face_normals,
-                    self.face_centers,
                     self.cell_centers,
                     self.cell_vols,
                     self.cell_face_offsets,
@@ -14289,6 +14069,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.cell_face_matrix_indices,
                     self.diagonal_indices,
                     self.face_boundary,
+                    self.face_centers,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -14298,7 +14079,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateCompressible::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateCompressible::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -14586,7 +14367,6 @@ struct Constants {
     eos_r: f32,
     eos_dp_drho: f32,
     eos_p_offset: f32,
-    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -14597,8 +14377,6 @@ var<storage> face_neighbor: array<i32>;
 var<storage> face_areas: array<f32>;
 @group(0) @binding(3) 
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
 @group(0) @binding(4) 
 var<storage> cell_centers: array<Vector2_>;
 @group(0) @binding(5) 
@@ -14613,6 +14391,8 @@ var<storage> cell_face_matrix_indices: array<u32>;
 var<storage> diagonal_indices: array<u32>;
 @group(0) @binding(12) 
 var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
 @group(1) @binding(0) 
 var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) 
@@ -15369,18 +15149,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub stride_x: u32,
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -15396,12 +15164,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -15416,12 +15178,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
                 }
             }
         }
@@ -15450,7 +15206,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BufferBinding<'a>,
             pub face_areas: wgpu::BufferBinding<'a>,
             pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
             pub cell_centers: wgpu::BufferBinding<'a>,
             pub cell_vols: wgpu::BufferBinding<'a>,
             pub cell_face_offsets: wgpu::BufferBinding<'a>,
@@ -15458,6 +15213,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
             pub diagonal_indices: wgpu::BufferBinding<'a>,
             pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -15465,7 +15221,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BindGroupEntry<'a>,
             pub face_areas: wgpu::BindGroupEntry<'a>,
             pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
             pub cell_centers: wgpu::BindGroupEntry<'a>,
             pub cell_vols: wgpu::BindGroupEntry<'a>,
             pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
@@ -15473,6 +15228,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
             pub diagonal_indices: wgpu::BindGroupEntry<'a>,
             pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -15492,10 +15248,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     face_normals: wgpu::BindGroupEntry {
                         binding: 3,
                         resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
                     },
                     cell_centers: wgpu::BindGroupEntry {
                         binding: 4,
@@ -15525,6 +15277,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 12,
                         resource: wgpu::BindingResource::Buffer(params.face_boundary),
                     },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
                 }
             }
             pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
@@ -15533,7 +15289,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.face_neighbor,
                     self.face_areas,
                     self.face_normals,
-                    self.face_centers,
                     self.cell_centers,
                     self.cell_vols,
                     self.cell_face_offsets,
@@ -15541,6 +15296,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.cell_face_matrix_indices,
                     self.diagonal_indices,
                     self.face_boundary,
+                    self.face_centers,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -15550,7 +15306,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -15836,12 +15592,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -15852,8 +15602,6 @@ var<storage> face_neighbor: array<i32>;
 var<storage> face_areas: array<f32>;
 @group(0) @binding(3) 
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
 @group(0) @binding(4) 
 var<storage> cell_centers: array<Vector2_>;
 @group(0) @binding(5) 
@@ -15868,6 +15616,8 @@ var<storage> cell_face_matrix_indices: array<u32>;
 var<storage> diagonal_indices: array<u32>;
 @group(0) @binding(12) 
 var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
 @group(1) @binding(0) 
 var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) 
@@ -16108,18 +15858,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub stride_x: u32,
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -16135,12 +15873,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -16155,12 +15887,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
                 }
             }
         }
@@ -16189,7 +15915,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BufferBinding<'a>,
             pub face_areas: wgpu::BufferBinding<'a>,
             pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
             pub cell_centers: wgpu::BufferBinding<'a>,
             pub cell_vols: wgpu::BufferBinding<'a>,
             pub cell_face_offsets: wgpu::BufferBinding<'a>,
@@ -16197,6 +15922,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
             pub diagonal_indices: wgpu::BufferBinding<'a>,
             pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -16204,7 +15930,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BindGroupEntry<'a>,
             pub face_areas: wgpu::BindGroupEntry<'a>,
             pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
             pub cell_centers: wgpu::BindGroupEntry<'a>,
             pub cell_vols: wgpu::BindGroupEntry<'a>,
             pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
@@ -16212,6 +15937,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
             pub diagonal_indices: wgpu::BindGroupEntry<'a>,
             pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -16231,10 +15957,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     face_normals: wgpu::BindGroupEntry {
                         binding: 3,
                         resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
                     },
                     cell_centers: wgpu::BindGroupEntry {
                         binding: 4,
@@ -16264,6 +15986,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 12,
                         resource: wgpu::BindingResource::Buffer(params.face_boundary),
                     },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
                 }
             }
             pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
@@ -16272,7 +15998,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.face_neighbor,
                     self.face_areas,
                     self.face_normals,
-                    self.face_centers,
                     self.cell_centers,
                     self.cell_vols,
                     self.cell_face_offsets,
@@ -16280,6 +16005,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.cell_face_matrix_indices,
                     self.diagonal_indices,
                     self.face_boundary,
+                    self.face_centers,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -16289,7 +16015,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -16542,12 +16268,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -16558,8 +16278,6 @@ var<storage> face_neighbor: array<i32>;
 var<storage> face_areas: array<f32>;
 @group(0) @binding(3) 
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
 @group(0) @binding(4) 
 var<storage> cell_centers: array<Vector2_>;
 @group(0) @binding(5) 
@@ -16574,6 +16292,8 @@ var<storage> cell_face_matrix_indices: array<u32>;
 var<storage> diagonal_indices: array<u32>;
 @group(0) @binding(12) 
 var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
 @group(1) @binding(0) 
 var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) 
@@ -16814,18 +16534,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub stride_x: u32,
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -16841,12 +16549,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -16861,12 +16563,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
                 }
             }
         }
@@ -16895,7 +16591,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BufferBinding<'a>,
             pub face_areas: wgpu::BufferBinding<'a>,
             pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
             pub cell_centers: wgpu::BufferBinding<'a>,
             pub cell_vols: wgpu::BufferBinding<'a>,
             pub cell_face_offsets: wgpu::BufferBinding<'a>,
@@ -16903,6 +16598,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
             pub diagonal_indices: wgpu::BufferBinding<'a>,
             pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -16910,7 +16606,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BindGroupEntry<'a>,
             pub face_areas: wgpu::BindGroupEntry<'a>,
             pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
             pub cell_centers: wgpu::BindGroupEntry<'a>,
             pub cell_vols: wgpu::BindGroupEntry<'a>,
             pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
@@ -16918,6 +16613,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
             pub diagonal_indices: wgpu::BindGroupEntry<'a>,
             pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -16937,10 +16633,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     face_normals: wgpu::BindGroupEntry {
                         binding: 3,
                         resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
                     },
                     cell_centers: wgpu::BindGroupEntry {
                         binding: 4,
@@ -16970,6 +16662,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 12,
                         resource: wgpu::BindingResource::Buffer(params.face_boundary),
                     },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
                 }
             }
             pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
@@ -16978,7 +16674,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.face_neighbor,
                     self.face_areas,
                     self.face_normals,
-                    self.face_centers,
                     self.cell_centers,
                     self.cell_vols,
                     self.cell_face_offsets,
@@ -16986,6 +16681,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.cell_face_matrix_indices,
                     self.diagonal_indices,
                     self.face_boundary,
+                    self.face_centers,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -16995,7 +16691,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -17253,12 +16949,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -17269,8 +16959,6 @@ var<storage> face_neighbor: array<i32>;
 var<storage> face_areas: array<f32>;
 @group(0) @binding(3) 
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
 @group(0) @binding(4) 
 var<storage> cell_centers: array<Vector2_>;
 @group(0) @binding(5) 
@@ -17285,6 +16973,8 @@ var<storage> cell_face_matrix_indices: array<u32>;
 var<storage> diagonal_indices: array<u32>;
 @group(0) @binding(12) 
 var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
 @group(1) @binding(0) 
 var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) 
@@ -18349,18 +18039,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub stride_x: u32,
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -18376,12 +18054,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -18396,12 +18068,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
                 }
             }
         }
@@ -18430,7 +18096,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BufferBinding<'a>,
             pub face_areas: wgpu::BufferBinding<'a>,
             pub face_normals: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
             pub cell_centers: wgpu::BufferBinding<'a>,
             pub cell_vols: wgpu::BufferBinding<'a>,
             pub cell_face_offsets: wgpu::BufferBinding<'a>,
@@ -18438,6 +18103,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BufferBinding<'a>,
             pub diagonal_indices: wgpu::BufferBinding<'a>,
             pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -18445,7 +18111,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub face_neighbor: wgpu::BindGroupEntry<'a>,
             pub face_areas: wgpu::BindGroupEntry<'a>,
             pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
             pub cell_centers: wgpu::BindGroupEntry<'a>,
             pub cell_vols: wgpu::BindGroupEntry<'a>,
             pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
@@ -18453,6 +18118,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub cell_face_matrix_indices: wgpu::BindGroupEntry<'a>,
             pub diagonal_indices: wgpu::BindGroupEntry<'a>,
             pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -18472,10 +18138,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     face_normals: wgpu::BindGroupEntry {
                         binding: 3,
                         resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
                     },
                     cell_centers: wgpu::BindGroupEntry {
                         binding: 4,
@@ -18505,6 +18167,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         binding: 12,
                         resource: wgpu::BindingResource::Buffer(params.face_boundary),
                     },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
                 }
             }
             pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 12] {
@@ -18513,7 +18179,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.face_neighbor,
                     self.face_areas,
                     self.face_normals,
-                    self.face_centers,
                     self.cell_centers,
                     self.cell_vols,
                     self.cell_face_offsets,
@@ -18521,6 +18186,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     self.cell_face_matrix_indices,
                     self.diagonal_indices,
                     self.face_boundary,
+                    self.face_centers,
                 ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
@@ -18530,7 +18196,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(10): \"cell_face_matrix_indices\""] wgpu :: BindGroupLayoutEntry { binding : 10 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(11): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 11 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -18816,12 +18482,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -18832,8 +18492,6 @@ var<storage> face_neighbor: array<i32>;
 var<storage> face_areas: array<f32>;
 @group(0) @binding(3) 
 var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
 @group(0) @binding(4) 
 var<storage> cell_centers: array<Vector2_>;
 @group(0) @binding(5) 
@@ -18848,6 +18506,8 @@ var<storage> cell_face_matrix_indices: array<u32>;
 var<storage> diagonal_indices: array<u32>;
 @group(0) @binding(12) 
 var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
 @group(1) @binding(0) 
 var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) 

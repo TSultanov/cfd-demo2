@@ -14,7 +14,7 @@ use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::graph::DispatchKind;
 use crate::solver::gpu::structs::{GpuConstants, PreconditionerType};
 use crate::solver::model::backend::{expand_schemes_unchecked, SchemeRegistry};
-use crate::solver::model::linear_solver::ModelLinearSolverType;
+use crate::solver::model::linear_solver::{FgmresSolutionUpdateStrategy, ModelLinearSolverType};
 use crate::solver::model::ports::PortRegistry;
 use crate::solver::model::{
     expand_field_components, GradientStorage, KernelId, ModelPreconditionerSpec, ModelSpec,
@@ -31,6 +31,7 @@ pub struct LinearSolverSpec {
     pub max_iters: u32,
     pub tolerance: f32,
     pub tolerance_abs: f32,
+    pub update_strategy: FgmresSolutionUpdateStrategy,
 }
 
 impl Default for LinearSolverSpec {
@@ -41,6 +42,7 @@ impl Default for LinearSolverSpec {
             max_iters: 200,
             tolerance: 1e-12,
             tolerance_abs: 1e-12,
+            update_strategy: FgmresSolutionUpdateStrategy::FusedContiguous,
         }
     }
 }
@@ -462,6 +464,7 @@ impl SolverRecipe {
             max_iters: model_solver.solver.max_iters,
             tolerance: model_solver.solver.tolerance,
             tolerance_abs: model_solver.solver.tolerance_abs,
+            update_strategy: model_solver.solver.update_strategy,
         };
 
         Ok(SolverRecipe {
@@ -705,7 +708,7 @@ mod tests {
     #[test]
     fn recipe_derives_linear_solver_defaults_from_model_and_config() {
         use crate::solver::model::linear_solver::{
-            ModelLinearSolverSettings, ModelLinearSolverType,
+            FgmresSolutionUpdateStrategy, ModelLinearSolverSettings, ModelLinearSolverType,
         };
         use crate::solver::model::{ModelLinearSolverSpec, ModelPreconditionerSpec};
 
@@ -717,6 +720,7 @@ mod tests {
                 max_iters: 42,
                 tolerance: 1e-5,
                 tolerance_abs: 1e-9,
+                update_strategy: FgmresSolutionUpdateStrategy::FusedContiguous,
             },
         });
 
@@ -733,6 +737,10 @@ mod tests {
         assert_eq!(recipe.linear_solver.max_iters, 42);
         assert!((recipe.linear_solver.tolerance - 1e-5).abs() < 1e-12);
         assert!((recipe.linear_solver.tolerance_abs - 1e-9).abs() < 1e-12);
+        assert_eq!(
+            recipe.linear_solver.update_strategy,
+            FgmresSolutionUpdateStrategy::FusedContiguous
+        );
         assert!(
             matches!(
                 recipe.linear_solver.solver_type,

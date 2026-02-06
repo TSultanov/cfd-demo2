@@ -2,6 +2,7 @@ use crate::solver::gpu::program::plan_instance::PlanParamValue;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::GpuUnifiedSolver;
 use crate::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel};
+use crate::solver::model::linear_solver::FgmresSolutionUpdateStrategy;
 use crate::solver::model::eos::EosSpec;
 use crate::solver::model::ports::PortRegistry;
 use std::future::Future;
@@ -171,6 +172,10 @@ pub trait SolverRuntimeParamsExt {
     fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String>;
     fn set_precond_pressure_coupling_alpha(&mut self, alpha: f32) -> Result<(), String>;
     fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String>;
+    fn set_linear_solver_solution_update_strategy(
+        &mut self,
+        strategy: FgmresSolutionUpdateStrategy,
+    ) -> Result<(), String>;
     fn set_eos(&mut self, eos: &EosSpec) -> Result<(), String>;
 }
 
@@ -236,6 +241,16 @@ impl SolverRuntimeParamsExt for GpuUnifiedSolver {
 
     fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String> {
         self.set_named_param("nonconverged_relax", PlanParamValue::F32(alpha))
+    }
+
+    fn set_linear_solver_solution_update_strategy(
+        &mut self,
+        strategy: FgmresSolutionUpdateStrategy,
+    ) -> Result<(), String> {
+        self.set_named_param(
+            "linear_solver.solution_update_strategy",
+            PlanParamValue::FgmresSolutionUpdateStrategy(strategy),
+        )
     }
 
     fn set_eos(&mut self, eos: &EosSpec) -> Result<(), String> {

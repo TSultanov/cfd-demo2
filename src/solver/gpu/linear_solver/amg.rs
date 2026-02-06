@@ -580,17 +580,17 @@ impl AmgResources {
         encoder.copy_buffer_to_buffer(scalars, 0, &self.b_control_scalars, 0, 64);
     }
 
-    pub(crate) fn create_state_override_bind_group(
+    pub(crate) fn create_state_override_bind_group<'a>(
         &self,
         device: &wgpu::Device,
-        x: &wgpu::Buffer,
-        b: &wgpu::Buffer,
+        x: wgpu::BindingResource<'a>,
+        b: wgpu::BindingResource<'a>,
         params: &wgpu::Buffer,
         label: &str,
     ) -> wgpu::BindGroup {
         let registry = ResourceRegistry::new()
-            .with_buffer("x", x)
-            .with_buffer("b", b)
+            .with_resource("x", x)
+            .with_resource("b", b)
             .with_buffer("params", params);
         wgsl_reflect::create_bind_group_from_bindings(
             device,

@@ -56,7 +56,7 @@ pub trait FgmresPreconditionerModule {
         encoder: &mut wgpu::CommandEncoder,
         fgmres: &FgmresWorkspace,
         input: wgpu::BindingResource<'_>,
-        output: &wgpu::Buffer,
+        output: wgpu::BindingResource<'_>,
         dispatch: DispatchGrids,
     );
 }

@@ -191,8 +191,8 @@ impl CoupledSchurModule {
         let level0 = &amg.levels[0];
         let override_bg = amg.create_state_override_bind_group(
             device,
-            &self.b_p_sol,
-            &self.b_temp_p,
+            self.b_p_sol.as_entire_binding(),
+            self.b_temp_p.as_entire_binding(),
             &level0.b_params,
             "Schur AMG Level0 State Override",
         );
@@ -282,7 +282,7 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
         encoder: &mut wgpu::CommandEncoder,
         fgmres: &FgmresWorkspace,
         input: wgpu::BindingResource<'_>,
-        output: &wgpu::Buffer,
+        output: wgpu::BindingResource<'_>,
         dispatch: DispatchGrids,
     ) {
         let aux = fgmres.temp_buffer().as_entire_binding();
@@ -290,7 +290,7 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
         let current_bg = self.create_schur_bg(
             device,
             input.clone(),
-            output.as_entire_binding(),
+            output.clone(),
             self.b_p_sol.as_entire_binding(),
             aux.clone(),
             "Schur BG",
@@ -298,7 +298,7 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
         let swap_bg = self.create_schur_bg(
             device,
             input,
-            output.as_entire_binding(),
+            output,
             aux.clone(),
             self.b_p_sol.as_entire_binding(),
             "Schur Swap BG",

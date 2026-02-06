@@ -906,6 +906,7 @@ fn build_generic_schur(
         num_dofs,
         num_cells,
         max_restart,
+        recipe.linear_solver.update_strategy,
         system,
         precond_bindings,
         "generic_coupled",
@@ -997,6 +998,7 @@ fn build_generic_krylov(
         n,
         num_cells,
         max_restart.max(1),
+        recipe.linear_solver.update_strategy,
         system,
         precond_bindings,
         "generic_coupled",
@@ -1991,6 +1993,27 @@ pub(crate) fn param_linear_solver_tolerance_abs(
     };
 
     res_mut(plan).linear_solver.tolerance_abs = tol_abs.max(0.0);
+    Ok(())
+}
+
+pub(crate) fn param_linear_solver_solution_update_strategy(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::FgmresSolutionUpdateStrategy(strategy) = value else {
+        return Err("linear_solver.solution_update_strategy expects FgmresSolutionUpdateStrategy"
+            .to_string());
+    };
+
+    let r = res_mut(plan);
+    r.linear_solver.update_strategy = strategy;
+
+    if let Some(schur) = &mut r.schur {
+        schur.solver.fgmres.set_solution_update_strategy(strategy);
+    } else if let Some(krylov) = &mut r.krylov {
+        krylov.solver.fgmres.set_solution_update_strategy(strategy);
+    }
+
     Ok(())
 }
 

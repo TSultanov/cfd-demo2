@@ -1,6 +1,7 @@
 use crate::solver::gpu::enums::{GpuLowMachPrecondModel, TimeScheme};
-use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::gpu::recipe::SteppingMode;
+use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
+use crate::solver::model::linear_solver::FgmresSolutionUpdateStrategy;
 use crate::solver::scheme::Scheme;
 use std::future::Future;
 use std::pin::Pin;
@@ -41,6 +42,7 @@ pub enum PlanParamValue {
     Scheme(Scheme),
     TimeScheme(TimeScheme),
     Preconditioner(PreconditionerType),
+    FgmresSolutionUpdateStrategy(FgmresSolutionUpdateStrategy),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

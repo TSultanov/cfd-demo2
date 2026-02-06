@@ -14,8 +14,8 @@ struct GmresParams {
     num_iters: u32,      // Jacobi iterations for preconditioner
     omega: f32,          // Relaxation factor
     dispatch_x: u32,     // Width of 2D dispatch (in threads, i.e. workgroups * 64)
-    _pad1: u32,
-    _pad2: u32,
+    max_restart: u32,
+    column_offset: u32,
     _pad3: u32,
 }
 

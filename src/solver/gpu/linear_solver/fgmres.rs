@@ -2,6 +2,7 @@ use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::wgsl_reflect;
+use crate::solver::model::linear_solver::FgmresSolutionUpdateStrategy;
 use crate::solver::model::KernelId;
 use bytemuck::{bytes_of, Pod, Zeroable};
 
@@ -57,9 +58,11 @@ pub struct FgmresCore<'a> {
     pub max_restart: usize,
     pub num_dot_groups: u32,
     pub basis_stride: u64,
+    pub z_stride: u64,
+    pub solution_update_strategy: FgmresSolutionUpdateStrategy,
 
     pub b_basis: &'a wgpu::Buffer,
-    pub z_vectors: &'a [wgpu::Buffer],
+    pub b_z_storage: &'a wgpu::Buffer,
     pub b_w: &'a wgpu::Buffer,
     pub b_temp: &'a wgpu::Buffer,
     pub b_dot_partial: &'a wgpu::Buffer,
@@ -89,7 +92,7 @@ pub struct FgmresCore<'a> {
     pub pipeline_reduce_final_and_finish_norm: &'a wgpu::ComputePipeline,
     pub pipeline_update_hessenberg: &'a wgpu::ComputePipeline,
     pub pipeline_solve_triangular: &'a wgpu::ComputePipeline,
-    pub pipeline_axpy_from_y: &'a wgpu::ComputePipeline,
+    pub pipeline_axpy_fused_from_y: &'a wgpu::ComputePipeline,
     pub pipeline_calc_dots_cgs: &'a wgpu::ComputePipeline,
     pub pipeline_reduce_dots_cgs: &'a wgpu::ComputePipeline,
     pub pipeline_update_w_cgs: &'a wgpu::ComputePipeline,
@@ -125,9 +128,11 @@ pub struct FgmresWorkspace {
     num_cells: u32,
     num_dot_groups: u32,
     basis_stride: u64,
+    z_stride: u64,
+    solution_update_strategy: FgmresSolutionUpdateStrategy,
 
     b_basis: wgpu::Buffer,
-    z_vectors: Vec<wgpu::Buffer>,
+    b_z_storage: wgpu::Buffer,
     b_w: wgpu::Buffer,
     b_temp: wgpu::Buffer,
     b_dot_partial: wgpu::Buffer,
@@ -159,8 +164,6 @@ pub struct FgmresWorkspace {
     bg_cgs: wgpu::BindGroup,
 
     pipeline_spmv: wgpu::ComputePipeline,
-    pipeline_axpy: wgpu::ComputePipeline,
-    pipeline_axpy_from_y: wgpu::ComputePipeline,
     pipeline_axpby: wgpu::ComputePipeline,
     pipeline_scale: wgpu::ComputePipeline,
     pipeline_scale_in_place: wgpu::ComputePipeline,
@@ -173,6 +176,7 @@ pub struct FgmresWorkspace {
     pipeline_calc_dots_cgs: wgpu::ComputePipeline,
     pipeline_reduce_dots_cgs: wgpu::ComputePipeline,
     pipeline_update_w_cgs: wgpu::ComputePipeline,
+    pipeline_axpy_fused_from_y: wgpu::ComputePipeline,
 }
 
 impl FgmresWorkspace {
@@ -181,6 +185,7 @@ impl FgmresWorkspace {
         n: u32,
         num_cells: u32,
         max_restart: usize,
+        solution_update_strategy: FgmresSolutionUpdateStrategy,
         system: LinearSystemView<'_>,
         precond: FgmresPrecondBindings<'_>,
         label_prefix: &str,
@@ -195,6 +200,8 @@ impl FgmresWorkspace {
         let basis_stride_unaligned = (n as u64) * 4;
         let basis_stride = (basis_stride_unaligned + min_alignment - 1) & !(min_alignment - 1);
         let basis_size = basis_stride * (max_restart as u64 + 1);
+        let z_stride_unaligned = (n as u64) * 4;
+        let z_stride = (z_stride_unaligned + min_alignment - 1) & !(min_alignment - 1);
 
         let b_basis = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label_prefix} FGMRES basis")),
@@ -205,17 +212,14 @@ impl FgmresWorkspace {
             mapped_at_creation: false,
         });
 
-        let mut z_vectors = Vec::with_capacity(max_restart);
-        for i in 0..max_restart {
-            z_vectors.push(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(&format!("{label_prefix} FGMRES Z {i}")),
-                size: (n as u64) * 4,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            }));
-        }
+        let b_z_storage = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES Z storage")),
+            size: z_stride * (max_restart as u64),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
 
         let b_w = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label_prefix} FGMRES w")),
@@ -351,14 +355,12 @@ impl FgmresWorkspace {
         let ops_bindings = ops_spmv_src.bindings;
 
         let pipeline_spmv = (ops_spmv_src.create_pipeline)(device);
-        let pipeline_axpy = {
-            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_AXPY)
-                .expect("gmres_ops/axpy shader missing from kernel registry");
-            (src.create_pipeline)(device)
-        };
-        let pipeline_axpy_from_y = {
-            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_AXPY_FROM_Y)
-                .expect("gmres_ops/axpy_from_y shader missing from kernel registry");
+        let pipeline_axpy_fused_from_y = {
+            let src = kernel_registry::kernel_source_by_id(
+                "",
+                KernelId("gmres_update_fused/accumulate_solution"),
+            )
+            .expect("gmres_update_fused/accumulate_solution shader missing from kernel registry");
             (src.create_pipeline)(device)
         };
         let pipeline_axpby = {
@@ -561,8 +563,10 @@ impl FgmresWorkspace {
             num_cells,
             num_dot_groups,
             basis_stride,
+            z_stride,
+            solution_update_strategy,
             b_basis,
-            z_vectors,
+            b_z_storage,
             b_w,
             b_temp,
             b_dot_partial,
@@ -591,8 +595,7 @@ impl FgmresWorkspace {
             bg_logic_params,
             bg_cgs,
             pipeline_spmv,
-            pipeline_axpy,
-            pipeline_axpy_from_y,
+            pipeline_axpy_fused_from_y,
             pipeline_axpby,
             pipeline_scale,
             pipeline_scale_in_place,
@@ -617,8 +620,10 @@ impl FgmresWorkspace {
             max_restart: self.max_restart,
             num_dot_groups: self.num_dot_groups,
             basis_stride: self.basis_stride,
+            z_stride: self.z_stride,
+            solution_update_strategy: self.solution_update_strategy,
             b_basis: &self.b_basis,
-            z_vectors: &self.z_vectors,
+            b_z_storage: &self.b_z_storage,
             b_w: &self.b_w,
             b_temp: &self.b_temp,
             b_dot_partial: &self.b_dot_partial,
@@ -645,7 +650,7 @@ impl FgmresWorkspace {
             pipeline_reduce_final_and_finish_norm: &self.pipeline_reduce_final_and_finish_norm,
             pipeline_update_hessenberg: &self.pipeline_update_hessenberg,
             pipeline_solve_triangular: &self.pipeline_solve_triangular,
-            pipeline_axpy_from_y: &self.pipeline_axpy_from_y,
+            pipeline_axpy_fused_from_y: &self.pipeline_axpy_fused_from_y,
             pipeline_calc_dots_cgs: &self.pipeline_calc_dots_cgs,
             pipeline_reduce_dots_cgs: &self.pipeline_reduce_dots_cgs,
             pipeline_update_w_cgs: &self.pipeline_update_w_cgs,
@@ -805,12 +810,24 @@ impl FgmresWorkspace {
         &self.b_basis
     }
 
-    pub fn z_vectors(&self) -> &[wgpu::Buffer] {
-        &self.z_vectors
+    pub fn z_stride(&self) -> u64 {
+        self.z_stride
     }
 
-    pub fn z_buffer(&self, idx: usize) -> &wgpu::Buffer {
-        &self.z_vectors[idx]
+    pub fn z_storage_buffer(&self) -> &wgpu::Buffer {
+        &self.b_z_storage
+    }
+
+    pub fn z_binding(&self, idx: usize) -> wgpu::BindingResource<'_> {
+        z_storage_binding(&self.b_z_storage, self.z_stride, self.vector_bytes(), idx)
+    }
+
+    pub fn solution_update_strategy(&self) -> FgmresSolutionUpdateStrategy {
+        self.solution_update_strategy
+    }
+
+    pub fn set_solution_update_strategy(&mut self, strategy: FgmresSolutionUpdateStrategy) {
+        self.solution_update_strategy = strategy;
     }
 
     pub fn w_buffer(&self) -> &wgpu::Buffer {
@@ -917,12 +934,8 @@ impl FgmresWorkspace {
         &self.pipeline_spmv
     }
 
-    pub fn pipeline_axpy(&self) -> &wgpu::ComputePipeline {
-        &self.pipeline_axpy
-    }
-
-    pub fn pipeline_axpy_from_y(&self) -> &wgpu::ComputePipeline {
-        &self.pipeline_axpy_from_y
+    pub fn pipeline_axpy_fused_from_y(&self) -> &wgpu::ComputePipeline {
+        &self.pipeline_axpy_fused_from_y
     }
 
     pub fn pipeline_axpby(&self) -> &wgpu::ComputePipeline {
@@ -1165,6 +1178,19 @@ pub fn basis_binding<'a>(
     })
 }
 
+pub fn z_storage_binding<'a>(
+    b_z_storage: &'a wgpu::Buffer,
+    z_stride: u64,
+    vector_bytes: u64,
+    idx: usize,
+) -> wgpu::BindingResource<'a> {
+    wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+        buffer: b_z_storage,
+        offset: (idx as u64) * z_stride,
+        size: std::num::NonZeroU64::new(vector_bytes),
+    })
+}
+
 fn create_vector_bind_group<'a>(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
@@ -1324,7 +1350,7 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         usize,
         &mut wgpu::CommandEncoder,
         wgpu::BindingResource<'a>,
-        &'a wgpu::Buffer,
+        wgpu::BindingResource<'a>,
     ),
 ) -> FgmresSolveOnceResult {
     let n = core.n;
@@ -1346,6 +1372,7 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
     params.n = n;
     params.dispatch_x = dispatch_x_threads;
     params.max_restart = max_restart as u32;
+    params.column_offset = (core.z_stride / 4) as u32;
     write_params(core, &params);
 
     let mut solver_scalars = [0.0_f32; FGMRES_SCALAR_COUNT];
@@ -1451,16 +1478,16 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
                 FGMRES_PARAMS_STRIDE_BYTES,
             );
 
-            let z_buf = &core.z_vectors[j];
+            let z_buf = z_storage_binding(core.b_z_storage, core.z_stride, vector_bytes, j);
             let vj = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j);
 
-            precondition(j, &mut encoder, vj, z_buf);
+            precondition(j, &mut encoder, vj, z_buf.clone());
 
             let spmv_bg = create_vector_bind_group(
                 core.device,
                 core.bgl_vectors,
                 core.vector_bindings,
-                z_buf.as_entire_binding(),
+                z_buf,
                 core.b_w.as_entire_binding(),
                 core.b_temp.as_entire_binding(),
                 "FGMRES SpMV BG",
@@ -1657,31 +1684,22 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
             encoder.clear_buffer(x, 0, Some(vector_bytes));
         }
 
-        for i in 0..max_restart {
-            let iter_offset = (i as u64) * FGMRES_ITER_PARAMS_STRIDE_BYTES;
-            encoder.copy_buffer_to_buffer(
-                core.b_iter_table_j,
-                iter_offset,
-                core.b_iter_params,
-                0,
-                FGMRES_ITER_PARAMS_STRIDE_BYTES,
-            );
-
-            let axpy_bg = create_vector_bind_group(
-                core.device,
-                core.bgl_vectors,
-                core.vector_bindings,
-                core.z_vectors[i].as_entire_binding(),
-                x.as_entire_binding(),
-                core.b_temp.as_entire_binding(),
-                "FGMRES Solution Update BG",
-            );
+        let fused_bg = create_vector_bind_group(
+            core.device,
+            core.bgl_vectors,
+            core.vector_bindings,
+            core.b_z_storage.as_entire_binding(),
+            x.as_entire_binding(),
+            core.b_temp.as_entire_binding(),
+            "FGMRES Solution Update Fused BG",
+        );
+        {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("FGMRES Solution Update"),
+                label: Some("FGMRES Solution Update Fused"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(core.pipeline_axpy_from_y);
-            pass.set_bind_group(0, &axpy_bg, &[]);
+            pass.set_pipeline(core.pipeline_axpy_fused_from_y);
+            pass.set_bind_group(0, &fused_bg, &[]);
             pass.set_bind_group(1, core.bg_matrix, &[]);
             pass.set_bind_group(2, core.bg_precond, &[]);
             pass.set_bind_group(3, core.bg_params, &[]);

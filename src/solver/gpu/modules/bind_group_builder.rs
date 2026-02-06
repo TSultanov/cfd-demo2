@@ -14,6 +14,7 @@ use crate::solver::gpu::wgsl_reflect::{create_bind_group_from_bindings, WgslBind
 pub struct BindGroupBuilder<'a> {
     device: &'a wgpu::Device,
     unified_fields: Option<&'a UnifiedFieldResources>,
+    external_resources: Vec<(&'static str, wgpu::BindingResource<'a>)>,
     external_buffers: Vec<(&'static str, &'a wgpu::Buffer)>,
     ping_pong_phase: usize,
 }
@@ -24,6 +25,7 @@ impl<'a> BindGroupBuilder<'a> {
         Self {
             device,
             unified_fields: None,
+            external_resources: Vec::new(),
             external_buffers: Vec::new(),
             ping_pong_phase: 0,
         }
@@ -47,6 +49,16 @@ impl<'a> BindGroupBuilder<'a> {
         self
     }
 
+    /// Add an external binding resource that can be resolved by name.
+    pub fn with_resource(
+        mut self,
+        name: &'static str,
+        resource: wgpu::BindingResource<'a>,
+    ) -> Self {
+        self.external_resources.push((name, resource));
+        self
+    }
+
     /// Build a bind group for the specified shader bindings and group index.
     pub fn build_bind_group<B: WgslBindingLike>(
         &self,
@@ -62,6 +74,12 @@ impl<'a> BindGroupBuilder<'a> {
 
     /// Resolve a buffer by name, checking all available sources.
     fn resolve_buffer(&self, name: &str) -> Option<wgpu::BindingResource<'a>> {
+        for (resource_name, resource) in &self.external_resources {
+            if *resource_name == name {
+                return Some(resource.clone());
+            }
+        }
+
         // First check external buffers
         for (buf_name, buffer) in &self.external_buffers {
             if *buf_name == name {

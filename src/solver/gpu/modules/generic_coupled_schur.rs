@@ -231,7 +231,8 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
                         },
                     );
                 } else {
-                    self.schur.set_pressure_kind(CoupledPressureSolveKind::Chebyshev);
+                    self.schur
+                        .set_pressure_kind(CoupledPressureSolveKind::Chebyshev);
                 }
             } else {
                 self.schur.refresh_amg_level0_matrix(
@@ -250,7 +251,7 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
         encoder: &mut wgpu::CommandEncoder,
         fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
         input: wgpu::BindingResource<'_>,
-        output: &wgpu::Buffer,
+        output: wgpu::BindingResource<'_>,
         dispatch: DispatchGrids,
     ) {
         self.schur

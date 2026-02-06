@@ -117,12 +117,19 @@ pub enum ModelLinearSolverType {
     Cg,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FgmresSolutionUpdateStrategy {
+    #[default]
+    FusedContiguous,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ModelLinearSolverSettings {
     pub solver_type: ModelLinearSolverType,
     pub max_iters: u32,
     pub tolerance: f32,
     pub tolerance_abs: f32,
+    pub update_strategy: FgmresSolutionUpdateStrategy,
 }
 
 impl Default for ModelLinearSolverSettings {
@@ -132,6 +139,7 @@ impl Default for ModelLinearSolverSettings {
             max_iters: 200,
             tolerance: 1e-12,
             tolerance_abs: 1e-12,
+            update_strategy: FgmresSolutionUpdateStrategy::FusedContiguous,
         }
     }
 }

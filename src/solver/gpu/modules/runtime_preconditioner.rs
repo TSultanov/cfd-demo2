@@ -188,7 +188,7 @@ impl RuntimePreconditionerModule {
             device,
             fgmres.w_buffer().as_entire_binding(),
             fgmres.temp_buffer().as_entire_binding(),
-            fgmres.z_buffer(0).as_entire_binding(),
+            fgmres.z_binding(0),
             "runtime_preconditioner:block_jacobi_build_vectors",
         );
 
@@ -227,7 +227,7 @@ impl RuntimePreconditionerModule {
             device,
             fgmres.w_buffer().as_entire_binding(),
             fgmres.temp_buffer().as_entire_binding(),
-            fgmres.z_buffer(0).as_entire_binding(),
+            fgmres.z_binding(0),
             "runtime_preconditioner:jacobi_diag_inv_vectors",
         );
 
@@ -367,7 +367,7 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
         encoder: &mut wgpu::CommandEncoder,
         fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
         input: wgpu::BindingResource<'_>,
-        output: &wgpu::Buffer,
+        output: wgpu::BindingResource<'_>,
         dispatch: DispatchGrids,
     ) {
         if self.kind == PreconditionerType::Jacobi {
@@ -381,8 +381,8 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
             let vector_bg = fgmres.create_vector_bind_group(
                 device,
                 input,
-                output.as_entire_binding(),
-                output.as_entire_binding(),
+                output.clone(),
+                output.clone(),
                 "runtime_preconditioner:jacobi_apply_vectors",
             );
 
@@ -415,8 +415,8 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
                 let vector_bg = fgmres.create_vector_bind_group(
                     device,
                     input,
-                    output.as_entire_binding(),
-                    output.as_entire_binding(),
+                    output.clone(),
+                    output.clone(),
                     "runtime_preconditioner:block_jacobi_fallback_jacobi_apply",
                 );
 
@@ -468,7 +468,7 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
             let vector_bg = fgmres.create_vector_bind_group(
                 device,
                 input,
-                output.as_entire_binding(),
+                output.clone(),
                 fgmres.temp_buffer().as_entire_binding(),
                 "runtime_preconditioner:block_jacobi_apply_vectors",
             );
@@ -507,12 +507,28 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
                 .encode_apply(device, encoder, fgmres, input, output, dispatch);
         };
 
+        let wgpu::BindingResource::Buffer(output_binding) = &output else {
+            return self
+                .identity
+                .encode_apply(device, encoder, fgmres, input, output, dispatch);
+        };
+
         let expected_bytes = (self.num_dofs as u64) * 4;
         let available = input_binding
             .size
             .map(|s| s.get())
             .unwrap_or(expected_bytes);
         if available < expected_bytes {
+            return self
+                .identity
+                .encode_apply(device, encoder, fgmres, input, output, dispatch);
+        }
+
+        let output_available = output_binding
+            .size
+            .map(|s| s.get())
+            .unwrap_or(expected_bytes);
+        if output_available < expected_bytes {
             return self
                 .identity
                 .encode_apply(device, encoder, fgmres, input, output, dispatch);
@@ -525,7 +541,11 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
             0,
             expected_bytes,
         );
-        encoder.clear_buffer(output, 0, Some(expected_bytes));
+        encoder.clear_buffer(
+            output_binding.buffer,
+            output_binding.offset,
+            Some(expected_bytes),
+        );
 
         let Some(level0) = amg.levels.first() else {
             return self
@@ -535,8 +555,8 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
 
         let override_bg = amg.create_state_override_bind_group(
             device,
-            output,
-            &self.b_rhs,
+            output.clone(),
+            self.b_rhs.as_entire_binding(),
             &level0.b_params,
             "runtime_preconditioner:amg_level0_state_override",
         );

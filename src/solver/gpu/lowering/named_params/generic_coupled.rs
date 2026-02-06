@@ -13,6 +13,9 @@ pub(crate) fn handler_for_key(key: &'static str) -> Option<ProgramParamHandler> 
         "linear_solver.max_iters" => Some(generic_coupled::param_linear_solver_max_iters),
         "linear_solver.tolerance" => Some(generic_coupled::param_linear_solver_tolerance),
         "linear_solver.tolerance_abs" => Some(generic_coupled::param_linear_solver_tolerance_abs),
+        "linear_solver.solution_update_strategy" => {
+            Some(generic_coupled::param_linear_solver_solution_update_strategy)
+        }
         "viscosity" => Some(generic_coupled::param_viscosity),
         "density" => Some(generic_coupled::param_density),
         "alpha_u" => Some(generic_coupled::param_alpha_u),

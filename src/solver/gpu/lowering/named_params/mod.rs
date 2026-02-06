@@ -65,6 +65,7 @@ mod tests {
             "linear_solver.max_iters",
             "linear_solver.tolerance",
             "linear_solver.tolerance_abs",
+            "linear_solver.solution_update_strategy",
         ] {
             assert!(
                 params.contains_key(key),

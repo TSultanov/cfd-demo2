@@ -7,6 +7,7 @@ pub struct ResourceRegistry<'a> {
     unified_fields: Option<&'a UnifiedFieldResources>,
     ping_pong_phase: usize,
     constants: Option<&'a wgpu::Buffer>,
+    named_resources: Vec<(&'static str, wgpu::BindingResource<'a>)>,
     named_buffers: Vec<(&'static str, &'a wgpu::Buffer)>,
 }
 
@@ -17,6 +18,7 @@ impl<'a> ResourceRegistry<'a> {
             unified_fields: None,
             ping_pong_phase: 0,
             constants: None,
+            named_resources: Vec::new(),
             named_buffers: Vec::new(),
         }
     }
@@ -46,7 +48,22 @@ impl<'a> ResourceRegistry<'a> {
         self
     }
 
+    pub fn with_resource(
+        mut self,
+        name: &'static str,
+        resource: wgpu::BindingResource<'a>,
+    ) -> Self {
+        self.named_resources.push((name, resource));
+        self
+    }
+
     pub fn resolve(&self, name: &str) -> Option<wgpu::BindingResource<'a>> {
+        for (resource_name, resource) in &self.named_resources {
+            if *resource_name == name {
+                return Some(resource.clone());
+            }
+        }
+
         for (buf_name, buffer) in &self.named_buffers {
             if *buf_name == name {
                 return Some(wgpu::BindingResource::Buffer(

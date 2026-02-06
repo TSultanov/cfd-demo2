@@ -172,7 +172,7 @@ impl FgmresPreconditionerModule for IdentityPreconditioner {
         encoder: &mut wgpu::CommandEncoder,
         fgmres: &FgmresWorkspace,
         input: wgpu::BindingResource<'_>,
-        output: &wgpu::Buffer,
+        output: wgpu::BindingResource<'_>,
         _dispatch: DispatchGrids,
     ) {
         let _ = &self.copy_pipeline;
@@ -180,8 +180,8 @@ impl FgmresPreconditionerModule for IdentityPreconditioner {
         let vector_bg = fgmres.create_vector_bind_group(
             device,
             input,
-            output.as_entire_binding(),
-            output.as_entire_binding(),
+            output.clone(),
+            output,
             "Identity preconditioner copy BG",
         );
 
@@ -210,6 +210,7 @@ impl PreconditionerWithBuffers for IdentityPreconditioner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver::model::linear_solver::FgmresSolutionUpdateStrategy;
 
     #[test]
     fn test_config_from_spec() {
@@ -219,6 +220,7 @@ mod tests {
             max_iters: 100,
             tolerance: 1e-8,
             tolerance_abs: 1e-12,
+            update_strategy: FgmresSolutionUpdateStrategy::FusedContiguous,
         };
 
         let config = GenericLinearSolverConfig::from(&spec);

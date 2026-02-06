@@ -96,7 +96,7 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
   - [x] `Off` vs `Safe` parity,
   - [x] `Safe` vs `Aggressive` parity where expected.
 - [ ] Performance checks:
-  - [ ] dispatch count reduction (via dispatch counter),
+  - [x] dispatch count reduction (incompressible coupled `Safe` vs `Aggressive` now validated by compile-time schedule test: update-phase dispatches drop by 3 after `dp_init`+Rhie-Chow full-chain fusion),
   - [ ] no regression in wall-clock for representative cases.
 
 ## 9) Rollout and Cleanup
@@ -121,6 +121,7 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 - [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` (Safe and Aggressive via `rhie_chow:dp_update_store_grad_p_v1`).
 - [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` (Aggressive-only via `rhie_chow:dp_update_store_grad_p_grad_p_update_v1`).
 - [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` (Aggressive-only via `rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1`).
+- [x] `dp_init` + `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` (Aggressive-only via `rhie_chow:dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1`).
 - [x] `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` as a standalone declared pair rule (Aggressive-only via `rhie_chow:store_grad_p_grad_p_update_v1`).
 - [x] `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` as a standalone declared pair rule (Aggressive-only via `rhie_chow:grad_p_update_correct_velocity_delta_v1`).
 - [x] `generic_coupled_assembly` + `generic_coupled_assembly_grad_state` DSL migration prerequisite completed (both kernels now emitted as DSL artifacts; rule declaration remains optional because conditions are mutually exclusive at runtime).
@@ -131,4 +132,4 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 - [x] Reconfirm active Rhie-Chow fusion opportunities and rule synthesis status.
 - [x] Reconfirm `generic_coupled_assembly -> generic_coupled_assembly_grad_state` is technically synthesizeable (`Safe` and `Aggressive`) once both kernels are DSL.
 - [x] Migrate `generic_coupled_update` to DSL and regenerate coverage (legacy DSL-migration-eligible per-model kernels now reduced to zero).
-- [ ] Decide whether to declare an explicit assembly-pair fusion rule despite mutually-exclusive kernel conditions.
+- [x] Decide whether to declare an explicit assembly-pair fusion rule despite mutually-exclusive kernel conditions (decision: no explicit rule; runtime kernel conditions are mutually exclusive so the pair is never adjacent in an active schedule).

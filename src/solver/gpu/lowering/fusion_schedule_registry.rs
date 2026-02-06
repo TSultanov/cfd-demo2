@@ -80,6 +80,7 @@ pub(crate) fn schedule_for_model(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver::gpu::recipe::KernelPhase;
 
     #[test]
     fn compile_time_schedule_exists_for_all_registered_models_and_contexts() {
@@ -125,5 +126,78 @@ mod tests {
             err.contains("missing compile-time kernel schedule"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn incompressible_coupled_aggressive_uses_dp_init_full_rhie_fused_kernel() {
+        for has_grad_state in [false, true] {
+            let (kernels, applied) = schedule_for_model(
+                "incompressible_momentum",
+                SteppingMode::Coupled,
+                has_grad_state,
+                KernelFusionPolicy::Aggressive,
+            )
+            .expect("missing aggressive coupled schedule for incompressible_momentum");
+
+            assert!(
+                applied
+                    .iter()
+                    .any(|name| *name
+                        == "rhie_chow:dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1"),
+                "expected aggressive schedule to apply dp_init+full Rhie-Chow fusion rule"
+            );
+
+            let ids: Vec<&str> = kernels.iter().map(|k| k.id.as_str()).collect();
+            assert!(
+                ids.contains(
+                    &"rhie_chow/dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused"
+                ),
+                "missing dp_init+full Rhie-Chow fused kernel in aggressive schedule"
+            );
+            assert!(
+                !ids.contains(&"dp_init"),
+                "dp_init should be absorbed by aggressive fused replacement"
+            );
+            assert!(
+                !ids.contains(
+                    &"rhie_chow/dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused"
+                ),
+                "legacy aggressive 4-kernel Rhie-Chow fused kernel should be superseded"
+            );
+        }
+    }
+
+    #[test]
+    fn incompressible_coupled_aggressive_reduces_update_dispatches_vs_safe() {
+        for has_grad_state in [false, true] {
+            let (safe_kernels, _) = schedule_for_model(
+                "incompressible_momentum",
+                SteppingMode::Coupled,
+                has_grad_state,
+                KernelFusionPolicy::Safe,
+            )
+            .expect("missing safe coupled schedule for incompressible_momentum");
+            let (aggressive_kernels, _) = schedule_for_model(
+                "incompressible_momentum",
+                SteppingMode::Coupled,
+                has_grad_state,
+                KernelFusionPolicy::Aggressive,
+            )
+            .expect("missing aggressive coupled schedule for incompressible_momentum");
+
+            let safe_update_dispatches = safe_kernels
+                .iter()
+                .filter(|k| k.phase == KernelPhase::Update)
+                .count();
+            let aggressive_update_dispatches = aggressive_kernels
+                .iter()
+                .filter(|k| k.phase == KernelPhase::Update)
+                .count();
+
+            assert!(
+                aggressive_update_dispatches + 3 == safe_update_dispatches,
+                "expected aggressive update dispatches to drop by 3 (safe={safe_update_dispatches}, aggressive={aggressive_update_dispatches}, has_grad_state={has_grad_state})"
+            );
+        }
     }
 }

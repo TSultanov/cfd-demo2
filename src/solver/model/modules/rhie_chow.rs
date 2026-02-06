@@ -7,15 +7,11 @@ use crate::solver::model::KernelId;
 
 use cfd2_codegen::solver::codegen::{
     wgsl_ast::{AssignOp, Block, Expr, ForStep, Stmt, Type},
-    wgsl_dsl as dsl, KernelWgsl,
+    wgsl_dsl as dsl,
 };
 use cfd2_ir::solver::ir::{
     BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelProgram, LaunchSemantics,
 };
-
-mod wgsl {
-    include!("rhie_chow_wgsl.rs");
-}
 
 /// Rhie-Chow auxiliary module that manages pressure correction and velocity correction.
 ///
@@ -65,6 +61,9 @@ pub fn rhie_chow_aux_module(
     let kernel_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused = KernelId(
         "rhie_chow/dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused",
     );
+    let kernel_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused = KernelId(
+        "rhie_chow/dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused",
+    );
     let kernel_store_grad_p = KernelId("rhie_chow/store_grad_p");
     let kernel_grad_p_update = KernelId("rhie_chow/grad_p_update");
     let kernel_rhie_chow_correct_velocity_delta = KernelId("rhie_chow/correct_velocity_delta");
@@ -76,7 +75,7 @@ pub fn rhie_chow_aux_module(
     let kernels = vec![
         ModelKernelSpec {
             id: kernel_dp_init,
-            phase: KernelPhaseId::Preparation,
+            phase: KernelPhaseId::Update,
             dispatch: DispatchKindId::Cells,
             condition: KernelConditionId::Always,
         },
@@ -116,8 +115,8 @@ pub fn rhie_chow_aux_module(
     let coupling_for_correct = coupling;
 
     let generators = vec![
-        ModelKernelGeneratorSpec::new(kernel_dp_init, move |model, _schemes| {
-            generate_dp_init_kernel_wgsl(model, dp_field)
+        ModelKernelGeneratorSpec::new_dsl(kernel_dp_init, move |model, _schemes| {
+            generate_dp_init_kernel_program(model, dp_field)
         }),
         ModelKernelGeneratorSpec::new_dsl(kernel_dp_update_from_diag, move |model, _schemes| {
             generate_dp_update_from_diag_kernel_program(model, dp_field, coupling_for_dp_update)
@@ -199,6 +198,32 @@ pub fn rhie_chow_aux_module(
                 FusionGuard::RequiresStepping(KernelFusionStepping::Coupled),
                 FusionGuard::RequiresModule("rhie_chow_aux"),
                 FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Safe),
+            ],
+        },
+        ModelKernelFusionRule {
+            name: "rhie_chow:dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1",
+            priority: 130,
+            phase: KernelPhaseId::Update,
+            pattern: vec![
+                KernelPatternAtom::with_dispatch(kernel_dp_init, DispatchKindId::Cells),
+                KernelPatternAtom::with_dispatch(kernel_dp_update_from_diag, DispatchKindId::Cells),
+                KernelPatternAtom::with_dispatch(kernel_store_grad_p, DispatchKindId::Cells),
+                KernelPatternAtom::with_dispatch(kernel_grad_p_update, DispatchKindId::Cells),
+                KernelPatternAtom::with_dispatch(
+                    kernel_rhie_chow_correct_velocity_delta,
+                    DispatchKindId::Cells,
+                ),
+            ],
+            replacement: ModelKernelSpec {
+                id: kernel_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused,
+                phase: KernelPhaseId::Update,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::Always,
+            },
+            guards: vec![
+                FusionGuard::RequiresStepping(KernelFusionStepping::Coupled),
+                FusionGuard::RequiresModule("rhie_chow_aux"),
+                FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Aggressive),
             ],
         },
         ModelKernelFusionRule {
@@ -308,10 +333,10 @@ pub fn rhie_chow_aux_module(
     })
 }
 
-fn generate_dp_init_kernel_wgsl(
+fn generate_dp_init_kernel_program(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
-) -> Result<KernelWgsl, String> {
+) -> Result<KernelProgram, String> {
     use crate::solver::model::ports::dimensions::D_P;
     use crate::solver::model::ports::PortRegistry;
 
@@ -323,7 +348,30 @@ fn generate_dp_init_kernel_wgsl(
 
     let stride = registry.state_layout().stride();
     let d_p_offset = d_p.offset();
-    Ok(wgsl::generate_dp_init_wgsl(stride, d_p_offset))
+    let mut program = KernelProgram::new(
+        "dp_init",
+        DispatchDomain::Cells,
+        rhie_chow_state_launch(stride),
+        rhie_chow_state_bindings(),
+    );
+    let indexing_stmts = vec![dsl::let_expr("base", Expr::ident("idx") * stride)];
+    let body_stmts = vec![dsl::assign_expr(
+        dsl::array_access("state", Expr::ident("base") + d_p_offset),
+        Expr::lit_f32(0.0),
+    )];
+    program.indexing = rhie_chow_section_lines(indexing_stmts);
+    program.body = rhie_chow_section_lines(body_stmts.clone());
+    program.local_symbols = rhie_chow_collect_local_symbols_sections(&[&body_stmts]);
+    program
+        .side_effects
+        .read_set
+        .insert(EffectResource::binding(0, 1));
+    program.side_effects.write_set.insert(EffectResource::component(
+        0,
+        0,
+        format!("state:{d_p_offset}"),
+    ));
+    Ok(program)
 }
 
 fn rhie_chow_state_launch(state_stride: u32) -> LaunchSemantics {
@@ -1098,6 +1146,24 @@ mod tests {
             "expected aggressive full fusion synthesis marker in fused Rhie-Chow WGSL"
         );
 
+        let aggressive_with_dp_init_fused_path = emitted
+            .iter()
+            .find_map(|(id, path)| {
+                (id.as_str()
+                    == "rhie_chow/dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused")
+                    .then_some(path)
+            })
+            .expect("aggressive full synthesized fused rhie-chow-with-dp_init kernel path");
+        let aggressive_with_dp_init_fused_src =
+            std::fs::read_to_string(aggressive_with_dp_init_fused_path)
+                .expect("read aggressive dp_init+full fused kernel");
+        assert!(
+            aggressive_with_dp_init_fused_src.contains(
+                "synthesized by fusion rule: rhie_chow:dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1"
+            ),
+            "expected aggressive dp_init+full fusion synthesis marker in fused Rhie-Chow WGSL"
+        );
+
         // Verify standalone grad_p_update + correct_velocity_delta fused kernel
         let standalone_fused_path = emitted
             .iter()
@@ -1137,31 +1203,32 @@ mod tests {
     }
 
     #[test]
-    fn contract_rhie_chow_correct_velocity_delta_is_dsl_artifact() {
+    fn contract_rhie_chow_dp_init_and_correct_velocity_delta_are_dsl_artifacts() {
         let model = crate::solver::model::incompressible_momentum_model();
         let rhie_chow_module = model
             .modules
             .iter()
             .find(|module| module.name == "rhie_chow_aux")
             .expect("incompressible model missing rhie_chow_aux module");
-
-        let generator = rhie_chow_module
-            .generators
-            .iter()
-            .find(|gen| gen.id.as_str() == "rhie_chow/correct_velocity_delta")
-            .expect("missing rhie_chow/correct_velocity_delta generator");
-
         let schemes = crate::solver::ir::SchemeRegistry::default();
-        let artifact = (generator.generator.as_ref())(&model, &schemes)
-            .expect("generate rhie_chow/correct_velocity_delta artifact");
 
-        assert!(
-            matches!(
-                artifact,
-                crate::solver::model::kernel::ModelKernelArtifact::DslProgram(_)
-            ),
-            "rhie_chow/correct_velocity_delta should be emitted as a DSL artifact"
-        );
+        for kernel_id in ["dp_init", "rhie_chow/correct_velocity_delta"] {
+            let generator = rhie_chow_module
+                .generators
+                .iter()
+                .find(|gen| gen.id.as_str() == kernel_id)
+                .unwrap_or_else(|| panic!("missing {kernel_id} generator"));
+            let artifact = (generator.generator.as_ref())(&model, &schemes)
+                .unwrap_or_else(|e| panic!("generate {kernel_id} artifact failed: {e}"));
+
+            assert!(
+                matches!(
+                    artifact,
+                    crate::solver::model::kernel::ModelKernelArtifact::DslProgram(_)
+                ),
+                "{kernel_id} should be emitted as a DSL artifact"
+            );
+        }
     }
 
     #[test]
@@ -1179,6 +1246,7 @@ mod tests {
                 "dp_update_from_diag",
                 vec!["rho", "dt", "d_p"],
             ),
+            ("dp_init", vec![]),
             ("rhie_chow/store_grad_p", vec![]),
             (
                 "rhie_chow/grad_p_update",

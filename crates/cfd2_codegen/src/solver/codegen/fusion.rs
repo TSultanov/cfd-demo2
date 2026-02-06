@@ -319,6 +319,7 @@ fn rename_identifier(src: &str, old: &str, new: &str) -> String {
         if end <= src_bytes.len()
             && &src_bytes[i..end] == old_bytes
             && is_ident_boundary(src_bytes, i, end)
+            && !is_member_access_field(src_bytes, i)
         {
             out.push_str(new);
             i = end;
@@ -342,6 +343,22 @@ fn is_ident_boundary(src: &[u8], start: usize, end: usize) -> bool {
         !is_ident_char(src[end])
     };
     left_ok && right_ok
+}
+
+fn is_member_access_field(src: &[u8], ident_start: usize) -> bool {
+    if ident_start == 0 {
+        return false;
+    }
+    let mut i = ident_start;
+    while i > 0 {
+        let prev = src[i - 1];
+        if prev.is_ascii_whitespace() {
+            i -= 1;
+            continue;
+        }
+        return prev == b'.';
+    }
+    false
 }
 
 fn is_ident_char(b: u8) -> bool {
@@ -772,5 +789,12 @@ mod tests {
             safe.body, aggressive.body,
             "aggressive cleanup should match safe output when no cleanup candidates exist"
         );
+    }
+
+    #[test]
+    fn symbol_rename_skips_member_access_fields() {
+        let src = "let dt = max(constants.dt, state[idx].dt);";
+        let renamed = rename_identifier(src, "dt", "k1_dt");
+        assert_eq!(renamed, "let k1_dt = max(constants.dt, state[idx].dt);");
     }
 }

@@ -70,6 +70,8 @@ pub fn rhie_chow_aux_module(
     let kernel_rhie_chow_correct_velocity_delta = KernelId("rhie_chow/correct_velocity_delta");
     let kernel_grad_p_update_correct_velocity_delta_fused =
         KernelId("rhie_chow/grad_p_update_correct_velocity_delta_fused");
+    let kernel_store_grad_p_grad_p_update_fused =
+        KernelId("rhie_chow/store_grad_p_grad_p_update_fused");
 
     let kernels = vec![
         ModelKernelSpec {
@@ -256,6 +258,27 @@ pub fn rhie_chow_aux_module(
             ],
             replacement: ModelKernelSpec {
                 id: kernel_grad_p_update_correct_velocity_delta_fused,
+                phase: KernelPhaseId::Update,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::Always,
+            },
+            guards: vec![
+                FusionGuard::RequiresStepping(KernelFusionStepping::Coupled),
+                FusionGuard::RequiresModule("rhie_chow_aux"),
+                FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Aggressive),
+            ],
+        },
+        // Standalone fusion rule for store_grad_p + grad_p_update (aggressive-only)
+        ModelKernelFusionRule {
+            name: "rhie_chow:store_grad_p_grad_p_update_v1",
+            priority: 106,
+            phase: KernelPhaseId::Update,
+            pattern: vec![
+                KernelPatternAtom::with_dispatch(kernel_store_grad_p, DispatchKindId::Cells),
+                KernelPatternAtom::with_dispatch(kernel_grad_p_update, DispatchKindId::Cells),
+            ],
+            replacement: ModelKernelSpec {
+                id: kernel_store_grad_p_grad_p_update_fused,
                 phase: KernelPhaseId::Update,
                 dispatch: DispatchKindId::Cells,
                 condition: KernelConditionId::Always,
@@ -1136,6 +1159,24 @@ mod tests {
                 "synthesized by fusion rule: rhie_chow:grad_p_update_correct_velocity_delta_v1"
             ),
             "expected standalone grad_p_update_correct_velocity_delta fusion synthesis marker in fused Rhie-Chow WGSL"
+        );
+
+        // Verify standalone store_grad_p + grad_p_update fused kernel
+        let store_grad_p_grad_p_update_fused_path = emitted
+            .iter()
+            .find_map(|(id, path)| {
+                (id.as_str() == "rhie_chow/store_grad_p_grad_p_update_fused")
+                    .then_some(path)
+            })
+            .expect("standalone store_grad_p_grad_p_update fused kernel path");
+        let store_grad_p_grad_p_update_fused_src =
+            std::fs::read_to_string(store_grad_p_grad_p_update_fused_path)
+                .expect("read standalone store_grad_p_grad_p_update fused kernel");
+        assert!(
+            store_grad_p_grad_p_update_fused_src.contains(
+                "synthesized by fusion rule: rhie_chow:store_grad_p_grad_p_update_v1"
+            ),
+            "expected standalone store_grad_p_grad_p_update fusion synthesis marker in fused Rhie-Chow WGSL"
         );
 
         let _ = std::fs::remove_dir_all(&out_dir);

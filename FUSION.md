@@ -92,7 +92,7 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
   - [x] registry completeness for fused kernels.
 - [ ] Numerical regression tests:
   - [x] `Off` vs `Safe` parity,
-  - [ ] `Safe` vs `Aggressive` parity where expected.
+  - [x] `Safe` vs `Aggressive` parity where expected.
 - [ ] Performance checks:
   - [ ] dispatch count reduction (via dispatch counter),
   - [ ] no regression in wall-clock for representative cases.
@@ -110,5 +110,5 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 - [ ] Fused kernels are generated from DSL at compile-time (not handwritten WGSL bodies).
 - [ ] Runtime remains registry-driven and model-driven, with no ad-hoc fusion logic.
 - [ ] At least one production fusion path (Rhie-Chow) fully migrated and validated.
-- [ ] Safe and Aggressive policy semantics are implemented, tested, and documented.
+- [x] Safe and Aggressive policy semantics are implemented, tested, and documented.
 - [ ] Full validation matrix passes in CI.

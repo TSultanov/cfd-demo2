@@ -121,5 +121,5 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 - [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` (Safe and Aggressive via `rhie_chow:dp_update_store_grad_p_v1`).
 - [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` (Aggressive-only via `rhie_chow:dp_update_store_grad_p_grad_p_update_v1`).
 - [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` (Aggressive-only via `rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1`).
-- [ ] `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` as a standalone declared pair rule (currently covered by the larger 4-kernel aggressive rule).
+- [x] `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` as a standalone declared pair rule (Aggressive-only via `rhie_chow:grad_p_update_correct_velocity_delta_v1`).
 - [ ] `generic_coupled_assembly` + `generic_coupled_assembly_grad_state` (blocked by WGSL-only artifacts; requires DSL migration).

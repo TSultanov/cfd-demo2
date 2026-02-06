@@ -68,6 +68,8 @@ pub fn rhie_chow_aux_module(
     let kernel_store_grad_p = KernelId("rhie_chow/store_grad_p");
     let kernel_grad_p_update = KernelId("rhie_chow/grad_p_update");
     let kernel_rhie_chow_correct_velocity_delta = KernelId("rhie_chow/correct_velocity_delta");
+    let kernel_grad_p_update_correct_velocity_delta_fused =
+        KernelId("rhie_chow/grad_p_update_correct_velocity_delta_fused");
 
     let kernels = vec![
         ModelKernelSpec {
@@ -233,6 +235,27 @@ pub fn rhie_chow_aux_module(
             ],
             replacement: ModelKernelSpec {
                 id: kernel_dp_update_store_grad_p_grad_p_update_fused,
+                phase: KernelPhaseId::Update,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::Always,
+            },
+            guards: vec![
+                FusionGuard::RequiresStepping(KernelFusionStepping::Coupled),
+                FusionGuard::RequiresModule("rhie_chow_aux"),
+                FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Aggressive),
+            ],
+        },
+        // Standalone fusion rule for grad_p_update + correct_velocity_delta (aggressive-only)
+        ModelKernelFusionRule {
+            name: "rhie_chow:grad_p_update_correct_velocity_delta_v1",
+            priority: 105,
+            phase: KernelPhaseId::Update,
+            pattern: vec![
+                KernelPatternAtom::with_dispatch(kernel_grad_p_update, DispatchKindId::Cells),
+                KernelPatternAtom::with_dispatch(kernel_rhie_chow_correct_velocity_delta, DispatchKindId::Cells),
+            ],
+            replacement: ModelKernelSpec {
+                id: kernel_grad_p_update_correct_velocity_delta_fused,
                 phase: KernelPhaseId::Update,
                 dispatch: DispatchKindId::Cells,
                 condition: KernelConditionId::Always,
@@ -1096,6 +1119,23 @@ mod tests {
                 "synthesized by fusion rule: rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1"
             ),
             "expected aggressive full fusion synthesis marker in fused Rhie-Chow WGSL"
+        );
+
+        // Verify standalone grad_p_update + correct_velocity_delta fused kernel
+        let standalone_fused_path = emitted
+            .iter()
+            .find_map(|(id, path)| {
+                (id.as_str() == "rhie_chow/grad_p_update_correct_velocity_delta_fused")
+                    .then_some(path)
+            })
+            .expect("standalone grad_p_update_correct_velocity_delta fused kernel path");
+        let standalone_fused_src = std::fs::read_to_string(standalone_fused_path)
+            .expect("read standalone grad_p_update_correct_velocity_delta fused kernel");
+        assert!(
+            standalone_fused_src.contains(
+                "synthesized by fusion rule: rhie_chow:grad_p_update_correct_velocity_delta_v1"
+            ),
+            "expected standalone grad_p_update_correct_velocity_delta fusion synthesis marker in fused Rhie-Chow WGSL"
         );
 
         let _ = std::fs::remove_dir_all(&out_dir);

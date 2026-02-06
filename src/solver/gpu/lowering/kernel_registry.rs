@@ -71,4 +71,22 @@ mod tests {
             "aggressive full fused rhie-chow kernel registry entry should include reflected bindings"
         );
     }
+
+    #[test]
+    fn synthesized_rhie_chow_grad_p_update_correct_velocity_delta_fused_kernel_is_present_in_generated_registry(
+    ) {
+        // Test the standalone grad_p_update + correct_velocity_delta fused kernel
+        // This is the aggressive-only pair fusion that does not include dp_update or store_grad_p.
+        let src = kernel_source_by_id(
+            "incompressible_momentum",
+            KernelId("rhie_chow/grad_p_update_correct_velocity_delta_fused"),
+        )
+        .expect(
+            "missing standalone grad_p_update_correct_velocity_delta fused kernel in generated registry"
+        );
+        assert!(
+            !src.bindings.is_empty(),
+            "standalone grad_p_update_correct_velocity_delta fused kernel registry entry should include reflected bindings"
+        );
+    }
 }

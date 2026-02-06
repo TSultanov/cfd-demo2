@@ -1,3 +1,5 @@
+use crate::solver::model::kernel::KernelFusionPolicy;
+
 pub const SCHUR_MAX_U: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -130,6 +132,11 @@ pub struct ModelLinearSolverSettings {
     pub tolerance: f32,
     pub tolerance_abs: f32,
     pub update_strategy: FgmresSolutionUpdateStrategy,
+    /// Build-time fusion policy used when deriving the recipe kernel schedule.
+    ///
+    /// This is intentionally init-time only. Switching policy requires rebuilding
+    /// the solver graph/plan so kernel availability and dispatch order stay coherent.
+    pub kernel_fusion_policy: KernelFusionPolicy,
 }
 
 impl Default for ModelLinearSolverSettings {
@@ -140,6 +147,7 @@ impl Default for ModelLinearSolverSettings {
             tolerance: 1e-12,
             tolerance_abs: 1e-12,
             update_strategy: FgmresSolutionUpdateStrategy::FusedContiguous,
+            kernel_fusion_policy: KernelFusionPolicy::Safe,
         }
     }
 }

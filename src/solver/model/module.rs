@@ -1,12 +1,13 @@
 use crate::solver::model::eos::EosSpec;
-use crate::solver::model::kernel::{ModelKernelGeneratorSpec, ModelKernelSpec};
+use crate::solver::model::kernel::{
+    ModelKernelFusionRule, ModelKernelGeneratorSpec, ModelKernelSpec,
+};
 
 /// Re-export IR-safe port manifest types for convenience.
 #[allow(unused_imports)]
 pub use cfd2_ir::solver::ir::ports::{
     BufferAccess, BufferSpec, FieldSpec, ParamSpec, PortFieldKind, PortManifest,
 };
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKindReq {
@@ -41,6 +42,9 @@ pub trait ModelModule {
     fn name(&self) -> &'static str;
     fn kernel_specs(&self) -> &[ModelKernelSpec];
     fn kernel_generators(&self) -> &[ModelKernelGeneratorSpec];
+    fn fusion_rules(&self) -> &[ModelKernelFusionRule] {
+        &[]
+    }
 }
 
 /// A simple data-driven module: a named bundle of kernel specs + WGSL generators.
@@ -49,6 +53,7 @@ pub struct KernelBundleModule {
     pub name: &'static str,
     pub kernels: Vec<ModelKernelSpec>,
     pub generators: Vec<ModelKernelGeneratorSpec>,
+    pub fusion_rules: Vec<ModelKernelFusionRule>,
 
     /// Optional EOS configuration carried by this module.
     ///
@@ -87,5 +92,9 @@ impl ModelModule for KernelBundleModule {
 
     fn kernel_generators(&self) -> &[ModelKernelGeneratorSpec] {
         &self.generators
+    }
+
+    fn fusion_rules(&self) -> &[ModelKernelFusionRule] {
+        &self.fusion_rules
     }
 }

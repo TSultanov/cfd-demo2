@@ -14,6 +14,10 @@ use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::graph::DispatchKind;
 use crate::solver::gpu::structs::{GpuConstants, PreconditionerType};
 use crate::solver::model::backend::{expand_schemes_unchecked, SchemeRegistry};
+use crate::solver::model::kernel::{
+    apply_model_fusion_rules, derive_kernel_fusion_rules_for_model, KernelFusionContext,
+    KernelFusionPolicy, KernelFusionStepping,
+};
 use crate::solver::model::linear_solver::{FgmresSolutionUpdateStrategy, ModelLinearSolverType};
 use crate::solver::model::ports::PortRegistry;
 use crate::solver::model::{
@@ -32,6 +36,10 @@ pub struct LinearSolverSpec {
     pub tolerance: f32,
     pub tolerance_abs: f32,
     pub update_strategy: FgmresSolutionUpdateStrategy,
+    /// Build-time fusion policy used while deriving the kernel schedule.
+    ///
+    /// This is not a live runtime knob: changing it requires rebuilding the solver plan.
+    pub kernel_fusion_policy: KernelFusionPolicy,
 }
 
 impl Default for LinearSolverSpec {
@@ -43,6 +51,7 @@ impl Default for LinearSolverSpec {
             tolerance: 1e-12,
             tolerance_abs: 1e-12,
             update_strategy: FgmresSolutionUpdateStrategy::FusedContiguous,
+            kernel_fusion_policy: KernelFusionPolicy::Safe,
         }
     }
 }
@@ -171,6 +180,9 @@ pub struct SolverRecipe {
 
     /// Required kernel passes
     pub kernels: Vec<KernelSpec>,
+
+    /// Fusion rules applied while deriving the kernel schedule.
+    pub applied_fusions: Vec<&'static str>,
 
     /// Required auxiliary buffers
     pub aux_buffers: Vec<BufferSpec>,
@@ -316,6 +328,9 @@ impl SolverRecipe {
             initial_constants.alpha_p = 1.0;
         }
 
+        // Solver-level settings are model-owned defaults used for recipe derivation.
+        let model_solver = model.linear_solver.unwrap_or_default();
+
         // Emit kernel specs in terms of stable KernelIds.
         //
         // Kernel selection, phase membership, and dispatch kind are model-owned and derived
@@ -323,7 +338,7 @@ impl SolverRecipe {
         let model_kernel_specs =
             crate::solver::model::kernel::derive_kernel_specs_for_model(model)?;
 
-        let mut kernels: Vec<KernelSpec> = Vec::new();
+        let mut filtered_model_specs = Vec::new();
         for spec in model_kernel_specs {
             let include = match spec.condition {
                 crate::solver::model::kernel::KernelConditionId::Always => true,
@@ -341,6 +356,28 @@ impl SolverRecipe {
                 continue;
             }
 
+            filtered_model_specs.push(spec);
+        }
+
+        let fusion_rules = derive_kernel_fusion_rules_for_model(model);
+        let module_names: Vec<&'static str> = model.modules.iter().map(|m| m.name).collect();
+        let fusion_ctx = KernelFusionContext {
+            policy: model_solver.solver.kernel_fusion_policy,
+            stepping: match stepping {
+                SteppingMode::Explicit => KernelFusionStepping::Explicit,
+                SteppingMode::Implicit { .. } => KernelFusionStepping::Implicit,
+                SteppingMode::Coupled => KernelFusionStepping::Coupled,
+            },
+            has_grad_state,
+            module_names: &module_names,
+        };
+        let fusion_result =
+            apply_model_fusion_rules(&filtered_model_specs, &fusion_rules, &fusion_ctx);
+        let applied_fusions: Vec<&'static str> =
+            fusion_result.applied.iter().map(|a| a.name).collect();
+
+        let mut kernels: Vec<KernelSpec> = Vec::new();
+        for spec in fusion_result.kernels {
             let phase = match spec.phase {
                 crate::solver::model::kernel::KernelPhaseId::Preparation => {
                     KernelPhase::Preparation
@@ -438,7 +475,6 @@ impl SolverRecipe {
         let time_integration = TimeIntegrationSpec::for_scheme(time_scheme);
 
         // Linear solver spec
-        let model_solver = model.linear_solver.unwrap_or_default();
         if matches!(
             model_solver.preconditioner,
             ModelPreconditionerSpec::Schur { .. }
@@ -465,11 +501,13 @@ impl SolverRecipe {
             tolerance: model_solver.solver.tolerance,
             tolerance_abs: model_solver.solver.tolerance_abs,
             update_strategy: model_solver.solver.update_strategy,
+            kernel_fusion_policy: model_solver.solver.kernel_fusion_policy,
         };
 
         Ok(SolverRecipe {
             model_id: model.id,
             kernels,
+            applied_fusions,
             aux_buffers,
             linear_solver,
             time_integration,
@@ -707,6 +745,7 @@ mod tests {
 
     #[test]
     fn recipe_derives_linear_solver_defaults_from_model_and_config() {
+        use crate::solver::model::kernel::KernelFusionPolicy;
         use crate::solver::model::linear_solver::{
             FgmresSolutionUpdateStrategy, ModelLinearSolverSettings, ModelLinearSolverType,
         };
@@ -721,6 +760,7 @@ mod tests {
                 tolerance: 1e-5,
                 tolerance_abs: 1e-9,
                 update_strategy: FgmresSolutionUpdateStrategy::FusedContiguous,
+                kernel_fusion_policy: KernelFusionPolicy::Aggressive,
             },
         });
 
@@ -740,6 +780,10 @@ mod tests {
         assert_eq!(
             recipe.linear_solver.update_strategy,
             FgmresSolutionUpdateStrategy::FusedContiguous
+        );
+        assert_eq!(
+            recipe.linear_solver.kernel_fusion_policy,
+            KernelFusionPolicy::Aggressive
         );
         assert!(
             matches!(
@@ -1004,6 +1048,76 @@ mod tests {
             .kernels
             .iter()
             .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY));
+    }
+
+    #[test]
+    fn recipe_applies_rhie_chow_fusion_rule_for_coupled() {
+        let model = incompressible_momentum_model();
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Coupled,
+        )
+        .expect("should create recipe");
+
+        assert!(
+            recipe
+                .applied_fusions
+                .contains(&"rhie_chow:dp_update_store_grad_p_v1"),
+            "expected rhie_chow fusion rule to be applied"
+        );
+        assert!(recipe
+            .kernels
+            .iter()
+            .any(|k| k.id.as_str() == "rhie_chow/dp_update_store_grad_p_fused"));
+        assert!(!recipe
+            .kernels
+            .iter()
+            .any(|k| k.id.as_str() == "dp_update_from_diag"));
+        assert!(!recipe
+            .kernels
+            .iter()
+            .any(|k| k.id.as_str() == "rhie_chow/store_grad_p"));
+    }
+
+    #[test]
+    fn recipe_does_not_apply_rhie_chow_fusion_when_policy_off() {
+        let mut model = incompressible_momentum_model();
+        let mut linear_solver = model.linear_solver.expect("missing linear_solver spec");
+        linear_solver.solver.kernel_fusion_policy = KernelFusionPolicy::Off;
+        model.linear_solver = Some(linear_solver);
+
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Coupled,
+        )
+        .expect("should create recipe");
+
+        assert!(
+            recipe.applied_fusions.is_empty(),
+            "expected no fusion rules when policy is Off"
+        );
+        assert_eq!(
+            recipe.linear_solver.kernel_fusion_policy,
+            KernelFusionPolicy::Off
+        );
+        assert!(recipe
+            .kernels
+            .iter()
+            .any(|k| k.id.as_str() == "dp_update_from_diag"));
+        assert!(recipe
+            .kernels
+            .iter()
+            .any(|k| k.id.as_str() == "rhie_chow/store_grad_p"));
+        assert!(!recipe
+            .kernels
+            .iter()
+            .any(|k| k.id.as_str() == "rhie_chow/dp_update_store_grad_p_fused"));
     }
 
     #[test]

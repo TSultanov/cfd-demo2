@@ -1,5 +1,7 @@
-use crate::solver::model::kernel::{DispatchKindId, KernelPhaseId};
-use crate::solver::model::kernel::{KernelConditionId, ModelKernelGeneratorSpec, ModelKernelSpec};
+use crate::solver::model::kernel::{
+    DispatchKindId, FusionGuard, KernelConditionId, KernelFusionStepping, KernelPatternAtom,
+    KernelPhaseId, ModelKernelFusionRule, ModelKernelGeneratorSpec, ModelKernelSpec,
+};
 use crate::solver::model::module::{KernelBundleModule, ModuleInvariant};
 use crate::solver::model::KernelId;
 
@@ -51,6 +53,7 @@ pub fn rhie_chow_aux_module(
 
     let kernel_dp_init = KernelId("dp_init");
     let kernel_dp_update_from_diag = KernelId("dp_update_from_diag");
+    let kernel_dp_update_store_grad_p_fused = KernelId("rhie_chow/dp_update_store_grad_p_fused");
     let kernel_store_grad_p = KernelId("rhie_chow/store_grad_p");
     let kernel_grad_p_update = KernelId("rhie_chow/grad_p_update");
     let kernel_rhie_chow_correct_velocity_delta = KernelId("rhie_chow/correct_velocity_delta");
@@ -104,6 +107,17 @@ pub fn rhie_chow_aux_module(
         ModelKernelGeneratorSpec::new(kernel_dp_update_from_diag, move |model, _schemes| {
             generate_dp_update_from_diag_kernel_wgsl(model, dp_field, coupling_for_dp_update)
         }),
+        ModelKernelGeneratorSpec::new(
+            kernel_dp_update_store_grad_p_fused,
+            move |model, _schemes| {
+                generate_rhie_chow_dp_update_store_grad_p_fused_kernel_wgsl(
+                    model,
+                    dp_field,
+                    grad_p_name,
+                    grad_p_old_name,
+                )
+            },
+        ),
         ModelKernelGeneratorSpec::new(kernel_store_grad_p, move |model, _schemes| {
             generate_rhie_chow_store_grad_p_kernel_wgsl(
                 model,
@@ -130,7 +144,7 @@ pub fn rhie_chow_aux_module(
     ];
 
     // Build PortManifest with required fields
-    use crate::solver::dimensions::{D_P, PressureGradient, UnitDimension};
+    use crate::solver::dimensions::{PressureGradient, UnitDimension, D_P};
     use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
 
     let port_manifest = Some(PortManifest {
@@ -163,10 +177,32 @@ pub fn rhie_chow_aux_module(
         ..Default::default()
     });
 
+    let fusion_rules = vec![ModelKernelFusionRule {
+        name: "rhie_chow:dp_update_store_grad_p_v1",
+        priority: 100,
+        phase: KernelPhaseId::Update,
+        pattern: vec![
+            KernelPatternAtom::with_dispatch(kernel_dp_update_from_diag, DispatchKindId::Cells),
+            KernelPatternAtom::with_dispatch(kernel_store_grad_p, DispatchKindId::Cells),
+        ],
+        replacement: ModelKernelSpec {
+            id: kernel_dp_update_store_grad_p_fused,
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        },
+        guards: vec![
+            FusionGuard::RequiresStepping(KernelFusionStepping::Coupled),
+            FusionGuard::RequiresModule("rhie_chow_aux"),
+            FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Safe),
+        ],
+    }];
+
     Ok(KernelBundleModule {
         name: "rhie_chow_aux",
         kernels,
         generators,
+        fusion_rules,
         invariants: vec![
             ModuleInvariant::RequireUniqueMomentumPressureCouplingReferencingDp {
                 dp_field,
@@ -240,6 +276,55 @@ fn generate_dp_update_from_diag_kernel_wgsl(
         model.system.unknowns_per_cell(),
         &u_indices,
     )
+}
+
+fn generate_rhie_chow_dp_update_store_grad_p_fused_kernel_wgsl(
+    model: &crate::solver::model::ModelSpec,
+    dp_field: &str,
+    grad_p_name: &'static str,
+    grad_p_old_name: &'static str,
+) -> Result<KernelWgsl, String> {
+    use crate::solver::model::ports::dimensions::{PressureGradient, D_P};
+    use crate::solver::model::ports::PortRegistry;
+
+    let mut registry = PortRegistry::new(model.state_layout.clone());
+
+    let d_p = registry
+        .register_scalar_field::<D_P>(dp_field)
+        .map_err(|e| format!("rhie_chow/fused_dp_update_store: {e}"))?;
+    let grad_p = registry
+        .register_vector2_field::<PressureGradient>(grad_p_name)
+        .map_err(|e| format!("rhie_chow/fused_dp_update_store: {e}"))?;
+    let grad_old = registry
+        .register_vector2_field::<PressureGradient>(grad_p_old_name)
+        .map_err(|e| format!("rhie_chow/fused_dp_update_store: {e}"))?;
+
+    let stride = registry.state_layout().stride();
+    let grad_p_x = grad_p
+        .component(0)
+        .map(|c| c.full_offset())
+        .ok_or("rhie_chow/fused_dp_update_store: grad_p component 0")?;
+    let grad_p_y = grad_p
+        .component(1)
+        .map(|c| c.full_offset())
+        .ok_or("rhie_chow/fused_dp_update_store: grad_p component 1")?;
+    let grad_old_x = grad_old
+        .component(0)
+        .map(|c| c.full_offset())
+        .ok_or("rhie_chow/fused_dp_update_store: grad_old component 0")?;
+    let grad_old_y = grad_old
+        .component(1)
+        .map(|c| c.full_offset())
+        .ok_or("rhie_chow/fused_dp_update_store: grad_old component 1")?;
+
+    Ok(wgsl::generate_dp_update_store_grad_p_fused_wgsl(
+        stride,
+        d_p.offset(),
+        grad_p_x,
+        grad_p_y,
+        grad_old_x,
+        grad_old_y,
+    ))
 }
 
 fn generate_rhie_chow_grad_p_update_kernel_wgsl(
@@ -321,8 +406,8 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
     grad_p_name: &'static str,
     grad_p_old_name: &'static str,
 ) -> Result<KernelWgsl, String> {
-    use crate::solver::model::ports::dimensions::{AnyDimension, D_P};
     use crate::solver::model::ports::dimensions::PressureGradient;
+    use crate::solver::model::ports::dimensions::{AnyDimension, D_P};
     use crate::solver::model::ports::PortRegistry;
 
     let mut registry = PortRegistry::new(model.state_layout.clone());
@@ -402,8 +487,8 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
 mod tests {
     use super::*;
     use crate::solver::dimensions::{
-        D_P, Density, DynamicViscosity, MassFlux, Pressure, PressureGradient, UnitDimension,
-        Velocity,
+        Density, DynamicViscosity, MassFlux, Pressure, PressureGradient, UnitDimension, Velocity,
+        D_P,
     };
     use crate::solver::model::backend::ast::{
         fvm, surface_scalar, vol_scalar, vol_vector, Coefficient, EquationSystem,
@@ -603,7 +688,10 @@ mod tests {
             .iter()
             .find(|f| f.name == "dp")
             .expect("dp field spec");
-        assert_eq!(dp_field.kind, crate::solver::ir::ports::PortFieldKind::Scalar);
+        assert_eq!(
+            dp_field.kind,
+            crate::solver::ir::ports::PortFieldKind::Scalar
+        );
         assert_eq!(dp_field.unit, D_P::UNIT);
 
         let grad_p_field = port_manifest

@@ -210,6 +210,7 @@ impl PreconditionerWithBuffers for IdentityPreconditioner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver::model::kernel::KernelFusionPolicy;
     use crate::solver::model::linear_solver::FgmresSolutionUpdateStrategy;
 
     #[test]
@@ -221,6 +222,7 @@ mod tests {
             tolerance: 1e-8,
             tolerance_abs: 1e-12,
             update_strategy: FgmresSolutionUpdateStrategy::FusedContiguous,
+            kernel_fusion_policy: KernelFusionPolicy::Safe,
         };
 
         let config = GenericLinearSolverConfig::from(&spec);

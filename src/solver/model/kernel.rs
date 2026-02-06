@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use cfd2_codegen::solver::codegen::KernelWgsl;
-use cfd2_ir::solver::ir::ports::{ParamSpec, PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
+use cfd2_ir::solver::ir::ports::{
+    ParamSpec, PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec,
+};
 use cfd2_ir::solver::ir::StateLayout;
 
 /// Stable identifier for a compute kernel.
@@ -142,8 +144,86 @@ pub struct ModelKernelSpec {
     pub condition: KernelConditionId,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum KernelFusionPolicy {
+    Off,
+    Safe,
+    Aggressive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KernelFusionStepping {
+    Explicit,
+    Implicit,
+    Coupled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FusionGuard {
+    RequiresGradState,
+    RequiresNoGradState,
+    RequiresStepping(KernelFusionStepping),
+    RequiresImplicitOrCoupled,
+    RequiresModule(&'static str),
+    MinPolicy(KernelFusionPolicy),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct KernelPatternAtom {
+    pub id: KernelId,
+    pub dispatch: Option<DispatchKindId>,
+}
+
+impl KernelPatternAtom {
+    pub const fn id(id: KernelId) -> Self {
+        Self { id, dispatch: None }
+    }
+
+    pub const fn with_dispatch(id: KernelId, dispatch: DispatchKindId) -> Self {
+        Self {
+            id,
+            dispatch: Some(dispatch),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelKernelFusionRule {
+    pub name: &'static str,
+    pub priority: i32,
+    pub phase: KernelPhaseId,
+    pub pattern: Vec<KernelPatternAtom>,
+    pub replacement: ModelKernelSpec,
+    pub guards: Vec<FusionGuard>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AppliedFusionRule {
+    pub name: &'static str,
+    pub start_index: usize,
+    pub pattern_len: usize,
+    pub replacement: KernelId,
+}
+
+#[derive(Debug, Clone)]
+pub struct FusionResult {
+    pub kernels: Vec<ModelKernelSpec>,
+    pub applied: Vec<AppliedFusionRule>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct KernelFusionContext<'a> {
+    pub policy: KernelFusionPolicy,
+    pub stepping: KernelFusionStepping,
+    pub has_grad_state: bool,
+    pub module_names: &'a [&'static str],
+}
+
 pub(crate) type ModelKernelWgslGenerator = Arc<
-    dyn Fn(&crate::solver::model::ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<KernelWgsl, String>
+    dyn Fn(
+            &crate::solver::model::ModelSpec,
+            &crate::solver::ir::SchemeRegistry,
+        ) -> Result<KernelWgsl, String>
         + Send
         + Sync
         + 'static,
@@ -165,7 +245,10 @@ pub struct ModelKernelGeneratorSpec {
 impl ModelKernelGeneratorSpec {
     pub fn new(
         id: KernelId,
-        generator: impl Fn(&crate::solver::model::ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<KernelWgsl, String>
+        generator: impl Fn(
+                &crate::solver::model::ModelSpec,
+                &crate::solver::ir::SchemeRegistry,
+            ) -> Result<KernelWgsl, String>
             + Send
             + Sync
             + 'static,
@@ -179,7 +262,10 @@ impl ModelKernelGeneratorSpec {
 
     pub fn new_shared(
         id: KernelId,
-        generator: impl Fn(&crate::solver::model::ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<KernelWgsl, String>
+        generator: impl Fn(
+                &crate::solver::model::ModelSpec,
+                &crate::solver::ir::SchemeRegistry,
+            ) -> Result<KernelWgsl, String>
             + Send
             + Sync
             + 'static,
@@ -210,6 +296,137 @@ pub fn derive_kernel_specs_for_model(
         kernels.extend_from_slice(module.kernel_specs());
     }
     Ok(kernels)
+}
+
+pub fn derive_kernel_fusion_rules_for_model(
+    model: &crate::solver::model::ModelSpec,
+) -> Vec<ModelKernelFusionRule> {
+    let mut rules = Vec::new();
+    for module in &model.modules {
+        let module: &dyn crate::solver::model::module::ModelModule = module;
+        rules.extend_from_slice(module.fusion_rules());
+    }
+    rules
+}
+
+fn guard_matches(guard: FusionGuard, ctx: &KernelFusionContext<'_>) -> bool {
+    match guard {
+        FusionGuard::RequiresGradState => ctx.has_grad_state,
+        FusionGuard::RequiresNoGradState => !ctx.has_grad_state,
+        FusionGuard::RequiresStepping(s) => ctx.stepping == s,
+        FusionGuard::RequiresImplicitOrCoupled => matches!(
+            ctx.stepping,
+            KernelFusionStepping::Implicit | KernelFusionStepping::Coupled
+        ),
+        FusionGuard::RequiresModule(name) => ctx.module_names.contains(&name),
+        FusionGuard::MinPolicy(min) => ctx.policy >= min,
+    }
+}
+
+fn rule_enabled(rule: &ModelKernelFusionRule, ctx: &KernelFusionContext<'_>) -> bool {
+    rule.guards.iter().all(|&g| guard_matches(g, ctx))
+}
+
+fn rule_matches_at(
+    rule: &ModelKernelFusionRule,
+    kernels: &[ModelKernelSpec],
+    start: usize,
+) -> bool {
+    if rule.pattern.is_empty() {
+        return false;
+    }
+    if start + rule.pattern.len() > kernels.len() {
+        return false;
+    }
+
+    for (offset, atom) in rule.pattern.iter().enumerate() {
+        let spec = kernels[start + offset];
+        if spec.phase != rule.phase {
+            return false;
+        }
+        if spec.id != atom.id {
+            return false;
+        }
+        if let Some(dispatch) = atom.dispatch {
+            if spec.dispatch != dispatch {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+pub fn apply_model_fusion_rules(
+    kernels: &[ModelKernelSpec],
+    rules: &[ModelKernelFusionRule],
+    ctx: &KernelFusionContext<'_>,
+) -> FusionResult {
+    if ctx.policy == KernelFusionPolicy::Off || rules.is_empty() {
+        return FusionResult {
+            kernels: kernels.to_vec(),
+            applied: Vec::new(),
+        };
+    }
+
+    let mut ranked_rules: Vec<(usize, &ModelKernelFusionRule)> = rules
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| rule_enabled(r, ctx))
+        .collect();
+    ranked_rules.sort_by(|(ia, a), (ib, b)| {
+        b.priority
+            .cmp(&a.priority)
+            .then_with(|| b.pattern.len().cmp(&a.pattern.len()))
+            .then_with(|| ia.cmp(ib))
+    });
+
+    let mut out = Vec::with_capacity(kernels.len());
+    let mut applied = Vec::new();
+    let mut i = 0usize;
+
+    while i < kernels.len() {
+        let mut matched: Option<&ModelKernelFusionRule> = None;
+        for (_, rule) in &ranked_rules {
+            if rule_matches_at(rule, kernels, i) {
+                matched = Some(rule);
+                break;
+            }
+        }
+
+        if let Some(rule) = matched {
+            out.push(rule.replacement);
+            applied.push(AppliedFusionRule {
+                name: rule.name,
+                start_index: i,
+                pattern_len: rule.pattern.len(),
+                replacement: rule.replacement.id,
+            });
+            i += rule.pattern.len();
+        } else {
+            out.push(kernels[i]);
+            i += 1;
+        }
+    }
+
+    FusionResult {
+        kernels: out,
+        applied,
+    }
+}
+
+pub fn derive_fusion_replacement_kernel_ids_for_model(
+    model: &crate::solver::model::ModelSpec,
+) -> Vec<KernelId> {
+    let mut seen = std::collections::HashSet::<KernelId>::new();
+    let mut ids = Vec::new();
+    for rule in derive_kernel_fusion_rules_for_model(model) {
+        let id = rule.replacement.id;
+        if seen.insert(id) {
+            ids.push(id);
+        }
+    }
+    ids
 }
 
 pub fn kernel_output_name_for_model(model_id: &str, kernel_id: KernelId) -> Result<String, String> {
@@ -256,8 +473,7 @@ pub(crate) fn extract_eos_params(model: &crate::solver::model::ModelSpec) -> Vec
         .and_then(|m| m.port_manifest.as_ref())
         .map(|p| p.params.clone())
         .unwrap_or_else(|| {
-            crate::solver::model::modules::eos_ports::eos_uniform_port_manifest()
-                .params
+            crate::solver::model::modules::eos_ports::eos_uniform_port_manifest().params
         })
 }
 
@@ -278,13 +494,15 @@ pub(crate) fn generate_generic_coupled_assembly_kernel_wgsl(
         .unwrap_or(0);
     let slots = resolved_slots_from_layout(&model.state_layout);
     let eos_params = extract_eos_params(model);
-    Ok(cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
-        &discrete,
-        &slots,
-        flux_stride,
-        needs_gradients,
-        &eos_params,
-    ))
+    Ok(
+        cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
+            &discrete,
+            &slots,
+            flux_stride,
+            needs_gradients,
+            &eos_params,
+        ),
+    )
 }
 
 pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_wgsl(
@@ -316,13 +534,15 @@ pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_wgsl(
         .unwrap_or(0);
     let slots = resolved_slots_from_layout(&model.state_layout);
     let eos_params = extract_eos_params(model);
-    Ok(cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
-        &discrete,
-        &slots,
-        flux_stride,
-        needs_gradients,
-        &eos_params,
-    ))
+    Ok(
+        cfd2_codegen::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
+            &discrete,
+            &slots,
+            flux_stride,
+            needs_gradients,
+            &eos_params,
+        ),
+    )
 }
 
 pub(crate) fn generate_packed_state_gradients_kernel_wgsl(
@@ -380,12 +600,13 @@ pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
         .primitives
         .ordered()
         .map_err(|e| format!("primitive recovery ordering failed: {e}"))?;
-    let (apply_relaxation, relaxation_requires_dtau) = match model.method().map_err(|e| e.to_string())?
-    {
-        crate::solver::model::method::MethodSpec::Coupled(caps) => {
-            (caps.apply_relaxation_in_update, caps.relaxation_requires_dtau)
-        }
-    };
+    let (apply_relaxation, relaxation_requires_dtau) =
+        match model.method().map_err(|e| e.to_string())? {
+            crate::solver::model::method::MethodSpec::Coupled(caps) => (
+                caps.apply_relaxation_in_update,
+                caps.relaxation_requires_dtau,
+            ),
+        };
     let slots = resolved_slots_from_layout(&model.state_layout);
 
     // Pre-resolve primitive output offsets (skip primitives that cannot be resolved)
@@ -413,7 +634,11 @@ fn kernel_generator_for_model_by_id(
 ) -> Option<&ModelKernelGeneratorSpec> {
     for module in &model.modules {
         let module: &dyn crate::solver::model::module::ModelModule = module;
-        if let Some(spec) = module.kernel_generators().iter().find(|s| s.id == kernel_id) {
+        if let Some(spec) = module
+            .kernel_generators()
+            .iter()
+            .find(|s| s.id == kernel_id)
+        {
             return Some(spec);
         }
     }
@@ -464,7 +689,8 @@ pub fn emit_shared_kernels_wgsl_with_ids_for_models(
     let base_dir = base_dir.as_ref();
     let mut outputs = Vec::new();
 
-    let mut wgsl_by_id: std::collections::HashMap<KernelId, String> = std::collections::HashMap::new();
+    let mut wgsl_by_id: std::collections::HashMap<KernelId, String> =
+        std::collections::HashMap::new();
     for model in models {
         for module in &model.modules {
             let module: &dyn crate::solver::model::module::ModelModule = module;
@@ -473,10 +699,8 @@ pub fn emit_shared_kernels_wgsl_with_ids_for_models(
                     continue;
                 }
 
-                let kernel = spec
-                    .generator
-                    .as_ref()(model, schemes)
-                    .map_err(std::io::Error::other)?;
+                let kernel =
+                    spec.generator.as_ref()(model, schemes).map_err(std::io::Error::other)?;
                 let wgsl = kernel.to_wgsl();
 
                 if let Some(prev) = wgsl_by_id.insert(spec.id, wgsl.clone()) {
@@ -497,13 +721,12 @@ pub fn emit_shared_kernels_wgsl_with_ids_for_models(
     shared_ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
 
     for kernel_id in shared_ids {
-        let filename = kernel_output_name_for_model("", kernel_id)
-            .map_err(std::io::Error::other)?;
+        let filename =
+            kernel_output_name_for_model("", kernel_id).map_err(std::io::Error::other)?;
         let wgsl = wgsl_by_id
             .get(&kernel_id)
             .expect("shared kernel id disappeared from table");
-        let path =
-            cfd2_codegen::compiler::write_generated_wgsl(base_dir, filename, wgsl)?;
+        let path = cfd2_codegen::compiler::write_generated_wgsl(base_dir, filename, wgsl)?;
         outputs.push((kernel_id, path));
     }
 
@@ -528,24 +751,28 @@ pub fn emit_model_kernels_wgsl_with_ids(
 ) -> std::io::Result<Vec<(KernelId, std::path::PathBuf)>> {
     let mut outputs = Vec::new();
 
-    let specs = derive_kernel_specs_for_model(model)
-        .map_err(std::io::Error::other)?;
+    let specs = derive_kernel_specs_for_model(model).map_err(std::io::Error::other)?;
+    let replacement_ids = derive_fusion_replacement_kernel_ids_for_model(model);
 
     let mut seen: std::collections::HashSet<KernelId> = std::collections::HashSet::new();
-    for spec in specs {
-        if !seen.insert(spec.id) {
+    let mut kernel_ids = Vec::with_capacity(specs.len() + replacement_ids.len());
+    kernel_ids.extend(specs.into_iter().map(|s| s.id));
+    kernel_ids.extend(replacement_ids);
+
+    for kernel_id in kernel_ids {
+        if !seen.insert(kernel_id) {
             continue;
         }
 
-        let Some(generator) = kernel_generator_for_model_by_id(model, spec.id) else {
+        let Some(generator) = kernel_generator_for_model_by_id(model, kernel_id) else {
             continue;
         };
         if generator.scope == KernelWgslScope::Shared {
             continue;
         }
 
-        let path = emit_model_kernel_wgsl_by_id(&base_dir, model, schemes, spec.id)?;
-        outputs.push((spec.id, path));
+        let path = emit_model_kernel_wgsl_by_id(&base_dir, model, schemes, kernel_id)?;
+        outputs.push((kernel_id, path));
     }
 
     Ok(outputs)
@@ -558,8 +785,8 @@ pub fn emit_model_kernel_wgsl_by_id(
     kernel_id: KernelId,
 ) -> std::io::Result<std::path::PathBuf> {
     let base_dir = base_dir.as_ref();
-    let filename = kernel_output_name_for_model(model.id, kernel_id)
-        .map_err(std::io::Error::other)?;
+    let filename =
+        kernel_output_name_for_model(model.id, kernel_id).map_err(std::io::Error::other)?;
     let wgsl = generate_kernel_wgsl_for_model_by_id(model, schemes, kernel_id)
         .map_err(std::io::Error::other)?;
     cfd2_codegen::compiler::write_generated_wgsl(base_dir, filename, &wgsl)
@@ -594,7 +821,10 @@ mod contract_tests {
                 dispatch: DispatchKindId::Cells,
                 condition: KernelConditionId::Always,
             }],
-            generators: vec![ModelKernelGeneratorSpec::new(contract_id, contract_kernel_generator)],
+            generators: vec![ModelKernelGeneratorSpec::new(
+                contract_id,
+                contract_kernel_generator,
+            )],
             ..Default::default()
         };
 
@@ -615,6 +845,64 @@ mod contract_tests {
             "generated WGSL must contain the module-defined marker"
         );
     }
+
+    #[test]
+    fn contract_fusion_replacement_kernels_are_emitted_for_codegen() {
+        let base_id = KernelId("contract/fusion_base");
+        let fused_id = KernelId("contract/fusion_fused");
+
+        let module = KernelBundleModule {
+            name: "contract_fusion_module",
+            kernels: vec![ModelKernelSpec {
+                id: base_id,
+                phase: KernelPhaseId::Update,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::Always,
+            }],
+            generators: vec![
+                ModelKernelGeneratorSpec::new(base_id, contract_kernel_generator),
+                ModelKernelGeneratorSpec::new(fused_id, contract_kernel_generator),
+            ],
+            fusion_rules: vec![ModelKernelFusionRule {
+                name: "contract:fuse_base",
+                priority: 1,
+                phase: KernelPhaseId::Update,
+                pattern: vec![KernelPatternAtom::id(base_id)],
+                replacement: ModelKernelSpec {
+                    id: fused_id,
+                    phase: KernelPhaseId::Update,
+                    dispatch: DispatchKindId::Cells,
+                    condition: KernelConditionId::Always,
+                },
+                guards: Vec::new(),
+            }],
+            ..Default::default()
+        };
+
+        let mut model = crate::solver::model::generic_diffusion_demo_model();
+        model.modules.push(module);
+
+        let replacement_ids = derive_fusion_replacement_kernel_ids_for_model(&model);
+        assert!(replacement_ids.contains(&fused_id));
+
+        let schemes = crate::solver::ir::SchemeRegistry::default();
+        let mut out_dir = std::env::temp_dir();
+        out_dir.push(format!(
+            "cfd2_kernel_emit_contract_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&out_dir).expect("create temp output dir");
+
+        let emitted = emit_model_kernels_wgsl_with_ids(&out_dir, &model, &schemes)
+            .expect("emit kernels with fusion replacements");
+        assert!(emitted.iter().any(|(id, _)| *id == fused_id));
+
+        let _ = std::fs::remove_dir_all(&out_dir);
+    }
 }
 
 // (intentionally no additional kernel-analysis helpers here; kernel selection is recipe-driven)
@@ -624,6 +912,125 @@ mod tests {
     use super::*;
     use crate::solver::scheme::Scheme;
     use std::collections::HashSet;
+
+    #[test]
+    fn fusion_pass_applies_highest_priority_longest_match() {
+        let a = ModelKernelSpec {
+            id: KernelId("fusion/a"),
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        };
+        let b = ModelKernelSpec {
+            id: KernelId("fusion/b"),
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        };
+        let c = ModelKernelSpec {
+            id: KernelId("fusion/c"),
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        };
+        let fused_ab = ModelKernelSpec {
+            id: KernelId("fusion/ab"),
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        };
+        let fused_abc = ModelKernelSpec {
+            id: KernelId("fusion/abc"),
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        };
+
+        let rules = vec![
+            ModelKernelFusionRule {
+                name: "fuse_ab",
+                priority: 10,
+                phase: KernelPhaseId::Update,
+                pattern: vec![KernelPatternAtom::id(a.id), KernelPatternAtom::id(b.id)],
+                replacement: fused_ab,
+                guards: Vec::new(),
+            },
+            ModelKernelFusionRule {
+                name: "fuse_abc",
+                priority: 10,
+                phase: KernelPhaseId::Update,
+                pattern: vec![
+                    KernelPatternAtom::id(a.id),
+                    KernelPatternAtom::id(b.id),
+                    KernelPatternAtom::id(c.id),
+                ],
+                replacement: fused_abc,
+                guards: Vec::new(),
+            },
+        ];
+        let kernels = vec![a, b, c];
+        let module_names = ["fusion_module"];
+        let ctx = KernelFusionContext {
+            policy: KernelFusionPolicy::Safe,
+            stepping: KernelFusionStepping::Coupled,
+            has_grad_state: false,
+            module_names: &module_names,
+        };
+
+        let out = apply_model_fusion_rules(&kernels, &rules, &ctx);
+        assert_eq!(out.kernels.len(), 1);
+        assert_eq!(out.kernels[0].id, fused_abc.id);
+        assert_eq!(out.applied.len(), 1);
+        assert_eq!(out.applied[0].name, "fuse_abc");
+    }
+
+    #[test]
+    fn fusion_guard_min_policy_gates_rules() {
+        let base = ModelKernelSpec {
+            id: KernelId("fusion/base"),
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        };
+        let fused = ModelKernelSpec {
+            id: KernelId("fusion/fused"),
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        };
+        let rules = vec![ModelKernelFusionRule {
+            name: "fuse_when_aggressive",
+            priority: 1,
+            phase: KernelPhaseId::Update,
+            pattern: vec![KernelPatternAtom::id(base.id)],
+            replacement: fused,
+            guards: vec![FusionGuard::MinPolicy(KernelFusionPolicy::Aggressive)],
+        }];
+        let kernels = vec![base];
+        let module_names = ["fusion_module"];
+
+        let safe_ctx = KernelFusionContext {
+            policy: KernelFusionPolicy::Safe,
+            stepping: KernelFusionStepping::Coupled,
+            has_grad_state: false,
+            module_names: &module_names,
+        };
+        let safe_out = apply_model_fusion_rules(&kernels, &rules, &safe_ctx);
+        assert_eq!(safe_out.kernels.len(), 1);
+        assert_eq!(safe_out.kernels[0].id, base.id);
+        assert!(safe_out.applied.is_empty());
+
+        let aggressive_ctx = KernelFusionContext {
+            policy: KernelFusionPolicy::Aggressive,
+            stepping: KernelFusionStepping::Coupled,
+            has_grad_state: false,
+            module_names: &module_names,
+        };
+        let aggressive_out = apply_model_fusion_rules(&kernels, &rules, &aggressive_ctx);
+        assert_eq!(aggressive_out.kernels.len(), 1);
+        assert_eq!(aggressive_out.kernels[0].id, fused.id);
+        assert_eq!(aggressive_out.applied.len(), 1);
+    }
 
     #[test]
     fn contract_flux_module_uses_runtime_scheme_and_includes_limited_paths() {

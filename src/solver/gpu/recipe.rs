@@ -563,7 +563,7 @@ impl SolverRecipe {
                     ProgramSpecNode::Graph {
                         label: "implicit:assembly",
                         kind: GraphOpKind("implicit:assembly"),
-                        mode: GraphExecMode::SplitTimed,
+                        mode: GraphExecMode::SingleSubmit,
                     },
                 );
                 program.push(

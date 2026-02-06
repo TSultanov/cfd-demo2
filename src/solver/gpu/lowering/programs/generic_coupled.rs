@@ -21,7 +21,6 @@ use crate::solver::gpu::modules::unified_graph::{
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::program::plan::{GpuProgramPlan, ProgramParamHandler};
 use crate::solver::gpu::program::plan_instance::{PlanFuture, PlanLinearSystemDebug, PlanParamValue};
-use crate::solver::gpu::readback::read_buffer_cached;
 use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::structs::{
@@ -485,17 +484,42 @@ impl OuterConvergenceMonitor {
             pass.set_bind_group(0, bind_group, &[]);
             pass.dispatch_workgroups(self.dispatch_cells.max(1), 1, 1);
         }
-        plan.context.queue.submit(Some(encoder.finish()));
 
         let out_bytes = (self.zero_out_words.len() as u64) * 4;
-        let raw = pollster::block_on(read_buffer_cached(
-            &plan.context,
-            &plan.staging_cache,
-            &plan.profiling_stats,
-            &self.b_out_bits,
+        let staging_buffer = plan.staging_cache.take_or_create(
+            &plan.context.device,
             out_bytes,
             "outer_convergence:out_bits (cached)",
-        ));
+        );
+        encoder.copy_buffer_to_buffer(&self.b_out_bits, 0, &staging_buffer, 0, out_bytes);
+        let submission_index = plan.context.queue.submit(Some(encoder.finish()));
+
+        let raw_result: Result<Vec<u8>, String> = (|| {
+            let slice = staging_buffer.slice(..);
+            let (tx, rx) = std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read, move |result| {
+                let _ = tx.send(result);
+            });
+
+            let _ = plan.context.device.poll(wgpu::PollType::Wait {
+                submission_index: Some(submission_index),
+                timeout: None,
+            });
+
+            let map_result = rx
+                .recv()
+                .map_err(|_| "outer convergence readback map channel closed".to_string())?;
+            map_result.map_err(|err| format!("outer convergence readback map failed: {err:?}"))?;
+
+            let data = slice.get_mapped_range();
+            let raw = data.to_vec();
+            drop(data);
+            staging_buffer.unmap();
+            Ok(raw)
+        })();
+        plan.staging_cache.put(out_bytes, staging_buffer);
+        let raw = raw_result?;
+
         if raw.len() != out_bytes as usize {
             return Err(format!(
                 "outer convergence readback size mismatch: got {} expected {}",

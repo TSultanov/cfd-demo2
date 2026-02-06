@@ -279,6 +279,7 @@ fn main() {
     }
 
     generate_kernel_registry_map(&manifest_dir, &models);
+    generate_fusion_schedule_registry(&manifest_dir, &models);
     generate_named_param_registry(&manifest_dir);
 
     for entry in glob("src/solver/gpu/shaders/**/*.wgsl").expect("Failed to read glob pattern") {
@@ -450,42 +451,52 @@ fn generate_kernel_registry_map(manifest_dir: &str, models: &[solver::model::Mod
     }
 
     for model in models {
-        let mut seen: std::collections::HashSet<solver::model::KernelId> =
+        let mut per_model_ids: std::collections::HashSet<solver::model::KernelId> =
             std::collections::HashSet::new();
         for module in &model.modules {
             let module: &dyn solver::model::module::ModelModule = module;
             for gen in module.kernel_generators() {
-                if gen.scope != solver::model::kernel::KernelWgslScope::PerModel {
-                    continue;
+                if gen.scope == solver::model::kernel::KernelWgslScope::PerModel {
+                    per_model_ids.insert(gen.id);
                 }
-                if !seen.insert(gen.id) {
-                    continue;
-                }
-                let filename =
-                    solver::model::kernel::kernel_output_name_for_model(model.id, gen.id)
-                        .unwrap_or_else(|err| {
-                            panic!(
+            }
+        }
+        for replacement_id in solver::model::kernel::derive_fusion_replacement_kernel_ids_for_model(model) {
+            per_model_ids.insert(replacement_id);
+        }
+
+        let mut per_model_ids: Vec<solver::model::KernelId> = per_model_ids.into_iter().collect();
+        per_model_ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+
+        for kernel_id in per_model_ids {
+            let filename = solver::model::kernel::kernel_output_name_for_model(model.id, kernel_id)
+                .unwrap_or_else(|err| {
+                    panic!(
                         "failed to compute per-model kernel output name for model '{}': {err}",
                         model.id
                     )
-                        });
-                let path = generated_dir.join(filename);
-                let src = fs::read_to_string(&path).unwrap_or_else(|err| {
-                    panic!("failed to read generated WGSL '{}': {err}", path.display())
                 });
-                let bindings = parse_wgsl_bindings(&src);
-                let stem = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or_else(|| panic!("bad generated WGSL file name: {}", path.display()));
-                let module_name = sanitize_rust_ident(stem);
-                per_model_entries.push((
-                    model.id.to_string(),
-                    gen.id.as_str().to_string(),
-                    module_name,
-                    bindings,
-                ));
-            }
+            let path = generated_dir.join(filename);
+            let src = fs::read_to_string(&path).unwrap_or_else(|err| {
+                panic!(
+                    "failed to read generated WGSL '{}' for model '{}' kernel '{}': {err}",
+                    path.display(),
+                    model.id,
+                    kernel_id.as_str()
+                )
+            });
+            let bindings = parse_wgsl_bindings(&src);
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_else(|| panic!("bad generated WGSL file name: {}", path.display()));
+            let module_name = sanitize_rust_ident(stem);
+            per_model_entries.push((
+                model.id.to_string(),
+                kernel_id.as_str().to_string(),
+                module_name,
+                bindings,
+            ));
         }
     }
 
@@ -607,6 +618,310 @@ fn generate_kernel_registry_map(manifest_dir: &str, models: &[solver::model::Mod
     code.push_str("}\n");
 
     write_if_changed(&out_path, &code);
+}
+
+type FusedKernelEntry = (String, u8, u8);
+type FusedScheduleEntry = (String, u8, bool, u8, Vec<FusedKernelEntry>, Vec<String>);
+
+fn generate_fusion_schedule_registry(manifest_dir: &str, models: &[solver::model::ModelSpec]) {
+    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
+    let out_path = PathBuf::from(out_dir).join("fusion_schedule_registry.rs");
+
+    let shared_generated_ids = collect_shared_generated_kernel_ids(models);
+    let per_model_generated_ids = collect_per_model_generated_kernel_ids(models);
+    let handwritten_kernel_ids = collect_handwritten_kernel_ids(manifest_dir);
+
+    let stepping_cases = [
+        (
+            0u8,
+            solver::model::kernel::KernelFusionStepping::Explicit,
+            false,
+        ),
+        (
+            1u8,
+            solver::model::kernel::KernelFusionStepping::Implicit,
+            true,
+        ),
+        (
+            2u8,
+            solver::model::kernel::KernelFusionStepping::Coupled,
+            false,
+        ),
+    ];
+    let policies = [
+        solver::model::kernel::KernelFusionPolicy::Off,
+        solver::model::kernel::KernelFusionPolicy::Safe,
+        solver::model::kernel::KernelFusionPolicy::Aggressive,
+    ];
+
+    let mut entries: Vec<FusedScheduleEntry> = Vec::new();
+
+    for model in models {
+        let model_kernel_specs = solver::model::kernel::derive_kernel_specs_for_model(model)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "failed to derive kernel specs for model '{}': {err}",
+                    model.id
+                )
+            });
+        let fusion_rules = solver::model::kernel::derive_kernel_fusion_rules_for_model(model);
+        let module_names: Vec<&'static str> = model.modules.iter().map(|m| m.name).collect();
+
+        for (stepping_tag, fusion_stepping, satisfies_requires_implicit_stepping) in stepping_cases
+        {
+            for has_grad_state in [false, true] {
+                let filtered_specs: Vec<solver::model::kernel::ModelKernelSpec> =
+                    model_kernel_specs
+                        .iter()
+                        .copied()
+                        .filter(|spec| {
+                            include_kernel_in_schedule(
+                                spec.condition,
+                                has_grad_state,
+                                satisfies_requires_implicit_stepping,
+                            )
+                        })
+                        .collect();
+
+                for policy in policies {
+                    let ctx = solver::model::kernel::KernelFusionContext {
+                        policy,
+                        stepping: fusion_stepping,
+                        has_grad_state,
+                        module_names: &module_names,
+                    };
+                    let result = solver::model::kernel::apply_model_fusion_rules(
+                        &filtered_specs,
+                        &fusion_rules,
+                        &ctx,
+                    );
+
+                    for spec in &result.kernels {
+                        ensure_fusion_schedule_kernel_is_resolvable(
+                            model.id,
+                            spec.id.as_str(),
+                            &shared_generated_ids,
+                            &per_model_generated_ids,
+                            &handwritten_kernel_ids,
+                        );
+                    }
+
+                    let kernels: Vec<FusedKernelEntry> = result
+                        .kernels
+                        .iter()
+                        .map(|spec| {
+                            (
+                                spec.id.as_str().to_string(),
+                                kernel_phase_tag(spec.phase),
+                                dispatch_kind_tag(spec.dispatch),
+                            )
+                        })
+                        .collect();
+
+                    let applied: Vec<String> = result
+                        .applied
+                        .iter()
+                        .map(|rule| rule.name.to_string())
+                        .collect();
+
+                    entries.push((
+                        model.id.to_string(),
+                        stepping_tag,
+                        has_grad_state,
+                        kernel_fusion_policy_tag(policy),
+                        kernels,
+                        applied,
+                    ));
+                }
+            }
+        }
+    }
+
+    entries.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(a.1.cmp(&b.1))
+            .then(a.2.cmp(&b.2))
+            .then(a.3.cmp(&b.3))
+    });
+
+    let mut code = String::new();
+    code.push_str("// @generated by build.rs\n");
+    code.push_str("// DO NOT EDIT MANUALLY\n\n");
+    code.push_str("#[derive(Clone, Copy)]\n");
+    code.push_str("pub(crate) struct FusedKernelSpecEntry {\n");
+    code.push_str("    pub id: &'static str,\n");
+    code.push_str("    pub phase: u8,\n");
+    code.push_str("    pub dispatch: u8,\n");
+    code.push_str("}\n\n");
+    code.push_str("pub(crate) fn schedule_entry(\n");
+    code.push_str("    model_id: &str,\n");
+    code.push_str("    stepping: u8,\n");
+    code.push_str("    has_grad_state: bool,\n");
+    code.push_str("    policy: u8,\n");
+    code.push_str(") -> Option<(&'static [FusedKernelSpecEntry], &'static [&'static str])> {\n");
+    code.push_str("    match (model_id, stepping, has_grad_state, policy) {\n");
+
+    for (model_id, stepping_tag, has_grad_state, policy_tag, kernels, applied) in &entries {
+        let model_lit = rust_string_literal(model_id);
+        code.push_str(&format!(
+            "        ({model_lit}, {stepping_tag}u8, {has_grad_state}, {policy_tag}u8) => Some((&[\n"
+        ));
+        for (kernel_id, phase_tag, dispatch_tag) in kernels {
+            let kernel_lit = rust_string_literal(kernel_id);
+            code.push_str(&format!(
+                "            FusedKernelSpecEntry {{ id: {kernel_lit}, phase: {phase_tag}u8, dispatch: {dispatch_tag}u8 }},\n"
+            ));
+        }
+        code.push_str("        ], &[\n");
+        for fusion_name in applied {
+            let fusion_lit = rust_string_literal(fusion_name);
+            code.push_str(&format!("            {fusion_lit},\n"));
+        }
+        code.push_str("        ])),\n");
+    }
+
+    code.push_str("        _ => None,\n");
+    code.push_str("    }\n");
+    code.push_str("}\n");
+
+    write_if_changed(&out_path, &code);
+}
+
+fn include_kernel_in_schedule(
+    condition: solver::model::kernel::KernelConditionId,
+    has_grad_state: bool,
+    satisfies_requires_implicit_stepping: bool,
+) -> bool {
+    match condition {
+        solver::model::kernel::KernelConditionId::Always => true,
+        solver::model::kernel::KernelConditionId::RequiresGradState => has_grad_state,
+        solver::model::kernel::KernelConditionId::RequiresNoGradState => !has_grad_state,
+        solver::model::kernel::KernelConditionId::RequiresImplicitStepping => {
+            satisfies_requires_implicit_stepping
+        }
+    }
+}
+
+fn kernel_phase_tag(phase: solver::model::kernel::KernelPhaseId) -> u8 {
+    match phase {
+        solver::model::kernel::KernelPhaseId::Preparation => 0,
+        solver::model::kernel::KernelPhaseId::Gradients => 1,
+        solver::model::kernel::KernelPhaseId::FluxComputation => 2,
+        solver::model::kernel::KernelPhaseId::Assembly => 3,
+        solver::model::kernel::KernelPhaseId::Apply => 4,
+        solver::model::kernel::KernelPhaseId::Update => 5,
+    }
+}
+
+fn dispatch_kind_tag(dispatch: solver::model::kernel::DispatchKindId) -> u8 {
+    match dispatch {
+        solver::model::kernel::DispatchKindId::Cells => 0,
+        solver::model::kernel::DispatchKindId::Faces => 1,
+    }
+}
+
+fn kernel_fusion_policy_tag(policy: solver::model::kernel::KernelFusionPolicy) -> u8 {
+    match policy {
+        solver::model::kernel::KernelFusionPolicy::Off => 0,
+        solver::model::kernel::KernelFusionPolicy::Safe => 1,
+        solver::model::kernel::KernelFusionPolicy::Aggressive => 2,
+    }
+}
+
+fn collect_shared_generated_kernel_ids(
+    models: &[solver::model::ModelSpec],
+) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::<String>::new();
+    for model in models {
+        for module in &model.modules {
+            let module: &dyn solver::model::module::ModelModule = module;
+            for generator in module.kernel_generators() {
+                if generator.scope == solver::model::kernel::KernelWgslScope::Shared {
+                    ids.insert(generator.id.as_str().to_string());
+                }
+            }
+        }
+    }
+    ids
+}
+
+fn collect_per_model_generated_kernel_ids(
+    models: &[solver::model::ModelSpec],
+) -> std::collections::HashMap<String, std::collections::HashSet<String>> {
+    let mut out = std::collections::HashMap::<String, std::collections::HashSet<String>>::new();
+
+    for model in models {
+        let ids = out.entry(model.id.to_string()).or_default();
+        for module in &model.modules {
+            let module: &dyn solver::model::module::ModelModule = module;
+            for generator in module.kernel_generators() {
+                if generator.scope == solver::model::kernel::KernelWgslScope::PerModel {
+                    ids.insert(generator.id.as_str().to_string());
+                }
+            }
+        }
+        for replacement_id in solver::model::kernel::derive_fusion_replacement_kernel_ids_for_model(model) {
+            ids.insert(replacement_id.as_str().to_string());
+        }
+    }
+
+    out
+}
+
+fn collect_handwritten_kernel_ids(manifest_dir: &str) -> std::collections::HashSet<String> {
+    let shader_dir = PathBuf::from(manifest_dir)
+        .join("src")
+        .join("solver")
+        .join("gpu")
+        .join("shaders");
+    let generated_dir = shader_dir.join("generated");
+
+    let mut out = std::collections::HashSet::<String>::new();
+    for path in list_wgsl_files_recursive(&shader_dir) {
+        if path.starts_with(&generated_dir) {
+            continue;
+        }
+        let src = fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("failed to read WGSL '{}': {err}", path.display()));
+        let entrypoints = parse_wgsl_compute_entrypoints(&src);
+        if entrypoints.is_empty() {
+            continue;
+        }
+        let rel_stem = wgsl_relative_stem(&shader_dir, &path);
+        if entrypoints.len() == 1 && entrypoints[0] == "main" {
+            out.insert(rel_stem);
+            continue;
+        }
+        for entry in entrypoints {
+            out.insert(format!("{rel_stem}/{entry}"));
+        }
+    }
+    out
+}
+
+fn ensure_fusion_schedule_kernel_is_resolvable(
+    model_id: &str,
+    kernel_id: &str,
+    shared_generated_ids: &std::collections::HashSet<String>,
+    per_model_generated_ids: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+    handwritten_kernel_ids: &std::collections::HashSet<String>,
+) {
+    let model_has_kernel = per_model_generated_ids
+        .get(model_id)
+        .map(|ids| ids.contains(kernel_id))
+        .unwrap_or(false);
+
+    if model_has_kernel
+        || shared_generated_ids.contains(kernel_id)
+        || handwritten_kernel_ids.contains(kernel_id)
+    {
+        return;
+    }
+
+    panic!(
+        "fusion schedule references kernel '{}' for model '{}' but no kernel registry source is available",
+        kernel_id, model_id
+    );
 }
 
 fn generate_named_param_registry(manifest_dir: &str) {

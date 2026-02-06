@@ -14,10 +14,7 @@ use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::graph::DispatchKind;
 use crate::solver::gpu::structs::{GpuConstants, PreconditionerType};
 use crate::solver::model::backend::{expand_schemes_unchecked, SchemeRegistry};
-use crate::solver::model::kernel::{
-    apply_model_fusion_rules, derive_kernel_fusion_rules_for_model, KernelFusionContext,
-    KernelFusionPolicy, KernelFusionStepping,
-};
+use crate::solver::model::kernel::KernelFusionPolicy;
 use crate::solver::model::linear_solver::{FgmresSolutionUpdateStrategy, ModelLinearSolverType};
 use crate::solver::model::ports::PortRegistry;
 use crate::solver::model::{
@@ -331,77 +328,18 @@ impl SolverRecipe {
         // Solver-level settings are model-owned defaults used for recipe derivation.
         let model_solver = model.linear_solver.unwrap_or_default();
 
-        // Emit kernel specs in terms of stable KernelIds.
+        // Resolve a precomputed compile-time kernel schedule keyed by
+        // (model, stepping mode, grad-state shape, fusion policy).
         //
-        // Kernel selection, phase membership, and dispatch kind are model-owned and derived
-        // from the method + module configuration.
-        let model_kernel_specs =
-            crate::solver::model::kernel::derive_kernel_specs_for_model(model)?;
-
-        let mut filtered_model_specs = Vec::new();
-        for spec in model_kernel_specs {
-            let include = match spec.condition {
-                crate::solver::model::kernel::KernelConditionId::Always => true,
-                crate::solver::model::kernel::KernelConditionId::RequiresGradState => {
-                    has_grad_state
-                }
-                crate::solver::model::kernel::KernelConditionId::RequiresNoGradState => {
-                    !has_grad_state
-                }
-                crate::solver::model::kernel::KernelConditionId::RequiresImplicitStepping => {
-                    matches!(stepping, SteppingMode::Implicit { .. })
-                }
-            };
-            if !include {
-                continue;
-            }
-
-            filtered_model_specs.push(spec);
-        }
-
-        let fusion_rules = derive_kernel_fusion_rules_for_model(model);
-        let module_names: Vec<&'static str> = model.modules.iter().map(|m| m.name).collect();
-        let fusion_ctx = KernelFusionContext {
-            policy: model_solver.solver.kernel_fusion_policy,
-            stepping: match stepping {
-                SteppingMode::Explicit => KernelFusionStepping::Explicit,
-                SteppingMode::Implicit { .. } => KernelFusionStepping::Implicit,
-                SteppingMode::Coupled => KernelFusionStepping::Coupled,
-            },
-            has_grad_state,
-            module_names: &module_names,
-        };
-        let fusion_result =
-            apply_model_fusion_rules(&filtered_model_specs, &fusion_rules, &fusion_ctx);
-        let applied_fusions: Vec<&'static str> =
-            fusion_result.applied.iter().map(|a| a.name).collect();
-
-        let mut kernels: Vec<KernelSpec> = Vec::new();
-        for spec in fusion_result.kernels {
-            let phase = match spec.phase {
-                crate::solver::model::kernel::KernelPhaseId::Preparation => {
-                    KernelPhase::Preparation
-                }
-                crate::solver::model::kernel::KernelPhaseId::Gradients => KernelPhase::Gradients,
-                crate::solver::model::kernel::KernelPhaseId::FluxComputation => {
-                    KernelPhase::FluxComputation
-                }
-                crate::solver::model::kernel::KernelPhaseId::Assembly => KernelPhase::Assembly,
-                crate::solver::model::kernel::KernelPhaseId::Apply => KernelPhase::Apply,
-                crate::solver::model::kernel::KernelPhaseId::Update => KernelPhase::Update,
-            };
-
-            let dispatch = match spec.dispatch {
-                crate::solver::model::kernel::DispatchKindId::Cells => DispatchKind::Cells,
-                crate::solver::model::kernel::DispatchKindId::Faces => DispatchKind::Faces,
-            };
-
-            kernels.push(KernelSpec {
-                id: spec.id,
-                phase,
-                dispatch,
-            });
-        }
+        // This keeps fusion fully build-time and avoids runtime fusion-pass logic in recipe
+        // construction.
+        let (kernels, applied_fusions) =
+            crate::solver::gpu::lowering::fusion_schedule_registry::schedule_for_model(
+                model.id,
+                stepping,
+                has_grad_state,
+                model_solver.solver.kernel_fusion_policy,
+            )?;
 
         // Optional resource needs are derived from binding metadata (kernel interface), not from
         // solver-side assumptions about which modules imply which buffers.
@@ -1118,6 +1056,26 @@ mod tests {
             .kernels
             .iter()
             .any(|k| k.id.as_str() == "rhie_chow/dp_update_store_grad_p_fused"));
+    }
+
+    #[test]
+    fn recipe_errors_when_compile_time_schedule_is_missing() {
+        let mut model = generic_diffusion_demo_model();
+        model.id = "generic_diffusion_demo_unregistered";
+
+        let err = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Coupled,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.contains("missing compile-time kernel schedule"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

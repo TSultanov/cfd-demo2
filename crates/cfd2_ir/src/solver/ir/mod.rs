@@ -376,10 +376,15 @@ pub enum LimiterSpec {
 /// embedding separate numeric literals.
 pub const VANLEER_EPS: f32 = 1e-8;
 
+pub mod kernel_program;
 pub mod ports;
 pub mod reconstruction;
 
 // Re-export port types for convenience
+pub use kernel_program::{
+    BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelProgram, LaunchSemantics,
+    SideEffectMetadata,
+};
 pub use ports::{BufferAccess, BufferSpec, FieldSpec, ParamSpec, PortFieldKind, PortManifest};
 
 // Intentionally no test fixtures here: `cfd2_ir` must not depend on model definitions.

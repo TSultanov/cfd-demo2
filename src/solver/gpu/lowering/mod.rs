@@ -3,6 +3,7 @@ use crate::solver::gpu::program::plan_instance::PlanInitConfig;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::ModelSpec;
 
+pub(crate) mod fusion_schedule_registry;
 pub(crate) mod kernel_registry;
 mod model_driven;
 pub(crate) mod named_params;

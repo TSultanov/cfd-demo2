@@ -9,6 +9,33 @@ To run the reference suite (and fail loudly if it accidentally runs 0 tests):
 Note: the OpenFOAM reference tests are marked `#[ignore]` so `cargo test` stays fast; the script
 runs them with `-- --ignored`.
 
+## Major changeset policy (required)
+
+For every major changeset:
+
+1. Run OpenFOAM references **before** the edits (baseline).
+2. Run OpenFOAM references **after** the edits.
+3. Compare failure magnitudes (`[openfoam]` diagnostics).
+
+These tests are intentionally not fully green yet, but error magnitudes must not drift upward.
+If any error metric grows versus baseline, treat it as a regression.
+
+Suggested commands:
+
+```bash
+mkdir -p target/openfoam_reference_logs
+
+CFD2_OPENFOAM_DIAG=1 bash scripts/run_openfoam_reference_tests.sh \
+  2>&1 | tee target/openfoam_reference_logs/before.log || true
+
+CFD2_OPENFOAM_DIAG=1 bash scripts/run_openfoam_reference_tests.sh \
+  2>&1 | tee target/openfoam_reference_logs/after.log || true
+
+rg '^\[openfoam\]' target/openfoam_reference_logs/before.log > target/openfoam_reference_logs/before.metrics
+rg '^\[openfoam\]' target/openfoam_reference_logs/after.log > target/openfoam_reference_logs/after.metrics
+diff -u target/openfoam_reference_logs/before.metrics target/openfoam_reference_logs/after.metrics || true
+```
+
 ## Visual sanity check (required)
 
 In addition to the numerical error metrics, always do a quick *visual* comparison of the

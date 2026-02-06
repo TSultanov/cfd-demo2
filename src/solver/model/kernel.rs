@@ -219,11 +219,28 @@ pub struct KernelFusionContext<'a> {
     pub module_names: &'a [&'static str],
 }
 
-pub(crate) type ModelKernelWgslGenerator = Arc<
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelKernelArtifact {
+    Wgsl(KernelWgsl),
+    DslProgram(crate::solver::ir::KernelProgram),
+}
+
+impl ModelKernelArtifact {
+    pub fn into_wgsl(self) -> Result<KernelWgsl, String> {
+        match self {
+            ModelKernelArtifact::Wgsl(kernel) => Ok(kernel),
+            ModelKernelArtifact::DslProgram(program) => {
+                cfd2_codegen::solver::codegen::fusion::lower_kernel_program_to_wgsl(&program)
+            }
+        }
+    }
+}
+
+pub(crate) type ModelKernelArtifactGenerator = Arc<
     dyn Fn(
             &crate::solver::model::ModelSpec,
             &crate::solver::ir::SchemeRegistry,
-        ) -> Result<KernelWgsl, String>
+        ) -> Result<ModelKernelArtifact, String>
         + Send
         + Sync
         + 'static,
@@ -239,7 +256,7 @@ pub enum KernelWgslScope {
 pub struct ModelKernelGeneratorSpec {
     pub id: KernelId,
     pub scope: KernelWgslScope,
-    pub generator: ModelKernelWgslGenerator,
+    pub generator: ModelKernelArtifactGenerator,
 }
 
 impl ModelKernelGeneratorSpec {
@@ -256,7 +273,9 @@ impl ModelKernelGeneratorSpec {
         Self {
             id,
             scope: KernelWgslScope::PerModel,
-            generator: Arc::new(generator),
+            generator: Arc::new(move |model, schemes| {
+                generator(model, schemes).map(ModelKernelArtifact::Wgsl)
+            }),
         }
     }
 
@@ -273,7 +292,47 @@ impl ModelKernelGeneratorSpec {
         Self {
             id,
             scope: KernelWgslScope::Shared,
-            generator: Arc::new(generator),
+            generator: Arc::new(move |model, schemes| {
+                generator(model, schemes).map(ModelKernelArtifact::Wgsl)
+            }),
+        }
+    }
+
+    pub fn new_dsl(
+        id: KernelId,
+        generator: impl Fn(
+                &crate::solver::model::ModelSpec,
+                &crate::solver::ir::SchemeRegistry,
+            ) -> Result<crate::solver::ir::KernelProgram, String>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self {
+            id,
+            scope: KernelWgslScope::PerModel,
+            generator: Arc::new(move |model, schemes| {
+                generator(model, schemes).map(ModelKernelArtifact::DslProgram)
+            }),
+        }
+    }
+
+    pub fn new_shared_dsl(
+        id: KernelId,
+        generator: impl Fn(
+                &crate::solver::model::ModelSpec,
+                &crate::solver::ir::SchemeRegistry,
+            ) -> Result<crate::solver::ir::KernelProgram, String>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self {
+            id,
+            scope: KernelWgslScope::Shared,
+            generator: Arc::new(move |model, schemes| {
+                generator(model, schemes).map(ModelKernelArtifact::DslProgram)
+            }),
         }
     }
 }
@@ -646,20 +705,29 @@ fn kernel_generator_for_model_by_id(
     None
 }
 
-pub fn generate_kernel_wgsl_for_model_by_id(
+fn generate_kernel_artifact_for_model_by_id(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
     kernel_id: KernelId,
-) -> Result<String, String> {
-    if let Some(gen) = kernel_generator_for_model_by_id(model, kernel_id) {
-        let kernel = gen.generator.as_ref()(model, schemes)?;
-        return Ok(kernel.to_wgsl());
+) -> Result<ModelKernelArtifact, String> {
+    if let Some(generator) = kernel_generator_for_model_by_id(model, kernel_id) {
+        return generator.generator.as_ref()(model, schemes);
     }
 
     Err(format!(
         "KernelId '{}' is not a build-time generated per-model kernel",
         kernel_id.as_str()
     ))
+}
+
+pub fn generate_kernel_wgsl_for_model_by_id(
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+    kernel_id: KernelId,
+) -> Result<String, String> {
+    let artifact = generate_kernel_artifact_for_model_by_id(model, schemes, kernel_id)?;
+    let kernel = artifact.into_wgsl()?;
+    Ok(kernel.to_wgsl())
 }
 
 pub fn emit_shared_kernels_wgsl(
@@ -699,8 +767,9 @@ pub fn emit_shared_kernels_wgsl_with_ids_for_models(
                     continue;
                 }
 
-                let kernel =
+                let artifact =
                     spec.generator.as_ref()(model, schemes).map_err(std::io::Error::other)?;
+                let kernel = artifact.into_wgsl().map_err(std::io::Error::other)?;
                 let wgsl = kernel.to_wgsl();
 
                 if let Some(prev) = wgsl_by_id.insert(spec.id, wgsl.clone()) {
@@ -744,6 +813,58 @@ pub fn emit_model_kernels_wgsl(
         .collect())
 }
 
+fn generate_kernel_program_for_model_by_id(
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+    kernel_id: KernelId,
+) -> Result<crate::solver::ir::KernelProgram, String> {
+    match generate_kernel_artifact_for_model_by_id(model, schemes, kernel_id)? {
+        ModelKernelArtifact::DslProgram(program) => Ok(program),
+        ModelKernelArtifact::Wgsl(_) => Err(format!(
+            "kernel '{}' is WGSL-only and cannot be used as DSL fusion input",
+            kernel_id.as_str()
+        )),
+    }
+}
+
+fn synthesize_fusion_replacement_wgsl_for_model(
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+    replacement_id: KernelId,
+) -> Result<Option<String>, String> {
+    let mut matching_rules: Vec<ModelKernelFusionRule> = derive_kernel_fusion_rules_for_model(model)
+        .into_iter()
+        .filter(|rule| rule.replacement.id == replacement_id)
+        .collect();
+    if matching_rules.is_empty() {
+        return Ok(None);
+    }
+    matching_rules.sort_by(|a, b| {
+        b.priority
+            .cmp(&a.priority)
+            .then(b.pattern.len().cmp(&a.pattern.len()))
+            .then(a.name.cmp(b.name))
+    });
+
+    let selected = &matching_rules[0];
+    let mut programs = Vec::with_capacity(selected.pattern.len());
+    for atom in &selected.pattern {
+        programs.push(generate_kernel_program_for_model_by_id(
+            model, schemes, atom.id,
+        )?);
+    }
+
+    let fused_program = cfd2_codegen::solver::codegen::fusion::synthesize_fused_program(
+        replacement_id.as_str().to_string(),
+        selected.name,
+        &programs,
+        cfd2_codegen::solver::codegen::fusion::FusionSafetyPolicy::Safe,
+    )?;
+    let wgsl =
+        cfd2_codegen::solver::codegen::fusion::lower_kernel_program_to_wgsl(&fused_program)?;
+    Ok(Some(wgsl.to_wgsl()))
+}
+
 pub fn emit_model_kernels_wgsl_with_ids(
     base_dir: impl AsRef<std::path::Path>,
     model: &crate::solver::model::ModelSpec,
@@ -753,6 +874,8 @@ pub fn emit_model_kernels_wgsl_with_ids(
 
     let specs = derive_kernel_specs_for_model(model).map_err(std::io::Error::other)?;
     let replacement_ids = derive_fusion_replacement_kernel_ids_for_model(model);
+    let replacement_id_set: std::collections::HashSet<KernelId> =
+        replacement_ids.iter().copied().collect();
 
     let mut seen: std::collections::HashSet<KernelId> = std::collections::HashSet::new();
     let mut kernel_ids = Vec::with_capacity(specs.len() + replacement_ids.len());
@@ -765,6 +888,21 @@ pub fn emit_model_kernels_wgsl_with_ids(
         }
 
         let Some(generator) = kernel_generator_for_model_by_id(model, kernel_id) else {
+            if replacement_id_set.contains(&kernel_id) {
+                let Some(wgsl) =
+                    synthesize_fusion_replacement_wgsl_for_model(model, schemes, kernel_id)
+                        .map_err(std::io::Error::other)?
+                else {
+                    return Err(std::io::Error::other(format!(
+                        "replacement kernel '{}' has no generator and no synthesizeable fusion rule",
+                        kernel_id.as_str()
+                    )));
+                };
+                let filename =
+                    kernel_output_name_for_model(model.id, kernel_id).map_err(std::io::Error::other)?;
+                let path = cfd2_codegen::compiler::write_generated_wgsl(base_dir.as_ref(), filename, &wgsl)?;
+                outputs.push((kernel_id, path));
+            }
             continue;
         };
         if generator.scope == KernelWgslScope::Shared {
@@ -797,6 +935,9 @@ mod contract_tests {
     use super::*;
     use crate::solver::model::module::KernelBundleModule;
     use crate::solver::model::ModelSpec;
+    use cfd2_ir::solver::ir::{
+        BindingAccess, DispatchDomain, KernelBinding, KernelProgram, LaunchSemantics,
+    };
 
     fn contract_kernel_generator(
         _model: &ModelSpec,
@@ -807,6 +948,48 @@ mod contract_tests {
             "contract: module-defined kernel generator".to_string(),
         ));
         Ok(KernelWgsl::from(module))
+    }
+
+    fn contract_dsl_kernel_generator(
+        kernel_id: &'static str,
+        body_stmt: &'static str,
+    ) -> impl Fn(
+        &ModelSpec,
+        &crate::solver::ir::SchemeRegistry,
+    ) -> Result<KernelProgram, String> + Send
+           + Sync
+           + 'static {
+        move |_model, _schemes| {
+            let launch = LaunchSemantics::new(
+                [64, 1, 1],
+                "global_id.y * constants.stride_x + global_id.x",
+                Some("idx >= arrayLength(&state)"),
+            );
+            let mut program = KernelProgram::new(
+                kernel_id,
+                DispatchDomain::Cells,
+                launch,
+                vec![
+                    KernelBinding::new(
+                        0,
+                        0,
+                        "state",
+                        "array<f32>",
+                        BindingAccess::ReadWriteStorage,
+                    ),
+                    KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
+                ],
+            );
+            program.indexing = vec!["let inv = idx;".to_string()];
+            program.preamble = vec!["var value: f32 = state[idx];".to_string()];
+            program.body = vec![
+                body_stmt.to_string(),
+                "state[idx] = value;".to_string(),
+                "state[inv] = state[idx];".to_string(),
+            ];
+            program.local_symbols = vec!["value".to_string(), "inv".to_string()];
+            Ok(program)
+        }
     }
 
     #[test]
@@ -900,6 +1083,159 @@ mod contract_tests {
         let emitted = emit_model_kernels_wgsl_with_ids(&out_dir, &model, &schemes)
             .expect("emit kernels with fusion replacements");
         assert!(emitted.iter().any(|(id, _)| *id == fused_id));
+
+        let _ = std::fs::remove_dir_all(&out_dir);
+    }
+
+    #[test]
+    fn contract_mixed_mode_kernel_generators_are_supported() {
+        let wgsl_id = KernelId("contract/mixed_wgsl");
+        let dsl_id = KernelId("contract/mixed_dsl");
+
+        let module = KernelBundleModule {
+            name: "contract_mixed_mode_module",
+            kernels: vec![
+                ModelKernelSpec {
+                    id: wgsl_id,
+                    phase: KernelPhaseId::Preparation,
+                    dispatch: DispatchKindId::Cells,
+                    condition: KernelConditionId::Always,
+                },
+                ModelKernelSpec {
+                    id: dsl_id,
+                    phase: KernelPhaseId::Preparation,
+                    dispatch: DispatchKindId::Cells,
+                    condition: KernelConditionId::Always,
+                },
+            ],
+            generators: vec![
+                ModelKernelGeneratorSpec::new(wgsl_id, contract_kernel_generator),
+                ModelKernelGeneratorSpec::new_dsl(
+                    dsl_id,
+                    contract_dsl_kernel_generator(dsl_id.as_str(), "value = value + 1.0;"),
+                ),
+            ],
+            ..Default::default()
+        };
+
+        let mut model = crate::solver::model::generic_diffusion_demo_model();
+        model.modules.push(module);
+        let schemes = crate::solver::ir::SchemeRegistry::default();
+
+        let wgsl = generate_kernel_wgsl_for_model_by_id(&model, &schemes, wgsl_id)
+            .expect("wgsl generator should resolve");
+        assert!(
+            wgsl.contains("contract: module-defined kernel generator"),
+            "expected WGSL artifact content"
+        );
+
+        let lowered = generate_kernel_wgsl_for_model_by_id(&model, &schemes, dsl_id)
+            .expect("dsl generator should lower to WGSL");
+        assert!(
+            lowered.contains("GENERATED BY CFD2 DSL FUSION"),
+            "expected DSL lowering marker"
+        );
+
+        let mut out_dir = std::env::temp_dir();
+        out_dir.push(format!(
+            "cfd2_kernel_emit_mixed_mode_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&out_dir).expect("create temp output dir");
+        let emitted = emit_model_kernels_wgsl_with_ids(&out_dir, &model, &schemes)
+            .expect("emit mixed-mode kernels");
+        assert!(emitted.iter().any(|(id, _)| *id == wgsl_id));
+        assert!(emitted.iter().any(|(id, _)| *id == dsl_id));
+        let _ = std::fs::remove_dir_all(&out_dir);
+    }
+
+    #[test]
+    fn contract_fusion_replacement_is_synthesized_from_dsl_inputs() {
+        let a_id = KernelId("contract/dsl_a");
+        let b_id = KernelId("contract/dsl_b");
+        let fused_id = KernelId("contract/dsl_fused");
+
+        let module = KernelBundleModule {
+            name: "contract_dsl_fusion_module",
+            kernels: vec![
+                ModelKernelSpec {
+                    id: a_id,
+                    phase: KernelPhaseId::Update,
+                    dispatch: DispatchKindId::Cells,
+                    condition: KernelConditionId::Always,
+                },
+                ModelKernelSpec {
+                    id: b_id,
+                    phase: KernelPhaseId::Update,
+                    dispatch: DispatchKindId::Cells,
+                    condition: KernelConditionId::Always,
+                },
+            ],
+            generators: vec![
+                ModelKernelGeneratorSpec::new_dsl(
+                    a_id,
+                    contract_dsl_kernel_generator(a_id.as_str(), "value = value + 1.0;"),
+                ),
+                ModelKernelGeneratorSpec::new_dsl(
+                    b_id,
+                    contract_dsl_kernel_generator(b_id.as_str(), "value = value + 2.0;"),
+                ),
+            ],
+            fusion_rules: vec![ModelKernelFusionRule {
+                name: "contract:dsl_fuse_ab",
+                priority: 50,
+                phase: KernelPhaseId::Update,
+                pattern: vec![KernelPatternAtom::id(a_id), KernelPatternAtom::id(b_id)],
+                replacement: ModelKernelSpec {
+                    id: fused_id,
+                    phase: KernelPhaseId::Update,
+                    dispatch: DispatchKindId::Cells,
+                    condition: KernelConditionId::Always,
+                },
+                guards: Vec::new(),
+            }],
+            ..Default::default()
+        };
+
+        let mut model = crate::solver::model::generic_diffusion_demo_model();
+        model.modules.push(module);
+        let schemes = crate::solver::ir::SchemeRegistry::default();
+
+        let mut out_dir = std::env::temp_dir();
+        out_dir.push(format!(
+            "cfd2_kernel_emit_dsl_fuse_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&out_dir).expect("create temp output dir");
+
+        let emitted = emit_model_kernels_wgsl_with_ids(&out_dir, &model, &schemes)
+            .expect("emit kernels with synthesized fusion replacement");
+        assert!(
+            emitted.iter().any(|(id, _)| *id == fused_id),
+            "expected synthesized fused kernel output"
+        );
+
+        let fused_path = emitted
+            .iter()
+            .find_map(|(id, path)| if *id == fused_id { Some(path) } else { None })
+            .expect("fused kernel path");
+        let src = std::fs::read_to_string(fused_path).expect("read fused wgsl");
+        assert!(
+            src.contains("synthesized by fusion rule"),
+            "missing synthesis marker in fused output"
+        );
+        assert!(
+            src.contains("k1_value"),
+            "expected deterministic local-symbol rename for second kernel"
+        );
 
         let _ = std::fs::remove_dir_all(&out_dir);
     }

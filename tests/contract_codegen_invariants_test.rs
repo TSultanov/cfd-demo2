@@ -88,6 +88,24 @@ fn contract_model_driven_lowering_is_single_path_for_stepping_modes() {
 }
 
 #[test]
+fn contract_recipe_fusion_is_compile_time_registry_driven() {
+    let path = repo_root().join("src/solver/gpu/recipe.rs");
+    let src = read_utf8(&path);
+
+    // Fusion planning must be generated at compile-time and looked up by key.
+    assert_contains(
+        &src,
+        "fusion_schedule_registry::schedule_for_model",
+        "recipe.rs",
+    );
+
+    // Runtime recipe derivation must not execute the fusion pass directly.
+    assert_not_contains(&src, "apply_model_fusion_rules", "recipe.rs");
+    assert_not_contains(&src, "derive_kernel_fusion_rules_for_model", "recipe.rs");
+    assert_not_contains(&src, "derive_kernel_specs_for_model", "recipe.rs");
+}
+
+#[test]
 fn contract_build_rs_has_no_per_kernel_prefix_discovery_glue() {
     let path = repo_root().join("build.rs");
     let src = read_utf8(&path);
@@ -107,6 +125,20 @@ fn contract_build_rs_has_no_per_kernel_prefix_discovery_glue() {
     // mechanism as generated kernels. Avoid a separate wgsl_meta binding table.
     assert_not_contains(&src, "wgsl_binding_meta", "build.rs");
     assert_not_contains(&src, "wgsl_meta", "build.rs");
+}
+
+#[test]
+fn contract_build_rs_includes_fusion_replacement_kernels_in_generated_registries() {
+    let path = repo_root().join("build.rs");
+    let src = read_utf8(&path);
+
+    // build.rs must include replacement KernelIds from fusion rules so synthesized fused kernels
+    // participate in generated registry maps and schedule resolvability checks.
+    assert_contains(
+        &src,
+        "derive_fusion_replacement_kernel_ids_for_model",
+        "build.rs",
+    );
 }
 
 #[test]

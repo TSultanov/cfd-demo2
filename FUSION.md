@@ -5,46 +5,46 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 ## 0) Scope and Contracts
 
 - [ ] Define and document "full DSL-based fusion" success criteria (compile-time only, no runtime fusion pass).
-- [ ] Confirm fusion remains recipe-schedule driven in `src/solver/gpu/recipe.rs` via `fusion_schedule_registry::schedule_for_model`.
-- [ ] Add a contract test that fused kernels are resolved through generated registries (not handwritten runtime lookup glue).
-- [ ] Add a contract test that runtime code does not call `apply_model_fusion_rules`.
+- [x] Confirm fusion remains recipe-schedule driven in `src/solver/gpu/recipe.rs` via `fusion_schedule_registry::schedule_for_model`.
+- [x] Add a contract test that fused kernels are resolved through generated registries (not handwritten runtime lookup glue).
+- [x] Add a contract test that runtime code does not call `apply_model_fusion_rules`.
 
 ## 1) Kernel Program IR (Fusion Input)
 
-- [ ] Add a kernel-program IR module under `crates/cfd2_ir/src/solver/ir` (for fusion-capable kernels).
-- [ ] Model dispatch domain in IR (cells/faces/custom) and preserve launch semantics.
-- [ ] Model bind interface in IR (group/binding/name/access) for deterministic merge checks.
-- [ ] Represent kernel body/preamble/indexing in IR so two kernels can be safely composed.
-- [ ] Add side-effect metadata in IR (read/write sets, optional barriers/atomics flags).
-- [ ] Re-export IR types from `crates/cfd2_ir/src/solver/ir/mod.rs`.
+- [x] Add a kernel-program IR module under `crates/cfd2_ir/src/solver/ir` (for fusion-capable kernels).
+- [x] Model dispatch domain in IR (cells/faces/custom) and preserve launch semantics.
+- [x] Model bind interface in IR (group/binding/name/access) for deterministic merge checks.
+- [x] Represent kernel body/preamble/indexing in IR so two kernels can be safely composed.
+- [x] Add side-effect metadata in IR (read/write sets, optional barriers/atomics flags).
+- [x] Re-export IR types from `crates/cfd2_ir/src/solver/ir/mod.rs`.
 
 ## 2) Generator API Upgrade
 
-- [ ] Extend model kernel generator API to support DSL program artifacts in addition to WGSL output.
-- [ ] Keep backward compatibility so existing WGSL-only generators continue to work.
-- [ ] Add helper constructors/adapters for "DSL program -> WGSL" lowering.
-- [ ] Add tests for mixed-mode models (some kernels DSL-capable, some WGSL-only).
+- [x] Extend model kernel generator API to support DSL program artifacts in addition to WGSL output.
+- [x] Keep backward compatibility so existing WGSL-only generators continue to work.
+- [x] Add helper constructors/adapters for "DSL program -> WGSL" lowering.
+- [x] Add tests for mixed-mode models (some kernels DSL-capable, some WGSL-only).
 
 ## 3) Fusion Compiler Pass (Codegen)
 
-- [ ] Add fusion pass module under `crates/cfd2_codegen/src/solver/codegen`.
-- [ ] Implement candidate matching based on applied fusion rules and ordered kernel list.
-- [ ] Implement Safe policy checks:
-  - [ ] same dispatch domain,
-  - [ ] compatible preamble/indexing,
-  - [ ] no unsafe hazards (RAW/WAR/WAW conflicts, barriers/atomics restrictions).
-- [ ] Implement deterministic symbol-renaming to avoid local-name collisions.
-- [ ] Merge bind interfaces deterministically and reject incompatible interfaces with clear errors.
-- [ ] Emit fused DSL program and lower it to WGSL through existing AST/lowering pipeline.
-- [ ] Add unit tests for all pass stages (matching, hazards, symbol merge, bind merge, output determinism).
+- [x] Add fusion pass module under `crates/cfd2_codegen/src/solver/codegen`.
+- [x] Implement candidate matching based on applied fusion rules and ordered kernel list.
+- [x] Implement Safe policy checks:
+  - [x] same dispatch domain,
+  - [x] compatible preamble/indexing,
+  - [x] no unsafe hazards (RAW/WAR/WAW conflicts, barriers/atomics restrictions).
+- [x] Implement deterministic symbol-renaming to avoid local-name collisions.
+- [x] Merge bind interfaces deterministically and reject incompatible interfaces with clear errors.
+- [x] Emit fused DSL program and lower it to WGSL through existing AST/lowering pipeline.
+- [x] Add unit tests for all pass stages (matching, hazards, symbol merge, bind merge, output determinism).
 
 ## 4) Build-Time Synthesis and Registry Wiring
 
-- [ ] In `build.rs`, synthesize replacement kernels when fusion schedule references a replacement without explicit generator output.
-- [ ] Emit synthesized fused WGSL files into `src/solver/gpu/shaders/generated` with stable names.
-- [ ] Ensure `generate_kernel_registry_map` includes synthesized fused kernels.
-- [ ] Ensure `generate_fusion_schedule_registry` validates resolvability of synthesized outputs.
-- [ ] Keep generated registry entries deterministic across builds.
+- [x] In `build.rs`, synthesize replacement kernels when fusion schedule references a replacement without explicit generator output.
+- [x] Emit synthesized fused WGSL files into `src/solver/gpu/shaders/generated` with stable names.
+- [x] Ensure `generate_kernel_registry_map` includes synthesized fused kernels.
+- [x] Ensure `generate_fusion_schedule_registry` validates resolvability of synthesized outputs.
+- [x] Keep generated registry entries deterministic across builds.
 - [ ] Add a contract/integration test that generated registry contains synthesized fused entries.
 
 ## 5) Pilot Migration: Rhie-Chow

@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 51cb84cb27ca863c1dfe69d94343336d5068eb8dad39c272d4eed0130ae66720
+// SourceHash: 4f4e76ce4ab2200d8032393f63c13e57142abd9055d2f2d1029c2848328cdc58
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -24083,8 +24083,7 @@ var<uniform> constants: Constants;
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
-    let num_cells = (arrayLength((&state)) / 8u);
-    if (idx >= num_cells) {
+    if (idx >= (arrayLength((&state)) / 8u)) {
         return;
     }
     let base = (idx * 8u);

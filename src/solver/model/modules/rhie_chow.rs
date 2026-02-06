@@ -115,10 +115,10 @@ pub fn rhie_chow_aux_module(
         ModelKernelGeneratorSpec::new(kernel_grad_p_update, move |model, _schemes| {
             generate_rhie_chow_grad_p_update_kernel_wgsl(model)
         }),
-        ModelKernelGeneratorSpec::new(
+        ModelKernelGeneratorSpec::new_dsl(
             kernel_rhie_chow_correct_velocity_delta,
             move |model, _schemes| {
-                generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
+                generate_rhie_chow_correct_velocity_delta_kernel_program(
                     model,
                     dp_field,
                     coupling_for_correct,
@@ -373,13 +373,13 @@ fn generate_rhie_chow_store_grad_p_kernel_program(
     Ok(program)
 }
 
-fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
+fn generate_rhie_chow_correct_velocity_delta_kernel_program(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
     coupling: crate::solver::model::invariants::MomentumPressureCoupling,
     grad_p_name: &'static str,
     grad_p_old_name: &'static str,
-) -> Result<KernelWgsl, String> {
+) -> Result<KernelProgram, String> {
     use crate::solver::model::ports::dimensions::PressureGradient;
     use crate::solver::model::ports::dimensions::{AnyDimension, D_P};
     use crate::solver::model::ports::PortRegistry;
@@ -443,18 +443,50 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
         .map(|c| c.full_offset())
         .ok_or("grad_old component 1")?;
 
-    Ok(wgsl::generate_rhie_chow_correct_velocity_delta_wgsl(
-        wgsl::RhieChowCorrectVelocityDeltaParams {
-            state_stride: stride,
-            u_x_offset: u_x,
-            u_y_offset: u_y,
-            d_p_offset,
-            grad_p_x_offset: grad_p_x,
-            grad_p_y_offset: grad_p_y,
-            grad_old_x_offset: grad_old_x,
-            grad_old_y_offset: grad_old_y,
-        },
-    ))
+    let mut program = KernelProgram::new(
+        "rhie_chow/correct_velocity_delta",
+        DispatchDomain::Cells,
+        rhie_chow_state_launch(stride),
+        rhie_chow_state_bindings(),
+    );
+    program.indexing = vec![format!("let base = idx * {stride}u;")];
+    program.preamble = vec![
+        format!("let d_p = state[base + {d_p_offset}u];"),
+        format!("let grad_px = state[base + {grad_p_x}u];"),
+        format!("let grad_py = state[base + {grad_p_y}u];"),
+        format!("let grad_old_x = state[base + {grad_old_x}u];"),
+        format!("let grad_old_y = state[base + {grad_old_y}u];"),
+        "let corr_x = d_p * (grad_px - grad_old_x);".to_string(),
+        "let corr_y = d_p * (grad_py - grad_old_y);".to_string(),
+    ];
+    program.body = vec![
+        format!("state[base + {u_x}u] = state[base + {u_x}u] - corr_x;"),
+        format!("state[base + {u_y}u] = state[base + {u_y}u] - corr_y;"),
+    ];
+    program.local_symbols = vec![
+        "d_p".to_string(),
+        "grad_px".to_string(),
+        "grad_py".to_string(),
+        "grad_old_x".to_string(),
+        "grad_old_y".to_string(),
+        "corr_x".to_string(),
+        "corr_y".to_string(),
+    ];
+    program.side_effects.read_set.extend([
+        EffectResource::component(0, 0, format!("state:{d_p_offset}")),
+        EffectResource::component(0, 0, format!("state:{grad_p_x}")),
+        EffectResource::component(0, 0, format!("state:{grad_p_y}")),
+        EffectResource::component(0, 0, format!("state:{grad_old_x}")),
+        EffectResource::component(0, 0, format!("state:{grad_old_y}")),
+        EffectResource::component(0, 0, format!("state:{u_x}")),
+        EffectResource::component(0, 0, format!("state:{u_y}")),
+    ]);
+    program.side_effects.write_set.extend([
+        EffectResource::component(0, 0, format!("state:{u_x}")),
+        EffectResource::component(0, 0, format!("state:{u_y}")),
+    ]);
+
+    Ok(program)
 }
 
 #[cfg(test)]
@@ -582,6 +614,34 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&out_dir);
+    }
+
+    #[test]
+    fn contract_rhie_chow_correct_velocity_delta_is_dsl_artifact() {
+        let model = crate::solver::model::incompressible_momentum_model();
+        let rhie_chow_module = model
+            .modules
+            .iter()
+            .find(|module| module.name == "rhie_chow_aux")
+            .expect("incompressible model missing rhie_chow_aux module");
+
+        let generator = rhie_chow_module
+            .generators
+            .iter()
+            .find(|gen| gen.id.as_str() == "rhie_chow/correct_velocity_delta")
+            .expect("missing rhie_chow/correct_velocity_delta generator");
+
+        let schemes = crate::solver::ir::SchemeRegistry::default();
+        let artifact = (generator.generator.as_ref())(&model, &schemes)
+            .expect("generate rhie_chow/correct_velocity_delta artifact");
+
+        assert!(
+            matches!(
+                artifact,
+                crate::solver::model::kernel::ModelKernelArtifact::DslProgram(_)
+            ),
+            "rhie_chow/correct_velocity_delta should be emitted as a DSL artifact"
+        );
     }
 
     #[test]

@@ -1443,6 +1443,26 @@ mod tests {
     }
 
     #[test]
+    fn non_dsl_kernels_remain_standalone_wgsl_artifacts() {
+        let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
+        let model = crate::solver::model::compressible_model();
+
+        for kernel_id in [
+            KernelId::GENERIC_COUPLED_ASSEMBLY,
+            KernelId::GENERIC_COUPLED_UPDATE,
+            KernelId::FLUX_MODULE,
+        ] {
+            let artifact = generate_kernel_artifact_for_model_by_id(&model, &schemes, kernel_id)
+                .expect("legacy WGSL kernel generator should remain available");
+            assert!(
+                matches!(artifact, ModelKernelArtifact::Wgsl(_)),
+                "kernel '{}' should remain a WGSL standalone artifact",
+                kernel_id.as_str()
+            );
+        }
+    }
+
+    #[test]
     fn contract_flux_module_uses_runtime_scheme_and_includes_limited_paths() {
         // Contract: the flux-module kernel must not ignore the runtime `advection_scheme` knob.
         // It should branch on `constants.scheme` and include the limited reconstruction paths

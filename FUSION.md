@@ -74,10 +74,10 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 
 ## 7) Broaden Coverage Beyond Pilot
 
-- [ ] Identify all model-generated kernels eligible for DSL fusion (update/assembly-heavy chains first).
+- [x] Identify all model-generated kernels eligible for DSL fusion (update/assembly-heavy chains first).
 - [ ] Migrate eligible generators from WGSL-only to DSL-capable artifacts.
-- [ ] Keep non-DSL kernels as standalone passes (no forced migration).
-- [ ] Add per-model coverage report (which kernels are fusion-capable vs legacy).
+- [x] Keep non-DSL kernels as standalone passes (no forced migration).
+- [x] Add per-model coverage report (which kernels are fusion-capable vs legacy).
 
 ## 8) Validation Matrix
 

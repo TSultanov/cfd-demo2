@@ -652,10 +652,10 @@ fn resolve_offset_from_slots(slots: &ResolvedStateSlotsSpec, name: &str) -> Opti
     Some(slot.base_offset + component)
 }
 
-pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
+pub(crate) fn generate_generic_coupled_update_kernel_program(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<KernelWgsl, String> {
+) -> Result<crate::solver::ir::KernelProgram, String> {
     // Use unchecked variant: model.system is already validated during construction.
     let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(&model.system, schemes);
     let prims = model
@@ -680,14 +680,15 @@ pub(crate) fn generate_generic_coupled_update_kernel_wgsl(
         .collect();
 
     let eos_params = extract_eos_params(model);
-    Ok(cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_update_wgsl(
+    cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_update_kernel_program(
+        KernelId::GENERIC_COUPLED_UPDATE.as_str(),
         &discrete,
         &slots,
         &resolved_prims,
         apply_relaxation,
         relaxation_requires_dtau,
         &eos_params,
-    ))
+    )
 }
 
 fn kernel_generator_for_model_by_id(
@@ -1445,7 +1446,7 @@ mod tests {
         let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
         let model = crate::solver::model::compressible_model();
 
-        for kernel_id in [KernelId::GENERIC_COUPLED_UPDATE, KernelId::FLUX_MODULE] {
+        for kernel_id in [KernelId::FLUX_MODULE] {
             let artifact = generate_kernel_artifact_for_model_by_id(&model, &schemes, kernel_id)
                 .expect("legacy WGSL kernel generator should remain available");
             assert!(
@@ -1457,13 +1458,14 @@ mod tests {
     }
 
     #[test]
-    fn generic_coupled_assembly_kernels_are_dsl_artifacts() {
+    fn generic_coupled_kernels_are_dsl_artifacts() {
         let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
         let model = crate::solver::model::compressible_model();
 
         for kernel_id in [
             KernelId::GENERIC_COUPLED_ASSEMBLY,
             KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE,
+            KernelId::GENERIC_COUPLED_UPDATE,
         ] {
             let artifact = generate_kernel_artifact_for_model_by_id(&model, &schemes, kernel_id)
                 .expect("generic coupled assembly generator should resolve");

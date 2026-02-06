@@ -97,9 +97,9 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                     Ok(cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_wgsl(&eos_params))
                 },
             ),
-            ModelKernelGeneratorSpec::new(
+            ModelKernelGeneratorSpec::new_dsl(
                 KernelId::GENERIC_COUPLED_UPDATE,
-                crate::solver::model::kernel::generate_generic_coupled_update_kernel_wgsl,
+                crate::solver::model::kernel::generate_generic_coupled_update_kernel_program,
             ),
         ],
         method: Some(method),

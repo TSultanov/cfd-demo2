@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: dbd37d58a6699eefa1b1e9a8340332b98072c96df0fe4d98d90604625cf7c160
+// SourceHash: 948c0af7ad3f39fc686b0a5ccf2d14101a604a9aaf3f8a7ae4ba598a03263b65
 
 #![allow(
     unused,
@@ -1420,43 +1420,7 @@ pub mod layout_asserts {
             ) == 44
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_compressible::Constants,
-                eos_gamma
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_compressible::Constants,
-                eos_gm1
-            ) == 52
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_compressible::Constants,
-                eos_r
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_compressible::Constants,
-                eos_dp_drho
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_compressible::Constants,
-                eos_p_offset
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_compressible::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
-            std::mem::size_of::<generated::generic_coupled_update_compressible::Constants>() == 72
+            std::mem::size_of::<generated::generic_coupled_update_compressible::Constants>() == 48
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_GENERIC_DIFFUSION_DEMO_CONSTANTS_ASSERTS: () = {
@@ -1533,44 +1497,8 @@ pub mod layout_asserts {
             ) == 44
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                eos_gamma
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                eos_gm1
-            ) == 52
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                eos_r
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                eos_dp_drho
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                eos_p_offset
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<generated::generic_coupled_update_generic_diffusion_demo::Constants>(
-            ) == 72
+            ) == 48
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_GENERIC_DIFFUSION_DEMO_NEUMANN_CONSTANTS_ASSERTS: () = {
@@ -1647,45 +1575,9 @@ pub mod layout_asserts {
             ) == 44
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                eos_gamma
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                eos_gm1
-            ) == 52
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                eos_r
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                eos_dp_drho
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                eos_p_offset
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<
                 generated::generic_coupled_update_generic_diffusion_demo_neumann::Constants,
-            >() == 72
+            >() == 48
         );
     };
     const GENERATED_GENERIC_COUPLED_UPDATE_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS: () = {
@@ -1762,44 +1654,8 @@ pub mod layout_asserts {
             ) == 44
         );
         assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum::Constants,
-                eos_gamma
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum::Constants,
-                eos_gm1
-            ) == 52
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum::Constants,
-                eos_r
-            ) == 56
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum::Constants,
-                eos_dp_drho
-            ) == 60
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum::Constants,
-                eos_p_offset
-            ) == 64
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::generic_coupled_update_incompressible_momentum::Constants,
-                eos_theta_ref
-            ) == 68
-        );
-        assert!(
             std::mem::size_of::<generated::generic_coupled_update_incompressible_momentum::Constants>(
-            ) == 72
+            ) == 48
         );
     };
     const GENERATED_PACKED_STATE_GRADIENTS_COMPRESSIBLE_VECTOR2_ASSERTS: () = {
@@ -19701,18 +19557,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub stride_x: u32,
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -19728,12 +19572,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -19748,12 +19586,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
                 }
             }
         }
@@ -19934,11 +19766,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             })
         }
         pub const SHADER_STRING: &str = r#"
-struct Vector2_ {
-    x: f32,
-    y: f32,
-}
-
 struct Constants {
     dt: f32,
     dt_old: f32,
@@ -19952,12 +19779,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -19971,8 +19792,7 @@ var<storage, read_write> x: array<f32>;
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
-    let num_cells = (arrayLength((&state)) / 22u);
-    if (idx >= num_cells) {
+    if (idx >= (arrayLength((&state)) / 22u)) {
         return;
     }
     let _e25 = state[((idx * 22u) + 0u)];
@@ -20216,18 +20036,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub stride_x: u32,
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -20243,12 +20051,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -20263,12 +20065,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
                 }
             }
         }
@@ -20431,11 +20227,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             })
         }
         pub const SHADER_STRING: &str = r#"
-struct Vector2_ {
-    x: f32,
-    y: f32,
-}
-
 struct Constants {
     dt: f32,
     dt_old: f32,
@@ -20449,12 +20240,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -20468,8 +20253,7 @@ var<storage, read_write> x: array<f32>;
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
-    let num_cells = (arrayLength((&state)) / 1u);
-    if (idx >= num_cells) {
+    if (idx >= (arrayLength((&state)) / 1u)) {
         return;
     }
     let _e25 = state[((idx * 1u) + 0u)];
@@ -20527,18 +20311,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub stride_x: u32,
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -20554,12 +20326,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -20574,12 +20340,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
                 }
             }
         }
@@ -20748,11 +20508,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             })
         }
         pub const SHADER_STRING: &str = r#"
-struct Vector2_ {
-    x: f32,
-    y: f32,
-}
-
 struct Constants {
     dt: f32,
     dt_old: f32,
@@ -20766,12 +20521,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -20785,8 +20534,7 @@ var<storage, read_write> x: array<f32>;
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
-    let num_cells = (arrayLength((&state)) / 1u);
-    if (idx >= num_cells) {
+    if (idx >= (arrayLength((&state)) / 1u)) {
         return;
     }
     let _e25 = state[((idx * 1u) + 0u)];
@@ -20844,18 +20592,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             pub stride_x: u32,
             #[doc = "offset: 44, size: 4, type: `u32`"]
             pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gamma: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 56, size: 4, type: `f32`"]
-            pub eos_r: f32,
-            #[doc = "offset: 60, size: 4, type: `f32`"]
-            pub eos_dp_drho: f32,
-            #[doc = "offset: 64, size: 4, type: `f32`"]
-            pub eos_p_offset: f32,
-            #[doc = "offset: 68, size: 4, type: `f32`"]
-            pub eos_theta_ref: f32,
         }
         impl Constants {
             pub const fn new(
@@ -20871,12 +20607,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 alpha_u: f32,
                 stride_x: u32,
                 time_scheme: u32,
-                eos_gamma: f32,
-                eos_gm1: f32,
-                eos_r: f32,
-                eos_dp_drho: f32,
-                eos_p_offset: f32,
-                eos_theta_ref: f32,
             ) -> Self {
                 Self {
                     dt,
@@ -20891,12 +20621,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     alpha_u,
                     stride_x,
                     time_scheme,
-                    eos_gamma,
-                    eos_gm1,
-                    eos_r,
-                    eos_dp_drho,
-                    eos_p_offset,
-                    eos_theta_ref,
                 }
             }
         }
@@ -21059,11 +20783,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             })
         }
         pub const SHADER_STRING: &str = r#"
-struct Vector2_ {
-    x: f32,
-    y: f32,
-}
-
 struct Constants {
     dt: f32,
     dt_old: f32,
@@ -21077,12 +20796,6 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
-    eos_gamma: f32,
-    eos_gm1_: f32,
-    eos_r: f32,
-    eos_dp_drho: f32,
-    eos_p_offset: f32,
-    eos_theta_ref: f32,
 }
 
 @group(0) @binding(0) 
@@ -21096,8 +20809,7 @@ var<storage, read_write> x: array<f32>;
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
-    let num_cells = (arrayLength((&state)) / 8u);
-    if (idx >= num_cells) {
+    if (idx >= (arrayLength((&state)) / 8u)) {
         return;
     }
     let _e25 = state[((idx * 8u) + 0u)];

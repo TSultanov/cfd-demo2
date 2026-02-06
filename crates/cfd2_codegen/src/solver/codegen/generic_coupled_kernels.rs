@@ -5,7 +5,8 @@ use super::constants::constants_struct;
 use super::dsl as typed;
 use super::state_access::state_component_slot;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt, Type,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt,
+    StorageClass, Type,
 };
 use super::wgsl_bindings::{storage_var, uniform_var, vector2_struct};
 use super::wgsl_dsl as dsl;
@@ -16,8 +17,13 @@ use crate::solver::codegen::primitive_expr::lower_primitive_expr;
 use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::ir::ports::{ParamSpec, ResolvedStateSlotsSpec};
-use crate::solver::ir::{Coefficient, Discretization};
+use crate::solver::ir::{
+    BindingAccess, Coefficient, Discretization, DispatchDomain, KernelBinding, KernelProgram,
+    LaunchSemantics,
+};
 use crate::solver::shared::PrimitiveExpr;
+
+const GENERIC_COUPLED_WORKGROUP_SIZE: u32 = 64;
 
 pub fn generate_generic_coupled_assembly_wgsl(
     system: &DiscreteSystem,
@@ -57,6 +63,33 @@ pub fn generate_generic_coupled_update_wgsl(
         relaxation_requires_dtau,
     )));
     KernelWgsl::from(module)
+}
+
+pub fn generate_generic_coupled_update_kernel_program(
+    id: &str,
+    system: &DiscreteSystem,
+    slots: &ResolvedStateSlotsSpec,
+    primitives: &[(u32, PrimitiveExpr)],
+    apply_relaxation: bool,
+    relaxation_requires_dtau: bool,
+    eos_params: &[ParamSpec],
+) -> Result<KernelProgram, String> {
+    let items = base_update_items(eos_params);
+    let bindings = kernel_bindings_from_items(&items)?;
+    let main = main_update_fn(
+        system,
+        slots,
+        primitives,
+        apply_relaxation,
+        relaxation_requires_dtau,
+    );
+    let (launch, consumed_stmts) = launch_from_update_statements(&main.body.stmts)?;
+    let kernel_stmts = &main.body.stmts[consumed_stmts..];
+
+    let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
+    program.body = super::wgsl_ast::render_stmt_lines(kernel_stmts);
+    program.local_symbols = super::wgsl_ast::collect_local_symbols(kernel_stmts);
+    Ok(program)
 }
 
 pub fn generate_generic_coupled_apply_wgsl(eos_params: &[ParamSpec]) -> KernelWgsl {
@@ -136,6 +169,99 @@ fn base_mesh_items(eos_params: &[ParamSpec]) -> Vec<Item> {
             AccessMode::Read,
         ),
     ]
+}
+
+fn kernel_bindings_from_items(items: &[Item]) -> Result<Vec<KernelBinding>, String> {
+    let mut bindings = Vec::new();
+    for item in items {
+        let Item::GlobalVar(var) = item else {
+            continue;
+        };
+        let Some((group, binding)) = group_binding_from_attributes(&var.attributes) else {
+            continue;
+        };
+        let access = match var.storage {
+            StorageClass::Storage => match var.access {
+                Some(AccessMode::Read) => BindingAccess::ReadOnlyStorage,
+                Some(AccessMode::ReadWrite) => BindingAccess::ReadWriteStorage,
+                None => {
+                    return Err(format!(
+                        "generic_coupled_update: storage var '{}' missing access mode",
+                        var.name
+                    ));
+                }
+            },
+            StorageClass::Uniform => BindingAccess::Uniform,
+            StorageClass::Workgroup => continue,
+        };
+        bindings.push(KernelBinding::new(
+            group,
+            binding,
+            &var.name,
+            var.ty.to_string(),
+            access,
+        ));
+    }
+    Ok(bindings)
+}
+
+fn group_binding_from_attributes(attrs: &[Attribute]) -> Option<(u32, u32)> {
+    let mut group = None;
+    let mut binding = None;
+    for attr in attrs {
+        match attr {
+            Attribute::Group(value) => group = Some(*value),
+            Attribute::Binding(value) => binding = Some(*value),
+            _ => {}
+        }
+    }
+    group.zip(binding)
+}
+
+fn launch_from_update_statements(stmts: &[Stmt]) -> Result<(LaunchSemantics, usize), String> {
+    let idx_expr = match stmts.first() {
+        Some(Stmt::Let { name, expr, .. }) if name == "idx" => expr.to_string(),
+        _ => {
+            return Err(
+                "generic_coupled_update: expected first statement to define idx launch expression"
+                    .to_string(),
+            );
+        }
+    };
+
+    let num_cells_expr = match stmts.get(1) {
+        Some(Stmt::Let { name, expr, .. }) if name == "num_cells" => expr.to_string(),
+        _ => {
+            return Err(
+                "generic_coupled_update: expected second statement to define num_cells".to_string(),
+            );
+        }
+    };
+
+    match stmts.get(2) {
+        Some(Stmt::If {
+            then_block,
+            else_block,
+            ..
+        }) if else_block.is_none()
+            && then_block.stmts.len() == 1
+            && matches!(then_block.stmts.first(), Some(Stmt::Return(None))) => {}
+        _ => {
+            return Err(
+                "generic_coupled_update: expected third statement to be idx bounds guard"
+                    .to_string(),
+            );
+        }
+    }
+
+    Ok((
+        LaunchSemantics::new(
+            [GENERIC_COUPLED_WORKGROUP_SIZE, 1, 1],
+            idx_expr,
+            Some(format!("idx >= ({num_cells_expr})")),
+        ),
+        3,
+    ))
 }
 
 fn base_state_items(needs_gradients: bool) -> Vec<Item> {
@@ -737,7 +863,10 @@ fn main_assembly_fn(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) -> 
         "main",
         params,
         None,
-        vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
+        vec![
+            Attribute::Compute,
+            Attribute::WorkgroupSize(GENERIC_COUPLED_WORKGROUP_SIZE),
+        ],
         Block::new(stmts),
     )
 }
@@ -845,7 +974,10 @@ fn main_update_fn(
         "main",
         params,
         None,
-        vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
+        vec![
+            Attribute::Compute,
+            Attribute::WorkgroupSize(GENERIC_COUPLED_WORKGROUP_SIZE),
+        ],
         Block::new(stmts),
     )
 }
@@ -906,7 +1038,10 @@ fn main_apply_fn() -> Function {
         "main",
         params,
         None,
-        vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
+        vec![
+            Attribute::Compute,
+            Attribute::WorkgroupSize(GENERIC_COUPLED_WORKGROUP_SIZE),
+        ],
         Block::new(stmts),
     )
 }
@@ -963,6 +1098,91 @@ mod tests {
         assert!(
             wgsl.contains("/ constants.dtau"),
             "expected assembly WGSL to include a 1/dtau diagonal contribution"
+        );
+    }
+
+    #[test]
+    fn generic_coupled_update_program_extracts_launch_and_body_from_dsl() {
+        let u = vol_scalar_dim::<cfd2_ir::solver::dimensions::Velocity>("u");
+
+        let mut eqn = Equation::new(u);
+        eqn.add_term(fvm::ddt(u));
+
+        let mut system = EquationSystem::new();
+        system.add_equation(eqn);
+
+        let layout = crate::solver::ir::StateLayout::new(vec![u]);
+        let slots = slots_from_layout(&layout);
+        let schemes = SchemeRegistry::new(Scheme::Upwind);
+        let discrete = lower_system(&system, &schemes).expect("lower_system");
+
+        let program = generate_generic_coupled_update_kernel_program(
+            "generic_coupled_update",
+            &discrete,
+            &slots,
+            &[],
+            false,
+            false,
+            &[],
+        )
+        .expect("generate update kernel program");
+
+        assert_eq!(program.id, "generic_coupled_update");
+        assert_eq!(
+            program.launch.invocation_index_expr,
+            "global_id.y * constants.stride_x + global_id.x"
+        );
+        assert_eq!(
+            program.launch.bounds_check_expr.as_deref(),
+            Some("idx >= (arrayLength(&state) / 1u)")
+        );
+        assert!(
+            !program.body.iter().any(|line| line.contains("let idx")),
+            "idx declaration should be represented by launch semantics, not body lines"
+        );
+        assert!(
+            !program.body.iter().any(|line| line.contains("num_cells")),
+            "num_cells helper should be folded into launch bounds check"
+        );
+    }
+
+    #[test]
+    fn generic_coupled_update_program_local_symbols_exclude_launch_aliases() {
+        let u = vol_scalar_dim::<cfd2_ir::solver::dimensions::Velocity>("u");
+
+        let mut eqn = Equation::new(u);
+        eqn.add_term(fvm::ddt(u));
+
+        let mut system = EquationSystem::new();
+        system.add_equation(eqn);
+
+        let layout = crate::solver::ir::StateLayout::new(vec![u]);
+        let slots = slots_from_layout(&layout);
+        let schemes = SchemeRegistry::new(Scheme::Upwind);
+        let discrete = lower_system(&system, &schemes).expect("lower_system");
+
+        let program = generate_generic_coupled_update_kernel_program(
+            "generic_coupled_update",
+            &discrete,
+            &slots,
+            &[],
+            true,
+            false,
+            &[],
+        )
+        .expect("generate update kernel program");
+
+        assert!(
+            program.local_symbols.is_empty(),
+            "update body emits no `let`/`var` declarations after launch extraction"
+        );
+        assert!(
+            !program.local_symbols.iter().any(|s| s == "idx"),
+            "`idx` launch alias should not be tracked as a renameable local symbol"
+        );
+        assert!(
+            !program.local_symbols.iter().any(|s| s == "num_cells"),
+            "`num_cells` launch helper should not remain after launch extraction"
         );
     }
 }

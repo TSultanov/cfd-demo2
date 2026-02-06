@@ -130,5 +130,5 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 - [x] Regenerate `FUSION_COVERAGE.md` after migrating `generic_coupled_assembly*` to DSL.
 - [x] Reconfirm active Rhie-Chow fusion opportunities and rule synthesis status.
 - [x] Reconfirm `generic_coupled_assembly -> generic_coupled_assembly_grad_state` is technically synthesizeable (`Safe` and `Aggressive`) once both kernels are DSL.
+- [x] Migrate `generic_coupled_update` to DSL and regenerate coverage (legacy DSL-migration-eligible per-model kernels now reduced to zero).
 - [ ] Decide whether to declare an explicit assembly-pair fusion rule despite mutually-exclusive kernel conditions.
-- [ ] Migrate `generic_coupled_update` to DSL to unlock reassessment of additional update-phase fusion opportunities.

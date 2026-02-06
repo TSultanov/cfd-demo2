@@ -28,3 +28,21 @@ pub(crate) fn kernel_source_by_id(
         kernel_id.as_str()
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn synthesized_rhie_chow_fused_kernel_is_present_in_generated_registry() {
+        let src = kernel_source_by_id(
+            "incompressible_momentum",
+            KernelId("rhie_chow/dp_update_store_grad_p_fused"),
+        )
+        .expect("missing synthesized fused rhie-chow kernel in generated registry");
+        assert!(
+            !src.bindings.is_empty(),
+            "fused rhie-chow kernel registry entry should include reflected bindings"
+        );
+    }
+}

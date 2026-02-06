@@ -365,6 +365,18 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
         by_slot.insert(key, binding);
     }
 
+    // Most kernel DSL programs in this repo use the shared runtime `Constants` uniform.
+    // Emit the canonical struct definition so lowered WGSL is self-contained.
+    let needs_constants_struct = by_slot.values().any(|binding| binding.wgsl_type == "Constants");
+    if needs_constants_struct {
+        let mut constants_module = super::wgsl_ast::Module::new();
+        constants_module.push(super::wgsl_ast::Item::Struct(
+            super::constants::constants_struct(&[]),
+        ));
+        lines.push(constants_module.to_wgsl());
+        lines.push(String::new());
+    }
+
     for binding in by_slot.values() {
         let decl = match binding.access {
             BindingAccess::ReadOnlyStorage => {
@@ -538,5 +550,6 @@ mod tests {
         let wgsl2 = lower_kernel_program_to_wgsl(&fused).expect("wgsl");
         assert_eq!(wgsl1.to_wgsl(), wgsl2.to_wgsl());
         assert!(wgsl1.to_wgsl().contains("@compute @workgroup_size(64, 1, 1)"));
+        assert!(wgsl1.to_wgsl().contains("struct Constants"));
     }
 }

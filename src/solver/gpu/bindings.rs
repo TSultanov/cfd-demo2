@@ -2,15 +2,9 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: e6e8175ab6e0886e92fe35666ae5e29333a22955c79ac7e0e74355cbef8e53d5
+// SourceHash: 51cb84cb27ca863c1dfe69d94343336d5068eb8dad39c272d4eed0130ae66720
 
-#![allow(
-    unused,
-    non_snake_case,
-    non_camel_case_types,
-    non_upper_case_globals,
-    clippy::too_many_arguments
-)]
+#![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShaderEntry {
     Amg,
@@ -6233,53 +6227,29 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub const ENTRY_MAIN: &str = "main";
         #[derive(Debug)]
         pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub scalar_row_offsets: wgpu::BufferBinding<'a>,
-            pub diagonal_indices: wgpu::BufferBinding<'a>,
-            pub matrix_values: wgpu::BufferBinding<'a>,
             pub state: wgpu::BufferBinding<'a>,
             pub constants: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
-            pub scalar_row_offsets: wgpu::BindGroupEntry<'a>,
-            pub diagonal_indices: wgpu::BindGroupEntry<'a>,
-            pub matrix_values: wgpu::BindGroupEntry<'a>,
             pub state: wgpu::BindGroupEntry<'a>,
             pub constants: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
                 Self {
-                    scalar_row_offsets: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.scalar_row_offsets),
-                    },
-                    diagonal_indices: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.diagonal_indices),
-                    },
-                    matrix_values: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.matrix_values),
-                    },
                     state: wgpu::BindGroupEntry {
-                        binding: 3,
+                        binding: 0,
                         resource: wgpu::BindingResource::Buffer(params.state),
                     },
                     constants: wgpu::BindGroupEntry {
-                        binding: 4,
+                        binding: 1,
                         resource: wgpu::BindingResource::Buffer(params.constants),
                     },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 5] {
-                [
-                    self.scalar_row_offsets,
-                    self.diagonal_indices,
-                    self.matrix_values,
-                    self.state,
-                    self.constants,
-                ]
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
                 self.into_array().into_iter().collect()
@@ -6288,7 +6258,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedDpUpdateFromDiagIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"scalar_row_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"diagonal_indices\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"matrix_values\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: dp_update_from_diag_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedDpUpdateFromDiagIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: dp_update_from_diag_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -6361,31 +6331,25 @@ struct Constants {
 }
 
 @group(0) @binding(0) 
-var<storage> scalar_row_offsets: array<u32>;
-@group(0) @binding(1) 
-var<storage> diagonal_indices: array<u32>;
-@group(0) @binding(2) 
-var<storage> matrix_values: array<f32>;
-@group(0) @binding(3) 
 var<storage, read_write> state: array<f32>;
-@group(0) @binding(4) 
+@group(0) @binding(1) 
 var<uniform> constants: Constants;
 
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
-    let num_cells = (arrayLength((&scalar_row_offsets)) - 1u);
-    if (idx >= num_cells) {
+    if (idx >= (arrayLength((&state)) / 8u)) {
         return;
     }
-    let _e15 = constants.density;
-    let rho = max(_e15, 0.000000000001f);
-    let _e20 = constants.dt;
-    let dt = max(_e20, 0f);
-    let _e25 = constants.alpha_u;
-    let d_p = ((_e25 * dt) / rho);
-    state[((idx * 8u) + 3u)] = d_p;
+    let base = (idx * 8u);
+    let _e17 = constants.density;
+    let rho = max(_e17, 0.000000000001f);
+    let _e22 = constants.dt;
+    let dt = max(_e22, 0f);
+    let _e27 = constants.alpha_u;
+    let d_p = ((_e27 * dt) / rho);
+    state[(base + 3u)] = d_p;
     return;
 }
 "#;
@@ -24325,8 +24289,7 @@ var<uniform> constants: Constants;
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
-    let num_cells = (arrayLength((&state)) / 8u);
-    if (idx >= num_cells) {
+    if (idx >= (arrayLength((&state)) / 8u)) {
         return;
     }
     let base = (idx * 8u);
@@ -25035,8 +24998,7 @@ var<uniform> constants: Constants;
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e4 = constants.stride_x;
     let idx = ((global_id.y * _e4) + global_id.x);
-    let num_cells = (arrayLength((&state)) / 8u);
-    if (idx >= num_cells) {
+    if (idx >= (arrayLength((&state)) / 8u)) {
         return;
     }
     let base = (idx * 8u);

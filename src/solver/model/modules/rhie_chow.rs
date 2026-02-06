@@ -6,6 +6,9 @@ use crate::solver::model::module::{KernelBundleModule, ModuleInvariant};
 use crate::solver::model::KernelId;
 
 use cfd2_codegen::solver::codegen::KernelWgsl;
+use cfd2_ir::solver::ir::{
+    BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelProgram, LaunchSemantics,
+};
 
 mod wgsl {
     include!("rhie_chow_wgsl.rs");
@@ -97,34 +100,17 @@ pub fn rhie_chow_aux_module(
 
     // Clone coupling data for the generator closures
     let coupling_for_dp_update = coupling;
-    let coupling_for_store = coupling;
     let coupling_for_correct = coupling;
 
     let generators = vec![
         ModelKernelGeneratorSpec::new(kernel_dp_init, move |model, _schemes| {
             generate_dp_init_kernel_wgsl(model, dp_field)
         }),
-        ModelKernelGeneratorSpec::new(kernel_dp_update_from_diag, move |model, _schemes| {
-            generate_dp_update_from_diag_kernel_wgsl(model, dp_field, coupling_for_dp_update)
+        ModelKernelGeneratorSpec::new_dsl(kernel_dp_update_from_diag, move |model, _schemes| {
+            generate_dp_update_from_diag_kernel_program(model, dp_field, coupling_for_dp_update)
         }),
-        ModelKernelGeneratorSpec::new(
-            kernel_dp_update_store_grad_p_fused,
-            move |model, _schemes| {
-                generate_rhie_chow_dp_update_store_grad_p_fused_kernel_wgsl(
-                    model,
-                    dp_field,
-                    grad_p_name,
-                    grad_p_old_name,
-                )
-            },
-        ),
-        ModelKernelGeneratorSpec::new(kernel_store_grad_p, move |model, _schemes| {
-            generate_rhie_chow_store_grad_p_kernel_wgsl(
-                model,
-                coupling_for_store,
-                grad_p_name,
-                grad_p_old_name,
-            )
+        ModelKernelGeneratorSpec::new_dsl(kernel_store_grad_p, move |model, _schemes| {
+            generate_rhie_chow_store_grad_p_kernel_program(model, grad_p_name, grad_p_old_name)
         }),
         ModelKernelGeneratorSpec::new(kernel_grad_p_update, move |model, _schemes| {
             generate_rhie_chow_grad_p_update_kernel_wgsl(model)
@@ -233,11 +219,28 @@ fn generate_dp_init_kernel_wgsl(
     Ok(wgsl::generate_dp_init_wgsl(stride, d_p_offset))
 }
 
-fn generate_dp_update_from_diag_kernel_wgsl(
+fn rhie_chow_state_launch(state_stride: u32) -> LaunchSemantics {
+    LaunchSemantics::new(
+        [64, 1, 1],
+        "global_id.y * constants.stride_x + global_id.x",
+        Some(format!(
+            "idx >= (arrayLength(&state) / max({state_stride}u, 1u))"
+        )),
+    )
+}
+
+fn rhie_chow_state_bindings() -> Vec<KernelBinding> {
+    vec![
+        KernelBinding::new(0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage),
+        KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
+    ]
+}
+
+fn generate_dp_update_from_diag_kernel_program(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
     coupling: crate::solver::model::invariants::MomentumPressureCoupling,
-) -> Result<KernelWgsl, String> {
+) -> Result<KernelProgram, String> {
     use crate::solver::model::ports::dimensions::{AnyDimension, D_P};
     use crate::solver::model::ports::PortRegistry;
 
@@ -257,74 +260,28 @@ fn generate_dp_update_from_diag_kernel_wgsl(
     let stride = registry.state_layout().stride();
     let d_p_offset = d_p.offset();
 
-    let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
-    let mut u_indices = Vec::new();
-    for component in 0..2u32 {
-        let Some(offset) = flux_layout.offset_for_field_component(momentum, component) else {
-            return Err(format!(
-                "dp_update_from_diag: missing unknown offset for momentum field '{}' component {}",
-                momentum.name(),
-                component
-            ));
-        };
-        u_indices.push(offset);
-    }
+    let mut program = KernelProgram::new(
+        "dp_update_from_diag",
+        DispatchDomain::Cells,
+        rhie_chow_state_launch(stride),
+        rhie_chow_state_bindings(),
+    );
+    program.indexing = vec![format!("let base = idx * {stride}u;")];
+    program.preamble = vec![
+        "let rho = max(constants.density, 1e-12);".to_string(),
+        "let dt = max(constants.dt, 0.0);".to_string(),
+        "let d_p = constants.alpha_u * dt / rho;".to_string(),
+    ];
+    program.body = vec![format!("state[base + {d_p_offset}u] = d_p;")];
+    program.local_symbols = vec!["rho".to_string(), "dt".to_string(), "d_p".to_string()];
+    program.side_effects.read_set.insert(EffectResource::binding(0, 1));
+    program.side_effects.write_set.insert(EffectResource::component(
+        0,
+        0,
+        format!("state:{d_p_offset}"),
+    ));
 
-    wgsl::generate_dp_update_from_diag_wgsl(
-        stride,
-        d_p_offset,
-        model.system.unknowns_per_cell(),
-        &u_indices,
-    )
-}
-
-fn generate_rhie_chow_dp_update_store_grad_p_fused_kernel_wgsl(
-    model: &crate::solver::model::ModelSpec,
-    dp_field: &str,
-    grad_p_name: &'static str,
-    grad_p_old_name: &'static str,
-) -> Result<KernelWgsl, String> {
-    use crate::solver::model::ports::dimensions::{PressureGradient, D_P};
-    use crate::solver::model::ports::PortRegistry;
-
-    let mut registry = PortRegistry::new(model.state_layout.clone());
-
-    let d_p = registry
-        .register_scalar_field::<D_P>(dp_field)
-        .map_err(|e| format!("rhie_chow/fused_dp_update_store: {e}"))?;
-    let grad_p = registry
-        .register_vector2_field::<PressureGradient>(grad_p_name)
-        .map_err(|e| format!("rhie_chow/fused_dp_update_store: {e}"))?;
-    let grad_old = registry
-        .register_vector2_field::<PressureGradient>(grad_p_old_name)
-        .map_err(|e| format!("rhie_chow/fused_dp_update_store: {e}"))?;
-
-    let stride = registry.state_layout().stride();
-    let grad_p_x = grad_p
-        .component(0)
-        .map(|c| c.full_offset())
-        .ok_or("rhie_chow/fused_dp_update_store: grad_p component 0")?;
-    let grad_p_y = grad_p
-        .component(1)
-        .map(|c| c.full_offset())
-        .ok_or("rhie_chow/fused_dp_update_store: grad_p component 1")?;
-    let grad_old_x = grad_old
-        .component(0)
-        .map(|c| c.full_offset())
-        .ok_or("rhie_chow/fused_dp_update_store: grad_old component 0")?;
-    let grad_old_y = grad_old
-        .component(1)
-        .map(|c| c.full_offset())
-        .ok_or("rhie_chow/fused_dp_update_store: grad_old component 1")?;
-
-    Ok(wgsl::generate_dp_update_store_grad_p_fused_wgsl(
-        stride,
-        d_p.offset(),
-        grad_p_x,
-        grad_p_y,
-        grad_old_x,
-        grad_old_y,
-    ))
+    Ok(program)
 }
 
 fn generate_rhie_chow_grad_p_update_kernel_wgsl(
@@ -346,12 +303,11 @@ fn generate_rhie_chow_grad_p_update_kernel_wgsl(
     )
 }
 
-fn generate_rhie_chow_store_grad_p_kernel_wgsl(
+fn generate_rhie_chow_store_grad_p_kernel_program(
     model: &crate::solver::model::ModelSpec,
-    _coupling: crate::solver::model::invariants::MomentumPressureCoupling,
     grad_p_name: &'static str,
     grad_p_old_name: &'static str,
-) -> Result<KernelWgsl, String> {
+) -> Result<KernelProgram, String> {
     use crate::solver::model::ports::dimensions::PressureGradient;
     use crate::solver::model::ports::PortRegistry;
 
@@ -394,9 +350,27 @@ fn generate_rhie_chow_store_grad_p_kernel_wgsl(
         .map(|c| c.full_offset())
         .ok_or("grad_old component 1")?;
 
-    Ok(wgsl::generate_rhie_chow_store_grad_p_wgsl(
-        stride, grad_p_x, grad_p_y, grad_old_x, grad_old_y,
-    ))
+    let mut program = KernelProgram::new(
+        "rhie_chow/store_grad_p",
+        DispatchDomain::Cells,
+        rhie_chow_state_launch(stride),
+        rhie_chow_state_bindings(),
+    );
+    program.indexing = vec![format!("let base = idx * {stride}u;")];
+    program.body = vec![
+        format!("state[base + {grad_old_x}u] = state[base + {grad_p_x}u];"),
+        format!("state[base + {grad_old_y}u] = state[base + {grad_p_y}u];"),
+    ];
+    program.side_effects.read_set.extend([
+        EffectResource::component(0, 0, format!("state:{grad_p_x}")),
+        EffectResource::component(0, 0, format!("state:{grad_p_y}")),
+    ]);
+    program.side_effects.write_set.extend([
+        EffectResource::component(0, 0, format!("state:{grad_old_x}")),
+        EffectResource::component(0, 0, format!("state:{grad_old_y}")),
+    ]);
+
+    Ok(program)
 }
 
 fn generate_rhie_chow_correct_velocity_delta_kernel_wgsl(
@@ -560,6 +534,54 @@ mod tests {
                 )
             });
         }
+    }
+
+    #[test]
+    fn contract_rhie_chow_fused_kernel_is_synthesized_from_dsl_inputs() {
+        let model = crate::solver::model::incompressible_momentum_model();
+        let rhie_chow_module = model
+            .modules
+            .iter()
+            .find(|module| module.name == "rhie_chow_aux")
+            .expect("incompressible model missing rhie_chow_aux module");
+
+        assert!(
+            !rhie_chow_module
+                .generators
+                .iter()
+                .any(|gen| gen.id.as_str() == "rhie_chow/dp_update_store_grad_p_fused"),
+            "fused replacement should not have a handwritten generator"
+        );
+
+        let schemes = crate::solver::ir::SchemeRegistry::default();
+        let mut out_dir = std::env::temp_dir();
+        out_dir.push(format!(
+            "cfd2_rhie_chow_fused_synth_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&out_dir).expect("create temp output dir");
+
+        let emitted = crate::solver::model::kernel::emit_model_kernels_wgsl_with_ids(
+            &out_dir, &model, &schemes,
+        )
+        .expect("emit model kernels");
+        let fused_path = emitted
+            .iter()
+            .find_map(|(id, path)| {
+                (id.as_str() == "rhie_chow/dp_update_store_grad_p_fused").then_some(path)
+            })
+            .expect("synthesized fused rhie-chow kernel path");
+        let fused_src = std::fs::read_to_string(fused_path).expect("read synthesized fused kernel");
+        assert!(
+            fused_src.contains("synthesized by fusion rule: rhie_chow:dp_update_store_grad_p_v1"),
+            "expected fusion synthesis marker in fused Rhie-Chow WGSL"
+        );
+
+        let _ = std::fs::remove_dir_all(&out_dir);
     }
 
     #[test]

@@ -1059,6 +1059,49 @@ mod tests {
     }
 
     #[test]
+    fn recipe_aggressive_matches_safe_for_current_rhie_chow_schedule() {
+        let mut safe_model = incompressible_momentum_model();
+        let mut safe_solver = safe_model
+            .linear_solver
+            .expect("missing linear_solver for safe model");
+        safe_solver.solver.kernel_fusion_policy = KernelFusionPolicy::Safe;
+        safe_model.linear_solver = Some(safe_solver);
+
+        let mut aggressive_model = incompressible_momentum_model();
+        let mut aggressive_solver = aggressive_model
+            .linear_solver
+            .expect("missing linear_solver for aggressive model");
+        aggressive_solver.solver.kernel_fusion_policy = KernelFusionPolicy::Aggressive;
+        aggressive_model.linear_solver = Some(aggressive_solver);
+
+        let safe_recipe = SolverRecipe::from_model(
+            &safe_model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Coupled,
+        )
+        .expect("safe recipe");
+        let aggressive_recipe = SolverRecipe::from_model(
+            &aggressive_model,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+            PreconditionerType::Jacobi,
+            SteppingMode::Coupled,
+        )
+        .expect("aggressive recipe");
+
+        assert_eq!(safe_recipe.applied_fusions, aggressive_recipe.applied_fusions);
+        let safe_kernel_ids: Vec<&str> = safe_recipe.kernels.iter().map(|k| k.id.as_str()).collect();
+        let aggressive_kernel_ids: Vec<&str> = aggressive_recipe
+            .kernels
+            .iter()
+            .map(|k| k.id.as_str())
+            .collect();
+        assert_eq!(safe_kernel_ids, aggressive_kernel_ids);
+    }
+
+    #[test]
     fn recipe_errors_when_compile_time_schedule_is_missing() {
         let mut model = generic_diffusion_demo_model();
         model.id = "generic_diffusion_demo_unregistered";

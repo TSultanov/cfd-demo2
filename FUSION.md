@@ -45,15 +45,15 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 - [x] Ensure `generate_kernel_registry_map` includes synthesized fused kernels.
 - [x] Ensure `generate_fusion_schedule_registry` validates resolvability of synthesized outputs.
 - [x] Keep generated registry entries deterministic across builds.
-- [ ] Add a contract/integration test that generated registry contains synthesized fused entries.
+- [x] Add a contract/integration test that generated registry contains synthesized fused entries.
 
 ## 5) Pilot Migration: Rhie-Chow
 
-- [ ] Migrate `rhie_chow:dp_update_store_grad_p_v1` to synthesized fusion output.
-- [ ] Remove manual fused kernel generator/body once synthesized path is validated.
-- [ ] Keep stable fused kernel id (`rhie_chow/dp_update_store_grad_p_fused`) to avoid runtime churn.
-- [ ] Keep schedule behavior unchanged for `Off`/`Safe`/`Aggressive` until aggressive semantics are expanded.
-- [ ] Add parity test: fused vs unfused Rhie-Chow results remain numerically equivalent within tolerance.
+- [x] Migrate `rhie_chow:dp_update_store_grad_p_v1` to synthesized fusion output.
+- [x] Remove manual fused kernel generator/body once synthesized path is validated.
+- [x] Keep stable fused kernel id (`rhie_chow/dp_update_store_grad_p_fused`) to avoid runtime churn.
+- [x] Keep schedule behavior unchanged for `Off`/`Safe`/`Aggressive` until aggressive semantics are expanded.
+- [x] Add parity test: fused vs unfused Rhie-Chow results remain numerically equivalent within tolerance.
 
 ## 6) Policy Semantics and Expansion
 
@@ -74,16 +74,16 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 ## 8) Validation Matrix
 
 - [ ] Unit tests:
-  - [ ] fusion matcher,
-  - [ ] hazard analysis,
-  - [ ] symbol/bind merge,
-  - [ ] deterministic output naming.
+  - [x] fusion matcher,
+  - [x] hazard analysis,
+  - [x] symbol/bind merge,
+  - [x] deterministic output naming.
 - [ ] Contract tests:
-  - [ ] compile-time-only schedule lookup,
-  - [ ] no runtime fusion path,
-  - [ ] registry completeness for fused kernels.
+  - [x] compile-time-only schedule lookup,
+  - [x] no runtime fusion path,
+  - [x] registry completeness for fused kernels.
 - [ ] Numerical regression tests:
-  - [ ] `Off` vs `Safe` parity,
+  - [x] `Off` vs `Safe` parity,
   - [ ] `Safe` vs `Aggressive` parity where expected.
 - [ ] Performance checks:
   - [ ] dispatch count reduction (via dispatch counter),

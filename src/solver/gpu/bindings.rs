@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 5941e854368e5644612484c0eb65e562b665f89d076d6cdda63b27d082b60199
+// SourceHash: a619717887ea6fcfaa6096f71b89509a7771a59293faad903c9ca4ed81ca8dd1
 
 #![allow(
     unused,
@@ -34,6 +34,7 @@ pub enum ShaderEntry {
     GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum,
     GeneratedGenericCoupledAssemblyIncompressibleMomentum,
     GeneratedGenericCoupledUpdateCompressible,
+    GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum,
     GeneratedGenericCoupledUpdateGenericDiffusionDemo,
     GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann,
     GeneratedGenericCoupledUpdateIncompressibleMomentum,
@@ -63,10 +64,10 @@ pub enum ShaderEntry {
 }
 impl ShaderEntry {
     pub fn create_pipeline_layout(&self, device: &wgpu::Device) -> wgpu::PipelineLayout {
-        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressible => generated :: flux_module_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: GmresUpdateFused => gmres_update_fused :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: OuterConvergence => outer_convergence :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
+        match self { Self :: Amg => amg :: create_pipeline_layout (device) , Self :: AmgPack => amg_pack :: create_pipeline_layout (device) , Self :: BlockPrecond => block_precond :: create_pipeline_layout (device) , Self :: DotProduct => dot_product :: create_pipeline_layout (device) , Self :: DotProductPair => dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressible => generated :: flux_module_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum => generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_pipeline_layout (device) , Self :: GenericCoupledSchurSetup => generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GmresCgs => gmres_cgs :: create_pipeline_layout (device) , Self :: GmresLogic => gmres_logic :: create_pipeline_layout (device) , Self :: GmresOps => gmres_ops :: create_pipeline_layout (device) , Self :: GmresUpdateFused => gmres_update_fused :: create_pipeline_layout (device) , Self :: LinearSolver => linear_solver :: create_pipeline_layout (device) , Self :: OuterConvergence => outer_convergence :: create_pipeline_layout (device) , Self :: Scalars => scalars :: create_pipeline_layout (device) , Self :: SchurPrecond => schur_precond :: create_pipeline_layout (device) , Self :: SchurPrecondGeneric => schur_precond_generic :: create_pipeline_layout (device) , }
     }
     pub fn create_shader_module_embed_source(&self, device: &wgpu::Device) -> wgpu::ShaderModule {
-        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressible => { generated :: flux_module_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: GmresUpdateFused => { gmres_update_fused :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: OuterConvergence => { outer_convergence :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
+        match self { Self :: Amg => { amg :: create_shader_module_embed_source (device) } , Self :: AmgPack => { amg_pack :: create_shader_module_embed_source (device) } , Self :: BlockPrecond => { block_precond :: create_shader_module_embed_source (device) } , Self :: DotProduct => { dot_product :: create_shader_module_embed_source (device) } , Self :: DotProductPair => { dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressible => { generated :: flux_module_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum => { generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GenericCoupledSchurSetup => { generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GmresCgs => { gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GmresLogic => { gmres_logic :: create_shader_module_embed_source (device) } , Self :: GmresOps => { gmres_ops :: create_shader_module_embed_source (device) } , Self :: GmresUpdateFused => { gmres_update_fused :: create_shader_module_embed_source (device) } , Self :: LinearSolver => { linear_solver :: create_shader_module_embed_source (device) } , Self :: OuterConvergence => { outer_convergence :: create_shader_module_embed_source (device) } , Self :: Scalars => { scalars :: create_shader_module_embed_source (device) } , Self :: SchurPrecond => { schur_precond :: create_shader_module_embed_source (device) } , Self :: SchurPrecondGeneric => { schur_precond_generic :: create_shader_module_embed_source (device) } , }
     }
 }
 mod _root {
@@ -1424,6 +1425,7 @@ pub mod layout_asserts {
             std::mem::size_of::<generated::generic_coupled_update_compressible::Constants>() == 48
         );
     };
+    const GENERATED_GENERIC_COUPLED_UPDATE_DP_INIT_FUSED_INCOMPRESSIBLE_MOMENTUM_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants > () == 48) ; } ;
     const GENERATED_GENERIC_COUPLED_UPDATE_GENERIC_DIFFUSION_DEMO_CONSTANTS_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
@@ -3459,6 +3461,14 @@ pub mod bytemuck_impls {
     }
     unsafe impl bytemuck::Zeroable for generated::generic_coupled_update_compressible::Constants {}
     unsafe impl bytemuck::Pod for generated::generic_coupled_update_compressible::Constants {}
+    unsafe impl bytemuck::Zeroable
+        for generated::generic_coupled_update_dp_init_fused_incompressible_momentum::Constants
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::generic_coupled_update_dp_init_fused_incompressible_momentum::Constants
+    {
+    }
     unsafe impl bytemuck::Zeroable
         for generated::generic_coupled_update_generic_diffusion_demo::Constants
     {
@@ -19775,214 +19785,527 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (idx >= (arrayLength((&state)) / 22u)) {
         return;
     }
-    let _e25 = state[((idx * 22u) + 0u)];
-    let _e32 = x[((idx * 8u) + 0u)];
-    let _e39 = state[((idx * 22u) + 0u)];
-    let _e46 = x[((idx * 8u) + 0u)];
-    let _e49 = constants.alpha_u;
-    let _e52 = constants.dtau;
-    let _e64 = state[((idx * 22u) + 0u)];
-    let _e71 = state[((idx * 22u) + 0u)];
-    let _e79 = state[((idx * 22u) + 0u)];
-    let _e91 = x[((idx * 8u) + 0u)];
-    let _e98 = x[((idx * 8u) + 0u)];
-    let _e106 = x[((idx * 8u) + 0u)];
-    state[((idx * 22u) + 0u)] = select(_e25, select(_e32, mix(_e39, _e46, select(1f, _e49, (_e52 > 0f))), ((_e64 == _e71) && (abs(_e79) < 340000000000000000000000000000000000000f))), ((_e91 == _e98) && (abs(_e106) < 340000000000000000000000000000000000000f)));
-    let _e124 = state[((idx * 22u) + 0u)];
-    let _e131 = x[((idx * 8u) + 0u)];
-    let _e138 = state[((idx * 22u) + 0u)];
-    let _e145 = x[((idx * 8u) + 0u)];
-    let _e148 = constants.alpha_u;
-    let _e151 = constants.dtau;
-    let _e163 = state[((idx * 22u) + 0u)];
-    let _e170 = state[((idx * 22u) + 0u)];
-    let _e178 = state[((idx * 22u) + 0u)];
-    let _e190 = x[((idx * 8u) + 0u)];
-    let _e197 = x[((idx * 8u) + 0u)];
-    let _e205 = x[((idx * 8u) + 0u)];
-    x[((idx * 8u) + 0u)] = select(_e124, select(_e131, mix(_e138, _e145, select(1f, _e148, (_e151 > 0f))), ((_e163 == _e170) && (abs(_e178) < 340000000000000000000000000000000000000f))), ((_e190 == _e197) && (abs(_e205) < 340000000000000000000000000000000000000f)));
-    let _e223 = state[((idx * 22u) + 1u)];
-    let _e230 = x[((idx * 8u) + 1u)];
-    let _e237 = state[((idx * 22u) + 1u)];
-    let _e244 = x[((idx * 8u) + 1u)];
-    let _e247 = constants.alpha_u;
-    let _e250 = constants.dtau;
-    let _e262 = state[((idx * 22u) + 1u)];
-    let _e269 = state[((idx * 22u) + 1u)];
-    let _e277 = state[((idx * 22u) + 1u)];
-    let _e289 = x[((idx * 8u) + 1u)];
-    let _e296 = x[((idx * 8u) + 1u)];
-    let _e304 = x[((idx * 8u) + 1u)];
-    state[((idx * 22u) + 1u)] = select(_e223, select(_e230, mix(_e237, _e244, select(1f, _e247, (_e250 > 0f))), ((_e262 == _e269) && (abs(_e277) < 340000000000000000000000000000000000000f))), ((_e289 == _e296) && (abs(_e304) < 340000000000000000000000000000000000000f)));
-    let _e322 = state[((idx * 22u) + 1u)];
-    let _e329 = x[((idx * 8u) + 1u)];
-    let _e336 = state[((idx * 22u) + 1u)];
-    let _e343 = x[((idx * 8u) + 1u)];
-    let _e346 = constants.alpha_u;
-    let _e349 = constants.dtau;
-    let _e361 = state[((idx * 22u) + 1u)];
-    let _e368 = state[((idx * 22u) + 1u)];
-    let _e376 = state[((idx * 22u) + 1u)];
-    let _e388 = x[((idx * 8u) + 1u)];
-    let _e395 = x[((idx * 8u) + 1u)];
-    let _e403 = x[((idx * 8u) + 1u)];
-    x[((idx * 8u) + 1u)] = select(_e322, select(_e329, mix(_e336, _e343, select(1f, _e346, (_e349 > 0f))), ((_e361 == _e368) && (abs(_e376) < 340000000000000000000000000000000000000f))), ((_e388 == _e395) && (abs(_e403) < 340000000000000000000000000000000000000f)));
-    let _e421 = state[((idx * 22u) + 2u)];
-    let _e428 = x[((idx * 8u) + 2u)];
-    let _e435 = state[((idx * 22u) + 2u)];
-    let _e442 = x[((idx * 8u) + 2u)];
-    let _e445 = constants.alpha_u;
-    let _e448 = constants.dtau;
-    let _e460 = state[((idx * 22u) + 2u)];
-    let _e467 = state[((idx * 22u) + 2u)];
-    let _e475 = state[((idx * 22u) + 2u)];
-    let _e487 = x[((idx * 8u) + 2u)];
-    let _e494 = x[((idx * 8u) + 2u)];
-    let _e502 = x[((idx * 8u) + 2u)];
-    state[((idx * 22u) + 2u)] = select(_e421, select(_e428, mix(_e435, _e442, select(1f, _e445, (_e448 > 0f))), ((_e460 == _e467) && (abs(_e475) < 340000000000000000000000000000000000000f))), ((_e487 == _e494) && (abs(_e502) < 340000000000000000000000000000000000000f)));
-    let _e520 = state[((idx * 22u) + 2u)];
-    let _e527 = x[((idx * 8u) + 2u)];
-    let _e534 = state[((idx * 22u) + 2u)];
-    let _e541 = x[((idx * 8u) + 2u)];
-    let _e544 = constants.alpha_u;
-    let _e547 = constants.dtau;
-    let _e559 = state[((idx * 22u) + 2u)];
-    let _e566 = state[((idx * 22u) + 2u)];
-    let _e574 = state[((idx * 22u) + 2u)];
-    let _e586 = x[((idx * 8u) + 2u)];
-    let _e593 = x[((idx * 8u) + 2u)];
-    let _e601 = x[((idx * 8u) + 2u)];
-    x[((idx * 8u) + 2u)] = select(_e520, select(_e527, mix(_e534, _e541, select(1f, _e544, (_e547 > 0f))), ((_e559 == _e566) && (abs(_e574) < 340000000000000000000000000000000000000f))), ((_e586 == _e593) && (abs(_e601) < 340000000000000000000000000000000000000f)));
-    let _e619 = state[((idx * 22u) + 7u)];
-    let _e626 = x[((idx * 8u) + 3u)];
-    let _e633 = state[((idx * 22u) + 7u)];
-    let _e640 = x[((idx * 8u) + 3u)];
-    let _e643 = constants.alpha_u;
-    let _e646 = constants.dtau;
-    let _e658 = state[((idx * 22u) + 7u)];
-    let _e665 = state[((idx * 22u) + 7u)];
-    let _e673 = state[((idx * 22u) + 7u)];
-    let _e685 = x[((idx * 8u) + 3u)];
-    let _e692 = x[((idx * 8u) + 3u)];
-    let _e700 = x[((idx * 8u) + 3u)];
-    state[((idx * 22u) + 7u)] = select(_e619, select(_e626, mix(_e633, _e640, select(1f, _e643, (_e646 > 0f))), ((_e658 == _e665) && (abs(_e673) < 340000000000000000000000000000000000000f))), ((_e685 == _e692) && (abs(_e700) < 340000000000000000000000000000000000000f)));
-    let _e718 = state[((idx * 22u) + 7u)];
-    let _e725 = x[((idx * 8u) + 3u)];
-    let _e732 = state[((idx * 22u) + 7u)];
-    let _e739 = x[((idx * 8u) + 3u)];
-    let _e742 = constants.alpha_u;
-    let _e745 = constants.dtau;
-    let _e757 = state[((idx * 22u) + 7u)];
-    let _e764 = state[((idx * 22u) + 7u)];
-    let _e772 = state[((idx * 22u) + 7u)];
-    let _e784 = x[((idx * 8u) + 3u)];
-    let _e791 = x[((idx * 8u) + 3u)];
-    let _e799 = x[((idx * 8u) + 3u)];
-    x[((idx * 8u) + 3u)] = select(_e718, select(_e725, mix(_e732, _e739, select(1f, _e742, (_e745 > 0f))), ((_e757 == _e764) && (abs(_e772) < 340000000000000000000000000000000000000f))), ((_e784 == _e791) && (abs(_e799) < 340000000000000000000000000000000000000f)));
-    let _e817 = state[((idx * 22u) + 10u)];
-    let _e824 = x[((idx * 8u) + 4u)];
-    let _e831 = state[((idx * 22u) + 10u)];
-    let _e838 = x[((idx * 8u) + 4u)];
-    let _e841 = constants.alpha_u;
-    let _e844 = constants.dtau;
-    let _e856 = state[((idx * 22u) + 10u)];
-    let _e863 = state[((idx * 22u) + 10u)];
-    let _e871 = state[((idx * 22u) + 10u)];
-    let _e883 = x[((idx * 8u) + 4u)];
-    let _e890 = x[((idx * 8u) + 4u)];
-    let _e898 = x[((idx * 8u) + 4u)];
-    state[((idx * 22u) + 10u)] = select(_e817, select(_e824, mix(_e831, _e838, select(1f, _e841, (_e844 > 0f))), ((_e856 == _e863) && (abs(_e871) < 340000000000000000000000000000000000000f))), ((_e883 == _e890) && (abs(_e898) < 340000000000000000000000000000000000000f)));
-    let _e916 = state[((idx * 22u) + 10u)];
-    let _e923 = x[((idx * 8u) + 4u)];
-    let _e930 = state[((idx * 22u) + 10u)];
-    let _e937 = x[((idx * 8u) + 4u)];
-    let _e940 = constants.alpha_u;
-    let _e943 = constants.dtau;
-    let _e955 = state[((idx * 22u) + 10u)];
-    let _e962 = state[((idx * 22u) + 10u)];
-    let _e970 = state[((idx * 22u) + 10u)];
-    let _e982 = x[((idx * 8u) + 4u)];
-    let _e989 = x[((idx * 8u) + 4u)];
-    let _e997 = x[((idx * 8u) + 4u)];
-    x[((idx * 8u) + 4u)] = select(_e916, select(_e923, mix(_e930, _e937, select(1f, _e940, (_e943 > 0f))), ((_e955 == _e962) && (abs(_e970) < 340000000000000000000000000000000000000f))), ((_e982 == _e989) && (abs(_e997) < 340000000000000000000000000000000000000f)));
-    let _e1015 = state[((idx * 22u) + 11u)];
-    let _e1022 = x[((idx * 8u) + 5u)];
-    let _e1029 = state[((idx * 22u) + 11u)];
-    let _e1036 = x[((idx * 8u) + 5u)];
-    let _e1039 = constants.alpha_u;
-    let _e1042 = constants.dtau;
-    let _e1054 = state[((idx * 22u) + 11u)];
-    let _e1061 = state[((idx * 22u) + 11u)];
-    let _e1069 = state[((idx * 22u) + 11u)];
-    let _e1081 = x[((idx * 8u) + 5u)];
-    let _e1088 = x[((idx * 8u) + 5u)];
-    let _e1096 = x[((idx * 8u) + 5u)];
-    state[((idx * 22u) + 11u)] = select(_e1015, select(_e1022, mix(_e1029, _e1036, select(1f, _e1039, (_e1042 > 0f))), ((_e1054 == _e1061) && (abs(_e1069) < 340000000000000000000000000000000000000f))), ((_e1081 == _e1088) && (abs(_e1096) < 340000000000000000000000000000000000000f)));
-    let _e1114 = state[((idx * 22u) + 11u)];
-    let _e1121 = x[((idx * 8u) + 5u)];
-    let _e1128 = state[((idx * 22u) + 11u)];
-    let _e1135 = x[((idx * 8u) + 5u)];
-    let _e1138 = constants.alpha_u;
-    let _e1141 = constants.dtau;
-    let _e1153 = state[((idx * 22u) + 11u)];
-    let _e1160 = state[((idx * 22u) + 11u)];
-    let _e1168 = state[((idx * 22u) + 11u)];
-    let _e1180 = x[((idx * 8u) + 5u)];
-    let _e1187 = x[((idx * 8u) + 5u)];
-    let _e1195 = x[((idx * 8u) + 5u)];
-    x[((idx * 8u) + 5u)] = select(_e1114, select(_e1121, mix(_e1128, _e1135, select(1f, _e1138, (_e1141 > 0f))), ((_e1153 == _e1160) && (abs(_e1168) < 340000000000000000000000000000000000000f))), ((_e1180 == _e1187) && (abs(_e1195) < 340000000000000000000000000000000000000f)));
-    let _e1213 = state[((idx * 22u) + 8u)];
-    let _e1220 = x[((idx * 8u) + 6u)];
-    let _e1227 = state[((idx * 22u) + 8u)];
-    let _e1234 = x[((idx * 8u) + 6u)];
-    let _e1237 = constants.alpha_p;
-    let _e1240 = constants.dtau;
-    let _e1252 = state[((idx * 22u) + 8u)];
-    let _e1259 = state[((idx * 22u) + 8u)];
-    let _e1267 = state[((idx * 22u) + 8u)];
-    let _e1279 = x[((idx * 8u) + 6u)];
-    let _e1286 = x[((idx * 8u) + 6u)];
-    let _e1294 = x[((idx * 8u) + 6u)];
-    state[((idx * 22u) + 8u)] = select(_e1213, select(_e1220, mix(_e1227, _e1234, select(1f, _e1237, (_e1240 > 0f))), ((_e1252 == _e1259) && (abs(_e1267) < 340000000000000000000000000000000000000f))), ((_e1279 == _e1286) && (abs(_e1294) < 340000000000000000000000000000000000000f)));
-    let _e1312 = state[((idx * 22u) + 8u)];
-    let _e1319 = x[((idx * 8u) + 6u)];
-    let _e1326 = state[((idx * 22u) + 8u)];
-    let _e1333 = x[((idx * 8u) + 6u)];
-    let _e1336 = constants.alpha_p;
-    let _e1339 = constants.dtau;
-    let _e1351 = state[((idx * 22u) + 8u)];
-    let _e1358 = state[((idx * 22u) + 8u)];
-    let _e1366 = state[((idx * 22u) + 8u)];
-    let _e1378 = x[((idx * 8u) + 6u)];
-    let _e1385 = x[((idx * 8u) + 6u)];
-    let _e1393 = x[((idx * 8u) + 6u)];
-    x[((idx * 8u) + 6u)] = select(_e1312, select(_e1319, mix(_e1326, _e1333, select(1f, _e1336, (_e1339 > 0f))), ((_e1351 == _e1358) && (abs(_e1366) < 340000000000000000000000000000000000000f))), ((_e1378 == _e1385) && (abs(_e1393) < 340000000000000000000000000000000000000f)));
-    let _e1411 = state[((idx * 22u) + 9u)];
-    let _e1418 = x[((idx * 8u) + 7u)];
-    let _e1425 = state[((idx * 22u) + 9u)];
-    let _e1432 = x[((idx * 8u) + 7u)];
-    let _e1435 = constants.alpha_u;
-    let _e1438 = constants.dtau;
-    let _e1450 = state[((idx * 22u) + 9u)];
-    let _e1457 = state[((idx * 22u) + 9u)];
-    let _e1465 = state[((idx * 22u) + 9u)];
-    let _e1477 = x[((idx * 8u) + 7u)];
-    let _e1484 = x[((idx * 8u) + 7u)];
-    let _e1492 = x[((idx * 8u) + 7u)];
-    state[((idx * 22u) + 9u)] = select(_e1411, select(_e1418, mix(_e1425, _e1432, select(1f, _e1435, (_e1438 > 0f))), ((_e1450 == _e1457) && (abs(_e1465) < 340000000000000000000000000000000000000f))), ((_e1477 == _e1484) && (abs(_e1492) < 340000000000000000000000000000000000000f)));
-    let _e1510 = state[((idx * 22u) + 9u)];
-    let _e1517 = x[((idx * 8u) + 7u)];
-    let _e1524 = state[((idx * 22u) + 9u)];
-    let _e1531 = x[((idx * 8u) + 7u)];
-    let _e1534 = constants.alpha_u;
-    let _e1537 = constants.dtau;
-    let _e1549 = state[((idx * 22u) + 9u)];
-    let _e1556 = state[((idx * 22u) + 9u)];
-    let _e1564 = state[((idx * 22u) + 9u)];
-    let _e1576 = x[((idx * 8u) + 7u)];
-    let _e1583 = x[((idx * 8u) + 7u)];
-    let _e1591 = x[((idx * 8u) + 7u)];
-    x[((idx * 8u) + 7u)] = select(_e1510, select(_e1517, mix(_e1524, _e1531, select(1f, _e1534, (_e1537 > 0f))), ((_e1549 == _e1556) && (abs(_e1564) < 340000000000000000000000000000000000000f))), ((_e1576 == _e1583) && (abs(_e1591) < 340000000000000000000000000000000000000f)));
+    let base = (idx * 22u);
+    let _e27 = state[((idx * 22u) + 0u)];
+    let _e34 = x[((idx * 8u) + 0u)];
+    let _e41 = state[((idx * 22u) + 0u)];
+    let _e48 = x[((idx * 8u) + 0u)];
+    let _e51 = constants.alpha_u;
+    let _e54 = constants.dtau;
+    let _e66 = state[((idx * 22u) + 0u)];
+    let _e73 = state[((idx * 22u) + 0u)];
+    let _e81 = state[((idx * 22u) + 0u)];
+    let _e93 = x[((idx * 8u) + 0u)];
+    let _e100 = x[((idx * 8u) + 0u)];
+    let _e108 = x[((idx * 8u) + 0u)];
+    state[((idx * 22u) + 0u)] = select(_e27, select(_e34, mix(_e41, _e48, select(1f, _e51, (_e54 > 0f))), ((_e66 == _e73) && (abs(_e81) < 340000000000000000000000000000000000000f))), ((_e93 == _e100) && (abs(_e108) < 340000000000000000000000000000000000000f)));
+    let _e126 = state[((idx * 22u) + 0u)];
+    let _e133 = x[((idx * 8u) + 0u)];
+    let _e140 = state[((idx * 22u) + 0u)];
+    let _e147 = x[((idx * 8u) + 0u)];
+    let _e150 = constants.alpha_u;
+    let _e153 = constants.dtau;
+    let _e165 = state[((idx * 22u) + 0u)];
+    let _e172 = state[((idx * 22u) + 0u)];
+    let _e180 = state[((idx * 22u) + 0u)];
+    let _e192 = x[((idx * 8u) + 0u)];
+    let _e199 = x[((idx * 8u) + 0u)];
+    let _e207 = x[((idx * 8u) + 0u)];
+    x[((idx * 8u) + 0u)] = select(_e126, select(_e133, mix(_e140, _e147, select(1f, _e150, (_e153 > 0f))), ((_e165 == _e172) && (abs(_e180) < 340000000000000000000000000000000000000f))), ((_e192 == _e199) && (abs(_e207) < 340000000000000000000000000000000000000f)));
+    let _e225 = state[((idx * 22u) + 1u)];
+    let _e232 = x[((idx * 8u) + 1u)];
+    let _e239 = state[((idx * 22u) + 1u)];
+    let _e246 = x[((idx * 8u) + 1u)];
+    let _e249 = constants.alpha_u;
+    let _e252 = constants.dtau;
+    let _e264 = state[((idx * 22u) + 1u)];
+    let _e271 = state[((idx * 22u) + 1u)];
+    let _e279 = state[((idx * 22u) + 1u)];
+    let _e291 = x[((idx * 8u) + 1u)];
+    let _e298 = x[((idx * 8u) + 1u)];
+    let _e306 = x[((idx * 8u) + 1u)];
+    state[((idx * 22u) + 1u)] = select(_e225, select(_e232, mix(_e239, _e246, select(1f, _e249, (_e252 > 0f))), ((_e264 == _e271) && (abs(_e279) < 340000000000000000000000000000000000000f))), ((_e291 == _e298) && (abs(_e306) < 340000000000000000000000000000000000000f)));
+    let _e324 = state[((idx * 22u) + 1u)];
+    let _e331 = x[((idx * 8u) + 1u)];
+    let _e338 = state[((idx * 22u) + 1u)];
+    let _e345 = x[((idx * 8u) + 1u)];
+    let _e348 = constants.alpha_u;
+    let _e351 = constants.dtau;
+    let _e363 = state[((idx * 22u) + 1u)];
+    let _e370 = state[((idx * 22u) + 1u)];
+    let _e378 = state[((idx * 22u) + 1u)];
+    let _e390 = x[((idx * 8u) + 1u)];
+    let _e397 = x[((idx * 8u) + 1u)];
+    let _e405 = x[((idx * 8u) + 1u)];
+    x[((idx * 8u) + 1u)] = select(_e324, select(_e331, mix(_e338, _e345, select(1f, _e348, (_e351 > 0f))), ((_e363 == _e370) && (abs(_e378) < 340000000000000000000000000000000000000f))), ((_e390 == _e397) && (abs(_e405) < 340000000000000000000000000000000000000f)));
+    let _e423 = state[((idx * 22u) + 2u)];
+    let _e430 = x[((idx * 8u) + 2u)];
+    let _e437 = state[((idx * 22u) + 2u)];
+    let _e444 = x[((idx * 8u) + 2u)];
+    let _e447 = constants.alpha_u;
+    let _e450 = constants.dtau;
+    let _e462 = state[((idx * 22u) + 2u)];
+    let _e469 = state[((idx * 22u) + 2u)];
+    let _e477 = state[((idx * 22u) + 2u)];
+    let _e489 = x[((idx * 8u) + 2u)];
+    let _e496 = x[((idx * 8u) + 2u)];
+    let _e504 = x[((idx * 8u) + 2u)];
+    state[((idx * 22u) + 2u)] = select(_e423, select(_e430, mix(_e437, _e444, select(1f, _e447, (_e450 > 0f))), ((_e462 == _e469) && (abs(_e477) < 340000000000000000000000000000000000000f))), ((_e489 == _e496) && (abs(_e504) < 340000000000000000000000000000000000000f)));
+    let _e522 = state[((idx * 22u) + 2u)];
+    let _e529 = x[((idx * 8u) + 2u)];
+    let _e536 = state[((idx * 22u) + 2u)];
+    let _e543 = x[((idx * 8u) + 2u)];
+    let _e546 = constants.alpha_u;
+    let _e549 = constants.dtau;
+    let _e561 = state[((idx * 22u) + 2u)];
+    let _e568 = state[((idx * 22u) + 2u)];
+    let _e576 = state[((idx * 22u) + 2u)];
+    let _e588 = x[((idx * 8u) + 2u)];
+    let _e595 = x[((idx * 8u) + 2u)];
+    let _e603 = x[((idx * 8u) + 2u)];
+    x[((idx * 8u) + 2u)] = select(_e522, select(_e529, mix(_e536, _e543, select(1f, _e546, (_e549 > 0f))), ((_e561 == _e568) && (abs(_e576) < 340000000000000000000000000000000000000f))), ((_e588 == _e595) && (abs(_e603) < 340000000000000000000000000000000000000f)));
+    let _e621 = state[((idx * 22u) + 7u)];
+    let _e628 = x[((idx * 8u) + 3u)];
+    let _e635 = state[((idx * 22u) + 7u)];
+    let _e642 = x[((idx * 8u) + 3u)];
+    let _e645 = constants.alpha_u;
+    let _e648 = constants.dtau;
+    let _e660 = state[((idx * 22u) + 7u)];
+    let _e667 = state[((idx * 22u) + 7u)];
+    let _e675 = state[((idx * 22u) + 7u)];
+    let _e687 = x[((idx * 8u) + 3u)];
+    let _e694 = x[((idx * 8u) + 3u)];
+    let _e702 = x[((idx * 8u) + 3u)];
+    state[((idx * 22u) + 7u)] = select(_e621, select(_e628, mix(_e635, _e642, select(1f, _e645, (_e648 > 0f))), ((_e660 == _e667) && (abs(_e675) < 340000000000000000000000000000000000000f))), ((_e687 == _e694) && (abs(_e702) < 340000000000000000000000000000000000000f)));
+    let _e720 = state[((idx * 22u) + 7u)];
+    let _e727 = x[((idx * 8u) + 3u)];
+    let _e734 = state[((idx * 22u) + 7u)];
+    let _e741 = x[((idx * 8u) + 3u)];
+    let _e744 = constants.alpha_u;
+    let _e747 = constants.dtau;
+    let _e759 = state[((idx * 22u) + 7u)];
+    let _e766 = state[((idx * 22u) + 7u)];
+    let _e774 = state[((idx * 22u) + 7u)];
+    let _e786 = x[((idx * 8u) + 3u)];
+    let _e793 = x[((idx * 8u) + 3u)];
+    let _e801 = x[((idx * 8u) + 3u)];
+    x[((idx * 8u) + 3u)] = select(_e720, select(_e727, mix(_e734, _e741, select(1f, _e744, (_e747 > 0f))), ((_e759 == _e766) && (abs(_e774) < 340000000000000000000000000000000000000f))), ((_e786 == _e793) && (abs(_e801) < 340000000000000000000000000000000000000f)));
+    let _e819 = state[((idx * 22u) + 10u)];
+    let _e826 = x[((idx * 8u) + 4u)];
+    let _e833 = state[((idx * 22u) + 10u)];
+    let _e840 = x[((idx * 8u) + 4u)];
+    let _e843 = constants.alpha_u;
+    let _e846 = constants.dtau;
+    let _e858 = state[((idx * 22u) + 10u)];
+    let _e865 = state[((idx * 22u) + 10u)];
+    let _e873 = state[((idx * 22u) + 10u)];
+    let _e885 = x[((idx * 8u) + 4u)];
+    let _e892 = x[((idx * 8u) + 4u)];
+    let _e900 = x[((idx * 8u) + 4u)];
+    state[((idx * 22u) + 10u)] = select(_e819, select(_e826, mix(_e833, _e840, select(1f, _e843, (_e846 > 0f))), ((_e858 == _e865) && (abs(_e873) < 340000000000000000000000000000000000000f))), ((_e885 == _e892) && (abs(_e900) < 340000000000000000000000000000000000000f)));
+    let _e918 = state[((idx * 22u) + 10u)];
+    let _e925 = x[((idx * 8u) + 4u)];
+    let _e932 = state[((idx * 22u) + 10u)];
+    let _e939 = x[((idx * 8u) + 4u)];
+    let _e942 = constants.alpha_u;
+    let _e945 = constants.dtau;
+    let _e957 = state[((idx * 22u) + 10u)];
+    let _e964 = state[((idx * 22u) + 10u)];
+    let _e972 = state[((idx * 22u) + 10u)];
+    let _e984 = x[((idx * 8u) + 4u)];
+    let _e991 = x[((idx * 8u) + 4u)];
+    let _e999 = x[((idx * 8u) + 4u)];
+    x[((idx * 8u) + 4u)] = select(_e918, select(_e925, mix(_e932, _e939, select(1f, _e942, (_e945 > 0f))), ((_e957 == _e964) && (abs(_e972) < 340000000000000000000000000000000000000f))), ((_e984 == _e991) && (abs(_e999) < 340000000000000000000000000000000000000f)));
+    let _e1017 = state[((idx * 22u) + 11u)];
+    let _e1024 = x[((idx * 8u) + 5u)];
+    let _e1031 = state[((idx * 22u) + 11u)];
+    let _e1038 = x[((idx * 8u) + 5u)];
+    let _e1041 = constants.alpha_u;
+    let _e1044 = constants.dtau;
+    let _e1056 = state[((idx * 22u) + 11u)];
+    let _e1063 = state[((idx * 22u) + 11u)];
+    let _e1071 = state[((idx * 22u) + 11u)];
+    let _e1083 = x[((idx * 8u) + 5u)];
+    let _e1090 = x[((idx * 8u) + 5u)];
+    let _e1098 = x[((idx * 8u) + 5u)];
+    state[((idx * 22u) + 11u)] = select(_e1017, select(_e1024, mix(_e1031, _e1038, select(1f, _e1041, (_e1044 > 0f))), ((_e1056 == _e1063) && (abs(_e1071) < 340000000000000000000000000000000000000f))), ((_e1083 == _e1090) && (abs(_e1098) < 340000000000000000000000000000000000000f)));
+    let _e1116 = state[((idx * 22u) + 11u)];
+    let _e1123 = x[((idx * 8u) + 5u)];
+    let _e1130 = state[((idx * 22u) + 11u)];
+    let _e1137 = x[((idx * 8u) + 5u)];
+    let _e1140 = constants.alpha_u;
+    let _e1143 = constants.dtau;
+    let _e1155 = state[((idx * 22u) + 11u)];
+    let _e1162 = state[((idx * 22u) + 11u)];
+    let _e1170 = state[((idx * 22u) + 11u)];
+    let _e1182 = x[((idx * 8u) + 5u)];
+    let _e1189 = x[((idx * 8u) + 5u)];
+    let _e1197 = x[((idx * 8u) + 5u)];
+    x[((idx * 8u) + 5u)] = select(_e1116, select(_e1123, mix(_e1130, _e1137, select(1f, _e1140, (_e1143 > 0f))), ((_e1155 == _e1162) && (abs(_e1170) < 340000000000000000000000000000000000000f))), ((_e1182 == _e1189) && (abs(_e1197) < 340000000000000000000000000000000000000f)));
+    let _e1215 = state[((idx * 22u) + 8u)];
+    let _e1222 = x[((idx * 8u) + 6u)];
+    let _e1229 = state[((idx * 22u) + 8u)];
+    let _e1236 = x[((idx * 8u) + 6u)];
+    let _e1239 = constants.alpha_p;
+    let _e1242 = constants.dtau;
+    let _e1254 = state[((idx * 22u) + 8u)];
+    let _e1261 = state[((idx * 22u) + 8u)];
+    let _e1269 = state[((idx * 22u) + 8u)];
+    let _e1281 = x[((idx * 8u) + 6u)];
+    let _e1288 = x[((idx * 8u) + 6u)];
+    let _e1296 = x[((idx * 8u) + 6u)];
+    state[((idx * 22u) + 8u)] = select(_e1215, select(_e1222, mix(_e1229, _e1236, select(1f, _e1239, (_e1242 > 0f))), ((_e1254 == _e1261) && (abs(_e1269) < 340000000000000000000000000000000000000f))), ((_e1281 == _e1288) && (abs(_e1296) < 340000000000000000000000000000000000000f)));
+    let _e1314 = state[((idx * 22u) + 8u)];
+    let _e1321 = x[((idx * 8u) + 6u)];
+    let _e1328 = state[((idx * 22u) + 8u)];
+    let _e1335 = x[((idx * 8u) + 6u)];
+    let _e1338 = constants.alpha_p;
+    let _e1341 = constants.dtau;
+    let _e1353 = state[((idx * 22u) + 8u)];
+    let _e1360 = state[((idx * 22u) + 8u)];
+    let _e1368 = state[((idx * 22u) + 8u)];
+    let _e1380 = x[((idx * 8u) + 6u)];
+    let _e1387 = x[((idx * 8u) + 6u)];
+    let _e1395 = x[((idx * 8u) + 6u)];
+    x[((idx * 8u) + 6u)] = select(_e1314, select(_e1321, mix(_e1328, _e1335, select(1f, _e1338, (_e1341 > 0f))), ((_e1353 == _e1360) && (abs(_e1368) < 340000000000000000000000000000000000000f))), ((_e1380 == _e1387) && (abs(_e1395) < 340000000000000000000000000000000000000f)));
+    let _e1413 = state[((idx * 22u) + 9u)];
+    let _e1420 = x[((idx * 8u) + 7u)];
+    let _e1427 = state[((idx * 22u) + 9u)];
+    let _e1434 = x[((idx * 8u) + 7u)];
+    let _e1437 = constants.alpha_u;
+    let _e1440 = constants.dtau;
+    let _e1452 = state[((idx * 22u) + 9u)];
+    let _e1459 = state[((idx * 22u) + 9u)];
+    let _e1467 = state[((idx * 22u) + 9u)];
+    let _e1479 = x[((idx * 8u) + 7u)];
+    let _e1486 = x[((idx * 8u) + 7u)];
+    let _e1494 = x[((idx * 8u) + 7u)];
+    state[((idx * 22u) + 9u)] = select(_e1413, select(_e1420, mix(_e1427, _e1434, select(1f, _e1437, (_e1440 > 0f))), ((_e1452 == _e1459) && (abs(_e1467) < 340000000000000000000000000000000000000f))), ((_e1479 == _e1486) && (abs(_e1494) < 340000000000000000000000000000000000000f)));
+    let _e1512 = state[((idx * 22u) + 9u)];
+    let _e1519 = x[((idx * 8u) + 7u)];
+    let _e1526 = state[((idx * 22u) + 9u)];
+    let _e1533 = x[((idx * 8u) + 7u)];
+    let _e1536 = constants.alpha_u;
+    let _e1539 = constants.dtau;
+    let _e1551 = state[((idx * 22u) + 9u)];
+    let _e1558 = state[((idx * 22u) + 9u)];
+    let _e1566 = state[((idx * 22u) + 9u)];
+    let _e1578 = x[((idx * 8u) + 7u)];
+    let _e1585 = x[((idx * 8u) + 7u)];
+    let _e1593 = x[((idx * 8u) + 7u)];
+    x[((idx * 8u) + 7u)] = select(_e1512, select(_e1519, mix(_e1526, _e1533, select(1f, _e1536, (_e1539 > 0f))), ((_e1551 == _e1558) && (abs(_e1566) < 340000000000000000000000000000000000000f))), ((_e1578 == _e1585) && (abs(_e1593) < 340000000000000000000000000000000000000f)));
+    return;
+}
+"#;
+    }
+    pub mod generic_coupled_update_dp_init_fused_incompressible_momentum {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum::BindGroup0") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub x: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub x: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    x: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.x),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 1] {
+                [self.x]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"x\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum::BindGroup1") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 2],
+            ) -> [wgpu::BindGroupLayout; 2] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device . create_pipeline_layout (& wgpu :: PipelineLayoutDescriptor { label : Some ("GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum::PipelineLayout") , bind_group_layouts : & [& WgpuBindGroup0 :: get_bind_group_layout (device) , & WgpuBindGroup1 :: get_bind_group_layout (device)] , push_constant_ranges : & [] , })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("generic_coupled_update_dp_init_fused_incompressible_momentum.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+}
+
+@group(0) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(0) @binding(1) 
+var<uniform> constants: Constants;
+@group(1) @binding(0) 
+var<storage, read_write> x: array<f32>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let _e4 = constants.stride_x;
+    let idx = ((global_id.y * _e4) + global_id.x);
+    if (idx >= (arrayLength((&state)) / 8u)) {
+        return;
+    }
+    let base = (idx * 8u);
+    let _e27 = state[((idx * 8u) + 0u)];
+    let _e34 = x[((idx * 3u) + 0u)];
+    let _e41 = state[((idx * 8u) + 0u)];
+    let _e48 = x[((idx * 3u) + 0u)];
+    let _e51 = constants.alpha_u;
+    let _e59 = state[((idx * 8u) + 0u)];
+    let _e66 = state[((idx * 8u) + 0u)];
+    let _e74 = state[((idx * 8u) + 0u)];
+    let _e86 = x[((idx * 3u) + 0u)];
+    let _e93 = x[((idx * 3u) + 0u)];
+    let _e101 = x[((idx * 3u) + 0u)];
+    state[((idx * 8u) + 0u)] = select(_e27, select(_e34, mix(_e41, _e48, _e51), ((_e59 == _e66) && (abs(_e74) < 340000000000000000000000000000000000000f))), ((_e86 == _e93) && (abs(_e101) < 340000000000000000000000000000000000000f)));
+    let _e119 = state[((idx * 8u) + 0u)];
+    let _e126 = x[((idx * 3u) + 0u)];
+    let _e133 = state[((idx * 8u) + 0u)];
+    let _e140 = x[((idx * 3u) + 0u)];
+    let _e143 = constants.alpha_u;
+    let _e151 = state[((idx * 8u) + 0u)];
+    let _e158 = state[((idx * 8u) + 0u)];
+    let _e166 = state[((idx * 8u) + 0u)];
+    let _e178 = x[((idx * 3u) + 0u)];
+    let _e185 = x[((idx * 3u) + 0u)];
+    let _e193 = x[((idx * 3u) + 0u)];
+    x[((idx * 3u) + 0u)] = select(_e119, select(_e126, mix(_e133, _e140, _e143), ((_e151 == _e158) && (abs(_e166) < 340000000000000000000000000000000000000f))), ((_e178 == _e185) && (abs(_e193) < 340000000000000000000000000000000000000f)));
+    let _e211 = state[((idx * 8u) + 1u)];
+    let _e218 = x[((idx * 3u) + 1u)];
+    let _e225 = state[((idx * 8u) + 1u)];
+    let _e232 = x[((idx * 3u) + 1u)];
+    let _e235 = constants.alpha_u;
+    let _e243 = state[((idx * 8u) + 1u)];
+    let _e250 = state[((idx * 8u) + 1u)];
+    let _e258 = state[((idx * 8u) + 1u)];
+    let _e270 = x[((idx * 3u) + 1u)];
+    let _e277 = x[((idx * 3u) + 1u)];
+    let _e285 = x[((idx * 3u) + 1u)];
+    state[((idx * 8u) + 1u)] = select(_e211, select(_e218, mix(_e225, _e232, _e235), ((_e243 == _e250) && (abs(_e258) < 340000000000000000000000000000000000000f))), ((_e270 == _e277) && (abs(_e285) < 340000000000000000000000000000000000000f)));
+    let _e303 = state[((idx * 8u) + 1u)];
+    let _e310 = x[((idx * 3u) + 1u)];
+    let _e317 = state[((idx * 8u) + 1u)];
+    let _e324 = x[((idx * 3u) + 1u)];
+    let _e327 = constants.alpha_u;
+    let _e335 = state[((idx * 8u) + 1u)];
+    let _e342 = state[((idx * 8u) + 1u)];
+    let _e350 = state[((idx * 8u) + 1u)];
+    let _e362 = x[((idx * 3u) + 1u)];
+    let _e369 = x[((idx * 3u) + 1u)];
+    let _e377 = x[((idx * 3u) + 1u)];
+    x[((idx * 3u) + 1u)] = select(_e303, select(_e310, mix(_e317, _e324, _e327), ((_e335 == _e342) && (abs(_e350) < 340000000000000000000000000000000000000f))), ((_e362 == _e369) && (abs(_e377) < 340000000000000000000000000000000000000f)));
+    let _e395 = state[((idx * 8u) + 2u)];
+    let _e402 = x[((idx * 3u) + 2u)];
+    let _e409 = state[((idx * 8u) + 2u)];
+    let _e416 = x[((idx * 3u) + 2u)];
+    let _e419 = constants.alpha_p;
+    let _e427 = state[((idx * 8u) + 2u)];
+    let _e434 = state[((idx * 8u) + 2u)];
+    let _e442 = state[((idx * 8u) + 2u)];
+    let _e454 = x[((idx * 3u) + 2u)];
+    let _e461 = x[((idx * 3u) + 2u)];
+    let _e469 = x[((idx * 3u) + 2u)];
+    state[((idx * 8u) + 2u)] = select(_e395, select(_e402, mix(_e409, _e416, _e419), ((_e427 == _e434) && (abs(_e442) < 340000000000000000000000000000000000000f))), ((_e454 == _e461) && (abs(_e469) < 340000000000000000000000000000000000000f)));
+    let _e487 = state[((idx * 8u) + 2u)];
+    let _e494 = x[((idx * 3u) + 2u)];
+    let _e501 = state[((idx * 8u) + 2u)];
+    let _e508 = x[((idx * 3u) + 2u)];
+    let _e511 = constants.alpha_p;
+    let _e519 = state[((idx * 8u) + 2u)];
+    let _e526 = state[((idx * 8u) + 2u)];
+    let _e534 = state[((idx * 8u) + 2u)];
+    let _e546 = x[((idx * 3u) + 2u)];
+    let _e553 = x[((idx * 3u) + 2u)];
+    let _e561 = x[((idx * 3u) + 2u)];
+    x[((idx * 3u) + 2u)] = select(_e487, select(_e494, mix(_e501, _e508, _e511), ((_e519 == _e526) && (abs(_e534) < 340000000000000000000000000000000000000f))), ((_e546 == _e553) && (abs(_e561) < 340000000000000000000000000000000000000f)));
+    state[(base + 3u)] = 0f;
     return;
 }
 "#;
@@ -20236,28 +20559,29 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (idx >= (arrayLength((&state)) / 1u)) {
         return;
     }
-    let _e25 = state[((idx * 1u) + 0u)];
-    let _e32 = x[((idx * 1u) + 0u)];
-    let _e39 = state[((idx * 1u) + 0u)];
-    let _e46 = x[((idx * 1u) + 0u)];
-    let _e55 = state[((idx * 1u) + 0u)];
-    let _e62 = state[((idx * 1u) + 0u)];
-    let _e70 = state[((idx * 1u) + 0u)];
-    let _e82 = x[((idx * 1u) + 0u)];
-    let _e89 = x[((idx * 1u) + 0u)];
-    let _e97 = x[((idx * 1u) + 0u)];
-    state[((idx * 1u) + 0u)] = select(_e25, select(_e32, mix(_e39, _e46, 1f), ((_e55 == _e62) && (abs(_e70) < 340000000000000000000000000000000000000f))), ((_e82 == _e89) && (abs(_e97) < 340000000000000000000000000000000000000f)));
-    let _e115 = state[((idx * 1u) + 0u)];
-    let _e122 = x[((idx * 1u) + 0u)];
-    let _e129 = state[((idx * 1u) + 0u)];
-    let _e136 = x[((idx * 1u) + 0u)];
-    let _e145 = state[((idx * 1u) + 0u)];
-    let _e152 = state[((idx * 1u) + 0u)];
-    let _e160 = state[((idx * 1u) + 0u)];
-    let _e172 = x[((idx * 1u) + 0u)];
-    let _e179 = x[((idx * 1u) + 0u)];
-    let _e187 = x[((idx * 1u) + 0u)];
-    x[((idx * 1u) + 0u)] = select(_e115, select(_e122, mix(_e129, _e136, 1f), ((_e145 == _e152) && (abs(_e160) < 340000000000000000000000000000000000000f))), ((_e172 == _e179) && (abs(_e187) < 340000000000000000000000000000000000000f)));
+    let base = (idx * 1u);
+    let _e27 = state[((idx * 1u) + 0u)];
+    let _e34 = x[((idx * 1u) + 0u)];
+    let _e41 = state[((idx * 1u) + 0u)];
+    let _e48 = x[((idx * 1u) + 0u)];
+    let _e57 = state[((idx * 1u) + 0u)];
+    let _e64 = state[((idx * 1u) + 0u)];
+    let _e72 = state[((idx * 1u) + 0u)];
+    let _e84 = x[((idx * 1u) + 0u)];
+    let _e91 = x[((idx * 1u) + 0u)];
+    let _e99 = x[((idx * 1u) + 0u)];
+    state[((idx * 1u) + 0u)] = select(_e27, select(_e34, mix(_e41, _e48, 1f), ((_e57 == _e64) && (abs(_e72) < 340000000000000000000000000000000000000f))), ((_e84 == _e91) && (abs(_e99) < 340000000000000000000000000000000000000f)));
+    let _e117 = state[((idx * 1u) + 0u)];
+    let _e124 = x[((idx * 1u) + 0u)];
+    let _e131 = state[((idx * 1u) + 0u)];
+    let _e138 = x[((idx * 1u) + 0u)];
+    let _e147 = state[((idx * 1u) + 0u)];
+    let _e154 = state[((idx * 1u) + 0u)];
+    let _e162 = state[((idx * 1u) + 0u)];
+    let _e174 = x[((idx * 1u) + 0u)];
+    let _e181 = x[((idx * 1u) + 0u)];
+    let _e189 = x[((idx * 1u) + 0u)];
+    x[((idx * 1u) + 0u)] = select(_e117, select(_e124, mix(_e131, _e138, 1f), ((_e147 == _e154) && (abs(_e162) < 340000000000000000000000000000000000000f))), ((_e174 == _e181) && (abs(_e189) < 340000000000000000000000000000000000000f)));
     return;
 }
 "#;
@@ -20517,28 +20841,29 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (idx >= (arrayLength((&state)) / 1u)) {
         return;
     }
-    let _e25 = state[((idx * 1u) + 0u)];
-    let _e32 = x[((idx * 1u) + 0u)];
-    let _e39 = state[((idx * 1u) + 0u)];
-    let _e46 = x[((idx * 1u) + 0u)];
-    let _e55 = state[((idx * 1u) + 0u)];
-    let _e62 = state[((idx * 1u) + 0u)];
-    let _e70 = state[((idx * 1u) + 0u)];
-    let _e82 = x[((idx * 1u) + 0u)];
-    let _e89 = x[((idx * 1u) + 0u)];
-    let _e97 = x[((idx * 1u) + 0u)];
-    state[((idx * 1u) + 0u)] = select(_e25, select(_e32, mix(_e39, _e46, 1f), ((_e55 == _e62) && (abs(_e70) < 340000000000000000000000000000000000000f))), ((_e82 == _e89) && (abs(_e97) < 340000000000000000000000000000000000000f)));
-    let _e115 = state[((idx * 1u) + 0u)];
-    let _e122 = x[((idx * 1u) + 0u)];
-    let _e129 = state[((idx * 1u) + 0u)];
-    let _e136 = x[((idx * 1u) + 0u)];
-    let _e145 = state[((idx * 1u) + 0u)];
-    let _e152 = state[((idx * 1u) + 0u)];
-    let _e160 = state[((idx * 1u) + 0u)];
-    let _e172 = x[((idx * 1u) + 0u)];
-    let _e179 = x[((idx * 1u) + 0u)];
-    let _e187 = x[((idx * 1u) + 0u)];
-    x[((idx * 1u) + 0u)] = select(_e115, select(_e122, mix(_e129, _e136, 1f), ((_e145 == _e152) && (abs(_e160) < 340000000000000000000000000000000000000f))), ((_e172 == _e179) && (abs(_e187) < 340000000000000000000000000000000000000f)));
+    let base = (idx * 1u);
+    let _e27 = state[((idx * 1u) + 0u)];
+    let _e34 = x[((idx * 1u) + 0u)];
+    let _e41 = state[((idx * 1u) + 0u)];
+    let _e48 = x[((idx * 1u) + 0u)];
+    let _e57 = state[((idx * 1u) + 0u)];
+    let _e64 = state[((idx * 1u) + 0u)];
+    let _e72 = state[((idx * 1u) + 0u)];
+    let _e84 = x[((idx * 1u) + 0u)];
+    let _e91 = x[((idx * 1u) + 0u)];
+    let _e99 = x[((idx * 1u) + 0u)];
+    state[((idx * 1u) + 0u)] = select(_e27, select(_e34, mix(_e41, _e48, 1f), ((_e57 == _e64) && (abs(_e72) < 340000000000000000000000000000000000000f))), ((_e84 == _e91) && (abs(_e99) < 340000000000000000000000000000000000000f)));
+    let _e117 = state[((idx * 1u) + 0u)];
+    let _e124 = x[((idx * 1u) + 0u)];
+    let _e131 = state[((idx * 1u) + 0u)];
+    let _e138 = x[((idx * 1u) + 0u)];
+    let _e147 = state[((idx * 1u) + 0u)];
+    let _e154 = state[((idx * 1u) + 0u)];
+    let _e162 = state[((idx * 1u) + 0u)];
+    let _e174 = x[((idx * 1u) + 0u)];
+    let _e181 = x[((idx * 1u) + 0u)];
+    let _e189 = x[((idx * 1u) + 0u)];
+    x[((idx * 1u) + 0u)] = select(_e117, select(_e124, mix(_e131, _e138, 1f), ((_e147 == _e154) && (abs(_e162) < 340000000000000000000000000000000000000f))), ((_e174 == _e181) && (abs(_e189) < 340000000000000000000000000000000000000f)));
     return;
 }
 "#;
@@ -20792,78 +21117,79 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (idx >= (arrayLength((&state)) / 8u)) {
         return;
     }
-    let _e25 = state[((idx * 8u) + 0u)];
-    let _e32 = x[((idx * 3u) + 0u)];
-    let _e39 = state[((idx * 8u) + 0u)];
-    let _e46 = x[((idx * 3u) + 0u)];
-    let _e49 = constants.alpha_u;
-    let _e57 = state[((idx * 8u) + 0u)];
-    let _e64 = state[((idx * 8u) + 0u)];
-    let _e72 = state[((idx * 8u) + 0u)];
-    let _e84 = x[((idx * 3u) + 0u)];
-    let _e91 = x[((idx * 3u) + 0u)];
-    let _e99 = x[((idx * 3u) + 0u)];
-    state[((idx * 8u) + 0u)] = select(_e25, select(_e32, mix(_e39, _e46, _e49), ((_e57 == _e64) && (abs(_e72) < 340000000000000000000000000000000000000f))), ((_e84 == _e91) && (abs(_e99) < 340000000000000000000000000000000000000f)));
-    let _e117 = state[((idx * 8u) + 0u)];
-    let _e124 = x[((idx * 3u) + 0u)];
-    let _e131 = state[((idx * 8u) + 0u)];
-    let _e138 = x[((idx * 3u) + 0u)];
-    let _e141 = constants.alpha_u;
-    let _e149 = state[((idx * 8u) + 0u)];
-    let _e156 = state[((idx * 8u) + 0u)];
-    let _e164 = state[((idx * 8u) + 0u)];
-    let _e176 = x[((idx * 3u) + 0u)];
-    let _e183 = x[((idx * 3u) + 0u)];
-    let _e191 = x[((idx * 3u) + 0u)];
-    x[((idx * 3u) + 0u)] = select(_e117, select(_e124, mix(_e131, _e138, _e141), ((_e149 == _e156) && (abs(_e164) < 340000000000000000000000000000000000000f))), ((_e176 == _e183) && (abs(_e191) < 340000000000000000000000000000000000000f)));
-    let _e209 = state[((idx * 8u) + 1u)];
-    let _e216 = x[((idx * 3u) + 1u)];
-    let _e223 = state[((idx * 8u) + 1u)];
-    let _e230 = x[((idx * 3u) + 1u)];
-    let _e233 = constants.alpha_u;
-    let _e241 = state[((idx * 8u) + 1u)];
-    let _e248 = state[((idx * 8u) + 1u)];
-    let _e256 = state[((idx * 8u) + 1u)];
-    let _e268 = x[((idx * 3u) + 1u)];
-    let _e275 = x[((idx * 3u) + 1u)];
-    let _e283 = x[((idx * 3u) + 1u)];
-    state[((idx * 8u) + 1u)] = select(_e209, select(_e216, mix(_e223, _e230, _e233), ((_e241 == _e248) && (abs(_e256) < 340000000000000000000000000000000000000f))), ((_e268 == _e275) && (abs(_e283) < 340000000000000000000000000000000000000f)));
-    let _e301 = state[((idx * 8u) + 1u)];
-    let _e308 = x[((idx * 3u) + 1u)];
-    let _e315 = state[((idx * 8u) + 1u)];
-    let _e322 = x[((idx * 3u) + 1u)];
-    let _e325 = constants.alpha_u;
-    let _e333 = state[((idx * 8u) + 1u)];
-    let _e340 = state[((idx * 8u) + 1u)];
-    let _e348 = state[((idx * 8u) + 1u)];
-    let _e360 = x[((idx * 3u) + 1u)];
-    let _e367 = x[((idx * 3u) + 1u)];
-    let _e375 = x[((idx * 3u) + 1u)];
-    x[((idx * 3u) + 1u)] = select(_e301, select(_e308, mix(_e315, _e322, _e325), ((_e333 == _e340) && (abs(_e348) < 340000000000000000000000000000000000000f))), ((_e360 == _e367) && (abs(_e375) < 340000000000000000000000000000000000000f)));
-    let _e393 = state[((idx * 8u) + 2u)];
-    let _e400 = x[((idx * 3u) + 2u)];
-    let _e407 = state[((idx * 8u) + 2u)];
-    let _e414 = x[((idx * 3u) + 2u)];
-    let _e417 = constants.alpha_p;
-    let _e425 = state[((idx * 8u) + 2u)];
-    let _e432 = state[((idx * 8u) + 2u)];
-    let _e440 = state[((idx * 8u) + 2u)];
-    let _e452 = x[((idx * 3u) + 2u)];
-    let _e459 = x[((idx * 3u) + 2u)];
-    let _e467 = x[((idx * 3u) + 2u)];
-    state[((idx * 8u) + 2u)] = select(_e393, select(_e400, mix(_e407, _e414, _e417), ((_e425 == _e432) && (abs(_e440) < 340000000000000000000000000000000000000f))), ((_e452 == _e459) && (abs(_e467) < 340000000000000000000000000000000000000f)));
-    let _e485 = state[((idx * 8u) + 2u)];
-    let _e492 = x[((idx * 3u) + 2u)];
-    let _e499 = state[((idx * 8u) + 2u)];
-    let _e506 = x[((idx * 3u) + 2u)];
-    let _e509 = constants.alpha_p;
-    let _e517 = state[((idx * 8u) + 2u)];
-    let _e524 = state[((idx * 8u) + 2u)];
-    let _e532 = state[((idx * 8u) + 2u)];
-    let _e544 = x[((idx * 3u) + 2u)];
-    let _e551 = x[((idx * 3u) + 2u)];
-    let _e559 = x[((idx * 3u) + 2u)];
-    x[((idx * 3u) + 2u)] = select(_e485, select(_e492, mix(_e499, _e506, _e509), ((_e517 == _e524) && (abs(_e532) < 340000000000000000000000000000000000000f))), ((_e544 == _e551) && (abs(_e559) < 340000000000000000000000000000000000000f)));
+    let base = (idx * 8u);
+    let _e27 = state[((idx * 8u) + 0u)];
+    let _e34 = x[((idx * 3u) + 0u)];
+    let _e41 = state[((idx * 8u) + 0u)];
+    let _e48 = x[((idx * 3u) + 0u)];
+    let _e51 = constants.alpha_u;
+    let _e59 = state[((idx * 8u) + 0u)];
+    let _e66 = state[((idx * 8u) + 0u)];
+    let _e74 = state[((idx * 8u) + 0u)];
+    let _e86 = x[((idx * 3u) + 0u)];
+    let _e93 = x[((idx * 3u) + 0u)];
+    let _e101 = x[((idx * 3u) + 0u)];
+    state[((idx * 8u) + 0u)] = select(_e27, select(_e34, mix(_e41, _e48, _e51), ((_e59 == _e66) && (abs(_e74) < 340000000000000000000000000000000000000f))), ((_e86 == _e93) && (abs(_e101) < 340000000000000000000000000000000000000f)));
+    let _e119 = state[((idx * 8u) + 0u)];
+    let _e126 = x[((idx * 3u) + 0u)];
+    let _e133 = state[((idx * 8u) + 0u)];
+    let _e140 = x[((idx * 3u) + 0u)];
+    let _e143 = constants.alpha_u;
+    let _e151 = state[((idx * 8u) + 0u)];
+    let _e158 = state[((idx * 8u) + 0u)];
+    let _e166 = state[((idx * 8u) + 0u)];
+    let _e178 = x[((idx * 3u) + 0u)];
+    let _e185 = x[((idx * 3u) + 0u)];
+    let _e193 = x[((idx * 3u) + 0u)];
+    x[((idx * 3u) + 0u)] = select(_e119, select(_e126, mix(_e133, _e140, _e143), ((_e151 == _e158) && (abs(_e166) < 340000000000000000000000000000000000000f))), ((_e178 == _e185) && (abs(_e193) < 340000000000000000000000000000000000000f)));
+    let _e211 = state[((idx * 8u) + 1u)];
+    let _e218 = x[((idx * 3u) + 1u)];
+    let _e225 = state[((idx * 8u) + 1u)];
+    let _e232 = x[((idx * 3u) + 1u)];
+    let _e235 = constants.alpha_u;
+    let _e243 = state[((idx * 8u) + 1u)];
+    let _e250 = state[((idx * 8u) + 1u)];
+    let _e258 = state[((idx * 8u) + 1u)];
+    let _e270 = x[((idx * 3u) + 1u)];
+    let _e277 = x[((idx * 3u) + 1u)];
+    let _e285 = x[((idx * 3u) + 1u)];
+    state[((idx * 8u) + 1u)] = select(_e211, select(_e218, mix(_e225, _e232, _e235), ((_e243 == _e250) && (abs(_e258) < 340000000000000000000000000000000000000f))), ((_e270 == _e277) && (abs(_e285) < 340000000000000000000000000000000000000f)));
+    let _e303 = state[((idx * 8u) + 1u)];
+    let _e310 = x[((idx * 3u) + 1u)];
+    let _e317 = state[((idx * 8u) + 1u)];
+    let _e324 = x[((idx * 3u) + 1u)];
+    let _e327 = constants.alpha_u;
+    let _e335 = state[((idx * 8u) + 1u)];
+    let _e342 = state[((idx * 8u) + 1u)];
+    let _e350 = state[((idx * 8u) + 1u)];
+    let _e362 = x[((idx * 3u) + 1u)];
+    let _e369 = x[((idx * 3u) + 1u)];
+    let _e377 = x[((idx * 3u) + 1u)];
+    x[((idx * 3u) + 1u)] = select(_e303, select(_e310, mix(_e317, _e324, _e327), ((_e335 == _e342) && (abs(_e350) < 340000000000000000000000000000000000000f))), ((_e362 == _e369) && (abs(_e377) < 340000000000000000000000000000000000000f)));
+    let _e395 = state[((idx * 8u) + 2u)];
+    let _e402 = x[((idx * 3u) + 2u)];
+    let _e409 = state[((idx * 8u) + 2u)];
+    let _e416 = x[((idx * 3u) + 2u)];
+    let _e419 = constants.alpha_p;
+    let _e427 = state[((idx * 8u) + 2u)];
+    let _e434 = state[((idx * 8u) + 2u)];
+    let _e442 = state[((idx * 8u) + 2u)];
+    let _e454 = x[((idx * 3u) + 2u)];
+    let _e461 = x[((idx * 3u) + 2u)];
+    let _e469 = x[((idx * 3u) + 2u)];
+    state[((idx * 8u) + 2u)] = select(_e395, select(_e402, mix(_e409, _e416, _e419), ((_e427 == _e434) && (abs(_e442) < 340000000000000000000000000000000000000f))), ((_e454 == _e461) && (abs(_e469) < 340000000000000000000000000000000000000f)));
+    let _e487 = state[((idx * 8u) + 2u)];
+    let _e494 = x[((idx * 3u) + 2u)];
+    let _e501 = state[((idx * 8u) + 2u)];
+    let _e508 = x[((idx * 3u) + 2u)];
+    let _e511 = constants.alpha_p;
+    let _e519 = state[((idx * 8u) + 2u)];
+    let _e526 = state[((idx * 8u) + 2u)];
+    let _e534 = state[((idx * 8u) + 2u)];
+    let _e546 = x[((idx * 3u) + 2u)];
+    let _e553 = x[((idx * 3u) + 2u)];
+    let _e561 = x[((idx * 3u) + 2u)];
+    x[((idx * 3u) + 2u)] = select(_e487, select(_e494, mix(_e501, _e508, _e511), ((_e519 == _e526) && (abs(_e534) < 340000000000000000000000000000000000000f))), ((_e546 == _e553) && (abs(_e561) < 340000000000000000000000000000000000000f)));
     return;
 }
 "#;

@@ -173,6 +173,7 @@ pub enum FusionGuard {
     RequiresImplicitOrCoupled,
     RequiresModule(&'static str),
     MinPolicy(KernelFusionPolicy),
+    ExactPolicy(KernelFusionPolicy),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -386,6 +387,7 @@ fn guard_matches(guard: FusionGuard, ctx: &KernelFusionContext<'_>) -> bool {
         ),
         FusionGuard::RequiresModule(name) => ctx.module_names.contains(&name),
         FusionGuard::MinPolicy(min) => ctx.policy >= min,
+        FusionGuard::ExactPolicy(policy) => ctx.policy == policy,
     }
 }
 
@@ -1395,6 +1397,62 @@ mod tests {
         assert_eq!(aggressive_out.kernels.len(), 1);
         assert_eq!(aggressive_out.kernels[0].id, fused.id);
         assert_eq!(aggressive_out.applied.len(), 1);
+    }
+
+    #[test]
+    fn fusion_guard_exact_policy_gates_rules() {
+        let base = ModelKernelSpec {
+            id: KernelId("fusion/base"),
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        };
+        let fused = ModelKernelSpec {
+            id: KernelId("fusion/fused"),
+            phase: KernelPhaseId::Update,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::Always,
+        };
+        let rules = vec![ModelKernelFusionRule {
+            name: "fuse_when_safe_only",
+            priority: 1,
+            phase: KernelPhaseId::Update,
+            pattern: vec![KernelPatternAtom::id(base.id)],
+            replacement: fused,
+            guards: vec![FusionGuard::ExactPolicy(KernelFusionPolicy::Safe)],
+        }];
+        let kernels = vec![base];
+        let module_names = ["fusion_module"];
+
+        let off_ctx = KernelFusionContext {
+            policy: KernelFusionPolicy::Off,
+            stepping: KernelFusionStepping::Coupled,
+            has_grad_state: false,
+            module_names: &module_names,
+        };
+        let off_out = apply_model_fusion_rules(&kernels, &rules, &off_ctx);
+        assert_eq!(off_out.kernels[0].id, base.id);
+        assert!(off_out.applied.is_empty());
+
+        let safe_ctx = KernelFusionContext {
+            policy: KernelFusionPolicy::Safe,
+            stepping: KernelFusionStepping::Coupled,
+            has_grad_state: false,
+            module_names: &module_names,
+        };
+        let safe_out = apply_model_fusion_rules(&kernels, &rules, &safe_ctx);
+        assert_eq!(safe_out.kernels[0].id, fused.id);
+        assert_eq!(safe_out.applied.len(), 1);
+
+        let aggressive_ctx = KernelFusionContext {
+            policy: KernelFusionPolicy::Aggressive,
+            stepping: KernelFusionStepping::Coupled,
+            has_grad_state: false,
+            module_names: &module_names,
+        };
+        let aggressive_out = apply_model_fusion_rules(&kernels, &rules, &aggressive_ctx);
+        assert_eq!(aggressive_out.kernels[0].id, base.id);
+        assert!(aggressive_out.applied.is_empty());
     }
 
     #[test]

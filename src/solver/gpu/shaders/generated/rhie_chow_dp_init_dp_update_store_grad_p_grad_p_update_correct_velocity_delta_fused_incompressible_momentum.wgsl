@@ -40,7 +40,7 @@ struct Constants {
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
-    if (idx >= (arrayLength(&state) / max(8u, 1u))) { return; }
+    if (idx >= (arrayLength(&state) / 8u)) { return; }
     let base = idx * 8u;
     // synthesized by fusion rule: rhie_chow:dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1
     // begin fused segment: dp_init

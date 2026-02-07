@@ -25,6 +25,7 @@ struct Constants {
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
     if (idx >= (arrayLength(&state) / 1u)) { return; }
+    let base = idx * 1u;
     state[idx * 1u + 0u] = select(state[idx * 1u + 0u], select(x[idx * 1u + 0u], mix(state[idx * 1u + 0u], x[idx * 1u + 0u], 1.0), state[idx * 1u + 0u] == state[idx * 1u + 0u] && abs(state[idx * 1u + 0u]) < 340000000000000000000000000000000000000.0), x[idx * 1u + 0u] == x[idx * 1u + 0u] && abs(x[idx * 1u + 0u]) < 340000000000000000000000000000000000000.0);
     x[idx * 1u + 0u] = select(state[idx * 1u + 0u], select(x[idx * 1u + 0u], mix(state[idx * 1u + 0u], x[idx * 1u + 0u], 1.0), state[idx * 1u + 0u] == state[idx * 1u + 0u] && abs(state[idx * 1u + 0u]) < 340000000000000000000000000000000000000.0), x[idx * 1u + 0u] == x[idx * 1u + 0u] && abs(x[idx * 1u + 0u]) < 340000000000000000000000000000000000000.0);
 }

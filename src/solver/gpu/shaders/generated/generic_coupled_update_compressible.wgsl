@@ -25,6 +25,7 @@ struct Constants {
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
     if (idx >= (arrayLength(&state) / 22u)) { return; }
+    let base = idx * 22u;
     state[idx * 22u + 0u] = select(state[idx * 22u + 0u], select(x[idx * 8u + 0u], mix(state[idx * 22u + 0u], x[idx * 8u + 0u], select(1.0, constants.alpha_u, constants.dtau > 0.0)), state[idx * 22u + 0u] == state[idx * 22u + 0u] && abs(state[idx * 22u + 0u]) < 340000000000000000000000000000000000000.0), x[idx * 8u + 0u] == x[idx * 8u + 0u] && abs(x[idx * 8u + 0u]) < 340000000000000000000000000000000000000.0);
     x[idx * 8u + 0u] = select(state[idx * 22u + 0u], select(x[idx * 8u + 0u], mix(state[idx * 22u + 0u], x[idx * 8u + 0u], select(1.0, constants.alpha_u, constants.dtau > 0.0)), state[idx * 22u + 0u] == state[idx * 22u + 0u] && abs(state[idx * 22u + 0u]) < 340000000000000000000000000000000000000.0), x[idx * 8u + 0u] == x[idx * 8u + 0u] && abs(x[idx * 8u + 0u]) < 340000000000000000000000000000000000000.0);
     state[idx * 22u + 1u] = select(state[idx * 22u + 1u], select(x[idx * 8u + 1u], mix(state[idx * 22u + 1u], x[idx * 8u + 1u], select(1.0, constants.alpha_u, constants.dtau > 0.0)), state[idx * 22u + 1u] == state[idx * 22u + 1u] && abs(state[idx * 22u + 1u]) < 340000000000000000000000000000000000000.0), x[idx * 8u + 1u] == x[idx * 8u + 1u] && abs(x[idx * 8u + 1u]) < 340000000000000000000000000000000000000.0);

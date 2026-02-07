@@ -96,7 +96,7 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
   - [x] `Off` vs `Safe` parity,
   - [x] `Safe` vs `Aggressive` parity where expected.
 - [ ] Performance checks:
-  - [x] dispatch count reduction (incompressible coupled `Safe` vs `Aggressive` validated by runtime dispatch-counter test: kernel-graph dispatches drop by 3 per outer-iteration after `dp_init`+Rhie-Chow full-chain fusion),
+  - [x] dispatch count reduction (compile-time schedule tests now validate `Off -> Safe` update dispatch drop of 2 and `Safe -> Aggressive` drop of 2 for incompressible coupled; runtime dispatch-counter test also confirms `Aggressive` executes fewer kernel-graph dispatches than `Safe`),
   - [ ] no regression in wall-clock for representative cases.
 
 ## 9) Rollout and Cleanup
@@ -124,6 +124,7 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 - [x] `dp_init` + `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` (Aggressive-only via `rhie_chow:dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1`).
 - [x] `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` as a standalone declared pair rule (Aggressive-only via `rhie_chow:store_grad_p_grad_p_update_v1`).
 - [x] `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` as a standalone declared pair rule (Aggressive-only via `rhie_chow:grad_p_update_correct_velocity_delta_v1`).
+- [x] `generic_coupled_update` + `dp_init` (Safe-only in coupled stepping via `generic_coupled:update_dp_init_v1`, guarded with `ExactPolicy(Safe)`).
 - [x] `generic_coupled_assembly` + `generic_coupled_assembly_grad_state` DSL migration prerequisite completed (both kernels now emitted as DSL artifacts; rule declaration remains optional because conditions are mutually exclusive at runtime).
 
 ## 12) Fusion Opportunity Reassessment (Post Assembly DSL Migration)

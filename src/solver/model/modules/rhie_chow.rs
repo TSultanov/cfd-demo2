@@ -61,6 +61,8 @@ pub fn rhie_chow_aux_module(
     let kernel_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused = KernelId(
         "rhie_chow/dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused",
     );
+    let kernel_generic_coupled_update_dp_init_fused =
+        KernelId("generic_coupled/update_dp_init_fused");
     let kernel_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused = KernelId(
         "rhie_chow/dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused",
     );
@@ -180,6 +182,31 @@ pub fn rhie_chow_aux_module(
     });
 
     let fusion_rules = vec![
+        ModelKernelFusionRule {
+            name: "generic_coupled:update_dp_init_v1",
+            priority: 140,
+            phase: KernelPhaseId::Update,
+            pattern: vec![
+                KernelPatternAtom::with_dispatch(
+                    KernelId::GENERIC_COUPLED_UPDATE,
+                    DispatchKindId::Cells,
+                ),
+                KernelPatternAtom::with_dispatch(kernel_dp_init, DispatchKindId::Cells),
+            ],
+            replacement: ModelKernelSpec {
+                id: kernel_generic_coupled_update_dp_init_fused,
+                phase: KernelPhaseId::Update,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::Always,
+            },
+            guards: vec![
+                FusionGuard::RequiresStepping(KernelFusionStepping::Coupled),
+                FusionGuard::RequiresModule("generic_coupled"),
+                FusionGuard::RequiresModule("rhie_chow_aux"),
+                FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Safe),
+                FusionGuard::ExactPolicy(crate::solver::model::kernel::KernelFusionPolicy::Safe),
+            ],
+        },
         ModelKernelFusionRule {
             name: "rhie_chow:dp_update_store_grad_p_v1",
             priority: 100,
@@ -378,9 +405,7 @@ fn rhie_chow_state_launch(state_stride: u32) -> LaunchSemantics {
     LaunchSemantics::new(
         [64, 1, 1],
         "global_id.y * constants.stride_x + global_id.x",
-        Some(format!(
-            "idx >= (arrayLength(&state) / max({state_stride}u, 1u))"
-        )),
+        Some(format!("idx >= (arrayLength(&state) / {state_stride}u)")),
     )
 }
 
@@ -1112,6 +1137,20 @@ mod tests {
         assert!(
             fused_src.contains("synthesized by fusion rule: rhie_chow:dp_update_store_grad_p_v1"),
             "expected fusion synthesis marker in fused Rhie-Chow WGSL"
+        );
+
+        let update_dp_init_fused_path = emitted
+            .iter()
+            .find_map(|(id, path)| {
+                (id.as_str() == "generic_coupled/update_dp_init_fused").then_some(path)
+            })
+            .expect("synthesized generic_coupled/update_dp_init fused kernel path");
+        let update_dp_init_fused_src = std::fs::read_to_string(update_dp_init_fused_path)
+            .expect("read synthesized generic_coupled/update_dp_init fused kernel");
+        assert!(
+            update_dp_init_fused_src
+                .contains("synthesized by fusion rule: generic_coupled:update_dp_init_v1"),
+            "expected synthesis marker for generic_coupled:update_dp_init_v1"
         );
 
         let aggressive_fused_path = emitted

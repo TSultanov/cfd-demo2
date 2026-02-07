@@ -168,6 +168,40 @@ mod tests {
     }
 
     #[test]
+    fn incompressible_coupled_safe_uses_generic_update_dp_init_fused_kernel() {
+        for has_grad_state in [false, true] {
+            let (kernels, applied) = schedule_for_model(
+                "incompressible_momentum",
+                SteppingMode::Coupled,
+                has_grad_state,
+                KernelFusionPolicy::Safe,
+            )
+            .expect("missing safe coupled schedule for incompressible_momentum");
+
+            assert!(
+                applied
+                    .iter()
+                    .any(|name| *name == "generic_coupled:update_dp_init_v1"),
+                "expected safe schedule to apply generic_coupled:update_dp_init_v1"
+            );
+
+            let ids: Vec<&str> = kernels.iter().map(|k| k.id.as_str()).collect();
+            assert!(
+                ids.contains(&"generic_coupled/update_dp_init_fused"),
+                "missing generic_coupled/update_dp_init_fused kernel in safe schedule"
+            );
+            assert!(
+                !ids.contains(&"generic_coupled_update"),
+                "generic_coupled_update should be absorbed by safe fused replacement"
+            );
+            assert!(
+                !ids.contains(&"dp_init"),
+                "dp_init should be absorbed by safe fused replacement"
+            );
+        }
+    }
+
+    #[test]
     fn incompressible_coupled_aggressive_reduces_update_dispatches_vs_safe() {
         for has_grad_state in [false, true] {
             let (safe_kernels, _) = schedule_for_model(
@@ -195,8 +229,42 @@ mod tests {
                 .count();
 
             assert!(
-                aggressive_update_dispatches + 3 == safe_update_dispatches,
-                "expected aggressive update dispatches to drop by 3 (safe={safe_update_dispatches}, aggressive={aggressive_update_dispatches}, has_grad_state={has_grad_state})"
+                aggressive_update_dispatches + 2 == safe_update_dispatches,
+                "expected aggressive update dispatches to drop by 2 (safe={safe_update_dispatches}, aggressive={aggressive_update_dispatches}, has_grad_state={has_grad_state})"
+            );
+        }
+    }
+
+    #[test]
+    fn incompressible_coupled_safe_reduces_update_dispatches_vs_off() {
+        for has_grad_state in [false, true] {
+            let (off_kernels, _) = schedule_for_model(
+                "incompressible_momentum",
+                SteppingMode::Coupled,
+                has_grad_state,
+                KernelFusionPolicy::Off,
+            )
+            .expect("missing off coupled schedule for incompressible_momentum");
+            let (safe_kernels, _) = schedule_for_model(
+                "incompressible_momentum",
+                SteppingMode::Coupled,
+                has_grad_state,
+                KernelFusionPolicy::Safe,
+            )
+            .expect("missing safe coupled schedule for incompressible_momentum");
+
+            let off_update_dispatches = off_kernels
+                .iter()
+                .filter(|k| k.phase == KernelPhase::Update)
+                .count();
+            let safe_update_dispatches = safe_kernels
+                .iter()
+                .filter(|k| k.phase == KernelPhase::Update)
+                .count();
+
+            assert!(
+                safe_update_dispatches + 2 == off_update_dispatches,
+                "expected safe update dispatches to drop by 2 vs off (off={off_update_dispatches}, safe={safe_update_dispatches}, has_grad_state={has_grad_state})"
             );
         }
     }

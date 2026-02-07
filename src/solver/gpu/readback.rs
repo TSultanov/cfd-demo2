@@ -85,6 +85,7 @@ pub async fn read_buffer_cached(
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
                 encoder.copy_buffer_to_buffer(buffer, 0, &staging_buffer, 0, size);
                 let submission_index = context.queue.submit(Some(encoder.finish()));
+                crate::count_submission!("Readback", "read_buffer_copy");
                 profiling.record_location(
                     "read_buffer:submit_copy",
                     ProfileCategory::GpuDispatch,
@@ -97,7 +98,9 @@ pub async fn read_buffer_cached(
                     .device
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
                 encoder.copy_buffer_to_buffer(buffer, 0, &staging_buffer, 0, size);
-                context.queue.submit(Some(encoder.finish()))
+                let submission_index = context.queue.submit(Some(encoder.finish()));
+                crate::count_submission!("Readback", "read_buffer_copy");
+                submission_index
             }
         }
 
@@ -107,7 +110,9 @@ pub async fn read_buffer_cached(
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
             encoder.copy_buffer_to_buffer(buffer, 0, &staging_buffer, 0, size);
-            context.queue.submit(Some(encoder.finish()))
+            let submission_index = context.queue.submit(Some(encoder.finish()));
+            crate::count_submission!("Readback", "read_buffer_copy");
+            submission_index
         }
     };
 

@@ -662,6 +662,10 @@ impl SolverRecipe {
                         kind: GraphOpKind("coupled:update"),
                         mode: GraphExecMode::SingleSubmit,
                     },
+                    ProgramSpecNode::Host {
+                        label: "coupled:batch_tail",
+                        kind: HostOpKind("coupled:batch_tail"),
+                    },
                 ] {
                     program.push(iter_block, node);
                 }
@@ -677,7 +681,7 @@ impl SolverRecipe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::gpu::program::plan::ProgramSpecNode;
+    use crate::solver::gpu::program::plan::{HostOpKind, ProgramSpecNode};
     use crate::solver::model::generic_diffusion_demo_model;
     use crate::solver::model::{compressible_model, incompressible_momentum_model};
 
@@ -957,6 +961,20 @@ mod tests {
         assert!(
             has_repeat,
             "incompressible coupled spec should have a Repeat loop"
+        );
+
+        let has_batch_tail = spec.blocks.iter().flat_map(|b| b.nodes.iter()).any(|n| {
+            matches!(
+                n,
+                ProgramSpecNode::Host {
+                    kind: HostOpKind("coupled:batch_tail"),
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_batch_tail,
+            "incompressible coupled spec should include coupled:batch_tail host hook"
         );
     }
 

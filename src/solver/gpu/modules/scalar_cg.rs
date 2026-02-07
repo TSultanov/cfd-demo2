@@ -238,6 +238,7 @@ impl ScalarCgModule {
                 pass.dispatch_workgroups(1, 1, 1);
             }
             context.queue.submit(Some(encoder.finish()));
+            crate::count_submission!("Scalar CG", "init");
         }
 
         for iter in 0..max_iters {
@@ -317,6 +318,7 @@ impl ScalarCgModule {
             }
 
             context.queue.submit(Some(encoder.finish()));
+            crate::count_submission!("Scalar CG", "iteration");
 
             let residual = self.read_residual(context).abs().sqrt();
             stats.iterations = iter + 1;
@@ -355,6 +357,7 @@ impl ScalarCgModule {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         encoder.copy_buffer_to_buffer(src, 0, dst, 0, size);
         context.queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Scalar CG", "copy_buffer");
     }
 
     fn read_residual(&self, context: &GpuContext) -> f32 {
@@ -363,6 +366,7 @@ impl ScalarCgModule {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         encoder.copy_buffer_to_buffer(&self.b_scalars, 0, &self.b_staging_scalar, 0, 64);
         let submission_index = context.queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Scalar CG", "read_residual_copy");
 
         let slice = self.b_staging_scalar.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();

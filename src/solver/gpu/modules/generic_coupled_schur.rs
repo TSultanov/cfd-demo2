@@ -163,6 +163,7 @@ impl GenericCoupledSchurPreconditioner {
         });
         encoder.copy_buffer_to_buffer(&self.pressure_values, 0, &staging, 0, size);
         let submission_index = queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Generic Coupled Schur", "pressure_matrix_readback_copy");
 
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
@@ -182,17 +183,8 @@ impl GenericCoupledSchurPreconditioner {
 
         Ok(values)
     }
-}
 
-impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
-    fn prepare(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        _fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
-        _rhs: wgpu::BindingResource<'_>,
-        dispatch: DispatchGrids,
-    ) {
+    fn write_setup_params(&self, queue: &wgpu::Queue) {
         let params = GpuGenericCoupledSchurSetupParams {
             num_cells: self.num_cells,
             unknowns_per_cell: self.unknowns_per_cell,
@@ -202,20 +194,31 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
             u4567: self.u4567,
         };
         queue.write_buffer(&self.setup_params, 0, bytemuck::bytes_of(&params));
+    }
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    fn encode_setup(&self, encoder: &mut wgpu::CommandEncoder, dispatch: DispatchGrids) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Generic Coupled Schur Setup"),
+            timestamp_writes: None,
         });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Generic Coupled Schur Setup"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.setup_pipeline);
-            pass.set_bind_group(0, &self.setup_bg, &[]);
-            pass.dispatch_workgroups(dispatch.cells.0, dispatch.cells.1, 1);
-        }
-        queue.submit(Some(encoder.finish()));
+        pass.set_pipeline(&self.setup_pipeline);
+        pass.set_bind_group(0, &self.setup_bg, &[]);
+        pass.dispatch_workgroups(dispatch.cells.0, dispatch.cells.1, 1);
+    }
+}
+
+impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
+    fn encode_prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        _fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
+        _rhs: wgpu::BindingResource<'_>,
+        dispatch: DispatchGrids,
+    ) {
+        self.write_setup_params(queue);
+        self.encode_setup(encoder, dispatch);
 
         if self.schur.pressure_kind() == CoupledPressureSolveKind::Amg {
             if !self.schur.has_amg_resources() {
@@ -235,14 +238,29 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
                         .set_pressure_kind(CoupledPressureSolveKind::Chebyshev);
                 }
             } else {
-                self.schur.refresh_amg_level0_matrix(
-                    device,
-                    queue,
+                self.schur.encode_refresh_amg_level0_matrix(
+                    encoder,
                     &self.pressure_values,
                     self.pressure_num_nonzeros,
                 );
             }
         }
+    }
+
+    fn prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
+        rhs: wgpu::BindingResource<'_>,
+        dispatch: DispatchGrids,
+    ) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Generic Coupled Schur Setup"),
+        });
+        self.encode_prepare(device, queue, &mut encoder, fgmres, rhs, dispatch);
+        queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Generic Coupled Schur", "setup");
     }
 
     fn encode_apply(

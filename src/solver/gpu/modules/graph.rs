@@ -44,16 +44,26 @@ impl<M: GpuComputeModule> ModuleGraph<M> {
         Self { nodes }
     }
 
+    pub fn encode_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        module: &M,
+        runtime: RuntimeDims,
+    ) {
+        for node in &self.nodes {
+            node.encode(encoder, module, runtime);
+        }
+    }
+
     pub fn execute(&self, context: &GpuContext, module: &M, runtime: RuntimeDims) {
         let mut encoder = context
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("ModuleGraph Encoder"),
             });
-        for node in &self.nodes {
-            node.encode(&mut encoder, module, runtime);
-        }
+        self.encode_into(&mut encoder, module, runtime);
         context.queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Module Graph", "execute");
     }
 
     pub fn execute_split_timed(
@@ -73,6 +83,7 @@ impl<M: GpuComputeModule> ModuleGraph<M> {
                     });
             node.encode(&mut encoder, module, runtime);
             context.queue.submit(Some(encoder.finish()));
+            crate::count_submission!("Module Graph", node.label());
             let secs = start.elapsed().as_secs_f64();
             timings.nodes.push(ModuleNodeTiming {
                 label: node.label(),

@@ -60,7 +60,7 @@ fn accumulate_solution(
 
     var acc = vec_y[idx];
     for (var i = 0u; i < k; i++) {
-        acc = y_sol[i] * vec_x[i * z_stride + idx] + acc;
+        acc = params.omega * y_sol[i] * vec_x[i * z_stride + idx] + acc;
     }
 
     vec_y[idx] = acc;

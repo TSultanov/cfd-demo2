@@ -168,87 +168,6 @@ impl RuntimePreconditionerModule {
         }
     }
 
-    fn build_block_jacobi(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
-        dispatch: DispatchGrids,
-    ) {
-        self.ensure_block_jacobi_resources(device);
-
-        let Some(pipeline) = self.pipeline_block_jacobi_build.as_ref() else {
-            return;
-        };
-        let Some(bg_block_inv) = self.bg_block_inv.as_ref() else {
-            return;
-        };
-
-        let vector_bg = fgmres.create_vector_bind_group(
-            device,
-            fgmres.w_buffer().as_entire_binding(),
-            fgmres.temp_buffer().as_entire_binding(),
-            fgmres.z_binding(0),
-            "runtime_preconditioner:block_jacobi_build_vectors",
-        );
-
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("runtime_preconditioner:block_jacobi_build"),
-        });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runtime_preconditioner:block_jacobi_build"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, &vector_bg, &[]);
-            pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
-            pass.set_bind_group(2, bg_block_inv, &[]);
-            pass.set_bind_group(3, fgmres.params_bg(), &[]);
-            pass.dispatch_workgroups(dispatch.cells.0, dispatch.cells.1, 1);
-        }
-        queue.submit(Some(encoder.finish()));
-    }
-
-    fn refresh_jacobi_diag_inv(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
-        dispatch: DispatchGrids,
-    ) {
-        self.ensure_jacobi_pipelines(device);
-
-        let Some(pipeline) = self.pipeline_extract_diag_inv.as_ref() else {
-            return;
-        };
-
-        let vector_bg = fgmres.create_vector_bind_group(
-            device,
-            fgmres.w_buffer().as_entire_binding(),
-            fgmres.temp_buffer().as_entire_binding(),
-            fgmres.z_binding(0),
-            "runtime_preconditioner:jacobi_diag_inv_vectors",
-        );
-
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("runtime_preconditioner:jacobi_diag_inv"),
-        });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runtime_preconditioner:jacobi_diag_inv"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, &vector_bg, &[]);
-            pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
-            pass.set_bind_group(2, fgmres.precond_bg(), &[]);
-            pass.set_bind_group(3, fgmres.params_bg(), &[]);
-            pass.dispatch_workgroups(dispatch.dofs.0, dispatch.dofs.1, 1);
-        }
-        queue.submit(Some(encoder.finish()));
-    }
-
     fn read_matrix_values(
         &self,
         device: &wgpu::Device,
@@ -267,6 +186,7 @@ impl RuntimePreconditionerModule {
         });
         encoder.copy_buffer_to_buffer(&self.matrix_values, 0, &staging, 0, size);
         let submission_index = queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Runtime Preconditioner", "matrix_readback_copy");
 
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
@@ -314,24 +234,142 @@ impl RuntimePreconditionerModule {
         self.amg = Some(AmgResources::new(device, &matrix, 20));
     }
 
-    fn refresh_amg_level0_matrix(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+    fn encode_build_block_jacobi(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
+        dispatch: DispatchGrids,
+    ) -> bool {
+        self.ensure_block_jacobi_resources(device);
+
+        let Some(pipeline) = self.pipeline_block_jacobi_build.as_ref() else {
+            return false;
+        };
+        let Some(bg_block_inv) = self.bg_block_inv.as_ref() else {
+            return false;
+        };
+
+        let vector_bg = fgmres.create_vector_bind_group(
+            device,
+            fgmres.w_buffer().as_entire_binding(),
+            fgmres.temp_buffer().as_entire_binding(),
+            fgmres.z_binding(0),
+            "runtime_preconditioner:block_jacobi_build_vectors",
+        );
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runtime_preconditioner:block_jacobi_build"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &vector_bg, &[]);
+            pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
+            pass.set_bind_group(2, bg_block_inv, &[]);
+            pass.set_bind_group(3, fgmres.params_bg(), &[]);
+            pass.dispatch_workgroups(dispatch.cells.0, dispatch.cells.1, 1);
+        }
+        true
+    }
+
+    fn encode_refresh_jacobi_diag_inv(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
+        dispatch: DispatchGrids,
+    ) -> bool {
+        self.ensure_jacobi_pipelines(device);
+
+        let Some(pipeline) = self.pipeline_extract_diag_inv.as_ref() else {
+            return false;
+        };
+
+        let vector_bg = fgmres.create_vector_bind_group(
+            device,
+            fgmres.w_buffer().as_entire_binding(),
+            fgmres.temp_buffer().as_entire_binding(),
+            fgmres.z_binding(0),
+            "runtime_preconditioner:jacobi_diag_inv_vectors",
+        );
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("runtime_preconditioner:jacobi_diag_inv"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &vector_bg, &[]);
+            pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
+            pass.set_bind_group(2, fgmres.precond_bg(), &[]);
+            pass.set_bind_group(3, fgmres.params_bg(), &[]);
+            pass.dispatch_workgroups(dispatch.dofs.0, dispatch.dofs.1, 1);
+        }
+        true
+    }
+
+    fn encode_refresh_amg_level0_matrix(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
         let Some(amg) = &self.amg else {
-            return;
+            return false;
         };
         let Some(level0) = amg.levels.first() else {
-            return;
+            return false;
         };
 
         let size = (self.num_nonzeros as u64) * 4;
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("runtime_preconditioner:amg_level0_refresh"),
-        });
         encoder.copy_buffer_to_buffer(&self.matrix_values, 0, &level0.b_matrix_values, 0, size);
-        queue.submit(Some(encoder.finish()));
+        true
+    }
+
+    fn encode_prepare_impl(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
+        dispatch: DispatchGrids,
+    ) -> Option<&'static str> {
+        if self.kind == PreconditionerType::Jacobi {
+            return self
+                .encode_refresh_jacobi_diag_inv(device, encoder, fgmres, dispatch)
+                .then_some("jacobi_diag_inv");
+        }
+        if self.kind == PreconditionerType::BlockJacobi {
+            if self.block_jacobi_block_size().is_some() {
+                return self
+                    .encode_build_block_jacobi(device, encoder, fgmres, dispatch)
+                    .then_some("block_jacobi_build");
+            }
+            // Unsupported block size: fall back to diagonal Jacobi.
+            return self
+                .encode_refresh_jacobi_diag_inv(device, encoder, fgmres, dispatch)
+                .then_some("jacobi_diag_inv");
+        }
+
+        self.ensure_amg(device, queue);
+        if self.kind == PreconditionerType::Amg {
+            return self
+                .encode_refresh_amg_level0_matrix(encoder)
+                .then_some("amg_level0_refresh");
+        }
+        None
     }
 }
 
 impl FgmresPreconditionerModule for RuntimePreconditionerModule {
+    fn encode_prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
+        _rhs: wgpu::BindingResource<'_>,
+        dispatch: DispatchGrids,
+    ) {
+        let _ = self.encode_prepare_impl(device, queue, encoder, fgmres, dispatch);
+    }
+
     fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -340,24 +378,13 @@ impl FgmresPreconditionerModule for RuntimePreconditionerModule {
         _rhs: wgpu::BindingResource<'_>,
         dispatch: DispatchGrids,
     ) {
-        if self.kind == PreconditionerType::Jacobi {
-            self.refresh_jacobi_diag_inv(device, queue, fgmres, dispatch);
-            return;
-        }
-        if self.kind == PreconditionerType::BlockJacobi {
-            if self.block_jacobi_block_size().is_some() {
-                self.build_block_jacobi(device, queue, fgmres, dispatch);
-            } else {
-                // If the system block size is unsupported by the cell-block preconditioner,
-                // fall back to diagonal Jacobi so we never produce an invalid preconditioned vector.
-                self.refresh_jacobi_diag_inv(device, queue, fgmres, dispatch);
-            }
-            return;
-        }
-
-        self.ensure_amg(device, queue);
-        if self.kind == PreconditionerType::Amg {
-            self.refresh_amg_level0_matrix(device, queue);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("runtime_preconditioner:prepare"),
+        });
+        if let Some(label) = self.encode_prepare_impl(device, queue, &mut encoder, fgmres, dispatch)
+        {
+            queue.submit(Some(encoder.finish()));
+            crate::count_submission!("Runtime Preconditioner", label);
         }
     }
 

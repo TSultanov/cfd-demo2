@@ -252,6 +252,7 @@ impl GpuUnifiedSolver {
         });
         encoder.copy_buffer_to_buffer(self.state_buffer(), 0, dst, 0, size_bytes);
         queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Unified Solver", "copy_state_to_buffer");
     }
 
     pub(crate) fn set_plan_named_param(

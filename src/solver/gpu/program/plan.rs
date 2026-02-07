@@ -370,6 +370,7 @@ pub(crate) struct GpuProgramPlan {
     pub outer_field_residuals: Vec<(String, f32)>,
     pub outer_field_residuals_scaled: Vec<(String, f32)>,
     pub repeat_break: bool,
+    pub skip_remaining_block: bool,
 }
 
 impl GpuProgramPlan {
@@ -398,6 +399,7 @@ impl GpuProgramPlan {
             outer_field_residuals: Vec::new(),
             outer_field_residuals_scaled: Vec::new(),
             repeat_break: false,
+            skip_remaining_block: false,
         }
     }
 
@@ -543,6 +545,9 @@ impl GpuProgramPlan {
     fn execute_block(&mut self, block: ProgramBlockId) {
         let nodes = self.spec.program.block(block).nodes.clone();
         for node in nodes {
+            if self.skip_remaining_block {
+                break;
+            }
             match node {
                 ProgramSpecNode::Graph { label, kind, mode } => {
                     let (seconds, detail) =
@@ -571,6 +576,7 @@ impl GpuProgramPlan {
                 }
             }
         }
+        self.skip_remaining_block = false;
     }
 }
 

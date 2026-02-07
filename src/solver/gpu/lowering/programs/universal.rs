@@ -97,6 +97,7 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
                 solve: Some(host_coupled_solve),
                 coupled_init_prepare_graph: Some(coupled_graph_init_prepare_run),
                 coupled_before_iter: Some(host_coupled_before_iter),
+                coupled_batch_tail: Some(host_coupled_batch_tail),
                 coupled_outer_iters: Some(coupled_outer_iters),
 
                 assembly_graph: Some(generic_coupled_program::assembly_graph_run),
@@ -264,15 +265,16 @@ fn host_coupled_begin_step(plan: &mut GpuProgramPlan) {
 }
 
 fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
-    // After the first iteration begins, we can stop running one-time preparation
-    // kernels (e.g. `dp_init`) on subsequent steps unless a parameter change
-    // re-enables them.
-    generic_coupled_program::clear_dp_init_needed(plan);
+    generic_coupled_program::host_coupled_before_iter(plan);
 }
 
 fn host_coupled_solve(plan: &mut GpuProgramPlan) {
     generic_coupled_program::host_solve_linear_system(plan);
     generic_coupled_program::host_after_solve(plan);
+}
+
+fn host_coupled_batch_tail(plan: &mut GpuProgramPlan) {
+    generic_coupled_program::host_coupled_batch_tail(plan);
 }
 
 fn host_coupled_finalize_step(plan: &mut GpuProgramPlan) {

@@ -208,6 +208,20 @@ impl CoupledSchurModule {
         matrix_values: &wgpu::Buffer,
         num_nonzeros: u64,
     ) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("schur:refresh_amg_level0_matrix"),
+        });
+        self.encode_refresh_amg_level0_matrix(&mut encoder, matrix_values, num_nonzeros);
+        queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Schur", "refresh_amg_level0_matrix");
+    }
+
+    pub fn encode_refresh_amg_level0_matrix(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        matrix_values: &wgpu::Buffer,
+        num_nonzeros: u64,
+    ) {
         let Some(amg) = &self.amg else {
             return;
         };
@@ -216,11 +230,7 @@ impl CoupledSchurModule {
         };
 
         let size = num_nonzeros * 4;
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("schur:refresh_amg_level0_matrix"),
-        });
         encoder.copy_buffer_to_buffer(matrix_values, 0, &level0.b_matrix_values, 0, size);
-        queue.submit(Some(encoder.finish()));
     }
 
     fn dispatch_schur(

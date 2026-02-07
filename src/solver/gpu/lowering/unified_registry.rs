@@ -37,6 +37,7 @@ pub struct UnifiedOpRegistryConfig {
 
     pub coupled_init_prepare_graph: Option<GraphOpHandler>,
     pub coupled_before_iter: Option<HostOpHandler>,
+    pub coupled_batch_tail: Option<HostOpHandler>,
     pub coupled_outer_iters: Option<CountOpHandler>,
 }
 
@@ -177,6 +178,10 @@ pub fn build_unified_registry(
                 GraphOpKind("coupled:update"),
                 config.update_graph.unwrap_or(noop_graph),
             )?;
+            registry.register_host(
+                HostOpKind("coupled:batch_tail"),
+                config.coupled_batch_tail.unwrap_or(noop_host),
+            )?;
 
             registry.register_host(
                 HostOpKind("coupled:finalize_step"),
@@ -237,6 +242,7 @@ mod tests {
         assert!(registry.has_graph(&GraphOpKind("coupled:assembly")));
         assert!(registry.has_host(&HostOpKind("coupled:solve")));
         assert!(registry.has_graph(&GraphOpKind("coupled:update")));
+        assert!(registry.has_host(&HostOpKind("coupled:batch_tail")));
         assert!(registry.has_host(&HostOpKind("coupled:finalize_step")));
     }
 }

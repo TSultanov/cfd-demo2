@@ -11,7 +11,9 @@ use crate::solver::gpu::modules::generic_coupled_schur::{
 use crate::solver::gpu::modules::graph::{ModuleGraph, RuntimeDims};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
-use crate::solver::gpu::modules::linear_solver::{solve_fgmres, SolveFgmresArgs};
+use crate::solver::gpu::modules::linear_solver::{
+    encode_solve_fgmres_fixed_iterations, solve_fgmres, SolveFgmresArgs,
+};
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::modules::runtime_preconditioner::{
     RuntimePreconditionerInputs, RuntimePreconditionerModule,
@@ -142,6 +144,8 @@ pub(crate) struct GenericCoupledProgramResources {
     outer_iters: usize,
     outer_tol: f32,
     outer_tol_abs: f32,
+    outer_break_enabled: bool,
+    outer_batched_mode: bool,
     nonconverged_relax: f32,
     implicit_base_alpha_u: Option<f32>,
     linear_solver: crate::solver::gpu::recipe::LinearSolverSpec,
@@ -152,6 +156,13 @@ pub(crate) struct GenericCoupledProgramResources {
     _b_bc_value: wgpu::Buffer,
     boundary_faces: Vec<Vec<u32>>,
 }
+
+/// Controls whether coupled outer iterations use host-side adaptive break logic.
+///
+/// `true` keeps existing behavior (evaluate correction norms and stop early).
+/// `false` forces fixed outer-iteration count and skips adaptive early break.
+const DEFAULT_OUTER_BREAK_ENABLED: bool = true;
+const DEFAULT_OUTER_BATCHED_MODE: bool = false;
 
 struct GenericCoupledSchurResources {
     solver: KrylovSolveModule<GenericCoupledSchurPreconditioner>,
@@ -189,15 +200,71 @@ struct GpuOuterConvergenceTargetDesc {
     _pad0: [u32; 3],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GpuOuterConvergenceBreakParams {
+    count: u32,
+    tol_rel: f32,
+    tol_abs: f32,
+    _pad0: u32,
+}
+
+const OUTER_CONVERGENCE_BREAK_WGSL: &str = r#"
+struct BreakParams {
+    count: u32,
+    tol_rel: f32,
+    tol_abs: f32,
+    _pad0: u32,
+};
+
+@group(0) @binding(0) var<storage, read> delta: array<f32>;
+@group(0) @binding(1) var<storage, read> scale: array<f32>;
+@group(0) @binding(2) var<storage, read_write> status: array<u32>;
+@group(0) @binding(3) var<uniform> params: BreakParams;
+
+@compute @workgroup_size(1, 1, 1)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    if (global_id.x != 0u) {
+        return;
+    }
+
+    var converged: u32 = 1u;
+    for (var i: u32 = 0u; i < params.count; i = i + 1u) {
+        let d = delta[i];
+        let s_raw = scale[i];
+        let bad_d = (!(d <= d)) || (abs(d) > 1.0e30);
+        let bad_s = (!(s_raw <= s_raw)) || (abs(s_raw) > 1.0e30);
+        if (bad_d || bad_s) {
+            converged = 0u;
+            break;
+        }
+
+        let s = max(s_raw, 1.0);
+        let tol = params.tol_abs + params.tol_rel * s;
+        if (d > tol) {
+            converged = 0u;
+            break;
+        }
+    }
+    status[0] = converged;
+}
+"#;
+
 struct OuterConvergenceMonitor {
     target_names: Vec<String>,
     pipeline: wgpu::ComputePipeline,
+    break_pipeline: wgpu::ComputePipeline,
     _b_params_x: wgpu::Buffer,
     b_params_state: wgpu::Buffer,
     _b_descs_x: wgpu::Buffer,
     b_descs_state: wgpu::Buffer,
     b_out_bits: wgpu::Buffer,
+    b_delta: wgpu::Buffer,
+    b_scale: wgpu::Buffer,
+    b_break_status: wgpu::Buffer,
+    b_break_params: wgpu::Buffer,
     bg_x: wgpu::BindGroup,
+    break_bg: wgpu::BindGroup,
     zero_out_words: Vec<u32>,
     dispatch_cells: u32,
     state_scale: Option<Vec<f32>>,
@@ -294,6 +361,18 @@ impl OuterConvergenceMonitor {
             (src.create_pipeline)(device)
         };
         let bgl = pipeline.get_bind_group_layout(0);
+        let break_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("outer_convergence:break"),
+            source: wgpu::ShaderSource::Wgsl(OUTER_CONVERGENCE_BREAK_WGSL.into()),
+        });
+        let break_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("outer_convergence:break"),
+            layout: None,
+            module: &break_module,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
 
         let b_params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outer_convergence:params_x"),
@@ -349,6 +428,32 @@ impl OuterConvergenceMonitor {
                 | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
+        let b_delta = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_convergence:delta"),
+            size: (num_targets as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let b_scale = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_convergence:scale"),
+            size: (num_targets as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let b_break_status = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_convergence:break_status"),
+            size: 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let b_break_params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_convergence:break_params"),
+            size: std::mem::size_of::<GpuOuterConvergenceBreakParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let bg_x = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("outer_convergence:bg_x"),
@@ -372,6 +477,29 @@ impl OuterConvergenceMonitor {
                 },
             ],
         });
+        let break_bgl = break_pipeline.get_bind_group_layout(0);
+        let break_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("outer_convergence:break_bg"),
+            layout: &break_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_delta.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_scale.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_break_status.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_break_params.as_entire_binding(),
+                },
+            ],
+        });
 
         let zero_out_words = vec![0u32; target_descs_x.len()];
         let dispatch_cells = num_cells.div_ceil(OUTER_CONVERGENCE_WORKGROUP_SIZE);
@@ -379,12 +507,18 @@ impl OuterConvergenceMonitor {
         Ok(Some(Self {
             target_names,
             pipeline,
+            break_pipeline,
             _b_params_x: b_params,
             b_params_state,
             _b_descs_x: b_descs_x,
             b_descs_state,
             b_out_bits,
+            b_delta,
+            b_scale,
+            b_break_status,
+            b_break_params,
             bg_x,
+            break_bg,
             zero_out_words,
             dispatch_cells,
             state_scale: None,
@@ -495,6 +629,7 @@ impl OuterConvergenceMonitor {
         );
         encoder.copy_buffer_to_buffer(&self.b_out_bits, 0, &staging_buffer, 0, out_bytes);
         let submission_index = plan.context.queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Generic Coupled", label_prefix);
 
         let raw_result: Result<Vec<u8>, String> = (|| {
             let slice = staging_buffer.slice(..);
@@ -539,6 +674,108 @@ impl OuterConvergenceMonitor {
 
     fn state_scale(&self) -> Option<&[f32]> {
         self.state_scale.as_deref()
+    }
+
+    fn evaluate_break_on_gpu(
+        &self,
+        plan: &GpuProgramPlan,
+        delta: &[f32],
+        scale: &[f32],
+        tol_rel: f32,
+        tol_abs: f32,
+    ) -> Result<bool, String> {
+        if delta.len() != scale.len() {
+            return Err(format!(
+                "outer convergence break input length mismatch: delta={} scale={}",
+                delta.len(),
+                scale.len()
+            ));
+        }
+        if delta.is_empty() {
+            return Ok(true);
+        }
+
+        let params = GpuOuterConvergenceBreakParams {
+            count: delta.len() as u32,
+            tol_rel,
+            tol_abs,
+            _pad0: 0,
+        };
+        plan.context
+            .queue
+            .write_buffer(&self.b_break_params, 0, bytes_of(&params));
+        plan.context
+            .queue
+            .write_buffer(&self.b_delta, 0, bytemuck::cast_slice(delta));
+        plan.context
+            .queue
+            .write_buffer(&self.b_scale, 0, bytemuck::cast_slice(scale));
+        let zero: u32 = 0;
+        plan.context
+            .queue
+            .write_buffer(&self.b_break_status, 0, bytemuck::bytes_of(&zero));
+
+        let mut encoder =
+            plan.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("outer_convergence:break_eval"),
+                });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("outer_convergence:break_eval"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.break_pipeline);
+            pass.set_bind_group(0, &self.break_bg, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
+
+        let out_bytes = 4u64;
+        let staging_buffer = plan.staging_cache.take_or_create(
+            &plan.context.device,
+            out_bytes,
+            "outer_convergence:break_status (cached)",
+        );
+        encoder.copy_buffer_to_buffer(&self.b_break_status, 0, &staging_buffer, 0, out_bytes);
+        let submission_index = plan.context.queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Generic Coupled", "outer_convergence:break_eval");
+
+        let raw_result: Result<Vec<u8>, String> = (|| {
+            let slice = staging_buffer.slice(..);
+            let (tx, rx) = std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read, move |result| {
+                let _ = tx.send(result);
+            });
+
+            let _ = plan.context.device.poll(wgpu::PollType::Wait {
+                submission_index: Some(submission_index),
+                timeout: None,
+            });
+
+            let map_result = rx
+                .recv()
+                .map_err(|_| "outer convergence break map channel closed".to_string())?;
+            map_result.map_err(|err| format!("outer convergence break map failed: {err:?}"))?;
+
+            let data = slice.get_mapped_range();
+            let raw = data.to_vec();
+            drop(data);
+            staging_buffer.unmap();
+            Ok(raw)
+        })();
+        plan.staging_cache.put(out_bytes, staging_buffer);
+        let raw = raw_result?;
+
+        if raw.len() != out_bytes as usize {
+            return Err(format!(
+                "outer convergence break readback size mismatch: got {} expected {}",
+                raw.len(),
+                out_bytes
+            ));
+        }
+        let words: &[u32] = bytemuck::cast_slice(&raw);
+        Ok(words.first().copied().unwrap_or(0) != 0)
     }
 }
 
@@ -672,6 +909,8 @@ impl GenericCoupledProgramResources {
             outer_iters,
             outer_tol: 1e-3,
             outer_tol_abs: 1e-6,
+            outer_break_enabled: DEFAULT_OUTER_BREAK_ENABLED,
+            outer_batched_mode: DEFAULT_OUTER_BATCHED_MODE,
             nonconverged_relax: 1.0,
             implicit_base_alpha_u: None,
             linear_solver,
@@ -1084,6 +1323,7 @@ impl PlanLinearSystemDebug for GenericCoupledProgramResources {
                     tol,
                     tol_abs: tol * 1e-4,
                     precond_label: "GenericCoupled Schur (debug)",
+                    use_encoded_seed_basis0: false,
                 },
             ))
         } else if let Some(krylov) = &mut self.krylov {
@@ -1109,6 +1349,7 @@ impl PlanLinearSystemDebug for GenericCoupledProgramResources {
                     tol,
                     tol_abs: tol * 1e-4,
                     precond_label: "GenericCoupled FGMRES (debug)",
+                    use_encoded_seed_basis0: false,
                 },
             ))
         } else {
@@ -1271,6 +1512,7 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
         r.fields.snapshot_for_iteration(&mut encoder);
     }
     queue.submit(Some(encoder.finish()));
+    crate::count_submission!("Generic Coupled", "pre_step_copy");
     r.time_integration
         .prepare_step(&mut r.fields.constants, &queue);
 }
@@ -1293,6 +1535,9 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
     };
 
     let r = res_mut(plan);
+    let use_encoded_seed_basis0 = r.outer_batched_mode
+        && !r.outer_break_enabled
+        && encoded_seed_basis0_enabled();
 
     if let Some(schur) = &mut r.schur {
         let system = LinearSystemView {
@@ -1319,6 +1564,7 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
                 tol: r.linear_solver.tolerance,
                 tol_abs: r.linear_solver.tolerance_abs,
                 precond_label: "generic_coupled:schur",
+                use_encoded_seed_basis0,
             },
         );
         plan.last_linear_stats = stats;
@@ -1350,6 +1596,7 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
                 tol: r.linear_solver.tolerance,
                 tol_abs: r.linear_solver.tolerance_abs,
                 precond_label: "generic_coupled:fgmres",
+                use_encoded_seed_basis0,
             },
         );
         plan.last_linear_stats = stats;
@@ -1368,7 +1615,17 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
     let iters_done = plan.step_linear_stats.len();
     plan.outer_iterations = iters_done as u32;
 
-    let outer_iters = res(plan).outer_iters;
+    let (outer_iters, outer_break_enabled) = {
+        let r = res(plan);
+        (r.outer_iters, r.outer_break_enabled)
+    };
+
+    if !outer_break_enabled && !plan.collect_convergence_stats {
+        // Fixed-iteration mode: keep host overhead minimal and avoid per-iteration
+        // convergence readback until a GPU-side break path is implemented.
+        return;
+    }
+
     if outer_iters <= 1 && !plan.collect_convergence_stats {
         return;
     }
@@ -1456,6 +1713,11 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
     plan.outer_residual_u = residual_u;
     plan.outer_residual_p = residual_p;
 
+    if !outer_break_enabled {
+        res_mut(plan).outer_convergence = Some(monitor);
+        return;
+    }
+
     if outer_iters <= 1 || !plan.last_linear_stats.converged || plan.repeat_break {
         res_mut(plan).outer_convergence = Some(monitor);
         return;
@@ -1470,30 +1732,252 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
         return;
     }
 
-    // Outer-loop convergence: stop iterating once the maximum correction magnitude is
-    // sufficiently small relative to the current state scale.
+    // Outer-loop convergence: evaluate tolerance checks on GPU and use the
+    // resulting status buffer to decide early break.
     let tol_rel = res(plan).outer_tol;
     let tol_abs = res(plan).outer_tol_abs;
-
-    let mut converged = true;
-    for (&d, &s) in delta.iter().zip(scale.iter()) {
-        if !d.is_finite() || !s.is_finite() {
-            converged = false;
-            break;
+    match monitor.evaluate_break_on_gpu(plan, &delta, scale, tol_rel, tol_abs) {
+        Ok(converged) => {
+            if converged {
+                plan.repeat_break = true;
+            }
         }
-        let s = s.max(1.0);
-        let tol = tol_abs + tol_rel * s;
-        if d > tol {
-            converged = false;
-            break;
+        Err(err) => {
+            eprintln!("[cfd2][outer] failed to evaluate break status on gpu: {err}");
         }
-    }
-
-    if converged {
-        plan.repeat_break = true;
     }
 
     res_mut(plan).outer_convergence = Some(monitor);
+}
+
+pub(crate) fn host_coupled_batch_tail(plan: &mut GpuProgramPlan) {
+    let (outer_batched_mode, outer_break_enabled, outer_iters) = {
+        let r = res(plan);
+        (
+            r.outer_batched_mode,
+            r.outer_break_enabled,
+            r.outer_iters.max(1),
+        )
+    };
+    if !outer_batched_mode || outer_break_enabled || outer_iters <= 1 {
+        return;
+    }
+
+    // This host op is placed at the end of the per-iteration block.
+    // When enabled, run all remaining fixed outer iterations here and break
+    // the recipe-level repeat loop to avoid duplicated outer passes.
+    let iters_done = plan.step_linear_stats.len();
+    if iters_done != 1 {
+        return;
+    }
+
+    let remaining = outer_iters.saturating_sub(iters_done);
+    if remaining == 0 {
+        return;
+    }
+
+    // Preferred path (feature-gated): encode all remaining fixed outer iterations into one
+    // submission.
+    if full_one_submission_outer_enabled() {
+        if try_host_coupled_batch_tail_one_submission(plan, remaining) {
+            return;
+        }
+    }
+
+    // Prime iteration-2 assembly. Subsequent tail iterations pipeline
+    // `update(i)` + `assembly(i+1)` into a single submission.
+    let (seconds, detail) =
+        submit_batched_graphs(plan, "coupled:assembly(batch_tail)", |encoder| {
+            assembly_graph_encode(plan, encoder);
+        });
+    if plan.collect_trace {
+        plan.step_graph_timings
+            .push(crate::solver::gpu::program::plan::StepGraphTiming {
+                label: "coupled:assembly(batch_tail)",
+                seconds,
+                detail,
+            });
+    }
+
+    for iter_idx in 0..remaining {
+        host_solve_linear_system(plan);
+        host_after_solve(plan);
+
+        let has_next = iter_idx + 1 < remaining;
+        if has_next {
+            let (seconds, detail) =
+                submit_batched_graphs(plan, "coupled:update+assembly(batch_tail)", |encoder| {
+                    update_graph_encode(plan, encoder);
+                    assembly_graph_encode(plan, encoder);
+                });
+            if plan.collect_trace {
+                plan.step_graph_timings
+                    .push(crate::solver::gpu::program::plan::StepGraphTiming {
+                        label: "coupled:update+assembly(batch_tail)",
+                        seconds,
+                        detail,
+                    });
+            }
+        } else {
+            let (seconds, detail) =
+                submit_batched_graphs(plan, "coupled:update(batch_tail)", |encoder| {
+                    update_graph_encode(plan, encoder);
+                });
+            if plan.collect_trace {
+                plan.step_graph_timings
+                    .push(crate::solver::gpu::program::plan::StepGraphTiming {
+                        label: "coupled:update(batch_tail)",
+                        seconds,
+                        detail,
+                    });
+            }
+        }
+    }
+
+    // We have already executed the remainder of this step's outer iterations.
+    plan.repeat_break = true;
+}
+
+fn try_host_coupled_batch_tail_one_submission(
+    plan: &mut GpuProgramPlan,
+    remaining: usize,
+) -> bool {
+    if remaining == 0 {
+        return false;
+    }
+    // This path intentionally skips per-iteration host convergence bookkeeping.
+    if plan.collect_convergence_stats {
+        return false;
+    }
+
+    let device = plan.context.device.clone();
+    let queue = plan.context.queue.clone();
+    let context = crate::solver::gpu::context::GpuContext {
+        device: device.clone(),
+        queue: queue.clone(),
+    };
+
+    let start = std::time::Instant::now();
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("coupled:assembly+solve+update(batch_tail_one_submission)"),
+    });
+
+    let mut encoded_tail_stats = Vec::with_capacity(remaining);
+    {
+        let r = res_mut(plan);
+        let max_restart = match r.linear_solver.solver_type {
+            LinearSolverType::Fgmres { max_restart } => max_restart.max(1),
+            _ => return false,
+        };
+
+        // Prime iteration-2 assembly.
+        r.assembly_graph
+            .encode_into(&mut encoder, &r.kernels, r.runtime_dims());
+
+        for iter_idx in 0..remaining {
+            let maybe_stats = encode_linear_solve_fixed_into_one_submission(
+                &context,
+                r,
+                max_restart,
+                &mut encoder,
+            );
+            let Some(stats) = maybe_stats else {
+                return false;
+            };
+            encoded_tail_stats.push(stats);
+
+            // Apply solve result, then prepare assembly for next outer iteration.
+            r.update_graph
+                .encode_into(&mut encoder, &r.kernels, r.runtime_dims());
+            if iter_idx + 1 < remaining {
+                r.assembly_graph
+                    .encode_into(&mut encoder, &r.kernels, r.runtime_dims());
+            }
+        }
+    }
+
+    queue.submit(Some(encoder.finish()));
+    crate::count_submission!(
+        "Generic Coupled",
+        "coupled:assembly+solve+update(batch_tail_one_submission)"
+    );
+
+    if let Some(last) = encoded_tail_stats.last().copied() {
+        plan.last_linear_stats = last;
+    }
+    plan.step_linear_stats.extend(encoded_tail_stats);
+    plan.outer_iterations = plan.step_linear_stats.len() as u32;
+
+    if plan.collect_trace {
+        plan.step_graph_timings
+            .push(crate::solver::gpu::program::plan::StepGraphTiming {
+                label: "coupled:assembly+solve+update(batch_tail_one_submission)",
+                seconds: start.elapsed().as_secs_f64(),
+                detail: None,
+            });
+    }
+
+    plan.repeat_break = true;
+    true
+}
+
+fn encode_linear_solve_fixed_into_one_submission(
+    context: &crate::solver::gpu::context::GpuContext,
+    r: &mut GenericCoupledProgramResources,
+    max_restart: usize,
+    encoder: &mut wgpu::CommandEncoder,
+) -> Option<LinearSolverStats> {
+    let system = LinearSystemView {
+        ports: r.runtime.linear_ports,
+        space: &r.runtime.linear_port_space,
+    };
+    let n = r.runtime.num_dofs;
+    let num_cells = r.runtime.common.num_cells;
+    let max_iters = r.linear_solver.max_iters;
+    let tol = r.linear_solver.tolerance;
+    let tol_abs = r.linear_solver.tolerance_abs;
+
+    if let Some(schur) = &mut r.schur {
+        return Some(encode_solve_fgmres_fixed_iterations(
+            &mut schur.solver,
+            SolveFgmresArgs {
+                context,
+                system,
+                n,
+                num_cells,
+                dispatch: schur.dispatch,
+                max_restart,
+                max_iters,
+                tol,
+                tol_abs,
+                precond_label: "generic_coupled:schur(batch_tail)",
+                use_encoded_seed_basis0: true,
+            },
+            encoder,
+        ));
+    }
+
+    if let Some(krylov) = &mut r.krylov {
+        return Some(encode_solve_fgmres_fixed_iterations(
+            &mut krylov.solver,
+            SolveFgmresArgs {
+                context,
+                system,
+                n,
+                num_cells,
+                dispatch: krylov.dispatch,
+                max_restart,
+                max_iters,
+                tol,
+                tol_abs,
+                precond_label: "generic_coupled:fgmres(batch_tail)",
+                use_encoded_seed_basis0: true,
+            },
+            encoder,
+        ));
+    }
+
+    None
 }
 
 pub(crate) fn host_implicit_set_alpha_for_apply(plan: &mut GpuProgramPlan) {
@@ -1535,6 +2019,34 @@ pub(crate) fn host_implicit_restore_alpha(plan: &mut GpuProgramPlan) {
     }
 }
 
+fn assembly_graph_encode(plan: &GpuProgramPlan, encoder: &mut wgpu::CommandEncoder) {
+    let r = res(plan);
+    r.assembly_graph
+        .encode_into(encoder, &r.kernels, r.runtime_dims());
+}
+
+fn update_graph_encode(plan: &GpuProgramPlan, encoder: &mut wgpu::CommandEncoder) {
+    let r = res(plan);
+    r.update_graph
+        .encode_into(encoder, &r.kernels, r.runtime_dims());
+}
+
+fn submit_batched_graphs(
+    plan: &GpuProgramPlan,
+    label: &'static str,
+    encode: impl FnOnce(&mut wgpu::CommandEncoder),
+) -> (f64, Option<GraphDetail>) {
+    let start = std::time::Instant::now();
+    let mut encoder = plan
+        .context
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
+    encode(&mut encoder);
+    plan.context.queue.submit(Some(encoder.finish()));
+    crate::count_submission!("Generic Coupled", label);
+    (start.elapsed().as_secs_f64(), None)
+}
+
 pub(crate) fn assembly_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
@@ -1573,6 +2085,51 @@ pub(crate) fn clear_dp_init_needed(plan: &mut GpuProgramPlan) {
     if r.dp_init_enabled {
         r.dp_init_needed.store(false, Ordering::Relaxed);
     }
+}
+
+pub(crate) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
+    // After the first iteration begins, we can stop running one-time preparation
+    // kernels (e.g. `dp_init`) on subsequent steps unless a parameter change
+    // re-enables them.
+    clear_dp_init_needed(plan);
+
+    // If fixed-iteration batched mode is enabled, attempt to run the full outer
+    // loop here in one encoded submission and skip the remaining per-iteration
+    // nodes in this repeat-body execution.
+    let (outer_batched_mode, outer_break_enabled, outer_iters) = {
+        let r = res(plan);
+        (
+            r.outer_batched_mode,
+            r.outer_break_enabled,
+            r.outer_iters.max(1),
+        )
+    };
+    if !outer_batched_mode || outer_break_enabled || outer_iters <= 1 {
+        return;
+    }
+    if !full_one_submission_outer_enabled() {
+        return;
+    }
+    if !plan.step_linear_stats.is_empty() {
+        // Only the first outer-loop iteration can consume the full batch.
+        return;
+    }
+
+    if try_host_coupled_batch_tail_one_submission(plan, outer_iters) {
+        plan.skip_remaining_block = true;
+    }
+}
+
+fn full_one_submission_outer_enabled() -> bool {
+    std::env::var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER")
+        .map(|v| v != "0")
+        .unwrap_or(false)
+}
+
+fn encoded_seed_basis0_enabled() -> bool {
+    std::env::var("CFD2_ENABLE_ENCODED_SEED_BASIS0")
+        .map(|v| v != "0")
+        .unwrap_or(false)
 }
 
 pub(crate) fn update_graph_run(
@@ -1627,6 +2184,7 @@ pub(crate) fn implicit_snapshot_run(
         });
     r.fields.snapshot_for_iteration(&mut encoder);
     context.queue.submit(Some(encoder.finish()));
+    crate::count_submission!("Generic Coupled", "implicit_snapshot");
     (0.0, None)
 }
 
@@ -1664,6 +2222,29 @@ pub(crate) fn param_outer_tol_abs(
         return Err("OuterTolAbs expects F32".to_string());
     };
     res_mut(plan).outer_tol_abs = tol_abs.max(0.0);
+    Ok(())
+}
+
+pub(crate) fn param_outer_fixed_iterations_mode(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::Bool(enabled) = value else {
+        return Err("OuterFixedIterationsMode expects Bool".to_string());
+    };
+    // API is framed positively for callers: `true` means fixed-iteration mode.
+    res_mut(plan).outer_break_enabled = !enabled;
+    Ok(())
+}
+
+pub(crate) fn param_outer_batched_mode(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::Bool(enabled) = value else {
+        return Err("OuterBatchedMode expects Bool".to_string());
+    };
+    res_mut(plan).outer_batched_mode = enabled;
     Ok(())
 }
 

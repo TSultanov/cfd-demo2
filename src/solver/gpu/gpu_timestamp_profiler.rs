@@ -263,6 +263,7 @@ impl GpuTimestampProfiler {
         encoder.resolve_query_set(query_set, 0..self.current_query, resolve_buffer, 0);
 
         let submission_index = context.queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Timestamp Profiler", "resolve");
 
         // Map and read results
         let slice = resolve_buffer.slice(..(self.current_query * 8) as u64);

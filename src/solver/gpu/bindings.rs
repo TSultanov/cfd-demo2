@@ -2,15 +2,9 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: a619717887ea6fcfaa6096f71b89509a7771a59293faad903c9ca4ed81ca8dd1
+// SourceHash: dbcf5d0cb3313961656465a62d2856347ebdd90d7be657286836bc8fa3a88d43
 
-#![allow(
-    unused,
-    non_snake_case,
-    non_camel_case_types,
-    non_upper_case_globals,
-    clippy::too_many_arguments
-)]
+#![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShaderEntry {
     Amg,
@@ -30539,20 +30533,21 @@ fn accumulate_solution(@builtin(global_invocation_id) global_id: vec3<u32>, @bui
             break;
         }
         {
-            let _e34 = i;
-            let _e36 = y_sol[_e34];
-            let _e38 = i;
-            let _e42 = vec_x[((_e38 * z_stride) + _e3)];
-            let _e44 = acc;
-            acc = ((_e36 * _e42) + _e44);
+            let _e35 = params.omega;
+            let _e37 = i;
+            let _e39 = y_sol[_e37];
+            let _e42 = i;
+            let _e46 = vec_x[((_e42 * z_stride) + _e3)];
+            let _e48 = acc;
+            acc = (((_e35 * _e39) * _e46) + _e48);
         }
         continuing {
-            let _e47 = i;
-            i = (_e47 + 1u);
+            let _e51 = i;
+            i = (_e51 + 1u);
         }
     }
-    let _e51 = acc;
-    vec_y[_e3] = _e51;
+    let _e55 = acc;
+    vec_y[_e3] = _e55;
     return;
 }
 "#;

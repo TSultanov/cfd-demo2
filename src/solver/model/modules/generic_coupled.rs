@@ -33,6 +33,8 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
         "outer_iters",
         "outer_tol",
         "outer_tol_abs",
+        "outer_fixed_iterations_mode",
+        "outer_batched_mode",
         "detailed_profiling_enabled",
     ];
 

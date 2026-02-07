@@ -24,7 +24,32 @@ pub(crate) fn handler_for_key(key: &'static str) -> Option<ProgramParamHandler> 
         "outer_iters" => Some(generic_coupled::param_outer_iters),
         "outer_tol" => Some(generic_coupled::param_outer_tol),
         "outer_tol_abs" => Some(generic_coupled::param_outer_tol_abs),
+        "outer_fixed_iterations_mode" => {
+            Some(generic_coupled::param_outer_fixed_iterations_mode)
+        }
+        "outer_batched_mode" => Some(generic_coupled::param_outer_batched_mode),
         "detailed_profiling_enabled" => Some(generic_coupled::param_detailed_profiling),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn outer_fixed_iterations_mode_has_handler() {
+        assert!(
+            handler_for_key("outer_fixed_iterations_mode").is_some(),
+            "missing named-param handler for outer_fixed_iterations_mode"
+        );
+    }
+
+    #[test]
+    fn outer_batched_mode_has_handler() {
+        assert!(
+            handler_for_key("outer_batched_mode").is_some(),
+            "missing named-param handler for outer_batched_mode"
+        );
     }
 }

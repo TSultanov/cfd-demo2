@@ -134,3 +134,61 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 - [x] Reconfirm `generic_coupled_assembly -> generic_coupled_assembly_grad_state` is technically synthesizeable (`Safe` and `Aggressive`) once both kernels are DSL.
 - [x] Migrate `generic_coupled_update` to DSL and regenerate coverage (legacy DSL-migration-eligible per-model kernels now reduced to zero).
 - [x] Decide whether to declare an explicit assembly-pair fusion rule despite mutually-exclusive kernel conditions (decision: no explicit rule; runtime kernel conditions are mutually exclusive so the pair is never adjacent in an active schedule).
+
+## 13) Dispatch-Reduction Investigation (Post DSL-Driven Fusion)
+
+- [x] Reassess the next update-phase fusion candidate for dispatch-count reduction: `generic_coupled_update` + `dp_init` + `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta`.
+- [x] Prototype the aggressive full-chain candidate and run parity checks (`tests/rhie_chow_fusion_parity_test.rs`) plus schedule dispatch checks.
+- [x] Document outcome: candidate can synthesize, but is currently **rejected** for rollout because parity regresses (`safe` vs `aggressive` mismatch above tolerance) when dispatch boundaries are removed before neighbor-dependent gradient updates.
+- [x] Reconfirm current stable update dispatch floor for coupled incompressible path: `Off=6`, `Safe=4`, `Aggressive=2` (best stable schedule today).
+- [x] Investigate single-submission outer iterations (FGMRES-restart style batching analogy).
+- [x] Document current blockers for one-submission outer loop:
+  - Outer-loop control in `src/solver/gpu/recipe.rs` is host-interleaved (`coupled:before_iter`, `coupled:solve`).
+  - Program executor in `src/solver/gpu/program/plan.rs` executes `Host` nodes between graph nodes every outer iteration.
+  - Coupled solve and convergence/break decisions in `src/solver/gpu/lowering/programs/generic_coupled.rs` require host-visible solver stats/readback (`host_solve_linear_system`, `host_after_solve`, `repeat_break`).
+- [ ] Future path to true one-submission outer loops (not implemented yet):
+  - Move outer convergence evaluation and break signaling to GPU-visible buffers.
+  - Provide a GPU-driven outer-iteration loop primitive (or fixed-iteration batch mode) that avoids per-iteration host branching.
+  - Keep feature-gated fallback to current host-driven loop until numerical parity and diagnostics are preserved.
+
+## 14) One-Submission Outer Loop Plan (Execution Roadmap)
+
+### Phase 1: Control-Mode Scaffolding (fixed outer count vs adaptive break)
+
+- [x] Add a coupled outer-loop runtime mode switch so we can run fixed outer iterations without adaptive host break logic.
+- [x] Wire mode through named params and solver helpers as `outer_fixed_iterations_mode` (bool).
+- [x] Keep default behavior unchanged (`adaptive` break remains default).
+- [x] Add regression coverage that fixed-iteration mode executes all configured outer iterations.
+
+### Phase 2: GPU-Visible Outer Convergence State
+
+- [x] Allocate/write a GPU-visible outer-convergence status buffer (instead of host-only `repeat_break` decisions).
+- [x] Move convergence metric reduction and tolerance check to GPU kernels.
+- [x] Preserve host-readable diagnostics by optional post-step readback.
+
+### Phase 3: Batched Outer-Loop Program Form
+
+- [x] Add fixed-iteration batched-tail scaffolding (`outer_batched_mode`) using `coupled:batch_tail` to execute remaining outer iterations inside one host op.
+- [x] Keep host-driven path as fallback and default until parity/perf gates pass.
+- [x] Ensure recipe/program-spec wiring can select host-driven vs batched path deterministically.
+- [x] Measure current impact of batched-tail scaffolding: fixed outer-iteration counts are preserved, kernel-graph dispatch count does not increase in batched mode, and queue submissions are reduced in measured runtime coverage (default validated path: `non_batched=178`, `batched=172`, `delta=6` in `tests/rhie_chow_fusion_parity_test.rs`; experimental full one-submission path can be opt-in tested separately).
+- [x] Add a batched coupled program path that runs outer iterations as a fixed GPU-driven batch (`coupled:before_iter` and `coupled:batch_tail` both have a guarded full one-submission implementation behind `CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER=1`, with fallback to the validated batched-tail path by default).
+
+### Phase 4: Toward True One-Submission Outer Step
+
+- [x] Refactor linear solve entrypoints to support encode-only solve passes suitable for inclusion in a batched submission path (FGMRES restart-body encode/finalize API is now available via `KrylovSolveModule::{encode_solve_once, finish_encoded_solve_once}`).
+- [x] Collapse per-iteration assembly/update/solve into a single submission for fixed-iteration mode (implemented as an opt-in experimental path behind `CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER=1`; fallback path remains default).
+- [x] Add queue-submission instrumentation (`submission_counter`) and runtime coverage proving batched mode does not increase submissions (default validated path: `178 -> 172`, delta `6`; experimental opt-in path reaches `178 -> 4` in targeted coverage).
+- [x] Add hard validation gates: numerical parity, dispatch/submission counters, OpenFOAM drift non-regression (`tests/rhie_chow_fusion_parity_test.rs` now includes fixed-batched vs fixed-nonbatched snapshot parity + low submission-budget assertion, and `scripts/run_one_submission_hard_gates.sh` runs parity/counter checks plus OpenFOAM diagnostic diff against a provided baseline metrics file).
+
+#### Phase 4A: Detailed Execution Plan (Current)
+
+- [x] Add reusable graph-encoding API (`ModuleGraph::encode_into`) so multiple graph segments can be recorded into one command encoder.
+- [x] Start collapsing graph-only submissions in batched tail by pipelining `update(i)` with `assembly(i+1)` into one submission.
+- [x] Extend preconditioner setup to encode into caller-provided command encoders (avoid per-iteration `prepare` submits in one-submission path): `FgmresPreconditionerModule::encode_prepare` is wired through `KrylovSolveModule::solve_once_with_prepare`, and runtime/schur preconditioners now provide encode-based setup paths.
+- [x] Extend FGMRES residual-seed/normalization path with encode-only variants (remove host-side residual submit/readback before restart-body encode) and fix command-buffer ordering hazards by using in-encoder buffer copies for seed/solver params/scalars and restart setup tables/indirect args in `src/solver/gpu/linear_solver/fgmres.rs`.
+- [x] Eliminate remaining race-like ordering risk in encoded FGMRES setup by writing `params` via in-encoder copies before `encode_prepare` and before restart-body encode (`src/solver/gpu/modules/krylov_solve.rs`, `src/solver/gpu/linear_solver/fgmres.rs`); repeated parity/submission probes with fixed settings are deterministic run-to-run.
+- [x] Add bounded multi-restart encode chunking for one-submission fixed-iteration solves in `src/solver/gpu/modules/linear_solver.rs` (`CFD2_ONE_SUBMISSION_RESTART_BUDGET` per restart chunk, `CFD2_ONE_SUBMISSION_TOTAL_ITERS` per-solve total budget; optional tuning knobs `CFD2_ONE_SUBMISSION_CHUNKS`, `CFD2_ONE_SUBMISSION_MIN_TAIL`, `CFD2_ONE_SUBMISSION_SOLUTION_OMEGA`, and `CFD2_ONE_SUBMISSION_TAIL_OMEGA`; current default tuning is `12`/`27` for the closest measured strict-parity behavior while preserving one-submission dispatch reduction).
+- [x] Add fixed-iteration encoded outer-loop runner that records `assembly + solve + update` for all outer iterations into one command buffer submission.
+- [x] Keep a guarded fallback to current batched-tail path until parity and OpenFOAM drift checks remain stable.
+- [ ] Close remaining strict parity gap for opt-in encoded-seed / full one-submission path (current targeted parity measurements: encoded-seed batched mode `max_rel=1.659893e-3` vs `1e-3` tolerance; full one-submission mode default best measured `max_rel=1.007846e-3` with `CFD2_ONE_SUBMISSION_RESTART_BUDGET=12` and `CFD2_ONE_SUBMISSION_TOTAL_ITERS=27`; tuned tail-damped variant reaches `max_rel=1.000047e-3` with `CFD2_ONE_SUBMISSION_TAIL_OMEGA=1.02580`, still slightly above `1e-3`).

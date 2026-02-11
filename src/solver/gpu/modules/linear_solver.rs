@@ -249,12 +249,12 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
     let restart_budget = std::env::var("CFD2_ONE_SUBMISSION_RESTART_BUDGET")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(12)
+        .unwrap_or(restart_len)
         .max(1);
     let total_iter_budget = std::env::var("CFD2_ONE_SUBMISSION_TOTAL_ITERS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(27)
+        .unwrap_or(max_iters as usize)
         .max(1);
     let iter_restart = restart_len
         .min(max_iters as usize)

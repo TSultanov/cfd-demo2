@@ -115,11 +115,21 @@ impl CompressibleConservedStateOffsets {
     }
 }
 
+/// Convenience accessors for the primary solution fields (velocity, pressure, density).
+///
+/// These methods resolve the canonical field names (`u`/`U`, `p`, `rho`) and delegate
+/// to the underlying [`GpuUnifiedSolver`] field storage.  The `get_*` variants return
+/// futures that perform an async GPU-to-host readback.
 pub trait SolverFieldAliasesExt {
+    /// Write velocity field data (per-cell `(u_x, u_y)` pairs).
     fn set_u(&mut self, u: &[(f64, f64)]);
+    /// Write pressure field data (per-cell scalar values).
     fn set_p(&mut self, p: &[f64]);
+    /// Read the velocity field back from GPU memory.
     fn get_u(&self) -> BoxFuture<'_, Vec<(f64, f64)>>;
+    /// Read the pressure field back from GPU memory.
     fn get_p(&self) -> BoxFuture<'_, Vec<f64>>;
+    /// Read the density field back from GPU memory.
     fn get_rho(&self) -> BoxFuture<'_, Vec<f64>>;
 }
 
@@ -163,25 +173,87 @@ impl SolverFieldAliasesExt for GpuUnifiedSolver {
     }
 }
 
+/// Runtime parameter setters for the GPU-based coupled stepping path.
+///
+/// These methods control the physics parameters, under-relaxation factors, outer-loop
+/// configuration, preconditioner selection, and linear-solver tuning of a
+/// [`GpuUnifiedSolver`].  Each setter maps to a named parameter that the solver's
+/// program plan reads during stepping.
+///
+/// # Outer-loop execution model
+///
+/// The coupled stepping path executes a SIMPLE-like pressure-velocity outer loop.
+/// By default the outer loop runs in **one-submission batched mode**: all outer
+/// iterations are encoded into a single GPU command buffer and submitted as one
+/// queue submission.  This eliminates per-iteration host-GPU synchronisation
+/// overhead and typically reduces total queue submissions by 50-75%.
+///
+/// When adaptive convergence is enabled (the default), the batched submission uses
+/// GPU-side indirect dispatch gating so that converged iterations become zero-cost
+/// dispatches rather than requiring host involvement to skip them.
+///
+/// The key parameters that control outer-loop behavior are:
+///
+/// | Parameter | Setter | Default | Effect |
+/// |-----------|--------|---------|--------|
+/// | Outer iterations | [`set_outer_iters`] | model-defined | Number of outer corrector sweeps |
+/// | Outer tolerance | [`set_outer_tolerance`] | model-defined | Relative correction-norm threshold for adaptive early stop |
+/// | Outer tolerance (abs) | [`set_outer_tolerance_abs`] | model-defined | Absolute correction-norm threshold |
+/// | Fixed-iteration mode | [`set_outer_fixed_iterations_mode`] | `false` | When `true`, run all configured iterations without adaptive break |
+/// | Batched mode | [`set_outer_batched_mode`] | `true` | When `true`, use one-submission batched outer loop |
+///
+/// [`set_outer_iters`]: SolverRuntimeParamsExt::set_outer_iters
+/// [`set_outer_tolerance`]: SolverRuntimeParamsExt::set_outer_tolerance
+/// [`set_outer_tolerance_abs`]: SolverRuntimeParamsExt::set_outer_tolerance_abs
+/// [`set_outer_fixed_iterations_mode`]: SolverRuntimeParamsExt::set_outer_fixed_iterations_mode
+/// [`set_outer_batched_mode`]: SolverRuntimeParamsExt::set_outer_batched_mode
 pub trait SolverRuntimeParamsExt {
+    /// Set the pseudo-timestep for the coupled stepping scheme.
     fn set_dtau(&mut self, dtau: f32) -> Result<(), String>;
+    /// Set the dynamic viscosity (uniform).  Also updates the `mu` state field if present.
     fn set_viscosity(&mut self, mu: f32) -> Result<(), String>;
+    /// Set the fluid density (uniform, incompressible models).
     fn set_density(&mut self, rho: f32) -> Result<(), String>;
+    /// Set the velocity under-relaxation factor.
     fn set_alpha_u(&mut self, alpha_u: f32) -> Result<(), String>;
+    /// Set the pressure under-relaxation factor.
     fn set_alpha_p(&mut self, alpha_p: f32) -> Result<(), String>;
+    /// Set the number of outer corrector iterations per step.
     fn set_outer_iters(&mut self, iters: usize) -> Result<(), String>;
+    /// Set the relative correction-norm tolerance for adaptive outer-loop early stopping.
     fn set_outer_tolerance(&mut self, tol: f32) -> Result<(), String>;
+    /// Set the absolute correction-norm tolerance for adaptive outer-loop early stopping.
     fn set_outer_tolerance_abs(&mut self, tol_abs: f32) -> Result<(), String>;
+    /// Enable or disable fixed-iteration outer-loop mode.
+    ///
+    /// When `true`, the solver runs all configured `outer_iters` without evaluating
+    /// convergence between iterations.  This is useful for deterministic benchmarking
+    /// where consistent iteration counts are required across runs.
     fn set_outer_fixed_iterations_mode(&mut self, enabled: bool) -> Result<(), String>;
+    /// Enable or disable the one-submission batched outer loop.
+    ///
+    /// When `true` (the default), all outer corrector iterations are encoded into a
+    /// single GPU command buffer submission.  This is the standard coupled stepping
+    /// mode and provides significantly fewer queue submissions than the per-iteration
+    /// host-driven loop.
+    ///
+    /// When adaptive convergence is active, converged iterations become zero-cost
+    /// indirect dispatches (GPU-side gating), avoiding any host round-trips.
     fn set_outer_batched_mode(&mut self, enabled: bool) -> Result<(), String>;
+    /// Set the low-Mach preconditioner model variant.
     fn set_precond_model(&mut self, model: GpuLowMachPrecondModel) -> Result<(), String>;
+    /// Set the low-Mach preconditioner theta floor parameter.
     fn set_precond_theta_floor(&mut self, theta: f32) -> Result<(), String>;
+    /// Set the low-Mach preconditioner pressure-coupling alpha parameter.
     fn set_precond_pressure_coupling_alpha(&mut self, alpha: f32) -> Result<(), String>;
+    /// Set the under-relaxation factor applied when the linear solver does not converge.
     fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String>;
+    /// Set the FGMRES solution-update strategy (e.g. classical vs modified Gram-Schmidt).
     fn set_linear_solver_solution_update_strategy(
         &mut self,
         strategy: FgmresSolutionUpdateStrategy,
     ) -> Result<(), String>;
+    /// Set the equation of state parameters from an [`EosSpec`].
     fn set_eos(&mut self, eos: &EosSpec) -> Result<(), String>;
 }
 
@@ -279,7 +351,9 @@ impl SolverRuntimeParamsExt for GpuUnifiedSolver {
     }
 }
 
+/// Inlet velocity boundary condition setter for incompressible models.
 pub trait SolverInletVelocityExt {
+    /// Set the inlet x-velocity (y-component is zero).
     fn set_inlet_velocity(&mut self, velocity: f32) -> Result<(), String>;
 }
 
@@ -343,8 +417,15 @@ impl SolverCompressibleInletExt for GpuUnifiedSolver {
     }
 }
 
+/// Initial-condition seeding for compressible ideal-gas models.
+///
+/// These methods write conserved-variable state fields (`rho`, `rho_u`, `rho_e`)
+/// and derived fields (`p`, `T`, `u`) from primitive inputs.  Existing state data
+/// for unrelated fields (e.g. `mu`, gradients) is preserved.
 pub trait SolverCompressibleIdealGasExt {
+    /// Seed a spatially uniform state.
     fn set_uniform_state(&mut self, rho: f32, u: [f32; 2], p: f32);
+    /// Seed per-cell state from arrays of primitives.
     fn set_state_fields(&mut self, rho: &[f32], u: &[[f32; 2]], p: &[f32]);
 }
 
@@ -457,12 +538,20 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
     }
 }
 
+/// Post-step statistics readers for incompressible coupled solvers.
+///
+/// These accessors expose convergence diagnostics, linear-solver residuals, and
+/// degenerate-cell counts from the most recent [`GpuUnifiedSolver::step`] call.
 pub trait SolverIncompressibleStatsExt {
+    /// Whether the solver signaled that the simulation should stop (e.g. steady-state reached).
     fn incompressible_should_stop(&self) -> bool;
+    /// Outer-loop stats: `(iterations_completed, residual_u, residual_p)`.
     fn incompressible_outer_stats(&self) -> Option<(u32, f32, f32)>;
+    /// Per-field linear-solver stats for the last outer iteration (u, p, coupled).
     fn incompressible_linear_stats(
         &self,
     ) -> Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)>;
+    /// Number of degenerate cells detected during the last step.
     fn incompressible_degenerate_count(&self) -> Option<u32>;
 }
 
@@ -491,8 +580,11 @@ impl SolverIncompressibleStatsExt for GpuUnifiedSolver {
     }
 }
 
+/// Mutable runtime controls for incompressible coupled solvers.
 pub trait SolverIncompressibleControlsExt {
+    /// Set the number of outer corrector iterations.  Maps to the unified `outer_iters` knob.
     fn set_incompressible_outer_correctors(&mut self, iters: u32) -> Result<(), String>;
+    /// Signal that the simulation should stop after the current step.
     fn incompressible_set_should_stop(&mut self, value: bool);
 }
 

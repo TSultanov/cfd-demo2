@@ -243,6 +243,6 @@ Currently the one-submission path is gated behind `!outer_break_enabled`
 - [x] Flip `full_one_submission_outer_enabled()` to return `true` by default (env var becomes the opt-out gate instead of opt-in).
 - [x] Flip `DEFAULT_OUTER_BATCHED_MODE` from `false` to `true` so the batched path is the default when fixed-iteration mode is selected.
 - [x] Remove or consolidate the `CFD2_ONE_SUBMISSION_*` env-var tuning knobs once parity is resolved (omega knobs removed in §5A; remaining knobs `CFD2_ONE_SUBMISSION_RESTART_BUDGET`, `CFD2_ONE_SUBMISSION_TOTAL_ITERS`, `CFD2_ONE_SUBMISSION_CHUNKS`, `CFD2_ONE_SUBMISSION_MIN_TAIL` retained for optional override).
-- [ ] Update `SolverExt` documentation to describe the one-submission behavior as the standard coupled stepping mode.
+- [x] Update `SolverExt` documentation to describe the one-submission behavior as the standard coupled stepping mode.
 - [x] Run full OpenFOAM reference suite (`scripts/run_openfoam_reference_tests.sh`) with default-on one-submission and confirm no drift regression vs current baseline.
-- [ ] Remove the multi-submission fallback loop in `host_coupled_batch_tail` once one-submission is proven stable across the validation matrix.
+- [x] Remove the multi-submission fallback loop in `host_coupled_batch_tail` once one-submission is proven stable across the validation matrix.

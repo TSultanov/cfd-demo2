@@ -421,25 +421,18 @@ struct ConvergenceDiagnostics {
 /// Run the solver for `steps` steps with `outer_iters` fixed outer iterations
 /// and return convergence diagnostics from the last step.
 ///
-/// When `one_submission` is true the env var `CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER`
-/// is set to `1` around the run so the one-submission path is exercised.
+/// The one-submission batched outer loop is always active when
+/// `outer_batched_mode` is true and `outer_iters > 1`.
 fn run_with_convergence_diagnostics(
     mesh: &Mesh,
     steps: usize,
     outer_iters: usize,
     outer_batched_mode: bool,
-    one_submission: bool,
     collect_convergence_stats: bool,
 ) -> ConvergenceDiagnostics {
     let _lock = solver_test_lock()
         .lock()
         .expect("solver test lock poisoned");
-
-    if one_submission {
-        std::env::set_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER", "1");
-    } else {
-        std::env::remove_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER");
-    }
 
     let mut model = incompressible_momentum_model();
     let mut linear_solver = model
@@ -503,9 +496,6 @@ fn run_with_convergence_diagnostics(
             .unwrap_or_default(),
     };
 
-    // Clean up env var.
-    std::env::remove_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER");
-
     diag
 }
 
@@ -539,7 +529,7 @@ fn one_submission_convergence_stats_populated() {
 
     let diag = run_with_convergence_diagnostics(
         &mesh, /* steps */ 2, /* outer_iters */ 5, /* outer_batched_mode */ true,
-        /* one_submission */ true, /* collect_convergence_stats */ true,
+        /* collect_convergence_stats */ true,
     );
 
     // outer_field_residuals must be populated (not None/empty).
@@ -621,7 +611,7 @@ fn one_submission_last_linear_stats_has_finite_residual() {
 
     let diag = run_with_convergence_diagnostics(
         &mesh, /* steps */ 2, /* outer_iters */ 5, /* outer_batched_mode */ true,
-        /* one_submission */ true, /* collect_convergence_stats */ false,
+        /* collect_convergence_stats */ false,
     );
 
     let residual = diag.last_linear_stats.residual;
@@ -680,7 +670,6 @@ fn one_submission_convergence_diagnostics_parity_with_multi_submission() {
         steps,
         outer_iters,
         /* outer_batched_mode */ false,
-        /* one_submission */ false,
         /* collect_convergence_stats */ true,
     );
 
@@ -690,7 +679,6 @@ fn one_submission_convergence_diagnostics_parity_with_multi_submission() {
         steps,
         outer_iters,
         /* outer_batched_mode */ true,
-        /* one_submission */ true,
         /* collect_convergence_stats */ true,
     );
 
@@ -1027,9 +1015,6 @@ fn coupled_outer_batched_mode_runs_full_fixed_iteration_batch() {
 #[test]
 fn coupled_outer_batched_mode_matches_non_batched_fixed_snapshot_within_tolerance() {
     std::env::set_var("CFD2_QUIET", "1");
-    // Prevent env-var leakage from concurrent tests that enable the one-submission
-    // chunked path; this test validates the default batched-graph path only.
-    std::env::remove_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER");
 
     let mesh = generate_structured_rect_mesh(
         16,
@@ -1082,7 +1067,6 @@ fn coupled_outer_batched_mode_matches_non_batched_fixed_snapshot_within_toleranc
 fn one_submission_parity_gate_max_rel_below_1e_3() {
     std::env::set_var("CFD2_QUIET", "1");
     // Ensure no legacy tuning knobs influence the result.
-    std::env::remove_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER");
     std::env::remove_var("CFD2_ONE_SUBMISSION_SOLUTION_OMEGA");
     std::env::remove_var("CFD2_ONE_SUBMISSION_TAIL_OMEGA");
     std::env::remove_var("CFD2_ONE_SUBMISSION_CHUNKS");
@@ -1130,7 +1114,7 @@ fn one_submission_parity_gate_max_rel_below_1e_3() {
     );
 }
 
-/// Assert that the one-submission chunked path (CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER=1) achieves
+/// Assert that the one-submission batched path achieves
 /// a substantial reduction in queue-submission count relative to the non-batched baseline.
 ///
 /// With per-FGMRES-restart-chunk submission the count scales with the number of restart chunks
@@ -1141,7 +1125,6 @@ fn one_submission_parity_gate_max_rel_below_1e_3() {
 fn one_submission_mode_submission_count_at_expected_floor() {
     std::env::set_var("CFD2_QUIET", "1");
     // Clear legacy tuning knobs so we measure the default chunk schedule.
-    std::env::remove_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER");
     std::env::remove_var("CFD2_ONE_SUBMISSION_SOLUTION_OMEGA");
     std::env::remove_var("CFD2_ONE_SUBMISSION_TAIL_OMEGA");
     std::env::remove_var("CFD2_ONE_SUBMISSION_CHUNKS");
@@ -1174,9 +1157,7 @@ fn one_submission_mode_submission_count_at_expected_floor() {
         false,
     );
 
-    // Enable the one-submission chunked path immediately before the run that
-    // needs it, to minimise env-var race window with parallel tests.
-    std::env::set_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER", "1");
+    // One-submission is always active when outer_batched_mode is true.
     let one_submission = run_with_policy_submission_count(
         &mesh,
         KernelFusionPolicy::Safe,
@@ -1185,9 +1166,6 @@ fn one_submission_mode_submission_count_at_expected_floor() {
         true,
         true,
     );
-
-    // Clean up env var so other tests are not affected.
-    std::env::remove_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER");
 
     eprintln!(
         "[submission_counter][one_submission_chunked] non_batched={} one_submission={} delta={}",

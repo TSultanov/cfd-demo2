@@ -2236,67 +2236,15 @@ pub(crate) fn host_coupled_batch_tail(plan: &mut GpuProgramPlan) {
         return;
     }
 
-    // Preferred path: encode all remaining outer iterations into one submission.
+    // Encode all remaining outer iterations into one submission.
     // When adaptive break is enabled, uses indirect dispatch + GPU-side convergence
     // gating so converged iterations become zero-cost dispatches.
-    if full_one_submission_outer_enabled() {
-        if try_host_coupled_batch_tail_one_submission(plan, remaining) {
-            return;
-        }
+    if !try_host_coupled_batch_tail_one_submission(plan, remaining) {
+        eprintln!(
+            "[cfd2][batch_tail] one-submission batch tail could not be used \
+             (unsupported solver config); falling back to recipe-level per-iteration loop"
+        );
     }
-
-    // Prime iteration-2 assembly. Subsequent tail iterations pipeline
-    // `update(i)` + `assembly(i+1)` into a single submission.
-    let (seconds, detail) =
-        submit_batched_graphs(plan, "coupled:assembly(batch_tail)", |encoder| {
-            assembly_graph_encode(plan, encoder);
-        });
-    if plan.collect_trace {
-        plan.step_graph_timings
-            .push(crate::solver::gpu::program::plan::StepGraphTiming {
-                label: "coupled:assembly(batch_tail)",
-                seconds,
-                detail,
-            });
-    }
-
-    for iter_idx in 0..remaining {
-        host_solve_linear_system(plan);
-        host_after_solve(plan);
-
-        let has_next = iter_idx + 1 < remaining;
-        if has_next {
-            let (seconds, detail) =
-                submit_batched_graphs(plan, "coupled:update+assembly(batch_tail)", |encoder| {
-                    update_graph_encode(plan, encoder);
-                    assembly_graph_encode(plan, encoder);
-                });
-            if plan.collect_trace {
-                plan.step_graph_timings
-                    .push(crate::solver::gpu::program::plan::StepGraphTiming {
-                        label: "coupled:update+assembly(batch_tail)",
-                        seconds,
-                        detail,
-                    });
-            }
-        } else {
-            let (seconds, detail) =
-                submit_batched_graphs(plan, "coupled:update(batch_tail)", |encoder| {
-                    update_graph_encode(plan, encoder);
-                });
-            if plan.collect_trace {
-                plan.step_graph_timings
-                    .push(crate::solver::gpu::program::plan::StepGraphTiming {
-                        label: "coupled:update(batch_tail)",
-                        seconds,
-                        detail,
-                    });
-            }
-        }
-    }
-
-    // We have already executed the remainder of this step's outer iterations.
-    plan.repeat_break = true;
 }
 
 fn try_host_coupled_batch_tail_one_submission(
@@ -2620,34 +2568,6 @@ pub(crate) fn host_implicit_restore_alpha(plan: &mut GpuProgramPlan) {
     }
 }
 
-fn assembly_graph_encode(plan: &GpuProgramPlan, encoder: &mut wgpu::CommandEncoder) {
-    let r = res(plan);
-    r.assembly_graph
-        .encode_into(encoder, &r.kernels, r.runtime_dims());
-}
-
-fn update_graph_encode(plan: &GpuProgramPlan, encoder: &mut wgpu::CommandEncoder) {
-    let r = res(plan);
-    r.update_graph
-        .encode_into(encoder, &r.kernels, r.runtime_dims());
-}
-
-fn submit_batched_graphs(
-    plan: &GpuProgramPlan,
-    label: &'static str,
-    encode: impl FnOnce(&mut wgpu::CommandEncoder),
-) -> (f64, Option<GraphDetail>) {
-    let start = std::time::Instant::now();
-    let mut encoder = plan
-        .context
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) });
-    encode(&mut encoder);
-    plan.context.queue.submit(Some(encoder.finish()));
-    crate::count_submission!("Generic Coupled", label);
-    (start.elapsed().as_secs_f64(), None)
-}
-
 pub(crate) fn assembly_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
@@ -2707,9 +2627,6 @@ pub(crate) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
     if !outer_batched_mode || outer_iters <= 1 {
         return;
     }
-    if !full_one_submission_outer_enabled() {
-        return;
-    }
     if !plan.step_linear_stats.is_empty() {
         // Only the first outer-loop iteration can consume the full batch.
         return;
@@ -2718,13 +2635,6 @@ pub(crate) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
     if try_host_coupled_batch_tail_one_submission(plan, outer_iters) {
         plan.skip_remaining_block = true;
     }
-}
-
-fn full_one_submission_outer_enabled() -> bool {
-    // Enabled by default; set CFD2_DISABLE_FULL_ONE_SUBMISSION_OUTER=1 to opt out.
-    std::env::var("CFD2_DISABLE_FULL_ONE_SUBMISSION_OUTER")
-        .map(|v| v != "1")
-        .unwrap_or(true)
 }
 
 fn encoded_seed_basis0_enabled() -> bool {

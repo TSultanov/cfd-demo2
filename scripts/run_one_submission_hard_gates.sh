@@ -30,8 +30,7 @@ ONE_SUBMISSION_LOG="${LOG_DIR}/hard_gate_one_submission.log"
 FGMRES_PARITY_LOG="${LOG_DIR}/hard_gate_fgmres_parity.log"
 
 echo "==> Hard gate: one-submission path parity + submission floor"
-CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER=1 \
-  cargo test -p cfd2 --test rhie_chow_fusion_parity_test \
+cargo test -p cfd2 --test rhie_chow_fusion_parity_test \
   one_submission -- --nocapture \
   2>&1 | tee "${ONE_SUBMISSION_LOG}"
 

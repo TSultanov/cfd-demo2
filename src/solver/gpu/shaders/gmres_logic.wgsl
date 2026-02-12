@@ -24,6 +24,8 @@ const SCALAR_ITERS_USED: u32 = 10u;
 const SCALAR_RESIDUAL_EST: u32 = 11u;
 const SCALAR_TOL_REL_RHS: u32 = 12u;
 const SCALAR_TOL_ABS: u32 = 13u;
+const SCALAR_RHS_NORM: u32 = 14u;
+const SCALAR_SKIP_UPDATE: u32 = 15u;
 
 fn h_idx(row: u32, col: u32) -> u32 {
     return col * (iter_params.max_restart + 1u) + row;
@@ -86,7 +88,7 @@ fn update_hessenberg_givens(@builtin(global_invocation_id) global_id: vec3<u32>)
     let residual = abs(g_rhs[j + 1u]);
     scalars[SCALAR_RESIDUAL_EST] = residual;
 
-    let tol_rel_rhs = scalars[SCALAR_TOL_REL_RHS];
+    let tol_rel_rhs = scalars[SCALAR_TOL_REL_RHS] * scalars[SCALAR_RHS_NORM];
     let tol_abs = scalars[SCALAR_TOL_ABS];
     if (residual <= tol_rel_rhs || residual <= tol_abs) {
         scalars[SCALAR_STOP] = 1.0;
@@ -102,6 +104,11 @@ fn update_hessenberg_givens(@builtin(global_invocation_id) global_id: vec3<u32>)
 
 @compute @workgroup_size(1)
 fn solve_triangular(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    // Skip if a prior chunk already converged (SKIP_UPDATE is snapshotted at chunk start).
+    if (scalars[SCALAR_SKIP_UPDATE] > 0.5) {
+        return;
+    }
+
     // Solve H * y = g for upper triangular H (size k x k)
     let k = u32(clamp(
         round(scalars[SCALAR_ITERS_USED]),

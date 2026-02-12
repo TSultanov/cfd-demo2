@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: dbcf5d0cb3313961656465a62d2856347ebdd90d7be657286836bc8fa3a88d43
+// SourceHash: 4523aad0211e53da7aca235d68bce10a2813ea47f86da7a40b1d03cc9e841c40
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -28193,6 +28193,8 @@ pub mod gmres_logic {
     pub const SCALAR_RESIDUAL_EST: u32 = 11u32;
     pub const SCALAR_TOL_REL_RHS: u32 = 12u32;
     pub const SCALAR_TOL_ABS: u32 = 13u32;
+    pub const SCALAR_RHS_NORM: u32 = 14u32;
+    pub const SCALAR_SKIP_UPDATE: u32 = 15u32;
     pub mod compute {
         use super::{_root, _root::*};
         pub const UPDATE_HESSENBERG_GIVENS_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
@@ -28512,6 +28514,8 @@ const SCALAR_ITERS_USED: u32 = 10u;
 const SCALAR_RESIDUAL_EST: u32 = 11u;
 const SCALAR_TOL_REL_RHS: u32 = 12u;
 const SCALAR_TOL_ABS: u32 = 13u;
+const SCALAR_RHS_NORM: u32 = 14u;
+const SCALAR_SKIP_UPDATE: u32 = 15u;
 
 @group(0) @binding(0) 
 var<storage, read_write> hessenberg: array<f32>;
@@ -28599,7 +28603,9 @@ fn update_hessenberg_givens(@builtin(global_invocation_id) global_id: vec3<u32>)
     let _e111 = g_rhs[(j_1 + 1u)];
     let residual = abs(_e111);
     scalars[11] = residual;
-    let tol_rel_rhs = scalars[12];
+    let _e117 = scalars[12];
+    let _e120 = scalars[14];
+    let tol_rel_rhs = (_e117 * _e120);
     let tol_abs = scalars[13];
     if ((residual <= tol_rel_rhs) || (residual <= tol_abs)) {
         scalars[8] = 1f;
@@ -28620,53 +28626,57 @@ fn solve_triangular(@builtin(global_invocation_id) global_id_1: vec3<u32>) {
     var sum: f32;
     var j: u32;
 
-    let _e3 = scalars[10];
-    let _e7 = iter_params.max_restart;
-    let k = u32(clamp(round(_e3), 1f, f32(_e7)));
+    let _e3 = scalars[15];
+    if (_e3 > 0.5f) {
+        return;
+    }
+    let _e8 = scalars[10];
+    let _e12 = iter_params.max_restart;
+    let k = u32(clamp(round(_e8), 1f, f32(_e12)));
     loop {
-        let _e13 = loop_i;
-        if (_e13 < k) {
+        let _e18 = loop_i;
+        if (_e18 < k) {
         } else {
             break;
         }
         {
-            let _e17 = loop_i;
-            let i_1 = ((k - 1u) - _e17);
-            let _e21 = g_rhs[i_1];
-            sum = _e21;
+            let _e22 = loop_i;
+            let i_1 = ((k - 1u) - _e22);
+            let _e26 = g_rhs[i_1];
+            sum = _e26;
             j = (i_1 + 1u);
             loop {
-                let _e26 = j;
-                if (_e26 < k) {
+                let _e31 = j;
+                if (_e31 < k) {
                 } else {
                     break;
                 }
                 {
-                    let _e28 = j;
-                    let _e29 = h_idx(i_1, _e28);
-                    let _e32 = hessenberg[_e29];
-                    let _e34 = j;
-                    let _e36 = y_sol[_e34];
-                    let _e38 = sum;
-                    sum = (_e38 - (_e32 * _e36));
+                    let _e33 = j;
+                    let _e34 = h_idx(i_1, _e33);
+                    let _e37 = hessenberg[_e34];
+                    let _e39 = j;
+                    let _e41 = y_sol[_e39];
+                    let _e43 = sum;
+                    sum = (_e43 - (_e37 * _e41));
                 }
                 continuing {
-                    let _e41 = j;
-                    j = (_e41 + 1u);
+                    let _e46 = j;
+                    j = (_e46 + 1u);
                 }
             }
-            let _e43 = h_idx(i_1, i_1);
-            let diag = hessenberg[_e43];
+            let _e48 = h_idx(i_1, i_1);
+            let diag = hessenberg[_e48];
             if (abs(diag) > 0.000000000001f) {
-                let _e52 = sum;
-                y_sol[i_1] = (_e52 / diag);
+                let _e57 = sum;
+                y_sol[i_1] = (_e57 / diag);
             } else {
                 y_sol[i_1] = 0f;
             }
         }
         continuing {
-            let _e58 = loop_i;
-            loop_i = (_e58 + 1u);
+            let _e63 = loop_i;
+            loop_i = (_e63 + 1u);
         }
     }
     return;
@@ -29957,6 +29967,7 @@ pub mod gmres_update_fused {
     }
     pub const WORKGROUP_SIZE: u32 = 64u32;
     pub const SCALAR_ITERS_USED: u32 = 10u32;
+    pub const SCALAR_SKIP_UPDATE: u32 = 15u32;
     pub mod compute {
         use super::{_root, _root::*};
         pub const ACCUMULATE_SOLUTION_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -30474,6 +30485,7 @@ struct IterParams {
 
 const WORKGROUP_SIZE: u32 = 64u;
 const SCALAR_ITERS_USED: u32 = 10u;
+const SCALAR_SKIP_UPDATE: u32 = 15u;
 
 @group(0) @binding(0) 
 var<storage> vec_x: array<f32>;
@@ -30518,36 +30530,40 @@ fn accumulate_solution(@builtin(global_invocation_id) global_id: vec3<u32>, @bui
     if (_e3 >= _e6) {
         return;
     }
-    let _e10 = scalars[10];
-    let _e14 = iter_params.max_restart;
-    let k = u32(clamp(round(_e10), 1f, f32(_e14)));
-    let _e21 = params.column_offset;
-    let _e24 = params.n;
-    let z_stride = max(_e21, _e24);
-    let _e28 = vec_y[_e3];
-    acc = _e28;
+    let _e10 = scalars[15];
+    if (_e10 > 0.5f) {
+        return;
+    }
+    let _e15 = scalars[10];
+    let _e19 = iter_params.max_restart;
+    let k = u32(clamp(round(_e15), 1f, f32(_e19)));
+    let _e26 = params.column_offset;
+    let _e29 = params.n;
+    let z_stride = max(_e26, _e29);
+    let _e33 = vec_y[_e3];
+    acc = _e33;
     loop {
-        let _e31 = i;
-        if (_e31 < k) {
+        let _e36 = i;
+        if (_e36 < k) {
         } else {
             break;
         }
         {
-            let _e35 = params.omega;
-            let _e37 = i;
-            let _e39 = y_sol[_e37];
+            let _e40 = params.omega;
             let _e42 = i;
-            let _e46 = vec_x[((_e42 * z_stride) + _e3)];
-            let _e48 = acc;
-            acc = (((_e35 * _e39) * _e46) + _e48);
+            let _e44 = y_sol[_e42];
+            let _e47 = i;
+            let _e51 = vec_x[((_e47 * z_stride) + _e3)];
+            let _e53 = acc;
+            acc = (((_e40 * _e44) * _e51) + _e53);
         }
         continuing {
-            let _e51 = i;
-            i = (_e51 + 1u);
+            let _e56 = i;
+            i = (_e56 + 1u);
         }
     }
-    let _e55 = acc;
-    vec_y[_e3] = _e55;
+    let _e60 = acc;
+    vec_y[_e3] = _e60;
     return;
 }
 "#;

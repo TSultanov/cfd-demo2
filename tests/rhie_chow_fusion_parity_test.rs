@@ -700,11 +700,85 @@ fn coupled_outer_batched_mode_matches_non_batched_fixed_snapshot_within_toleranc
 
     let steps = 4usize;
     let outer_iters = 5usize;
-    let non_batched =
-        run_with_policy_snapshot_fixed_outer(&mesh, KernelFusionPolicy::Safe, steps, outer_iters, false);
-    let batched =
-        run_with_policy_snapshot_fixed_outer(&mesh, KernelFusionPolicy::Safe, steps, outer_iters, true);
+    let non_batched = run_with_policy_snapshot_fixed_outer(
+        &mesh,
+        KernelFusionPolicy::Safe,
+        steps,
+        outer_iters,
+        false,
+    );
+    let batched = run_with_policy_snapshot_fixed_outer(
+        &mesh,
+        KernelFusionPolicy::Safe,
+        steps,
+        outer_iters,
+        true,
+    );
 
     let rel_tol = 1e-3f64;
-    assert_snapshots_match("fixed_non_batched", &non_batched, "fixed_batched", &batched, rel_tol);
+    assert_snapshots_match(
+        "fixed_non_batched",
+        &non_batched,
+        "fixed_batched",
+        &batched,
+        rel_tol,
+    );
+}
+
+/// Parity gate for the one-submission encoded FGMRES path (FUSION.md §5A).
+///
+/// Compares the host-driven linear solve (non-batched, fixed outer iterations)
+/// against the one-submission GPU-encoded path (batched).  All env-var tuning
+/// knobs are explicitly cleared so the test validates the default code path.
+///
+/// Gate criterion: `max_rel < 1e-3` across u, p (mean-free), d_p, grad_p_old.
+#[test]
+fn one_submission_parity_gate_max_rel_below_1e_3() {
+    std::env::set_var("CFD2_QUIET", "1");
+    // Ensure no legacy tuning knobs influence the result.
+    std::env::remove_var("CFD2_ONE_SUBMISSION_SOLUTION_OMEGA");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_TAIL_OMEGA");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_CHUNKS");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_RESTART_BUDGET");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_TOTAL_ITERS");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_MIN_TAIL");
+
+    let mesh = generate_structured_rect_mesh(
+        16,
+        8,
+        1.0,
+        0.2,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
+    );
+
+    let steps = 4usize;
+    let outer_iters = 5usize;
+    let host_driven = run_with_policy_snapshot_fixed_outer(
+        &mesh,
+        KernelFusionPolicy::Safe,
+        steps,
+        outer_iters,
+        false,
+    );
+    let one_submission = run_with_policy_snapshot_fixed_outer(
+        &mesh,
+        KernelFusionPolicy::Safe,
+        steps,
+        outer_iters,
+        true,
+    );
+
+    let rel_tol = 1e-3f64;
+    assert_snapshots_match(
+        "host_driven",
+        &host_driven,
+        "one_submission",
+        &one_submission,
+        rel_tol,
+    );
 }

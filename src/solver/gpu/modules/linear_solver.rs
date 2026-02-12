@@ -236,8 +236,8 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
         dispatch,
         max_restart,
         max_iters,
-        tol: _tol,
-        tol_abs: _tol_abs,
+        tol,
+        tol_abs,
         precond_label,
         use_encoded_seed_basis0,
     } = args;
@@ -266,16 +266,6 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(1)
         .max(1);
-    let one_submission_solution_omega = std::env::var("CFD2_ONE_SUBMISSION_SOLUTION_OMEGA")
-        .ok()
-        .and_then(|v| v.parse::<f32>().ok())
-        .unwrap_or(1.0)
-        .clamp(0.0, 2.0);
-    let one_submission_tail_omega = std::env::var("CFD2_ONE_SUBMISSION_TAIL_OMEGA")
-        .ok()
-        .and_then(|v| v.parse::<f32>().ok())
-        .unwrap_or(one_submission_solution_omega)
-        .clamp(0.0, 2.0);
     let explicit_chunks: Option<Vec<usize>> = std::env::var("CFD2_ONE_SUBMISSION_CHUNKS")
         .ok()
         .and_then(|raw| {
@@ -296,7 +286,7 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
         n,
         num_cells,
         num_iters: 0,
-        omega: one_submission_solution_omega,
+        omega: 1.0,
         dispatch_x: dispatch.dofs_dispatch_x_threads,
         max_restart: 0,
         column_offset: 0,
@@ -351,14 +341,8 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
     }
 
     let mut encoded_total = 0usize;
-    let chunk_count = chunk_sizes.len();
     for (chunk_idx, &chunk_restart) in chunk_sizes.iter().enumerate() {
         params.max_restart = chunk_restart as u32;
-        params.omega = if chunk_idx + 1 == chunk_count {
-            one_submission_tail_omega
-        } else {
-            one_submission_solution_omega
-        };
         let iter_params = IterParams {
             current_idx: 0,
             max_restart: chunk_restart as u32,
@@ -366,21 +350,27 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
             _pad2: 0,
         };
         let is_first_chunk = chunk_idx == 0;
+        let preserve = !is_first_chunk;
         let encoded = krylov.encode_solve_once_with_prepare(
             EncodeSolveOnceArgs {
                 context,
                 system,
-                rhs_norm: 1.0,
+                rhs_norm: 1.0, // GPU-resident; shader multiplies TOL_REL_RHS * scalars[RHS_NORM]
                 params,
                 iter_params,
                 config: FgmresSolveOnceConfig {
-                    tol_rel: 0.0,
-                    tol_abs: 0.0,
+                    tol_rel: tol,
+                    tol_abs,
                     reset_x_before_update: false,
                 },
                 dispatch: dispatch.grids,
                 precond_label,
                 capture_solver_scalars: false,
+                preserve_convergence_state: preserve,
+                // Compute ||rhs|| on GPU only for the first chunk, after seed_basis0
+                // and scalars init.  Subsequent chunks preserve the value via the
+                // preserve_convergence_state path.
+                compute_rhs_norm_on_gpu: is_first_chunk,
             },
             encoder,
             is_first_chunk,

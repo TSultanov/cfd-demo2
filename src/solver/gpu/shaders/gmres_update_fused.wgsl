@@ -18,6 +18,7 @@ struct IterParams {
 
 const WORKGROUP_SIZE: u32 = 64u;
 const SCALAR_ITERS_USED: u32 = 10u;
+const SCALAR_SKIP_UPDATE: u32 = 15u;
 
 fn global_index(global_id: vec3<u32>, num_workgroups: vec3<u32>) -> u32 {
     return global_id.y * (num_workgroups.x * WORKGROUP_SIZE) + global_id.x;
@@ -48,6 +49,11 @@ fn accumulate_solution(
 ) {
     let idx = global_index(global_id, num_workgroups);
     if (idx >= params.n) {
+        return;
+    }
+
+    // Skip if a prior chunk already converged (SKIP_UPDATE is snapshotted at chunk start).
+    if (scalars[SCALAR_SKIP_UPDATE] > 0.5) {
         return;
     }
 

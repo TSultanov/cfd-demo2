@@ -188,7 +188,61 @@ This checklist tracks the implementation of full compile-time, DSL-based kernel 
 - [x] Extend preconditioner setup to encode into caller-provided command encoders (avoid per-iteration `prepare` submits in one-submission path): `FgmresPreconditionerModule::encode_prepare` is wired through `KrylovSolveModule::solve_once_with_prepare`, and runtime/schur preconditioners now provide encode-based setup paths.
 - [x] Extend FGMRES residual-seed/normalization path with encode-only variants (remove host-side residual submit/readback before restart-body encode) and fix command-buffer ordering hazards by using in-encoder buffer copies for seed/solver params/scalars and restart setup tables/indirect args in `src/solver/gpu/linear_solver/fgmres.rs`.
 - [x] Eliminate remaining race-like ordering risk in encoded FGMRES setup by writing `params` via in-encoder copies before `encode_prepare` and before restart-body encode (`src/solver/gpu/modules/krylov_solve.rs`, `src/solver/gpu/linear_solver/fgmres.rs`); repeated parity/submission probes with fixed settings are deterministic run-to-run.
-- [x] Add bounded multi-restart encode chunking for one-submission fixed-iteration solves in `src/solver/gpu/modules/linear_solver.rs` (`CFD2_ONE_SUBMISSION_RESTART_BUDGET` per restart chunk, `CFD2_ONE_SUBMISSION_TOTAL_ITERS` per-solve total budget; optional tuning knobs `CFD2_ONE_SUBMISSION_CHUNKS`, `CFD2_ONE_SUBMISSION_MIN_TAIL`, `CFD2_ONE_SUBMISSION_SOLUTION_OMEGA`, and `CFD2_ONE_SUBMISSION_TAIL_OMEGA`; current default tuning is `12`/`27` for the closest measured strict-parity behavior while preserving one-submission dispatch reduction).
+- [x] Add bounded multi-restart encode chunking for one-submission fixed-iteration solves in `src/solver/gpu/modules/linear_solver.rs` (`CFD2_ONE_SUBMISSION_RESTART_BUDGET` per restart chunk, `CFD2_ONE_SUBMISSION_TOTAL_ITERS` per-solve total budget; optional tuning knobs `CFD2_ONE_SUBMISSION_CHUNKS`, `CFD2_ONE_SUBMISSION_MIN_TAIL`; omega tuning knobs `CFD2_ONE_SUBMISSION_SOLUTION_OMEGA` and `CFD2_ONE_SUBMISSION_TAIL_OMEGA` have been removed after §5A parity gap was closed).
 - [x] Add fixed-iteration encoded outer-loop runner that records `assembly + solve + update` for all outer iterations into one command buffer submission.
 - [x] Keep a guarded fallback to current batched-tail path until parity and OpenFOAM drift checks remain stable.
-- [ ] Close remaining strict parity gap for opt-in encoded-seed / full one-submission path (current targeted parity measurements: encoded-seed batched mode `max_rel=1.659893e-3` vs `1e-3` tolerance; full one-submission mode default best measured `max_rel=1.007846e-3` with `CFD2_ONE_SUBMISSION_RESTART_BUDGET=12` and `CFD2_ONE_SUBMISSION_TOTAL_ITERS=27`; tuned tail-damped variant reaches `max_rel=1.000047e-3` with `CFD2_ONE_SUBMISSION_TAIL_OMEGA=1.02580`, still slightly above `1e-3`).
+- [x] Close remaining strict parity gap for opt-in encoded-seed / full one-submission path (see Phase 5A for root-cause analysis and resolution).
+
+### Phase 5: Close Gaps and Promote One-Submission to Default
+
+#### 5A: Numerical Parity (P0 — required before default promotion)
+
+Root cause: the encoded FGMRES path diverged from the host-driven path due to three
+compounding differences in how the linear solve executed.  All three have been resolved.
+
+- [x] **Fix RHS-norm substitution**: `encode_solve_fgmres_fixed_iterations` hardcoded `rhs_norm: 1.0` instead of the true `||b||`, disabling relative-tolerance semantics. Fixed by adding a GPU-side `||rhs||` reduction (`encode_rhs_norm_into_scalars`) that writes to `scalars[RHS_NORM]` and wiring it into `encode_fgmres_solve_once_with_preconditioner` after the scalars init but before the inner loop. The shader (`update_hessenberg_givens`) now computes `tol_rel_rhs = scalars[TOL_REL_RHS] * scalars[RHS_NORM]`. For the host path `RHS_NORM=1.0` (pre-multiplied tolerance); for the encoded path `RHS_NORM=GPU-computed ||b||`.
+- [x] **Re-enable inter-restart convergence signaling on GPU**: tolerances were zeroed and `capture_solver_scalars` was `false`, so the solver always ran the full iteration budget. Fixed by passing real `tol` and `tol_abs` in the encoded path config, adding `preserve_convergence_state` to preserve STOP/CONVERGED/RHS_NORM/indirect-args across restart chunks, and adding a SKIP_UPDATE mechanism so `solve_triangular` and `accumulate_solution` skip when a prior chunk already converged.
+- [x] **Validate GPU-side basis seeding parity**: `encode_fgmres_seed_basis0_from_system` computes `r₀ = b − Ax` and normalizes entirely on GPU. The standard Rhie-Chow parity test (`tests/rhie_chow_fusion_parity_test.rs`) passes at `1e-3` tolerance, confirming FP-ordering divergence from host-computed norms is within acceptable bounds.
+- [x] **Eliminate omega tuning knobs**: the `CFD2_ONE_SUBMISSION_SOLUTION_OMEGA` and `CFD2_ONE_SUBMISSION_TAIL_OMEGA` env vars (band-aids for the parity gap) have been removed. Omega is now hardcoded to `1.0`. Parity holds without manual tuning.
+- [x] **Parity gate**: `one_submission_parity_gate_max_rel_below_1e_3` test in `tests/rhie_chow_fusion_parity_test.rs` explicitly clears all legacy tuning env vars and asserts `max_rel < 1e-3` across u, p (mean-free), d_p, grad_p_old — passes cleanly.
+
+#### 5B: Test Coverage (P0 — required before default promotion)
+
+- [x] Add a parity test variant in `tests/rhie_chow_fusion_parity_test.rs` that asserts snapshot match within `1e-3` tolerance against the non-batched fixed-iteration baseline with all legacy tuning env vars cleared (`one_submission_parity_gate_max_rel_below_1e_3`).
+- [ ] Add a submission-count test variant that enables one-submission mode and asserts submission count is at the expected floor (~4 for the test problem).
+- [ ] Add an isolated unit test for `encode_solve_fgmres_fixed_iterations` vs `solve_fgmres` on a small linear system, comparing final solution vectors element-wise (not just snapshot fields) to identify which FGMRES stage introduces the dominant error.
+- [ ] Add the one-submission path to `scripts/run_one_submission_hard_gates.sh` as a required CI gate (currently relies on manual baseline comparison).
+
+#### 5C: Convergence Diagnostics (P1 — required for production usability)
+
+The one-submission path currently bails when `plan.collect_convergence_stats` is set
+(`generic_coupled.rs:1849-1851`) and never populates `outer_field_residuals`,
+`outer_residual_u`, or `outer_residual_p` for encoded iterations.
+
+- [ ] Add a post-submission residual readback: after the single `queue.submit()` in `try_host_coupled_batch_tail_one_submission`, perform one final GPU-to-host readback of the solution state and compute correction norms for at least the last outer iteration, so diagnostics and UI reporting remain functional.
+- [ ] Remove the `collect_convergence_stats` early-return guard in `try_host_coupled_batch_tail_one_submission` once post-step diagnostics are available.
+- [ ] Populate `plan.last_linear_stats` with a meaningful final residual instead of `f32::INFINITY` (`linear_solver.rs:393`). At minimum, encode a final residual-norm reduction kernel at the end of the last restart chunk and read it back after submission.
+
+#### 5D: Adaptive Outer Break on GPU (P2 — needed to drop fixed-iteration-only requirement)
+
+Currently the one-submission path is gated behind `!outer_break_enabled`
+(`generic_coupled.rs:2107`), forcing users into fixed-iteration mode.
+
+- [ ] Design a GPU-driven outer-loop break mechanism: after each encoded outer iteration's update graph, dispatch the existing `OuterConvergenceMonitor` break kernel (`OUTER_CONVERGENCE_BREAK_WGSL`) and write a GPU-visible break flag. Use indirect dispatch or conditional buffer writes on subsequent iterations to skip work when the flag is set.
+- [ ] Wire the GPU break flag into the encoded assembly/solve/update chain so converged iterations emit zero-cost dispatches (indirect dispatch with count=0) rather than full kernel launches.
+- [ ] Remove the `outer_break_enabled` gate in `host_coupled_before_iter` so the one-submission path works with adaptive convergence.
+- [ ] Validate that adaptive-break one-submission produces the same iteration counts and final solutions as the host-driven adaptive path.
+
+#### 5E: Solver Generality (P2 — needed for non-FGMRES models)
+
+- [ ] Add an `encode_solve_cg_fixed_iterations` function (analogous to `encode_solve_fgmres_fixed_iterations`) for the CG linear solver path (`src/solver/gpu/modules/scalar_cg.rs`).
+- [ ] Remove the `LinearSolverType::Fgmres` guard in `encode_linear_solve_fixed_into_one_submission` (`generic_coupled.rs:1868-1870`) and dispatch to the appropriate encoded solver.
+
+#### 5F: Default Promotion and Cleanup (P3 — final rollout)
+
+- [ ] Flip `full_one_submission_outer_enabled()` to return `true` by default (env var becomes the opt-out gate instead of opt-in).
+- [ ] Flip `DEFAULT_OUTER_BATCHED_MODE` from `false` to `true` so the batched path is the default when fixed-iteration mode is selected.
+- [x] Remove or consolidate the `CFD2_ONE_SUBMISSION_*` env-var tuning knobs once parity is resolved (omega knobs removed in §5A; remaining knobs `CFD2_ONE_SUBMISSION_RESTART_BUDGET`, `CFD2_ONE_SUBMISSION_TOTAL_ITERS`, `CFD2_ONE_SUBMISSION_CHUNKS`, `CFD2_ONE_SUBMISSION_MIN_TAIL` retained for optional override).
+- [ ] Update `SolverExt` documentation to describe the one-submission behavior as the standard coupled stepping mode.
+- [ ] Run full OpenFOAM reference suite (`scripts/run_openfoam_reference_tests.sh`) with default-on one-submission and confirm no drift regression vs current baseline.
+- [ ] Remove the multi-submission fallback loop in `host_coupled_batch_tail` once one-submission is proven stable across the validation matrix.

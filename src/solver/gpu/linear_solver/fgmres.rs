@@ -16,6 +16,8 @@ const FGMRES_SCALAR_ITERS_USED: usize = 10;
 const FGMRES_SCALAR_RESIDUAL_EST: usize = 11;
 const FGMRES_SCALAR_TOL_REL_RHS: usize = 12;
 const FGMRES_SCALAR_TOL_ABS: usize = 13;
+const FGMRES_SCALAR_RHS_NORM: usize = 14;
+const FGMRES_SCALAR_SKIP_UPDATE: usize = 15;
 
 const FGMRES_INDIRECT_DISPATCH_COUNT: usize = 3;
 const FGMRES_INDIRECT_ENTRY_STRIDE_BYTES: u64 = 16;
@@ -1347,6 +1349,7 @@ pub fn encode_fgmres_seed_basis0_from_system<'a>(
     encoder: &mut wgpu::CommandEncoder,
     system: LinearSystemView<'a>,
     max_restart: u32,
+    preserve_convergence_state: bool,
 ) {
     let n = core.n;
     let vector_bytes = (n as u64) * 4;
@@ -1404,19 +1407,32 @@ pub fn encode_fgmres_seed_basis0_from_system<'a>(
         pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
     }
 
-    let mut axpby_scalars = [0.0_f32; FGMRES_SCALAR_COUNT];
-    axpby_scalars[FGMRES_SCALAR_STOP] = 0.0;
-    axpby_scalars[FGMRES_SCALAR_CONVERGED] = 0.0;
-    axpby_scalars[0] = 1.0;
-    axpby_scalars[1] = -1.0;
-    encode_write_buffer_from_bytes(
-        core.device,
-        encoder,
-        core.b_scalars,
-        0,
-        bytemuck::cast_slice(&axpby_scalars),
-        "FGMRES residual seed scalars",
-    );
+    if preserve_convergence_state {
+        // Only write scratch slots needed by AXPBY; preserve STOP/CONVERGED/RHS_NORM.
+        let scratch_scalars: [f32; 2] = [1.0, -1.0]; // alpha, beta for AXPBY
+        encode_write_buffer_from_bytes(
+            core.device,
+            encoder,
+            core.b_scalars,
+            0,
+            bytemuck::cast_slice(&scratch_scalars),
+            "FGMRES residual seed scalars (scratch only)",
+        );
+    } else {
+        let mut axpby_scalars = [0.0_f32; FGMRES_SCALAR_COUNT];
+        axpby_scalars[FGMRES_SCALAR_STOP] = 0.0;
+        axpby_scalars[FGMRES_SCALAR_CONVERGED] = 0.0;
+        axpby_scalars[0] = 1.0;
+        axpby_scalars[1] = -1.0;
+        encode_write_buffer_from_bytes(
+            core.device,
+            encoder,
+            core.b_scalars,
+            0,
+            bytemuck::cast_slice(&axpby_scalars),
+            "FGMRES residual seed scalars",
+        );
+    }
     let residual_bg = create_vector_bind_group(
         core.device,
         core.bgl_vectors,
@@ -1555,6 +1571,152 @@ pub fn encode_fgmres_seed_basis0_from_system<'a>(
     encoder.copy_buffer_to_buffer(core.b_hessenberg, 0, core.b_g, 0, 4);
 }
 
+/// Encode a GPU-side computation of `||rhs||` and store the result in
+/// `scalars[FGMRES_SCALAR_RHS_NORM]`.
+///
+/// Uses the same two-pass norm-reduction pattern as the basis0 seeding path:
+///   1. `pipeline_norm_sq` — workgroup-level partial sum-of-squares → `b_dot_partial`
+///   2. `pipeline_reduce_final_and_finish_norm` — final sum, sqrt, writes norm to
+///      `hessenberg[0]` and `1/norm` to `scalars[0]`.
+///   3. `copy_buffer_to_buffer` to propagate `hessenberg[0]` (= `||rhs||`) into
+///      `scalars[FGMRES_SCALAR_RHS_NORM]`.
+///
+/// After this function returns, subsequent GPU kernels can read the RHS norm from
+/// `scalars[14]` without a host readback.
+pub fn encode_rhs_norm_into_scalars<'a>(
+    core: &FgmresCore<'a>,
+    encoder: &mut wgpu::CommandEncoder,
+    system: LinearSystemView<'a>,
+) {
+    let n = core.n;
+    let workgroups = workgroups_for_size(n);
+    let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
+    let dispatch_x_threads = dispatch_x_threads(workgroups);
+
+    // Set up vector-op params for the norm reduction.
+    let norm_params = RawFgmresParams {
+        n,
+        num_cells: core.num_cells,
+        num_iters: 0,
+        omega: 1.0,
+        dispatch_x: dispatch_x_threads,
+        max_restart: 0,
+        column_offset: (core.z_stride / 4) as u32,
+        _pad3: 0,
+    };
+    encode_write_buffer_from_bytes(
+        core.device,
+        encoder,
+        core.b_params,
+        0,
+        bytes_of(&norm_params),
+        "FGMRES rhs_norm params",
+    );
+
+    // Pass 1: partial norm-squared of the RHS vector.
+    let norm_bg = create_vector_bind_group(
+        core.device,
+        core.bgl_vectors,
+        core.vector_bindings,
+        system.rhs().as_entire_binding(),
+        core.b_temp.as_entire_binding(),
+        core.b_dot_partial.as_entire_binding(),
+        "FGMRES rhs_norm partial BG",
+    );
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("FGMRES rhs_norm partial"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(core.pipeline_norm_sq);
+        pass.set_bind_group(0, &norm_bg, &[]);
+        pass.set_bind_group(1, core.bg_matrix, &[]);
+        pass.set_bind_group(2, core.bg_precond, &[]);
+        pass.set_bind_group(3, core.bg_params, &[]);
+        pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+    }
+
+    // Pass 2: final reduction → writes norm to hessenberg[0], 1/norm to scalars[0].
+    // Temporarily switch params.n to num_dot_groups for the reduction kernel.
+    let reduce_params = RawFgmresParams {
+        n: core.num_dot_groups,
+        num_cells: 0,
+        num_iters: 0,
+        omega: 0.0,
+        dispatch_x: WORKGROUP_SIZE,
+        max_restart: 0,
+        column_offset: 0,
+        _pad3: 0,
+    };
+    encode_write_buffer_from_bytes(
+        core.device,
+        encoder,
+        core.b_params,
+        0,
+        bytes_of(&reduce_params),
+        "FGMRES rhs_norm reduce params",
+    );
+    // iter_params.current_idx = 0 so the norm lands in hessenberg[0].
+    let reduce_iter_params = IterParams {
+        current_idx: 0,
+        max_restart: 0,
+        _pad1: 0,
+        _pad2: 0,
+    };
+    encode_write_buffer_from_bytes(
+        core.device,
+        encoder,
+        core.b_iter_params,
+        0,
+        bytes_of(&reduce_iter_params),
+        "FGMRES rhs_norm reduce iter params",
+    );
+
+    // We need SCALAR_STOP = 0 so reduce_final_and_finish_norm doesn't early-exit.
+    // Only clear the STOP slot to avoid clobbering other scalars that may already
+    // be initialised (e.g. tolerance slots written by encode_fgmres_solve_once).
+    let stop_zero: [f32; 1] = [0.0];
+    encode_write_buffer_from_bytes(
+        core.device,
+        encoder,
+        core.b_scalars,
+        (FGMRES_SCALAR_STOP * 4) as u64,
+        bytemuck::cast_slice(&stop_zero),
+        "FGMRES rhs_norm scalars (clear stop)",
+    );
+
+    let reduce_bg = create_vector_bind_group(
+        core.device,
+        core.bgl_vectors,
+        core.vector_bindings,
+        core.b_dot_partial.as_entire_binding(),
+        core.b_temp.as_entire_binding(),
+        core.b_temp.as_entire_binding(),
+        "FGMRES rhs_norm reduce BG",
+    );
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("FGMRES rhs_norm reduce final"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(core.pipeline_reduce_final_and_finish_norm);
+        pass.set_bind_group(0, &reduce_bg, &[]);
+        pass.set_bind_group(1, core.bg_matrix, &[]);
+        pass.set_bind_group(2, core.bg_precond, &[]);
+        pass.set_bind_group(3, core.bg_params, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+
+    // Propagate ||rhs|| from hessenberg[0] to scalars[FGMRES_SCALAR_RHS_NORM].
+    encoder.copy_buffer_to_buffer(
+        core.b_hessenberg,
+        0,
+        core.b_scalars,
+        (FGMRES_SCALAR_RHS_NORM * 4) as u64,
+        4,
+    );
+}
+
 pub fn read_scalar(core: &FgmresCore<'_>) -> f32 {
     let mut encoder = core
         .device
@@ -1642,6 +1804,8 @@ pub fn fgmres_solve_once_with_preconditioner<'a>(
         iter_params,
         config,
         true,
+        false,
+        None, // host path: rhs_norm already computed on CPU
         precondition,
     );
     let status_submission_index = core.queue.submit(Some(encoder.finish()));
@@ -1677,6 +1841,13 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
     iter_params: IterParams,
     config: FgmresSolveOnceConfig,
     capture_solver_scalars: bool,
+    preserve_convergence_state: bool,
+    // When `Some`, compute `||rhs||` on the GPU and store in `scalars[RHS_NORM]`
+    // after the scalars buffer has been initialised.  Must only be used on the
+    // first restart chunk (non-preserve path) where `seed_basis0` has already
+    // written beta = ||r0|| into `hessenberg[0]`.  The function saves/restores
+    // `hessenberg[0]` around the norm computation.
+    rhs_norm_system: Option<LinearSystemView<'a>>,
     mut precondition: impl FnMut(
         usize,
         &mut wgpu::CommandEncoder,
@@ -1704,44 +1875,105 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
     params.column_offset = (core.z_stride / 4) as u32;
     encode_write_params(core, encoder, &params);
 
-    let mut solver_scalars = [0.0_f32; FGMRES_SCALAR_COUNT];
-    solver_scalars[FGMRES_SCALAR_STOP] = 0.0;
-    solver_scalars[FGMRES_SCALAR_CONVERGED] = 0.0;
-    solver_scalars[FGMRES_SCALAR_ITERS_USED] = max_restart as f32;
-    solver_scalars[FGMRES_SCALAR_RESIDUAL_EST] = f32::INFINITY;
-    solver_scalars[FGMRES_SCALAR_TOL_REL_RHS] = tol_rel_rhs;
-    solver_scalars[FGMRES_SCALAR_TOL_ABS] = tol_abs;
-    encode_write_buffer_from_bytes(
-        core.device,
-        encoder,
-        core.b_scalars,
-        0,
-        bytemuck::cast_slice(&solver_scalars),
-        "FGMRES solver scalars",
-    );
+    if preserve_convergence_state {
+        // Snapshot SCALAR_STOP → SCALAR_SKIP_UPDATE before the inner loop starts.
+        // This lets solve_triangular and accumulate_solution skip when a prior chunk
+        // already converged, while still running correctly if convergence happens
+        // during THIS chunk (SKIP_UPDATE stays 0 because STOP was 0 at snapshot time).
+        encoder.copy_buffer_to_buffer(
+            core.b_scalars,
+            (FGMRES_SCALAR_STOP * 4) as u64,
+            core.b_scalars,
+            (FGMRES_SCALAR_SKIP_UPDATE * 4) as u64,
+            4,
+        );
 
-    let indirect_args: [u32; FGMRES_INDIRECT_DISPATCH_COUNT * 4] = [
-        dispatch_x,
-        dispatch_y,
-        1,
-        0,
-        cell_dispatch_x,
-        cell_dispatch_y,
-        1,
-        0,
-        max_restart as u32,
-        1,
-        1,
-        0,
-    ];
-    encode_write_buffer_from_bytes(
-        core.device,
-        encoder,
-        core.b_indirect_args,
-        0,
-        bytemuck::cast_slice(&indirect_args),
-        "FGMRES indirect args",
-    );
+        // Only update tolerance and default slots without resetting STOP/CONVERGED/indirect.
+        // This preserves early-termination state from a previous restart chunk so that
+        // converged chunks cause all subsequent chunks to be no-ops.
+        let tol_scalars: [f32; 2] = [
+            tol_rel_rhs, // SCALAR_TOL_REL_RHS (12)
+            tol_abs,     // SCALAR_TOL_ABS (13)
+        ];
+        encode_write_buffer_from_bytes(
+            core.device,
+            encoder,
+            core.b_scalars,
+            (FGMRES_SCALAR_TOL_REL_RHS * 4) as u64,
+            bytemuck::cast_slice(&tol_scalars),
+            "FGMRES solver scalars (tolerance only)",
+        );
+        // Update ITERS_USED default for this chunk (used by accumulate_solution).
+        let iters_default: [f32; 1] = [max_restart as f32];
+        encode_write_buffer_from_bytes(
+            core.device,
+            encoder,
+            core.b_scalars,
+            (FGMRES_SCALAR_ITERS_USED * 4) as u64,
+            bytemuck::cast_slice(&iters_default),
+            "FGMRES solver scalars (iters_used default)",
+        );
+    } else {
+        let mut solver_scalars = [0.0_f32; FGMRES_SCALAR_COUNT];
+        solver_scalars[FGMRES_SCALAR_STOP] = 0.0;
+        solver_scalars[FGMRES_SCALAR_CONVERGED] = 0.0;
+        solver_scalars[FGMRES_SCALAR_ITERS_USED] = max_restart as f32;
+        solver_scalars[FGMRES_SCALAR_RESIDUAL_EST] = f32::INFINITY;
+        solver_scalars[FGMRES_SCALAR_TOL_REL_RHS] = tol_rel_rhs;
+        solver_scalars[FGMRES_SCALAR_TOL_ABS] = tol_abs;
+        solver_scalars[FGMRES_SCALAR_RHS_NORM] = 1.0; // shader multiplies TOL_REL_RHS * RHS_NORM
+        solver_scalars[FGMRES_SCALAR_SKIP_UPDATE] = 0.0;
+        encode_write_buffer_from_bytes(
+            core.device,
+            encoder,
+            core.b_scalars,
+            0,
+            bytemuck::cast_slice(&solver_scalars),
+            "FGMRES solver scalars",
+        );
+
+        let indirect_args: [u32; FGMRES_INDIRECT_DISPATCH_COUNT * 4] = [
+            dispatch_x,
+            dispatch_y,
+            1,
+            0,
+            cell_dispatch_x,
+            cell_dispatch_y,
+            1,
+            0,
+            max_restart as u32,
+            1,
+            1,
+            0,
+        ];
+        encode_write_buffer_from_bytes(
+            core.device,
+            encoder,
+            core.b_indirect_args,
+            0,
+            bytemuck::cast_slice(&indirect_args),
+            "FGMRES indirect args",
+        );
+    }
+
+    // ── GPU-side ||rhs|| computation ────────────────────────────────────
+    // Must happen after the scalars init (so our write to scalars[RHS_NORM]
+    // is not clobbered) and after seed_basis0 (so basis0 is ready).
+    //
+    // encode_rhs_norm_into_scalars reuses reduce_final_and_finish_norm which
+    // writes the norm into hessenberg[0].  However hessenberg[0] already
+    // holds beta = ||r0|| written by seed_basis0 and needed by the inner
+    // loop (update_hessenberg_givens).  We save/restore hessenberg[0] via
+    // b_y[0] which is cleared by seed_basis0 and unused until
+    // solve_triangular at the end.
+    if let Some(system) = rhs_norm_system {
+        // Save hessenberg[0] (beta) → b_y[0].
+        encoder.copy_buffer_to_buffer(core.b_hessenberg, 0, core.b_y, 0, 4);
+        // Compute ||rhs|| → scalars[RHS_NORM] (clobbers hessenberg[0]).
+        encode_rhs_norm_into_scalars(core, encoder, system);
+        // Restore hessenberg[0] (beta) ← b_y[0].
+        encoder.copy_buffer_to_buffer(core.b_y, 0, core.b_hessenberg, 0, 4);
+    }
 
     let max_restart_u32 = max_restart as u32;
     let params_iter_table: Vec<RawFgmresParams> = (0..max_restart)

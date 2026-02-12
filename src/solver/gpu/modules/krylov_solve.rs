@@ -1,8 +1,9 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::linear_solver::fgmres::{
     encode_fgmres_seed_basis0_from_system, encode_fgmres_solve_once_with_preconditioner,
-    encode_write_params, solve_once_from_encoded_status, submit_fgmres_encoded_pass,
-    FgmresSolveOnceConfig, FgmresSolveOnceResult, FgmresWorkspace, IterParams, RawFgmresParams,
+    encode_rhs_norm_into_scalars, encode_write_params, solve_once_from_encoded_status,
+    submit_fgmres_encoded_pass, FgmresSolveOnceConfig, FgmresSolveOnceResult, FgmresWorkspace,
+    IterParams, RawFgmresParams,
 };
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
@@ -34,6 +35,12 @@ pub struct EncodeSolveOnceArgs<'a> {
     pub dispatch: DispatchGrids,
     pub precond_label: &'a str,
     pub capture_solver_scalars: bool,
+    pub preserve_convergence_state: bool,
+    /// When true, compute `||rhs||` on GPU and store it in `scalars[RHS_NORM]`
+    /// after the scalars buffer has been initialised.  This must happen after
+    /// `seed_basis0` and after the full-scalars init in the non-preserve path
+    /// so that the copy into slot 14 is not clobbered.
+    pub compute_rhs_norm_on_gpu: bool,
 }
 
 impl<P> KrylovSolveModule<P> {
@@ -48,6 +55,20 @@ impl<P> KrylovSolveModule<P> {
             system.rhs().as_entire_binding(),
             n,
         )
+    }
+
+    /// Encode a GPU-side `||rhs||` computation into `scalars[FGMRES_SCALAR_RHS_NORM]`.
+    ///
+    /// No host readback is performed — the result stays GPU-resident for use by
+    /// subsequent encoded kernels.
+    pub fn encode_rhs_norm(
+        &self,
+        context: &GpuContext,
+        encoder: &mut wgpu::CommandEncoder,
+        system: LinearSystemView<'_>,
+    ) {
+        let core = self.fgmres.core(&context.device, &context.queue);
+        encode_rhs_norm_into_scalars(&core, encoder, system);
     }
 }
 
@@ -105,7 +126,13 @@ impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {
             );
         }
         if seed_basis_from_system {
-            encode_fgmres_seed_basis0_from_system(&core, encoder, system, seed_max_restart);
+            encode_fgmres_seed_basis0_from_system(
+                &core,
+                encoder,
+                system,
+                seed_max_restart,
+                args.preserve_convergence_state,
+            );
         }
         self.encode_solve_once(args, encoder)
     }
@@ -125,7 +152,14 @@ impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {
             dispatch,
             precond_label,
             capture_solver_scalars,
+            preserve_convergence_state,
+            compute_rhs_norm_on_gpu,
         } = args;
+        let rhs_norm_system = if compute_rhs_norm_on_gpu {
+            Some(system)
+        } else {
+            None
+        };
         let core = self.fgmres.core(&context.device, &context.queue);
         let encoded = encode_fgmres_solve_once_with_preconditioner(
             &core,
@@ -136,6 +170,8 @@ impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {
             iter_params,
             config,
             capture_solver_scalars,
+            preserve_convergence_state,
+            rhs_norm_system,
             |_j, encoder, vj, z_buf| {
                 encoder.push_debug_group(precond_label);
                 self.precond.encode_apply(
@@ -195,6 +231,8 @@ impl<'a> EncodeSolveOnceArgs<'a> {
             dispatch,
             precond_label,
             capture_solver_scalars,
+            preserve_convergence_state: false,
+            compute_rhs_norm_on_gpu: false,
         }
     }
 }

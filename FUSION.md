@@ -213,15 +213,15 @@ compounding differences in how the linear solve executed.  All three have been r
 - [x] Add an isolated unit test for `encode_solve_fgmres_fixed_iterations` vs `solve_fgmres` on a small linear system, comparing final solution vectors element-wise (not just snapshot fields) to identify which FGMRES stage introduces the dominant error.
 - [x] Add the one-submission path to `scripts/run_one_submission_hard_gates.sh` as a required CI gate (currently relies on manual baseline comparison).
 
-#### 5C: Convergence Diagnostics (P1 — required for production usability)
+#### 5C: Convergence Diagnostics (P1 — required for production usability) ✅
 
-The one-submission path currently bails when `plan.collect_convergence_stats` is set
-(`generic_coupled.rs:1849-1851`) and never populates `outer_field_residuals`,
-`outer_residual_u`, or `outer_residual_p` for encoded iterations.
+The one-submission path previously bailed when `plan.collect_convergence_stats` was set
+and never populated `outer_field_residuals`, `outer_residual_u`, or `outer_residual_p`
+for encoded iterations.  All three items are now resolved:
 
-- [ ] Add a post-submission residual readback: after the single `queue.submit()` in `try_host_coupled_batch_tail_one_submission`, perform one final GPU-to-host readback of the solution state and compute correction norms for at least the last outer iteration, so diagnostics and UI reporting remain functional.
-- [ ] Remove the `collect_convergence_stats` early-return guard in `try_host_coupled_batch_tail_one_submission` once post-step diagnostics are available.
-- [ ] Populate `plan.last_linear_stats` with a meaningful final residual instead of `f32::INFINITY` (`linear_solver.rs:393`). At minimum, encode a final residual-norm reduction kernel at the end of the last restart chunk and read it back after submission.
+- [x] Add a post-submission residual readback: `compute_outer_residuals` is called after the one-submission tail completes, computing correction norms via `delta_maxima` + `ensure_state_scale` (two small GPU dispatches). Note: the one-submission path measures post-update `x` while the multi-submission path measures pre-update `x`, so absolute residual values will differ between paths — this is expected and documented in the parity test.
+- [x] Remove the `collect_convergence_stats` early-return guard in `try_host_coupled_batch_tail_one_submission` — deleted.
+- [x] Populate `plan.last_linear_stats` with a meaningful final residual: `submit_solve_fgmres_fixed_iterations_chunked` now sets `capture_solver_scalars: true` on the last chunk and reads back the real GPU-computed residual via `read_last_solver_stats`. `universal::step_stats` now wires `plan.last_linear_stats` / `plan.step_linear_stats` into `PlanStepStats::linear_stats`.
 
 #### 5D: Adaptive Outer Break on GPU (P2 — needed to drop fixed-iteration-only requirement)
 

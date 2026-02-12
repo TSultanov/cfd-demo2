@@ -1630,24 +1630,66 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
         return;
     }
 
-    let (_lin_tol, _lin_tol_abs, state, monitor) = {
-        let r = res_mut(plan);
-        (
-            r.linear_solver.tolerance,
-            r.linear_solver.tolerance_abs,
-            r.fields.current_state().clone(),
-            r.outer_convergence.take(),
-        )
+    let (delta, scale) = match compute_outer_residuals(plan) {
+        Some(result) => result,
+        None => return,
     };
 
-    let Some(mut monitor) = monitor else {
+    if !outer_break_enabled {
+        return;
+    }
+
+    if outer_iters <= 1 || !plan.last_linear_stats.converged || plan.repeat_break {
+        return;
+    }
+
+    let Some(ref scale) = scale else {
         return;
     };
+    if scale.len() != delta.len() {
+        return;
+    }
 
-    if outer_iters > 1 || plan.collect_convergence_stats {
-        if let Err(err) = monitor.ensure_state_scale(plan, &state) {
-            eprintln!("[cfd2][outer] failed to compute state scale: {err}");
+    // Outer-loop convergence: evaluate tolerance checks on GPU and use the
+    // resulting status buffer to decide early break.
+    let tol_rel = res(plan).outer_tol;
+    let tol_abs = res(plan).outer_tol_abs;
+    let monitor = res_mut(plan).outer_convergence.take();
+    let Some(monitor) = monitor else {
+        return;
+    };
+    match monitor.evaluate_break_on_gpu(plan, &delta, scale, tol_rel, tol_abs) {
+        Ok(converged) => {
+            if converged {
+                plan.repeat_break = true;
+            }
         }
+        Err(err) => {
+            eprintln!("[cfd2][outer] failed to evaluate break status on gpu: {err}");
+        }
+    }
+
+    res_mut(plan).outer_convergence = Some(monitor);
+}
+
+/// Compute outer-loop correction norms (field residuals) via the
+/// `OuterConvergenceMonitor` and populate `plan.outer_field_residuals`,
+/// `plan.outer_field_residuals_scaled`, `plan.outer_residual_u`, and
+/// `plan.outer_residual_p`.
+///
+/// Returns `Some((delta, scale))` on success, `None` if no monitor is
+/// available or a readback fails.  The monitor is always returned to the
+/// resource state regardless of success or failure.
+fn compute_outer_residuals(plan: &mut GpuProgramPlan) -> Option<(Vec<f32>, Option<Vec<f32>>)> {
+    let state = {
+        let r = res_mut(plan);
+        r.fields.current_state().clone()
+    };
+    let monitor = res_mut(plan).outer_convergence.take();
+    let mut monitor = monitor?;
+
+    if let Err(err) = monitor.ensure_state_scale(plan, &state) {
+        eprintln!("[cfd2][outer] failed to compute state scale: {err}");
     }
 
     let delta = match monitor.delta_maxima(plan) {
@@ -1655,7 +1697,7 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
         Err(err) => {
             eprintln!("[cfd2][outer] failed to compute correction norms: {err}");
             res_mut(plan).outer_convergence = Some(monitor);
-            return;
+            return None;
         }
     };
 
@@ -1666,15 +1708,11 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
             monitor.target_names().len()
         );
         res_mut(plan).outer_convergence = Some(monitor);
-        return;
+        return None;
     }
 
-    // Compute state scale for normalization (if available and outer_iters > 1, or when explicitly collecting stats)
-    let scale: Option<Vec<f32>> = if outer_iters > 1 || plan.collect_convergence_stats {
-        monitor.state_scale().map(|s| s.to_vec())
-    } else {
-        None
-    };
+    // Always compute scaled residuals (state scale is populated by ensure_state_scale above).
+    let scale: Option<Vec<f32>> = monitor.state_scale().map(|s| s.to_vec());
 
     // Store absolute residuals
     plan.outer_field_residuals.clear();
@@ -1713,41 +1751,8 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
     plan.outer_residual_u = residual_u;
     plan.outer_residual_p = residual_p;
 
-    if !outer_break_enabled {
-        res_mut(plan).outer_convergence = Some(monitor);
-        return;
-    }
-
-    if outer_iters <= 1 || !plan.last_linear_stats.converged || plan.repeat_break {
-        res_mut(plan).outer_convergence = Some(monitor);
-        return;
-    }
-
-    let Some(ref scale) = scale else {
-        res_mut(plan).outer_convergence = Some(monitor);
-        return;
-    };
-    if scale.len() != delta.len() {
-        res_mut(plan).outer_convergence = Some(monitor);
-        return;
-    }
-
-    // Outer-loop convergence: evaluate tolerance checks on GPU and use the
-    // resulting status buffer to decide early break.
-    let tol_rel = res(plan).outer_tol;
-    let tol_abs = res(plan).outer_tol_abs;
-    match monitor.evaluate_break_on_gpu(plan, &delta, scale, tol_rel, tol_abs) {
-        Ok(converged) => {
-            if converged {
-                plan.repeat_break = true;
-            }
-        }
-        Err(err) => {
-            eprintln!("[cfd2][outer] failed to evaluate break status on gpu: {err}");
-        }
-    }
-
     res_mut(plan).outer_convergence = Some(monitor);
+    Some((delta, scale))
 }
 
 pub(crate) fn host_coupled_batch_tail(plan: &mut GpuProgramPlan) {
@@ -1843,10 +1848,6 @@ fn try_host_coupled_batch_tail_one_submission(
     remaining: usize,
 ) -> bool {
     if remaining == 0 {
-        return false;
-    }
-    // This path intentionally skips per-iteration host convergence bookkeeping.
-    if plan.collect_convergence_stats {
         return false;
     }
 
@@ -1947,6 +1948,14 @@ fn try_host_coupled_batch_tail_one_submission(
     }
     plan.step_linear_stats.extend(encoded_tail_stats);
     plan.outer_iterations = plan.step_linear_stats.len() as u32;
+
+    // Post-submission: compute outer-loop correction norms so that
+    // outer_field_residuals, outer_residual_u and outer_residual_p are
+    // populated even when the one-submission path is used.  This adds a
+    // small number of GPU dispatches (two reduction kernels + readback)
+    // once at the end of the step — the per-iteration savings from the
+    // encoded path are preserved.
+    compute_outer_residuals(plan);
 
     if plan.collect_trace {
         plan.step_graph_timings

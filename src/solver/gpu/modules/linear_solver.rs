@@ -340,6 +340,7 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
         }
     }
 
+    let num_chunks = chunk_sizes.len();
     let mut encoded_total = 0usize;
     for (chunk_idx, &chunk_restart) in chunk_sizes.iter().enumerate() {
         params.max_restart = chunk_restart as u32;
@@ -350,7 +351,11 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
             _pad2: 0,
         };
         let is_first_chunk = chunk_idx == 0;
+        let is_last_chunk = chunk_idx + 1 == num_chunks;
         let preserve = !is_first_chunk;
+        // Capture solver scalars on the last chunk so the caller can read back
+        // the real residual and convergence flag after submission.
+        let capture_scalars = is_last_chunk;
         let encoded = krylov.encode_solve_once_with_prepare(
             EncodeSolveOnceArgs {
                 context,
@@ -365,7 +370,7 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
                 },
                 dispatch: dispatch.grids,
                 precond_label,
-                capture_solver_scalars: false,
+                capture_solver_scalars: capture_scalars,
                 preserve_convergence_state: preserve,
                 // Compute ||rhs|| on GPU only for the first chunk, after seed_basis0
                 // and scalars init.  Subsequent chunks preserve the value via the
@@ -380,6 +385,12 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
         encoded_total = encoded_total.saturating_add(consumed);
     }
 
+    // Note: this function only encodes into the caller's encoder — the actual
+    // submission and readback happen externally.  The last chunk has
+    // `capture_solver_scalars: true`, so after submitting the caller can use
+    // `KrylovSolveModule::read_last_solver_stats` to get a real residual.
+    // We still return a placeholder here because we cannot read back without
+    // a submission index.
     LinearSolverStats::max_iterations(encoded_total as u32, f32::INFINITY, start.elapsed())
 }
 
@@ -513,6 +524,7 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: FgmresPreconditionerModul
 
     let num_chunks = chunk_sizes.len();
     let mut encoded_total = 0usize;
+    let mut last_submission_index: Option<wgpu::SubmissionIndex> = None;
     for (chunk_idx, &chunk_restart) in chunk_sizes.iter().enumerate() {
         let mut encoder = context
             .device
@@ -533,7 +545,11 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: FgmresPreconditionerModul
             _pad2: 0,
         };
         let is_first_chunk = chunk_idx == 0;
+        let is_last_chunk = chunk_idx + 1 == num_chunks;
         let preserve = !is_first_chunk;
+        // Capture solver scalars on the last chunk so we can read back a real
+        // residual and convergence flag instead of returning f32::INFINITY.
+        let capture_scalars = is_last_chunk;
         let encoded = krylov.encode_solve_once_with_prepare(
             EncodeSolveOnceArgs {
                 context,
@@ -548,7 +564,7 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: FgmresPreconditionerModul
                 },
                 dispatch: dispatch.grids,
                 precond_label,
-                capture_solver_scalars: false,
+                capture_solver_scalars: capture_scalars,
                 preserve_convergence_state: preserve,
                 compute_rhs_norm_on_gpu: is_first_chunk,
             },
@@ -560,13 +576,22 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: FgmresPreconditionerModul
         encoded_total = encoded_total.saturating_add(consumed);
 
         // Let the caller encode update/assembly commands after the last solve chunk.
-        if chunk_idx + 1 == num_chunks {
+        if is_last_chunk {
             post_encode(&mut encoder);
         }
 
-        context.queue.submit(Some(encoder.finish()));
+        let sub_idx = context.queue.submit(Some(encoder.finish()));
         crate::count_submission!("Generic Coupled", "fgmres:one_submission_chunk");
+        if is_last_chunk {
+            last_submission_index = Some(sub_idx);
+        }
     }
 
-    LinearSolverStats::max_iterations(encoded_total as u32, f32::INFINITY, start.elapsed())
+    // Read back solver scalars from the last chunk to produce a meaningful
+    // LinearSolverStats with the real GPU-computed residual.
+    if let Some(sub_idx) = last_submission_index {
+        krylov.read_last_solver_stats(context, sub_idx, encoded_total as u32, start.elapsed())
+    } else {
+        LinearSolverStats::max_iterations(encoded_total as u32, f32::INFINITY, start.elapsed())
+    }
 }

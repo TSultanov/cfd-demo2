@@ -147,10 +147,38 @@ pub(in crate::solver::gpu::lowering) fn spec_set_bc_value(
 }
 
 pub(in crate::solver::gpu::lowering) fn step_stats(plan: &GpuProgramPlan) -> PlanStepStats {
+    let linear_stats = if !plan.step_linear_stats.is_empty() {
+        let first = plan.step_linear_stats[0];
+        let last = *plan
+            .step_linear_stats
+            .last()
+            .unwrap_or(&plan.last_linear_stats);
+        let best = plan
+            .step_linear_stats
+            .iter()
+            .copied()
+            .min_by(|a, b| {
+                a.residual
+                    .partial_cmp(&b.residual)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(last);
+        Some((first, best, last))
+    } else if plan.last_linear_stats.iterations > 0
+        || plan.last_linear_stats.converged
+        || plan.last_linear_stats.diverged
+    {
+        let s = plan.last_linear_stats;
+        Some((s, s, s))
+    } else {
+        None
+    };
+
     PlanStepStats {
         outer_iterations: (plan.outer_iterations > 0).then_some(plan.outer_iterations),
         outer_residual_u: plan.outer_residual_u,
         outer_residual_p: plan.outer_residual_p,
+        linear_stats,
         ..Default::default()
     }
 }

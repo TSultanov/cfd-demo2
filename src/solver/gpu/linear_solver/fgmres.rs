@@ -9,11 +9,11 @@ use bytemuck::{bytes_of, Pod, Zeroable};
 pub const WORKGROUP_SIZE: u32 = 64;
 pub const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
 
-const FGMRES_SCALAR_COUNT: usize = 16;
+pub(crate) const FGMRES_SCALAR_COUNT: usize = 16;
 const FGMRES_SCALAR_STOP: usize = 8;
-const FGMRES_SCALAR_CONVERGED: usize = 9;
+pub(crate) const FGMRES_SCALAR_CONVERGED: usize = 9;
 const FGMRES_SCALAR_ITERS_USED: usize = 10;
-const FGMRES_SCALAR_RESIDUAL_EST: usize = 11;
+pub(crate) const FGMRES_SCALAR_RESIDUAL_EST: usize = 11;
 const FGMRES_SCALAR_TOL_REL_RHS: usize = 12;
 const FGMRES_SCALAR_TOL_ABS: usize = 13;
 const FGMRES_SCALAR_RHS_NORM: usize = 14;
@@ -1765,7 +1765,7 @@ pub fn read_scalar_after_submit(
     value
 }
 
-fn read_solver_scalars_after_submit(
+pub(crate) fn read_solver_scalars_after_submit(
     core: &FgmresCore<'_>,
     submission_index: wgpu::SubmissionIndex,
 ) -> [f32; FGMRES_SCALAR_COUNT] {

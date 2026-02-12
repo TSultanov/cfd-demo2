@@ -1,12 +1,14 @@
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::linear_solver::fgmres::{
     encode_fgmres_seed_basis0_from_system, encode_fgmres_solve_once_with_preconditioner,
-    encode_rhs_norm_into_scalars, encode_write_params, solve_once_from_encoded_status,
-    submit_fgmres_encoded_pass, FgmresSolveOnceConfig, FgmresSolveOnceResult, FgmresWorkspace,
-    IterParams, RawFgmresParams,
+    encode_rhs_norm_into_scalars, encode_write_params, read_solver_scalars_after_submit,
+    solve_once_from_encoded_status, submit_fgmres_encoded_pass, FgmresSolveOnceConfig,
+    FgmresSolveOnceResult, FgmresWorkspace, IterParams, RawFgmresParams, FGMRES_SCALAR_CONVERGED,
+    FGMRES_SCALAR_RESIDUAL_EST,
 };
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
+use crate::solver::gpu::structs::LinearSolverStats;
 
 pub struct KrylovSolveModule<P> {
     pub fgmres: FgmresWorkspace,
@@ -69,6 +71,31 @@ impl<P> KrylovSolveModule<P> {
     ) {
         let core = self.fgmres.core(&context.device, &context.queue);
         encode_rhs_norm_into_scalars(&core, encoder, system);
+    }
+
+    /// Read back the FGMRES solver scalars after a submission and return a
+    /// [`LinearSolverStats`] with the real GPU-computed residual and convergence
+    /// flag.  `iterations` and `time` are supplied by the caller because they
+    /// are not tracked in the GPU scalars buffer.
+    pub fn read_last_solver_stats(
+        &self,
+        context: &GpuContext,
+        submission_index: wgpu::SubmissionIndex,
+        iterations: u32,
+        time: std::time::Duration,
+    ) -> LinearSolverStats {
+        let core = self.fgmres.core(&context.device, &context.queue);
+        let scalars = read_solver_scalars_after_submit(&core, submission_index);
+        let residual_est = scalars[FGMRES_SCALAR_RESIDUAL_EST];
+        let converged = scalars[FGMRES_SCALAR_CONVERGED] > 0.5;
+
+        if !residual_est.is_finite() {
+            LinearSolverStats::diverged(iterations, residual_est, time)
+        } else if converged {
+            LinearSolverStats::converged(iterations, residual_est, time)
+        } else {
+            LinearSolverStats::max_iterations(iterations, residual_est, time)
+        }
     }
 }
 

@@ -8,7 +8,7 @@ use crate::solver::gpu::modules::generic_coupled_schur::{
     GenericCoupledSchurPreconditioner, GenericCoupledSchurPreconditionerInputs,
     GenericCoupledSchurSetupBindGroupInputs,
 };
-use crate::solver::gpu::modules::graph::{ModuleGraph, RuntimeDims};
+use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, RuntimeDims};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_solver::{
@@ -152,6 +152,7 @@ pub(crate) struct GenericCoupledProgramResources {
     schur: Option<GenericCoupledSchurResources>,
     krylov: Option<GenericCoupledKrylovResources>,
     outer_convergence: Option<OuterConvergenceMonitor>,
+    outer_gate: Option<OuterAdaptiveGate>,
     _b_bc_kind: wgpu::Buffer,
     _b_bc_value: wgpu::Buffer,
     boundary_faces: Vec<Vec<u32>>,
@@ -162,7 +163,7 @@ pub(crate) struct GenericCoupledProgramResources {
 /// `true` keeps existing behavior (evaluate correction norms and stop early).
 /// `false` forces fixed outer-iteration count and skips adaptive early break.
 const DEFAULT_OUTER_BREAK_ENABLED: bool = true;
-const DEFAULT_OUTER_BATCHED_MODE: bool = false;
+const DEFAULT_OUTER_BATCHED_MODE: bool = true;
 
 struct GenericCoupledSchurResources {
     solver: KrylovSolveModule<GenericCoupledSchurPreconditioner>,
@@ -249,6 +250,276 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     status[0] = converged;
 }
 "#;
+
+/// Gate kernel for the adaptive outer break on GPU.
+///
+/// Reads `break_status[0]` (1 = converged, 0 = not converged):
+/// - If NOT converged: copies real dispatch args → indirect args for both cells and faces,
+///   and atomically increments the iteration counter.
+/// - If converged: writes zeros → indirect args (zero-cost dispatch).
+const OUTER_GATE_WGSL: &str = r#"
+@group(0) @binding(0) var<storage, read> break_status: array<u32>;
+@group(0) @binding(1) var<storage, read> real_args_cells: array<u32>;
+@group(0) @binding(2) var<storage, read_write> indirect_args_cells: array<u32>;
+@group(0) @binding(3) var<storage, read> real_args_faces: array<u32>;
+@group(0) @binding(4) var<storage, read_write> indirect_args_faces: array<u32>;
+@group(0) @binding(5) var<storage, read_write> iter_counter: array<atomic<u32>>;
+
+@compute @workgroup_size(1, 1, 1)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    if (global_id.x != 0u) {
+        return;
+    }
+    let converged = break_status[0];
+    if (converged == 0u) {
+        // Not converged: enable dispatches with real args
+        indirect_args_cells[0] = real_args_cells[0];
+        indirect_args_cells[1] = real_args_cells[1];
+        indirect_args_cells[2] = real_args_cells[2];
+        indirect_args_faces[0] = real_args_faces[0];
+        indirect_args_faces[1] = real_args_faces[1];
+        indirect_args_faces[2] = real_args_faces[2];
+        // Increment iteration counter
+        atomicAdd(&iter_counter[0], 1u);
+    } else {
+        // Converged: zero out dispatches (zero-cost no-op)
+        indirect_args_cells[0] = 0u;
+        indirect_args_cells[1] = 0u;
+        indirect_args_cells[2] = 0u;
+        indirect_args_faces[0] = 0u;
+        indirect_args_faces[1] = 0u;
+        indirect_args_faces[2] = 0u;
+    }
+}
+"#;
+
+/// STOP-inject kernel for FGMRES.
+///
+/// Reads `break_status[0]` and writes `f32(break_status[0])` into the FGMRES scalars
+/// buffer at the STOP index. When converged (break_status=1), scalars[STOP] = 1.0 > 0.5,
+/// which causes FGMRES to skip all remaining work via its existing convergence check.
+const OUTER_STOP_INJECT_WGSL: &str = r#"
+@group(0) @binding(0) var<storage, read> break_status: array<u32>;
+@group(0) @binding(1) var<storage, read_write> scalars: array<f32>;
+
+@compute @workgroup_size(1, 1, 1)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    if (global_id.x != 0u) {
+        return;
+    }
+    scalars[{SCALAR_STOP}] = f32(break_status[0]);
+}
+"#;
+
+/// GPU-side adaptive outer break gate resources.
+///
+/// This struct holds the indirect dispatch argument buffers, the gate kernel
+/// pipeline, and the iteration counter. It is created when one-submission mode
+/// with adaptive break is enabled.
+struct OuterAdaptiveGate {
+    /// Gate kernel pipeline (reads break_status, writes indirect args / counter)
+    gate_pipeline: wgpu::ComputePipeline,
+    gate_bg: wgpu::BindGroup,
+    /// STOP-inject kernel pipeline (writes break_status into FGMRES scalars[SCALAR_STOP])
+    stop_inject_pipeline: wgpu::ComputePipeline,
+    /// Indirect dispatch args for Cells-dispatched kernels (3 × u32)
+    b_indirect_args_cells: std::sync::Arc<wgpu::Buffer>,
+    /// Indirect dispatch args for Faces-dispatched kernels (3 × u32)
+    b_indirect_args_faces: std::sync::Arc<wgpu::Buffer>,
+    /// GPU-side iteration counter (atomically incremented by gate kernel)
+    b_iter_counter: std::sync::Arc<wgpu::Buffer>,
+}
+
+impl OuterAdaptiveGate {
+    fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        num_cells: u32,
+        num_faces: u32,
+        max_workgroups_per_dim: u32,
+        b_break_status: &wgpu::Buffer,
+    ) -> Self {
+        // Compute real dispatch args using the same formula as GeneratedKernelsModule
+        const WORKGROUP_SIZE_X: u32 = 64;
+        let compute_dispatch = |items: u32| -> [u32; 3] {
+            let groups = items.div_ceil(WORKGROUP_SIZE_X);
+            if groups <= max_workgroups_per_dim {
+                [groups.max(1), 1, 1]
+            } else {
+                let x = max_workgroups_per_dim;
+                let y = groups.div_ceil(x);
+                [x, y, 1]
+            }
+        };
+        let real_cells = compute_dispatch(num_cells);
+        let real_faces = compute_dispatch(num_faces);
+
+        let b_real_args_cells = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_gate:real_args_cells"),
+            size: 12,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&b_real_args_cells, 0, bytemuck::cast_slice(&real_cells));
+
+        let b_real_args_faces = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_gate:real_args_faces"),
+            size: 12,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&b_real_args_faces, 0, bytemuck::cast_slice(&real_faces));
+
+        let b_indirect_args_cells =
+            std::sync::Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("outer_gate:indirect_args_cells"),
+                size: 12,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
+                mapped_at_creation: false,
+            }));
+
+        let b_indirect_args_faces =
+            std::sync::Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("outer_gate:indirect_args_faces"),
+                size: 12,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
+                mapped_at_creation: false,
+            }));
+
+        let b_iter_counter = std::sync::Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_gate:iter_counter"),
+            size: 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        }));
+
+        // Gate pipeline
+        let gate_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("outer_gate:gate"),
+            source: wgpu::ShaderSource::Wgsl(OUTER_GATE_WGSL.into()),
+        });
+        let gate_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("outer_gate:gate"),
+            layout: None,
+            module: &gate_module,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let gate_bgl = gate_pipeline.get_bind_group_layout(0);
+        let gate_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("outer_gate:gate_bg"),
+            layout: &gate_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_break_status.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_real_args_cells.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: b_indirect_args_cells.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: b_real_args_faces.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: b_indirect_args_faces.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: b_iter_counter.as_entire_binding(),
+                },
+            ],
+        });
+
+        // STOP-inject pipeline (bind group created per-FGMRES workspace)
+        let stop_inject_src =
+            OUTER_STOP_INJECT_WGSL.replace("{SCALAR_STOP}", &format!("{FGMRES_SCALAR_STOP}"));
+        let stop_inject_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("outer_gate:stop_inject"),
+            source: wgpu::ShaderSource::Wgsl(stop_inject_src.into()),
+        });
+        let stop_inject_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("outer_gate:stop_inject"),
+                layout: None,
+                module: &stop_inject_module,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+
+        Self {
+            gate_pipeline,
+            gate_bg,
+            stop_inject_pipeline,
+            b_indirect_args_cells,
+            b_indirect_args_faces,
+            b_iter_counter,
+        }
+    }
+
+    /// Create a bind group for the STOP-inject kernel with a specific FGMRES scalars buffer.
+    fn create_stop_inject_bind_group(
+        &self,
+        device: &wgpu::Device,
+        b_break_status: &wgpu::Buffer,
+        b_scalars: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        let bgl = self.stop_inject_pipeline.get_bind_group_layout(0);
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("outer_gate:stop_inject_bg"),
+            layout: &bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_break_status.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_scalars.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    /// Encode the gate kernel dispatch into a command encoder.
+    fn encode_gate_into(&self, encoder: &mut wgpu::CommandEncoder) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("outer_gate:gate"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&self.gate_pipeline);
+        pass.set_bind_group(0, &self.gate_bg, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+
+    /// Encode the STOP-inject kernel dispatch into a command encoder.
+    fn encode_stop_inject_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        stop_inject_bg: &wgpu::BindGroup,
+    ) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("outer_gate:stop_inject"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&self.stop_inject_pipeline);
+        pass.set_bind_group(0, stop_inject_bg, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+}
+
+/// Constant for FGMRES scalar STOP index, used in STOP-inject WGSL.
+use crate::solver::gpu::linear_solver::fgmres::FGMRES_SCALAR_STOP;
 
 struct OuterConvergenceMonitor {
     target_names: Vec<String>,
@@ -777,6 +1048,118 @@ impl OuterConvergenceMonitor {
         let words: &[u32] = bytemuck::cast_slice(&raw);
         Ok(words.first().copied().unwrap_or(0) != 0)
     }
+
+    // --- Encode-only methods for GPU-driven adaptive outer break ---
+
+    /// Create a bind group for the reduction pipeline bound to the state buffer.
+    /// Call this once before the one-submission encoder loop.
+    fn create_state_bind_group(
+        &self,
+        device: &wgpu::Device,
+        state: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        let bgl = self.pipeline.get_bind_group_layout(0);
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("outer_convergence:bg_state"),
+            layout: &bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: state.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.b_descs_state.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.b_out_bits.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self.b_params_state.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    /// Upload break parameters into the GPU buffer. Call once before the encoder loop.
+    fn upload_break_params(&self, queue: &wgpu::Queue, tol_rel: f32, tol_abs: f32) {
+        let params = GpuOuterConvergenceBreakParams {
+            count: self.target_names.len() as u32,
+            tol_rel,
+            tol_abs,
+            _pad0: 0,
+        };
+        queue.write_buffer(&self.b_break_params, 0, bytes_of(&params));
+    }
+
+    /// Encode the delta-maxima reduction: clear out_bits, dispatch reduction, copy → b_delta.
+    fn encode_delta_maxima_into(&self, encoder: &mut wgpu::CommandEncoder) {
+        let out_bytes = (self.zero_out_words.len() as u64) * 4;
+        encoder.clear_buffer(&self.b_out_bits, 0, Some(out_bytes));
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("outer_convergence:delta_encode"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.bg_x, &[]);
+            pass.dispatch_workgroups(self.dispatch_cells.max(1), 1, 1);
+        }
+        encoder.copy_buffer_to_buffer(&self.b_out_bits, 0, &self.b_delta, 0, out_bytes);
+    }
+
+    /// Encode the state-scale reduction: clear out_bits, dispatch reduction, copy → b_scale.
+    fn encode_state_scale_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        bg_state: &wgpu::BindGroup,
+    ) {
+        let out_bytes = (self.zero_out_words.len() as u64) * 4;
+        encoder.clear_buffer(&self.b_out_bits, 0, Some(out_bytes));
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("outer_convergence:scale_encode"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, bg_state, &[]);
+            pass.dispatch_workgroups(self.dispatch_cells.max(1), 1, 1);
+        }
+        encoder.copy_buffer_to_buffer(&self.b_out_bits, 0, &self.b_scale, 0, out_bytes);
+    }
+
+    /// Encode the break evaluation: clear break_status, dispatch break kernel.
+    fn encode_break_eval_into(&self, encoder: &mut wgpu::CommandEncoder) {
+        encoder.clear_buffer(&self.b_break_status, 0, Some(4));
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("outer_convergence:break_eval_encode"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&self.break_pipeline);
+            pass.set_bind_group(0, &self.break_bg, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
+    }
+
+    /// Encode a full convergence check sequence for one outer iteration.
+    ///
+    /// If `first_iter` is true, also encodes the state-scale reduction.
+    /// After this, `b_break_status` contains the convergence result on the GPU.
+    fn encode_convergence_check(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        bg_state: &wgpu::BindGroup,
+        first_iter: bool,
+    ) {
+        if first_iter {
+            self.encode_state_scale_into(encoder, bg_state);
+        }
+        self.encode_delta_maxima_into(encoder);
+        self.encode_break_eval_into(encoder);
+    }
 }
 
 impl GenericCoupledProgramResources {
@@ -887,6 +1270,17 @@ impl GenericCoupledProgramResources {
             &unknown_mapping,
         )?;
 
+        let outer_gate = outer_convergence.as_ref().map(|oc| {
+            OuterAdaptiveGate::new(
+                &runtime.common.context.device,
+                &runtime.common.context.queue,
+                runtime.common.num_cells,
+                runtime.common.num_faces,
+                runtime.common.context.device.limits().max_compute_workgroups_per_dimension,
+                &oc.b_break_status,
+            )
+        });
+
         let requested_time_scheme = match recipe.initial_constants.time_scheme {
             0 => crate::solver::gpu::enums::TimeScheme::Euler,
             1 => crate::solver::gpu::enums::TimeScheme::BDF2,
@@ -917,6 +1311,7 @@ impl GenericCoupledProgramResources {
             schur,
             krylov,
             outer_convergence,
+            outer_gate,
             _b_bc_kind: b_bc_kind,
             _b_bc_value: b_bc_value,
             boundary_faces,
@@ -1536,7 +1931,6 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
 
     let r = res_mut(plan);
     let use_encoded_seed_basis0 = r.outer_batched_mode
-        && !r.outer_break_enabled
         && encoded_seed_basis0_enabled();
 
     if let Some(schur) = &mut r.schur {
@@ -1756,15 +2150,14 @@ fn compute_outer_residuals(plan: &mut GpuProgramPlan) -> Option<(Vec<f32>, Optio
 }
 
 pub(crate) fn host_coupled_batch_tail(plan: &mut GpuProgramPlan) {
-    let (outer_batched_mode, outer_break_enabled, outer_iters) = {
+    let (outer_batched_mode, outer_iters) = {
         let r = res(plan);
         (
             r.outer_batched_mode,
-            r.outer_break_enabled,
             r.outer_iters.max(1),
         )
     };
-    if !outer_batched_mode || outer_break_enabled || outer_iters <= 1 {
+    if !outer_batched_mode || outer_iters <= 1 {
         return;
     }
 
@@ -1781,8 +2174,9 @@ pub(crate) fn host_coupled_batch_tail(plan: &mut GpuProgramPlan) {
         return;
     }
 
-    // Preferred path (feature-gated): encode all remaining fixed outer iterations into one
-    // submission.
+    // Preferred path: encode all remaining outer iterations into one submission.
+    // When adaptive break is enabled, uses indirect dispatch + GPU-side convergence
+    // gating so converged iterations become zero-cost dispatches.
     if full_one_submission_outer_enabled() {
         if try_host_coupled_batch_tail_one_submission(plan, remaining) {
             return;
@@ -1861,6 +2255,8 @@ fn try_host_coupled_batch_tail_one_submission(
     let start = std::time::Instant::now();
 
     let mut encoded_tail_stats = Vec::with_capacity(remaining);
+    let mut adaptive_iter_count: Option<u32> = None;
+    let iter_counter_buf: Option<std::sync::Arc<wgpu::Buffer>>;
     {
         let r = res_mut(plan);
         let max_restart = match r.linear_solver.solver_type {
@@ -1885,16 +2281,97 @@ fn try_host_coupled_batch_tail_one_submission(
         let tol = r.linear_solver.tolerance;
         let tol_abs = r.linear_solver.tolerance_abs;
 
+        // Determine if adaptive outer break is available
+        let use_adaptive = r.outer_break_enabled
+            && r.outer_gate.is_some()
+            && r.outer_convergence.is_some()
+            && remaining > 1;
+
+        // Prepare adaptive resources (indirect graphs, bind groups, etc.)
+        let adaptive_resources = if use_adaptive {
+            let gate = r.outer_gate.as_ref().unwrap();
+            let monitor = r.outer_convergence.as_ref().unwrap();
+
+            // Create indirect-dispatch variants of assembly and update graphs
+            let indirect_cells = gate.b_indirect_args_cells.clone();
+            let indirect_faces = gate.b_indirect_args_faces.clone();
+            let assembly_graph_indirect =
+                assembly_graph.clone_with_indirect_dispatch(|kind| match kind {
+                    DispatchKind::Faces => (indirect_faces.clone(), 0),
+                    _ => (indirect_cells.clone(), 0),
+                });
+            let update_graph_indirect =
+                update_graph.clone_with_indirect_dispatch(|kind| match kind {
+                    DispatchKind::Faces => (indirect_faces.clone(), 0),
+                    _ => (indirect_cells.clone(), 0),
+                });
+
+            // Create state bind group for convergence check
+            let state = r.fields.current_state();
+            let bg_state = monitor.create_state_bind_group(&device, state);
+
+            // Upload break params
+            monitor.upload_break_params(&queue, r.outer_tol, r.outer_tol_abs);
+
+            // Clear iteration counter
+            let zero: u32 = 0;
+            queue.write_buffer(&gate.b_iter_counter, 0, bytemuck::bytes_of(&zero));
+
+            // Create STOP-inject bind group from the FGMRES scalars buffer
+            let b_scalars = if let Some(schur) = &r.schur {
+                schur.solver.fgmres.scalars_buffer()
+            } else if let Some(krylov) = &r.krylov {
+                krylov.solver.fgmres.scalars_buffer()
+            } else {
+                return false;
+            };
+            let stop_inject_bg =
+                gate.create_stop_inject_bind_group(&device, &monitor.b_break_status, b_scalars);
+
+            Some((
+                assembly_graph_indirect,
+                update_graph_indirect,
+                bg_state,
+                stop_inject_bg,
+            ))
+        } else {
+            None
+        };
+
         // Use chunked submission to avoid Metal hangs.  Each FGMRES restart
         // chunk gets its own encoder → submit cycle.  Assembly is prepended to
         // the first chunk and update is appended to the last chunk of each
         // outer iteration.
-        for _iter_idx in 0..remaining {
+        for iter_idx in 0..remaining {
+            let is_indirect = use_adaptive && iter_idx > 0;
+
             let mut pre = |encoder: &mut wgpu::CommandEncoder| {
+                if let Some((ref asm_indirect, _, _, ref stop_bg)) = adaptive_resources {
+                    if is_indirect {
+                        // Inject STOP scalar so FGMRES becomes zero-cost when converged
+                        r.outer_gate.as_ref().unwrap().encode_stop_inject_into(encoder, stop_bg);
+                        asm_indirect.encode_into(encoder, kernels, runtime_dims);
+                        return;
+                    }
+                }
                 assembly_graph.encode_into(encoder, kernels, runtime_dims);
             };
             let mut post = |encoder: &mut wgpu::CommandEncoder| {
-                update_graph.encode_into(encoder, kernels, runtime_dims);
+                if let Some((_, ref upd_indirect, ref bg_state, _)) = adaptive_resources {
+                    if is_indirect {
+                        upd_indirect.encode_into(encoder, kernels, runtime_dims);
+                    } else {
+                        update_graph.encode_into(encoder, kernels, runtime_dims);
+                    }
+                    // Convergence check + gate after every iteration in adaptive mode
+                    let monitor = r.outer_convergence.as_ref().unwrap();
+                    let gate = r.outer_gate.as_ref().unwrap();
+                    let first_iter = iter_idx == 0;
+                    monitor.encode_convergence_check(encoder, bg_state, first_iter);
+                    gate.encode_gate_into(encoder);
+                } else {
+                    update_graph.encode_into(encoder, kernels, runtime_dims);
+                }
             };
 
             if let Some(schur) = &mut r.schur {
@@ -1941,13 +2418,66 @@ fn try_host_coupled_batch_tail_one_submission(
                 return false;
             }
         }
+
+        // Clone the iter counter buffer so we can read it back after dropping `r`.
+        iter_counter_buf = if use_adaptive {
+            r.outer_gate.as_ref().map(|g| g.b_iter_counter.clone())
+        } else {
+            None
+        };
+    }
+
+    // Read back adaptive iteration counter OUTSIDE the `r` borrow scope
+    // so we can access `plan.staging_cache`.
+    if let Some(b_iter_counter) = iter_counter_buf {
+        let staging = plan.staging_cache.take_or_create(
+            &device,
+            4,
+            "outer_gate:iter_counter_readback",
+        );
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("outer_gate:counter_readback"),
+            });
+        encoder.copy_buffer_to_buffer(&b_iter_counter, 0, &staging, 0, 4);
+        let sub_idx = queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Generic Coupled", "outer_gate:counter_readback");
+
+        let slice = staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: Some(sub_idx),
+            timeout: None,
+        });
+        if let Ok(Ok(())) = rx.recv() {
+            let data = slice.get_mapped_range();
+            let words: &[u32] = bytemuck::cast_slice(&data);
+            // iter_counter counts the number of times the gate
+            // dispatched (i.e. not-converged iterations). This includes
+            // iteration 0 (always runs) plus any unconverged indirect
+            // iterations.
+            let gpu_iters = words.first().copied().unwrap_or(remaining as u32);
+            adaptive_iter_count = Some(gpu_iters);
+            drop(data);
+            staging.unmap();
+        }
+        plan.staging_cache.put(4, staging);
     }
 
     if let Some(last) = encoded_tail_stats.last().copied() {
         plan.last_linear_stats = last;
     }
     plan.step_linear_stats.extend(encoded_tail_stats);
-    plan.outer_iterations = plan.step_linear_stats.len() as u32;
+
+    if let Some(gpu_iters) = adaptive_iter_count {
+        // Use the GPU-reported iteration count instead of the encoded count
+        plan.outer_iterations = gpu_iters;
+    } else {
+        plan.outer_iterations = plan.step_linear_stats.len() as u32;
+    }
 
     // Post-submission: compute outer-loop correction norms so that
     // outer_field_residuals, outer_residual_u and outer_residual_p are
@@ -2083,18 +2613,17 @@ pub(crate) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
     // re-enables them.
     clear_dp_init_needed(plan);
 
-    // If fixed-iteration batched mode is enabled, attempt to run the full outer
+    // If batched mode is enabled, attempt to run the full outer
     // loop here in one encoded submission and skip the remaining per-iteration
     // nodes in this repeat-body execution.
-    let (outer_batched_mode, outer_break_enabled, outer_iters) = {
+    let (outer_batched_mode, outer_iters) = {
         let r = res(plan);
         (
             r.outer_batched_mode,
-            r.outer_break_enabled,
             r.outer_iters.max(1),
         )
     };
-    if !outer_batched_mode || outer_break_enabled || outer_iters <= 1 {
+    if !outer_batched_mode || outer_iters <= 1 {
         return;
     }
     if !full_one_submission_outer_enabled() {
@@ -2111,9 +2640,10 @@ pub(crate) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
 }
 
 fn full_one_submission_outer_enabled() -> bool {
-    std::env::var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER")
-        .map(|v| v != "0")
-        .unwrap_or(false)
+    // Enabled by default; set CFD2_DISABLE_FULL_ONE_SUBMISSION_OUTER=1 to opt out.
+    std::env::var("CFD2_DISABLE_FULL_ONE_SUBMISSION_OUTER")
+        .map(|v| v != "1")
+        .unwrap_or(true)
 }
 
 fn encoded_seed_basis0_enabled() -> bool {

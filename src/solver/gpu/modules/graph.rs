@@ -1,4 +1,5 @@
 use crate::solver::gpu::context::GpuContext;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeDims {
@@ -6,11 +7,21 @@ pub struct RuntimeDims {
     pub num_faces: u32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum DispatchKind {
     Cells,
     Faces,
-    Custom { x: u32, y: u32, z: u32 },
+    Custom {
+        x: u32,
+        y: u32,
+        z: u32,
+    },
+    /// Indirect dispatch: workgroup counts are read from a GPU buffer at the given offset.
+    /// The buffer must contain 3 × u32 (x, y, z) at the specified byte offset.
+    Indirect {
+        buffer: Arc<wgpu::Buffer>,
+        offset: u64,
+    },
 }
 
 pub trait GpuComputeModule {
@@ -22,7 +33,7 @@ pub trait GpuComputeModule {
     fn dispatch(&self, kind: DispatchKind, runtime: RuntimeDims) -> (u32, u32, u32);
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct ComputeSpec<P: Copy, B: Copy> {
     pub label: &'static str,
     pub pipeline: P,
@@ -30,7 +41,7 @@ pub struct ComputeSpec<P: Copy, B: Copy> {
     pub dispatch: DispatchKind,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum ModuleNode<P: Copy, B: Copy> {
     Compute(ComputeSpec<P, B>),
 }
@@ -41,6 +52,31 @@ pub struct ModuleGraph<M: GpuComputeModule> {
 
 impl<M: GpuComputeModule> ModuleGraph<M> {
     pub fn new(nodes: Vec<ModuleNode<M::PipelineKey, M::BindKey>>) -> Self {
+        Self { nodes }
+    }
+
+    /// Create a clone of this graph where every dispatch is replaced with indirect dispatch.
+    /// The `map_fn` receives the original `DispatchKind` and returns the indirect buffer + offset
+    /// to use for that dispatch. This allows different indirect buffers for Cells vs Faces.
+    pub fn clone_with_indirect_dispatch(
+        &self,
+        map_fn: impl Fn(&DispatchKind) -> (Arc<wgpu::Buffer>, u64),
+    ) -> Self {
+        let nodes = self
+            .nodes
+            .iter()
+            .map(|node| match node {
+                ModuleNode::Compute(spec) => {
+                    let (buffer, offset) = map_fn(&spec.dispatch);
+                    ModuleNode::Compute(ComputeSpec {
+                        label: spec.label,
+                        pipeline: spec.pipeline,
+                        bind: spec.bind,
+                        dispatch: DispatchKind::Indirect { buffer, offset },
+                    })
+                }
+            })
+            .collect();
         Self { nodes }
     }
 
@@ -116,8 +152,15 @@ impl<P: Copy, B: Copy> ModuleNode<P, B> {
                 });
                 pass.set_pipeline(module.pipeline(spec.pipeline));
                 module.bind(spec.bind, &mut pass);
-                let (x, y, z) = module.dispatch(spec.dispatch, runtime);
-                pass.dispatch_workgroups(x, y, z);
+                match &spec.dispatch {
+                    DispatchKind::Indirect { buffer, offset } => {
+                        pass.dispatch_workgroups_indirect(buffer, *offset);
+                    }
+                    other => {
+                        let (x, y, z) = module.dispatch(other.clone(), runtime);
+                        pass.dispatch_workgroups(x, y, z);
+                    }
+                }
 
                 // Count this dispatch for profiling
                 crate::count_dispatch!("Kernel Graph", spec.label);

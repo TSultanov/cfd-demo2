@@ -158,6 +158,9 @@ impl GpuComputeModule for GeneratedKernelsModule {
             DispatchKind::Cells => self.dispatch_cells_or_faces(runtime.num_cells),
             DispatchKind::Faces => self.dispatch_cells_or_faces(runtime.num_faces),
             DispatchKind::Custom { x, y, z } => (x, y, z),
+            DispatchKind::Indirect { .. } => {
+                unreachable!("Indirect dispatch is handled in ModuleNode::encode, not dispatch()")
+            }
         }
     }
 }

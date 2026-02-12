@@ -228,10 +228,10 @@ for encoded iterations.  All three items are now resolved:
 Currently the one-submission path is gated behind `!outer_break_enabled`
 (`generic_coupled.rs:2107`), forcing users into fixed-iteration mode.
 
-- [ ] Design a GPU-driven outer-loop break mechanism: after each encoded outer iteration's update graph, dispatch the existing `OuterConvergenceMonitor` break kernel (`OUTER_CONVERGENCE_BREAK_WGSL`) and write a GPU-visible break flag. Use indirect dispatch or conditional buffer writes on subsequent iterations to skip work when the flag is set.
-- [ ] Wire the GPU break flag into the encoded assembly/solve/update chain so converged iterations emit zero-cost dispatches (indirect dispatch with count=0) rather than full kernel launches.
-- [ ] Remove the `outer_break_enabled` gate in `host_coupled_before_iter` so the one-submission path works with adaptive convergence.
-- [ ] Validate that adaptive-break one-submission produces the same iteration counts and final solutions as the host-driven adaptive path.
+- [x] Design a GPU-driven outer-loop break mechanism: after each encoded outer iteration's update graph, dispatch the existing `OuterConvergenceMonitor` break kernel (`OUTER_CONVERGENCE_BREAK_WGSL`) and write a GPU-visible break flag. Use indirect dispatch or conditional buffer writes on subsequent iterations to skip work when the flag is set.
+- [x] Wire the GPU break flag into the encoded assembly/solve/update chain so converged iterations emit zero-cost dispatches (indirect dispatch with count=0) rather than full kernel launches.
+- [x] Remove the `outer_break_enabled` gate in `host_coupled_before_iter` so the one-submission path works with adaptive convergence.
+- [x] Validate that adaptive-break one-submission produces the same iteration counts and final solutions as the host-driven adaptive path.
 
 #### 5E: Solver Generality (P2 — needed for non-FGMRES models)
 
@@ -240,9 +240,9 @@ Currently the one-submission path is gated behind `!outer_break_enabled`
 
 #### 5F: Default Promotion and Cleanup (P3 — final rollout)
 
-- [ ] Flip `full_one_submission_outer_enabled()` to return `true` by default (env var becomes the opt-out gate instead of opt-in).
-- [ ] Flip `DEFAULT_OUTER_BATCHED_MODE` from `false` to `true` so the batched path is the default when fixed-iteration mode is selected.
+- [x] Flip `full_one_submission_outer_enabled()` to return `true` by default (env var becomes the opt-out gate instead of opt-in).
+- [x] Flip `DEFAULT_OUTER_BATCHED_MODE` from `false` to `true` so the batched path is the default when fixed-iteration mode is selected.
 - [x] Remove or consolidate the `CFD2_ONE_SUBMISSION_*` env-var tuning knobs once parity is resolved (omega knobs removed in §5A; remaining knobs `CFD2_ONE_SUBMISSION_RESTART_BUDGET`, `CFD2_ONE_SUBMISSION_TOTAL_ITERS`, `CFD2_ONE_SUBMISSION_CHUNKS`, `CFD2_ONE_SUBMISSION_MIN_TAIL` retained for optional override).
 - [ ] Update `SolverExt` documentation to describe the one-submission behavior as the standard coupled stepping mode.
-- [ ] Run full OpenFOAM reference suite (`scripts/run_openfoam_reference_tests.sh`) with default-on one-submission and confirm no drift regression vs current baseline.
+- [x] Run full OpenFOAM reference suite (`scripts/run_openfoam_reference_tests.sh`) with default-on one-submission and confirm no drift regression vs current baseline.
 - [ ] Remove the multi-submission fallback loop in `host_coupled_batch_tail` once one-submission is proven stable across the validation matrix.

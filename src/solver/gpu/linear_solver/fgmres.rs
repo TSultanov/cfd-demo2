@@ -10,7 +10,7 @@ pub const WORKGROUP_SIZE: u32 = 64;
 pub const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
 
 pub(crate) const FGMRES_SCALAR_COUNT: usize = 16;
-const FGMRES_SCALAR_STOP: usize = 8;
+pub(crate) const FGMRES_SCALAR_STOP: usize = 8;
 pub(crate) const FGMRES_SCALAR_CONVERGED: usize = 9;
 const FGMRES_SCALAR_ITERS_USED: usize = 10;
 pub(crate) const FGMRES_SCALAR_RESIDUAL_EST: usize = 11;

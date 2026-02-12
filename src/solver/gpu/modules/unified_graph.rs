@@ -55,7 +55,7 @@ fn push_nodes_for_phase<M: UnifiedGraphModule>(
         let bind = module
             .bind_for_kernel(kernel_spec.id)
             .ok_or_else(|| format!("no bind group for kernel {}", kernel_spec.id.as_str()))?;
-        let dispatch = kernel_spec.dispatch;
+        let dispatch = kernel_spec.dispatch.clone();
 
         let label = kernel_label(label_prefix, kernel_spec.id);
 

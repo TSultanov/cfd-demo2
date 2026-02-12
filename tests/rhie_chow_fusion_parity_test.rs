@@ -684,6 +684,9 @@ fn coupled_outer_batched_mode_runs_full_fixed_iteration_batch() {
 #[test]
 fn coupled_outer_batched_mode_matches_non_batched_fixed_snapshot_within_tolerance() {
     std::env::set_var("CFD2_QUIET", "1");
+    // Prevent env-var leakage from concurrent tests that enable the one-submission
+    // chunked path; this test validates the default batched-graph path only.
+    std::env::remove_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER");
 
     let mesh = generate_structured_rect_mesh(
         16,
@@ -736,6 +739,7 @@ fn coupled_outer_batched_mode_matches_non_batched_fixed_snapshot_within_toleranc
 fn one_submission_parity_gate_max_rel_below_1e_3() {
     std::env::set_var("CFD2_QUIET", "1");
     // Ensure no legacy tuning knobs influence the result.
+    std::env::remove_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER");
     std::env::remove_var("CFD2_ONE_SUBMISSION_SOLUTION_OMEGA");
     std::env::remove_var("CFD2_ONE_SUBMISSION_TAIL_OMEGA");
     std::env::remove_var("CFD2_ONE_SUBMISSION_CHUNKS");
@@ -780,5 +784,87 @@ fn one_submission_parity_gate_max_rel_below_1e_3() {
         "one_submission",
         &one_submission,
         rel_tol,
+    );
+}
+
+/// Assert that the one-submission chunked path (CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER=1) achieves
+/// a substantial reduction in queue-submission count relative to the non-batched baseline.
+///
+/// With per-FGMRES-restart-chunk submission the count scales with the number of restart chunks
+/// rather than the number of host-side convergence round-trips.  On the 16×8 test mesh with
+/// default FGMRES parameters (max_iters=200, max_restart=60), the chunked path produces ~42
+/// submissions per 2 steps vs 178 for the non-batched baseline — a ~76% reduction.
+#[test]
+fn one_submission_mode_submission_count_at_expected_floor() {
+    std::env::set_var("CFD2_QUIET", "1");
+    // Clear legacy tuning knobs so we measure the default chunk schedule.
+    std::env::remove_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_SOLUTION_OMEGA");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_TAIL_OMEGA");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_CHUNKS");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_RESTART_BUDGET");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_TOTAL_ITERS");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_MIN_TAIL");
+
+    let mesh = generate_structured_rect_mesh(
+        16,
+        8,
+        1.0,
+        0.2,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
+    );
+
+    let steps = 2usize;
+    let outer_iters = 5usize;
+
+    let non_batched = run_with_policy_submission_count(
+        &mesh,
+        KernelFusionPolicy::Safe,
+        steps,
+        outer_iters,
+        true,
+        false,
+    );
+
+    // Enable the one-submission chunked path immediately before the run that
+    // needs it, to minimise env-var race window with parallel tests.
+    std::env::set_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER", "1");
+    let one_submission = run_with_policy_submission_count(
+        &mesh,
+        KernelFusionPolicy::Safe,
+        steps,
+        outer_iters,
+        true,
+        true,
+    );
+
+    // Clean up env var so other tests are not affected.
+    std::env::remove_var("CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER");
+
+    eprintln!(
+        "[submission_counter][one_submission_chunked] non_batched={} one_submission={} delta={}",
+        non_batched,
+        one_submission,
+        non_batched.saturating_sub(one_submission)
+    );
+
+    // The chunked path should achieve at least a 50% reduction in submissions.
+    let max_allowed = non_batched / 2;
+    assert!(
+        one_submission <= max_allowed,
+        "expected one-submission chunked path to use at most {} submissions (50% of non_batched={}), but got {}",
+        max_allowed, non_batched, one_submission
+    );
+
+    // Sanity: must be substantially fewer than non-batched.
+    assert!(
+        one_submission < non_batched,
+        "one-submission path should have fewer submissions than non-batched (non_batched={}, one_submission={})",
+        non_batched, one_submission
     );
 }

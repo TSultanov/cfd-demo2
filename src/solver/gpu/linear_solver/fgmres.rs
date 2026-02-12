@@ -81,6 +81,9 @@ pub struct FgmresCore<'a> {
     pub b_g: &'a wgpu::Buffer,
     pub b_y: &'a wgpu::Buffer,
     pub b_staging_scalar: &'a wgpu::Buffer,
+    /// Tiny scratch buffer (4 bytes) for intra-`b_scalars` copies that cannot use
+    /// `copy_buffer_to_buffer` with source == destination (WebGPU forbids same-buffer copies).
+    pub b_scalar_copy_staging: &'a wgpu::Buffer,
 
     pub bg_matrix: &'a wgpu::BindGroup,
     pub bg_precond: &'a wgpu::BindGroup,
@@ -157,6 +160,9 @@ pub struct FgmresWorkspace {
     b_g: wgpu::Buffer,
     b_y: wgpu::Buffer,
     b_staging_scalar: wgpu::Buffer,
+    /// Tiny scratch buffer (4 bytes) for intra-`b_scalars` copies via two-hop
+    /// (WebGPU forbids `copy_buffer_to_buffer` with same source and destination).
+    b_scalar_copy_staging: wgpu::Buffer,
 
     bgl_vectors: wgpu::BindGroupLayout,
     vector_bindings: &'static [wgsl_reflect::WgslBindingDesc],
@@ -355,6 +361,12 @@ impl FgmresWorkspace {
             label: Some(&format!("{label_prefix} FGMRES staging scalar")),
             size: (FGMRES_SCALAR_COUNT as u64) * 4,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let b_scalar_copy_staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES scalar copy staging")),
+            size: 4,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -591,6 +603,7 @@ impl FgmresWorkspace {
             b_g,
             b_y,
             b_staging_scalar,
+            b_scalar_copy_staging,
             bgl_vectors,
             vector_bindings: ops_bindings,
             bgl_matrix,
@@ -648,6 +661,7 @@ impl FgmresWorkspace {
             b_g: &self.b_g,
             b_y: &self.b_y,
             b_staging_scalar: &self.b_staging_scalar,
+            b_scalar_copy_staging: &self.b_scalar_copy_staging,
             bg_matrix: &self.bg_matrix,
             bg_precond: &self.bg_precond,
             bg_params: &self.bg_params,
@@ -1880,9 +1894,19 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         // This lets solve_triangular and accumulate_solution skip when a prior chunk
         // already converged, while still running correctly if convergence happens
         // during THIS chunk (SKIP_UPDATE stays 0 because STOP was 0 at snapshot time).
+        //
+        // WebGPU forbids copy_buffer_to_buffer with the same source and destination
+        // buffer, so we use a two-hop copy through a tiny scratch buffer.
         encoder.copy_buffer_to_buffer(
             core.b_scalars,
             (FGMRES_SCALAR_STOP * 4) as u64,
+            core.b_scalar_copy_staging,
+            0,
+            4,
+        );
+        encoder.copy_buffer_to_buffer(
+            core.b_scalar_copy_staging,
+            0,
             core.b_scalars,
             (FGMRES_SCALAR_SKIP_UPDATE * 4) as u64,
             4,

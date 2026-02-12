@@ -382,3 +382,191 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
 
     LinearSolverStats::max_iterations(encoded_total as u32, f32::INFINITY, start.elapsed())
 }
+
+/// Like [`encode_solve_fgmres_fixed_iterations`], but submits a separate command buffer for each
+/// restart chunk instead of encoding everything into one caller-provided encoder.
+///
+/// This avoids Metal/backend limits on command-buffer size (the `encoder.finish()` call can block
+/// when tens of thousands of compute dispatches are recorded into a single buffer).  Each chunk
+/// gets its own encoder → submit cycle, but the GPU-side solver state (buffers, convergence
+/// flags) persists between submissions because the same device/queue is used.
+///
+/// The caller can also encode assembly/update graphs into the returned encoders via the
+/// `pre_encode` and `post_encode` callbacks.
+pub fn submit_solve_fgmres_fixed_iterations_chunked<P: FgmresPreconditionerModule>(
+    krylov: &mut KrylovSolveModule<P>,
+    args: SolveFgmresArgs<'_>,
+    pre_encode: &mut dyn FnMut(&mut wgpu::CommandEncoder),
+    post_encode: &mut dyn FnMut(&mut wgpu::CommandEncoder),
+) -> LinearSolverStats {
+    let SolveFgmresArgs {
+        context,
+        system,
+        n,
+        num_cells,
+        dispatch,
+        max_restart,
+        max_iters,
+        tol,
+        tol_abs,
+        precond_label,
+        use_encoded_seed_basis0,
+    } = args;
+    let start = Instant::now();
+
+    let max_iters = max_iters.max(1);
+    let capacity = krylov.fgmres.max_restart();
+    let restart_len = max_restart.max(1).min(capacity);
+    let restart_budget = std::env::var("CFD2_ONE_SUBMISSION_RESTART_BUDGET")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(restart_len)
+        .max(1);
+    let total_iter_budget = std::env::var("CFD2_ONE_SUBMISSION_TOTAL_ITERS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(max_iters as usize)
+        .max(1);
+    let iter_restart = restart_len
+        .min(max_iters as usize)
+        .min(restart_budget)
+        .max(1);
+    let total_iters_to_encode = (max_iters as usize).min(total_iter_budget).max(1);
+    let min_tail_chunk = std::env::var("CFD2_ONE_SUBMISSION_MIN_TAIL")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1)
+        .max(1);
+    let explicit_chunks: Option<Vec<usize>> = std::env::var("CFD2_ONE_SUBMISSION_CHUNKS")
+        .ok()
+        .and_then(|raw| {
+            let parsed: Vec<usize> = raw
+                .split(',')
+                .filter_map(|s| s.trim().parse::<usize>().ok())
+                .filter(|&v| v > 0)
+                .collect();
+            if parsed.is_empty() {
+                None
+            } else {
+                Some(parsed)
+            }
+        });
+    let has_explicit_chunks = explicit_chunks.is_some();
+
+    let mut params = RawFgmresParams {
+        n,
+        num_cells,
+        num_iters: 0,
+        omega: 1.0,
+        dispatch_x: dispatch.dofs_dispatch_x_threads,
+        max_restart: 0,
+        column_offset: 0,
+        _pad3: 0,
+    };
+
+    let mut chunk_sizes: Vec<usize> = if let Some(mut chunks) = explicit_chunks {
+        let mut normalized: Vec<usize> = Vec::new();
+        let mut remaining = total_iters_to_encode;
+        for c in chunks.drain(..) {
+            if remaining == 0 {
+                break;
+            }
+            let chunk = c.min(iter_restart).min(remaining).max(1);
+            normalized.push(chunk);
+            remaining -= chunk;
+        }
+        while remaining > 0 {
+            let chunk = iter_restart.min(remaining).max(1);
+            normalized.push(chunk);
+            remaining -= chunk;
+        }
+        normalized
+    } else {
+        let mut defaults: Vec<usize> = Vec::new();
+        let mut remaining = total_iters_to_encode;
+        while remaining > 0 {
+            let chunk = iter_restart.min(remaining).max(1);
+            defaults.push(chunk);
+            remaining -= chunk;
+        }
+        defaults
+    };
+    if !has_explicit_chunks && chunk_sizes.len() >= 2 {
+        let last_idx = chunk_sizes.len() - 1;
+        if chunk_sizes[last_idx] < min_tail_chunk {
+            let mut need = min_tail_chunk - chunk_sizes[last_idx];
+            for donor_idx in 0..last_idx {
+                if need == 0 {
+                    break;
+                }
+                let donor_can_give = chunk_sizes[donor_idx].saturating_sub(1);
+                if donor_can_give == 0 {
+                    continue;
+                }
+                let give = donor_can_give.min(need);
+                chunk_sizes[donor_idx] -= give;
+                chunk_sizes[last_idx] += give;
+                need -= give;
+            }
+        }
+    }
+
+    let num_chunks = chunk_sizes.len();
+    let mut encoded_total = 0usize;
+    for (chunk_idx, &chunk_restart) in chunk_sizes.iter().enumerate() {
+        let mut encoder = context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("fgmres:one_submission_chunk"),
+            });
+
+        // Let the caller encode assembly/setup commands before the solve chunk.
+        if chunk_idx == 0 {
+            pre_encode(&mut encoder);
+        }
+
+        params.max_restart = chunk_restart as u32;
+        let iter_params = IterParams {
+            current_idx: 0,
+            max_restart: chunk_restart as u32,
+            _pad1: 0,
+            _pad2: 0,
+        };
+        let is_first_chunk = chunk_idx == 0;
+        let preserve = !is_first_chunk;
+        let encoded = krylov.encode_solve_once_with_prepare(
+            EncodeSolveOnceArgs {
+                context,
+                system,
+                rhs_norm: 1.0,
+                params,
+                iter_params,
+                config: FgmresSolveOnceConfig {
+                    tol_rel: tol,
+                    tol_abs,
+                    reset_x_before_update: false,
+                },
+                dispatch: dispatch.grids,
+                precond_label,
+                capture_solver_scalars: false,
+                preserve_convergence_state: preserve,
+                compute_rhs_norm_on_gpu: is_first_chunk,
+            },
+            &mut encoder,
+            is_first_chunk,
+            use_encoded_seed_basis0,
+        );
+        let consumed = encoded.max(1);
+        encoded_total = encoded_total.saturating_add(consumed);
+
+        // Let the caller encode update/assembly commands after the last solve chunk.
+        if chunk_idx + 1 == num_chunks {
+            post_encode(&mut encoder);
+        }
+
+        context.queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Generic Coupled", "fgmres:one_submission_chunk");
+    }
+
+    LinearSolverStats::max_iterations(encoded_total as u32, f32::INFINITY, start.elapsed())
+}

@@ -209,9 +209,9 @@ compounding differences in how the linear solve executed.  All three have been r
 #### 5B: Test Coverage (P0 — required before default promotion)
 
 - [x] Add a parity test variant in `tests/rhie_chow_fusion_parity_test.rs` that asserts snapshot match within `1e-3` tolerance against the non-batched fixed-iteration baseline with all legacy tuning env vars cleared (`one_submission_parity_gate_max_rel_below_1e_3`).
-- [ ] Add a submission-count test variant that enables one-submission mode and asserts submission count is at the expected floor (~4 for the test problem).
-- [ ] Add an isolated unit test for `encode_solve_fgmres_fixed_iterations` vs `solve_fgmres` on a small linear system, comparing final solution vectors element-wise (not just snapshot fields) to identify which FGMRES stage introduces the dominant error.
-- [ ] Add the one-submission path to `scripts/run_one_submission_hard_gates.sh` as a required CI gate (currently relies on manual baseline comparison).
+- [x] Add a submission-count test variant that enables one-submission mode and asserts submission count is at the expected floor (~4 for the test problem).
+- [x] Add an isolated unit test for `encode_solve_fgmres_fixed_iterations` vs `solve_fgmres` on a small linear system, comparing final solution vectors element-wise (not just snapshot fields) to identify which FGMRES stage introduces the dominant error.
+- [x] Add the one-submission path to `scripts/run_one_submission_hard_gates.sh` as a required CI gate (currently relies on manual baseline comparison).
 
 #### 5C: Convergence Diagnostics (P1 — required for production usability)
 

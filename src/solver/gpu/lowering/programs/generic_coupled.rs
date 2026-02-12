@@ -12,7 +12,7 @@ use crate::solver::gpu::modules::graph::{ModuleGraph, RuntimeDims};
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_solver::{
-    encode_solve_fgmres_fixed_iterations, solve_fgmres, SolveFgmresArgs,
+    solve_fgmres, submit_solve_fgmres_fixed_iterations_chunked, SolveFgmresArgs,
 };
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::modules::runtime_preconditioner::{
@@ -1858,9 +1858,6 @@ fn try_host_coupled_batch_tail_one_submission(
     };
 
     let start = std::time::Instant::now();
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("coupled:assembly+solve+update(batch_tail_one_submission)"),
-    });
 
     let mut encoded_tail_stats = Vec::with_capacity(remaining);
     {
@@ -1870,37 +1867,80 @@ fn try_host_coupled_batch_tail_one_submission(
             _ => return false,
         };
 
-        // Prime iteration-2 assembly.
-        r.assembly_graph
-            .encode_into(&mut encoder, &r.kernels, r.runtime_dims());
+        // Split borrows: we need mutable access to the solver (schur or krylov)
+        // and immutable access to assembly/update graphs + kernels + runtime dims.
+        let assembly_graph = &r.assembly_graph;
+        let update_graph = &r.update_graph;
+        let kernels = &r.kernels;
+        let runtime_dims = r.runtime_dims();
 
-        for iter_idx in 0..remaining {
-            let maybe_stats = encode_linear_solve_fixed_into_one_submission(
-                &context,
-                r,
-                max_restart,
-                &mut encoder,
-            );
-            let Some(stats) = maybe_stats else {
-                return false;
+        let system = LinearSystemView {
+            ports: r.runtime.linear_ports,
+            space: &r.runtime.linear_port_space,
+        };
+        let n = r.runtime.num_dofs;
+        let num_cells = r.runtime.common.num_cells;
+        let max_iters = r.linear_solver.max_iters;
+        let tol = r.linear_solver.tolerance;
+        let tol_abs = r.linear_solver.tolerance_abs;
+
+        // Use chunked submission to avoid Metal hangs.  Each FGMRES restart
+        // chunk gets its own encoder → submit cycle.  Assembly is prepended to
+        // the first chunk and update is appended to the last chunk of each
+        // outer iteration.
+        for _iter_idx in 0..remaining {
+            let mut pre = |encoder: &mut wgpu::CommandEncoder| {
+                assembly_graph.encode_into(encoder, kernels, runtime_dims);
             };
-            encoded_tail_stats.push(stats);
+            let mut post = |encoder: &mut wgpu::CommandEncoder| {
+                update_graph.encode_into(encoder, kernels, runtime_dims);
+            };
 
-            // Apply solve result, then prepare assembly for next outer iteration.
-            r.update_graph
-                .encode_into(&mut encoder, &r.kernels, r.runtime_dims());
-            if iter_idx + 1 < remaining {
-                r.assembly_graph
-                    .encode_into(&mut encoder, &r.kernels, r.runtime_dims());
+            if let Some(schur) = &mut r.schur {
+                let stats = submit_solve_fgmres_fixed_iterations_chunked(
+                    &mut schur.solver,
+                    SolveFgmresArgs {
+                        context: &context,
+                        system,
+                        n,
+                        num_cells,
+                        dispatch: schur.dispatch,
+                        max_restart,
+                        max_iters,
+                        tol,
+                        tol_abs,
+                        precond_label: "generic_coupled:schur(batch_tail)",
+                        use_encoded_seed_basis0: true,
+                    },
+                    &mut pre,
+                    &mut post,
+                );
+                encoded_tail_stats.push(stats);
+            } else if let Some(krylov) = &mut r.krylov {
+                let stats = submit_solve_fgmres_fixed_iterations_chunked(
+                    &mut krylov.solver,
+                    SolveFgmresArgs {
+                        context: &context,
+                        system,
+                        n,
+                        num_cells,
+                        dispatch: krylov.dispatch,
+                        max_restart,
+                        max_iters,
+                        tol,
+                        tol_abs,
+                        precond_label: "generic_coupled:fgmres(batch_tail)",
+                        use_encoded_seed_basis0: true,
+                    },
+                    &mut pre,
+                    &mut post,
+                );
+                encoded_tail_stats.push(stats);
+            } else {
+                return false;
             }
         }
     }
-
-    queue.submit(Some(encoder.finish()));
-    crate::count_submission!(
-        "Generic Coupled",
-        "coupled:assembly+solve+update(batch_tail_one_submission)"
-    );
 
     if let Some(last) = encoded_tail_stats.last().copied() {
         plan.last_linear_stats = last;
@@ -1911,7 +1951,7 @@ fn try_host_coupled_batch_tail_one_submission(
     if plan.collect_trace {
         plan.step_graph_timings
             .push(crate::solver::gpu::program::plan::StepGraphTiming {
-                label: "coupled:assembly+solve+update(batch_tail_one_submission)",
+                label: "coupled:one_submission_chunked",
                 seconds: start.elapsed().as_secs_f64(),
                 detail: None,
             });
@@ -1919,65 +1959,6 @@ fn try_host_coupled_batch_tail_one_submission(
 
     plan.repeat_break = true;
     true
-}
-
-fn encode_linear_solve_fixed_into_one_submission(
-    context: &crate::solver::gpu::context::GpuContext,
-    r: &mut GenericCoupledProgramResources,
-    max_restart: usize,
-    encoder: &mut wgpu::CommandEncoder,
-) -> Option<LinearSolverStats> {
-    let system = LinearSystemView {
-        ports: r.runtime.linear_ports,
-        space: &r.runtime.linear_port_space,
-    };
-    let n = r.runtime.num_dofs;
-    let num_cells = r.runtime.common.num_cells;
-    let max_iters = r.linear_solver.max_iters;
-    let tol = r.linear_solver.tolerance;
-    let tol_abs = r.linear_solver.tolerance_abs;
-
-    if let Some(schur) = &mut r.schur {
-        return Some(encode_solve_fgmres_fixed_iterations(
-            &mut schur.solver,
-            SolveFgmresArgs {
-                context,
-                system,
-                n,
-                num_cells,
-                dispatch: schur.dispatch,
-                max_restart,
-                max_iters,
-                tol,
-                tol_abs,
-                precond_label: "generic_coupled:schur(batch_tail)",
-                use_encoded_seed_basis0: true,
-            },
-            encoder,
-        ));
-    }
-
-    if let Some(krylov) = &mut r.krylov {
-        return Some(encode_solve_fgmres_fixed_iterations(
-            &mut krylov.solver,
-            SolveFgmresArgs {
-                context,
-                system,
-                n,
-                num_cells,
-                dispatch: krylov.dispatch,
-                max_restart,
-                max_iters,
-                tol,
-                tol_abs,
-                precond_label: "generic_coupled:fgmres(batch_tail)",
-                use_encoded_seed_basis0: true,
-            },
-            encoder,
-        ));
-    }
-
-    None
 }
 
 pub(crate) fn host_implicit_set_alpha_for_apply(plan: &mut GpuProgramPlan) {

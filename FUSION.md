@@ -1,248 +1,248 @@
-# DSL-Based Kernel Fusion Checklist
+# DSL-Based Kernel Fusion — Remaining Work and Gaps
 
-This checklist tracks the implementation of full compile-time, DSL-based kernel fusion.
+This document tracks **remaining gaps and future work** for the kernel fusion system.
+All completed items from the original checklist have been removed. What follows is the
+set of verified-incomplete tasks and newly discovered gaps.
 
-## Success Criteria (Full DSL-Based Compile-Time Fusion)
+For full coverage status of all models, see `FUSION_COVERAGE.md`
+(`cargo run --bin fusion_coverage -- --write FUSION_COVERAGE.md`).
 
-- Fusion replacement kernels are synthesized at build time from DSL `KernelProgram` inputs.
-- Fusion-capable kernel implementations are authored via structured DSL/AST construction (WGSL DSL statements/expressions), not hand-written `Vec<String>` program sections.
-- Runtime selection remains recipe/schedule-driven (`fusion_schedule_registry`) with no ad-hoc
-  fusion pass during stepping.
-- `KernelFusionPolicy::Off|Safe|Aggressive` semantics are explicit and test-covered.
-- Fused kernel IDs stay stable so runtime graph wiring does not churn across migrations.
+## Current State (Summary)
 
-## 0) Scope and Contracts
+The core fusion pipeline is complete and production-default:
 
-- [x] Define and document "full DSL-based fusion" success criteria (compile-time only, no runtime fusion pass).
-- [x] Require structured DSL/AST kernel encoding for fusion-capable kernels (no manual string-array kernel body encoding).
-- [x] Confirm fusion remains recipe-schedule driven in `src/solver/gpu/recipe.rs` via `fusion_schedule_registry::schedule_for_model`.
-- [x] Add a contract test that fused kernels are resolved through generated registries (not handwritten runtime lookup glue).
-- [x] Add a contract test that runtime code does not call `apply_model_fusion_rules`.
+- Fusion-capable kernels are encoded as structured `KernelProgram` IR (DSL).
+- Fusion synthesis (candidate matching, hazard analysis, binding merge, symbol renaming,
+  WGSL lowering) runs at build time in `build.rs`.
+- Fusion schedules are precomputed for all `(model, stepping, grad_state, policy)` tuples
+  and served at runtime via `fusion_schedule_registry::schedule_for_model`.
+- Contract tests enforce: no runtime fusion pass, registry-driven lookup, handwritten fused
+  generators removed.
+- One-submission outer loop is default-enabled (`DEFAULT_OUTER_BATCHED_MODE = true`) with
+  GPU-driven adaptive outer break, FGMRES + CG encoded solver paths, and convergence
+  diagnostics readback.
+- All DSL-eligible model kernels (8 of 12) are migrated; 4 WGSL-only kernels remain by
+  design (different dispatch domain or phase).
+- 7 synthesized fused WGSL shaders exist for `incompressible_momentum`.
+- Policy semantics (`Off`/`Safe`/`Aggressive`) are implemented and tested.
+- Dispatch floor for incompressible coupled: `Off=6`, `Safe=4`, `Aggressive=2` update
+  dispatches.
+- Numerical parity gates at `1e-3` tolerance: Safe vs Off, Aggressive vs Safe,
+  one-submission vs host-driven, batched vs non-batched.
 
-## 1) Kernel Program IR (Fusion Input)
+## 1) Validation and Testing Gaps
 
-- [x] Add a kernel-program IR module under `crates/cfd2_ir/src/solver/ir` (for fusion-capable kernels).
-- [x] Model dispatch domain in IR (cells/faces/custom) and preserve launch semantics.
-- [x] Model bind interface in IR (group/binding/name/access) for deterministic merge checks.
-- [x] Represent kernel body/preamble/indexing in IR so two kernels can be safely composed.
-- [x] Add side-effect metadata in IR (read/write sets, optional barriers/atomics flags).
-- [x] Re-export IR types from `crates/cfd2_ir/src/solver/ir/mod.rs`.
+### 1a) Wall-Clock Performance Regression Checks (P1)
 
-## 2) Generator API Upgrade
+No benchmarks exist comparing fusion policies on representative cases.
 
-- [x] Extend model kernel generator API to support DSL program artifacts in addition to WGSL output.
-- [x] Keep backward compatibility so existing WGSL-only generators continue to work.
-- [x] Add helper constructors/adapters for "DSL program -> WGSL" lowering.
-- [x] Add tests for mixed-mode models (some kernels DSL-capable, some WGSL-only).
+- [ ] Add a Criterion (or equivalent) benchmark that measures step wall-clock time for
+  `Off`, `Safe`, and `Aggressive` policies on the incompressible momentum model.
+- [ ] Add a wall-clock benchmark comparing the one-submission path vs the multi-submission
+  host-driven path on a representative mesh.
+- [ ] Track wall-clock metrics in CI to catch performance regressions.
 
-## 3) Fusion Compiler Pass (Codegen)
+### 1b) Cross-Model Fusion Integration Tests (P1)
 
-- [x] Add fusion pass module under `crates/cfd2_codegen/src/solver/codegen`.
-- [x] Implement candidate matching based on applied fusion rules and ordered kernel list.
-- [x] Implement Safe policy checks:
-  - [x] same dispatch domain,
-  - [x] compatible preamble/indexing,
-  - [x] no unsafe hazards (RAW/WAR/WAW conflicts, barriers/atomics restrictions).
-- [x] Implement deterministic symbol-renaming to avoid local-name collisions.
-- [x] Merge bind interfaces deterministically and reject incompatible interfaces with clear errors.
-- [x] Emit fused DSL program and lower it to WGSL through existing AST/lowering pipeline.
-- [x] Add unit tests for all pass stages (matching, hazards, symbol merge, bind merge, output determinism).
+All runtime parity and dispatch-count tests use `incompressible_momentum` only.
+The `compressible` model has a fuseable `assembly → assembly_grad_state` pair
+(both DSL, same dispatch domain) that is untested at runtime.
 
-## 4) Build-Time Synthesis and Registry Wiring
+- [ ] Add a runtime fusion parity test for the `compressible` model (even though no
+  explicit fusion rule is currently declared, verify schedule correctness across policies).
+- [ ] Add runtime fusion parity tests for `generic_diffusion_demo` /
+  `generic_diffusion_demo_neumann` models.
 
-- [x] In `build.rs`, synthesize replacement kernels when fusion schedule references a replacement without explicit generator output.
-- [x] Emit synthesized fused WGSL files into `src/solver/gpu/shaders/generated` with stable names.
-- [x] Ensure `generate_kernel_registry_map` includes synthesized fused kernels.
-- [x] Ensure `generate_fusion_schedule_registry` validates resolvability of synthesized outputs.
-- [x] Keep generated registry entries deterministic across builds.
-- [x] Add a contract/integration test that generated registry contains synthesized fused entries.
+### 1c) Stepping-Mode Coverage (P2)
 
-## 5) Pilot Migration: Rhie-Chow
+All runtime parity tests use `Coupled` stepping. Fusion schedules are precomputed for
+`Explicit` and `Implicit` stepping too, but never tested at runtime.
 
-- [x] Migrate `rhie_chow:dp_update_store_grad_p_v1` to synthesized fusion output.
-- [x] Remove manual fused kernel generator/body once synthesized path is validated.
-- [x] Keep stable fused kernel id (`rhie_chow/dp_update_store_grad_p_fused`) to avoid runtime churn.
-- [x] Keep schedule behavior unchanged for `Off`/`Safe`/`Aggressive` until aggressive semantics are expanded.
-- [x] Add parity test: fused vs unfused Rhie-Chow results remain numerically equivalent within tolerance.
+- [ ] Add a runtime parity test exercising fusion under `Implicit` stepping for a model
+  that supports it.
+- [ ] Verify that `Explicit` stepping schedules produce correct dispatch counts and kernel
+  lists (at least at the schedule level, runtime execution may not be feasible for all
+  models).
 
-## 6) Policy Semantics and Expansion
+### 1d) CI Workflow for Full Validation Matrix (P1)
 
-- [x] Codify policy semantics:
-  - [x] `Off`: no fusion,
-  - [x] `Safe`: strict hazard-checked fusion,
-  - [x] `Aggressive`: broader candidate set + optional algebraic cleanup passes.
-- [x] Implement explicit aggressive-only transforms behind policy guard.
-- [x] Add tests proving `Aggressive` can differ from `Safe` only where intended.
+Only WGSL freshness (`check_generated_wgsl.sh`) runs in CI. The fusion parity tests,
+dispatch/submission counters, and OpenFOAM drift checks are in
+`scripts/run_one_submission_hard_gates.sh` but have no GitHub Actions workflow.
 
-## 7) Broaden Coverage Beyond Pilot
+- [ ] Add a CI workflow (`.github/workflows/`) that runs the fusion parity test suite
+  (`tests/rhie_chow_fusion_parity_test.rs`) on PRs/pushes.
+- [ ] Add a CI workflow (or scheduled job) that runs `run_one_submission_hard_gates.sh`
+  with OpenFOAM drift comparison against a checked-in baseline.
 
-- [x] Identify all model-generated kernels eligible for DSL fusion (update/assembly-heavy chains first).
-- [x] Migrate eligible generators from WGSL-only to DSL-capable artifacts.
-- [x] Keep non-DSL kernels as standalone passes (no forced migration).
-- [x] Add per-model coverage report (which kernels are fusion-capable vs legacy).
+### 1e) Tight Parity for Safe Policy (P3)
 
-## 8) Validation Matrix
+Safe fusion should be semantically equivalent to unfused execution (identical dispatch
+order, just fewer dispatches). Current parity tolerance is `1e-3`.
 
-- [x] Unit tests:
-  - [x] fusion matcher,
-  - [x] hazard analysis,
-  - [x] symbol/bind merge,
-  - [x] deterministic output naming.
-- [x] Contract tests:
-  - [x] compile-time-only schedule lookup,
-  - [x] no runtime fusion path,
-  - [x] registry completeness for fused kernels.
-- [x] Numerical regression tests:
-  - [x] `Off` vs `Safe` parity,
-  - [x] `Safe` vs `Aggressive` parity where expected.
-- [ ] Performance checks:
-  - [x] dispatch count reduction (compile-time schedule tests now validate `Off -> Safe` update dispatch drop of 2 and `Safe -> Aggressive` drop of 2 for incompressible coupled; runtime dispatch-counter test also confirms `Aggressive` executes fewer kernel-graph dispatches than `Safe`),
-  - [ ] no regression in wall-clock for representative cases.
+- [ ] Investigate whether Safe policy can achieve tighter parity (e.g., `1e-6` or bitwise
+  match) and add a tighter gate if so.
 
-## 9) Rollout and Cleanup
+## 2) Fusion Compiler Gaps
 
-- [ ] Roll out in small PR sequence (scaffolding -> pass -> pilot -> expansion).
-- [ ] Keep feature-gated fallback until pilot and validation matrix are green.
-- [ ] Remove obsolete handwritten fused kernel code after migration completion.
-- [ ] Update docs for model authors (how to define fusion-capable kernels/rules).
-- [ ] Add troubleshooting notes for common fusion synthesis failures.
+### 2a) No Hazard Analysis for Aggressive Policy (P2)
 
-## 10) Exit Criteria (Definition of Done)
+`ensure_safe_composition()` in `crates/cfd2_codegen/src/solver/codegen/fusion.rs:181`
+is gated on `policy == Safe`. Under Aggressive, the entire safety check is skipped.
+Rule authors must manually guarantee correctness.
 
-- [x] Fused kernels are generated from DSL at compile-time (not handwritten WGSL bodies).
-- [x] Fusion-capable kernels are encoded through structured DSL/AST builders, not manual `Vec<String>` sections.
-- [ ] Runtime remains registry-driven and model-driven, with no ad-hoc fusion logic.
-- [x] At least one production fusion path (Rhie-Chow) fully migrated and validated.
-- [x] Safe and Aggressive policy semantics are implemented, tested, and documented.
-- [ ] Full validation matrix passes in CI.
+- [ ] Add at least a warning-level hazard report for Aggressive policy fusions (log
+  detected hazards without rejecting, so authors have visibility).
+- [ ] Consider adding a `--aggressive-hazard-report` flag to `fusion_coverage` binary.
 
-## 11) Concrete Kernel Fusion Worklist
+### 2b) No Cross-Kernel Value Forwarding (P3 — optimization opportunity)
 
-- [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` (Safe and Aggressive via `rhie_chow:dp_update_store_grad_p_v1`).
-- [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` (Aggressive-only via `rhie_chow:dp_update_store_grad_p_grad_p_update_v1`).
-- [x] `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` (Aggressive-only via `rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1`).
-- [x] `dp_init` + `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` (Aggressive-only via `rhie_chow:dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1`).
-- [x] `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` as a standalone declared pair rule (Aggressive-only via `rhie_chow:store_grad_p_grad_p_update_v1`).
-- [x] `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta` as a standalone declared pair rule (Aggressive-only via `rhie_chow:grad_p_update_correct_velocity_delta_v1`).
-- [x] `generic_coupled_update` + `dp_init` (Safe-only in coupled stepping via `generic_coupled:update_dp_init_v1`, guarded with `ExactPolicy(Safe)`).
-- [x] `generic_coupled_assembly` + `generic_coupled_assembly_grad_state` DSL migration prerequisite completed (both kernels now emitted as DSL artifacts; rule declaration remains optional because conditions are mutually exclusive at runtime).
+Kernel bodies are stored as `Vec<String>` (WGSL text lines). When kernel A writes a
+value that kernel B reads (from the same buffer slot), the fused kernel still performs
+a memory round-trip (store then load). A proper AST-based body representation would
+enable eliminating redundant loads/stores across fused kernel boundaries.
 
-## 12) Fusion Opportunity Reassessment (Post Assembly DSL Migration)
+- [ ] Evaluate the cost/benefit of replacing `Vec<String>` body with a typed expression
+  AST (the face-expression AST `FaceScalarExpr`/`FaceVec2Expr` already exists in the IR
+  but is not used for kernel bodies).
+- [ ] If adopted, implement a simple load-after-store elimination pass in
+  `synthesize_fused_program`.
 
-- [x] Regenerate `FUSION_COVERAGE.md` after migrating `generic_coupled_assembly*` to DSL.
-- [x] Reconfirm active Rhie-Chow fusion opportunities and rule synthesis status.
-- [x] Reconfirm `generic_coupled_assembly -> generic_coupled_assembly_grad_state` is technically synthesizeable (`Safe` and `Aggressive`) once both kernels are DSL.
-- [x] Migrate `generic_coupled_update` to DSL and regenerate coverage (legacy DSL-migration-eligible per-model kernels now reduced to zero).
-- [x] Decide whether to declare an explicit assembly-pair fusion rule despite mutually-exclusive kernel conditions (decision: no explicit rule; runtime kernel conditions are mutually exclusive so the pair is never adjacent in an active schedule).
+### 2c) Binding Access Promotion (P3)
 
-## 13) Dispatch-Reduction Investigation (Post DSL-Driven Fusion)
+`merge_bindings()` rejects bindings where one kernel reads a slot and another writes
+the same slot with different `BindingAccess`. A smarter merge could safely promote
+`ReadOnlyStorage` to `ReadWriteStorage` when the write is in a later kernel.
 
-- [x] Reassess the next update-phase fusion candidate for dispatch-count reduction: `generic_coupled_update` + `dp_init` + `dp_update_from_diag` + `rhie_chow/store_grad_p` + `rhie_chow/grad_p_update` + `rhie_chow/correct_velocity_delta`.
-- [x] Prototype the aggressive full-chain candidate and run parity checks (`tests/rhie_chow_fusion_parity_test.rs`) plus schedule dispatch checks.
-- [x] Document outcome: candidate can synthesize, but is currently **rejected** for rollout because parity regresses (`safe` vs `aggressive` mismatch above tolerance) when dispatch boundaries are removed before neighbor-dependent gradient updates.
-- [x] Reconfirm current stable update dispatch floor for coupled incompressible path: `Off=6`, `Safe=4`, `Aggressive=2` (best stable schedule today).
-- [x] Investigate single-submission outer iterations (FGMRES-restart style batching analogy).
-- [x] Document current blockers for one-submission outer loop:
-  - Outer-loop control in `src/solver/gpu/recipe.rs` is host-interleaved (`coupled:before_iter`, `coupled:solve`).
-  - Program executor in `src/solver/gpu/program/plan.rs` executes `Host` nodes between graph nodes every outer iteration.
-  - Coupled solve and convergence/break decisions in `src/solver/gpu/lowering/programs/generic_coupled.rs` require host-visible solver stats/readback (`host_solve_linear_system`, `host_after_solve`, `repeat_break`).
-- [ ] Future path to true one-submission outer loops (not implemented yet):
-  - Move outer convergence evaluation and break signaling to GPU-visible buffers.
-  - Provide a GPU-driven outer-iteration loop primitive (or fixed-iteration batch mode) that avoids per-iteration host branching.
-  - Keep feature-gated fallback to current host-driven loop until numerical parity and diagnostics are preserved.
+- [ ] Evaluate whether any real fusion candidate is blocked by this (check
+  `FUSION_COVERAGE.md` for bind-merge rejections vs hazard rejections).
+- [ ] If blocking, implement promotion logic with clear documentation of safety
+  guarantees.
 
-## 14) One-Submission Outer Loop Plan (Execution Roadmap)
+### 2d) EOS Parameter Detection Is Fragile (P3)
 
-### Phase 1: Control-Mode Scaffolding (fixed outer count vs adaptive break)
+`constants_extra_params_for_program()` in `fusion.rs:388` scans for hardcoded EOS
+field names (`eos.gamma`, etc.) via string containment. Adding new EOS parameters
+requires updating this function.
 
-- [x] Add a coupled outer-loop runtime mode switch so we can run fixed outer iterations without adaptive host break logic.
-- [x] Wire mode through named params and solver helpers as `outer_fixed_iterations_mode` (bool).
-- [x] Keep default behavior unchanged (`adaptive` break remains default).
-- [x] Add regression coverage that fixed-iteration mode executes all configured outer iterations.
+- [ ] Replace string-scan heuristic with a structured EOS parameter declaration in the
+  `KernelProgram` IR (e.g., an `eos_params_used: BTreeSet<String>` field).
 
-### Phase 2: GPU-Visible Outer Convergence State
+## 3) Fusion Coverage Expansion
 
-- [x] Allocate/write a GPU-visible outer-convergence status buffer (instead of host-only `repeat_break` decisions).
-- [x] Move convergence metric reduction and tolerance check to GPU kernels.
-- [x] Preserve host-readable diagnostics by optional post-step readback.
+### 3a) Compressible Model Has No Fusion Rules (P2)
 
-### Phase 3: Batched Outer-Loop Program Form
+`FUSION_COVERAGE.md` shows the compressible model has a fuseable `assembly →
+assembly_grad_state` pair (both DSL, same dispatch domain, `Cells`), but no rule is
+declared. The pair is theoretically safe and aggressive-fuseable.
 
-- [x] Add fixed-iteration batched-tail scaffolding (`outer_batched_mode`) using `coupled:batch_tail` to execute remaining outer iterations inside one host op.
-- [x] Keep host-driven path as fallback and default until parity/perf gates pass.
-- [x] Ensure recipe/program-spec wiring can select host-driven vs batched path deterministically.
-- [x] Measure current impact of batched-tail scaffolding: fixed outer-iteration counts are preserved, kernel-graph dispatch count does not increase in batched mode, and queue submissions are reduced in measured runtime coverage (default validated path: `non_batched=178`, `batched=172`, `delta=6` in `tests/rhie_chow_fusion_parity_test.rs`; experimental full one-submission path can be opt-in tested separately).
-- [x] Add a batched coupled program path that runs outer iterations as a fixed GPU-driven batch (`coupled:before_iter` and `coupled:batch_tail` both have a guarded full one-submission implementation behind `CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER=1`, with fallback to the validated batched-tail path by default).
+However, these two kernels use mutually-exclusive runtime conditions
+(`RequiresNoGradState` / `RequiresGradState`), so they are never adjacent in an
+active schedule. This was a deliberate decision (FUSION.md section 12).
 
-### Phase 4: Toward True One-Submission Outer Step
+- [ ] Evaluate whether the compressible model has other update-phase fusion opportunities
+  (e.g., `generic_coupled_update` + any model-specific update kernels) that are not
+  blocked by mutually-exclusive conditions.
+- [ ] Document the decision not to fuse `assembly + assembly_grad_state` in the
+  compressible model.
 
-- [x] Refactor linear solve entrypoints to support encode-only solve passes suitable for inclusion in a batched submission path (FGMRES restart-body encode/finalize API is now available via `KrylovSolveModule::{encode_solve_once, finish_encoded_solve_once}`).
-- [x] Collapse per-iteration assembly/update/solve into a single submission for fixed-iteration mode (implemented as an opt-in experimental path behind `CFD2_ENABLE_FULL_ONE_SUBMISSION_OUTER=1`; fallback path remains default).
-- [x] Add queue-submission instrumentation (`submission_counter`) and runtime coverage proving batched mode does not increase submissions (default validated path: `178 -> 172`, delta `6`; experimental opt-in path reaches `178 -> 4` in targeted coverage).
-- [x] Add hard validation gates: numerical parity, dispatch/submission counters, OpenFOAM drift non-regression (`tests/rhie_chow_fusion_parity_test.rs` now includes fixed-batched vs fixed-nonbatched snapshot parity + low submission-budget assertion, and `scripts/run_one_submission_hard_gates.sh` runs parity/counter checks plus OpenFOAM diagnostic diff against a provided baseline metrics file).
+### 3b) Cross-Phase Fusion (P3 — future investigation)
 
-#### Phase 4A: Detailed Execution Plan (Current)
+Current fusion is limited to same-phase, same-dispatch-domain kernels. No investigation
+has been done into:
 
-- [x] Add reusable graph-encoding API (`ModuleGraph::encode_into`) so multiple graph segments can be recorded into one command encoder.
-- [x] Start collapsing graph-only submissions in batched tail by pipelining `update(i)` with `assembly(i+1)` into one submission.
-- [x] Extend preconditioner setup to encode into caller-provided command encoders (avoid per-iteration `prepare` submits in one-submission path): `FgmresPreconditionerModule::encode_prepare` is wired through `KrylovSolveModule::solve_once_with_prepare`, and runtime/schur preconditioners now provide encode-based setup paths.
-- [x] Extend FGMRES residual-seed/normalization path with encode-only variants (remove host-side residual submit/readback before restart-body encode) and fix command-buffer ordering hazards by using in-encoder buffer copies for seed/solver params/scalars and restart setup tables/indirect args in `src/solver/gpu/linear_solver/fgmres.rs`.
-- [x] Eliminate remaining race-like ordering risk in encoded FGMRES setup by writing `params` via in-encoder copies before `encode_prepare` and before restart-body encode (`src/solver/gpu/modules/krylov_solve.rs`, `src/solver/gpu/linear_solver/fgmres.rs`); repeated parity/submission probes with fixed settings are deterministic run-to-run.
-- [x] Add bounded multi-restart encode chunking for one-submission fixed-iteration solves in `src/solver/gpu/modules/linear_solver.rs` (`CFD2_ONE_SUBMISSION_RESTART_BUDGET` per restart chunk, `CFD2_ONE_SUBMISSION_TOTAL_ITERS` per-solve total budget; optional tuning knobs `CFD2_ONE_SUBMISSION_CHUNKS`, `CFD2_ONE_SUBMISSION_MIN_TAIL`; omega tuning knobs `CFD2_ONE_SUBMISSION_SOLUTION_OMEGA` and `CFD2_ONE_SUBMISSION_TAIL_OMEGA` have been removed after §5A parity gap was closed).
-- [x] Add fixed-iteration encoded outer-loop runner that records `assembly + solve + update` for all outer iterations into one command buffer submission.
-- [x] Keep a guarded fallback to current batched-tail path until parity and OpenFOAM drift checks remain stable.
-- [x] Close remaining strict parity gap for opt-in encoded-seed / full one-submission path (see Phase 5A for root-cause analysis and resolution).
+- Gradients + Assembly phase fusion (e.g., `packed_state_gradients` + `assembly`)
+- Assembly + FluxComputation fusion (blocked by dispatch domain: Cells vs Faces)
 
-### Phase 5: Close Gaps and Promote One-Submission to Default
+- [ ] Investigate whether cross-phase fusion is feasible for any model's kernel chain
+  (likely requires relaxing the phase-match constraint in the pattern matcher).
 
-#### 5A: Numerical Parity (P0 — required before default promotion)
+## 4) Documentation (P2)
 
-Root cause: the encoded FGMRES path diverged from the host-driven path due to three
-compounding differences in how the linear solve executed.  All three have been resolved.
+### 4a) Model Author Guide
 
-- [x] **Fix RHS-norm substitution**: `encode_solve_fgmres_fixed_iterations` hardcoded `rhs_norm: 1.0` instead of the true `||b||`, disabling relative-tolerance semantics. Fixed by adding a GPU-side `||rhs||` reduction (`encode_rhs_norm_into_scalars`) that writes to `scalars[RHS_NORM]` and wiring it into `encode_fgmres_solve_once_with_preconditioner` after the scalars init but before the inner loop. The shader (`update_hessenberg_givens`) now computes `tol_rel_rhs = scalars[TOL_REL_RHS] * scalars[RHS_NORM]`. For the host path `RHS_NORM=1.0` (pre-multiplied tolerance); for the encoded path `RHS_NORM=GPU-computed ||b||`.
-- [x] **Re-enable inter-restart convergence signaling on GPU**: tolerances were zeroed and `capture_solver_scalars` was `false`, so the solver always ran the full iteration budget. Fixed by passing real `tol` and `tol_abs` in the encoded path config, adding `preserve_convergence_state` to preserve STOP/CONVERGED/RHS_NORM/indirect-args across restart chunks, and adding a SKIP_UPDATE mechanism so `solve_triangular` and `accumulate_solution` skip when a prior chunk already converged.
-- [x] **Validate GPU-side basis seeding parity**: `encode_fgmres_seed_basis0_from_system` computes `r₀ = b − Ax` and normalizes entirely on GPU. The standard Rhie-Chow parity test (`tests/rhie_chow_fusion_parity_test.rs`) passes at `1e-3` tolerance, confirming FP-ordering divergence from host-computed norms is within acceptable bounds.
-- [x] **Eliminate omega tuning knobs**: the `CFD2_ONE_SUBMISSION_SOLUTION_OMEGA` and `CFD2_ONE_SUBMISSION_TAIL_OMEGA` env vars (band-aids for the parity gap) have been removed. Omega is now hardcoded to `1.0`. Parity holds without manual tuning.
-- [x] **Parity gate**: `one_submission_parity_gate_max_rel_below_1e_3` test in `tests/rhie_chow_fusion_parity_test.rs` explicitly clears all legacy tuning env vars and asserts `max_rel < 1e-3` across u, p (mean-free), d_p, grad_p_old — passes cleanly.
+No documentation exists for model authors on how to:
+- Define a fusion-capable kernel (return `ModelKernelArtifact::DslProgram` from generator)
+- Declare `SideEffectMetadata` read/write sets
+- Write `ModelKernelFusionRule` with guards
+- Use the `fusion_coverage` binary for coverage auditing
 
-#### 5B: Test Coverage (P0 — required before default promotion)
+- [ ] Write a model-author guide (e.g., `docs/fusion-authoring.md`) covering the full
+  workflow from kernel generator to fusion rule to validated synthesized output.
 
-- [x] Add a parity test variant in `tests/rhie_chow_fusion_parity_test.rs` that asserts snapshot match within `1e-3` tolerance against the non-batched fixed-iteration baseline with all legacy tuning env vars cleared (`one_submission_parity_gate_max_rel_below_1e_3`).
-- [x] Add a submission-count test variant that enables one-submission mode and asserts submission count is at the expected floor (~4 for the test problem).
-- [x] Add an isolated unit test for `encode_solve_fgmres_fixed_iterations` vs `solve_fgmres` on a small linear system, comparing final solution vectors element-wise (not just snapshot fields) to identify which FGMRES stage introduces the dominant error.
-- [x] Add the one-submission path to `scripts/run_one_submission_hard_gates.sh` as a required CI gate (currently relies on manual baseline comparison).
+### 4b) Troubleshooting Guide
 
-#### 5C: Convergence Diagnostics (P1 — required for production usability) ✅
+No guide exists for debugging fusion synthesis failures (hazard rejections, bind-merge
+conflicts, dispatch-domain mismatches).
 
-The one-submission path previously bailed when `plan.collect_convergence_stats` was set
-and never populated `outer_field_residuals`, `outer_residual_u`, or `outer_residual_p`
-for encoded iterations.  All three items are now resolved:
+- [ ] Add troubleshooting notes covering:
+  - How to read `FUSION_COVERAGE.md` hazard rejection messages
+  - How to fix common RAW/WAR/WAW hazard errors
+  - How to debug bind-merge incompatibilities
+  - How to validate a new fusion rule with the parity test framework
 
-- [x] Add a post-submission residual readback: `compute_outer_residuals` is called after the one-submission tail completes, computing correction norms via `delta_maxima` + `ensure_state_scale` (two small GPU dispatches). Note: the one-submission path measures post-update `x` while the multi-submission path measures pre-update `x`, so absolute residual values will differ between paths — this is expected and documented in the parity test.
-- [x] Remove the `collect_convergence_stats` early-return guard in `try_host_coupled_batch_tail_one_submission` — deleted.
-- [x] Populate `plan.last_linear_stats` with a meaningful final residual: `submit_solve_fgmres_fixed_iterations_chunked` now sets `capture_solver_scalars: true` on the last chunk and reads back the real GPU-computed residual via `read_last_solver_stats`. `universal::step_stats` now wires `plan.last_linear_stats` / `plan.step_linear_stats` into `PlanStepStats::linear_stats`.
+## 5) One-Submission Path Gaps
 
-#### 5D: Adaptive Outer Break on GPU (P2 — needed to drop fixed-iteration-only requirement)
+### 5a) Fallback Path After Multi-Submission Loop Removal (P1)
 
-Currently the one-submission path is gated behind `!outer_break_enabled`
-(`generic_coupled.rs:2107`), forcing users into fixed-iteration mode.
+The multi-submission fallback loop in `host_coupled_batch_tail` was removed per the
+rollout plan. When `try_host_coupled_batch_tail_one_submission` returns `false`
+(unsupported solver config), the code prints a warning but does not execute the
+remaining outer iterations. For edge-case solver configurations that don't match
+FGMRES, CG, or Schur paths, the solver would silently run only 1 outer iteration.
 
-- [x] Design a GPU-driven outer-loop break mechanism: after each encoded outer iteration's update graph, dispatch the existing `OuterConvergenceMonitor` break kernel (`OUTER_CONVERGENCE_BREAK_WGSL`) and write a GPU-visible break flag. Use indirect dispatch or conditional buffer writes on subsequent iterations to skip work when the flag is set.
-- [x] Wire the GPU break flag into the encoded assembly/solve/update chain so converged iterations emit zero-cost dispatches (indirect dispatch with count=0) rather than full kernel launches.
-- [x] Remove the `outer_break_enabled` gate in `host_coupled_before_iter` so the one-submission path works with adaptive convergence.
-- [x] Validate that adaptive-break one-submission produces the same iteration counts and final solutions as the host-driven adaptive path.
+- [ ] Add a graceful fallback: when one-submission fails, fall back to per-iteration
+  recipe-level loop (re-enable `plan.repeat_break = false` so the recipe continues).
+- [ ] Add a test that exercises the fallback path with an unsupported solver config.
 
-#### 5E: Solver Generality (P2 — needed for non-FGMRES models)
+### 5b) Env-Var Reads in Hot Path (P3)
 
-- [x] Add an `encode_solve_cg_fixed_iterations` function (analogous to `encode_solve_fgmres_fixed_iterations`) for the CG linear solver path (`src/solver/gpu/modules/scalar_cg.rs`).
-- [x] Remove the `LinearSolverType::Fgmres` guard in `try_host_coupled_batch_tail_one_submission` (`generic_coupled.rs`) and dispatch to the appropriate encoded solver (CG or FGMRES). CG path uses `submit_solve_cg_fixed_iterations_chunked` with full stop-flag parity (adaptive outer break zeros out CG work via `scalars.stop`).
+The `CFD2_ONE_SUBMISSION_*` env vars (`RESTART_BUDGET`, `TOTAL_ITERS`, `CHUNKS`,
+`MIN_TAIL`, `CG_CHUNK_SIZE`) are read via `std::env::var()` on every call to the
+chunked submission functions (`linear_solver.rs:249-269`, `431-464`, `624`).
 
-#### 5F: Default Promotion and Cleanup (P3 — final rollout)
+- [ ] Cache env-var reads in a `once_cell::sync::Lazy` or similar, or move them to
+  solver config / named params.
 
-- [x] Flip `full_one_submission_outer_enabled()` to return `true` by default (env var becomes the opt-out gate instead of opt-in).
-- [x] Flip `DEFAULT_OUTER_BATCHED_MODE` from `false` to `true` so the batched path is the default when fixed-iteration mode is selected.
-- [x] Remove or consolidate the `CFD2_ONE_SUBMISSION_*` env-var tuning knobs once parity is resolved (omega knobs removed in §5A; remaining knobs `CFD2_ONE_SUBMISSION_RESTART_BUDGET`, `CFD2_ONE_SUBMISSION_TOTAL_ITERS`, `CFD2_ONE_SUBMISSION_CHUNKS`, `CFD2_ONE_SUBMISSION_MIN_TAIL` retained for optional override).
-- [x] Update `SolverExt` documentation to describe the one-submission behavior as the standard coupled stepping mode.
-- [x] Run full OpenFOAM reference suite (`scripts/run_openfoam_reference_tests.sh`) with default-on one-submission and confirm no drift regression vs current baseline.
-- [x] Remove the multi-submission fallback loop in `host_coupled_batch_tail` once one-submission is proven stable across the validation matrix.
+### 5c) `CFD2_ENABLE_ENCODED_SEED_BASIS0` Still Opt-In (P3)
+
+GPU-side `r0 = b - Ax` basis seeding is validated but default-off for the host-driven
+solve path (`generic_coupled.rs:2640-2644`). The batched path always uses it, but the
+host-driven path gates it behind both `outer_batched_mode` and the env var.
+
+- [ ] Promote `CFD2_ENABLE_ENCODED_SEED_BASIS0` to default-on after confirming parity
+  in the host-driven path, or remove the env var entirely.
+
+### 5d) Future: GPU-Driven Outer Loop Without Fixed-Iteration Requirement
+
+The one-submission path currently works with both adaptive and fixed-iteration modes.
+Future optimization opportunities:
+
+- [ ] Move outer convergence evaluation and break signaling to fully GPU-visible buffers
+  (partially done via `OuterConvergenceMonitor`).
+- [ ] Provide a GPU-driven outer-iteration loop primitive that avoids per-iteration host
+  branching entirely (currently, adaptive break still requires iteration-counter readback
+  after submission).
+- [ ] Keep feature-gated fallback to host-driven loop until numerical parity and
+  diagnostics are preserved.
+
+## 6) Build and Release
+
+### 6a) Feature-Gated Fallback (P3)
+
+Fusion is controlled by `KernelFusionPolicy` (runtime enum), not Cargo feature flags.
+The `Off` policy serves as the opt-out mechanism. No compile-time feature gate exists.
+
+- [ ] Decide whether a `--no-default-features` compile-time opt-out is needed for
+  environments where even the codegen overhead of fusion synthesis is undesirable.
+  Current assessment: not needed — `Off` policy is sufficient.
+
+### 6b) Codegen-Level `FusionPatternRule` Cleanup (P3)
+
+`FusionPatternRule` and `match_fusion_candidates()` in
+`crates/cfd2_codegen/src/solver/codegen/fusion.rs` appear unused in production.
+The model-level `ModelKernelFusionRule` / `apply_model_fusion_rules()` has replaced
+them. They are only used in `fusion.rs` unit tests.
+
+- [ ] Mark codegen-level `FusionPatternRule` as `#[cfg(test)]` or document it as
+  test-only infrastructure.

@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 4523aad0211e53da7aca235d68bce10a2813ea47f86da7a40b1d03cc9e841c40
+// SourceHash: cade9e9b3fa41034eae4540c98e9a109ecf2c572f8b03cc14adad27682a449b5
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -2514,7 +2514,8 @@ pub mod layout_asserts {
         assert!(std::mem::offset_of!(linear_solver::GpuScalars, beta) == 12);
         assert!(std::mem::offset_of!(linear_solver::GpuScalars, r0_v) == 16);
         assert!(std::mem::offset_of!(linear_solver::GpuScalars, r_r) == 20);
-        assert!(std::mem::size_of::<linear_solver::GpuScalars>() == 24);
+        assert!(std::mem::offset_of!(linear_solver::GpuScalars, stop) == 24);
+        assert!(std::mem::size_of::<linear_solver::GpuScalars>() == 28);
     };
     const LINEAR_SOLVER_SOLVER_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(linear_solver::SolverParams, n) == 0);
@@ -2540,7 +2541,8 @@ pub mod layout_asserts {
         assert!(std::mem::offset_of!(scalars::GpuScalars, beta) == 12);
         assert!(std::mem::offset_of!(scalars::GpuScalars, r0_v) == 16);
         assert!(std::mem::offset_of!(scalars::GpuScalars, r_r) == 20);
-        assert!(std::mem::size_of::<scalars::GpuScalars>() == 24);
+        assert!(std::mem::offset_of!(scalars::GpuScalars, stop) == 24);
+        assert!(std::mem::size_of::<scalars::GpuScalars>() == 28);
     };
     const SCALARS_REDUCE_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(scalars::ReduceParams, n) == 0);
@@ -30585,6 +30587,8 @@ pub mod linear_solver {
         pub r0_v: f32,
         #[doc = "offset: 20, size: 4, type: `f32`"]
         pub r_r: f32,
+        #[doc = "offset: 24, size: 4, type: `f32`"]
+        pub stop: f32,
     }
     impl GpuScalars {
         pub const fn new(
@@ -30594,6 +30598,7 @@ pub mod linear_solver {
             beta: f32,
             r0_v: f32,
             r_r: f32,
+            stop: f32,
         ) -> Self {
             Self {
                 rho_old,
@@ -30602,6 +30607,7 @@ pub mod linear_solver {
                 beta,
                 r0_v,
                 r_r,
+                stop,
             }
         }
     }
@@ -30974,6 +30980,7 @@ struct GpuScalars {
     beta: f32,
     r0_v: f32,
     r_r: f32,
+    stop: f32,
 }
 
 struct SolverParams {
@@ -31010,36 +31017,40 @@ fn spmv_p_v(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_wo
     var sum: f32 = 0f;
     var k: u32;
 
-    let _e3 = global_index(global_id, num_workgroups);
-    let _e6 = params.n;
-    if (_e3 >= _e6) {
+    let _e3 = scalars.stop;
+    if (_e3 > 0.5f) {
         return;
     }
-    let start = row_offsets[_e3];
-    let end = row_offsets[(_e3 + 1u)];
+    let _e8 = global_index(global_id, num_workgroups);
+    let _e11 = params.n;
+    if (_e8 >= _e11) {
+        return;
+    }
+    let start = row_offsets[_e8];
+    let end = row_offsets[(_e8 + 1u)];
     k = start;
     loop {
-        let _e17 = k;
-        if (_e17 < end) {
+        let _e22 = k;
+        if (_e22 < end) {
         } else {
             break;
         }
         {
-            let _e20 = k;
-            let col = col_indices[_e20];
-            let _e24 = k;
-            let val = matrix_values[_e24];
-            let _e30 = p[col];
-            let _e32 = sum;
-            sum = (_e32 + (val * _e30));
+            let _e25 = k;
+            let col = col_indices[_e25];
+            let _e29 = k;
+            let val = matrix_values[_e29];
+            let _e35 = p[col];
+            let _e37 = sum;
+            sum = (_e37 + (val * _e35));
         }
         continuing {
-            let _e35 = k;
-            k = (_e35 + 1u);
+            let _e40 = k;
+            k = (_e40 + 1u);
         }
     }
-    let _e39 = sum;
-    v[_e3] = _e39;
+    let _e44 = sum;
+    v[_e8] = _e44;
     return;
 }
 
@@ -31047,29 +31058,33 @@ fn spmv_p_v(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_wo
 fn cg_update_x_r(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin(num_workgroups) num_workgroups_1: vec3<u32>) {
     var alpha: f32 = 0f;
 
-    let _e3 = global_index(global_id_1, num_workgroups_1);
-    let _e6 = scalars.r0_v;
-    if (abs(_e6) >= 0.00000000000000000001f) {
-        let _e12 = scalars.rho_old;
-        let _e15 = scalars.r0_v;
-        alpha = (_e12 / _e15);
-    }
-    if (_e3 == 0u) {
-        let _e22 = alpha;
-        scalars.alpha = _e22;
-    }
-    let _e25 = params.n;
-    if (_e3 >= _e25) {
+    let _e3 = scalars.stop;
+    if (_e3 > 0.5f) {
         return;
     }
-    let _e29 = alpha;
-    let _e32 = p[_e3];
-    let _e34 = x[_e3];
-    x[_e3] = (_e34 + (_e29 * _e32));
-    let _e38 = alpha;
-    let _e41 = v[_e3];
-    let _e43 = r[_e3];
-    r[_e3] = (_e43 - (_e38 * _e41));
+    let _e8 = global_index(global_id_1, num_workgroups_1);
+    let _e11 = scalars.r0_v;
+    if (abs(_e11) >= 0.00000000000000000001f) {
+        let _e17 = scalars.rho_old;
+        let _e20 = scalars.r0_v;
+        alpha = (_e17 / _e20);
+    }
+    if (_e8 == 0u) {
+        let _e27 = alpha;
+        scalars.alpha = _e27;
+    }
+    let _e30 = params.n;
+    if (_e8 >= _e30) {
+        return;
+    }
+    let _e34 = alpha;
+    let _e37 = p[_e8];
+    let _e39 = x[_e8];
+    x[_e8] = (_e39 + (_e34 * _e37));
+    let _e43 = alpha;
+    let _e46 = v[_e8];
+    let _e48 = r[_e8];
+    r[_e8] = (_e48 - (_e43 * _e46));
     return;
 }
 
@@ -31077,27 +31092,31 @@ fn cg_update_x_r(@builtin(global_invocation_id) global_id_1: vec3<u32>, @builtin
 fn cg_update_p(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
     var beta: f32 = 0f;
 
-    let _e3 = global_index(global_id_2, num_workgroups_2);
-    let _e6 = scalars.rho_old;
-    if (abs(_e6) >= 0.00000000000000000001f) {
-        let _e12 = scalars.rho_new;
-        let _e15 = scalars.rho_old;
-        beta = (_e12 / _e15);
-    }
-    if (_e3 == 0u) {
-        let _e22 = beta;
-        scalars.beta = _e22;
-        let _e27 = scalars.rho_new;
-        scalars.rho_old = _e27;
-    }
-    let _e30 = params.n;
-    if (_e3 >= _e30) {
+    let _e3 = scalars.stop;
+    if (_e3 > 0.5f) {
         return;
     }
-    let _e36 = r[_e3];
-    let _e37 = beta;
-    let _e40 = p[_e3];
-    p[_e3] = (_e36 + (_e37 * _e40));
+    let _e8 = global_index(global_id_2, num_workgroups_2);
+    let _e11 = scalars.rho_old;
+    if (abs(_e11) >= 0.00000000000000000001f) {
+        let _e17 = scalars.rho_new;
+        let _e20 = scalars.rho_old;
+        beta = (_e17 / _e20);
+    }
+    if (_e8 == 0u) {
+        let _e27 = beta;
+        scalars.beta = _e27;
+        let _e32 = scalars.rho_new;
+        scalars.rho_old = _e32;
+    }
+    let _e35 = params.n;
+    if (_e8 >= _e35) {
+        return;
+    }
+    let _e41 = r[_e8];
+    let _e42 = beta;
+    let _e45 = p[_e8];
+    p[_e8] = (_e41 + (_e42 * _e45));
     return;
 }
 "#;
@@ -31414,6 +31433,8 @@ pub mod scalars {
         pub r0_v: f32,
         #[doc = "offset: 20, size: 4, type: `f32`"]
         pub r_r: f32,
+        #[doc = "offset: 24, size: 4, type: `f32`"]
+        pub stop: f32,
     }
     impl GpuScalars {
         pub const fn new(
@@ -31423,6 +31444,7 @@ pub mod scalars {
             beta: f32,
             r0_v: f32,
             r_r: f32,
+            stop: f32,
         ) -> Self {
             Self {
                 rho_old,
@@ -31431,6 +31453,7 @@ pub mod scalars {
                 beta,
                 r0_v,
                 r_r,
+                stop,
             }
         }
     }
@@ -31669,6 +31692,7 @@ struct GpuScalars {
     beta: f32,
     r0_v: f32,
     r_r: f32,
+    stop: f32,
 }
 
 struct ReduceParams {
@@ -31694,65 +31718,69 @@ fn reduce_rho_new_r_r(@builtin(local_invocation_id) local_id: vec3<u32>) {
     var i: u32;
     var i_1: u32 = 32u;
 
+    let _e4 = scalars.stop;
+    if (_e4 > 0.5f) {
+        return;
+    }
     let n = params.num_groups;
     let lid = local_id.x;
     i = lid;
     loop {
-        let _e8 = i;
-        if (_e8 < n) {
+        let _e13 = i;
+        if (_e13 < n) {
         } else {
             break;
         }
         {
-            let _e12 = i;
-            let _e14 = dot_result_1_[_e12];
-            let _e15 = sum1_;
-            sum1_ = (_e15 + _e14);
-            let _e19 = i;
-            let _e21 = dot_result_2_[_e19];
-            let _e22 = sum2_;
-            sum2_ = (_e22 + _e21);
+            let _e17 = i;
+            let _e19 = dot_result_1_[_e17];
+            let _e20 = sum1_;
+            sum1_ = (_e20 + _e19);
+            let _e24 = i;
+            let _e26 = dot_result_2_[_e24];
+            let _e27 = sum2_;
+            sum2_ = (_e27 + _e26);
         }
         continuing {
-            let _e25 = i;
-            i = (_e25 + 64u);
+            let _e30 = i;
+            i = (_e30 + 64u);
         }
     }
-    let _e29 = sum1_;
-    scratch1_[lid] = _e29;
-    let _e32 = sum2_;
-    scratch2_[lid] = _e32;
+    let _e34 = sum1_;
+    scratch1_[lid] = _e34;
+    let _e37 = sum2_;
+    scratch2_[lid] = _e37;
     workgroupBarrier();
     loop {
-        let _e34 = i_1;
-        if (_e34 > 0u) {
+        let _e39 = i_1;
+        if (_e39 > 0u) {
         } else {
             break;
         }
         {
-            let _e37 = i_1;
-            if (lid < _e37) {
-                let _e42 = i_1;
-                let _e45 = scratch1_[(lid + _e42)];
-                let _e46 = scratch1_[lid];
-                scratch1_[lid] = (_e46 + _e45);
-                let _e51 = i_1;
-                let _e54 = scratch2_[(lid + _e51)];
-                let _e55 = scratch2_[lid];
-                scratch2_[lid] = (_e55 + _e54);
+            let _e42 = i_1;
+            if (lid < _e42) {
+                let _e47 = i_1;
+                let _e50 = scratch1_[(lid + _e47)];
+                let _e51 = scratch1_[lid];
+                scratch1_[lid] = (_e51 + _e50);
+                let _e56 = i_1;
+                let _e59 = scratch2_[(lid + _e56)];
+                let _e60 = scratch2_[lid];
+                scratch2_[lid] = (_e60 + _e59);
             }
             workgroupBarrier();
         }
         continuing {
-            let _e58 = i_1;
-            i_1 = (_e58 >> 1u);
+            let _e63 = i_1;
+            i_1 = (_e63 >> 1u);
         }
     }
     if (lid == 0u) {
-        let _e66 = scratch1_[0];
-        scalars.rho_new = _e66;
-        let _e71 = scratch2_[0];
-        scalars.r_r = _e71;
+        let _e71 = scratch1_[0];
+        scalars.rho_new = _e71;
+        let _e76 = scratch2_[0];
+        scalars.r_r = _e76;
         return;
     } else {
         return;
@@ -31765,53 +31793,57 @@ fn reduce_r0_v(@builtin(local_invocation_id) local_id_1: vec3<u32>) {
     var i_2: u32;
     var i_3: u32 = 32u;
 
+    let _e4 = scalars.stop;
+    if (_e4 > 0.5f) {
+        return;
+    }
     let n_1 = params.num_groups;
     let lid_1 = local_id_1.x;
     i_2 = lid_1;
     loop {
-        let _e8 = i_2;
-        if (_e8 < n_1) {
+        let _e13 = i_2;
+        if (_e13 < n_1) {
         } else {
             break;
         }
         {
-            let _e12 = i_2;
-            let _e14 = dot_result_1_[_e12];
-            let _e15 = sum;
-            sum = (_e15 + _e14);
+            let _e17 = i_2;
+            let _e19 = dot_result_1_[_e17];
+            let _e20 = sum;
+            sum = (_e20 + _e19);
         }
         continuing {
-            let _e18 = i_2;
-            i_2 = (_e18 + 64u);
+            let _e23 = i_2;
+            i_2 = (_e23 + 64u);
         }
     }
-    let _e22 = sum;
-    scratch1_[lid_1] = _e22;
+    let _e27 = sum;
+    scratch1_[lid_1] = _e27;
     workgroupBarrier();
     loop {
-        let _e24 = i_3;
-        if (_e24 > 0u) {
+        let _e29 = i_3;
+        if (_e29 > 0u) {
         } else {
             break;
         }
         {
-            let _e27 = i_3;
-            if (lid_1 < _e27) {
-                let _e32 = i_3;
-                let _e35 = scratch1_[(lid_1 + _e32)];
-                let _e36 = scratch1_[lid_1];
-                scratch1_[lid_1] = (_e36 + _e35);
+            let _e32 = i_3;
+            if (lid_1 < _e32) {
+                let _e37 = i_3;
+                let _e40 = scratch1_[(lid_1 + _e37)];
+                let _e41 = scratch1_[lid_1];
+                scratch1_[lid_1] = (_e41 + _e40);
             }
             workgroupBarrier();
         }
         continuing {
-            let _e39 = i_3;
-            i_3 = (_e39 >> 1u);
+            let _e44 = i_3;
+            i_3 = (_e44 >> 1u);
         }
     }
     if (lid_1 == 0u) {
-        let _e47 = scratch1_[0];
-        scalars.r0_v = _e47;
+        let _e52 = scratch1_[0];
+        scalars.r0_v = _e52;
         return;
     } else {
         return;
@@ -31873,6 +31905,7 @@ fn init_cg_scalars(@builtin(local_invocation_id) local_id_2: vec3<u32>) {
         scalars.rho_old = _e47;
         scalars.alpha = 0f;
         scalars.beta = 0f;
+        scalars.stop = 0f;
         return;
     } else {
         return;

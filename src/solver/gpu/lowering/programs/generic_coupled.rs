@@ -12,7 +12,8 @@ use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, RuntimeDims}
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_solver::{
-    solve_fgmres, submit_solve_fgmres_fixed_iterations_chunked, SolveFgmresArgs,
+    solve_fgmres, submit_solve_cg_fixed_iterations_chunked,
+    submit_solve_fgmres_fixed_iterations_chunked, SolveFgmresArgs,
 };
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::modules::runtime_preconditioner::{
@@ -322,6 +323,8 @@ struct OuterAdaptiveGate {
     gate_bg: wgpu::BindGroup,
     /// STOP-inject kernel pipeline (writes break_status into FGMRES scalars[SCALAR_STOP])
     stop_inject_pipeline: wgpu::ComputePipeline,
+    /// STOP-inject kernel pipeline for CG (writes break_status into CG scalars[CG_SCALAR_STOP])
+    cg_stop_inject_pipeline: wgpu::ComputePipeline,
     /// Indirect dispatch args for Cells-dispatched kernels (3 × u32)
     b_indirect_args_cells: std::sync::Arc<wgpu::Buffer>,
     /// Indirect dispatch args for Faces-dispatched kernels (3 × u32)
@@ -457,10 +460,28 @@ impl OuterAdaptiveGate {
                 cache: None,
             });
 
+        // STOP-inject pipeline for CG (same shader, different scalar offset)
+        let cg_stop_inject_src =
+            OUTER_STOP_INJECT_WGSL.replace("{SCALAR_STOP}", &format!("{CG_SCALAR_STOP}"));
+        let cg_stop_inject_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("outer_gate:cg_stop_inject"),
+            source: wgpu::ShaderSource::Wgsl(cg_stop_inject_src.into()),
+        });
+        let cg_stop_inject_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("outer_gate:cg_stop_inject"),
+                layout: None,
+                module: &cg_stop_inject_module,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+
         Self {
             gate_pipeline,
             gate_bg,
             stop_inject_pipeline,
+            cg_stop_inject_pipeline,
             b_indirect_args_cells,
             b_indirect_args_faces,
             b_iter_counter,
@@ -516,10 +537,51 @@ impl OuterAdaptiveGate {
         pass.set_bind_group(0, stop_inject_bg, &[]);
         pass.dispatch_workgroups(1, 1, 1);
     }
+
+    /// Create a bind group for the CG STOP-inject kernel with a specific CG scalars buffer.
+    fn create_stop_inject_bind_group_cg(
+        &self,
+        device: &wgpu::Device,
+        b_break_status: &wgpu::Buffer,
+        b_scalars: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        let bgl = self.cg_stop_inject_pipeline.get_bind_group_layout(0);
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("outer_gate:cg_stop_inject_bg"),
+            layout: &bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: b_break_status.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b_scalars.as_entire_binding(),
+                },
+            ],
+        })
+    }
+
+    /// Encode the CG STOP-inject kernel dispatch into a command encoder.
+    fn encode_stop_inject_cg_into(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        stop_inject_bg: &wgpu::BindGroup,
+    ) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("outer_gate:cg_stop_inject"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&self.cg_stop_inject_pipeline);
+        pass.set_bind_group(0, stop_inject_bg, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
 }
 
 /// Constant for FGMRES scalar STOP index, used in STOP-inject WGSL.
 use crate::solver::gpu::linear_solver::fgmres::FGMRES_SCALAR_STOP;
+/// Constant for CG scalar STOP index, used in STOP-inject WGSL.
+use crate::solver::gpu::modules::scalar_cg::CG_SCALAR_STOP;
 
 struct OuterConvergenceMonitor {
     target_names: Vec<String>,
@@ -2259,9 +2321,9 @@ fn try_host_coupled_batch_tail_one_submission(
     let iter_counter_buf: Option<std::sync::Arc<wgpu::Buffer>>;
     {
         let r = res_mut(plan);
-        let max_restart = match r.linear_solver.solver_type {
-            LinearSolverType::Fgmres { max_restart } => max_restart.max(1),
-            _ => return false,
+        let (max_restart, solver_is_cg) = match r.linear_solver.solver_type {
+            LinearSolverType::Fgmres { max_restart } => (max_restart.max(1), false),
+            LinearSolverType::Cg => (0, true),
         };
 
         // Split borrows: we need mutable access to the solver (schur or krylov)
@@ -2317,16 +2379,20 @@ fn try_host_coupled_batch_tail_one_submission(
             let zero: u32 = 0;
             queue.write_buffer(&gate.b_iter_counter, 0, bytemuck::bytes_of(&zero));
 
-            // Create STOP-inject bind group from the FGMRES scalars buffer
-            let b_scalars = if let Some(schur) = &r.schur {
-                schur.solver.fgmres.scalars_buffer()
-            } else if let Some(krylov) = &r.krylov {
-                krylov.solver.fgmres.scalars_buffer()
+            // Create STOP-inject bind group from the solver's scalars buffer
+            let stop_inject_bg = if solver_is_cg {
+                let b_scalars = r.runtime.scalar_cg.scalars();
+                gate.create_stop_inject_bind_group_cg(&device, &monitor.b_break_status, b_scalars)
             } else {
-                return false;
+                let b_scalars = if let Some(schur) = &r.schur {
+                    schur.solver.fgmres.scalars_buffer()
+                } else if let Some(krylov) = &r.krylov {
+                    krylov.solver.fgmres.scalars_buffer()
+                } else {
+                    return false;
+                };
+                gate.create_stop_inject_bind_group(&device, &monitor.b_break_status, b_scalars)
             };
-            let stop_inject_bg =
-                gate.create_stop_inject_bind_group(&device, &monitor.b_break_status, b_scalars);
 
             Some((
                 assembly_graph_indirect,
@@ -2348,8 +2414,13 @@ fn try_host_coupled_batch_tail_one_submission(
             let mut pre = |encoder: &mut wgpu::CommandEncoder| {
                 if let Some((ref asm_indirect, _, _, ref stop_bg)) = adaptive_resources {
                     if is_indirect {
-                        // Inject STOP scalar so FGMRES becomes zero-cost when converged
-                        r.outer_gate.as_ref().unwrap().encode_stop_inject_into(encoder, stop_bg);
+                        // Inject STOP scalar so the linear solver becomes zero-cost when converged
+                        let gate = r.outer_gate.as_ref().unwrap();
+                        if solver_is_cg {
+                            gate.encode_stop_inject_cg_into(encoder, stop_bg);
+                        } else {
+                            gate.encode_stop_inject_into(encoder, stop_bg);
+                        }
                         asm_indirect.encode_into(encoder, kernels, runtime_dims);
                         return;
                     }
@@ -2410,6 +2481,16 @@ fn try_host_coupled_batch_tail_one_submission(
                         precond_label: "generic_coupled:fgmres(batch_tail)",
                         use_encoded_seed_basis0: true,
                     },
+                    &mut pre,
+                    &mut post,
+                );
+                encoded_tail_stats.push(stats);
+            } else if solver_is_cg {
+                let stats = submit_solve_cg_fixed_iterations_chunked(
+                    &r.runtime.scalar_cg,
+                    &context,
+                    n,
+                    max_iters,
                     &mut pre,
                     &mut post,
                 );

@@ -235,8 +235,8 @@ Currently the one-submission path is gated behind `!outer_break_enabled`
 
 #### 5E: Solver Generality (P2 — needed for non-FGMRES models)
 
-- [ ] Add an `encode_solve_cg_fixed_iterations` function (analogous to `encode_solve_fgmres_fixed_iterations`) for the CG linear solver path (`src/solver/gpu/modules/scalar_cg.rs`).
-- [ ] Remove the `LinearSolverType::Fgmres` guard in `encode_linear_solve_fixed_into_one_submission` (`generic_coupled.rs:1868-1870`) and dispatch to the appropriate encoded solver.
+- [x] Add an `encode_solve_cg_fixed_iterations` function (analogous to `encode_solve_fgmres_fixed_iterations`) for the CG linear solver path (`src/solver/gpu/modules/scalar_cg.rs`).
+- [x] Remove the `LinearSolverType::Fgmres` guard in `try_host_coupled_batch_tail_one_submission` (`generic_coupled.rs`) and dispatch to the appropriate encoded solver (CG or FGMRES). CG path uses `submit_solve_cg_fixed_iterations_chunked` with full stop-flag parity (adaptive outer break zeros out CG work via `scalars.stop`).
 
 #### 5F: Default Promotion and Cleanup (P3 — final rollout)
 

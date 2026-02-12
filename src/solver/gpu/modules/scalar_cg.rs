@@ -6,6 +6,9 @@ use crate::solver::gpu::structs::{LinearSolverStats, SolverParams};
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
 
+/// Index of the `stop` field within the CG `GpuScalars` struct (byte offset = 6 * 4 = 24).
+pub const CG_SCALAR_STOP: usize = 6;
+
 /// Input resources for constructing a [`ScalarCgModule`].
 pub struct ScalarCgModuleInputs<'a> {
     pub capacity: u32,
@@ -336,6 +339,208 @@ impl ScalarCgModule {
 
         stats.time = start.elapsed();
         stats
+    }
+
+    /// Encode a fixed-iteration CG solve into a caller-provided command encoder.
+    ///
+    /// Unlike [`solve`], this does **not** read back residuals between iterations
+    /// and does **not** submit.  All CG iterations (init + `max_iters` iteration
+    /// bodies) are recorded into `encoder`.  The caller is responsible for
+    /// submitting the encoder and reading back stats via [`read_last_cg_stats`].
+    ///
+    /// `params_already_written` should be `false` for the first chunk of a
+    /// chunked solve and `true` for subsequent chunks (params and init are only
+    /// needed once).
+    pub fn encode_solve_cg_fixed_iterations(
+        &self,
+        context: &GpuContext,
+        encoder: &mut wgpu::CommandEncoder,
+        n: u32,
+        max_iters: u32,
+        include_init: bool,
+        capture_scalars: bool,
+    ) {
+        if n > self.capacity {
+            panic!(
+                "requested solve size {} exceeds allocated size {}",
+                n, self.capacity
+            );
+        }
+
+        let num_groups = n.div_ceil(Self::WORKGROUP_SIZE);
+        let (dispatch_x, dispatch_y) = dispatch_2d(num_groups);
+        let buffer_size = (n as u64) * 4;
+
+        if include_init {
+            // Write solver params before encoding (constant across all iterations).
+            let params = SolverParams {
+                n,
+                num_groups,
+                padding: [0; 2],
+            };
+            context
+                .queue
+                .write_buffer(&self.b_solver_params, 0, bytemuck::bytes_of(&params));
+
+            // Zero the solution vector.
+            encoder.clear_buffer(&self.b_x, 0, None);
+
+            // Initial copies: rhs -> r, rhs -> p, rhs -> r0
+            encoder.copy_buffer_to_buffer(&self.b_rhs, 0, &self.b_r, 0, buffer_size);
+            encoder.copy_buffer_to_buffer(&self.b_rhs, 0, &self.b_p, 0, buffer_size);
+            encoder.copy_buffer_to_buffer(&self.b_rhs, 0, &self.b_r0, 0, buffer_size);
+
+            // Init passes: dot(r, r) then reduce to set rho_old + clear alpha/beta/stop
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("CG encode: init dot r.r"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipeline_dot);
+                pass.set_bind_group(0, &self.bg_dot_params, &[]);
+                pass.set_bind_group(1, &self.bg_dot_r_r, &[]);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            }
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("CG encode: init reduce"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipeline_init_cg_scalars);
+                pass.set_bind_group(0, &self.bg_scalars, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+        }
+
+        // Unroll the iteration loop: each iteration encodes 7 compute passes + 1 buffer copy.
+        for _iter in 0..max_iters {
+            // 1. SpMV: v = A * p
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("CG encode: spmv p->v"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipeline_spmv_p_v);
+                pass.set_bind_group(0, &self.bg_linear_state, &[]);
+                pass.set_bind_group(1, &self.bg_linear_matrix, &[]);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            }
+
+            // 2. Dot: partial dot products p.v
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("CG encode: dot p.v"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipeline_dot);
+                pass.set_bind_group(0, &self.bg_dot_params, &[]);
+                pass.set_bind_group(1, &self.bg_dot_p_v, &[]);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            }
+
+            // 3. Reduce r0_v (= p.v)
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("CG encode: reduce r0_v"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipeline_reduce_r0_v);
+                pass.set_bind_group(0, &self.bg_scalars, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+
+            // 4. Update x and r: x += alpha*p, r -= alpha*v
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("CG encode: update x,r"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipeline_cg_update_x_r);
+                pass.set_bind_group(0, &self.bg_linear_state, &[]);
+                pass.set_bind_group(1, &self.bg_linear_matrix, &[]);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            }
+
+            // 5. Copy r -> r0
+            encoder.copy_buffer_to_buffer(&self.b_r, 0, &self.b_r0, 0, buffer_size);
+
+            // 6. Dual dot: partial dot products (r0.r, r.r)
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("CG encode: dot pair r0r rr"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipeline_dot_pair);
+                pass.set_bind_group(0, &self.bg_dot_params, &[]);
+                pass.set_bind_group(1, &self.bg_dot_pair_r0r_rr, &[]);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            }
+
+            // 7. Reduce rho_new and r_r
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("CG encode: reduce rho_new"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipeline_reduce_rho_new_r_r);
+                pass.set_bind_group(0, &self.bg_scalars, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+
+            // 8. Update p: p = r + beta*p, update rho_old = rho_new
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("CG encode: update p"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipeline_cg_update_p);
+                pass.set_bind_group(0, &self.bg_linear_state, &[]);
+                pass.set_bind_group(1, &self.bg_linear_matrix, &[]);
+                pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            }
+        }
+
+        // Copy scalars to staging so the caller can read back the residual
+        // after submission.
+        if capture_scalars {
+            encoder.copy_buffer_to_buffer(&self.b_scalars, 0, &self.b_staging_scalar, 0, 64);
+        }
+    }
+
+    /// Read back CG solver stats from the staging buffer after submission.
+    ///
+    /// This mirrors [`KrylovSolveModule::read_last_solver_stats`] but reads from
+    /// the CG scalars layout (`values[5]` = `r_r` = residual norm squared).
+    pub fn read_last_cg_stats(
+        &self,
+        context: &GpuContext,
+        submission_index: wgpu::SubmissionIndex,
+        iterations: u32,
+        time: std::time::Duration,
+    ) -> LinearSolverStats {
+        let slice = self.b_staging_scalar.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
+        let _ = context.device.poll(wgpu::PollType::Wait {
+            submission_index: Some(submission_index),
+            timeout: None,
+        });
+        rx.recv().unwrap().unwrap();
+        let data = slice.get_mapped_range();
+        let values: &[f32] = bytemuck::cast_slice(&data);
+        let r_r = values.get(5).copied().unwrap_or(0.0);
+        drop(data);
+        self.b_staging_scalar.unmap();
+
+        let residual = r_r.abs().sqrt();
+        LinearSolverStats {
+            iterations,
+            residual,
+            converged: residual.is_finite(),
+            diverged: !residual.is_finite(),
+            time,
+            ..LinearSolverStats::default()
+        }
     }
 
     fn update_params(&self, context: &GpuContext, n: u32) -> u32 {

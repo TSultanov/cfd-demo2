@@ -20,6 +20,7 @@ struct GpuScalars {
     beta: f32,
     r0_v: f32,
     r_r: f32,
+    stop: f32,
 }
 @group(1) @binding(3) var<storage, read_write> scalars: GpuScalars;
 
@@ -40,6 +41,9 @@ fn spmv_p_v(
     @builtin(global_invocation_id) global_id: vec3<u32>,
     @builtin(num_workgroups) num_workgroups: vec3<u32>,
 ) {
+    if (scalars.stop > 0.5) {
+        return;
+    }
     let row = global_index(global_id, num_workgroups);
     if (row >= params.n) {
         return;
@@ -64,6 +68,9 @@ fn cg_update_x_r(
     @builtin(global_invocation_id) global_id: vec3<u32>,
     @builtin(num_workgroups) num_workgroups: vec3<u32>,
 ) {
+    if (scalars.stop > 0.5) {
+        return;
+    }
     let idx = global_index(global_id, num_workgroups);
 
     var alpha = 0.0;
@@ -89,6 +96,9 @@ fn cg_update_p(
     @builtin(global_invocation_id) global_id: vec3<u32>,
     @builtin(num_workgroups) num_workgroups: vec3<u32>,
 ) {
+    if (scalars.stop > 0.5) {
+        return;
+    }
     let idx = global_index(global_id, num_workgroups);
 
     var beta = 0.0;

@@ -595,3 +595,91 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: FgmresPreconditionerModul
         LinearSolverStats::max_iterations(encoded_total as u32, f32::INFINITY, start.elapsed())
     }
 }
+
+/// Default number of CG iterations per submission chunk.
+///
+/// This is analogous to the FGMRES restart-budget chunking: splitting many
+/// iterations across separate command-buffer submissions avoids Metal backend
+/// hangs when tens of thousands of compute dispatches are recorded into one
+/// command buffer.
+const DEFAULT_CG_CHUNK_SIZE: usize = 50;
+
+/// Submit a fixed-iteration CG solve in chunked submissions, with assembly/update
+/// callbacks analogous to [`submit_solve_fgmres_fixed_iterations_chunked`].
+///
+/// Each chunk gets its own encoder → submit cycle.  `pre_encode` is called on the
+/// first chunk's encoder (to record assembly dispatches) and `post_encode` is called
+/// on the last chunk's encoder (to record update dispatches).
+pub fn submit_solve_cg_fixed_iterations_chunked(
+    cg: &crate::solver::gpu::modules::scalar_cg::ScalarCgModule,
+    context: &GpuContext,
+    n: u32,
+    max_iters: u32,
+    pre_encode: &mut dyn FnMut(&mut wgpu::CommandEncoder),
+    post_encode: &mut dyn FnMut(&mut wgpu::CommandEncoder),
+) -> LinearSolverStats {
+    let start = Instant::now();
+    let max_iters = max_iters.max(1) as usize;
+
+    let chunk_size = std::env::var("CFD2_ONE_SUBMISSION_CG_CHUNK_SIZE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_CG_CHUNK_SIZE)
+        .max(1);
+
+    // Build chunk layout.
+    let mut chunk_sizes: Vec<usize> = Vec::new();
+    let mut remaining = max_iters;
+    while remaining > 0 {
+        let chunk = chunk_size.min(remaining).max(1);
+        chunk_sizes.push(chunk);
+        remaining -= chunk;
+    }
+
+    let num_chunks = chunk_sizes.len();
+    let mut last_submission_index: Option<wgpu::SubmissionIndex> = None;
+
+    for (chunk_idx, &iters_in_chunk) in chunk_sizes.iter().enumerate() {
+        let is_first_chunk = chunk_idx == 0;
+        let is_last_chunk = chunk_idx + 1 == num_chunks;
+
+        let mut encoder = context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("cg:one_submission_chunk"),
+            });
+
+        // Assembly: prepend to the first chunk.
+        if is_first_chunk {
+            pre_encode(&mut encoder);
+        }
+
+        // Encode CG iterations for this chunk.
+        cg.encode_solve_cg_fixed_iterations(
+            context,
+            &mut encoder,
+            n,
+            iters_in_chunk as u32,
+            is_first_chunk, // include_init only on first chunk
+            is_last_chunk,  // capture_scalars only on last chunk
+        );
+
+        // Update: append to the last chunk.
+        if is_last_chunk {
+            post_encode(&mut encoder);
+        }
+
+        let sub_idx = context.queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Generic Coupled", "cg:one_submission_chunk");
+        if is_last_chunk {
+            last_submission_index = Some(sub_idx);
+        }
+    }
+
+    // Read back solver scalars from the last chunk.
+    if let Some(sub_idx) = last_submission_index {
+        cg.read_last_cg_stats(context, sub_idx, max_iters as u32, start.elapsed())
+    } else {
+        LinearSolverStats::max_iterations(max_iters as u32, f32::INFINITY, start.elapsed())
+    }
+}

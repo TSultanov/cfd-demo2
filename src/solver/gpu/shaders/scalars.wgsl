@@ -5,6 +5,7 @@ struct GpuScalars {
     beta: f32,
     r0_v: f32,
     r_r: f32,
+    stop: f32,
 }
 
 @group(0) @binding(0) var<storage, read_write> scalars: GpuScalars;
@@ -22,6 +23,9 @@ var<workgroup> scratch2: array<f32, 64>;
 
 @compute @workgroup_size(64)
 fn reduce_rho_new_r_r(@builtin(local_invocation_id) local_id: vec3<u32>) {
+    if (scalars.stop > 0.5) {
+        return;
+    }
     let n = params.num_groups;
     let lid = local_id.x;
     
@@ -53,6 +57,9 @@ fn reduce_rho_new_r_r(@builtin(local_invocation_id) local_id: vec3<u32>) {
 
 @compute @workgroup_size(64)
 fn reduce_r0_v(@builtin(local_invocation_id) local_id: vec3<u32>) {
+    if (scalars.stop > 0.5) {
+        return;
+    }
     let n = params.num_groups;
     let lid = local_id.x;
     
@@ -100,5 +107,6 @@ fn init_cg_scalars(@builtin(local_invocation_id) local_id: vec3<u32>) {
         scalars.rho_old = scratch1[0];
         scalars.alpha = 0.0;
         scalars.beta = 0.0;
+        scalars.stop = 0.0;
     }
 }

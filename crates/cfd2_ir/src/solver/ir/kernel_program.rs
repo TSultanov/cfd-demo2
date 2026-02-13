@@ -118,6 +118,11 @@ pub struct KernelProgram {
     pub dispatch: DispatchDomain,
     pub launch: LaunchSemantics,
     pub bindings: Vec<KernelBinding>,
+    /// Module-level helper function definitions emitted before `fn main()`.
+    ///
+    /// Each entry is a complete WGSL function definition (including `fn` keyword and body).
+    /// During fusion, helper functions from all programs are merged (deduplicated by content).
+    pub helper_functions: Vec<String>,
     pub preamble: Vec<String>,
     pub indexing: Vec<String>,
     pub body: Vec<String>,
@@ -141,6 +146,7 @@ impl KernelProgram {
             dispatch,
             launch,
             bindings,
+            helper_functions: Vec::new(),
             preamble: Vec::new(),
             indexing: Vec::new(),
             body: Vec::new(),

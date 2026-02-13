@@ -94,14 +94,17 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                 KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE,
                 crate::solver::model::kernel::generate_generic_coupled_assembly_grad_state_kernel_program,
             ),
-            ModelKernelGeneratorSpec::new_shared(
+            ModelKernelGeneratorSpec::new_shared_dsl(
                 KernelId::GENERIC_COUPLED_APPLY,
                 |_model, _schemes| {
                     // Shared kernel must use canonical EOS params to generate
                     // identical WGSL across all models
                     let eos_params = crate::solver::model::modules::eos_ports::eos_uniform_port_manifest()
                         .params;
-                    Ok(cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_wgsl(&eos_params))
+                    cfd2_codegen::solver::codegen::generic_coupled_kernels::generate_generic_coupled_apply_kernel_program(
+                        crate::solver::model::KernelId::GENERIC_COUPLED_APPLY.as_str(),
+                        &eos_params,
+                    )
                 },
             ),
             ModelKernelGeneratorSpec::new_dsl(

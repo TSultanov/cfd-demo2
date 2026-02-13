@@ -105,6 +105,56 @@ pub fn generate_generic_coupled_apply_wgsl(eos_params: &[ParamSpec]) -> KernelWg
     KernelWgsl::from(module)
 }
 
+pub fn generate_generic_coupled_apply_kernel_program(
+    id: &str,
+    eos_params: &[ParamSpec],
+) -> Result<KernelProgram, String> {
+    let items = base_apply_items(eos_params);
+    let bindings = kernel_bindings_from_items(&items)?;
+    // Build the apply function using `idx` as the index variable directly,
+    // matching the KernelProgram lowerer's convention (`let idx = ...`).
+    let main = main_apply_fn_with_index_var("idx");
+
+    // The apply function uses:
+    //   stmt 0: let idx = global_id.y * constants.stride_x + global_id.x   (launch index)
+    //   stmt 1: let n = arrayLength(&row_offsets) - 1u                      (bounds value)
+    //   stmt 2: if (idx >= n) { return; }                                   (bounds guard)
+    //   stmts 3..: body
+    let idx_expr = match main.body.stmts.first() {
+        Some(Stmt::Let { expr, .. }) => expr.to_string(),
+        _ => {
+            return Err(
+                "generic_coupled_apply: expected first statement to define idx launch expression"
+                    .to_string(),
+            );
+        }
+    };
+    let bounds_expr = match main.body.stmts.get(1) {
+        Some(Stmt::Let { expr, .. }) => expr.to_string(),
+        _ => {
+            return Err(
+                "generic_coupled_apply: expected second statement to define n bounds".to_string(),
+            );
+        }
+    };
+
+    let launch = LaunchSemantics::new(
+        [GENERIC_COUPLED_WORKGROUP_SIZE, 1, 1],
+        idx_expr,
+        Some(format!("idx >= ({bounds_expr})")),
+    );
+
+    let kernel_stmts = &main.body.stmts[3..];
+    let body_lines = super::wgsl_ast::render_stmt_lines(kernel_stmts);
+    let local_symbols = super::wgsl_ast::collect_local_symbols(kernel_stmts);
+
+    let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
+    program.body = body_lines;
+    program.local_symbols = local_symbols;
+    program.eos_params = eos_params.to_vec();
+    Ok(program)
+}
+
 fn base_mesh_items(eos_params: &[ParamSpec]) -> Vec<Item> {
     vec![
         Item::Struct(vector2_struct()),
@@ -173,7 +223,7 @@ fn base_mesh_items(eos_params: &[ParamSpec]) -> Vec<Item> {
     ]
 }
 
-fn kernel_bindings_from_items(items: &[Item]) -> Result<Vec<KernelBinding>, String> {
+pub fn kernel_bindings_from_items(items: &[Item]) -> Result<Vec<KernelBinding>, String> {
     let mut bindings = Vec::new();
     for item in items {
         let Item::GlobalVar(var) = item else {
@@ -985,6 +1035,10 @@ fn main_update_fn(
 }
 
 fn main_apply_fn() -> Function {
+    main_apply_fn_with_index_var("row")
+}
+
+fn main_apply_fn_with_index_var(index_var: &str) -> Function {
     let params = vec![Param::new(
         "global_id",
         Type::vec3_u32(),
@@ -993,7 +1047,7 @@ fn main_apply_fn() -> Function {
 
     let mut stmts = vec![
         dsl::let_expr(
-            "row",
+            index_var,
             Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
                 + Expr::ident("global_id").field("x"),
         ),
@@ -1002,17 +1056,17 @@ fn main_apply_fn() -> Function {
             Expr::call_named("arrayLength", vec![Expr::ident("row_offsets").addr_of()]) - 1u32,
         ),
         dsl::if_block_expr(
-            Expr::ident("row").ge(Expr::ident("n")),
+            Expr::ident(index_var).ge(Expr::ident("n")),
             dsl::block(vec![Stmt::Return(None)]),
             None,
         ),
         dsl::let_expr(
             "start",
-            dsl::array_access("row_offsets", Expr::ident("row")),
+            dsl::array_access("row_offsets", Expr::ident(index_var)),
         ),
         dsl::let_expr(
             "end",
-            dsl::array_access("row_offsets", Expr::ident("row") + 1u32),
+            dsl::array_access("row_offsets", Expr::ident(index_var) + 1u32),
         ),
         dsl::var_typed_expr("sum", Type::F32, Some(0.0.into())),
         dsl::for_loop_expr(
@@ -1032,7 +1086,7 @@ fn main_apply_fn() -> Function {
         ),
     ];
     stmts.push(dsl::assign_expr(
-        dsl::array_access("y", Expr::ident("row")),
+        dsl::array_access("y", Expr::ident(index_var)),
         Expr::ident("sum"),
     ));
 

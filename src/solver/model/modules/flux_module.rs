@@ -1,13 +1,11 @@
 use crate::solver::ir::{FieldKind, FluxLayout, StateLayout};
-use std::collections::HashSet;
 use crate::solver::model::flux_module::FluxModuleSpec;
 use crate::solver::model::kernel::{
     DispatchKindId, KernelConditionId, KernelPhaseId, ModelKernelGeneratorSpec, ModelKernelSpec,
 };
 use crate::solver::model::module::KernelBundleModule;
 use crate::solver::model::KernelId;
-
-use cfd2_codegen::solver::codegen::KernelWgsl;
+use std::collections::HashSet;
 
 mod wgsl_flux {
     include!("flux_module_wgsl.rs");
@@ -21,7 +19,8 @@ mod resolver_pass {
     include!("flux_module_resolver_pass.rs");
 }
 
-pub(crate) use wgsl_gradients::generate_flux_module_gradients_wgsl;
+use wgsl_flux::generate_flux_module_kernel_program_runtime_scheme;
+use wgsl_gradients::generate_flux_module_gradients_kernel_program;
 
 /// Resolved gradient target for flux module gradients kernel.
 ///
@@ -123,9 +122,10 @@ fn build_resolved_targets(
         let (base_field, base_component) = resolve_base_scalar(&layout_meta, component)?;
 
         // Get base field metadata and compute offset
-        let base_meta = layout_meta.fields_by_name.get(&base_field).ok_or_else(|| {
-            format!("flux_module_gradients: base field '{base_field}' not found")
-        })?;
+        let base_meta = layout_meta
+            .fields_by_name
+            .get(&base_field)
+            .ok_or_else(|| format!("flux_module_gradients: base field '{base_field}' not found"))?;
 
         let base_offset = match base_meta.component_count {
             1 => {
@@ -328,9 +328,9 @@ pub fn flux_module_module(
             dispatch: DispatchKindId::Cells,
             condition: KernelConditionId::Always,
         });
-        out.generators.push(ModelKernelGeneratorSpec::new(
+        out.generators.push(ModelKernelGeneratorSpec::new_dsl(
             KernelId::FLUX_MODULE_GRADIENTS,
-            generate_flux_module_gradients_kernel_wgsl,
+            generate_flux_module_gradients_kernel_program_for_model,
         ));
     }
 
@@ -340,18 +340,18 @@ pub fn flux_module_module(
         dispatch: DispatchKindId::Faces,
         condition: KernelConditionId::Always,
     });
-    out.generators.push(ModelKernelGeneratorSpec::new(
+    out.generators.push(ModelKernelGeneratorSpec::new_dsl(
         KernelId::FLUX_MODULE,
-        generate_flux_module_kernel_wgsl,
+        generate_flux_module_kernel_program_for_model,
     ));
 
     Ok(out)
 }
 
-fn generate_flux_module_gradients_kernel_wgsl(
+fn generate_flux_module_gradients_kernel_program_for_model(
     model: &crate::solver::model::ModelSpec,
     _schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<KernelWgsl, String> {
+) -> Result<cfd2_ir::solver::ir::KernelProgram, String> {
     let flux = model
         .flux_module()
         .map_err(|e| e.to_string())?
@@ -359,7 +359,6 @@ fn generate_flux_module_gradients_kernel_wgsl(
             "flux_module_gradients requested but model has no flux module".to_string()
         })?;
 
-    // Check if gradients are enabled for this flux module
     let has_gradients = match &flux {
         crate::solver::model::flux_module::FluxModuleSpec::Kernel { gradients, .. } => {
             gradients.is_some()
@@ -373,7 +372,6 @@ fn generate_flux_module_gradients_kernel_wgsl(
         return Err("flux_module_gradients requested but model has no gradients stage".to_string());
     }
 
-    // Fetch pre-resolved gradient targets from the flux_module's port_manifest
     let flux_module = model
         .modules
         .iter()
@@ -389,7 +387,6 @@ fn generate_flux_module_gradients_kernel_wgsl(
         return Err("flux_module_gradients: gradient_targets empty in port_manifest".to_string());
     }
 
-    // Convert IR-safe ResolvedGradientTargetSpec to local ResolvedGradientTarget
     let targets: Vec<ResolvedGradientTarget> = port_manifest
         .gradient_targets
         .iter()
@@ -407,11 +404,12 @@ fn generate_flux_module_gradients_kernel_wgsl(
         .collect();
 
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
-    Ok(generate_flux_module_gradients_wgsl(
+    generate_flux_module_gradients_kernel_program(
+        KernelId::FLUX_MODULE_GRADIENTS.as_str(),
         model.state_layout.stride(),
         &flux_layout,
         &targets,
-    ))
+    )
 }
 
 /// Resolve state slots for flux module based on the spec type.
@@ -458,10 +456,10 @@ fn resolve_state_slots_for_flux(
     }
 }
 
-fn generate_flux_module_kernel_wgsl(
+fn generate_flux_module_kernel_program_for_model(
     model: &crate::solver::model::ModelSpec,
     _schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<KernelWgsl, String> {
+) -> Result<cfd2_ir::solver::ir::KernelProgram, String> {
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
     let flux_stride = model.system.unknowns_per_cell();
     let prims = model
@@ -474,7 +472,6 @@ fn generate_flux_module_kernel_wgsl(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "flux_module requested but model has no flux module".to_string())?;
 
-    // Get resolved state slots from port_manifest (populated during module creation)
     let resolved_slots = model
         .modules
         .iter()
@@ -483,19 +480,19 @@ fn generate_flux_module_kernel_wgsl(
         .and_then(|p| p.resolved_state_slots.as_ref())
         .ok_or_else(|| "flux_module port_manifest missing resolved_state_slots".to_string())?;
 
-    // Use shared helper to extract EOS params (handles both compressible and Constant EOS models)
     let eos_params = crate::solver::model::kernel::extract_eos_params(model);
 
     match flux {
         crate::solver::model::flux_module::FluxModuleSpec::Kernel { kernel, .. } => {
-            Ok(wgsl_flux::generate_flux_module_wgsl(
+            wgsl_flux::generate_flux_module_kernel_program(
+                KernelId::FLUX_MODULE.as_str(),
                 resolved_slots,
                 &flux_layout,
                 flux_stride,
                 &prims,
                 kernel,
                 &eos_params,
-            ))
+            )
         }
         crate::solver::model::flux_module::FluxModuleSpec::Scheme { scheme, .. } => {
             use crate::solver::scheme::Scheme;
@@ -521,14 +518,15 @@ fn generate_flux_module_kernel_wgsl(
                 variants.push((reconstruction, kernel));
             }
 
-            Ok(wgsl_flux::generate_flux_module_wgsl_runtime_scheme(
+            generate_flux_module_kernel_program_runtime_scheme(
+                KernelId::FLUX_MODULE.as_str(),
                 resolved_slots,
                 &flux_layout,
                 flux_stride,
                 &prims,
                 &variants,
                 &eos_params,
-            ))
+            )
         }
     }
 }

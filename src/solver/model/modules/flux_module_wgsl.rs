@@ -16,7 +16,9 @@ use cfd2_codegen::solver::codegen::wgsl_bindings::{
     boundary_bindings, low_mach_params_struct, storage_var, uniform_var, vector2_struct,
 };
 use cfd2_codegen::solver::codegen::wgsl_dsl as dsl;
+#[cfg(test)]
 use cfd2_codegen::solver::codegen::KernelWgsl;
+use cfd2_ir::solver::ir::{DispatchDomain, KernelProgram, LaunchSemantics};
 
 /// Build a resolver from ResolvedStateSlotsSpec.
 struct ResolvedSlotResolver {
@@ -46,6 +48,7 @@ impl ResolvedSlotResolver {
     }
 }
 
+#[cfg(test)]
 pub fn generate_flux_module_wgsl(
     resolved_slots: &ResolvedStateSlotsSpec,
     flux_layout: &FluxLayout,
@@ -88,6 +91,7 @@ pub fn generate_flux_module_wgsl(
 /// The per-`Scheme` variants are provided as IR specs. This emits a single WGSL entrypoint that
 /// selects between the variants per face invocation, while guarding boundary faces to remain
 /// first-order.
+#[cfg(test)]
 pub fn generate_flux_module_wgsl_runtime_scheme(
     resolved_slots: &ResolvedStateSlotsSpec,
     flux_layout: &FluxLayout,
@@ -127,6 +131,148 @@ pub fn generate_flux_module_wgsl_runtime_scheme(
         variants,
     )));
     KernelWgsl::from(module)
+}
+
+/// Render the `bc_neighbor_scalar` helper as a standalone WGSL function string.
+fn render_bc_neighbor_scalar_helper() -> String {
+    let mut helper_module = Module::new();
+    helper_module.push(Item::Function(bc_neighbor_scalar_fn()));
+    helper_module.to_wgsl()
+}
+
+/// Extract Pattern B launch semantics from a main function body.
+///
+/// Pattern B:
+///   stmt 0: `let idx = <invocation_index_expr>`
+///   stmt 1: `if (<bounds_check_expr>) { return; }`
+fn extract_launch_pattern_b(main: &Function) -> Result<(LaunchSemantics, usize), String> {
+    let idx_expr = match main.body.stmts.first() {
+        Some(Stmt::Let { name, expr, .. }) if name == "idx" => expr.to_string(),
+        _ => {
+            return Err(
+                "flux_module: expected first statement to define idx launch expression".to_string(),
+            );
+        }
+    };
+
+    let bounds_check = match main.body.stmts.get(1) {
+        Some(Stmt::If {
+            cond,
+            then_block,
+            else_block,
+        }) if else_block.is_none()
+            && then_block.stmts.len() == 1
+            && matches!(then_block.stmts.first(), Some(Stmt::Return(None))) =>
+        {
+            cond.to_string()
+        }
+        _ => {
+            return Err(
+                "flux_module: expected second statement to be bounds guard if-return".to_string(),
+            );
+        }
+    };
+
+    let launch = LaunchSemantics::new([64, 1, 1], idx_expr, Some(bounds_check));
+    Ok((launch, 2))
+}
+
+/// Build a KernelProgram from a single-scheme flux module spec.
+pub fn generate_flux_module_kernel_program(
+    id: &str,
+    resolved_slots: &ResolvedStateSlotsSpec,
+    flux_layout: &FluxLayout,
+    flux_stride: u32,
+    primitives: &[(String, PrimitiveExpr)],
+    spec: &FluxModuleKernelSpec,
+    eos_params: &[ParamSpec],
+) -> Result<KernelProgram, String> {
+    assert!(flux_stride > 0, "flux_module requires flux_stride > 0");
+    assert_eq!(
+        flux_stride, flux_layout.stride,
+        "flux_stride must match FluxLayout.stride"
+    );
+
+    let uses_low_mach = flux_spec_uses_low_mach(spec);
+    let items = base_items(uses_low_mach, eos_params);
+    let bindings =
+        cfd2_codegen::solver::codegen::generic_coupled_kernels::kernel_bindings_from_items(&items)?;
+
+    let primitive_map: HashMap<&str, &PrimitiveExpr> =
+        primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
+
+    let resolver = ResolvedSlotResolver::from_spec(resolved_slots);
+    let resolver_ref: &dyn OffsetResolver = &resolver;
+
+    let main = main_fn(resolver_ref, flux_layout, flux_stride, &primitive_map, spec);
+    let (launch, skip) = extract_launch_pattern_b(&main)?;
+
+    let kernel_stmts = &main.body.stmts[skip..];
+    let body_lines = cfd2_codegen::solver::codegen::wgsl_ast::render_stmt_lines(kernel_stmts);
+    let local_symbols =
+        cfd2_codegen::solver::codegen::wgsl_ast::collect_local_symbols(kernel_stmts);
+
+    let helper = render_bc_neighbor_scalar_helper();
+
+    let mut program = KernelProgram::new(id, DispatchDomain::Faces, launch, bindings);
+    program.helper_functions = vec![helper];
+    program.body = body_lines;
+    program.local_symbols = local_symbols;
+    program.eos_params = eos_params.to_vec();
+    Ok(program)
+}
+
+/// Build a KernelProgram from a runtime-scheme flux module spec.
+pub fn generate_flux_module_kernel_program_runtime_scheme(
+    id: &str,
+    resolved_slots: &ResolvedStateSlotsSpec,
+    flux_layout: &FluxLayout,
+    flux_stride: u32,
+    primitives: &[(String, PrimitiveExpr)],
+    variants: &[(Scheme, FluxModuleKernelSpec)],
+    eos_params: &[ParamSpec],
+) -> Result<KernelProgram, String> {
+    assert!(flux_stride > 0, "flux_module requires flux_stride > 0");
+    assert_eq!(
+        flux_stride, flux_layout.stride,
+        "flux_stride must match FluxLayout.stride"
+    );
+
+    let uses_low_mach = variants
+        .iter()
+        .any(|(_, spec)| flux_spec_uses_low_mach(spec));
+    let items = base_items(uses_low_mach, eos_params);
+    let bindings =
+        cfd2_codegen::solver::codegen::generic_coupled_kernels::kernel_bindings_from_items(&items)?;
+
+    let primitive_map: HashMap<&str, &PrimitiveExpr> =
+        primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
+
+    let resolver = ResolvedSlotResolver::from_spec(resolved_slots);
+    let resolver_ref: &dyn OffsetResolver = &resolver;
+
+    let main = main_fn_runtime_scheme(
+        resolver_ref,
+        flux_layout,
+        flux_stride,
+        &primitive_map,
+        variants,
+    );
+    let (launch, skip) = extract_launch_pattern_b(&main)?;
+
+    let kernel_stmts = &main.body.stmts[skip..];
+    let body_lines = cfd2_codegen::solver::codegen::wgsl_ast::render_stmt_lines(kernel_stmts);
+    let local_symbols =
+        cfd2_codegen::solver::codegen::wgsl_ast::collect_local_symbols(kernel_stmts);
+
+    let helper = render_bc_neighbor_scalar_helper();
+
+    let mut program = KernelProgram::new(id, DispatchDomain::Faces, launch, bindings);
+    program.helper_functions = vec![helper];
+    program.body = body_lines;
+    program.local_symbols = local_symbols;
+    program.eos_params = eos_params.to_vec();
+    Ok(program)
 }
 
 #[cfg(test)]

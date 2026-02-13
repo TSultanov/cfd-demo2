@@ -3,18 +3,21 @@ use crate::solver::model::modules::flux_module::ResolvedGradientTarget;
 use cfd2_codegen::solver::codegen::constants::constants_struct;
 use cfd2_codegen::solver::codegen::dsl as typed;
 use cfd2_codegen::solver::codegen::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt, Type,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Param, Stmt, Type,
 };
 use cfd2_codegen::solver::codegen::wgsl_bindings::{
     boundary_bindings, storage_var, uniform_var, vector2_struct,
 };
 use cfd2_codegen::solver::codegen::wgsl_dsl as dsl;
-use cfd2_codegen::solver::codegen::KernelWgsl;
+#[cfg(test)]
+use cfd2_codegen::solver::codegen::{wgsl_ast::Module, KernelWgsl};
+use cfd2_ir::solver::ir::{DispatchDomain, KernelProgram, LaunchSemantics};
 
 /// Generate flux module gradients WGSL kernel from pre-resolved gradient targets.
 ///
 /// This function no longer scans StateLayout; all offsets and metadata must be
 /// pre-resolved into `targets` via `resolve_flux_module_gradients_targets()`.
+#[cfg(test)]
 pub fn generate_flux_module_gradients_wgsl(
     stride: u32,
     flux_layout: &FluxLayout,
@@ -28,6 +31,68 @@ pub fn generate_flux_module_gradients_wgsl(
     module.extend(base_items());
     module.push(Item::Function(main_fn(stride, flux_layout, targets)));
     KernelWgsl::from(module)
+}
+
+/// Generate a fusion-eligible KernelProgram for the flux module gradients kernel.
+///
+/// This extracts launch semantics from the DSL-generated function body and
+/// packages the remaining statements as KernelProgram body lines.
+pub fn generate_flux_module_gradients_kernel_program(
+    id: &str,
+    stride: u32,
+    flux_layout: &FluxLayout,
+    targets: &[ResolvedGradientTarget],
+) -> Result<KernelProgram, String> {
+    let items = base_items();
+    let bindings =
+        cfd2_codegen::solver::codegen::generic_coupled_kernels::kernel_bindings_from_items(&items)?;
+    let main = main_fn(stride, flux_layout, targets);
+
+    // The gradients function body has this launch pattern:
+    //   stmt 0: let idx = global_id.y * constants.stride_x + global_id.x
+    //   stmt 1: if (idx >= arrayLength(&cell_vols)) { return; }
+    //   stmts 2..: body
+    let idx_expr = match main.body.stmts.first() {
+        Some(Stmt::Let { name, expr, .. }) if name == "idx" => expr.to_string(),
+        _ => {
+            return Err(
+                "flux_module_gradients: expected first statement to define idx launch expression"
+                    .to_string(),
+            );
+        }
+    };
+
+    // Extract bounds check from the if-guard statement
+    let bounds_check = match main.body.stmts.get(1) {
+        Some(Stmt::If {
+            cond,
+            then_block,
+            else_block,
+        }) if else_block.is_none()
+            && then_block.stmts.len() == 1
+            && matches!(then_block.stmts.first(), Some(Stmt::Return(None))) =>
+        {
+            cond.to_string()
+        }
+        _ => {
+            return Err(
+                "flux_module_gradients: expected second statement to be bounds guard if-return"
+                    .to_string(),
+            );
+        }
+    };
+
+    let launch = LaunchSemantics::new([64, 1, 1], idx_expr, Some(bounds_check));
+
+    let kernel_stmts = &main.body.stmts[2..];
+    let body_lines = cfd2_codegen::solver::codegen::wgsl_ast::render_stmt_lines(kernel_stmts);
+    let local_symbols =
+        cfd2_codegen::solver::codegen::wgsl_ast::collect_local_symbols(kernel_stmts);
+
+    let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
+    program.body = body_lines;
+    program.local_symbols = local_symbols;
+    Ok(program)
 }
 
 fn base_items() -> Vec<Item> {

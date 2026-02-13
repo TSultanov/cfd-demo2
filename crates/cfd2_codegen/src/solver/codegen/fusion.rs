@@ -228,9 +228,17 @@ pub fn synthesize_fused_program_with_report_remapped(
     let mut body = Vec::new();
     let mut local_symbols = Vec::new();
     let mut side_effects = SideEffectMetadata::default();
+    let mut helper_functions = Vec::<String>::new();
 
     for (idx, program) in remapped.iter().enumerate() {
         let rename_map = deterministic_symbol_rename_map(idx, &program.local_symbols);
+
+        // Merge helper functions (deduplicate by content).
+        for helper in &program.helper_functions {
+            if !helper_functions.contains(helper) {
+                helper_functions.push(helper.clone());
+            }
+        }
 
         // Preserve per-kernel execution order by emitting each segment's preamble
         // immediately before that same segment's body.
@@ -256,6 +264,7 @@ pub fn synthesize_fused_program_with_report_remapped(
         launch,
         merged_bindings.into_values().collect(),
     );
+    fused.helper_functions = helper_functions;
     fused.indexing = remapped[0].indexing.clone();
     fused.preamble = Vec::new();
     fused.body = body;
@@ -772,7 +781,10 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
     let needs_vector2_struct = by_slot
         .values()
         .any(|binding| binding.wgsl_type.contains("Vector2"));
-    if needs_constants_struct || needs_vector2_struct {
+    let needs_low_mach_params_struct = by_slot
+        .values()
+        .any(|binding| binding.wgsl_type == "LowMachParams");
+    if needs_constants_struct || needs_vector2_struct || needs_low_mach_params_struct {
         let mut shared_structs_module = super::wgsl_ast::Module::new();
         if needs_vector2_struct {
             shared_structs_module.push(super::wgsl_ast::Item::Struct(
@@ -792,6 +804,11 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
             };
             shared_structs_module.push(super::wgsl_ast::Item::Struct(
                 super::constants::constants_struct(&extra_constants),
+            ));
+        }
+        if needs_low_mach_params_struct {
+            shared_structs_module.push(super::wgsl_ast::Item::Struct(
+                super::wgsl_bindings::low_mach_params_struct(),
             ));
         }
         lines.push(shared_structs_module.to_wgsl());
@@ -820,6 +837,14 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
             }
         };
         lines.push(decl);
+    }
+
+    // Emit module-level helper functions between bindings and the compute entry point.
+    if !program.helper_functions.is_empty() {
+        lines.push(String::new());
+        for helper in &program.helper_functions {
+            lines.push(helper.clone());
+        }
     }
 
     lines.push(String::new());

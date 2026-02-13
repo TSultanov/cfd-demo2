@@ -2,6 +2,7 @@ use crate::solver::ir::FluxLayout;
 use crate::solver::model::modules::flux_module::ResolvedGradientTarget;
 use cfd2_codegen::solver::codegen::constants::constants_struct;
 use cfd2_codegen::solver::codegen::dsl as typed;
+use cfd2_codegen::solver::codegen::dsl::XY;
 use cfd2_codegen::solver::codegen::wgsl_ast::{
     AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Param, Stmt, Type,
 };
@@ -410,10 +411,10 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
                     let ny = Expr::ident("normal_vec").field("y");
                     let un = vx * nx + vy * ny;
 
-                    let projected = match target.base_component {
-                        0 => vx - un * nx,
-                        1 => vy - un * ny,
-                        _ => unreachable!("base_component <= 1 guarded above"),
+                    let axis = XY::from_index(target.base_component);
+                    let projected = match axis {
+                        XY::X => vx - un * nx,
+                        XY::Y => vy - un * ny,
                     };
 
                     other_val = dsl::select(other_val, projected, slip_mask);
@@ -457,14 +458,14 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
         ));
 
         let out = Expr::ident(format!("grad_out_{}", target.component));
-        stmts.push(dsl::assign_expr(
-            Expr::ident("state").index(Expr::ident("idx") * stride + target.grad_x_offset),
-            out.field("x"),
-        ));
-        stmts.push(dsl::assign_expr(
-            Expr::ident("state").index(Expr::ident("idx") * stride + target.grad_y_offset),
-            out.field("y"),
-        ));
+        let grad_offsets = [target.grad_x_offset, target.grad_y_offset];
+        for axis in XY::ALL {
+            stmts.push(dsl::assign_expr(
+                Expr::ident("state")
+                    .index(Expr::ident("idx") * stride + grad_offsets[axis.to_usize()]),
+                out.field(axis.suffix()),
+            ));
+        }
     }
 
     Block::new(stmts)

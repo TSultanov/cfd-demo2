@@ -1,5 +1,6 @@
 use super::dsl as typed;
 use super::dsl::EnumExpr;
+use super::dsl::XY;
 use super::wgsl_ast::{Expr, Stmt};
 use super::wgsl_dsl as dsl;
 use crate::solver::ir::reconstruction::{
@@ -310,19 +311,19 @@ pub fn vec2_reconstruction_xy(
     let rec_x = scalar_reconstruction(
         scheme,
         flux,
-        phi_own.component(0),
-        phi_neigh.component(0),
-        grad_own[0],
-        grad_neigh[0],
+        phi_own.component(XY::X.to_usize()),
+        phi_neigh.component(XY::X.to_usize()),
+        grad_own[XY::X.to_usize()],
+        grad_neigh[XY::X.to_usize()],
         geom,
     );
     let rec_y = scalar_reconstruction(
         scheme,
         flux,
-        phi_own.component(1),
-        phi_neigh.component(1),
-        grad_own[1],
-        grad_neigh[1],
+        phi_own.component(XY::Y.to_usize()),
+        phi_neigh.component(XY::Y.to_usize()),
+        grad_own[XY::Y.to_usize()],
+        grad_neigh[XY::Y.to_usize()],
         geom,
     );
 

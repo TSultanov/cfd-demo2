@@ -14,6 +14,38 @@ pub enum XY {
     Y,
 }
 
+impl XY {
+    /// Both variants in index order, useful for iteration.
+    pub const ALL: [XY; 2] = [XY::X, XY::Y];
+
+    /// Convert a numeric component index to the corresponding axis value.
+    ///
+    /// Panics if `index > 1`.
+    pub fn from_index(index: u32) -> Self {
+        match index {
+            0 => XY::X,
+            1 => XY::Y,
+            _ => panic!("XY::from_index({index}): expected 0 or 1"),
+        }
+    }
+
+    /// Return the positional index (`0` for X, `1` for Y).
+    pub fn to_usize(self) -> usize {
+        match self {
+            XY::X => 0,
+            XY::Y => 1,
+        }
+    }
+
+    /// Short lowercase suffix (`"x"` or `"y"`), matching WGSL swizzle names.
+    pub fn suffix(self) -> &'static str {
+        match self {
+            XY::X => "x",
+            XY::Y => "y",
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct AxisXY;
 
@@ -21,10 +53,7 @@ impl Axis<2> for AxisXY {
     type Index = XY;
 
     fn to_usize(index: Self::Index) -> usize {
-        match index {
-            XY::X => 0,
-            XY::Y => 1,
-        }
+        index.to_usize()
     }
 }
 
@@ -160,6 +189,14 @@ impl<const N: usize, Ax> NamedVecExpr<N, Ax> {
 
     pub fn from_expr(expr: Expr) -> Self {
         Self::from_vec(VecExpr::from_expr(expr))
+    }
+
+    pub fn from_components(components: [Expr; N]) -> Self {
+        Self::from_vec(VecExpr::from_components(components))
+    }
+
+    pub fn zeros() -> Self {
+        Self::from_vec(VecExpr::zeros())
     }
 
     pub fn expr(&self) -> Expr {
@@ -583,5 +620,36 @@ mod tests {
         let out = mat.contract_rows(&v);
         assert_eq!(out.at(Cons::Rho).to_string(), "m_00 * v.x + m_10 * v.y");
         assert_eq!(out.at(Cons::Re).to_string(), "m_03 * v.x + m_13 * v.y");
+    }
+
+    #[test]
+    fn xy_from_index_roundtrips() {
+        assert_eq!(XY::from_index(0), XY::X);
+        assert_eq!(XY::from_index(1), XY::Y);
+        assert_eq!(XY::X.to_usize(), 0);
+        assert_eq!(XY::Y.to_usize(), 1);
+    }
+
+    #[test]
+    fn xy_suffix_returns_swizzle_names() {
+        assert_eq!(XY::X.suffix(), "x");
+        assert_eq!(XY::Y.suffix(), "y");
+    }
+
+    #[test]
+    fn xy_all_iterates_both_axes() {
+        let axes: Vec<_> = XY::ALL.iter().map(|a| a.suffix()).collect();
+        assert_eq!(axes, vec!["x", "y"]);
+    }
+
+    #[test]
+    fn named_vec_from_components_and_zeros() {
+        let v = NamedVecExpr::<2, AxisXY>::from_components([Expr::ident("a"), Expr::ident("b")]);
+        assert_eq!(v.at(XY::X).to_string(), "a");
+        assert_eq!(v.at(XY::Y).to_string(), "b");
+
+        let z = NamedVecExpr::<2, AxisXY>::zeros();
+        assert_eq!(z.at(XY::X).to_string(), "0.0");
+        assert_eq!(z.at(XY::Y).to_string(), "0.0");
     }
 }

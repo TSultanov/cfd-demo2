@@ -9,6 +9,7 @@ use crate::solver::scheme::Scheme;
 use crate::solver::shared::PrimitiveExpr;
 use cfd2_codegen::solver::codegen::constants::constants_struct;
 use cfd2_codegen::solver::codegen::dsl as typed;
+use cfd2_codegen::solver::codegen::dsl::XY;
 use cfd2_codegen::solver::codegen::wgsl_ast::{
     AccessMode, Attribute, Block, CseBuilder, Expr, Function, Item, Module, Param, Stmt, Type,
 };
@@ -1532,11 +1533,11 @@ fn state_var_name(resolver: &dyn OffsetResolver, key: StateKey<'_>) -> String {
     let suffix = resolver.field_kind(key.field);
     match suffix {
         Some(FieldKind::Vector2) => {
-            name.push_str(match key.component {
-                0 => "_x",
-                1 => "_y",
-                _ => return format!("{name}_c{}", key.component),
-            });
+            if key.component > 1 {
+                return format!("{name}_c{}", key.component);
+            }
+            name.push('_');
+            name.push_str(XY::from_index(key.component).suffix());
         }
         Some(FieldKind::Vector3) => {
             name.push_str(match key.component {
@@ -1613,16 +1614,13 @@ fn collect_state_keys_from_vec2<'a>(
         }
         FaceVec2Expr::StateVec2 { side, field } => {
             // `FaceVec2Expr` is always `vec2`, so we only materialize x/y.
-            out.insert(StateKey {
-                side: *side,
-                field: field.as_str(),
-                component: 0,
-            });
-            out.insert(StateKey {
-                side: *side,
-                field: field.as_str(),
-                component: 1,
-            });
+            for axis in XY::ALL {
+                out.insert(StateKey {
+                    side: *side,
+                    field: field.as_str(),
+                    component: axis.to_usize() as u32,
+                });
+            }
         }
         FaceVec2Expr::Add(a, b) | FaceVec2Expr::Sub(a, b) | FaceVec2Expr::Lerp(a, b) => {
             collect_state_keys_from_vec2(a, primitives, resolver, out);
@@ -1804,8 +1802,8 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
             typed::VecExpr::<2>::from_components([lower_scalar(x, ctx), lower_scalar(y, ctx)])
         }
         FaceVec2Expr::StateVec2 { side, field } => {
-            let x = ctx.state_scalar(*side, field.as_str(), 0);
-            let y = ctx.state_scalar(*side, field.as_str(), 1);
+            let x = ctx.state_scalar(*side, field.as_str(), XY::X.to_usize() as u32);
+            let y = ctx.state_scalar(*side, field.as_str(), XY::Y.to_usize() as u32);
 
             // Boundary regression guard for MUSCL reconstruction:
             //
@@ -1845,8 +1843,20 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
                 FaceSide::Neighbor => Expr::ident("neigh_idx"),
             };
             typed::VecExpr::<2>::from_components([
-                state_component_at_resolver(ctx.resolver, "state", idx, field.as_str(), 0),
-                state_component_at_resolver(ctx.resolver, "state", idx, field.as_str(), 1),
+                state_component_at_resolver(
+                    ctx.resolver,
+                    "state",
+                    idx,
+                    field.as_str(),
+                    XY::X.to_usize() as u32,
+                ),
+                state_component_at_resolver(
+                    ctx.resolver,
+                    "state",
+                    idx,
+                    field.as_str(),
+                    XY::Y.to_usize() as u32,
+                ),
             ])
         }
         FaceVec2Expr::Add(a, b) => {
@@ -1959,11 +1969,10 @@ fn state_component_at_side_resolver(
             field.to_string()
         }
         FieldKind::Vector2 => {
-            let suffix = match component {
-                0 => "x",
-                1 => "y",
-                _ => return owner,
-            };
+            if component > 1 {
+                return owner;
+            }
+            let suffix = XY::from_index(component).suffix();
             format!("{field}_{suffix}")
         }
         FieldKind::Vector3 => {
@@ -2045,6 +2054,7 @@ fn apply_slipwall_velocity_reflection_resolver(
     if !is_velocity_field || component > 1 {
         return base;
     }
+    let axis = XY::from_index(component);
 
     let is_boundary = Expr::ident("is_boundary");
     let boundary_type = Expr::ident("boundary_type");
@@ -2057,16 +2067,27 @@ fn apply_slipwall_velocity_reflection_resolver(
     // both components). Projecting the owner-cell velocity would incorrectly introduce
     // tangential slip into the convective flux.
     let is_slipwall = is_boundary & boundary_type.eq(Expr::from(4u32));
-    let ux = state_component_at_resolver(resolver, buffer, Expr::ident("owner"), field, 0);
-    let uy = state_component_at_resolver(resolver, buffer, Expr::ident("owner"), field, 1);
+    let ux = state_component_at_resolver(
+        resolver,
+        buffer,
+        Expr::ident("owner"),
+        field,
+        XY::X.to_usize() as u32,
+    );
+    let uy = state_component_at_resolver(
+        resolver,
+        buffer,
+        Expr::ident("owner"),
+        field,
+        XY::Y.to_usize() as u32,
+    );
     let nx = Expr::ident("normal_vec").field("x");
     let ny = Expr::ident("normal_vec").field("y");
     let un = ux * nx + uy * ny;
 
-    let slip_projected = match component {
-        0 => ux - un * nx,
-        1 => uy - un * ny,
-        _ => return base,
+    let slip_projected = match axis {
+        XY::X => ux - un * nx,
+        XY::Y => uy - un * ny,
     };
 
     dsl::select(base, slip_projected, is_slipwall)

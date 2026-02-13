@@ -6,6 +6,7 @@ use crate::solver::model::module::{KernelBundleModule, ModuleInvariant};
 use crate::solver::model::KernelId;
 
 use cfd2_codegen::solver::codegen::{
+    dsl::XY,
     wgsl_ast::{AssignOp, Block, Expr, ForStep, Stmt, Type},
     wgsl_dsl as dsl,
 };
@@ -635,11 +636,11 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
     let state_stride = registry.state_layout().stride();
     let p_offset = p.offset();
     let grad_p_x = grad_p
-        .component(0)
+        .component(XY::X.to_usize() as u32)
         .map(|c| c.full_offset())
         .ok_or("rhie_chow/grad_p_update: grad_p component 0")?;
     let grad_p_y = grad_p
-        .component(1)
+        .component(XY::Y.to_usize() as u32)
         .map(|c| c.full_offset())
         .ok_or("rhie_chow/grad_p_update: grad_p component 1")?;
 
@@ -920,19 +921,19 @@ fn generate_rhie_chow_store_grad_p_kernel_program(
 
     let stride = registry.state_layout().stride();
     let grad_p_x = grad_p
-        .component(0)
+        .component(XY::X.to_usize() as u32)
         .map(|c| c.full_offset())
         .ok_or("grad_p component 0")?;
     let grad_p_y = grad_p
-        .component(1)
+        .component(XY::Y.to_usize() as u32)
         .map(|c| c.full_offset())
         .ok_or("grad_p component 1")?;
     let grad_old_x = grad_old
-        .component(0)
+        .component(XY::X.to_usize() as u32)
         .map(|c| c.full_offset())
         .ok_or("grad_old component 0")?;
     let grad_old_y = grad_old
-        .component(1)
+        .component(XY::Y.to_usize() as u32)
         .map(|c| c.full_offset())
         .ok_or("grad_old component 1")?;
 
@@ -1012,27 +1013,27 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_program(
     let stride = registry.state_layout().stride();
     let d_p_offset = d_p.offset();
     let u_x = u
-        .component(0)
+        .component(XY::X.to_usize() as u32)
         .map(|c| c.full_offset())
         .ok_or("u component 0")?;
     let u_y = u
-        .component(1)
+        .component(XY::Y.to_usize() as u32)
         .map(|c| c.full_offset())
         .ok_or("u component 1")?;
     let grad_p_x = grad_p
-        .component(0)
+        .component(XY::X.to_usize() as u32)
         .map(|c| c.full_offset())
         .ok_or("grad_p component 0")?;
     let grad_p_y = grad_p
-        .component(1)
+        .component(XY::Y.to_usize() as u32)
         .map(|c| c.full_offset())
         .ok_or("grad_p component 1")?;
     let grad_old_x = grad_old
-        .component(0)
+        .component(XY::X.to_usize() as u32)
         .map(|c| c.full_offset())
         .ok_or("grad_old component 0")?;
     let grad_old_y = grad_old
-        .component(1)
+        .component(XY::Y.to_usize() as u32)
         .map(|c| c.full_offset())
         .ok_or("grad_old component 1")?;
 

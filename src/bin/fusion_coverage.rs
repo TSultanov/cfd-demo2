@@ -5,8 +5,8 @@ use cfd2::solver::model::kernel::{
 };
 use cfd2::solver::scheme::Scheme;
 use cfd2_codegen::solver::codegen::fusion::{
-    synthesize_fused_program, synthesize_fused_program_with_report, FusionSafetyPolicy,
-    HazardReport,
+    synthesize_fused_program, synthesize_fused_program_remapped,
+    synthesize_fused_program_with_report_remapped, FusionSafetyPolicy, HazardReport,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -358,24 +358,27 @@ fn collect_model_coverage(
             blocked_by_wgsl,
             aggressive_hazards,
         ) = if all_dsl {
-            let (safe_ok, safe_reason) = match synthesize_fused_program(
+            let (safe_ok, safe_reason) = match synthesize_fused_program_remapped(
                 format!("reassess/rule_safe/{}", rule.replacement.id.as_str()),
                 rule.name,
                 &rule_programs,
                 FusionSafetyPolicy::Safe,
+                &rule.binding_remaps,
             ) {
                 Ok(_) => (true, "compatible".to_string()),
                 Err(err) => (false, compact_error(&err)),
             };
-            let (aggr_ok, aggr_reason, hazards) = match synthesize_fused_program_with_report(
-                format!("reassess/rule_aggressive/{}", rule.replacement.id.as_str()),
-                rule.name,
-                &rule_programs,
-                FusionSafetyPolicy::Aggressive,
-            ) {
-                Ok((_program, hazards)) => (true, "compatible".to_string(), hazards),
-                Err(err) => (false, compact_error(&err), Vec::new()),
-            };
+            let (aggr_ok, aggr_reason, hazards) =
+                match synthesize_fused_program_with_report_remapped(
+                    format!("reassess/rule_aggressive/{}", rule.replacement.id.as_str()),
+                    rule.name,
+                    &rule_programs,
+                    FusionSafetyPolicy::Aggressive,
+                    &rule.binding_remaps,
+                ) {
+                    Ok((_program, hazards)) => (true, "compatible".to_string(), hazards),
+                    Err(err) => (false, compact_error(&err), Vec::new()),
+                };
             (safe_ok, aggr_ok, safe_reason, aggr_reason, false, hazards)
         } else {
             (

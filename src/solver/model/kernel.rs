@@ -180,17 +180,33 @@ pub enum FusionGuard {
 pub struct KernelPatternAtom {
     pub id: KernelId,
     pub dispatch: Option<DispatchKindId>,
+    /// Override the expected phase for this atom.  When `None` the atom
+    /// inherits the rule-level `phase` (the original behaviour).
+    pub phase: Option<KernelPhaseId>,
 }
 
 impl KernelPatternAtom {
     pub const fn id(id: KernelId) -> Self {
-        Self { id, dispatch: None }
+        Self {
+            id,
+            dispatch: None,
+            phase: None,
+        }
     }
 
     pub const fn with_dispatch(id: KernelId, dispatch: DispatchKindId) -> Self {
         Self {
             id,
             dispatch: Some(dispatch),
+            phase: None,
+        }
+    }
+
+    pub const fn with_phase(id: KernelId, dispatch: DispatchKindId, phase: KernelPhaseId) -> Self {
+        Self {
+            id,
+            dispatch: Some(dispatch),
+            phase: Some(phase),
         }
     }
 }
@@ -203,6 +219,13 @@ pub struct ModelKernelFusionRule {
     pub pattern: Vec<KernelPatternAtom>,
     pub replacement: ModelKernelSpec,
     pub guards: Vec<FusionGuard>,
+    /// Binding slot remaps applied before fusion merging.
+    ///
+    /// When the kernels being fused have the same logical buffer at different
+    /// `(group, binding)` slots (e.g. boundary conditions at group 2 in one
+    /// kernel vs group 3 in another), each entry instructs the synthesizer to
+    /// relocate a specific program's binding slot to the target layout.
+    pub binding_remaps: Vec<cfd2_codegen::solver::codegen::fusion::BindingRemap>,
 }
 
 #[derive(Debug, Clone)]
@@ -409,7 +432,8 @@ fn rule_matches_at(
 
     for (offset, atom) in rule.pattern.iter().enumerate() {
         let spec = kernels[start + offset];
-        if spec.phase != rule.phase {
+        let expected_phase = atom.phase.unwrap_or(rule.phase);
+        if spec.phase != expected_phase {
             return false;
         }
         if spec.id != atom.id {
@@ -609,17 +633,17 @@ pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_program(
     )
 }
 
-pub(crate) fn generate_packed_state_gradients_kernel_wgsl(
+pub(crate) fn generate_packed_state_gradients_kernel_program(
     model: &crate::solver::model::ModelSpec,
     _schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<KernelWgsl, String> {
+) -> Result<crate::solver::ir::KernelProgram, String> {
     let eos_params = extract_eos_params(model);
-    cfd2_codegen::solver::codegen::generate_packed_state_gradients_wgsl(
+    cfd2_codegen::solver::codegen::generate_packed_state_gradients_kernel_program(
+        "packed_state_gradients",
         &model.state_layout,
         model.system.unknowns_per_cell(),
         &eos_params,
     )
-    .map_err(|e| e.to_string())
 }
 
 /// Resolve a state offset by field name, supporting component suffixes (e.g., "rho_u_x").
@@ -863,11 +887,12 @@ fn synthesize_fusion_replacement_wgsl_for_model(
         )?);
     }
 
-    let fused_program = cfd2_codegen::solver::codegen::fusion::synthesize_fused_program(
+    let fused_program = cfd2_codegen::solver::codegen::fusion::synthesize_fused_program_remapped(
         replacement_id.as_str().to_string(),
         selected.name,
         &programs,
         synthesis_policy,
+        &selected.binding_remaps,
     )?;
     let wgsl = cfd2_codegen::solver::codegen::fusion::lower_kernel_program_to_wgsl(&fused_program)?;
     Ok(Some(wgsl.to_wgsl()))
@@ -1089,6 +1114,7 @@ mod contract_tests {
                     condition: KernelConditionId::Always,
                 },
                 guards: Vec::new(),
+                binding_remaps: vec![],
             }],
             ..Default::default()
         };
@@ -1228,6 +1254,7 @@ mod contract_tests {
                     condition: KernelConditionId::Always,
                 },
                 guards: Vec::new(),
+                binding_remaps: vec![],
             }],
             ..Default::default()
         };
@@ -1321,6 +1348,7 @@ mod tests {
                 pattern: vec![KernelPatternAtom::id(a.id), KernelPatternAtom::id(b.id)],
                 replacement: fused_ab,
                 guards: Vec::new(),
+                binding_remaps: vec![],
             },
             ModelKernelFusionRule {
                 name: "fuse_abc",
@@ -1333,6 +1361,7 @@ mod tests {
                 ],
                 replacement: fused_abc,
                 guards: Vec::new(),
+                binding_remaps: vec![],
             },
         ];
         let kernels = vec![a, b, c];
@@ -1372,6 +1401,7 @@ mod tests {
             pattern: vec![KernelPatternAtom::id(base.id)],
             replacement: fused,
             guards: vec![FusionGuard::MinPolicy(KernelFusionPolicy::Aggressive)],
+            binding_remaps: vec![],
         }];
         let kernels = vec![base];
         let module_names = ["fusion_module"];
@@ -1420,6 +1450,7 @@ mod tests {
             pattern: vec![KernelPatternAtom::id(base.id)],
             replacement: fused,
             guards: vec![FusionGuard::ExactPolicy(KernelFusionPolicy::Safe)],
+            binding_remaps: vec![],
         }];
         let kernels = vec![base];
         let module_names = ["fusion_module"];
@@ -1470,6 +1501,7 @@ mod tests {
             pattern: vec![KernelPatternAtom::id(KernelId("fusion/base"))],
             replacement,
             guards: Vec::new(),
+            binding_remaps: vec![],
         };
 
         let safe = fusion_safety_policy_for_rule(&base_rule);

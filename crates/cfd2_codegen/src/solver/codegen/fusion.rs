@@ -6,6 +6,23 @@ use cfd2_ir::solver::ir::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+/// A single binding slot remap for fusion synthesis.
+///
+/// When two kernels being fused have the same logical buffer (e.g. `bc_kind`)
+/// at different `(group, binding)` slots, one kernel's bindings must be
+/// remapped to match the other's layout before `merge_bindings` can succeed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BindingRemap {
+    /// Index of the program in the fusion input sequence (0-based).
+    pub program_index: usize,
+    /// Original slot in this program's `KernelProgram.bindings`.
+    pub from_group: u32,
+    pub from_binding: u32,
+    /// Target slot the binding should be moved to in the fused layout.
+    pub to_group: u32,
+    pub to_binding: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FusionPatternRule {
     pub name: String,
@@ -145,8 +162,27 @@ pub fn synthesize_fused_program(
     programs: &[KernelProgram],
     policy: FusionSafetyPolicy,
 ) -> Result<KernelProgram, String> {
-    let (program, _hazards) =
-        synthesize_fused_program_with_report(replacement_id, rule_name, programs, policy)?;
+    synthesize_fused_program_remapped(replacement_id, rule_name, programs, policy, &[])
+}
+
+/// Like [`synthesize_fused_program`], but applies binding slot remaps before
+/// merging. Use this when the kernels being fused have conflicting bind group
+/// layouts that must be reconciled (e.g. a gradients kernel using group 2 for
+/// boundary conditions vs an assembly kernel using group 3).
+pub fn synthesize_fused_program_remapped(
+    replacement_id: impl Into<String>,
+    rule_name: &str,
+    programs: &[KernelProgram],
+    policy: FusionSafetyPolicy,
+    binding_remaps: &[BindingRemap],
+) -> Result<KernelProgram, String> {
+    let (program, _hazards) = synthesize_fused_program_with_report_remapped(
+        replacement_id,
+        rule_name,
+        programs,
+        policy,
+        binding_remaps,
+    )?;
     Ok(program)
 }
 
@@ -160,20 +196,40 @@ pub fn synthesize_fused_program_with_report(
     programs: &[KernelProgram],
     policy: FusionSafetyPolicy,
 ) -> Result<(KernelProgram, Vec<HazardReport>), String> {
+    synthesize_fused_program_with_report_remapped(replacement_id, rule_name, programs, policy, &[])
+}
+
+/// Like [`synthesize_fused_program_with_report`], but applies binding slot
+/// remaps before merging.
+pub fn synthesize_fused_program_with_report_remapped(
+    replacement_id: impl Into<String>,
+    rule_name: &str,
+    programs: &[KernelProgram],
+    policy: FusionSafetyPolicy,
+    binding_remaps: &[BindingRemap],
+) -> Result<(KernelProgram, Vec<HazardReport>), String> {
     if programs.is_empty() {
         return Err("fusion synthesis requires at least one input kernel".to_string());
     }
-    let hazards = ensure_safe_composition(programs, policy)?;
 
-    let dispatch = programs[0].dispatch.clone();
-    let launch = programs[0].launch.clone();
-    let merged_bindings = merge_bindings(programs)?;
+    // Apply binding remaps to produce adjusted programs for merging.
+    let remapped: Vec<KernelProgram> = if binding_remaps.is_empty() {
+        programs.to_vec()
+    } else {
+        apply_binding_remaps(programs, binding_remaps)?
+    };
+
+    let hazards = ensure_safe_composition(&remapped, policy)?;
+
+    let dispatch = remapped[0].dispatch.clone();
+    let launch = remapped[0].launch.clone();
+    let merged_bindings = merge_bindings(&remapped)?;
 
     let mut body = Vec::new();
     let mut local_symbols = Vec::new();
     let mut side_effects = SideEffectMetadata::default();
 
-    for (idx, program) in programs.iter().enumerate() {
+    for (idx, program) in remapped.iter().enumerate() {
         let rename_map = deterministic_symbol_rename_map(idx, &program.local_symbols);
 
         // Preserve per-kernel execution order by emitting each segment's preamble
@@ -200,12 +256,12 @@ pub fn synthesize_fused_program_with_report(
         launch,
         merged_bindings.into_values().collect(),
     );
-    fused.indexing = programs[0].indexing.clone();
+    fused.indexing = remapped[0].indexing.clone();
     fused.preamble = Vec::new();
     fused.body = body;
     fused.local_symbols = local_symbols;
     fused.side_effects = side_effects;
-    fused.eos_params = merge_eos_params(programs);
+    fused.eos_params = merge_eos_params(&remapped);
 
     if policy == FusionSafetyPolicy::Aggressive {
         apply_aggressive_cleanup(&mut fused);
@@ -339,6 +395,100 @@ fn intersection_list(
     }
 }
 
+/// Apply binding slot remaps to a sequence of programs before fusion merging.
+///
+/// Each `BindingRemap` entry specifies that program N's binding at
+/// `(from_group, from_binding)` should be moved to `(to_group, to_binding)`.
+/// The corresponding `side_effects` read/write sets are updated as well.
+fn apply_binding_remaps(
+    programs: &[KernelProgram],
+    remaps: &[BindingRemap],
+) -> Result<Vec<KernelProgram>, String> {
+    let mut result: Vec<KernelProgram> = programs.to_vec();
+
+    for remap in remaps {
+        if remap.program_index >= result.len() {
+            return Err(format!(
+                "binding remap references program index {} but only {} programs provided",
+                remap.program_index,
+                result.len()
+            ));
+        }
+
+        let program = &mut result[remap.program_index];
+
+        // Remap binding slots.
+        let mut found = false;
+        for binding in &mut program.bindings {
+            if binding.group == remap.from_group && binding.binding == remap.from_binding {
+                binding.group = remap.to_group;
+                binding.binding = remap.to_binding;
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Err(format!(
+                "binding remap: program '{}' has no binding at @group({}) @binding({})",
+                program.id, remap.from_group, remap.from_binding
+            ));
+        }
+
+        // Remap side-effect metadata.
+        let from_res = EffectResource::binding(remap.from_group, remap.from_binding);
+        let to_res = EffectResource::binding(remap.to_group, remap.to_binding);
+        if program.side_effects.read_set.remove(&from_res) {
+            program.side_effects.read_set.insert(to_res.clone());
+        }
+        if program.side_effects.write_set.remove(&from_res) {
+            program.side_effects.write_set.insert(to_res);
+        }
+
+        // Also remap any component-level side-effects at the same slot.
+        let read_to_remap: Vec<_> = program
+            .side_effects
+            .read_set
+            .iter()
+            .filter(|r| {
+                r.group == remap.from_group
+                    && r.binding == remap.from_binding
+                    && r.component.is_some()
+            })
+            .cloned()
+            .collect();
+        for r in read_to_remap {
+            program.side_effects.read_set.remove(&r);
+            program.side_effects.read_set.insert(EffectResource {
+                group: remap.to_group,
+                binding: remap.to_binding,
+                component: r.component,
+            });
+        }
+
+        let write_to_remap: Vec<_> = program
+            .side_effects
+            .write_set
+            .iter()
+            .filter(|r| {
+                r.group == remap.from_group
+                    && r.binding == remap.from_binding
+                    && r.component.is_some()
+            })
+            .cloned()
+            .collect();
+        for r in write_to_remap {
+            program.side_effects.write_set.remove(&r);
+            program.side_effects.write_set.insert(EffectResource {
+                group: remap.to_group,
+                binding: remap.to_binding,
+                component: r.component,
+            });
+        }
+    }
+
+    Ok(result)
+}
+
 fn merge_bindings(
     programs: &[KernelProgram],
 ) -> Result<BTreeMap<(u32, u32), KernelBinding>, String> {
@@ -346,11 +496,8 @@ fn merge_bindings(
     for program in programs {
         for binding in &program.bindings {
             let key = (binding.group, binding.binding);
-            if let Some(prev) = merged.get(&key) {
-                if prev.name != binding.name
-                    || prev.wgsl_type != binding.wgsl_type
-                    || prev.access != binding.access
-                {
+            if let Some(prev) = merged.get_mut(&key) {
+                if prev.name != binding.name || prev.wgsl_type != binding.wgsl_type {
                     return Err(format!(
                         "incompatible bind interface at @group({}) @binding({}) while fusing '{}': '{}'/'{}' vs '{}'/'{}'",
                         binding.group,
@@ -362,12 +509,41 @@ fn merge_bindings(
                         binding.wgsl_type,
                     ));
                 }
+                // Promote to most permissive access mode:
+                // ReadOnlyStorage + ReadWriteStorage → ReadWriteStorage
+                // Uniform is incompatible with storage modes.
+                if prev.access != binding.access {
+                    let promoted = promote_access(prev.access, binding.access).ok_or_else(|| {
+                        format!(
+                            "incompatible access modes at @group({}) @binding({}) while fusing '{}': {:?} vs {:?}",
+                            binding.group,
+                            binding.binding,
+                            program.id,
+                            prev.access,
+                            binding.access,
+                        )
+                    })?;
+                    prev.access = promoted;
+                }
             } else {
                 merged.insert(key, binding.clone());
             }
         }
     }
     Ok(merged)
+}
+
+/// Promote two access modes to the most permissive compatible mode.
+/// Returns `None` for incompatible combinations (e.g. Uniform + Storage).
+fn promote_access(a: BindingAccess, b: BindingAccess) -> Option<BindingAccess> {
+    match (a, b) {
+        (BindingAccess::ReadOnlyStorage, BindingAccess::ReadWriteStorage)
+        | (BindingAccess::ReadWriteStorage, BindingAccess::ReadOnlyStorage) => {
+            Some(BindingAccess::ReadWriteStorage)
+        }
+        (BindingAccess::Uniform, BindingAccess::Uniform) => Some(BindingAccess::Uniform),
+        _ => None,
+    }
 }
 
 /// Union all `eos_params` across input programs, deduplicated by `wgsl_field`.
@@ -571,7 +747,7 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
     });
 
     // Reject duplicate bind slots with incompatible definitions up front.
-    let mut by_slot = BTreeMap::<(u32, u32), &KernelBinding>::new();
+    let mut by_slot = BTreeMap::<(u32, u32), KernelBinding>::new();
     for binding in &sorted_bindings {
         let key = (binding.group, binding.binding);
         if let Some(prev) = by_slot.get(&key) {
@@ -586,7 +762,7 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
             }
             continue;
         }
-        by_slot.insert(key, binding);
+        by_slot.insert(key, binding.clone());
     }
 
     // Emit canonical shared struct definitions so lowered WGSL is self-contained.

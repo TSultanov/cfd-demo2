@@ -1,13 +1,19 @@
+use std::collections::BTreeSet;
+
 use super::constants::constants_struct;
 use super::dsl as typed;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt, Type,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt,
+    StorageClass, Type,
 };
 use super::wgsl_bindings::{boundary_bindings, storage_var, uniform_var, vector2_struct};
 use super::wgsl_dsl as dsl;
 use super::KernelWgsl;
 use crate::solver::ir::ports::ParamSpec;
-use crate::solver::ir::StateLayout;
+use crate::solver::ir::{
+    BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelProgram, LaunchSemantics,
+    SideEffectMetadata, StateLayout,
+};
 
 pub fn generate_packed_state_gradients_wgsl(
     layout: &StateLayout,
@@ -370,4 +376,179 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
     }
 
     Block::new(stmts)
+}
+
+const PACKED_STATE_GRADIENTS_WORKGROUP_SIZE: u32 = 64;
+
+fn kernel_bindings_from_items(items: &[Item]) -> Result<Vec<KernelBinding>, String> {
+    let mut bindings = Vec::new();
+    for item in items {
+        let Item::GlobalVar(var) = item else {
+            continue;
+        };
+        let mut group = None;
+        let mut binding = None;
+        for attr in &var.attributes {
+            match attr {
+                Attribute::Group(value) => group = Some(*value),
+                Attribute::Binding(value) => binding = Some(*value),
+                _ => {}
+            }
+        }
+        let Some((g, b)) = group.zip(binding) else {
+            continue;
+        };
+        let access = match var.storage {
+            StorageClass::Storage => match var.access {
+                Some(AccessMode::Read) => BindingAccess::ReadOnlyStorage,
+                Some(AccessMode::ReadWrite) => BindingAccess::ReadWriteStorage,
+                None => {
+                    return Err(format!(
+                        "packed_state_gradients: storage var '{}' missing access mode",
+                        var.name
+                    ));
+                }
+            },
+            StorageClass::Uniform => BindingAccess::Uniform,
+            StorageClass::Workgroup => continue,
+        };
+        bindings.push(KernelBinding::new(
+            g,
+            b,
+            &var.name,
+            var.ty.to_string(),
+            access,
+        ));
+    }
+    Ok(bindings)
+}
+
+/// Extract `LaunchSemantics` from the first statements of the packed_state_gradients body.
+///
+/// The body starts with:
+///   0: let idx = ...       (invocation index)
+///   1: if (idx >= ...) { return; }  (bounds check)
+///   2: if (constants.scheme == 0u) { return; }  (scheme guard — goes into preamble)
+///
+/// Returns (launch, preamble_lines, consumed_stmts).
+fn launch_from_gradient_statements(
+    stmts: &[Stmt],
+) -> Result<(LaunchSemantics, Vec<String>, usize), String> {
+    // Statement 0: `let idx = ...`
+    let idx_expr = match stmts.first() {
+        Some(Stmt::Let { name, expr, .. }) if name == "idx" => expr.to_string(),
+        _ => {
+            return Err(
+                "packed_state_gradients: expected first statement to define idx launch expression"
+                    .to_string(),
+            );
+        }
+    };
+
+    // Statement 1: `if (idx >= arrayLength(...)) { return; }`
+    let bounds_expr = match stmts.get(1) {
+        Some(Stmt::If {
+            cond,
+            then_block,
+            else_block,
+        }) if else_block.is_none()
+            && then_block.stmts.len() == 1
+            && matches!(then_block.stmts.first(), Some(Stmt::Return(None))) =>
+        {
+            cond.to_string()
+        }
+        _ => {
+            return Err(
+                "packed_state_gradients: expected second statement to be idx bounds guard"
+                    .to_string(),
+            );
+        }
+    };
+
+    // Statement 2: `if (constants.scheme == 0u) { return; }` — scheme guard, goes into preamble
+    let preamble_lines = match stmts.get(2) {
+        Some(Stmt::If {
+            then_block,
+            else_block,
+            ..
+        }) if else_block.is_none()
+            && then_block.stmts.len() == 1
+            && matches!(then_block.stmts.first(), Some(Stmt::Return(None))) =>
+        {
+            super::wgsl_ast::render_stmt_lines(&stmts[2..3])
+        }
+        _ => {
+            return Err(
+                "packed_state_gradients: expected third statement to be scheme guard".to_string(),
+            );
+        }
+    };
+
+    Ok((
+        LaunchSemantics::new(
+            [PACKED_STATE_GRADIENTS_WORKGROUP_SIZE, 1, 1],
+            idx_expr,
+            Some(bounds_expr),
+        ),
+        preamble_lines,
+        3,
+    ))
+}
+
+/// Generate a `KernelProgram` (DSL IR) for the packed_state_gradients kernel,
+/// enabling fusion with adjacent DSL kernels.
+pub fn generate_packed_state_gradients_kernel_program(
+    id: &str,
+    layout: &StateLayout,
+    unknown_stride: u32,
+    eos_params: &[ParamSpec],
+) -> Result<KernelProgram, String> {
+    let stride = layout.stride();
+    if unknown_stride == 0 {
+        return Err("packed_state_gradients requires unknown_stride > 0".to_string());
+    }
+    if unknown_stride > stride {
+        return Err(format!(
+            "packed_state_gradients requires unknown_stride ({unknown_stride}) <= state stride ({stride})"
+        ));
+    }
+
+    let items = base_items(eos_params);
+    let bindings = kernel_bindings_from_items(&items)?;
+    let main = main_fn(layout, unknown_stride);
+    let (launch, preamble_lines, consumed_stmts) =
+        launch_from_gradient_statements(&main.body.stmts)?;
+    let kernel_stmts = &main.body.stmts[consumed_stmts..];
+
+    let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
+    program.preamble = preamble_lines;
+    program.body = super::wgsl_ast::render_stmt_lines(kernel_stmts);
+    program.local_symbols = super::wgsl_ast::collect_local_symbols(kernel_stmts);
+    program.eos_params = eos_params.to_vec();
+
+    // Side-effect metadata for hazard analysis.
+    let mut read_set = BTreeSet::new();
+    // Group 0: mesh buffers (all read-only)
+    for binding_slot in [0u32, 1, 2, 3, 4, 5, 6, 7, 13] {
+        read_set.insert(EffectResource::binding(0, binding_slot));
+    }
+    // Group 1: state (read), constants (uniform, read)
+    read_set.insert(EffectResource::binding(1, 0));
+    read_set.insert(EffectResource::binding(1, 3));
+    // Group 2: bc_kind, bc_value (read-only)
+    read_set.insert(EffectResource::binding(2, 0));
+    read_set.insert(EffectResource::binding(2, 1));
+
+    let mut write_set = BTreeSet::new();
+    // Group 1: grad_state (read_write — output)
+    write_set.insert(EffectResource::binding(1, 4));
+
+    program.side_effects = SideEffectMetadata {
+        read_set,
+        write_set,
+        uses_barriers: false,
+        uses_atomics: false,
+    };
+
+    Ok(program)
 }

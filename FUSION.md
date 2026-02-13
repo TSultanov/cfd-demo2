@@ -21,9 +21,13 @@ The core fusion pipeline is complete and production-default:
 - One-submission outer loop is default-enabled (`DEFAULT_OUTER_BATCHED_MODE = true`) with
   GPU-driven adaptive outer break, FGMRES + CG encoded solver paths, and convergence
   diagnostics readback.
-- All DSL-eligible model kernels (8 of 12) are migrated; 4 WGSL-only kernels remain by
-  design (different dispatch domain or phase).
-- 7 synthesized fused WGSL shaders exist for `incompressible_momentum`.
+- All DSL-eligible model kernels (9 of 12) are migrated; 3 WGSL-only kernels remain by
+  design (different dispatch domain or phase). `packed_state_gradients` was the latest
+  migration (Gradients phase, Cells dispatch).
+- 8 synthesized fused WGSL shaders exist for `incompressible_momentum`, plus 1 cross-phase
+  fused shader (`packed_state_gradients + assembly_grad_state`) generated for all 4 models.
+- Cross-phase fusion (Gradients → Assembly) is supported via per-atom phase tags in
+  `KernelPatternAtom` and `BindingRemap` for binding layout harmonization.
 - Policy semantics (`Off`/`Safe`/`Aggressive`) are implemented and tested.
 - Dispatch floor for incompressible coupled: `Off=6`, `Safe=4`, `Aggressive=2` update
   dispatches.
@@ -121,17 +125,20 @@ enable eliminating redundant loads/stores across fused kernel boundaries.
 
 ### 2c) Binding Access Promotion (P3)
 
-`merge_bindings()` rejects bindings where one kernel reads a slot and another writes
-the same slot with different `BindingAccess`. A smarter merge could safely promote
-`ReadOnlyStorage` to `ReadWriteStorage` when the write is in a later kernel.
+`merge_bindings()` originally rejected bindings where one kernel reads a slot and another
+writes the same slot with different `BindingAccess`. Promotion logic has now been
+implemented.
 
 - [x] Evaluate whether any real fusion candidate is blocked by this (check
   `FUSION_COVERAGE.md` for bind-merge rejections vs hazard rejections).
-  **Result: No fusion candidate is blocked by bind-merge incompatibility.**
-  All rejections in the current coverage report are hazard-based (WAW, WAR, RAW).
-  Promotion logic is not needed today.
-- [ ] If blocking in the future, implement promotion logic with clear documentation
-  of safety guarantees.
+  **Result: The cross-phase `packed_state_gradients + assembly_grad_state` fusion
+  requires access promotion** — `state` at (1,0) is ReadOnly in gradients and ReadWrite
+  in assembly. Without promotion, this fusion would be rejected.
+- [x] Implement promotion logic with clear documentation of safety guarantees.
+  **Implemented:** `promote_access()` helper in `fusion.rs` promotes `ReadOnly` +
+  `ReadWrite` → `ReadWrite` when both kernels reference the same `(group, binding)`
+  slot. The later kernel's access mode is used. `merge_bindings()` calls
+  `promote_access()` instead of rejecting mismatches.
 
 ### 2d) EOS Parameter Detection Is Fragile (P3)
 
@@ -150,32 +157,66 @@ requires updating this function.
 
 ## 3) Fusion Coverage Expansion
 
-### 3a) Compressible Model Has No Fusion Rules (P2)
+### 3a) Compressible Model Fusion Opportunities — CLOSED
 
-`FUSION_COVERAGE.md` shows the compressible model has a fuseable `assembly →
-assembly_grad_state` pair (both DSL, same dispatch domain, `Cells`), but no rule is
-declared. The pair is theoretically safe and aggressive-fuseable.
+The compressible model's only same-phase fuseable pair (`assembly` / `assembly_grad_state`)
+uses mutually-exclusive runtime conditions (`RequiresNoGradState` / `RequiresGradState`),
+so they are never adjacent in an active schedule. No same-phase fusion is possible.
 
-However, these two kernels use mutually-exclusive runtime conditions
-(`RequiresNoGradState` / `RequiresGradState`), so they are never adjacent in an
-active schedule. This was a deliberate decision (FUSION.md section 12).
+However, cross-phase fusion (see 3b below) identified a viable opportunity:
+`packed_state_gradients` (Gradients) → `assembly_grad_state` (Assembly). These are
+directly adjacent in all `has_grad_state=true` schedules.
 
-- [ ] Evaluate whether the compressible model has other update-phase fusion opportunities
-  (e.g., `generic_coupled_update` + any model-specific update kernels) that are not
-  blocked by mutually-exclusive conditions.
-- [ ] Document the decision not to fuse `assembly + assembly_grad_state` in the
-  compressible model.
+- [x] Evaluate whether the compressible model has other fusion opportunities beyond
+  the mutually-exclusive `assembly + assembly_grad_state` pair.
+  **Result:** The only viable pair is `packed_state_gradients + assembly_grad_state`
+  (cross-phase, Gradients → Assembly). The compressible model has only one
+  update-phase kernel (`generic_coupled_update`), so no update-phase chaining is
+  possible. Implemented as fusion rule `generic_coupled:gradients_assembly_grad_state_v1`.
+- [x] Document the decision not to fuse `assembly + assembly_grad_state`.
+  **Documented here:** These kernels have mutually-exclusive `RequiresNoGradState` /
+  `RequiresGradState` guards, making them never co-present in a schedule. Fusion is
+  structurally impossible.
 
-### 3b) Cross-Phase Fusion (P3 — future investigation)
+### 3b) Cross-Phase Fusion — CLOSED
 
-Current fusion is limited to same-phase, same-dispatch-domain kernels. No investigation
-has been done into:
+Cross-phase fusion has been investigated, implemented, and validated.
 
-- Gradients + Assembly phase fusion (e.g., `packed_state_gradients` + `assembly`)
-- Assembly + FluxComputation fusion (blocked by dispatch domain: Cells vs Faces)
+**Findings:**
+- Gradients + Assembly fusion (`packed_state_gradients` + `assembly_grad_state`) is
+  feasible and safe. These kernels are directly adjacent in all `has_grad_state=true`
+  schedules for all 4 models (compressible, incompressible_momentum,
+  generic_diffusion_demo, generic_diffusion_demo_neumann).
+- Assembly + FluxComputation fusion remains blocked by dispatch domain mismatch
+  (Cells vs Faces).
 
-- [ ] Investigate whether cross-phase fusion is feasible for any model's kernel chain
-  (likely requires relaxing the phase-match constraint in the pattern matcher).
+**Implementation (3 sub-tasks):**
+
+- [x] **3b-1: DSL migration of `packed_state_gradients`.** Migrated the WGSL kernel to
+  a `KernelProgram` generator (`generate_packed_state_gradients_kernel_program()` in
+  `packed_state_gradients.rs`). Generated WGSL is cosmetically different but
+  semantically identical to the original.
+- [x] **3b-2: Cross-phase pattern matching.** Added per-atom `phase: Option<KernelPhaseId>`
+  field to `KernelPatternAtom` and relaxed the same-phase constraint in `rule_matches_at()`.
+  The IR-level `ensure_safe_composition()` already did not check phase — only dispatch
+  domain, launch semantics, and indexing.
+- [x] **3b-3: Binding layout harmonization via `BindingRemap`.** The two kernels use
+  incompatible binding layouts (gradients: bc at group 2, grad_state at (1,4); assembly:
+  bc at group 3, grad_state at (1,5), matrix/rhs at group 2). Added `BindingRemap` struct
+  and `apply_binding_remaps()` to fusion.rs. The fusion rule remaps gradients bindings
+  to assembly's layout before `merge_bindings`. Access mode promotion (`ReadOnly` +
+  `ReadWrite` → `ReadWrite`) was also added to `merge_bindings()`.
+- [x] **3b-4: Fusion rule declaration.** Rule
+  `generic_coupled:gradients_assembly_grad_state_v1` declared in `generic_coupled.rs`
+  with `MinPolicy(Safe)` + guards for `RequiresGradState`, `RequiresStepping(Coupled)`,
+  and `RequiresModule("generic_coupled")`.
+
+**Validation:**
+- Fused WGSL shaders generated for all 4 models with correct binding superset,
+  body ordering, and `k1_` symbol renaming.
+- All `cargo test` pass (1 pre-existing failure unrelated to fusion).
+- OpenFOAM reference metrics are **bit-identical** before and after the change
+  (compressible_acoustic u_x max_rel=0.008001 — pre-existing).
 
 ## 4) Documentation (P2)
 

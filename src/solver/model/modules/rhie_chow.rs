@@ -58,9 +58,8 @@ pub fn rhie_chow_aux_module(
     let kernel_dp_update_store_grad_p_fused = KernelId("rhie_chow/dp_update_store_grad_p_fused");
     let kernel_dp_update_store_grad_p_grad_p_update_fused =
         KernelId("rhie_chow/dp_update_store_grad_p_grad_p_update_fused");
-    let kernel_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused = KernelId(
-        "rhie_chow/dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused",
-    );
+    let kernel_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused =
+        KernelId("rhie_chow/dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused");
     let kernel_generic_coupled_update_dp_init_fused =
         KernelId("generic_coupled/update_dp_init_fused");
     let kernel_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused = KernelId(
@@ -206,6 +205,7 @@ pub fn rhie_chow_aux_module(
                 FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Safe),
                 FusionGuard::ExactPolicy(crate::solver::model::kernel::KernelFusionPolicy::Safe),
             ],
+            binding_remaps: vec![],
         },
         ModelKernelFusionRule {
             name: "rhie_chow:dp_update_store_grad_p_v1",
@@ -226,9 +226,11 @@ pub fn rhie_chow_aux_module(
                 FusionGuard::RequiresModule("rhie_chow_aux"),
                 FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Safe),
             ],
+            binding_remaps: vec![],
         },
         ModelKernelFusionRule {
-            name: "rhie_chow:dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1",
+            name:
+                "rhie_chow:dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1",
             priority: 130,
             phase: KernelPhaseId::Update,
             pattern: vec![
@@ -242,7 +244,8 @@ pub fn rhie_chow_aux_module(
                 ),
             ],
             replacement: ModelKernelSpec {
-                id: kernel_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused,
+                id:
+                    kernel_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused,
                 phase: KernelPhaseId::Update,
                 dispatch: DispatchKindId::Cells,
                 condition: KernelConditionId::Always,
@@ -250,8 +253,11 @@ pub fn rhie_chow_aux_module(
             guards: vec![
                 FusionGuard::RequiresStepping(KernelFusionStepping::Coupled),
                 FusionGuard::RequiresModule("rhie_chow_aux"),
-                FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Aggressive),
+                FusionGuard::MinPolicy(
+                    crate::solver::model::kernel::KernelFusionPolicy::Aggressive,
+                ),
             ],
+            binding_remaps: vec![],
         },
         ModelKernelFusionRule {
             name: "rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1",
@@ -275,8 +281,11 @@ pub fn rhie_chow_aux_module(
             guards: vec![
                 FusionGuard::RequiresStepping(KernelFusionStepping::Coupled),
                 FusionGuard::RequiresModule("rhie_chow_aux"),
-                FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Aggressive),
+                FusionGuard::MinPolicy(
+                    crate::solver::model::kernel::KernelFusionPolicy::Aggressive,
+                ),
             ],
+            binding_remaps: vec![],
         },
         ModelKernelFusionRule {
             name: "rhie_chow:dp_update_store_grad_p_grad_p_update_v1",
@@ -296,8 +305,11 @@ pub fn rhie_chow_aux_module(
             guards: vec![
                 FusionGuard::RequiresStepping(KernelFusionStepping::Coupled),
                 FusionGuard::RequiresModule("rhie_chow_aux"),
-                FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Aggressive),
+                FusionGuard::MinPolicy(
+                    crate::solver::model::kernel::KernelFusionPolicy::Aggressive,
+                ),
             ],
+            binding_remaps: vec![],
         },
         // Standalone fusion rule for grad_p_update + correct_velocity_delta (aggressive-only)
         ModelKernelFusionRule {
@@ -306,7 +318,10 @@ pub fn rhie_chow_aux_module(
             phase: KernelPhaseId::Update,
             pattern: vec![
                 KernelPatternAtom::with_dispatch(kernel_grad_p_update, DispatchKindId::Cells),
-                KernelPatternAtom::with_dispatch(kernel_rhie_chow_correct_velocity_delta, DispatchKindId::Cells),
+                KernelPatternAtom::with_dispatch(
+                    kernel_rhie_chow_correct_velocity_delta,
+                    DispatchKindId::Cells,
+                ),
             ],
             replacement: ModelKernelSpec {
                 id: kernel_grad_p_update_correct_velocity_delta_fused,
@@ -317,8 +332,11 @@ pub fn rhie_chow_aux_module(
             guards: vec![
                 FusionGuard::RequiresStepping(KernelFusionStepping::Coupled),
                 FusionGuard::RequiresModule("rhie_chow_aux"),
-                FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Aggressive),
+                FusionGuard::MinPolicy(
+                    crate::solver::model::kernel::KernelFusionPolicy::Aggressive,
+                ),
             ],
+            binding_remaps: vec![],
         },
         // Standalone fusion rule for store_grad_p + grad_p_update (aggressive-only)
         ModelKernelFusionRule {
@@ -338,8 +356,11 @@ pub fn rhie_chow_aux_module(
             guards: vec![
                 FusionGuard::RequiresStepping(KernelFusionStepping::Coupled),
                 FusionGuard::RequiresModule("rhie_chow_aux"),
-                FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Aggressive),
+                FusionGuard::MinPolicy(
+                    crate::solver::model::kernel::KernelFusionPolicy::Aggressive,
+                ),
             ],
+            binding_remaps: vec![],
         },
     ];
 
@@ -393,11 +414,14 @@ fn generate_dp_init_kernel_program(
         .side_effects
         .read_set
         .insert(EffectResource::binding(0, 1));
-    program.side_effects.write_set.insert(EffectResource::component(
-        0,
-        0,
-        format!("state:{d_p_offset}"),
-    ));
+    program
+        .side_effects
+        .write_set
+        .insert(EffectResource::component(
+            0,
+            0,
+            format!("state:{d_p_offset}"),
+        ));
     Ok(program)
 }
 
@@ -432,10 +456,34 @@ fn rhie_chow_grad_p_update_bindings() -> Vec<KernelBinding> {
     vec![
         KernelBinding::new(0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage),
         KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
-        KernelBinding::new(1, 0, "face_owner", "array<u32>", BindingAccess::ReadOnlyStorage),
-        KernelBinding::new(1, 1, "face_neighbor", "array<i32>", BindingAccess::ReadOnlyStorage),
-        KernelBinding::new(1, 2, "face_areas", "array<f32>", BindingAccess::ReadOnlyStorage),
-        KernelBinding::new(1, 3, "face_normals", "array<Vector2>", BindingAccess::ReadOnlyStorage),
+        KernelBinding::new(
+            1,
+            0,
+            "face_owner",
+            "array<u32>",
+            BindingAccess::ReadOnlyStorage,
+        ),
+        KernelBinding::new(
+            1,
+            1,
+            "face_neighbor",
+            "array<i32>",
+            BindingAccess::ReadOnlyStorage,
+        ),
+        KernelBinding::new(
+            1,
+            2,
+            "face_areas",
+            "array<f32>",
+            BindingAccess::ReadOnlyStorage,
+        ),
+        KernelBinding::new(
+            1,
+            3,
+            "face_normals",
+            "array<Vector2>",
+            BindingAccess::ReadOnlyStorage,
+        ),
         KernelBinding::new(
             1,
             13,
@@ -443,8 +491,20 @@ fn rhie_chow_grad_p_update_bindings() -> Vec<KernelBinding> {
             "array<Vector2>",
             BindingAccess::ReadOnlyStorage,
         ),
-        KernelBinding::new(1, 4, "cell_centers", "array<Vector2>", BindingAccess::ReadOnlyStorage),
-        KernelBinding::new(1, 5, "cell_vols", "array<f32>", BindingAccess::ReadOnlyStorage),
+        KernelBinding::new(
+            1,
+            4,
+            "cell_centers",
+            "array<Vector2>",
+            BindingAccess::ReadOnlyStorage,
+        ),
+        KernelBinding::new(
+            1,
+            5,
+            "cell_vols",
+            "array<f32>",
+            BindingAccess::ReadOnlyStorage,
+        ),
         KernelBinding::new(
             1,
             6,
@@ -452,7 +512,13 @@ fn rhie_chow_grad_p_update_bindings() -> Vec<KernelBinding> {
             "array<u32>",
             BindingAccess::ReadOnlyStorage,
         ),
-        KernelBinding::new(1, 7, "cell_faces", "array<u32>", BindingAccess::ReadOnlyStorage),
+        KernelBinding::new(
+            1,
+            7,
+            "cell_faces",
+            "array<u32>",
+            BindingAccess::ReadOnlyStorage,
+        ),
         KernelBinding::new(
             1,
             12,
@@ -460,8 +526,20 @@ fn rhie_chow_grad_p_update_bindings() -> Vec<KernelBinding> {
             "array<u32>",
             BindingAccess::ReadOnlyStorage,
         ),
-        KernelBinding::new(2, 0, "bc_kind", "array<u32>", BindingAccess::ReadOnlyStorage),
-        KernelBinding::new(2, 1, "bc_value", "array<f32>", BindingAccess::ReadOnlyStorage),
+        KernelBinding::new(
+            2,
+            0,
+            "bc_kind",
+            "array<u32>",
+            BindingAccess::ReadOnlyStorage,
+        ),
+        KernelBinding::new(
+            2,
+            1,
+            "bc_value",
+            "array<f32>",
+            BindingAccess::ReadOnlyStorage,
+        ),
     ]
 }
 
@@ -495,14 +573,14 @@ fn generate_dp_update_from_diag_kernel_program(
         rhie_chow_state_launch(stride),
         rhie_chow_state_bindings(),
     );
-    let indexing_stmts = vec![dsl::let_expr(
-        "base",
-        Expr::ident("idx") * stride,
-    )];
+    let indexing_stmts = vec![dsl::let_expr("base", Expr::ident("idx") * stride)];
     let preamble_stmts = vec![
         dsl::let_expr(
             "rho",
-            dsl::max(Expr::ident("constants").field("density"), Expr::lit_f32(1e-12)),
+            dsl::max(
+                Expr::ident("constants").field("density"),
+                Expr::lit_f32(1e-12),
+            ),
         ),
         dsl::let_expr(
             "dt",
@@ -522,12 +600,18 @@ fn generate_dp_update_from_diag_kernel_program(
     program.body = rhie_chow_section_lines(body_stmts.clone());
     program.local_symbols =
         rhie_chow_collect_local_symbols_sections(&[&preamble_stmts, &body_stmts]);
-    program.side_effects.read_set.insert(EffectResource::binding(0, 1));
-    program.side_effects.write_set.insert(EffectResource::component(
-        0,
-        0,
-        format!("state:{d_p_offset}"),
-    ));
+    program
+        .side_effects
+        .read_set
+        .insert(EffectResource::binding(0, 1));
+    program
+        .side_effects
+        .write_set
+        .insert(EffectResource::component(
+            0,
+            0,
+            format!("state:{d_p_offset}"),
+        ));
 
     Ok(program)
 }
@@ -581,8 +665,11 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
         bc_kind_expr.eq(2u32),
     );
     let p_interp_expr = p_state_expr * Expr::ident("lambda")
-        + dsl::select(p_other_state_expr, p_boundary_expr, Expr::ident("is_boundary"))
-            * Expr::ident("lambda_other");
+        + dsl::select(
+            p_other_state_expr,
+            p_boundary_expr,
+            Expr::ident("is_boundary"),
+        ) * Expr::ident("lambda_other");
 
     let mut program = KernelProgram::new(
         "rhie_chow/grad_p_update",
@@ -590,12 +677,12 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
         rhie_chow_state_launch(state_stride),
         rhie_chow_grad_p_update_bindings(),
     );
-    let indexing_stmts = vec![dsl::let_expr(
-        "base",
-        Expr::ident("idx") * state_stride,
-    )];
+    let indexing_stmts = vec![dsl::let_expr("base", Expr::ident("idx") * state_stride)];
     let preamble_stmts = vec![
-        dsl::let_expr("cell_center", dsl::array_access("cell_centers", Expr::ident("idx"))),
+        dsl::let_expr(
+            "cell_center",
+            dsl::array_access("cell_centers", Expr::ident("idx")),
+        ),
         dsl::let_typed_expr(
             "cell_center_vec",
             Type::vec2_f32(),
@@ -629,7 +716,10 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
                     "face_idx",
                     dsl::array_access("cell_faces", Expr::ident("k")),
                 ),
-                dsl::let_expr("owner", dsl::array_access("face_owner", Expr::ident("face_idx"))),
+                dsl::let_expr(
+                    "owner",
+                    dsl::array_access("face_owner", Expr::ident("face_idx")),
+                ),
                 dsl::let_expr(
                     "neighbor_raw",
                     dsl::array_access("face_neighbor", Expr::ident("face_idx")),
@@ -642,7 +732,10 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
                     "boundary_type",
                     dsl::array_access("face_boundary", Expr::ident("face_idx")),
                 ),
-                dsl::let_expr("area", dsl::array_access("face_areas", Expr::ident("face_idx"))),
+                dsl::let_expr(
+                    "area",
+                    dsl::array_access("face_areas", Expr::ident("face_idx")),
+                ),
                 dsl::let_expr(
                     "face_center",
                     dsl::array_access("face_centers", Expr::ident("face_idx")),
@@ -784,11 +877,10 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
             .read_set
             .insert(EffectResource::binding(group, binding));
     }
-    program.side_effects.read_set.insert(EffectResource::component(
-        0,
-        0,
-        format!("state:{p_offset}"),
-    ));
+    program
+        .side_effects
+        .read_set
+        .insert(EffectResource::component(0, 0, format!("state:{p_offset}")));
     program.side_effects.write_set.extend([
         EffectResource::component(0, 0, format!("state:{grad_p_x}")),
         EffectResource::component(0, 0, format!("state:{grad_p_y}")),
@@ -850,10 +942,8 @@ fn generate_rhie_chow_store_grad_p_kernel_program(
         rhie_chow_state_launch(stride),
         rhie_chow_state_bindings(),
     );
-    program.indexing = rhie_chow_section_lines(vec![dsl::let_expr(
-        "base",
-        Expr::ident("idx") * stride,
-    )]);
+    program.indexing =
+        rhie_chow_section_lines(vec![dsl::let_expr("base", Expr::ident("idx") * stride)]);
     program.body = rhie_chow_section_lines(vec![
         dsl::assign_expr(
             dsl::array_access("state", Expr::ident("base") + grad_old_x),
@@ -952,12 +1042,12 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_program(
         rhie_chow_state_launch(stride),
         rhie_chow_state_bindings(),
     );
-    let indexing_stmts = vec![dsl::let_expr(
-        "base",
-        Expr::ident("idx") * stride,
-    )];
+    let indexing_stmts = vec![dsl::let_expr("base", Expr::ident("idx") * stride)];
     let preamble_stmts = vec![
-        dsl::let_expr("d_p", dsl::array_access("state", Expr::ident("base") + d_p_offset)),
+        dsl::let_expr(
+            "d_p",
+            dsl::array_access("state", Expr::ident("base") + d_p_offset),
+        ),
         dsl::let_expr(
             "grad_px",
             dsl::array_access("state", Expr::ident("base") + grad_p_x),
@@ -1163,8 +1253,9 @@ mod tests {
         let aggressive_fused_src =
             std::fs::read_to_string(aggressive_fused_path).expect("read aggressive fused kernel");
         assert!(
-            aggressive_fused_src
-                .contains("synthesized by fusion rule: rhie_chow:dp_update_store_grad_p_grad_p_update_v1"),
+            aggressive_fused_src.contains(
+                "synthesized by fusion rule: rhie_chow:dp_update_store_grad_p_grad_p_update_v1"
+            ),
             "expected aggressive fusion synthesis marker in fused Rhie-Chow WGSL"
         );
 
@@ -1224,8 +1315,7 @@ mod tests {
         let store_grad_p_grad_p_update_fused_path = emitted
             .iter()
             .find_map(|(id, path)| {
-                (id.as_str() == "rhie_chow/store_grad_p_grad_p_update_fused")
-                    .then_some(path)
+                (id.as_str() == "rhie_chow/store_grad_p_grad_p_update_fused").then_some(path)
             })
             .expect("standalone store_grad_p_grad_p_update fused kernel path");
         let store_grad_p_grad_p_update_fused_src =
@@ -1281,10 +1371,7 @@ mod tests {
         let schemes = crate::solver::ir::SchemeRegistry::default();
 
         for (kernel_id, expected_symbols) in [
-            (
-                "dp_update_from_diag",
-                vec!["rho", "dt", "d_p"],
-            ),
+            ("dp_update_from_diag", vec!["rho", "dt", "d_p"]),
             ("dp_init", vec![]),
             ("rhie_chow/store_grad_p", vec![]),
             (

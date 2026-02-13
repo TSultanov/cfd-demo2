@@ -1,3 +1,4 @@
+use cfd2_codegen::solver::codegen::infrastructure_kernels;
 use glob::glob;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -278,6 +279,9 @@ fn main() {
         write_u64_hex(&model_codegen_fingerprint_path, model_codegen_fingerprint);
     }
 
+    // Generate infrastructure kernels (dot_product, amg, scalars, etc.) from DSL
+    emit_infrastructure_kernels(&manifest_dir);
+
     generate_kernel_registry_map(&manifest_dir, &models);
     generate_fusion_schedule_registry(&manifest_dir, &models);
     generate_named_param_registry(&manifest_dir);
@@ -399,6 +403,15 @@ fn enforce_codegen_ir_boundary(manifest_dir: &str) {
     }
 }
 
+fn emit_infrastructure_kernels(manifest_dir: &str) {
+    for (filename, generator) in infrastructure_kernels::all_infrastructure_kernels() {
+        let wgsl = generator().to_wgsl();
+        cfd2_codegen::compiler::write_generated_wgsl(manifest_dir, filename, &wgsl).unwrap_or_else(
+            |err| panic!("failed to write infrastructure kernel '{filename}': {err}"),
+        );
+    }
+}
+
 type WgslBinding = (u32, u32, String);
 type PerModelEntry = (String, String, String, Vec<WgslBinding>);
 type SharedEntry = (String, String, Vec<WgslBinding>);
@@ -508,6 +521,54 @@ fn generate_kernel_registry_map(manifest_dir: &str, models: &[solver::model::Mod
     shared_entries.sort_by(|a, b| a.0.cmp(&b.0));
     shared_entries.dedup_by(|a, b| a.0 == b.0);
 
+    // Infrastructure kernels: DSL-generated kernels in `shaders/generated/` that aren't
+    // part of any model module (dot_product, amg, linear_solver, scalars, etc.)
+    let mut infrastructure_entries: Vec<PerModelEntry> = Vec::new();
+    for (filename, _generator) in infrastructure_kernels::all_infrastructure_kernels() {
+        let path = generated_dir.join(filename);
+        let src = fs::read_to_string(&path).unwrap_or_else(|err| {
+            panic!(
+                "failed to read infrastructure kernel '{}': {err}",
+                path.display()
+            )
+        });
+        let bindings = parse_wgsl_bindings(&src);
+        let entrypoints = parse_wgsl_compute_entrypoints(&src);
+        if entrypoints.is_empty() {
+            continue;
+        }
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_else(|| panic!("bad infrastructure kernel file name: {}", path.display()));
+        let module_name = sanitize_rust_ident(stem);
+        if entrypoints.len() == 1 && entrypoints[0] == "main" {
+            infrastructure_entries.push((
+                stem.to_string(),
+                format!("generated::{module_name}"),
+                "create_main_pipeline_embed_source".to_string(),
+                bindings.clone(),
+            ));
+        } else {
+            for entry in &entrypoints {
+                infrastructure_entries.push((
+                    format!("{stem}/{entry}"),
+                    format!("generated::{module_name}"),
+                    format!("create_{entry}_pipeline_embed_source"),
+                    bindings.clone(),
+                ));
+            }
+        }
+    }
+    infrastructure_entries.sort_by(|a, b| a.0.cmp(&b.0));
+    infrastructure_entries.dedup_by(|a, b| a.0 == b.0);
+
+    // Collect infrastructure kernel IDs to exclude from handwritten scanner
+    let infrastructure_kernel_ids: std::collections::HashSet<String> = infrastructure_entries
+        .iter()
+        .map(|(kernel_id, _, _, _)| kernel_id.clone())
+        .collect();
+
     let mut handwritten_entries: Vec<PerModelEntry> = Vec::new();
     for path in list_wgsl_files_recursive(&shader_dir) {
         // Handwritten kernels only: generated WGSL is mapped separately via per-model/shared entries.
@@ -524,6 +585,10 @@ fn generate_kernel_registry_map(manifest_dir: &str, models: &[solver::model::Mod
         let rel_stem = wgsl_relative_stem(&shader_dir, &path);
         let module_path = wgsl_bindings_module_path(&rel_stem);
         if entrypoints.len() == 1 && entrypoints[0] == "main" {
+            // Skip if this kernel is now generated as infrastructure
+            if infrastructure_kernel_ids.contains(&rel_stem) {
+                continue;
+            }
             handwritten_entries.push((
                 rel_stem,
                 module_path,
@@ -532,7 +597,15 @@ fn generate_kernel_registry_map(manifest_dir: &str, models: &[solver::model::Mod
             ));
             continue;
         }
-        for entry in entrypoints {
+        // For multi-entry kernels, skip if all entries are infrastructure
+        let non_infra_entries: Vec<&String> = entrypoints
+            .iter()
+            .filter(|entry| !infrastructure_kernel_ids.contains(&format!("{rel_stem}/{entry}")))
+            .collect();
+        if non_infra_entries.is_empty() {
+            continue;
+        }
+        for entry in non_infra_entries {
             handwritten_entries.push((
                 format!("{rel_stem}/{entry}"),
                 module_path.clone(),
@@ -597,6 +670,22 @@ fn generate_kernel_registry_map(manifest_dir: &str, models: &[solver::model::Mod
         code.push_str("                ],\n");
         code.push_str("            ))\n");
         code.push_str("        }\n");
+    }
+
+    for (kernel_id, module, ctor, bindings) in &infrastructure_entries {
+        code.push_str(&format!("        (_, \"{kernel_id}\") => Some((\n"));
+        code.push_str(&format!("            bindings::{module}::SHADER_STRING,\n"));
+        code.push_str(&format!(
+            "            bindings::{module}::compute::{ctor},\n"
+        ));
+        code.push_str("            &[\n");
+        for (group, binding, name) in bindings {
+            code.push_str(&format!(
+                "                crate::solver::gpu::wgsl_reflect::WgslBindingDesc {{ group: {group}, binding: {binding}, name: \"{name}\" }},\n"
+            ));
+        }
+        code.push_str("            ],\n");
+        code.push_str("        )),\n");
     }
 
     for (kernel_id, module, ctor, bindings) in handwritten_entries {

@@ -43,6 +43,12 @@ impl Default for Module {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     Comment(String),
+    /// Module-level `const NAME: TYPE = EXPR;` declaration.
+    Const {
+        name: String,
+        ty: Type,
+        expr: Expr,
+    },
     Struct(StructDef),
     GlobalVar(GlobalVar),
     Function(Function),
@@ -53,6 +59,9 @@ impl Item {
         match self {
             Item::Comment(text) => {
                 ctx.line(&format!("// {}", text));
+            }
+            Item::Const { name, ty, expr } => {
+                ctx.line(&format!("const {}: {} = {};", name, ty, expr));
             }
             Item::Struct(def) => def.render(ctx),
             Item::GlobalVar(var) => var.render(ctx),
@@ -348,12 +357,20 @@ pub fn collect_local_symbols(stmts: &[Stmt]) -> Vec<String> {
                     visit_stmt(inner, out);
                 }
             }
+            Stmt::Loop { body } | Stmt::While { body, .. } => {
+                for inner in &body.stmts {
+                    visit_stmt(inner, out);
+                }
+            }
             Stmt::Comment(_)
             | Stmt::Assign { .. }
             | Stmt::AssignOp { .. }
             | Stmt::Return(_)
             | Stmt::Call(_)
-            | Stmt::Increment(_) => {}
+            | Stmt::Increment(_)
+            | Stmt::Decrement(_)
+            | Stmt::Break
+            | Stmt::Continue => {}
         }
     }
 
@@ -397,9 +414,21 @@ pub enum Stmt {
         step: ForStep,
         body: Block,
     },
+    /// WGSL `loop { ... }` — an infinite loop exited by `break`.
+    Loop {
+        body: Block,
+    },
+    /// WGSL `while (cond) { ... }` — a pre-condition loop.
+    While {
+        cond: Expr,
+        body: Block,
+    },
+    Break,
+    Continue,
     Return(Option<Expr>),
     Call(Expr),
     Increment(Expr),
+    Decrement(Expr),
 }
 
 impl Stmt {
@@ -476,8 +505,25 @@ impl Stmt {
                     ctx.line("return;");
                 }
             }
+            Stmt::Loop { body } => {
+                ctx.line("loop {");
+                ctx.indent();
+                body.render(ctx);
+                ctx.dedent();
+                ctx.line("}");
+            }
+            Stmt::While { cond, body } => {
+                ctx.line(&format!("while ({}) {{", cond));
+                ctx.indent();
+                body.render(ctx);
+                ctx.dedent();
+                ctx.line("}");
+            }
+            Stmt::Break => ctx.line("break;"),
+            Stmt::Continue => ctx.line("continue;"),
             Stmt::Call(expr) => ctx.line(&format!("{};", expr)),
             Stmt::Increment(expr) => ctx.line(&format!("{}++;", expr)),
+            Stmt::Decrement(expr) => ctx.line(&format!("{}--;", expr)),
         }
     }
 }
@@ -488,6 +534,11 @@ pub enum AssignOp {
     Sub,
     Mul,
     Div,
+    Modulo,
+    ShiftRight,
+    ShiftLeft,
+    BitwiseAnd,
+    BitwiseOr,
 }
 
 impl fmt::Display for AssignOp {
@@ -497,6 +548,11 @@ impl fmt::Display for AssignOp {
             AssignOp::Sub => write!(f, "-"),
             AssignOp::Mul => write!(f, "*"),
             AssignOp::Div => write!(f, "/"),
+            AssignOp::Modulo => write!(f, "%"),
+            AssignOp::ShiftRight => write!(f, ">>"),
+            AssignOp::ShiftLeft => write!(f, "<<"),
+            AssignOp::BitwiseAnd => write!(f, "&"),
+            AssignOp::BitwiseOr => write!(f, "|"),
         }
     }
 }
@@ -544,6 +600,7 @@ impl ForInit {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ForStep {
     Increment(Expr),
+    Decrement(Expr),
     Assign {
         target: Expr,
         value: Expr,
@@ -559,6 +616,7 @@ impl ForStep {
     fn to_wgsl(&self) -> String {
         match self {
             ForStep::Increment(expr) => format!("{}++", expr),
+            ForStep::Decrement(expr) => format!("{}--", expr),
             ForStep::Assign { target, value } => format!("{} = {}", target, value),
             ForStep::AssignOp { target, op, value } => format!("{} {}= {}", target, op, value),
         }
@@ -575,6 +633,12 @@ pub enum Type {
     Vec3(Box<Type>),
     Vec4(Box<Type>),
     Array(Box<Type>),
+    /// Fixed-size array, e.g. `array<f32, 64>`.
+    SizedArray(Box<Type>, u32),
+    /// Pointer type, e.g. `ptr<function, f32>`.
+    Ptr(Box<Type>, AddressSpace),
+    /// Atomic type, e.g. `atomic<u32>`.
+    Atomic(Box<Type>),
     Custom(String),
 }
 
@@ -590,6 +654,40 @@ impl Type {
     pub fn array(inner: Type) -> Self {
         Type::Array(Box::new(inner))
     }
+
+    pub fn sized_array(inner: Type, size: u32) -> Self {
+        Type::SizedArray(Box::new(inner), size)
+    }
+
+    pub fn ptr(inner: Type, address_space: AddressSpace) -> Self {
+        Type::Ptr(Box::new(inner), address_space)
+    }
+
+    pub fn atomic(inner: Type) -> Self {
+        Type::Atomic(Box::new(inner))
+    }
+}
+
+/// WGSL address space for pointer types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddressSpace {
+    Function,
+    Private,
+    Workgroup,
+    Storage,
+    Uniform,
+}
+
+impl fmt::Display for AddressSpace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AddressSpace::Function => write!(f, "function"),
+            AddressSpace::Private => write!(f, "private"),
+            AddressSpace::Workgroup => write!(f, "workgroup"),
+            AddressSpace::Storage => write!(f, "storage"),
+            AddressSpace::Uniform => write!(f, "uniform"),
+        }
+    }
 }
 
 impl fmt::Display for Type {
@@ -603,6 +701,9 @@ impl fmt::Display for Type {
             Type::Vec3(inner) => write!(f, "vec3<{}>", inner),
             Type::Vec4(inner) => write!(f, "vec4<{}>", inner),
             Type::Array(inner) => write!(f, "array<{}>", inner),
+            Type::SizedArray(inner, size) => write!(f, "array<{}, {}>", inner, size),
+            Type::Ptr(inner, space) => write!(f, "ptr<{}, {}>", space, inner),
+            Type::Atomic(inner) => write!(f, "atomic<{}>", inner),
             Type::Custom(name) => write!(f, "{}", name),
         }
     }
@@ -615,6 +716,8 @@ pub enum Attribute {
     Builtin(String),
     Compute,
     WorkgroupSize(u32),
+    /// 3-component workgroup size, e.g. `@workgroup_size(256, 1, 1)`.
+    WorkgroupSize3(u32, u32, u32),
 }
 
 impl fmt::Display for Attribute {
@@ -625,6 +728,9 @@ impl fmt::Display for Attribute {
             Attribute::Builtin(name) => write!(f, "@builtin({})", name),
             Attribute::Compute => write!(f, "@compute"),
             Attribute::WorkgroupSize(size) => write!(f, "@workgroup_size({})", size),
+            Attribute::WorkgroupSize3(x, y, z) => {
+                write!(f, "@workgroup_size({}, {}, {})", x, y, z)
+            }
         }
     }
 }
@@ -755,6 +861,11 @@ impl Expr {
         Expr::unary(UnaryOp::AddressOf, self)
     }
 
+    /// Pointer dereference: `*expr`.
+    pub fn deref(self) -> Self {
+        Expr::unary(UnaryOp::Deref, self)
+    }
+
     pub fn lt(self, rhs: impl Into<Expr>) -> Self {
         Expr::binary(self, BinaryOp::Less, rhs.into())
     }
@@ -777,6 +888,26 @@ impl Expr {
 
     pub fn ne(self, rhs: impl Into<Expr>) -> Self {
         Expr::binary(self, BinaryOp::NotEqual, rhs.into())
+    }
+
+    pub fn shr(self, rhs: impl Into<Expr>) -> Self {
+        Expr::binary(self, BinaryOp::ShiftRight, rhs.into())
+    }
+
+    pub fn shl(self, rhs: impl Into<Expr>) -> Self {
+        Expr::binary(self, BinaryOp::ShiftLeft, rhs.into())
+    }
+
+    pub fn modulo(self, rhs: impl Into<Expr>) -> Self {
+        Expr::binary(self, BinaryOp::Modulo, rhs.into())
+    }
+
+    pub fn bitwise_and(self, rhs: impl Into<Expr>) -> Self {
+        Expr::binary(self, BinaryOp::BitwiseAnd, rhs.into())
+    }
+
+    pub fn bitwise_or(self, rhs: impl Into<Expr>) -> Self {
+        Expr::binary(self, BinaryOp::BitwiseOr, rhs.into())
     }
 
     pub fn try_call_named(self, name: &str) -> Option<Vec<Expr>> {
@@ -827,6 +958,8 @@ enum UnaryOp {
     Negate,
     Not,
     AddressOf,
+    /// Pointer dereference: `*expr`.
+    Deref,
 }
 
 impl fmt::Display for UnaryOp {
@@ -835,6 +968,7 @@ impl fmt::Display for UnaryOp {
             UnaryOp::Negate => write!(f, "-"),
             UnaryOp::Not => write!(f, "!"),
             UnaryOp::AddressOf => write!(f, "&"),
+            UnaryOp::Deref => write!(f, "*"),
         }
     }
 }
@@ -845,6 +979,7 @@ enum BinaryOp {
     Sub,
     Mul,
     Div,
+    Modulo,
     Less,
     LessEq,
     Greater,
@@ -853,6 +988,10 @@ enum BinaryOp {
     NotEqual,
     And,
     Or,
+    ShiftRight,
+    ShiftLeft,
+    BitwiseAnd,
+    BitwiseOr,
 }
 
 impl BinaryOp {
@@ -860,12 +999,15 @@ impl BinaryOp {
         match self {
             BinaryOp::Or => Precedence::Or,
             BinaryOp::And => Precedence::And,
+            BinaryOp::BitwiseOr => Precedence::BitwiseOr,
+            BinaryOp::BitwiseAnd => Precedence::BitwiseAnd,
             BinaryOp::Equal | BinaryOp::NotEqual => Precedence::Equality,
             BinaryOp::Less | BinaryOp::LessEq | BinaryOp::Greater | BinaryOp::GreaterEq => {
                 Precedence::Comparison
             }
+            BinaryOp::ShiftLeft | BinaryOp::ShiftRight => Precedence::Shift,
             BinaryOp::Add | BinaryOp::Sub => Precedence::Sum,
-            BinaryOp::Mul | BinaryOp::Div => Precedence::Product,
+            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Modulo => Precedence::Product,
         }
     }
 }
@@ -877,6 +1019,7 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Sub => write!(f, "-"),
             BinaryOp::Mul => write!(f, "*"),
             BinaryOp::Div => write!(f, "/"),
+            BinaryOp::Modulo => write!(f, "%"),
             BinaryOp::Less => write!(f, "<"),
             BinaryOp::LessEq => write!(f, "<="),
             BinaryOp::Greater => write!(f, ">"),
@@ -885,6 +1028,10 @@ impl fmt::Display for BinaryOp {
             BinaryOp::NotEqual => write!(f, "!="),
             BinaryOp::And => write!(f, "&&"),
             BinaryOp::Or => write!(f, "||"),
+            BinaryOp::ShiftRight => write!(f, ">>"),
+            BinaryOp::ShiftLeft => write!(f, "<<"),
+            BinaryOp::BitwiseAnd => write!(f, "&"),
+            BinaryOp::BitwiseOr => write!(f, "|"),
         }
     }
 }
@@ -894,8 +1041,11 @@ enum Precedence {
     Lowest,
     Or,
     And,
+    BitwiseOr,
+    BitwiseAnd,
     Equality,
     Comparison,
+    Shift,
     Sum,
     Product,
     Prefix,
@@ -906,9 +1056,12 @@ fn next_precedence(prec: Precedence) -> Precedence {
     match prec {
         Precedence::Lowest => Precedence::Or,
         Precedence::Or => Precedence::And,
-        Precedence::And => Precedence::Equality,
+        Precedence::And => Precedence::BitwiseOr,
+        Precedence::BitwiseOr => Precedence::BitwiseAnd,
+        Precedence::BitwiseAnd => Precedence::Equality,
         Precedence::Equality => Precedence::Comparison,
-        Precedence::Comparison => Precedence::Sum,
+        Precedence::Comparison => Precedence::Shift,
+        Precedence::Shift => Precedence::Sum,
         Precedence::Sum => Precedence::Product,
         Precedence::Product => Precedence::Prefix,
         Precedence::Prefix | Precedence::Postfix => Precedence::Postfix,
@@ -1806,6 +1959,7 @@ impl CseBuilder {
                             UnaryOp::Negate => -new_inner,
                             UnaryOp::Not => !new_inner,
                             UnaryOp::AddressOf => new_inner.addr_of(),
+                            UnaryOp::Deref => new_inner.deref(),
                         }
                     }
                     ExprNode::Binary { left, op, right } => {
@@ -1819,6 +1973,7 @@ impl CseBuilder {
                             BinaryOp::Sub => new_left - new_right,
                             BinaryOp::Mul => new_left * new_right,
                             BinaryOp::Div => new_left / new_right,
+                            BinaryOp::Modulo => new_left.modulo(new_right),
                             BinaryOp::Less => new_left.lt(new_right),
                             BinaryOp::LessEq => new_left.le(new_right),
                             BinaryOp::Greater => new_left.gt(new_right),
@@ -1827,6 +1982,10 @@ impl CseBuilder {
                             BinaryOp::NotEqual => new_left.ne(new_right),
                             BinaryOp::And => new_left & new_right,
                             BinaryOp::Or => new_left | new_right,
+                            BinaryOp::ShiftRight => new_left.shr(new_right),
+                            BinaryOp::ShiftLeft => new_left.shl(new_right),
+                            BinaryOp::BitwiseAnd => new_left.bitwise_and(new_right),
+                            BinaryOp::BitwiseOr => new_left.bitwise_or(new_right),
                         }
                     }
                     ExprNode::Call { callee, args } => {

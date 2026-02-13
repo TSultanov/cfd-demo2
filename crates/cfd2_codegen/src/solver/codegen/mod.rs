@@ -3,6 +3,7 @@ pub mod constants;
 pub mod dsl;
 pub mod fusion;
 pub mod generic_coupled_kernels;
+pub mod infrastructure_kernels;
 pub mod ir;
 pub mod kernel_wgsl;
 pub mod packed_state_gradients;

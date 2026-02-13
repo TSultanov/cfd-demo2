@@ -37,6 +37,8 @@ use crate::solver::model::backend::ast::FieldKind;
 use crate::solver::model::ports::PortRegistry;
 use crate::solver::model::{ModelPreconditionerSpec, ModelSpec};
 use bytemuck::{bytes_of, Pod, Zeroable};
+use cfd2_codegen::solver::codegen::wgsl_ast::*;
+use cfd2_codegen::solver::codegen::wgsl_dsl::*;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -211,106 +213,357 @@ struct GpuOuterConvergenceBreakParams {
     _pad0: u32,
 }
 
-const OUTER_CONVERGENCE_BREAK_WGSL: &str = r#"
-struct BreakParams {
-    count: u32,
-    tol_rel: f32,
-    tol_abs: f32,
-    _pad0: u32,
-};
-
-@group(0) @binding(0) var<storage, read> delta: array<f32>;
-@group(0) @binding(1) var<storage, read> scale: array<f32>;
-@group(0) @binding(2) var<storage, read_write> status: array<u32>;
-@group(0) @binding(3) var<uniform> params: BreakParams;
-
-@compute @workgroup_size(1, 1, 1)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    if (global_id.x != 0u) {
-        return;
-    }
-
-    var converged: u32 = 1u;
-    for (var i: u32 = 0u; i < params.count; i = i + 1u) {
-        let d = delta[i];
-        let s_raw = scale[i];
-        let bad_d = (!(d <= d)) || (abs(d) > 1.0e30);
-        let bad_s = (!(s_raw <= s_raw)) || (abs(s_raw) > 1.0e30);
-        if (bad_d || bad_s) {
-            converged = 0u;
-            break;
-        }
-
-        let s = max(s_raw, 1.0);
-        let tol = params.tol_abs + params.tol_rel * s;
-        if (d > tol) {
-            converged = 0u;
-            break;
-        }
-    }
-    status[0] = converged;
-}
-"#;
-
-/// Gate kernel for the adaptive outer break on GPU.
+/// Builds the outer convergence break kernel WGSL via the structured DSL.
 ///
-/// Reads `break_status[0]` (1 = converged, 0 = not converged):
-/// - If NOT converged: copies real dispatch args → indirect args for both cells and faces,
+/// Single-thread kernel that checks whether all (delta, scale) pairs satisfy the
+/// convergence criterion, writing `1u` (converged) or `0u` (not converged) into
+/// `status[0]`.
+fn build_outer_convergence_break_wgsl() -> String {
+    let mut m = Module::new();
+
+    m.push(Item::Struct(StructDef::new(
+        "BreakParams",
+        vec![
+            StructField::new("count", Type::U32),
+            StructField::new("tol_rel", Type::F32),
+            StructField::new("tol_abs", Type::F32),
+            StructField::new("_pad0", Type::U32),
+        ],
+    )));
+
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "delta",
+        Type::array(Type::F32),
+        StorageClass::Storage,
+        Some(AccessMode::Read),
+        vec![Attribute::Group(0), Attribute::Binding(0)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "scale",
+        Type::array(Type::F32),
+        StorageClass::Storage,
+        Some(AccessMode::Read),
+        vec![Attribute::Group(0), Attribute::Binding(1)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "status",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::ReadWrite),
+        vec![Attribute::Group(0), Attribute::Binding(2)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "params",
+        Type::Custom("BreakParams".into()),
+        StorageClass::Uniform,
+        None,
+        vec![Attribute::Group(0), Attribute::Binding(3)],
+    )));
+
+    let global_id = Expr::ident("global_id");
+    let params = Expr::ident("params");
+    let delta = Expr::ident("delta");
+    let scale = Expr::ident("scale");
+    let status = Expr::ident("status");
+    let i = Expr::ident("i");
+    let d = Expr::ident("d");
+    let s_raw = Expr::ident("s_raw");
+    let bad_d = Expr::ident("bad_d");
+    let bad_s = Expr::ident("bad_s");
+    let s = Expr::ident("s");
+    let tol = Expr::ident("tol");
+    let converged = Expr::ident("converged");
+
+    let body = block(vec![
+        // if (global_id.x != 0u) { return; }
+        if_block_expr(
+            global_id.clone().field("x").ne(Expr::lit_u32(0)),
+            block(vec![return_void()]),
+            None,
+        ),
+        // var converged: u32 = 1u;
+        var_typed_expr("converged", Type::U32, Some(Expr::lit_u32(1))),
+        // for (var i: u32 = 0u; i < params.count; i = i + 1u) { ... }
+        for_loop_expr(
+            for_init_var_typed_expr("i", Type::U32, Expr::lit_u32(0)),
+            i.clone().lt(params.clone().field("count")),
+            for_step_increment_expr(i.clone()),
+            block(vec![
+                // let d = delta[i];
+                let_expr("d", delta.clone().index(i.clone())),
+                // let s_raw = scale[i];
+                let_expr("s_raw", scale.clone().index(i.clone())),
+                // let bad_d = (!(d <= d)) || (abs(d) > 1.0e30);
+                let_expr(
+                    "bad_d",
+                    (!d.clone().le(d.clone()))
+                        | abs(d.clone()).gt(Expr::lit_f32(1.0e30)),
+                ),
+                // let bad_s = (!(s_raw <= s_raw)) || (abs(s_raw) > 1.0e30);
+                let_expr(
+                    "bad_s",
+                    (!s_raw.clone().le(s_raw.clone()))
+                        | abs(s_raw.clone()).gt(Expr::lit_f32(1.0e30)),
+                ),
+                // if (bad_d || bad_s) { converged = 0u; break; }
+                if_block_expr(
+                    bad_d.clone() | bad_s.clone(),
+                    block(vec![
+                        assign_expr(converged.clone(), Expr::lit_u32(0)),
+                        break_stmt(),
+                    ]),
+                    None,
+                ),
+                // let s = max(s_raw, 1.0);
+                let_expr("s", max(s_raw.clone(), Expr::lit_f32(1.0))),
+                // let tol = params.tol_abs + params.tol_rel * s;
+                let_expr(
+                    "tol",
+                    params.clone().field("tol_abs") + params.clone().field("tol_rel") * s.clone(),
+                ),
+                // if (d > tol) { converged = 0u; break; }
+                if_block_expr(
+                    d.clone().gt(tol.clone()),
+                    block(vec![
+                        assign_expr(converged.clone(), Expr::lit_u32(0)),
+                        break_stmt(),
+                    ]),
+                    None,
+                ),
+            ]),
+        ),
+        // status[0] = converged;
+        assign_expr(status.clone().index(Expr::lit_u32(0)), converged.clone()),
+    ]);
+
+    m.push(Item::Function(Function::new(
+        "main",
+        vec![Param::new(
+            "global_id",
+            Type::vec3_u32(),
+            vec![Attribute::Builtin("global_invocation_id".into())],
+        )],
+        None,
+        vec![
+            Attribute::Compute,
+            Attribute::WorkgroupSize3(1, 1, 1),
+        ],
+        body,
+    )));
+
+    m.to_wgsl()
+}
+
+/// Builds the outer gate kernel WGSL via the structured DSL.
+///
+/// Single-thread kernel that reads `break_status[0]`:
+/// - If NOT converged (0): copies real dispatch args to indirect args for cells/faces,
 ///   and atomically increments the iteration counter.
-/// - If converged: writes zeros → indirect args (zero-cost dispatch).
-const OUTER_GATE_WGSL: &str = r#"
-@group(0) @binding(0) var<storage, read> break_status: array<u32>;
-@group(0) @binding(1) var<storage, read> real_args_cells: array<u32>;
-@group(0) @binding(2) var<storage, read_write> indirect_args_cells: array<u32>;
-@group(0) @binding(3) var<storage, read> real_args_faces: array<u32>;
-@group(0) @binding(4) var<storage, read_write> indirect_args_faces: array<u32>;
-@group(0) @binding(5) var<storage, read_write> iter_counter: array<atomic<u32>>;
+/// - If converged (1): writes zeros to indirect args (zero-cost dispatch).
+fn build_outer_gate_wgsl() -> String {
+    let mut m = Module::new();
 
-@compute @workgroup_size(1, 1, 1)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    if (global_id.x != 0u) {
-        return;
-    }
-    let converged = break_status[0];
-    if (converged == 0u) {
-        // Not converged: enable dispatches with real args
-        indirect_args_cells[0] = real_args_cells[0];
-        indirect_args_cells[1] = real_args_cells[1];
-        indirect_args_cells[2] = real_args_cells[2];
-        indirect_args_faces[0] = real_args_faces[0];
-        indirect_args_faces[1] = real_args_faces[1];
-        indirect_args_faces[2] = real_args_faces[2];
-        // Increment iteration counter
-        atomicAdd(&iter_counter[0], 1u);
-    } else {
-        // Converged: zero out dispatches (zero-cost no-op)
-        indirect_args_cells[0] = 0u;
-        indirect_args_cells[1] = 0u;
-        indirect_args_cells[2] = 0u;
-        indirect_args_faces[0] = 0u;
-        indirect_args_faces[1] = 0u;
-        indirect_args_faces[2] = 0u;
-    }
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "break_status",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::Read),
+        vec![Attribute::Group(0), Attribute::Binding(0)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "real_args_cells",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::Read),
+        vec![Attribute::Group(0), Attribute::Binding(1)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "indirect_args_cells",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::ReadWrite),
+        vec![Attribute::Group(0), Attribute::Binding(2)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "real_args_faces",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::Read),
+        vec![Attribute::Group(0), Attribute::Binding(3)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "indirect_args_faces",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::ReadWrite),
+        vec![Attribute::Group(0), Attribute::Binding(4)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "iter_counter",
+        Type::array(Type::atomic(Type::U32)),
+        StorageClass::Storage,
+        Some(AccessMode::ReadWrite),
+        vec![Attribute::Group(0), Attribute::Binding(5)],
+    )));
+
+    let global_id = Expr::ident("global_id");
+    let break_status = Expr::ident("break_status");
+    let real_args_cells = Expr::ident("real_args_cells");
+    let indirect_args_cells = Expr::ident("indirect_args_cells");
+    let real_args_faces = Expr::ident("real_args_faces");
+    let indirect_args_faces = Expr::ident("indirect_args_faces");
+    let iter_counter = Expr::ident("iter_counter");
+    let converged = Expr::ident("converged");
+
+    let body = block(vec![
+        // if (global_id.x != 0u) { return; }
+        if_block_expr(
+            global_id.clone().field("x").ne(Expr::lit_u32(0)),
+            block(vec![return_void()]),
+            None,
+        ),
+        // let converged = break_status[0];
+        let_expr("converged", break_status.clone().index(Expr::lit_u32(0))),
+        // if (converged == 0u) { ... } else { ... }
+        if_block_expr(
+            converged.clone().eq(Expr::lit_u32(0)),
+            block(vec![
+                // Not converged: enable dispatches with real args
+                assign_expr(
+                    indirect_args_cells.clone().index(Expr::lit_u32(0)),
+                    real_args_cells.clone().index(Expr::lit_u32(0)),
+                ),
+                assign_expr(
+                    indirect_args_cells.clone().index(Expr::lit_u32(1)),
+                    real_args_cells.clone().index(Expr::lit_u32(1)),
+                ),
+                assign_expr(
+                    indirect_args_cells.clone().index(Expr::lit_u32(2)),
+                    real_args_cells.clone().index(Expr::lit_u32(2)),
+                ),
+                assign_expr(
+                    indirect_args_faces.clone().index(Expr::lit_u32(0)),
+                    real_args_faces.clone().index(Expr::lit_u32(0)),
+                ),
+                assign_expr(
+                    indirect_args_faces.clone().index(Expr::lit_u32(1)),
+                    real_args_faces.clone().index(Expr::lit_u32(1)),
+                ),
+                assign_expr(
+                    indirect_args_faces.clone().index(Expr::lit_u32(2)),
+                    real_args_faces.clone().index(Expr::lit_u32(2)),
+                ),
+                // Increment iteration counter
+                call_stmt_expr(atomic_add(
+                    iter_counter.clone().index(Expr::lit_u32(0)).addr_of(),
+                    Expr::lit_u32(1),
+                )),
+            ]),
+            Some(block(vec![
+                // Converged: zero out dispatches
+                assign_expr(
+                    indirect_args_cells.clone().index(Expr::lit_u32(0)),
+                    Expr::lit_u32(0),
+                ),
+                assign_expr(
+                    indirect_args_cells.clone().index(Expr::lit_u32(1)),
+                    Expr::lit_u32(0),
+                ),
+                assign_expr(
+                    indirect_args_cells.clone().index(Expr::lit_u32(2)),
+                    Expr::lit_u32(0),
+                ),
+                assign_expr(
+                    indirect_args_faces.clone().index(Expr::lit_u32(0)),
+                    Expr::lit_u32(0),
+                ),
+                assign_expr(
+                    indirect_args_faces.clone().index(Expr::lit_u32(1)),
+                    Expr::lit_u32(0),
+                ),
+                assign_expr(
+                    indirect_args_faces.clone().index(Expr::lit_u32(2)),
+                    Expr::lit_u32(0),
+                ),
+            ])),
+        ),
+    ]);
+
+    m.push(Item::Function(Function::new(
+        "main",
+        vec![Param::new(
+            "global_id",
+            Type::vec3_u32(),
+            vec![Attribute::Builtin("global_invocation_id".into())],
+        )],
+        None,
+        vec![
+            Attribute::Compute,
+            Attribute::WorkgroupSize3(1, 1, 1),
+        ],
+        body,
+    )));
+
+    m.to_wgsl()
 }
-"#;
 
-/// STOP-inject kernel for FGMRES.
+/// Builds the STOP-inject kernel WGSL via the structured DSL.
 ///
-/// Reads `break_status[0]` and writes `f32(break_status[0])` into the FGMRES scalars
-/// buffer at the STOP index. When converged (break_status=1), scalars[STOP] = 1.0 > 0.5,
-/// which causes FGMRES to skip all remaining work via its existing convergence check.
-const OUTER_STOP_INJECT_WGSL: &str = r#"
-@group(0) @binding(0) var<storage, read> break_status: array<u32>;
-@group(0) @binding(1) var<storage, read_write> scalars: array<f32>;
+/// Single-thread kernel that reads `break_status[0]` and writes `f32(break_status[0])`
+/// into the scalars buffer at the given `scalar_stop` index.
+fn build_outer_stop_inject_wgsl(scalar_stop: usize) -> String {
+    let mut m = Module::new();
 
-@compute @workgroup_size(1, 1, 1)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    if (global_id.x != 0u) {
-        return;
-    }
-    scalars[{SCALAR_STOP}] = f32(break_status[0]);
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "break_status",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::Read),
+        vec![Attribute::Group(0), Attribute::Binding(0)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "scalars",
+        Type::array(Type::F32),
+        StorageClass::Storage,
+        Some(AccessMode::ReadWrite),
+        vec![Attribute::Group(0), Attribute::Binding(1)],
+    )));
+
+    let global_id = Expr::ident("global_id");
+    let break_status = Expr::ident("break_status");
+    let scalars = Expr::ident("scalars");
+
+    let body = block(vec![
+        // if (global_id.x != 0u) { return; }
+        if_block_expr(
+            global_id.clone().field("x").ne(Expr::lit_u32(0)),
+            block(vec![return_void()]),
+            None,
+        ),
+        // scalars[SCALAR_STOP] = f32(break_status[0]);
+        assign_expr(
+            scalars.clone().index(Expr::lit_u32(scalar_stop as u32)),
+            f32_cast(break_status.clone().index(Expr::lit_u32(0))),
+        ),
+    ]);
+
+    m.push(Item::Function(Function::new(
+        "main",
+        vec![Param::new(
+            "global_id",
+            Type::vec3_u32(),
+            vec![Attribute::Builtin("global_invocation_id".into())],
+        )],
+        None,
+        vec![
+            Attribute::Compute,
+            Attribute::WorkgroupSize3(1, 1, 1),
+        ],
+        body,
+    )));
+
+    m.to_wgsl()
 }
-"#;
 
 /// GPU-side adaptive outer break gate resources.
 ///
@@ -401,7 +654,7 @@ impl OuterAdaptiveGate {
         // Gate pipeline
         let gate_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("outer_gate:gate"),
-            source: wgpu::ShaderSource::Wgsl(OUTER_GATE_WGSL.into()),
+            source: wgpu::ShaderSource::Wgsl(build_outer_gate_wgsl().into()),
         });
         let gate_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("outer_gate:gate"),
@@ -444,8 +697,7 @@ impl OuterAdaptiveGate {
         });
 
         // STOP-inject pipeline (bind group created per-FGMRES workspace)
-        let stop_inject_src =
-            OUTER_STOP_INJECT_WGSL.replace("{SCALAR_STOP}", &format!("{FGMRES_SCALAR_STOP}"));
+        let stop_inject_src = build_outer_stop_inject_wgsl(FGMRES_SCALAR_STOP);
         let stop_inject_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("outer_gate:stop_inject"),
             source: wgpu::ShaderSource::Wgsl(stop_inject_src.into()),
@@ -461,8 +713,7 @@ impl OuterAdaptiveGate {
             });
 
         // STOP-inject pipeline for CG (same shader, different scalar offset)
-        let cg_stop_inject_src =
-            OUTER_STOP_INJECT_WGSL.replace("{SCALAR_STOP}", &format!("{CG_SCALAR_STOP}"));
+        let cg_stop_inject_src = build_outer_stop_inject_wgsl(CG_SCALAR_STOP);
         let cg_stop_inject_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("outer_gate:cg_stop_inject"),
             source: wgpu::ShaderSource::Wgsl(cg_stop_inject_src.into()),
@@ -696,7 +947,7 @@ impl OuterConvergenceMonitor {
         let bgl = pipeline.get_bind_group_layout(0);
         let break_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("outer_convergence:break"),
-            source: wgpu::ShaderSource::Wgsl(OUTER_CONVERGENCE_BREAK_WGSL.into()),
+            source: wgpu::ShaderSource::Wgsl(build_outer_convergence_break_wgsl().into()),
         });
         let break_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("outer_convergence:break"),

@@ -1,5 +1,7 @@
 use super::wgsl_ast::{AssignOp, Block, Expr, ForInit, ForStep, Stmt, Type};
 
+// ── Builtin math functions ──────────────────────────────────────────────
+
 pub fn abs(x: impl Into<Expr>) -> Expr {
     Expr::call_named("abs", vec![x.into()])
 }
@@ -47,8 +49,136 @@ pub fn dot(lhs: impl Into<Expr>, rhs: impl Into<Expr>) -> Expr {
     Expr::call_named("dot", vec![lhs.into(), rhs.into()])
 }
 
+pub fn mix(x: impl Into<Expr>, y: impl Into<Expr>, a: impl Into<Expr>) -> Expr {
+    Expr::call_named("mix", vec![x.into(), y.into(), a.into()])
+}
+
+pub fn round(x: impl Into<Expr>) -> Expr {
+    Expr::call_named("round", vec![x.into()])
+}
+
+pub fn floor(x: impl Into<Expr>) -> Expr {
+    Expr::call_named("floor", vec![x.into()])
+}
+
+pub fn ceil(x: impl Into<Expr>) -> Expr {
+    Expr::call_named("ceil", vec![x.into()])
+}
+
+pub fn sign(x: impl Into<Expr>) -> Expr {
+    Expr::call_named("sign", vec![x.into()])
+}
+
+pub fn fma(a: impl Into<Expr>, b: impl Into<Expr>, c: impl Into<Expr>) -> Expr {
+    Expr::call_named("fma", vec![a.into(), b.into(), c.into()])
+}
+
+pub fn log2(x: impl Into<Expr>) -> Expr {
+    Expr::call_named("log2", vec![x.into()])
+}
+
+pub fn exp2(x: impl Into<Expr>) -> Expr {
+    Expr::call_named("exp2", vec![x.into()])
+}
+
+pub fn pow(base: impl Into<Expr>, exponent: impl Into<Expr>) -> Expr {
+    Expr::call_named("pow", vec![base.into(), exponent.into()])
+}
+
+// ── Type conversion / reinterpretation ──────────────────────────────────
+
+/// `bitcast<T>(expr)` — reinterprets bits as another type.
+pub fn bitcast(ty: &str, x: impl Into<Expr>) -> Expr {
+    Expr::call_named(&format!("bitcast<{}>", ty), vec![x.into()])
+}
+
+/// `f32(expr)` — type constructor.
+pub fn f32_cast(x: impl Into<Expr>) -> Expr {
+    Expr::call_named("f32", vec![x.into()])
+}
+
+/// `u32(expr)` — type constructor.
+pub fn u32_cast(x: impl Into<Expr>) -> Expr {
+    Expr::call_named("u32", vec![x.into()])
+}
+
+/// `i32(expr)` — type constructor.
+pub fn i32_cast(x: impl Into<Expr>) -> Expr {
+    Expr::call_named("i32", vec![x.into()])
+}
+
+/// `bool(expr)` — type constructor.
+pub fn bool_cast(x: impl Into<Expr>) -> Expr {
+    Expr::call_named("bool", vec![x.into()])
+}
+
+// ── Synchronization barriers ────────────────────────────────────────────
+
+pub fn workgroup_barrier() -> Stmt {
+    Stmt::Call(Expr::call_named("workgroupBarrier", vec![]))
+}
+
+pub fn storage_barrier() -> Stmt {
+    Stmt::Call(Expr::call_named("storageBarrier", vec![]))
+}
+
+// ── Atomic operations ───────────────────────────────────────────────────
+
+pub fn atomic_load(ptr: impl Into<Expr>) -> Expr {
+    Expr::call_named("atomicLoad", vec![ptr.into()])
+}
+
+pub fn atomic_store(ptr: impl Into<Expr>, value: impl Into<Expr>) -> Stmt {
+    Stmt::Call(Expr::call_named(
+        "atomicStore",
+        vec![ptr.into(), value.into()],
+    ))
+}
+
+pub fn atomic_add(ptr: impl Into<Expr>, value: impl Into<Expr>) -> Expr {
+    Expr::call_named("atomicAdd", vec![ptr.into(), value.into()])
+}
+
+pub fn atomic_max(ptr: impl Into<Expr>, value: impl Into<Expr>) -> Expr {
+    Expr::call_named("atomicMax", vec![ptr.into(), value.into()])
+}
+
+pub fn atomic_min(ptr: impl Into<Expr>, value: impl Into<Expr>) -> Expr {
+    Expr::call_named("atomicMin", vec![ptr.into(), value.into()])
+}
+
+// ── Array intrinsics ────────────────────────────────────────────────────
+
+/// `arrayLength(&buffer)` — returns the runtime-sized array length.
+pub fn array_length(ptr: impl Into<Expr>) -> Expr {
+    Expr::call_named("arrayLength", vec![ptr.into()])
+}
+
 pub fn vec2_f32(x: impl Into<Expr>, y: impl Into<Expr>) -> Expr {
     Expr::call_named("vec2<f32>", vec![x.into(), y.into()])
+}
+
+pub fn vec4_f32(
+    x: impl Into<Expr>,
+    y: impl Into<Expr>,
+    z: impl Into<Expr>,
+    w: impl Into<Expr>,
+) -> Expr {
+    Expr::call_named("vec4<f32>", vec![x.into(), y.into(), z.into(), w.into()])
+}
+
+/// `vec4<f32>(scalar)` — splat constructor.
+pub fn vec4_f32_splat(v: impl Into<Expr>) -> Expr {
+    Expr::call_named("vec4<f32>", vec![v.into()])
+}
+
+pub fn vec4_u32(
+    x: impl Into<Expr>,
+    y: impl Into<Expr>,
+    z: impl Into<Expr>,
+    w: impl Into<Expr>,
+) -> Expr {
+    Expr::call_named("vec4<u32>", vec![x.into(), y.into(), z.into(), w.into()])
 }
 
 pub fn vec2_f32_xy_fields(name: &str) -> Expr {
@@ -159,8 +289,36 @@ pub fn increment_expr(expr: Expr) -> Stmt {
     Stmt::Increment(expr)
 }
 
+pub fn decrement_expr(expr: Expr) -> Stmt {
+    Stmt::Decrement(expr)
+}
+
 pub fn call_stmt_expr(expr: Expr) -> Stmt {
     Stmt::Call(expr)
+}
+
+pub fn break_stmt() -> Stmt {
+    Stmt::Break
+}
+
+pub fn continue_stmt() -> Stmt {
+    Stmt::Continue
+}
+
+pub fn loop_block(body: Block) -> Stmt {
+    Stmt::Loop { body }
+}
+
+pub fn while_block(cond: Expr, body: Block) -> Stmt {
+    Stmt::While { cond, body }
+}
+
+pub fn return_expr(expr: impl Into<Expr>) -> Stmt {
+    Stmt::Return(Some(expr.into()))
+}
+
+pub fn return_void() -> Stmt {
+    Stmt::Return(None)
 }
 
 pub fn if_block_expr(cond: Expr, then_block: Block, else_block: Option<Block>) -> Stmt {
@@ -205,6 +363,10 @@ pub fn for_init_assign_expr(target: Expr, value: impl Into<Expr>) -> ForInit {
 
 pub fn for_step_increment_expr(expr: Expr) -> ForStep {
     ForStep::Increment(expr)
+}
+
+pub fn for_step_decrement_expr(expr: Expr) -> ForStep {
+    ForStep::Decrement(expr)
 }
 
 pub fn for_step_assign_expr(target: Expr, value: impl Into<Expr>) -> ForStep {

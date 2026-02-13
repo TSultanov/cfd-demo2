@@ -44,17 +44,9 @@ impl KernelId {
     pub const AMG_PROLONGATE_OP: KernelId = KernelId("amg/prolongate_op");
     pub const AMG_CLEAR: KernelId = KernelId("amg/clear");
 
-    pub const AMG_PACK_PACK_COMPONENT: KernelId = KernelId("amg_pack/pack_component");
-    pub const AMG_PACK_UNPACK_COMPONENT: KernelId = KernelId("amg_pack/unpack_component");
-
     pub const BLOCK_PRECOND_BUILD_BLOCK_INV: KernelId = KernelId("block_precond/build_block_inv");
     pub const BLOCK_PRECOND_APPLY_BLOCK_PRECOND: KernelId =
         KernelId("block_precond/apply_block_precond");
-
-    pub const SCHUR_PRECOND_PREDICT_AND_FORM: KernelId =
-        KernelId("schur_precond/predict_and_form_schur");
-    pub const SCHUR_PRECOND_RELAX_PRESSURE: KernelId = KernelId("schur_precond/relax_pressure");
-    pub const SCHUR_PRECOND_CORRECT_VELOCITY: KernelId = KernelId("schur_precond/correct_velocity");
 
     pub const SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM: KernelId =
         KernelId("schur_precond_generic/predict_and_form_schur");

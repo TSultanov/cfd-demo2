@@ -209,7 +209,7 @@ fn contract_jacobi_preconditioner_is_diagonal_scaled() {
         "runtime_preconditioner.rs",
     );
 
-    let shader_path = repo_root().join("src/solver/gpu/shaders/gmres_ops.wgsl");
+    let shader_path = repo_root().join("src/solver/gpu/shaders/generated/gmres_ops.wgsl");
     let shader_src = read_utf8(&shader_path);
     assert_contains(&shader_src, "fn extract_diag_inv", "gmres_ops.wgsl");
     assert_contains(&shader_src, "fn apply_diag_inv", "gmres_ops.wgsl");
@@ -244,7 +244,7 @@ fn contract_block_jacobi_preconditioner_is_wired() {
         "runtime_preconditioner.rs",
     );
 
-    let shader_path = repo_root().join("src/solver/gpu/shaders/block_precond.wgsl");
+    let shader_path = repo_root().join("src/solver/gpu/shaders/generated/block_precond.wgsl");
     let shader_src = read_utf8(&shader_path);
     assert_contains(
         &shader_src,

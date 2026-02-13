@@ -19,6 +19,12 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
+    eos_gamma: f32,
+    eos_gm1: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
 }
 
 

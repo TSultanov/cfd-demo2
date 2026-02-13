@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use super::ParamSpec;
+
 /// Kernel dispatch domain used for compatibility checks during fusion.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DispatchDomain {
@@ -122,6 +124,9 @@ pub struct KernelProgram {
     /// Local symbols that may need deterministic renaming when composing kernels.
     pub local_symbols: Vec<String>,
     pub side_effects: SideEffectMetadata,
+    /// EOS parameters referenced by this kernel (structured declaration that replaces
+    /// string-scan heuristic in `constants_extra_params_for_program`).
+    pub eos_params: Vec<ParamSpec>,
 }
 
 impl KernelProgram {
@@ -141,6 +146,7 @@ impl KernelProgram {
             body: Vec::new(),
             local_symbols: Vec::new(),
             side_effects: SideEffectMetadata::default(),
+            eos_params: Vec::new(),
         }
     }
 

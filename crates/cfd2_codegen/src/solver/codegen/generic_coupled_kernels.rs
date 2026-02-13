@@ -90,6 +90,7 @@ pub fn generate_generic_coupled_update_kernel_program(
     program.indexing = vec![format!("let base = idx * {}u;", slots.stride)];
     program.body = super::wgsl_ast::render_stmt_lines(kernel_stmts);
     program.local_symbols = super::wgsl_ast::collect_local_symbols(kernel_stmts);
+    program.eos_params = eos_params.to_vec();
     Ok(program)
 }
 

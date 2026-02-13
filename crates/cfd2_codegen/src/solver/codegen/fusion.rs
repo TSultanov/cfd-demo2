@@ -28,6 +28,58 @@ pub enum FusionSafetyPolicy {
     Aggressive,
 }
 
+/// Classification of a data hazard detected during fusion safety analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HazardKind {
+    /// Read-After-Write: a later kernel reads a resource written by an earlier kernel.
+    RAW,
+    /// Write-After-Read: a later kernel writes a resource read by an earlier kernel.
+    WAR,
+    /// Write-After-Write: a later kernel writes a resource also written by an earlier kernel.
+    WAW,
+    /// A kernel uses barriers or atomics, requiring dedicated transforms.
+    BarriersOrAtomics,
+}
+
+impl std::fmt::Display for HazardKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HazardKind::RAW => write!(f, "RAW"),
+            HazardKind::WAR => write!(f, "WAR"),
+            HazardKind::WAW => write!(f, "WAW"),
+            HazardKind::BarriersOrAtomics => write!(f, "barriers/atomics"),
+        }
+    }
+}
+
+/// A single hazard detected during fusion composition analysis.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HazardReport {
+    pub kind: HazardKind,
+    pub kernel_id: String,
+    pub resources: Vec<EffectResource>,
+}
+
+impl std::fmt::Display for HazardReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} hazard at kernel '{}'", self.kind, self.kernel_id)?;
+        if !self.resources.is_empty() {
+            write!(f, " (resources: ")?;
+            for (i, r) in self.resources.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "@group({}) @binding({})", r.group, r.binding)?;
+                if let Some(ref c) = r.component {
+                    write!(f, ":{c}")?;
+                }
+            }
+            write!(f, ")")?;
+        }
+        Ok(())
+    }
+}
+
 pub fn match_fusion_candidates(
     ordered_kernel_ids: &[&str],
     rules: &[FusionPatternRule],
@@ -93,10 +145,25 @@ pub fn synthesize_fused_program(
     programs: &[KernelProgram],
     policy: FusionSafetyPolicy,
 ) -> Result<KernelProgram, String> {
+    let (program, _hazards) =
+        synthesize_fused_program_with_report(replacement_id, rule_name, programs, policy)?;
+    Ok(program)
+}
+
+/// Like [`synthesize_fused_program`], but also returns any hazard reports detected
+/// during composition analysis. Under `Safe` policy, hazards cause rejection (Err).
+/// Under `Aggressive` policy, hazards are collected and returned alongside the
+/// successfully fused program so callers have visibility.
+pub fn synthesize_fused_program_with_report(
+    replacement_id: impl Into<String>,
+    rule_name: &str,
+    programs: &[KernelProgram],
+    policy: FusionSafetyPolicy,
+) -> Result<(KernelProgram, Vec<HazardReport>), String> {
     if programs.is_empty() {
         return Err("fusion synthesis requires at least one input kernel".to_string());
     }
-    ensure_safe_composition(programs, policy)?;
+    let hazards = ensure_safe_composition(programs, policy)?;
 
     let dispatch = programs[0].dispatch.clone();
     let launch = programs[0].launch.clone();
@@ -138,6 +205,7 @@ pub fn synthesize_fused_program(
     fused.body = body;
     fused.local_symbols = local_symbols;
     fused.side_effects = side_effects;
+    fused.eos_params = merge_eos_params(programs);
 
     if policy == FusionSafetyPolicy::Aggressive {
         apply_aggressive_cleanup(&mut fused);
@@ -148,13 +216,71 @@ pub fn synthesize_fused_program(
         .preamble
         .insert(0, format!("// synthesized by fusion rule: {rule_name}"));
 
-    Ok(fused)
+    Ok((fused, hazards))
+}
+
+/// Detect all data hazards across a sequence of programs without rejecting.
+///
+/// Returns a list of [`HazardReport`] entries describing every RAW, WAR, WAW,
+/// and barrier/atomics hazard found in the program sequence. An empty list means
+/// the composition is safe.
+pub fn detect_hazards(programs: &[KernelProgram]) -> Vec<HazardReport> {
+    let mut reports = Vec::new();
+
+    for program in programs {
+        if program.side_effects.uses_barriers || program.side_effects.uses_atomics {
+            reports.push(HazardReport {
+                kind: HazardKind::BarriersOrAtomics,
+                kernel_id: program.id.clone(),
+                resources: Vec::new(),
+            });
+        }
+    }
+
+    let mut prior_reads = BTreeSet::<EffectResource>::new();
+    let mut prior_writes = BTreeSet::<EffectResource>::new();
+    for program in programs {
+        let read = &program.side_effects.read_set;
+        let write = &program.side_effects.write_set;
+
+        let raw_resources = intersection_list(&prior_writes, read);
+        if !raw_resources.is_empty() {
+            reports.push(HazardReport {
+                kind: HazardKind::RAW,
+                kernel_id: program.id.clone(),
+                resources: raw_resources,
+            });
+        }
+
+        let war_resources = intersection_list(&prior_reads, write);
+        if !war_resources.is_empty() {
+            reports.push(HazardReport {
+                kind: HazardKind::WAR,
+                kernel_id: program.id.clone(),
+                resources: war_resources,
+            });
+        }
+
+        let waw_resources = intersection_list(&prior_writes, write);
+        if !waw_resources.is_empty() {
+            reports.push(HazardReport {
+                kind: HazardKind::WAW,
+                kernel_id: program.id.clone(),
+                resources: waw_resources,
+            });
+        }
+
+        prior_reads.extend(read.iter().cloned());
+        prior_writes.extend(write.iter().cloned());
+    }
+
+    reports
 }
 
 fn ensure_safe_composition(
     programs: &[KernelProgram],
     policy: FusionSafetyPolicy,
-) -> Result<(), String> {
+) -> Result<Vec<HazardReport>, String> {
     let first = &programs[0];
     for program in programs.iter().skip(1) {
         if program.dispatch != first.dispatch {
@@ -178,48 +304,20 @@ fn ensure_safe_composition(
         }
     }
 
+    let hazards = detect_hazards(programs);
+
     if policy == FusionSafetyPolicy::Safe {
-        if programs
-            .iter()
-            .any(|p| p.side_effects.uses_barriers || p.side_effects.uses_atomics)
-        {
-            return Err(
-                "fusion rejected: barriers/atomics require aggressive policy and dedicated transforms"
-                    .to_string(),
-            );
-        }
-
-        let mut prior_reads = BTreeSet::<EffectResource>::new();
-        let mut prior_writes = BTreeSet::<EffectResource>::new();
-        for program in programs {
-            let read = &program.side_effects.read_set;
-            let write = &program.side_effects.write_set;
-
-            if intersects(&prior_writes, read) {
-                return Err(format!(
-                    "fusion rejected: RAW hazard at kernel '{}'",
-                    program.id
-                ));
-            }
-            if intersects(&prior_reads, write) {
-                return Err(format!(
-                    "fusion rejected: WAR hazard at kernel '{}'",
-                    program.id
-                ));
-            }
-            if intersects(&prior_writes, write) {
-                return Err(format!(
-                    "fusion rejected: WAW hazard at kernel '{}'",
-                    program.id
-                ));
-            }
-
-            prior_reads.extend(read.iter().cloned());
-            prior_writes.extend(write.iter().cloned());
+        // Under Safe policy, any hazard is a hard rejection.
+        if let Some(h) = hazards.first() {
+            return Err(format!(
+                "fusion rejected: {} hazard at kernel '{}'",
+                h.kind, h.kernel_id
+            ));
         }
     }
 
-    Ok(())
+    // Under Aggressive policy, hazards are collected but do not block synthesis.
+    Ok(hazards)
 }
 
 fn dispatch_label(dispatch: &DispatchDomain) -> String {
@@ -230,11 +328,14 @@ fn dispatch_label(dispatch: &DispatchDomain) -> String {
     }
 }
 
-fn intersects(left: &BTreeSet<EffectResource>, right: &BTreeSet<EffectResource>) -> bool {
+fn intersection_list(
+    left: &BTreeSet<EffectResource>,
+    right: &BTreeSet<EffectResource>,
+) -> Vec<EffectResource> {
     if left.len() < right.len() {
-        left.iter().any(|r| right.contains(r))
+        left.iter().filter(|r| right.contains(r)).cloned().collect()
     } else {
-        right.iter().any(|r| left.contains(r))
+        right.iter().filter(|r| left.contains(r)).cloned().collect()
     }
 }
 
@@ -267,6 +368,22 @@ fn merge_bindings(
         }
     }
     Ok(merged)
+}
+
+/// Union all `eos_params` across input programs, deduplicated by `wgsl_field`.
+///
+/// Order is preserved by first-seen insertion.
+fn merge_eos_params(programs: &[KernelProgram]) -> Vec<ParamSpec> {
+    let mut seen = BTreeSet::new();
+    let mut merged = Vec::new();
+    for program in programs {
+        for param in &program.eos_params {
+            if seen.insert(param.wgsl_field) {
+                merged.push(param.clone());
+            }
+        }
+    }
+    merged
 }
 
 fn deterministic_symbol_rename_map(
@@ -487,7 +604,16 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
             ));
         }
         if needs_constants_struct {
-            let extra_constants = constants_extra_params_for_program(program);
+            // Use the structured eos_params declaration from the KernelProgram IR
+            // instead of scanning body strings for field references (§2d fix).
+            // Falls back to the legacy string-scan heuristic when eos_params is
+            // empty to keep backward compatibility with programs that haven't
+            // been updated yet.
+            let extra_constants = if program.eos_params.is_empty() {
+                constants_extra_params_for_program(program)
+            } else {
+                program.eos_params.clone()
+            };
             shared_structs_module.push(super::wgsl_ast::Item::Struct(
                 super::constants::constants_struct(&extra_constants),
             ));
@@ -796,5 +922,294 @@ mod tests {
         let src = "let dt = max(constants.dt, state[idx].dt);";
         let renamed = rename_identifier(src, "dt", "k1_dt");
         assert_eq!(renamed, "let k1_dt = max(constants.dt, state[idx].dt);");
+    }
+
+    #[test]
+    fn detect_hazards_finds_raw() {
+        let mut a = sample_program("a");
+        a.side_effects
+            .write_set
+            .insert(EffectResource::binding(0, 0));
+
+        let mut b = sample_program("b");
+        b.side_effects
+            .read_set
+            .insert(EffectResource::binding(0, 0));
+
+        let hazards = detect_hazards(&[a, b]);
+        assert_eq!(hazards.len(), 1);
+        assert_eq!(hazards[0].kind, HazardKind::RAW);
+        assert_eq!(hazards[0].kernel_id, "b");
+        assert_eq!(hazards[0].resources.len(), 1);
+        assert_eq!(hazards[0].resources[0], EffectResource::binding(0, 0));
+    }
+
+    #[test]
+    fn detect_hazards_finds_war() {
+        let mut a = sample_program("a");
+        a.side_effects
+            .read_set
+            .insert(EffectResource::binding(0, 0));
+
+        let mut b = sample_program("b");
+        b.side_effects
+            .write_set
+            .insert(EffectResource::binding(0, 0));
+
+        let hazards = detect_hazards(&[a, b]);
+        assert_eq!(hazards.len(), 1);
+        assert_eq!(hazards[0].kind, HazardKind::WAR);
+        assert_eq!(hazards[0].kernel_id, "b");
+    }
+
+    #[test]
+    fn detect_hazards_finds_waw() {
+        let mut a = sample_program("a");
+        a.side_effects
+            .write_set
+            .insert(EffectResource::binding(0, 0));
+
+        let mut b = sample_program("b");
+        b.side_effects
+            .write_set
+            .insert(EffectResource::binding(0, 0));
+
+        let hazards = detect_hazards(&[a, b]);
+        assert_eq!(hazards.len(), 1);
+        assert_eq!(hazards[0].kind, HazardKind::WAW);
+        assert_eq!(hazards[0].kernel_id, "b");
+    }
+
+    #[test]
+    fn detect_hazards_finds_barriers_atomics() {
+        let mut a = sample_program("a");
+        a.side_effects.uses_barriers = true;
+
+        let b = sample_program("b");
+
+        let hazards = detect_hazards(&[a, b]);
+        assert_eq!(hazards.len(), 1);
+        assert_eq!(hazards[0].kind, HazardKind::BarriersOrAtomics);
+        assert_eq!(hazards[0].kernel_id, "a");
+    }
+
+    #[test]
+    fn detect_hazards_empty_for_safe_programs() {
+        let a = sample_program("a");
+        let b = sample_program("b");
+        let hazards = detect_hazards(&[a, b]);
+        assert!(hazards.is_empty());
+    }
+
+    #[test]
+    fn detect_hazards_multiple_hazards_in_chain() {
+        let mut a = sample_program("a");
+        a.side_effects
+            .write_set
+            .insert(EffectResource::binding(0, 0));
+
+        let mut b = sample_program("b");
+        b.side_effects
+            .read_set
+            .insert(EffectResource::binding(0, 0));
+        b.side_effects
+            .write_set
+            .insert(EffectResource::component(0, 0, "x"));
+
+        let mut c = sample_program("c");
+        c.side_effects
+            .read_set
+            .insert(EffectResource::component(0, 0, "x"));
+
+        let hazards = detect_hazards(&[a, b, c]);
+        assert!(
+            hazards.len() >= 2,
+            "expected at least 2 hazards, got {}",
+            hazards.len()
+        );
+        assert_eq!(hazards[0].kind, HazardKind::RAW);
+        assert_eq!(hazards[0].kernel_id, "b");
+    }
+
+    #[test]
+    fn aggressive_policy_succeeds_with_hazards_and_returns_report() {
+        let mut a = sample_program("a");
+        a.side_effects
+            .write_set
+            .insert(EffectResource::binding(0, 0));
+
+        let mut b = sample_program("b");
+        b.side_effects
+            .read_set
+            .insert(EffectResource::binding(0, 0));
+
+        let result = synthesize_fused_program_with_report(
+            "fused",
+            "rule/a_b",
+            &[a, b],
+            FusionSafetyPolicy::Aggressive,
+        );
+        let (program, hazards) =
+            result.expect("aggressive synthesis should succeed despite hazards");
+        assert!(!hazards.is_empty(), "hazards should be reported");
+        assert_eq!(hazards[0].kind, HazardKind::RAW);
+        assert!(!program.body.is_empty());
+    }
+
+    #[test]
+    fn safe_policy_still_rejects_on_hazards() {
+        let mut a = sample_program("a");
+        a.side_effects
+            .write_set
+            .insert(EffectResource::binding(0, 0));
+
+        let mut b = sample_program("b");
+        b.side_effects
+            .read_set
+            .insert(EffectResource::binding(0, 0));
+
+        let err = synthesize_fused_program_with_report(
+            "fused",
+            "rule/a_b",
+            &[a, b],
+            FusionSafetyPolicy::Safe,
+        )
+        .unwrap_err();
+        assert!(err.contains("RAW hazard"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn hazard_report_display_formatting() {
+        let report = HazardReport {
+            kind: HazardKind::WAW,
+            kernel_id: "dp_update_from_diag".to_string(),
+            resources: vec![EffectResource::component(0, 0, "state:d_p_offset")],
+        };
+        let display = format!("{report}");
+        assert!(display.contains("WAW hazard at kernel 'dp_update_from_diag'"));
+        assert!(display.contains("@group(0) @binding(0):state:d_p_offset"));
+    }
+
+    #[test]
+    fn lowering_uses_structured_eos_params_from_ir() {
+        use cfd2_ir::solver::dimensions::Dimensionless;
+        let launch = LaunchSemantics::new(
+            [64, 1, 1],
+            "global_id.y * constants.stride_x + global_id.x",
+            Some("idx >= arrayLength(&state) / 2u"),
+        );
+        let mut program = KernelProgram::new(
+            "structured_eos_test",
+            DispatchDomain::Cells,
+            launch,
+            vec![
+                KernelBinding::new(0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage),
+                KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
+            ],
+        );
+        // Declare eos_gamma and eos_r via structured IR field
+        program.eos_params = vec![
+            ParamSpec {
+                key: "eos.gamma",
+                wgsl_field: "eos_gamma",
+                wgsl_type: "f32",
+                unit: Dimensionless::UNIT,
+            },
+            ParamSpec {
+                key: "eos.r",
+                wgsl_field: "eos_r",
+                wgsl_type: "f32",
+                unit: Dimensionless::UNIT,
+            },
+        ];
+        // Body references eos_gamma only — but since it's declared, eos_r
+        // should also appear in the Constants struct.
+        program.body = vec![
+            "let c = constants.eos_gamma;".to_string(),
+            "state[idx] = c;".to_string(),
+        ];
+
+        let wgsl = lower_kernel_program_to_wgsl(&program).expect("lowering should succeed");
+        let src = wgsl.to_wgsl();
+        assert!(
+            src.contains("eos_gamma: f32"),
+            "declared eos_gamma must appear in Constants"
+        );
+        assert!(
+            src.contains("eos_r: f32"),
+            "declared eos_r must appear in Constants even if not in body"
+        );
+        assert!(
+            !src.contains("eos_gm1: f32"),
+            "undeclared eos_gm1 must not appear"
+        );
+    }
+
+    #[test]
+    fn lowering_falls_back_to_string_scan_when_eos_params_empty() {
+        let launch = LaunchSemantics::new(
+            [64, 1, 1],
+            "global_id.y * constants.stride_x + global_id.x",
+            Some("idx >= arrayLength(&state) / 2u"),
+        );
+        let mut program = KernelProgram::new(
+            "fallback_eos_test",
+            DispatchDomain::Cells,
+            launch,
+            vec![
+                KernelBinding::new(0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage),
+                KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
+            ],
+        );
+        // No eos_params set (empty vec), but body references eos_gamma
+        program.body = vec![
+            "let c = constants.eos_gamma;".to_string(),
+            "state[idx] = c;".to_string(),
+        ];
+        assert!(program.eos_params.is_empty());
+
+        let wgsl = lower_kernel_program_to_wgsl(&program).expect("lowering should succeed");
+        let src = wgsl.to_wgsl();
+        assert!(
+            src.contains("eos_gamma: f32"),
+            "string-scan fallback should detect eos_gamma in body"
+        );
+    }
+
+    #[test]
+    fn fusion_merges_eos_params_from_input_programs() {
+        use cfd2_ir::solver::dimensions::Dimensionless;
+        let mut a = sample_program("a");
+        a.eos_params = vec![ParamSpec {
+            key: "eos.gamma",
+            wgsl_field: "eos_gamma",
+            wgsl_type: "f32",
+            unit: Dimensionless::UNIT,
+        }];
+
+        let mut b = sample_program("b");
+        b.eos_params = vec![
+            ParamSpec {
+                key: "eos.gamma",
+                wgsl_field: "eos_gamma",
+                wgsl_type: "f32",
+                unit: Dimensionless::UNIT,
+            },
+            ParamSpec {
+                key: "eos.r",
+                wgsl_field: "eos_r",
+                wgsl_type: "f32",
+                unit: Dimensionless::UNIT,
+            },
+        ];
+
+        let fused =
+            synthesize_fused_program("fused", "rule/a_b", &[a, b], FusionSafetyPolicy::Safe)
+                .expect("safe fused synthesis");
+
+        assert_eq!(fused.eos_params.len(), 2, "should deduplicate eos_gamma");
+        let fields: Vec<&str> = fused.eos_params.iter().map(|p| p.wgsl_field).collect();
+        assert!(fields.contains(&"eos_gamma"));
+        assert!(fields.contains(&"eos_r"));
     }
 }

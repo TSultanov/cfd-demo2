@@ -87,9 +87,16 @@ order, just fewer dispatches). ~~Current parity tolerance is `1e-3`.~~
 is gated on `policy == Safe`. Under Aggressive, the entire safety check is skipped.
 Rule authors must manually guarantee correctness.
 
-- [ ] Add at least a warning-level hazard report for Aggressive policy fusions (log
+- [x] Add at least a warning-level hazard report for Aggressive policy fusions (log
   detected hazards without rejecting, so authors have visibility).
-- [ ] Consider adding a `--aggressive-hazard-report` flag to `fusion_coverage` binary.
+  **Implemented:** Extracted `detect_hazards()` as a public function returning a
+  `HazardReport` (with `HazardKind` enum: RAW/WAR/WAW/BarriersOrAtomics).
+  `synthesize_fused_program_with_report()` exposes hazard info alongside the fused
+  program. `ensure_safe_composition()` now delegates to `detect_hazards()` internally.
+  9 new unit tests cover all hazard kinds and report formatting.
+- [x] Consider adding a `--aggressive-hazard-report` flag to `fusion_coverage` binary.
+  **Implemented:** `fusion_coverage --aggressive-hazard-report` renders per-rule hazard
+  reports for all aggressive-policy fusions.
 
 ### 2b) No Cross-Kernel Value Forwarding (P3 — optimization opportunity)
 
@@ -98,11 +105,19 @@ value that kernel B reads (from the same buffer slot), the fused kernel still pe
 a memory round-trip (store then load). A proper AST-based body representation would
 enable eliminating redundant loads/stores across fused kernel boundaries.
 
-- [ ] Evaluate the cost/benefit of replacing `Vec<String>` body with a typed expression
+- [x] Evaluate the cost/benefit of replacing `Vec<String>` body with a typed expression
   AST (the face-expression AST `FaceScalarExpr`/`FaceVec2Expr` already exists in the IR
   but is not used for kernel bodies).
-- [ ] If adopted, implement a simple load-after-store elimination pass in
-  `synthesize_fused_program`.
+  **Evaluation result:** Only 3 of 7 fusion rules have cross-kernel store-load
+  forwarding opportunities (all aggressive-only). Maximum 5 scalar `f32` store-load
+  pairs could be eliminated, but these values are almost certainly in L1 cache after
+  the preceding store, so the performance benefit is negligible.
+  `FaceScalarExpr`/`FaceVec2Expr` are face-centric and unsuitable as general body AST.
+  Migrating `body: Vec<String>` to `body: Vec<Stmt>` would be a deep structural change
+  touching every kernel generator. **Cost far exceeds benefit — deferred.**
+- [ ] If adopted in the future, implement a simple load-after-store elimination pass in
+  `synthesize_fused_program`. A lightweight string-pattern rewrite pass (~50–100 lines)
+  could achieve the same result without AST migration if the need arises.
 
 ### 2c) Binding Access Promotion (P3)
 
@@ -110,19 +125,28 @@ enable eliminating redundant loads/stores across fused kernel boundaries.
 the same slot with different `BindingAccess`. A smarter merge could safely promote
 `ReadOnlyStorage` to `ReadWriteStorage` when the write is in a later kernel.
 
-- [ ] Evaluate whether any real fusion candidate is blocked by this (check
+- [x] Evaluate whether any real fusion candidate is blocked by this (check
   `FUSION_COVERAGE.md` for bind-merge rejections vs hazard rejections).
-- [ ] If blocking, implement promotion logic with clear documentation of safety
-  guarantees.
+  **Result: No fusion candidate is blocked by bind-merge incompatibility.**
+  All rejections in the current coverage report are hazard-based (WAW, WAR, RAW).
+  Promotion logic is not needed today.
+- [ ] If blocking in the future, implement promotion logic with clear documentation
+  of safety guarantees.
 
 ### 2d) EOS Parameter Detection Is Fragile (P3)
 
-`constants_extra_params_for_program()` in `fusion.rs:388` scans for hardcoded EOS
+`constants_extra_params_for_program()` in `fusion.rs:488` scans for hardcoded EOS
 field names (`eos.gamma`, etc.) via string containment. Adding new EOS parameters
 requires updating this function.
 
-- [ ] Replace string-scan heuristic with a structured EOS parameter declaration in the
-  `KernelProgram` IR (e.g., an `eos_params_used: BTreeSet<String>` field).
+- [x] Replace string-scan heuristic with a structured EOS parameter declaration in the
+  `KernelProgram` IR.
+  **Implemented:** Added `eos_params: Vec<ParamSpec>` field to `KernelProgram`.
+  Generators (`generate_generic_coupled_update_kernel_program`,
+  `generate_unified_assembly_kernel_program`) now populate `eos_params`.
+  Fusion synthesis merges `eos_params` via `merge_eos_params()`.
+  `lower_kernel_program_to_wgsl` prefers `program.eos_params` when non-empty,
+  falling back to the legacy string-scan for backward compatibility.
 
 ## 3) Fusion Coverage Expansion
 

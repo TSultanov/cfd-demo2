@@ -35,7 +35,7 @@ pub struct PortManifest {
 }
 
 /// Specification for a parameter port.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParamSpec {
     /// The parameter key (human-readable identifier).
     pub key: &'static str,

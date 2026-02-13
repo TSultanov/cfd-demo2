@@ -1117,19 +1117,31 @@ mod tests {
         );
         assert!(
             aggressive_recipe.applied_fusions.contains(
-                &"rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1"
+                &"rhie_chow:dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1"
             ),
-            "aggressive recipe should apply full rhie-chow fusion"
+            "aggressive recipe should apply full rhie-chow fusion (5-kernel dp_init variant)"
         );
+        // The aggressive policy applies a single 5-kernel fusion rule that subsumes
+        // the two separate safe-level rules, so it may have fewer rule entries but
+        // should always produce fewer total kernel dispatches.
         assert!(
-            aggressive_recipe.applied_fusions.len() >= safe_recipe.applied_fusions.len(),
-            "aggressive policy should not apply fewer fusion rules than safe"
+            aggressive_recipe.kernels.len() < safe_recipe.kernels.len(),
+            "aggressive policy should produce fewer kernel dispatches than safe (aggressive={}, safe={})",
+            aggressive_recipe.kernels.len(),
+            safe_recipe.kernels.len(),
         );
 
         assert!(aggressive_recipe.kernels.iter().any(|k| {
             k.id.as_str()
-                == "rhie_chow/dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused"
+                == "rhie_chow/dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused"
         }));
+        assert!(
+            !aggressive_recipe
+                .kernels
+                .iter()
+                .any(|k| k.id.as_str() == "dp_init"),
+            "dp_init should be absorbed by aggressive fused replacement"
+        );
         assert!(!aggressive_recipe
             .kernels
             .iter()
@@ -1219,9 +1231,9 @@ mod tests {
         // depending on the kernel ordering. We verify the rule exists and is classified correctly.
         assert!(
             aggressive_recipe.applied_fusions.contains(
-                &"rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1"
+                &"rhie_chow:dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1"
             ),
-            "aggressive policy should apply full rhie-chow fusion"
+            "aggressive policy should apply full rhie-chow fusion (5-kernel dp_init variant)"
         );
     }
 

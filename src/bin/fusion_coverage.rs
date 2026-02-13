@@ -4,7 +4,10 @@ use cfd2::solver::model::kernel::{
     KernelWgslScope, ModelKernelArtifact,
 };
 use cfd2::solver::scheme::Scheme;
-use cfd2_codegen::solver::codegen::fusion::{synthesize_fused_program, FusionSafetyPolicy};
+use cfd2_codegen::solver::codegen::fusion::{
+    synthesize_fused_program, synthesize_fused_program_with_report, FusionSafetyPolicy,
+    HazardReport,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone)]
@@ -55,6 +58,7 @@ struct FusionRuleRow {
     safe_reason: String,
     aggressive_reason: String,
     blocked_by_wgsl: bool,
+    aggressive_hazards: Vec<HazardReport>,
 }
 
 fn phase_name(phase: Option<KernelPhaseId>) -> &'static str {
@@ -352,6 +356,7 @@ fn collect_model_coverage(
             safe_reason,
             aggressive_reason,
             blocked_by_wgsl,
+            aggressive_hazards,
         ) = if all_dsl {
             let (safe_ok, safe_reason) = match synthesize_fused_program(
                 format!("reassess/rule_safe/{}", rule.replacement.id.as_str()),
@@ -362,16 +367,16 @@ fn collect_model_coverage(
                 Ok(_) => (true, "compatible".to_string()),
                 Err(err) => (false, compact_error(&err)),
             };
-            let (aggr_ok, aggr_reason) = match synthesize_fused_program(
+            let (aggr_ok, aggr_reason, hazards) = match synthesize_fused_program_with_report(
                 format!("reassess/rule_aggressive/{}", rule.replacement.id.as_str()),
                 rule.name,
                 &rule_programs,
                 FusionSafetyPolicy::Aggressive,
             ) {
-                Ok(_) => (true, "compatible".to_string()),
-                Err(err) => (false, compact_error(&err)),
+                Ok((_program, hazards)) => (true, "compatible".to_string(), hazards),
+                Err(err) => (false, compact_error(&err), Vec::new()),
             };
-            (safe_ok, aggr_ok, safe_reason, aggr_reason, false)
+            (safe_ok, aggr_ok, safe_reason, aggr_reason, false, hazards)
         } else {
             (
                 false,
@@ -379,6 +384,7 @@ fn collect_model_coverage(
                 "requires DSL migration".to_string(),
                 "requires DSL migration".to_string(),
                 true,
+                Vec::new(),
             )
         };
 
@@ -392,6 +398,7 @@ fn collect_model_coverage(
             safe_reason,
             aggressive_reason,
             blocked_by_wgsl,
+            aggressive_hazards,
         });
     }
     rule_reassessment.sort_by(|a, b| a.name.cmp(b.name));
@@ -591,6 +598,7 @@ fn parse_write_path(args: &[String]) -> Option<String> {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let write_path = parse_write_path(&args);
+    let aggressive_hazard_report = args.iter().any(|a| a == "--aggressive-hazard-report");
 
     let schemes = model::backend::SchemeRegistry::new(Scheme::Upwind);
     let mut coverages = Vec::new();
@@ -607,7 +615,11 @@ fn main() {
     }
     coverages.sort_by(|a, b| a.model_id.cmp(b.model_id));
 
-    let report = render_report(&coverages);
+    let mut report = render_report(&coverages);
+
+    if aggressive_hazard_report {
+        report.push_str(&render_aggressive_hazard_report(&coverages));
+    }
 
     if let Some(path) = write_path {
         let path = std::path::PathBuf::from(path);
@@ -622,4 +634,69 @@ fn main() {
     } else {
         println!("{report}");
     }
+}
+
+fn render_aggressive_hazard_report(coverages: &[ModelCoverage]) -> String {
+    let mut out = String::new();
+    out.push_str("\n## Aggressive Policy Hazard Report\n\n");
+    out.push_str(
+        "Hazards detected in aggressive-policy fusion rules. These hazards are accepted \
+         under the Aggressive policy but listed here for rule author visibility.\n\n",
+    );
+
+    let mut any_hazards = false;
+    for coverage in coverages {
+        let rules_with_hazards: Vec<&FusionRuleRow> = coverage
+            .rule_reassessment
+            .iter()
+            .filter(|r| !r.aggressive_hazards.is_empty())
+            .collect();
+        if rules_with_hazards.is_empty() {
+            continue;
+        }
+        any_hazards = true;
+        out.push_str(&format!("### `{}`\n\n", coverage.model_id));
+        for rule in rules_with_hazards {
+            out.push_str(&format!(
+                "**Rule `{}`** (pattern: {})\n\n",
+                rule.name,
+                rule.pattern
+                    .iter()
+                    .map(|id| format!("`{id}`"))
+                    .collect::<Vec<_>>()
+                    .join(" -> ")
+            ));
+            out.push_str("| Hazard | Kernel | Resources |\n");
+            out.push_str("|---|---|---|\n");
+            for hazard in &rule.aggressive_hazards {
+                let resources = if hazard.resources.is_empty() {
+                    "-".to_string()
+                } else {
+                    hazard
+                        .resources
+                        .iter()
+                        .map(|r| {
+                            let mut s = format!("@group({}) @binding({})", r.group, r.binding);
+                            if let Some(ref c) = r.component {
+                                s.push_str(&format!(":{c}"));
+                            }
+                            s
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                out.push_str(&format!(
+                    "| {} | `{}` | {} |\n",
+                    hazard.kind, hazard.kernel_id, resources
+                ));
+            }
+            out.push('\n');
+        }
+    }
+
+    if !any_hazards {
+        out.push_str("No hazards detected in any aggressive-policy fusion rules.\n");
+    }
+
+    out
 }

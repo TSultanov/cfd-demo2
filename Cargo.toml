@@ -271,3 +271,8 @@ required-features = ["meshgen"]
 name = "compressible_solver_benchmark"
 harness = false
 required-features = ["meshgen"]
+
+[[bench]]
+name = "fusion_policy_benchmark"
+harness = false
+required-features = ["meshgen"]

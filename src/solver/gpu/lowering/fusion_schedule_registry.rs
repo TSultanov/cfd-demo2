@@ -268,4 +268,100 @@ mod tests {
             );
         }
     }
+
+    /// Explicit stepping schedules should exclude `RequiresImplicitStepping`
+    /// kernels (e.g., `generic_coupled_apply`) for all models.
+    #[test]
+    fn explicit_stepping_schedule_excludes_implicit_only_kernels() {
+        let models = crate::solver::model::all_models();
+        let policies = [
+            KernelFusionPolicy::Off,
+            KernelFusionPolicy::Safe,
+            KernelFusionPolicy::Aggressive,
+        ];
+
+        for model in &models {
+            for has_grad_state in [false, true] {
+                for policy in policies {
+                    let (kernels, _) = schedule_for_model(
+                        model.id,
+                        SteppingMode::Explicit,
+                        has_grad_state,
+                        policy,
+                    )
+                    .unwrap_or_else(|e| {
+                        panic!("missing explicit schedule for model='{}': {e}", model.id)
+                    });
+
+                    // generic_coupled_apply requires implicit stepping — it must
+                    // not appear in the Explicit schedule.
+                    let has_apply = kernels
+                        .iter()
+                        .any(|k| k.id.as_str() == "generic_coupled_apply");
+                    assert!(
+                        !has_apply,
+                        "model='{}' explicit schedule (has_grad_state={has_grad_state}, policy={policy:?}) \
+                         should NOT contain generic_coupled_apply (RequiresImplicitStepping)",
+                        model.id,
+                    );
+
+                    // The schedule must be non-empty.
+                    assert!(
+                        !kernels.is_empty(),
+                        "model='{}' explicit schedule (has_grad_state={has_grad_state}, policy={policy:?}) \
+                         is empty",
+                        model.id,
+                    );
+                }
+            }
+        }
+    }
+
+    /// For models without fusion rules (`compressible`, `generic_diffusion_demo`,
+    /// `generic_diffusion_demo_neumann`), Explicit stepping should produce
+    /// identical kernel lists for Off/Safe/Aggressive policies.
+    #[test]
+    fn explicit_stepping_no_fusion_models_identical_across_policies() {
+        let no_fusion_models = [
+            "compressible",
+            "generic_diffusion_demo",
+            "generic_diffusion_demo_neumann",
+        ];
+        let policies = [
+            KernelFusionPolicy::Off,
+            KernelFusionPolicy::Safe,
+            KernelFusionPolicy::Aggressive,
+        ];
+
+        for model_id in &no_fusion_models {
+            for has_grad_state in [false, true] {
+                let schedules: Vec<(Vec<KernelSpec>, Vec<&str>)> = policies
+                    .iter()
+                    .map(|&policy| {
+                        schedule_for_model(model_id, SteppingMode::Explicit, has_grad_state, policy)
+                            .unwrap_or_else(|e| {
+                                panic!("missing explicit schedule for model='{model_id}': {e}")
+                            })
+                    })
+                    .collect();
+
+                let base_ids: Vec<&str> = schedules[0].0.iter().map(|k| k.id.as_str()).collect();
+
+                for (i, policy) in policies.iter().enumerate().skip(1) {
+                    let ids: Vec<&str> = schedules[i].0.iter().map(|k| k.id.as_str()).collect();
+                    assert_eq!(
+                        base_ids, ids,
+                        "model='{model_id}' explicit schedule (has_grad_state={has_grad_state}) \
+                         differs between Off and {policy:?}"
+                    );
+                    assert!(
+                        schedules[i].1.is_empty(),
+                        "model='{model_id}' explicit schedule (has_grad_state={has_grad_state}, \
+                         policy={policy:?}) should have no applied fusion rules, got {:?}",
+                        schedules[i].1,
+                    );
+                }
+            }
+        }
+    }
 }

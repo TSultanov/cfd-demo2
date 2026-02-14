@@ -1,6 +1,9 @@
+use std::marker::PhantomData;
+
 use crate::solver::codegen::wgsl_ast::Expr;
 
 use super::expr::DynExpr;
+use super::tensor::{BlockCol, BlockRow, CoupledAxis};
 use super::types::{ScalarType, Shape};
 use super::{DslType, UnitDim};
 
@@ -230,6 +233,118 @@ impl BlockCsrSoaEntry {
     }
 }
 
+// ── Named (phantom-typed) block CSR SOA wrappers ──────────────────────
+
+/// Phantom-typed wrapper around [`BlockCsrSoaMatrix`] that requires
+/// [`BlockRow`]/[`BlockCol`] typed indices in `entry()` calls, preventing
+/// accidental row/col transposition at compile time.
+///
+/// The axis type `Ax` describes the coupled unknowns (e.g.,
+/// [`IncompressibleAxis2D`](super::tensor::IncompressibleAxis2D)).
+/// Since block matrices in this codebase are always square, a single axis
+/// type covers both rows and columns.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamedBlockCsrSoaMatrix<Ax: CoupledAxis> {
+    inner: BlockCsrSoaMatrix,
+    _axis: PhantomData<Ax>,
+}
+
+impl<Ax: CoupledAxis> NamedBlockCsrSoaMatrix<Ax> {
+    /// Wrap an existing `BlockCsrSoaMatrix`, asserting that its shape
+    /// matches `Ax::STRIDE`.
+    pub fn new(inner: BlockCsrSoaMatrix) -> Self {
+        assert_eq!(
+            inner.block.rows as u32,
+            Ax::STRIDE,
+            "NamedBlockCsrSoaMatrix: block rows ({}) do not match axis stride ({})",
+            inner.block.rows,
+            Ax::STRIDE,
+        );
+        assert_eq!(
+            inner.block.cols as u32,
+            Ax::STRIDE,
+            "NamedBlockCsrSoaMatrix: block cols ({}) do not match axis stride ({})",
+            inner.block.cols,
+            Ax::STRIDE,
+        );
+        Self {
+            inner,
+            _axis: PhantomData,
+        }
+    }
+
+    /// Convenience constructor matching [`BlockCsrSoaMatrix::from_start_row_prefix`].
+    pub fn from_start_row_prefix(
+        values: &str,
+        start_row_prefix: &str,
+        scalar: ScalarType,
+        entry_unit: UnitDim,
+    ) -> Self {
+        let stride = Ax::STRIDE as u8;
+        let block = BlockShape::new(stride, stride);
+        Self::new(BlockCsrSoaMatrix::from_start_row_prefix(
+            values,
+            start_row_prefix,
+            block,
+            scalar,
+            entry_unit,
+        ))
+    }
+
+    /// Type-safe block entry access.
+    pub fn entry(&self, rank: &Expr, row: BlockRow<Ax>, col: BlockCol<Ax>) -> DynExpr {
+        self.inner.entry(rank, row.to_u8(), col.to_u8())
+    }
+
+    /// Type-safe row entry (pre-computes row bases for a given rank).
+    pub fn row_entry(&self, rank: &Expr) -> NamedBlockCsrSoaEntry<Ax> {
+        NamedBlockCsrSoaEntry::new(self.inner.row_entry(rank))
+    }
+
+    /// Access the underlying untyped matrix (escape hatch for code that
+    /// must iterate generically, e.g. zeroing loops).
+    pub fn inner(&self) -> &BlockCsrSoaMatrix {
+        &self.inner
+    }
+}
+
+/// Phantom-typed wrapper around [`BlockCsrSoaEntry`] that requires
+/// [`BlockRow`]/[`BlockCol`] typed indices.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamedBlockCsrSoaEntry<Ax: CoupledAxis> {
+    inner: BlockCsrSoaEntry,
+    _axis: PhantomData<Ax>,
+}
+
+impl<Ax: CoupledAxis> NamedBlockCsrSoaEntry<Ax> {
+    pub fn new(inner: BlockCsrSoaEntry) -> Self {
+        Self {
+            inner,
+            _axis: PhantomData,
+        }
+    }
+
+    /// Type-safe block entry access.
+    pub fn entry(&self, row: BlockRow<Ax>, col: BlockCol<Ax>) -> DynExpr {
+        self.inner.entry(row.to_u8(), col.to_u8())
+    }
+
+    /// Type-safe index expression (the array offset, without the array access).
+    pub fn index_expr(&self, row: BlockRow<Ax>, col: BlockCol<Ax>) -> Expr {
+        self.inner.index_expr(row.to_u8(), col.to_u8())
+    }
+
+    /// Type-safe access expression (the full `values[offset]` expression).
+    pub fn access_expr(&self, row: BlockRow<Ax>, col: BlockCol<Ax>) -> Expr {
+        self.inner.access_expr(row.to_u8(), col.to_u8())
+    }
+
+    /// Access the underlying untyped entry (escape hatch).
+    pub fn inner(&self) -> &BlockCsrSoaEntry {
+        &self.inner
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,5 +385,153 @@ mod tests {
         );
         let expr = entry.entry(2, 3).expr.to_string();
         assert_eq!(expr, "matrix_values[base_2 + 3u]");
+    }
+
+    // ── NamedBlockCsrSoaMatrix tests ──────────────────────────────────
+
+    use crate::solver::codegen::dsl::tensor::{
+        block_col, block_row, BlockCol, BlockRow, IncompressibleAxis2D, ScalarAxis,
+    };
+
+    #[test]
+    fn named_matrix_wraps_matching_stride() {
+        let mat = NamedBlockCsrSoaMatrix::<IncompressibleAxis2D>::from_start_row_prefix(
+            "vals",
+            "start",
+            ScalarType::F32,
+            UnitDim::dimensionless(),
+        );
+        assert_eq!(mat.inner().block.rows, 3);
+        assert_eq!(mat.inner().block.cols, 3);
+    }
+
+    #[test]
+    #[should_panic(expected = "block rows (4) do not match axis stride (3)")]
+    fn named_matrix_panics_on_stride_mismatch() {
+        let block = BlockShape::new(4, 4);
+        let inner = BlockCsrSoaMatrix::from_start_row_prefix(
+            "vals",
+            "start",
+            block,
+            ScalarType::F32,
+            UnitDim::dimensionless(),
+        );
+        NamedBlockCsrSoaMatrix::<IncompressibleAxis2D>::new(inner);
+    }
+
+    #[test]
+    fn named_matrix_entry_matches_untyped() {
+        let block = BlockShape::new(3, 3);
+        let inner = BlockCsrSoaMatrix::from_start_row_prefix(
+            "vals",
+            "start",
+            block,
+            ScalarType::F32,
+            UnitDim::dimensionless(),
+        );
+        let named = NamedBlockCsrSoaMatrix::<IncompressibleAxis2D>::new(inner.clone());
+        let rank = Expr::ident("rank");
+
+        // Typed entry should produce the same expression as untyped
+        let typed = named
+            .entry(
+                &rank,
+                BlockRow::new(IncompressibleAxis2D::Uy),
+                BlockCol::new(IncompressibleAxis2D::P),
+            )
+            .expr
+            .to_string();
+        let untyped = inner.entry(&rank, 1, 2).expr.to_string();
+        assert_eq!(typed, untyped);
+    }
+
+    #[test]
+    fn named_matrix_entry_via_free_functions() {
+        let named = NamedBlockCsrSoaMatrix::<IncompressibleAxis2D>::from_start_row_prefix(
+            "vals",
+            "start",
+            ScalarType::F32,
+            UnitDim::dimensionless(),
+        );
+        let rank = Expr::ident("rank");
+
+        let expr = named
+            .entry(&rank, block_row(0), block_col(2))
+            .expr
+            .to_string();
+        // Should be same as untyped entry(rank, 0, 2)
+        let expected = named.inner().entry(&rank, 0, 2).expr.to_string();
+        assert_eq!(expr, expected);
+    }
+
+    // ── NamedBlockCsrSoaEntry tests ───────────────────────────────────
+
+    #[test]
+    fn named_entry_delegates_to_inner() {
+        let block = BlockShape::new(3, 3);
+        let inner_entry = BlockCsrSoaEntry::new(
+            Expr::ident("vals"),
+            (0..3).map(|r| Expr::ident(format!("base_{r}"))).collect(),
+            block,
+            ScalarType::F32,
+            UnitDim::dimensionless(),
+        );
+        let named = NamedBlockCsrSoaEntry::<IncompressibleAxis2D>::new(inner_entry.clone());
+
+        // entry()
+        let typed = named
+            .entry(
+                BlockRow::new(IncompressibleAxis2D::Ux),
+                BlockCol::new(IncompressibleAxis2D::P),
+            )
+            .expr
+            .to_string();
+        assert_eq!(typed, inner_entry.entry(0, 2).expr.to_string());
+
+        // index_expr()
+        let typed_idx = named
+            .index_expr(
+                BlockRow::new(IncompressibleAxis2D::Uy),
+                BlockCol::new(IncompressibleAxis2D::Ux),
+            )
+            .to_string();
+        assert_eq!(typed_idx, inner_entry.index_expr(1, 0).to_string());
+
+        // access_expr()
+        let typed_acc = named
+            .access_expr(
+                BlockRow::new(IncompressibleAxis2D::P),
+                BlockCol::new(IncompressibleAxis2D::Uy),
+            )
+            .to_string();
+        assert_eq!(typed_acc, inner_entry.access_expr(2, 1).to_string());
+    }
+
+    #[test]
+    fn named_entry_from_row_entry() {
+        let named_mat = NamedBlockCsrSoaMatrix::<ScalarAxis>::from_start_row_prefix(
+            "v",
+            "s",
+            ScalarType::F32,
+            UnitDim::dimensionless(),
+        );
+        let rank = Expr::ident("r");
+        let named_entry = named_mat.row_entry(&rank);
+
+        let expr = named_entry
+            .entry(
+                BlockRow::new(ScalarAxis::Phi),
+                BlockCol::new(ScalarAxis::Phi),
+            )
+            .expr
+            .to_string();
+        // Should be same as inner().row_entry().entry(0, 0)
+        let expected = named_mat
+            .inner()
+            .row_entry(&rank)
+            .entry(0, 0)
+            .expr
+            .to_string();
+        assert_eq!(expr, expected);
     }
 }

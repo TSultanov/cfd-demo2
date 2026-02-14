@@ -11,7 +11,12 @@ pub use enums::{EnumExpr, WgslEnum};
 pub use expr::{DslError, DynExpr, TypedExpr, TypedSqrt};
 pub use matrix::{
     BlockCsrMatrix, BlockCsrSoaEntry, BlockCsrSoaMatrix, BlockShape, CsrMatrix, CsrPattern,
+    NamedBlockCsrSoaEntry, NamedBlockCsrSoaMatrix,
 };
-pub use tensor::{Axis, AxisCons, AxisXY, Cons, MatExpr, NamedMatExpr, NamedVecExpr, VecExpr, XY};
+pub use tensor::{
+    block_col, block_row, dispatch_by_coupled_stride, Axis, AxisCons, AxisXY, BlockCol, BlockRow,
+    CompressibleAxis2D, Cons, CoupledAxis, DispatchByStride, IncompressibleAxis2D,
+    IncompressibleAxis3D, MatExpr, NamedMatExpr, NamedVecExpr, ScalarAxis, VecExpr, XY,
+};
 pub use types::{DslType, ScalarType, Shape};
 pub use units::UnitDim;

@@ -1,11 +1,266 @@
 use crate::solver::codegen::wgsl_ast::{AssignOp, Expr, Stmt};
 
-use super::matrix::BlockCsrSoaEntry;
+use super::matrix::{BlockCsrSoaEntry, NamedBlockCsrSoaEntry};
 
 pub trait Axis<const N: usize> {
     type Index: Copy;
 
     fn to_usize(index: Self::Index) -> usize;
+}
+
+// ── Coupled-system axis types ─────────────────────────────────────────
+
+/// Trait for coupled-system axis types used in block CSR matrices.
+///
+/// Unlike `Axis<N>` which is const-generic, this trait enables
+/// compile-time distinguishing of row vs column indices in block
+/// matrix entry calls. The block matrix is always square, so a
+/// single axis type describes both rows and columns.
+pub trait CoupledAxis: Copy + std::fmt::Debug + 'static {
+    /// Number of scalar unknowns per cell for this coupled system.
+    const STRIDE: u32;
+
+    /// Convert this axis value to its positional index.
+    fn to_u8(self) -> u8;
+
+    /// Convert a numeric index to this axis value.
+    ///
+    /// Panics if `index >= Self::STRIDE`.
+    fn from_u32(index: u32) -> Self;
+
+    /// All variants in index order.
+    fn all() -> &'static [Self];
+}
+
+/// Newtype wrapper marking a block-matrix **row** index.
+///
+/// Cannot be used where a `BlockCol` is expected, preventing
+/// accidental transposition of row/col arguments.
+#[derive(Debug, Clone, Copy)]
+pub struct BlockRow<Ax: CoupledAxis>(Ax);
+
+impl<Ax: CoupledAxis> BlockRow<Ax> {
+    pub fn new(ax: Ax) -> Self {
+        Self(ax)
+    }
+
+    pub fn to_u8(self) -> u8 {
+        self.0.to_u8()
+    }
+
+    pub fn axis(self) -> Ax {
+        self.0
+    }
+}
+
+/// Newtype wrapper marking a block-matrix **column** index.
+///
+/// Cannot be used where a `BlockRow` is expected, preventing
+/// accidental transposition of row/col arguments.
+#[derive(Debug, Clone, Copy)]
+pub struct BlockCol<Ax: CoupledAxis>(Ax);
+
+impl<Ax: CoupledAxis> BlockCol<Ax> {
+    pub fn new(ax: Ax) -> Self {
+        Self(ax)
+    }
+
+    pub fn to_u8(self) -> u8 {
+        self.0.to_u8()
+    }
+
+    pub fn axis(self) -> Ax {
+        self.0
+    }
+}
+
+/// Convenience constructors for `BlockRow` / `BlockCol` from numeric indices.
+pub fn block_row<Ax: CoupledAxis>(index: u32) -> BlockRow<Ax> {
+    BlockRow::new(Ax::from_u32(index))
+}
+
+pub fn block_col<Ax: CoupledAxis>(index: u32) -> BlockCol<Ax> {
+    BlockCol::new(Ax::from_u32(index))
+}
+
+// ── Concrete coupled axis enums ───────────────────────────────────────
+
+/// Single-scalar coupled system (e.g., generic diffusion demo).
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ScalarAxis {
+    Phi,
+}
+
+impl CoupledAxis for ScalarAxis {
+    const STRIDE: u32 = 1;
+
+    fn to_u8(self) -> u8 {
+        0
+    }
+
+    fn from_u32(index: u32) -> Self {
+        match index {
+            0 => ScalarAxis::Phi,
+            _ => panic!("ScalarAxis::from_u32({index}): expected 0"),
+        }
+    }
+
+    fn all() -> &'static [Self] {
+        &[ScalarAxis::Phi]
+    }
+}
+
+/// 2D incompressible velocity-pressure system (stride 3).
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum IncompressibleAxis2D {
+    Ux,
+    Uy,
+    P,
+}
+
+impl CoupledAxis for IncompressibleAxis2D {
+    const STRIDE: u32 = 3;
+
+    fn to_u8(self) -> u8 {
+        match self {
+            Self::Ux => 0,
+            Self::Uy => 1,
+            Self::P => 2,
+        }
+    }
+
+    fn from_u32(index: u32) -> Self {
+        match index {
+            0 => Self::Ux,
+            1 => Self::Uy,
+            2 => Self::P,
+            _ => panic!("IncompressibleAxis2D::from_u32({index}): expected 0..3"),
+        }
+    }
+
+    fn all() -> &'static [Self] {
+        &[Self::Ux, Self::Uy, Self::P]
+    }
+}
+
+/// 3D incompressible velocity-pressure system (stride 4).
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum IncompressibleAxis3D {
+    Ux,
+    Uy,
+    Uz,
+    P,
+}
+
+impl CoupledAxis for IncompressibleAxis3D {
+    const STRIDE: u32 = 4;
+
+    fn to_u8(self) -> u8 {
+        match self {
+            Self::Ux => 0,
+            Self::Uy => 1,
+            Self::Uz => 2,
+            Self::P => 3,
+        }
+    }
+
+    fn from_u32(index: u32) -> Self {
+        match index {
+            0 => Self::Ux,
+            1 => Self::Uy,
+            2 => Self::Uz,
+            3 => Self::P,
+            _ => panic!("IncompressibleAxis3D::from_u32({index}): expected 0..4"),
+        }
+    }
+
+    fn all() -> &'static [Self] {
+        &[Self::Ux, Self::Uy, Self::Uz, Self::P]
+    }
+}
+
+/// 2D compressible Euler/Navier-Stokes system (stride 8).
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum CompressibleAxis2D {
+    Rho,
+    RhoUx,
+    RhoUy,
+    RhoE,
+    Ux,
+    Uy,
+    P,
+    T,
+}
+
+impl CoupledAxis for CompressibleAxis2D {
+    const STRIDE: u32 = 8;
+
+    fn to_u8(self) -> u8 {
+        match self {
+            Self::Rho => 0,
+            Self::RhoUx => 1,
+            Self::RhoUy => 2,
+            Self::RhoE => 3,
+            Self::Ux => 4,
+            Self::Uy => 5,
+            Self::P => 6,
+            Self::T => 7,
+        }
+    }
+
+    fn from_u32(index: u32) -> Self {
+        match index {
+            0 => Self::Rho,
+            1 => Self::RhoUx,
+            2 => Self::RhoUy,
+            3 => Self::RhoE,
+            4 => Self::Ux,
+            5 => Self::Uy,
+            6 => Self::P,
+            7 => Self::T,
+            _ => panic!("CompressibleAxis2D::from_u32({index}): expected 0..8"),
+        }
+    }
+
+    fn all() -> &'static [Self] {
+        &[
+            Self::Rho,
+            Self::RhoUx,
+            Self::RhoUy,
+            Self::RhoE,
+            Self::Ux,
+            Self::Uy,
+            Self::P,
+            Self::T,
+        ]
+    }
+}
+
+/// Dispatch a function call by matching `coupled_stride` to the appropriate
+/// concrete `CoupledAxis` type. This is the monomorphization point: the
+/// `body` closure is instantiated for each supported stride.
+///
+/// Returns an error string if the stride is not recognised.
+pub fn dispatch_by_coupled_stride<R>(
+    coupled_stride: u32,
+    body: impl DispatchByStride<R>,
+) -> Result<R, String> {
+    match coupled_stride {
+        1 => Ok(body.call::<ScalarAxis>()),
+        3 => Ok(body.call::<IncompressibleAxis2D>()),
+        4 => Ok(body.call::<IncompressibleAxis3D>()),
+        8 => Ok(body.call::<CompressibleAxis2D>()),
+        _ => Err(format!(
+            "unsupported coupled_stride {coupled_stride}; expected 1, 3, 4, or 8"
+        )),
+    }
+}
+
+/// Helper trait for `dispatch_by_coupled_stride` to work around Rust's
+/// lack of generic closures. Implement this for a struct that captures
+/// the closure's environment.
+pub trait DispatchByStride<R> {
+    fn call<Ax: CoupledAxis>(&self) -> R;
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -419,6 +674,30 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
         }
         out
     }
+
+    /// Type-safe variant of [`scatter_assign_to_block_entry_scaled`] that
+    /// uses [`NamedBlockCsrSoaEntry`] with phantom-typed row/col indices.
+    pub fn scatter_assign_to_named_block_entry_scaled<Ax: CoupledAxis>(
+        &self,
+        entry: &NamedBlockCsrSoaEntry<Ax>,
+        scale: Option<Expr>,
+    ) -> Vec<Stmt> {
+        let mut out = Vec::new();
+        for row in 0..R {
+            for col in 0..C {
+                let target = entry.access_expr(
+                    BlockRow::new(Ax::from_u32(row as u32)),
+                    BlockCol::new(Ax::from_u32(col as u32)),
+                );
+                let mut value = self.entry(row, col);
+                if let Some(scale) = scale {
+                    value = value * scale;
+                }
+                out.push(Stmt::Assign { target, value });
+            }
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -651,5 +930,196 @@ mod tests {
         let z = NamedVecExpr::<2, AxisXY>::zeros();
         assert_eq!(z.at(XY::X).to_string(), "0.0");
         assert_eq!(z.at(XY::Y).to_string(), "0.0");
+    }
+
+    // ── CoupledAxis enum tests ────────────────────────────────────────
+
+    #[test]
+    fn scalar_axis_roundtrips() {
+        assert_eq!(ScalarAxis::Phi.to_u8(), 0);
+        assert_eq!(ScalarAxis::from_u32(0), ScalarAxis::Phi);
+        assert_eq!(ScalarAxis::all(), &[ScalarAxis::Phi]);
+        assert_eq!(ScalarAxis::STRIDE, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "expected 0")]
+    fn scalar_axis_from_u32_panics_on_out_of_range() {
+        ScalarAxis::from_u32(1);
+    }
+
+    #[test]
+    fn incompressible_2d_roundtrips() {
+        use IncompressibleAxis2D::*;
+        assert_eq!(IncompressibleAxis2D::STRIDE, 3);
+        let all = IncompressibleAxis2D::all();
+        assert_eq!(all, &[Ux, Uy, P]);
+        for (i, &ax) in all.iter().enumerate() {
+            assert_eq!(ax.to_u8() as usize, i);
+            assert_eq!(IncompressibleAxis2D::from_u32(i as u32), ax);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "expected 0..3")]
+    fn incompressible_2d_from_u32_panics_on_out_of_range() {
+        IncompressibleAxis2D::from_u32(3);
+    }
+
+    #[test]
+    fn incompressible_3d_roundtrips() {
+        use IncompressibleAxis3D::*;
+        assert_eq!(IncompressibleAxis3D::STRIDE, 4);
+        let all = IncompressibleAxis3D::all();
+        assert_eq!(all, &[Ux, Uy, Uz, P]);
+        for (i, &ax) in all.iter().enumerate() {
+            assert_eq!(ax.to_u8() as usize, i);
+            assert_eq!(IncompressibleAxis3D::from_u32(i as u32), ax);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "expected 0..4")]
+    fn incompressible_3d_from_u32_panics_on_out_of_range() {
+        IncompressibleAxis3D::from_u32(4);
+    }
+
+    #[test]
+    fn compressible_2d_roundtrips() {
+        use CompressibleAxis2D::*;
+        assert_eq!(CompressibleAxis2D::STRIDE, 8);
+        let all = CompressibleAxis2D::all();
+        assert_eq!(all, &[Rho, RhoUx, RhoUy, RhoE, Ux, Uy, P, T]);
+        for (i, &ax) in all.iter().enumerate() {
+            assert_eq!(ax.to_u8() as usize, i);
+            assert_eq!(CompressibleAxis2D::from_u32(i as u32), ax);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "expected 0..8")]
+    fn compressible_2d_from_u32_panics_on_out_of_range() {
+        CompressibleAxis2D::from_u32(8);
+    }
+
+    // ── BlockRow / BlockCol tests ─────────────────────────────────────
+
+    #[test]
+    fn block_row_preserves_axis() {
+        let row = BlockRow::new(IncompressibleAxis2D::P);
+        assert_eq!(row.to_u8(), 2);
+        assert_eq!(row.axis(), IncompressibleAxis2D::P);
+    }
+
+    #[test]
+    fn block_col_preserves_axis() {
+        let col = BlockCol::new(IncompressibleAxis2D::Ux);
+        assert_eq!(col.to_u8(), 0);
+        assert_eq!(col.axis(), IncompressibleAxis2D::Ux);
+    }
+
+    #[test]
+    fn block_row_col_free_functions() {
+        let row: BlockRow<IncompressibleAxis3D> = block_row(2);
+        assert_eq!(row.axis(), IncompressibleAxis3D::Uz);
+        assert_eq!(row.to_u8(), 2);
+
+        let col: BlockCol<IncompressibleAxis3D> = block_col(3);
+        assert_eq!(col.axis(), IncompressibleAxis3D::P);
+        assert_eq!(col.to_u8(), 3);
+    }
+
+    // ── dispatch_by_coupled_stride tests ──────────────────────────────
+
+    struct StrideChecker;
+
+    impl DispatchByStride<u32> for StrideChecker {
+        fn call<Ax: CoupledAxis>(&self) -> u32 {
+            Ax::STRIDE
+        }
+    }
+
+    #[test]
+    fn dispatch_resolves_all_supported_strides() {
+        assert_eq!(dispatch_by_coupled_stride(1, StrideChecker), Ok(1));
+        assert_eq!(dispatch_by_coupled_stride(3, StrideChecker), Ok(3));
+        assert_eq!(dispatch_by_coupled_stride(4, StrideChecker), Ok(4));
+        assert_eq!(dispatch_by_coupled_stride(8, StrideChecker), Ok(8));
+    }
+
+    #[test]
+    fn dispatch_returns_error_for_unsupported_stride() {
+        let result = dispatch_by_coupled_stride(5, StrideChecker);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unsupported coupled_stride 5"));
+    }
+
+    // ── scatter_assign_to_named_block_entry_scaled tests ──────────────
+
+    #[test]
+    fn scatter_named_matches_untyped() {
+        let mat = MatExpr::<3, 3>::from_prefix("jac");
+        let block = BlockShape::new(3, 3);
+        let soa = BlockCsrSoaMatrix::from_start_row_prefix(
+            "vals",
+            "start",
+            block,
+            ScalarType::F32,
+            UnitDim::dimensionless(),
+        );
+        let entry = soa.row_entry(&Expr::ident("rank"));
+
+        // Untyped version
+        let untyped = mat.scatter_assign_to_block_entry_scaled(&entry, Some(Expr::ident("area")));
+
+        // Typed version
+        let named_entry =
+            super::super::matrix::NamedBlockCsrSoaEntry::<IncompressibleAxis2D>::new(entry);
+        let typed =
+            mat.scatter_assign_to_named_block_entry_scaled(&named_entry, Some(Expr::ident("area")));
+
+        assert_eq!(untyped.len(), typed.len());
+        for (u, t) in untyped.iter().zip(typed.iter()) {
+            match (u, t) {
+                (
+                    Stmt::Assign {
+                        target: ut,
+                        value: uv,
+                    },
+                    Stmt::Assign {
+                        target: tt,
+                        value: tv,
+                    },
+                ) => {
+                    assert_eq!(ut.to_string(), tt.to_string());
+                    assert_eq!(uv.to_string(), tv.to_string());
+                }
+                _ => panic!("expected Assign stmts"),
+            }
+        }
+    }
+
+    #[test]
+    fn scatter_named_without_scale() {
+        let mat = MatExpr::<1, 1>::from_prefix("j");
+        let block = BlockShape::new(1, 1);
+        let soa = BlockCsrSoaMatrix::from_start_row_prefix(
+            "vals",
+            "start",
+            block,
+            ScalarType::F32,
+            UnitDim::dimensionless(),
+        );
+        let entry = soa.row_entry(&Expr::ident("rank"));
+        let named_entry = super::super::matrix::NamedBlockCsrSoaEntry::<ScalarAxis>::new(entry);
+        let stmts = mat.scatter_assign_to_named_block_entry_scaled(&named_entry, None);
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Stmt::Assign { target, value } => {
+                assert!(target.to_string().starts_with("vals["));
+                assert_eq!(value.to_string(), "j_00");
+            }
+            _ => panic!("expected assign stmt"),
+        }
     }
 }

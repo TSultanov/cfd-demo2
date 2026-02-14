@@ -88,13 +88,85 @@ and `unified_assembly.rs`) with a typed `CoupledAccumulators` abstraction. Also 
 - All 151 lib tests pass
 - OpenFOAM reference suite: no regressions (before/after metrics are identical)
 
-## Tier 3: Named Block-CSR Matrix (Future)
+## Tier 3: Named Block-CSR Matrix
 
-Add `NamedBlockCsrSoaMatrix<R, C, RowAx, ColAx>` phantom wrapper to prevent
-row/col argument swaps in `block_matrix.entry(rank, u_idx as u8, u_idx as u8)`.
+Add `NamedBlockCsrSoaMatrix<Ax>` phantom-typed wrapper around `BlockCsrSoaMatrix`
+to prevent row/col argument swaps in `block_matrix.entry(rank, row, col)` calls
+by requiring `BlockRow<Ax>` and `BlockCol<Ax>` typed indices instead of raw `u8`.
 
-- [ ] Implement `NamedBlockCsrSoaMatrix` wrapper
-- [ ] Refactor assembly kernels to use it
+### Design Decisions
+
+- Block matrices are always square (same `coupled_stride` for rows and cols),
+  so a single axis type parameter `Ax: CoupledAxis` covers both rows and columns.
+- `CoupledAxis` is a separate trait from `Axis<N>` — it is not const-generic
+  because the stride is determined at runtime via `dispatch_by_coupled_stride()`.
+- Dispatch uses a `DispatchByStride<R>` trait pattern (not generic closures)
+  since Rust doesn't support `impl Fn<Ax: CoupledAxis>()`.
+- Dispatch happens inside codegen public API functions; the model layer
+  (`kernel.rs`) needs no changes.
+
+### 3a) CoupledAxis Trait + Concrete Enums
+
+- [x] `CoupledAxis` trait with `STRIDE`, `to_u8()`, `from_u32()`, `all()` methods
+- [x] `ScalarAxis` (stride 1): `Phi`
+- [x] `IncompressibleAxis2D` (stride 3): `Ux`, `Uy`, `P`
+- [x] `IncompressibleAxis3D` (stride 4): `Ux`, `Uy`, `Uz`, `P`
+- [x] `CompressibleAxis2D` (stride 8): `Rho`, `RhoUx`, `RhoUy`, `RhoE`, `Ux`, `Uy`, `P`, `T`
+
+### 3b) BlockRow / BlockCol Newtypes
+
+- [x] `BlockRow<Ax>` / `BlockCol<Ax>` zero-cost wrappers with `new()`, `to_u8()`, `axis()`
+- [x] `block_row<Ax>(index: u32)` / `block_col<Ax>(index: u32)` convenience constructors
+
+### 3c) NamedBlockCsrSoaMatrix / NamedBlockCsrSoaEntry Wrappers
+
+- [x] `NamedBlockCsrSoaMatrix<Ax>`: `new()`, `from_start_row_prefix()`, typed `entry()`,
+  `row_entry()`, `inner()` escape hatch
+- [x] `NamedBlockCsrSoaEntry<Ax>`: typed `entry()`, `index_expr()`, `access_expr()`,
+  `inner()` escape hatch
+
+### 3d) Exports + Dispatch Helper
+
+- [x] `dsl/mod.rs` updated to export all new types and functions
+- [x] `dispatch_by_coupled_stride()` function + `DispatchByStride<R>` trait in `tensor.rs`
+
+### 3e) Unit Tests
+
+- [x] CoupledAxis enum roundtrip tests (4 enums, including out-of-range panics)
+- [x] BlockRow / BlockCol preservation and free-function tests
+- [x] `dispatch_by_coupled_stride` — all 4 supported strides + unsupported error
+- [x] NamedBlockCsrSoaMatrix construction, stride mismatch panic, typed entry equivalence
+- [x] NamedBlockCsrSoaEntry delegation (entry, index_expr, access_expr)
+- [x] `scatter_assign_to_named_block_entry_scaled` equivalence with untyped variant
+
+### 3f) generic_coupled_kernels.rs Refactored
+
+- [x] `main_assembly_fn` made generic over `Ax: CoupledAxis`
+- [x] All 3 entry call sites updated to use `BlockRow`/`BlockCol`
+- [x] `generate_generic_coupled_assembly_wgsl` updated with `DispatchByStride` dispatch
+
+### 3g) unified_assembly.rs Refactored
+
+- [x] `main_assembly_fn` made generic over `Ax: CoupledAxis`
+- [x] All 9 entry call sites updated (zeroing loop, source cross-coupling,
+  diffusion interior/boundary, convection neighbor, gradient diag/neighbor,
+  final writeback)
+- [x] Both `generate_unified_assembly_wgsl` and `generate_unified_assembly_kernel_program`
+  updated with `DispatchByStride` dispatch structs
+
+### 3h) Model-Layer Wrappers
+
+- [x] No changes needed — dispatch is internal to codegen public functions
+
+### 3i) scatter_assign_to_named_block_entry_scaled
+
+- [x] New typed variant added to `MatExpr<R, C>` alongside original untyped method
+
+### Verification
+
+- All 156 codegen tests pass (20 new unit tests for Tier 3 types)
+- All 151 lib tests pass
+- OpenFOAM reference suite: no regressions (before/after metrics are identical)
 
 ## Tier 4: BC Table Accessor (Future)
 

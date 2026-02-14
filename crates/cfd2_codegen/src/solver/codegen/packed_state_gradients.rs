@@ -1,18 +1,17 @@
 use std::collections::BTreeSet;
 
 use super::constants::constants_struct;
+use super::coupled_common::kernel_bindings_from_items;
 use super::dsl as typed;
 use super::wgsl_ast::{
-    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt,
-    StorageClass, Type,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt, Type,
 };
 use super::wgsl_bindings::{boundary_bindings, storage_var, uniform_var, vector2_struct};
 use super::wgsl_dsl as dsl;
 use super::KernelWgsl;
 use crate::solver::ir::ports::ParamSpec;
 use crate::solver::ir::{
-    BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelProgram, LaunchSemantics,
-    SideEffectMetadata, StateLayout,
+    DispatchDomain, EffectResource, KernelProgram, LaunchSemantics, SideEffectMetadata, StateLayout,
 };
 
 pub fn generate_packed_state_gradients_wgsl(
@@ -379,49 +378,6 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
 }
 
 const PACKED_STATE_GRADIENTS_WORKGROUP_SIZE: u32 = 64;
-
-fn kernel_bindings_from_items(items: &[Item]) -> Result<Vec<KernelBinding>, String> {
-    let mut bindings = Vec::new();
-    for item in items {
-        let Item::GlobalVar(var) = item else {
-            continue;
-        };
-        let mut group = None;
-        let mut binding = None;
-        for attr in &var.attributes {
-            match attr {
-                Attribute::Group(value) => group = Some(*value),
-                Attribute::Binding(value) => binding = Some(*value),
-                _ => {}
-            }
-        }
-        let Some((g, b)) = group.zip(binding) else {
-            continue;
-        };
-        let access = match var.storage {
-            StorageClass::Storage => match var.access {
-                Some(AccessMode::Read) => BindingAccess::ReadOnlyStorage,
-                Some(AccessMode::ReadWrite) => BindingAccess::ReadWriteStorage,
-                None => {
-                    return Err(format!(
-                        "packed_state_gradients: storage var '{}' missing access mode",
-                        var.name
-                    ));
-                }
-            },
-            StorageClass::Uniform => BindingAccess::Uniform,
-            StorageClass::Workgroup => continue,
-        };
-        bindings.push(KernelBinding::new(
-            g,
-            b,
-            &var.name,
-            var.ty.to_string(),
-            access,
-        ));
-    }
-    Ok(bindings)
-}
 
 /// Extract `LaunchSemantics` from the first statements of the packed_state_gradients body.
 ///

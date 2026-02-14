@@ -197,7 +197,7 @@ pub fn generate_flux_module_kernel_program(
     let uses_low_mach = flux_spec_uses_low_mach(spec);
     let items = base_items(uses_low_mach, eos_params);
     let bindings =
-        cfd2_codegen::solver::codegen::generic_coupled_kernels::kernel_bindings_from_items(&items)?;
+        cfd2_codegen::solver::codegen::coupled_common::kernel_bindings_from_items(&items)?;
 
     let primitive_map: HashMap<&str, &PrimitiveExpr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
@@ -244,7 +244,7 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
         .any(|(_, spec)| flux_spec_uses_low_mach(spec));
     let items = base_items(uses_low_mach, eos_params);
     let bindings =
-        cfd2_codegen::solver::codegen::generic_coupled_kernels::kernel_bindings_from_items(&items)?;
+        cfd2_codegen::solver::codegen::coupled_common::kernel_bindings_from_items(&items)?;
 
     let primitive_map: HashMap<&str, &PrimitiveExpr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();

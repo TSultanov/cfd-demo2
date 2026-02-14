@@ -1,3 +1,4 @@
+pub mod accumulators;
 pub mod enums;
 pub mod expr;
 pub mod matrix;
@@ -5,6 +6,7 @@ pub mod tensor;
 pub mod types;
 pub mod units;
 
+pub use accumulators::CoupledAccumulators;
 pub use enums::{EnumExpr, WgslEnum};
 pub use expr::{DslError, DynExpr, TypedExpr, TypedSqrt};
 pub use matrix::{

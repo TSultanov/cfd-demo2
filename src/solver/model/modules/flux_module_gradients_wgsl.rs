@@ -46,7 +46,7 @@ pub fn generate_flux_module_gradients_kernel_program(
 ) -> Result<KernelProgram, String> {
     let items = base_items();
     let bindings =
-        cfd2_codegen::solver::codegen::generic_coupled_kernels::kernel_bindings_from_items(&items)?;
+        cfd2_codegen::solver::codegen::coupled_common::kernel_bindings_from_items(&items)?;
     let main = main_fn(stride, flux_layout, targets);
 
     // The gradients function body has this launch pattern:

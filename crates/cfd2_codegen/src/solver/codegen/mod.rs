@@ -1,5 +1,6 @@
 pub mod coeff_expr;
 pub mod constants;
+pub mod coupled_common;
 pub mod dsl;
 pub mod fusion;
 pub mod generic_coupled_kernels;

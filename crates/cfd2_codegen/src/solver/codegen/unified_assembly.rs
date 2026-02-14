@@ -1,3 +1,4 @@
+use super::bc_table::BcTable;
 use super::coupled_common::{
     base_assembly_items, coefficient_value_expr, coupled_offsets, coupled_unknown_components,
     kernel_bindings_from_items,
@@ -612,12 +613,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 
                     // Boundary values are taken from the field being diffused (the "column"
                     // variable), not from the equation target.
-                    let bc_table_idx = Expr::ident("face_idx") * coupled_stride + col_u_idx;
-                    let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
-                        "bc_kind",
-                        bc_table_idx,
-                    ));
-                    let bc_value_expr = dsl::array_access("bc_value", bc_table_idx);
+                    let bc = BcTable::new(Expr::ident("face_idx"), coupled_stride);
+                    let (bc_kind_expr, bc_value_expr) = bc.lookup(col_u_idx);
 
                     let diag_block = block_matrix.row_entry(&Expr::ident("diag_rank"));
 
@@ -810,11 +807,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 
                     let boundary_contrib = if let Some(field_base_offset) = field_offset_opt {
                         let field_u_idx = field_base_offset + component;
-                        let bc_table_idx = Expr::ident("face_idx") * coupled_stride + field_u_idx;
-                        let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(
-                            dsl::array_access("bc_kind", bc_table_idx),
-                        );
-                        let bc_value_expr = dsl::array_access("bc_value", bc_table_idx);
+                        let bc = BcTable::new(Expr::ident("face_idx"), coupled_stride);
+                        let (bc_kind_expr, bc_value_expr) = bc.lookup(field_u_idx);
 
                         let neumann_rhs = -(kappa_own * Expr::ident("area") * bc_value_expr);
 
@@ -836,17 +830,9 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         let rho_u_base = *offsets.get("rho_u").expect("missing rho_u offset");
                         let rho_u_idx = rho_u_base + component;
 
-                        let bc_rho_idx = Expr::ident("face_idx") * coupled_stride + rho_idx;
-                        let bc_rho_u_idx = Expr::ident("face_idx") * coupled_stride + rho_u_idx;
-
-                        let bc_rho_kind = typed::EnumExpr::<GpuBcKind>::from_expr(
-                            dsl::array_access("bc_kind", bc_rho_idx),
-                        );
-                        let bc_rho_u_kind = typed::EnumExpr::<GpuBcKind>::from_expr(
-                            dsl::array_access("bc_kind", bc_rho_u_idx),
-                        );
-                        let bc_rho_val = dsl::array_access("bc_value", bc_rho_idx);
-                        let bc_rho_u_val = dsl::array_access("bc_value", bc_rho_u_idx);
+                        let bc = BcTable::new(Expr::ident("face_idx"), coupled_stride);
+                        let (bc_rho_kind, bc_rho_val) = bc.lookup(rho_idx);
+                        let (bc_rho_u_kind, bc_rho_u_val) = bc.lookup(rho_u_idx);
 
                         let rho_slot =
                             slots
@@ -1050,11 +1036,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             acc.sub_rhs(u_idx, dc_term),
                         ]);
 
-                        let bc_table_idx = Expr::ident("face_idx") * coupled_stride + u_idx;
-                        let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(
-                            dsl::array_access("bc_kind", bc_table_idx),
-                        );
-                        let bc_value_expr = dsl::array_access("bc_value", bc_table_idx);
+                        let bc = BcTable::new(Expr::ident("face_idx"), coupled_stride);
+                        let (bc_kind_expr, bc_value_expr) = bc.lookup(u_idx);
 
                         let boundary_contrib = dsl::block(vec![dsl::if_block_expr(
                             bc_kind_expr.eq(GpuBcKind::Dirichlet),

@@ -7,6 +7,7 @@ use crate::solver::ir::{
 };
 use crate::solver::scheme::Scheme;
 use crate::solver::shared::PrimitiveExpr;
+use cfd2_codegen::solver::codegen::bc_table::BcTable;
 use cfd2_codegen::solver::codegen::constants::constants_struct;
 use cfd2_codegen::solver::codegen::dsl as typed;
 use cfd2_codegen::solver::codegen::dsl::XY;
@@ -1987,10 +1988,9 @@ fn state_component_at_side_resolver(
     };
 
     if let Some(unknown_offset) = flux_layout.offset_for(&comp_name) {
-        let bc_table_idx =
-            Expr::ident("idx") * Expr::from(flux_layout.stride) + Expr::from(unknown_offset);
-        let kind = dsl::array_access("bc_kind", bc_table_idx);
-        let value = dsl::array_access("bc_value", bc_table_idx);
+        let bc = BcTable::new(Expr::ident("idx"), Expr::from(flux_layout.stride));
+        let kind = bc.kind_raw(Expr::from(unknown_offset));
+        let value = bc.value(Expr::from(unknown_offset));
 
         let base = if side == FaceSide::Owner {
             // OpenFOAM's `fvc::interpolate(...)` sets non-coupled patch face values to the patch

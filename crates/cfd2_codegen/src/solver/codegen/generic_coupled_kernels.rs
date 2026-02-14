@@ -1,3 +1,4 @@
+use super::bc_table::BcTable;
 use super::constants::constants_struct;
 use super::coupled_common::{
     base_assembly_items, coefficient_value_expr, coupled_offsets, coupled_unknown_components,
@@ -618,12 +619,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 
             for component in 0..equation.target.kind().component_count() as u32 {
                 let u_idx = base_offset + component;
-                let bc_table_idx = Expr::ident("face_idx") * coupled_stride + u_idx;
-                let bc_kind_expr = typed::EnumExpr::<GpuBcKind>::from_expr(dsl::array_access(
-                    "bc_kind",
-                    bc_table_idx,
-                ));
-                let bc_value_expr = dsl::array_access("bc_value", bc_table_idx);
+                let bc = BcTable::new(Expr::ident("face_idx"), coupled_stride);
+                let (bc_kind_expr, bc_value_expr) = bc.lookup(u_idx);
 
                 let interior_contrib = dsl::block(vec![
                     acc.add_diag(u_idx, Expr::ident(&diff_coeff_name)),

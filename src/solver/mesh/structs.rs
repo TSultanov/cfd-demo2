@@ -9,6 +9,26 @@ pub enum BoundaryType {
     MovingWall,
 }
 
+impl BoundaryType {
+    /// Returns the BC-table row index for this boundary type.
+    ///
+    /// Row 0 is reserved for "None" (no boundary), so the mapping is:
+    /// `Inlet -> 1, Outlet -> 2, Wall -> 3, SlipWall -> 4, MovingWall -> 5`.
+    ///
+    /// Used by both `generic_coupled_backend.rs` (per-face BC expansion)
+    /// and GPU upload paths.
+    #[inline]
+    pub fn bc_table_index(self) -> usize {
+        match self {
+            BoundaryType::Inlet => 1,
+            BoundaryType::Outlet => 2,
+            BoundaryType::Wall => 3,
+            BoundaryType::SlipWall => 4,
+            BoundaryType::MovingWall => 5,
+        }
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct Mesh {
     // Vertices

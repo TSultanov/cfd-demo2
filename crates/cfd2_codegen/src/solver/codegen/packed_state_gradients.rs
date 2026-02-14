@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use super::bc_table::BcTable;
 use super::constants::constants_struct;
 use super::coupled_common::kernel_bindings_from_items;
 use super::dsl as typed;
@@ -315,15 +316,8 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
             let interior_other = Expr::ident("state")
                 .index(Expr::ident("other_idx") * stride + Expr::from(component));
 
-            let bc_table_idx =
-                Expr::ident("face_idx") * Expr::from(unknown_stride) + Expr::from(component);
-            let kind = dsl::array_access("bc_kind", bc_table_idx);
-            let value = dsl::array_access("bc_value", bc_table_idx);
-            let from_bc = dsl::select(
-                dsl::select(cell_val, value, kind.eq(Expr::from(1u32))),
-                cell_val + value * Expr::ident("d_own"),
-                kind.eq(Expr::from(2u32)),
-            );
+            let bc = BcTable::new(Expr::ident("face_idx"), Expr::from(unknown_stride));
+            let from_bc = bc.ghost_value(Expr::from(component), cell_val, Expr::ident("d_own"));
 
             let other_val = dsl::select(interior_other, from_bc, Expr::ident("is_boundary"));
             let phi_face =

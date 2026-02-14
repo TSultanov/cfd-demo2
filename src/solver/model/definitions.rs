@@ -4,6 +4,7 @@ use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
 use crate::solver::model::backend::ast::{EquationSystem, FieldRef};
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::units::UnitDim;
+use cfd2_codegen::solver::codegen::bc_table::HostBcTable;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -403,6 +404,8 @@ impl BoundarySpec {
             GpuBoundaryType::MovingWall,
         ];
 
+        let table = HostBcTable::new(coupled_stride);
+
         let mut kind = vec![GpuBcKind::ZeroGradient as u32; boundary_types.len() * coupled_stride];
         let mut value = vec![0.0_f32; boundary_types.len() * coupled_stride];
 
@@ -445,12 +448,12 @@ impl BoundarySpec {
                             cond.kind
                         ));
                     }
-                    kind[b_i * coupled_stride + u_idx] = cond.kind as u32;
-                    value[b_i * coupled_stride + u_idx] = cond.value as f32;
+                    kind[table.offset(b_i, u_idx)] = cond.kind as u32;
+                    value[table.offset(b_i, u_idx)] = cond.value as f32;
                 } else {
                     // Default: ZeroGradient (Neumann=0), with expected unit field.unit()/L.
-                    kind[b_i * coupled_stride + u_idx] = GpuBcKind::ZeroGradient as u32;
-                    value[b_i * coupled_stride + u_idx] = 0.0;
+                    kind[table.offset(b_i, u_idx)] = GpuBcKind::ZeroGradient as u32;
+                    value[table.offset(b_i, u_idx)] = 0.0;
                 }
             }
         }

@@ -168,10 +168,43 @@ by requiring `BlockRow<Ax>` and `BlockCol<Ax>` typed indices instead of raw `u8`
 - All 151 lib tests pass
 - OpenFOAM reference suite: no regressions (before/after metrics are identical)
 
-## Tier 4: BC Table Accessor (Future)
+## Tier 4: BC Table Accessor
 
-Replace manual `face_idx * coupled_stride + u_idx` arithmetic (~8 occurrences)
-with a typed `BcTable` accessor.
+Replace manual `face_idx * coupled_stride + u_idx` arithmetic with typed
+`BcTable` (codegen DSL) and `HostBcTable` (host-side) accessors.
 
-- [ ] Implement `BcTable` type with `kind(face_idx, unknown)` / `value(face_idx, unknown)`
-- [ ] Refactor assembly and gradient kernels
+### New types
+
+- `BcTable` (`crates/cfd2_codegen/src/solver/codegen/bc_table.rs`): codegen DSL
+  wrapper that hides index arithmetic for `bc_kind[]`/`bc_value[]` lookups.
+  Methods: `kind()`, `kind_raw()`, `value()`, `lookup()`, `ghost_value()`.
+- `HostBcTable` (same file): host-side helper with `offset()`, `byte_offset()`,
+  `row_base()` for CPU-side table construction and runtime patching.
+- `BOUNDARY_TYPE_COUNT` (same file): constant `6` replacing hardcoded magic
+  numbers for boundary type row count.
+- `BoundaryType::bc_table_index()` (`src/solver/mesh/structs.rs`): maps
+  `BoundaryType` variants to their BC table row index (1-5), replacing
+  duplicated match arms.
+
+### GPU codegen sites refactored (7 sites across 5 files)
+
+- [x] `generic_coupled_kernels.rs` — 1 site → `BcTable::lookup()`
+- [x] `unified_assembly.rs` — 4 sites → `BcTable::lookup()`
+- [x] `packed_state_gradients.rs` — 1 site → `BcTable::ghost_value()`
+- [x] `flux_module_wgsl.rs` — 1 site → `BcTable::kind_raw()` + `BcTable::value()`
+- [x] `flux_module_gradients_wgsl.rs` — 1 site → `BcTable::ghost_value()`
+- [x] `rhie_chow.rs` — 1 site → `BcTable::ghost_value()`
+
+### Host-side sites refactored (3 sites across 3 files)
+
+- [x] `definitions.rs` `to_gpu_tables()` — `HostBcTable::offset()`
+- [x] `generic_coupled_backend.rs` — `BoundaryType::bc_table_index()` +
+      `HostBcTable::row_base()` + `BOUNDARY_TYPE_COUNT`
+- [x] `generic_coupled.rs` `spec_set_bc_value()` — `HostBcTable::byte_offset()` +
+      `BOUNDARY_TYPE_COUNT`
+
+### Verification
+
+- All 165 codegen tests pass (9 new unit tests for BcTable/HostBcTable)
+- All 151 lib tests pass
+- OpenFOAM reference suite: no regressions (before/after metrics byte-identical)

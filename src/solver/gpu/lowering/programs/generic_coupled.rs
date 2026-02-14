@@ -37,6 +37,7 @@ use crate::solver::model::backend::ast::FieldKind;
 use crate::solver::model::ports::PortRegistry;
 use crate::solver::model::{ModelPreconditionerSpec, ModelSpec};
 use bytemuck::{bytes_of, Pod, Zeroable};
+use cfd2_codegen::solver::codegen::bc_table::{HostBcTable, BOUNDARY_TYPE_COUNT};
 use cfd2_codegen::solver::codegen::wgsl_ast::*;
 use cfd2_codegen::solver::codegen::wgsl_dsl::*;
 use std::collections::HashMap;
@@ -2145,11 +2146,12 @@ pub(crate) fn spec_set_bc_value(
         ));
     }
 
-    let boundary_count = 6u32; // None, Inlet, Outlet, Wall, SlipWall, MovingWall
     let boundary_idx = boundary as u32;
-    if boundary_idx >= boundary_count {
+    if boundary_idx as usize >= BOUNDARY_TYPE_COUNT {
         return Err(format!("invalid boundary type index {boundary_idx}"));
     }
+
+    let table = HostBcTable::new(coupled_stride as usize);
 
     // Per-face BC storage: apply the boundary value to all boundary faces of this type.
     // (Boundary index 0 is reserved for "None" and should have no boundary faces.)
@@ -2158,7 +2160,7 @@ pub(crate) fn spec_set_bc_value(
         .get(boundary_idx as usize)
         .ok_or_else(|| format!("missing boundary_faces[{boundary_idx}]"))?;
     for &face_idx in faces {
-        let offset_bytes = (face_idx as u64 * coupled_stride as u64 + unknown_component as u64) * 4;
+        let offset_bytes = table.byte_offset(face_idx as usize, unknown_component as usize);
         plan.context
             .queue
             .write_buffer(&res(plan)._b_bc_value, offset_bytes, bytes_of(&value));

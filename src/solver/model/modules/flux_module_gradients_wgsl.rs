@@ -1,5 +1,6 @@
 use crate::solver::ir::FluxLayout;
 use crate::solver::model::modules::flux_module::ResolvedGradientTarget;
+use cfd2_codegen::solver::codegen::bc_table::BcTable;
 use cfd2_codegen::solver::codegen::constants::constants_struct;
 use cfd2_codegen::solver::codegen::dsl as typed;
 use cfd2_codegen::solver::codegen::dsl::XY;
@@ -382,15 +383,8 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
                 Expr::ident("state").index(Expr::ident("other_idx") * stride + target.base_offset);
 
             let mut other_val = if let Some(off) = target.bc_unknown_offset {
-                let bc_table_idx =
-                    Expr::ident("face_idx") * Expr::from(unknown_stride) + Expr::from(off);
-                let kind = dsl::array_access("bc_kind", bc_table_idx);
-                let value = dsl::array_access("bc_value", bc_table_idx);
-                let from_bc = dsl::select(
-                    dsl::select(cell_val, value, kind.eq(Expr::from(1u32))),
-                    cell_val + value * Expr::ident("d_own"),
-                    kind.eq(Expr::from(2u32)),
-                );
+                let bc = BcTable::new(Expr::ident("face_idx"), Expr::from(unknown_stride));
+                let from_bc = bc.ghost_value(Expr::from(off), cell_val, Expr::ident("d_own"));
                 dsl::select(interior_other, from_bc, Expr::ident("is_boundary"))
             } else {
                 dsl::select(interior_other, cell_val, Expr::ident("is_boundary"))

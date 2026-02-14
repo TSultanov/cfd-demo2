@@ -6,6 +6,7 @@ use crate::solver::model::module::{KernelBundleModule, ModuleInvariant};
 use crate::solver::model::KernelId;
 
 use cfd2_codegen::solver::codegen::{
+    bc_table::BcTable,
     dsl::XY,
     wgsl_ast::{AssignOp, Block, Expr, ForStep, Stmt, Type},
     wgsl_dsl as dsl,
@@ -654,17 +655,11 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
             )
         })?;
     let unknowns_per_face = model.system.unknowns_per_cell();
-    let bc_idx_expr = Expr::ident("face_idx") * unknowns_per_face + p_unknown_offset;
+    let bc = BcTable::new(Expr::ident("face_idx"), unknowns_per_face);
     let p_state_expr = dsl::array_access("state", Expr::ident("base") + p_offset);
     let p_other_state_expr =
         dsl::array_access("state", Expr::ident("other_idx") * state_stride + p_offset);
-    let bc_kind_expr = dsl::array_access("bc_kind", bc_idx_expr);
-    let bc_value_expr = dsl::array_access("bc_value", bc_idx_expr);
-    let p_boundary_expr = dsl::select(
-        dsl::select(p_state_expr, bc_value_expr, bc_kind_expr.eq(1u32)),
-        p_state_expr + bc_value_expr * Expr::ident("d_own"),
-        bc_kind_expr.eq(2u32),
-    );
+    let p_boundary_expr = bc.ghost_value(p_unknown_offset, p_state_expr, Expr::ident("d_own"));
     let p_interp_expr = p_state_expr * Expr::ident("lambda")
         + dsl::select(
             p_other_state_expr,

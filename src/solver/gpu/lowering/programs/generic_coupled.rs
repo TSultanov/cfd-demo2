@@ -2572,6 +2572,9 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
         return false;
     }
 
+    let gpu_outer_loop_primitive_enabled = gpu_outer_loop_primitive_enabled();
+    let collect_convergence_stats = plan.collect_convergence_stats;
+
     let device = plan.context.device.clone();
     let queue = plan.context.queue.clone();
     let context = crate::solver::gpu::context::GpuContext {
@@ -2584,6 +2587,7 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
     let mut encoded_tail_stats = Vec::with_capacity(remaining);
     let mut adaptive_iter_count: Option<u32> = None;
     let iter_counter_buf: Option<std::sync::Arc<wgpu::Buffer>>;
+    let skip_iter_counter_readback: bool;
     {
         let r = res_mut(plan);
         let (max_restart, solver_is_cg) = match r.linear_solver.solver_type {
@@ -2609,10 +2613,27 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
         let tol_abs = r.linear_solver.tolerance_abs;
 
         // Determine if adaptive outer break is available
-        let use_adaptive = r.outer_break_enabled
+        let supports_adaptive = r.outer_break_enabled
             && r.outer_gate.is_some()
             && r.outer_convergence.is_some()
             && remaining > 1;
+
+        // Experimental GPU outer-loop primitive: only valid for the adaptive
+        // one-submission path where gate resources are available.
+        //
+        // When enabled, we avoid the post-submission iteration-counter
+        // readback and rely on the encoded GPU gate path exclusively.
+        // Keep a conservative fallback to the host-driven loop when full
+        // convergence diagnostics are requested.
+        if gpu_outer_loop_primitive_enabled && !supports_adaptive {
+            return false;
+        }
+        if gpu_outer_loop_primitive_enabled && collect_convergence_stats {
+            return false;
+        }
+
+        let use_adaptive = supports_adaptive;
+        skip_iter_counter_readback = gpu_outer_loop_primitive_enabled && use_adaptive;
 
         // Prepare adaptive resources (indirect graphs, bind groups, etc.)
         let adaptive_resources = if use_adaptive {
@@ -2766,7 +2787,7 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
         }
 
         // Clone the iter counter buffer so we can read it back after dropping `r`.
-        iter_counter_buf = if use_adaptive {
+        iter_counter_buf = if use_adaptive && !skip_iter_counter_readback {
             r.outer_gate.as_ref().map(|g| g.b_iter_counter.clone())
         } else {
             None
@@ -2952,6 +2973,12 @@ fn encoded_seed_basis0_enabled(default_enabled: bool) -> bool {
     std::env::var("CFD2_ENABLE_ENCODED_SEED_BASIS0")
         .map(|v| v != "0")
         .unwrap_or(default_enabled)
+}
+
+fn gpu_outer_loop_primitive_enabled() -> bool {
+    std::env::var("CFD2_ENABLE_GPU_OUTER_LOOP_PRIMITIVE")
+        .map(|v| v != "0")
+        .unwrap_or(false)
 }
 
 pub(crate) fn update_graph_run(

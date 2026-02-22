@@ -297,11 +297,18 @@ Future optimization opportunities:
   (`generic_coupled.rs`, `host_after_solve`). When convergence diagnostics are enabled,
   per-field residual readback is still performed for reporting, but break signaling stays
   buffer-driven.
-- [ ] Provide a GPU-driven outer-iteration loop primitive that avoids per-iteration host
+- [x] Provide a GPU-driven outer-iteration loop primitive that avoids per-iteration host
   branching entirely (currently, adaptive break still requires iteration-counter readback
   after submission).
-- [ ] Keep feature-gated fallback to host-driven loop until numerical parity and
+  **Implemented (experimental):** `CFD2_ENABLE_GPU_OUTER_LOOP_PRIMITIVE=1` enables an
+  adaptive one-submission path that skips the `outer_gate:counter_readback` submission,
+  so outer-loop progression remains GPU-driven for the full encoded batch.
+- [x] Keep feature-gated fallback to host-driven loop until numerical parity and
   diagnostics are preserved.
+  **Implemented:** with the primitive enabled, the solver falls back to the recipe-level
+  host-driven loop when adaptive gate resources are unavailable or when
+  `collect_convergence_stats` is enabled. This preserves diagnostics behavior while the
+  primitive remains feature-gated.
 
 ## 6) Build and Release
 

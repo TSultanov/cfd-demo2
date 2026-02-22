@@ -1,6 +1,8 @@
 use cfd2::solver::gpu::dispatch_counter::{get_dispatch_stats, DispatchScope};
 use cfd2::solver::gpu::structs::LinearSolverStats;
-use cfd2::solver::gpu::submission_counter::{get_submission_stats, SubmissionScope};
+use cfd2::solver::gpu::submission_counter::{
+    get_submission_stats, SubmissionScope, SubmissionStats,
+};
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
 use cfd2::solver::model::helpers::{
     SolverFieldAliasesExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
@@ -310,18 +312,36 @@ fn run_with_policy_outer_iterations(
     solver.step_stats().outer_iterations.unwrap_or(0)
 }
 
-fn run_with_policy_submission_count(
+fn run_with_policy_submission_stats(
     mesh: &Mesh,
     policy: KernelFusionPolicy,
     steps: usize,
     outer_iters: usize,
     fixed_outer_iterations_mode: bool,
     outer_batched_mode: bool,
-) -> u64 {
+) -> SubmissionStats {
     let _lock = solver_test_lock()
         .lock()
         .expect("dispatch/submission test lock poisoned");
 
+    run_with_policy_submission_stats_no_lock(
+        mesh,
+        policy,
+        steps,
+        outer_iters,
+        fixed_outer_iterations_mode,
+        outer_batched_mode,
+    )
+}
+
+fn run_with_policy_submission_stats_no_lock(
+    mesh: &Mesh,
+    policy: KernelFusionPolicy,
+    steps: usize,
+    outer_iters: usize,
+    fixed_outer_iterations_mode: bool,
+    outer_batched_mode: bool,
+) -> SubmissionStats {
     let mut model = incompressible_momentum_model();
     let mut linear_solver = model
         .linear_solver
@@ -370,8 +390,26 @@ fn run_with_policy_submission_count(
     for _ in 0..steps {
         solver.step();
     }
-    let stats = get_submission_stats();
-    stats.total_submissions
+    get_submission_stats()
+}
+
+fn run_with_policy_submission_count(
+    mesh: &Mesh,
+    policy: KernelFusionPolicy,
+    steps: usize,
+    outer_iters: usize,
+    fixed_outer_iterations_mode: bool,
+    outer_batched_mode: bool,
+) -> u64 {
+    run_with_policy_submission_stats(
+        mesh,
+        policy,
+        steps,
+        outer_iters,
+        fixed_outer_iterations_mode,
+        outer_batched_mode,
+    )
+    .total_submissions
 }
 
 fn assert_snapshots_match(
@@ -1313,6 +1351,168 @@ fn one_submission_mode_submission_count_at_expected_floor() {
         one_submission < non_batched,
         "one-submission path should have fewer submissions than non-batched (non_batched={}, one_submission={})",
         non_batched, one_submission
+    );
+}
+
+#[test]
+fn gpu_outer_loop_primitive_avoids_counter_readback_submission() {
+    std::env::set_var("CFD2_QUIET", "1");
+
+    let _lock = solver_test_lock()
+        .lock()
+        .expect("solver test lock poisoned");
+    let _primitive_guard = EnvVarGuard::capture("CFD2_ENABLE_GPU_OUTER_LOOP_PRIMITIVE");
+
+    let mesh = generate_structured_rect_mesh(
+        16,
+        8,
+        1.0,
+        0.2,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
+    );
+
+    std::env::remove_var("CFD2_ENABLE_GPU_OUTER_LOOP_PRIMITIVE");
+    let baseline = run_with_policy_submission_stats_no_lock(
+        &mesh,
+        KernelFusionPolicy::Safe,
+        1,
+        5,
+        false,
+        true,
+    );
+
+    std::env::set_var("CFD2_ENABLE_GPU_OUTER_LOOP_PRIMITIVE", "1");
+    let primitive = run_with_policy_submission_stats_no_lock(
+        &mesh,
+        KernelFusionPolicy::Safe,
+        1,
+        5,
+        false,
+        true,
+    );
+
+    let baseline_readback = baseline
+        .by_label
+        .get("outer_gate:counter_readback")
+        .copied()
+        .unwrap_or(0);
+    let primitive_readback = primitive
+        .by_label
+        .get("outer_gate:counter_readback")
+        .copied()
+        .unwrap_or(0);
+
+    assert!(
+        baseline_readback > 0,
+        "expected baseline adaptive one-submission path to include counter readback submissions"
+    );
+    assert_eq!(
+        primitive_readback, 0,
+        "gpu outer-loop primitive must avoid outer_gate:counter_readback submissions"
+    );
+}
+
+#[test]
+fn gpu_outer_loop_primitive_falls_back_when_convergence_stats_enabled() {
+    std::env::set_var("CFD2_QUIET", "1");
+
+    let _lock = solver_test_lock()
+        .lock()
+        .expect("solver test lock poisoned");
+    let _primitive_guard = EnvVarGuard::capture("CFD2_ENABLE_GPU_OUTER_LOOP_PRIMITIVE");
+
+    let mesh = generate_structured_rect_mesh(
+        16,
+        8,
+        1.0,
+        0.2,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
+    );
+
+    std::env::set_var("CFD2_ENABLE_GPU_OUTER_LOOP_PRIMITIVE", "1");
+
+    let primitive_without_stats = run_with_policy_submission_stats_no_lock(
+        &mesh,
+        KernelFusionPolicy::Safe,
+        1,
+        5,
+        false,
+        true,
+    );
+    let primitive_chunk_submissions = primitive_without_stats
+        .by_label
+        .get("fgmres:one_submission_chunk")
+        .copied()
+        .unwrap_or(0);
+    assert!(
+        primitive_chunk_submissions > 0,
+        "expected one-submission chunks when gpu outer-loop primitive is enabled without convergence stats"
+    );
+
+    let mut model = incompressible_momentum_model();
+    let mut linear_solver = model
+        .linear_solver
+        .expect("incompressible model missing linear solver");
+    linear_solver.solver.kernel_fusion_policy = KernelFusionPolicy::Safe;
+    model.linear_solver = Some(linear_solver);
+
+    let config = SolverConfig {
+        advection_scheme: Scheme::Upwind,
+        time_scheme: TimeScheme::BDF2,
+        preconditioner: PreconditionerType::Jacobi,
+        stepping: SteppingMode::Coupled,
+    };
+
+    let mut solver = pollster::block_on(UnifiedSolver::new(&mesh, model, config, None, None))
+        .expect("solver init");
+
+    solver.set_collect_convergence_stats(true);
+    solver.set_dt(0.02);
+    solver.set_dtau(0.0).expect("set dtau");
+    solver.set_density(1.0).expect("set density");
+    solver.set_viscosity(0.01).expect("set viscosity");
+    solver.set_inlet_velocity(1.0).expect("set inlet velocity");
+    solver.set_alpha_u(0.7).expect("set alpha_u");
+    solver.set_alpha_p(0.3).expect("set alpha_p");
+    solver.set_outer_iters(5).expect("set outer iters");
+    solver
+        .set_outer_tolerance(0.0)
+        .expect("set outer relative tolerance");
+    solver
+        .set_outer_tolerance_abs(0.0)
+        .expect("set outer absolute tolerance");
+    solver
+        .set_outer_fixed_iterations_mode(false)
+        .expect("set outer fixed-iterations mode");
+    solver
+        .set_outer_batched_mode(true)
+        .expect("set outer batched mode");
+    solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
+    solver.set_p(&vec![0.0; mesh.num_cells()]);
+    solver.initialize_history();
+
+    let _submission_scope = SubmissionScope::new();
+    solver.step();
+    let stats = get_submission_stats();
+    let chunked = stats
+        .by_label
+        .get("fgmres:one_submission_chunk")
+        .copied()
+        .unwrap_or(0);
+
+    assert_eq!(
+        chunked, 0,
+        "expected host-driven fallback when convergence stats are enabled under gpu outer-loop primitive"
     );
 }
 

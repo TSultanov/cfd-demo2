@@ -22,6 +22,30 @@ fn solver_test_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+struct EnvVarGuard {
+    key: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvVarGuard {
+    fn capture(key: &'static str) -> Self {
+        Self {
+            key,
+            previous: std::env::var(key).ok(),
+        }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(value) = &self.previous {
+            std::env::set_var(self.key, value);
+        } else {
+            std::env::remove_var(self.key);
+        }
+    }
+}
+
 fn mean(values: &[f64]) -> f64 {
     if values.is_empty() {
         return 0.0;
@@ -89,6 +113,22 @@ fn run_with_policy_snapshot_fixed_outer(
         .lock()
         .expect("solver test lock poisoned");
 
+    run_with_policy_snapshot_fixed_outer_no_lock(
+        mesh,
+        policy,
+        steps,
+        outer_iters,
+        outer_batched_mode,
+    )
+}
+
+fn run_with_policy_snapshot_fixed_outer_no_lock(
+    mesh: &Mesh,
+    policy: KernelFusionPolicy,
+    steps: usize,
+    outer_iters: usize,
+    outer_batched_mode: bool,
+) -> RhieChowSnapshot {
     let mut model = incompressible_momentum_model();
     let mut linear_solver = model
         .linear_solver
@@ -1137,6 +1177,65 @@ fn one_submission_parity_gate_max_rel_below_1e_3() {
         &host_driven,
         "one_submission",
         &one_submission,
+        rel_tol,
+    );
+}
+
+/// Host-driven (non-batched) parity gate for encoded `basis0` seeding.
+///
+/// Compares the explicit opt-out (`CFD2_ENABLE_ENCODED_SEED_BASIS0=0`) against
+/// the default-on path (env var unset) while forcing the host-driven loop
+/// (`outer_batched_mode=false`).
+#[test]
+fn host_driven_encoded_seed_basis0_default_on_matches_opt_out() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let _seed_guard = EnvVarGuard::capture("CFD2_ENABLE_ENCODED_SEED_BASIS0");
+
+    let mesh = generate_structured_rect_mesh(
+        16,
+        8,
+        1.0,
+        0.2,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
+    );
+
+    let steps = 4usize;
+    let outer_iters = 5usize;
+
+    let _lock = solver_test_lock()
+        .lock()
+        .expect("solver test lock poisoned");
+
+    std::env::set_var("CFD2_ENABLE_ENCODED_SEED_BASIS0", "0");
+    let opt_out = run_with_policy_snapshot_fixed_outer_no_lock(
+        &mesh,
+        KernelFusionPolicy::Safe,
+        steps,
+        outer_iters,
+        false,
+    );
+
+    std::env::remove_var("CFD2_ENABLE_ENCODED_SEED_BASIS0");
+    let default_on = run_with_policy_snapshot_fixed_outer_no_lock(
+        &mesh,
+        KernelFusionPolicy::Safe,
+        steps,
+        outer_iters,
+        false,
+    );
+
+    // Keep tolerance aligned with existing host-driven vs one-submission parity gates.
+    let rel_tol = 1e-2f64;
+    assert_snapshots_match(
+        "encoded_opt_out",
+        &opt_out,
+        "encoded_default_on",
+        &default_on,
         rel_tol,
     );
 }

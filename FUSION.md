@@ -270,15 +270,21 @@ chunked submission functions.
   *(Implemented via process-lifetime cached `OneSubmissionEnvTunables` in
   `linear_solver.rs` using `std::sync::OnceLock`.)*
 
-### 5c) `CFD2_ENABLE_ENCODED_SEED_BASIS0` Still Opt-In (P3)
+### 5c) `CFD2_ENABLE_ENCODED_SEED_BASIS0` Default Policy (P3)
 
-GPU-side `r0 = b - Ax` basis seeding remains default-off for the host-driven
-solve path; batched one-submission paths still force encoded seeding.
+GPU-side `r0 = b - Ax` basis seeding now defaults on for host-driven
+multi-outer solves (`outer_iters > 1`), while batched one-submission paths
+continue to force encoded seeding.
 
-- [ ] Promote `CFD2_ENABLE_ENCODED_SEED_BASIS0` to default-on after confirming parity
+- [x] Promote `CFD2_ENABLE_ENCODED_SEED_BASIS0` to default-on after confirming parity
   in the host-driven path, or remove the env var entirely.
-  *(Attempted during this pass, but rolled back pending broader parity confirmation
-  because OpenFOAM diagnostics showed increased worst-case error.)*
+  **Implemented (scope-limited):** host-driven solves now default to encoded basis
+  seeding when `outer_iters > 1` (`generic_coupled.rs`), with env-var override
+  preserved (`CFD2_ENABLE_ENCODED_SEED_BASIS0=0` disables, nonzero enables).
+  Single-outer implicit solves keep default-off unless explicitly opted in, because
+  that path remains more sensitive in OpenFOAM diagnostics.
+  Added parity test `host_driven_encoded_seed_basis0_default_on_matches_opt_out`
+  in `tests/rhie_chow_fusion_parity_test.rs` (tolerance `1e-2`).
 
 ### 5d) Future: GPU-Driven Outer Loop Without Fixed-Iteration Requirement
 

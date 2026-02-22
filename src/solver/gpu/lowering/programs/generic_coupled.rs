@@ -2240,7 +2240,10 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
     };
 
     let r = res_mut(plan);
-    let use_encoded_seed_basis0 = r.outer_batched_mode && encoded_seed_basis0_enabled();
+    // Enable encoded basis seeding by default for multi-outer host-driven solves.
+    // Keep single-outer implicit solves opt-in via env var because that path is
+    // still more sensitive in OpenFOAM parity diagnostics.
+    let use_encoded_seed_basis0 = encoded_seed_basis0_enabled(r.outer_iters > 1);
 
     if let Some(schur) = &mut r.schur {
         let system = LinearSystemView {
@@ -2876,10 +2879,10 @@ pub(crate) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
     }
 }
 
-fn encoded_seed_basis0_enabled() -> bool {
+fn encoded_seed_basis0_enabled(default_enabled: bool) -> bool {
     std::env::var("CFD2_ENABLE_ENCODED_SEED_BASIS0")
         .map(|v| v != "0")
-        .unwrap_or(false)
+        .unwrap_or(default_enabled)
 }
 
 pub(crate) fn update_graph_run(

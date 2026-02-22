@@ -308,11 +308,14 @@ pub fn vec2_reconstruction_xy(
     grad_neigh: [Expr; 2],
     geom: GeometryPoints,
 ) -> Vec2Reconstruction {
+    let phi_own = typed::NamedVecExpr::<2, typed::AxisXY>::from_vec(phi_own);
+    let phi_neigh = typed::NamedVecExpr::<2, typed::AxisXY>::from_vec(phi_neigh);
+
     let rec_x = scalar_reconstruction(
         scheme,
         flux,
-        phi_own.component(XY::X.to_usize()),
-        phi_neigh.component(XY::X.to_usize()),
+        phi_own.at(XY::X),
+        phi_neigh.at(XY::X),
         grad_own[XY::X.to_usize()],
         grad_neigh[XY::X.to_usize()],
         geom,
@@ -320,8 +323,8 @@ pub fn vec2_reconstruction_xy(
     let rec_y = scalar_reconstruction(
         scheme,
         flux,
-        phi_own.component(XY::Y.to_usize()),
-        phi_neigh.component(XY::Y.to_usize()),
+        phi_own.at(XY::Y),
+        phi_neigh.at(XY::Y),
         grad_own[XY::Y.to_usize()],
         grad_neigh[XY::Y.to_usize()],
         geom,

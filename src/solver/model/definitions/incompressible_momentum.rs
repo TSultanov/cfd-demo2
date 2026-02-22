@@ -7,6 +7,7 @@ use crate::solver::model::backend::typed_ast::{
     typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
 // si module no longer needed for boundary conditions - using type-level dimensions
+use cfd2_codegen::solver::codegen::dsl::XY;
 use cfd2_ir::solver::dimensions::{
     Density, DivDim, DynamicViscosity, Force, InvTime, Length, MassFlux, Pressure, Velocity,
 };
@@ -157,8 +158,14 @@ pub fn incompressible_momentum_model() -> ModelSpec {
             .register_scalar_field::<Pressure>("p")
             .expect("p field registration failed");
 
-        let u0 = u_port.component(0).expect("U component 0").full_offset();
-        let u1 = u_port.component(1).expect("U component 1").full_offset();
+        let u0 = u_port
+            .component(XY::X.to_usize() as u32)
+            .expect("U component x")
+            .full_offset();
+        let u1 = u_port
+            .component(XY::Y.to_usize() as u32)
+            .expect("U component y")
+            .full_offset();
         let p = p_port.offset();
         (u0, u1, p)
     };

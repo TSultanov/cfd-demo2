@@ -208,3 +208,24 @@ Replace manual `face_idx * coupled_stride + u_idx` arithmetic with typed
 - All 165 codegen tests pass (9 new unit tests for BcTable/HostBcTable)
 - All 151 lib tests pass
 - OpenFOAM reference suite: no regressions (before/after metrics byte-identical)
+
+## Post-Tier Cleanup: Host-Side Axis + BC Index Alignment
+
+After Tier 4 landed, a small amount of host-side/component-index glue still used
+raw numeric indices and duplicated boundary-type mappings. This cleanup aligns
+those callsites with the named-axis and BC-table helpers.
+
+- [x] `src/solver/model/modules/flux_module.rs` — replace remaining
+  `.component(0)` / `.component(1)` with `XY::X.to_usize() as u32` /
+  `XY::Y.to_usize() as u32` when resolving gradient/slip offsets
+- [x] `src/solver/model/definitions/incompressible_momentum.rs` — replace
+  `u_port.component(0/1)` with `XY`-based indices
+- [x] `src/solver/gpu/init/mesh.rs` — replace manual `BoundaryType` to numeric
+  mapping with `BoundaryType::bc_table_index()`
+
+### Verification
+
+- All 165 codegen tests pass
+- All 151 lib tests pass
+- OpenFOAM reference suite: no regressions (before/after `[openfoam]` metrics
+  are identical)

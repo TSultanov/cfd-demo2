@@ -5,6 +5,7 @@ use crate::solver::model::kernel::{
 };
 use crate::solver::model::module::KernelBundleModule;
 use crate::solver::model::KernelId;
+use cfd2_codegen::solver::codegen::dsl::XY;
 use std::collections::HashSet;
 
 mod wgsl_flux {
@@ -166,13 +167,13 @@ fn build_resolved_targets(
             .map_err(|e| format!("flux_module_gradients: missing gradient field '{grad}': {e}"))?;
 
         let grad_x_offset = grad_port
-            .component(0)
+            .component(XY::X.to_usize() as u32)
             .map(|c| c.full_offset())
-            .ok_or_else(|| format!("flux_module_gradients: missing '{grad}[0]'"))?;
+            .ok_or_else(|| format!("flux_module_gradients: missing '{grad}[x]'"))?;
         let grad_y_offset = grad_port
-            .component(1)
+            .component(XY::Y.to_usize() as u32)
             .map(|c| c.full_offset())
-            .ok_or_else(|| format!("flux_module_gradients: missing '{grad}[1]'"))?;
+            .ok_or_else(|| format!("flux_module_gradients: missing '{grad}[y]'"))?;
 
         let bc_unknown_offset = flux_layout.offset_for(component);
 
@@ -183,8 +184,12 @@ fn build_resolved_targets(
                     .register_vector2_field::<AnyDimension>(base_field.as_str())
                     .map_err(|e| format!("flux_module_gradients: {e}"))?;
                 (
-                    slip_port.component(0).map(|c| c.full_offset()),
-                    slip_port.component(1).map(|c| c.full_offset()),
+                    slip_port
+                        .component(XY::X.to_usize() as u32)
+                        .map(|c| c.full_offset()),
+                    slip_port
+                        .component(XY::Y.to_usize() as u32)
+                        .map(|c| c.full_offset()),
                 )
             }
             _ => (None, None),

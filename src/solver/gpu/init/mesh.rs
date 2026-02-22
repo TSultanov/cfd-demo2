@@ -1,4 +1,4 @@
-use crate::solver::mesh::{BoundaryType, Mesh};
+use crate::solver::mesh::Mesh;
 use wgpu::util::DeviceExt;
 
 pub struct MeshResources {
@@ -112,11 +112,7 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
         .iter()
         .map(|b| match b {
             None => 0,
-            Some(BoundaryType::Inlet) => 1,
-            Some(BoundaryType::Outlet) => 2,
-            Some(BoundaryType::Wall) => 3,
-            Some(BoundaryType::SlipWall) => 4,
-            Some(BoundaryType::MovingWall) => 5,
+            Some(bt) => bt.bc_table_index() as u32,
         })
         .collect();
     let b_face_boundary = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

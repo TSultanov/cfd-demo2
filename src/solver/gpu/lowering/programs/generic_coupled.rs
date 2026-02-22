@@ -843,6 +843,7 @@ struct OuterConvergenceMonitor {
     zero_out_words: Vec<u32>,
     dispatch_cells: u32,
     state_scale: Option<Vec<f32>>,
+    state_scale_ready: bool,
 }
 
 impl OuterConvergenceMonitor {
@@ -1097,11 +1098,13 @@ impl OuterConvergenceMonitor {
             zero_out_words,
             dispatch_cells,
             state_scale: None,
+            state_scale_ready: false,
         }))
     }
 
     fn reset_step(&mut self) {
         self.state_scale = None;
+        self.state_scale_ready = false;
     }
 
     fn ensure_state_scale(
@@ -1119,7 +1122,13 @@ impl OuterConvergenceMonitor {
             &self.b_params_state,
             "outer_convergence:state",
         )?;
+        if !scale.is_empty() {
+            plan.context
+                .queue
+                .write_buffer(&self.b_scale, 0, bytemuck::cast_slice(&scale));
+        }
         self.state_scale = Some(scale);
+        self.state_scale_ready = true;
         Ok(())
     }
 
@@ -1251,61 +1260,12 @@ impl OuterConvergenceMonitor {
         self.state_scale.as_deref()
     }
 
-    fn evaluate_break_on_gpu(
+    fn submit_break_eval_and_read_status(
         &self,
         plan: &GpuProgramPlan,
-        delta: &[f32],
-        scale: &[f32],
-        tol_rel: f32,
-        tol_abs: f32,
+        mut encoder: wgpu::CommandEncoder,
+        submission_label: &'static str,
     ) -> Result<bool, String> {
-        if delta.len() != scale.len() {
-            return Err(format!(
-                "outer convergence break input length mismatch: delta={} scale={}",
-                delta.len(),
-                scale.len()
-            ));
-        }
-        if delta.is_empty() {
-            return Ok(true);
-        }
-
-        let params = GpuOuterConvergenceBreakParams {
-            count: delta.len() as u32,
-            tol_rel,
-            tol_abs,
-            _pad0: 0,
-        };
-        plan.context
-            .queue
-            .write_buffer(&self.b_break_params, 0, bytes_of(&params));
-        plan.context
-            .queue
-            .write_buffer(&self.b_delta, 0, bytemuck::cast_slice(delta));
-        plan.context
-            .queue
-            .write_buffer(&self.b_scale, 0, bytemuck::cast_slice(scale));
-        let zero: u32 = 0;
-        plan.context
-            .queue
-            .write_buffer(&self.b_break_status, 0, bytemuck::bytes_of(&zero));
-
-        let mut encoder =
-            plan.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("outer_convergence:break_eval"),
-                });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("outer_convergence:break_eval"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.break_pipeline);
-            pass.set_bind_group(0, &self.break_bg, &[]);
-            pass.dispatch_workgroups(1, 1, 1);
-        }
-
         let out_bytes = 4u64;
         let staging_buffer = plan.staging_cache.take_or_create(
             &plan.context.device,
@@ -1314,7 +1274,7 @@ impl OuterConvergenceMonitor {
         );
         encoder.copy_buffer_to_buffer(&self.b_break_status, 0, &staging_buffer, 0, out_bytes);
         let submission_index = plan.context.queue.submit(Some(encoder.finish()));
-        crate::count_submission!("Generic Coupled", "outer_convergence:break_eval");
+        crate::count_submission!("Generic Coupled", submission_label);
 
         let raw_result: Result<Vec<u8>, String> = (|| {
             let slice = staging_buffer.slice(..);
@@ -1351,6 +1311,82 @@ impl OuterConvergenceMonitor {
         }
         let words: &[u32] = bytemuck::cast_slice(&raw);
         Ok(words.first().copied().unwrap_or(0) != 0)
+    }
+
+    fn evaluate_break_from_current_buffers(
+        &self,
+        plan: &GpuProgramPlan,
+        tol_rel: f32,
+        tol_abs: f32,
+    ) -> Result<bool, String> {
+        let params = GpuOuterConvergenceBreakParams {
+            count: self.target_names.len() as u32,
+            tol_rel,
+            tol_abs,
+            _pad0: 0,
+        };
+        plan.context
+            .queue
+            .write_buffer(&self.b_break_params, 0, bytes_of(&params));
+
+        let mut encoder =
+            plan.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("outer_convergence:break_eval_buffered"),
+                });
+        self.encode_break_eval_into(&mut encoder);
+        self.submit_break_eval_and_read_status(
+            plan,
+            encoder,
+            "outer_convergence:break_eval_buffered",
+        )
+    }
+
+    fn evaluate_break_from_state_on_gpu(
+        &mut self,
+        plan: &GpuProgramPlan,
+        state: &wgpu::Buffer,
+        tol_rel: f32,
+        tol_abs: f32,
+    ) -> Result<bool, String> {
+        let params = GpuOuterConvergenceBreakParams {
+            count: self.target_names.len() as u32,
+            tol_rel,
+            tol_abs,
+            _pad0: 0,
+        };
+        plan.context
+            .queue
+            .write_buffer(&self.b_break_params, 0, bytes_of(&params));
+
+        let mut encoder =
+            plan.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("outer_convergence:break_eval_no_readback"),
+                });
+
+        let seeded_scale = if self.state_scale_ready {
+            false
+        } else {
+            let bg_state = self.create_state_bind_group(&plan.context.device, state);
+            self.encode_state_scale_into(&mut encoder, &bg_state);
+            true
+        };
+
+        self.encode_delta_maxima_into(&mut encoder);
+        self.encode_break_eval_into(&mut encoder);
+
+        let converged = self.submit_break_eval_and_read_status(
+            plan,
+            encoder,
+            "outer_convergence:break_eval_no_readback",
+        )?;
+        if seeded_scale {
+            self.state_scale_ready = true;
+        }
+        Ok(converged)
     }
 
     // --- Encode-only methods for GPU-driven adaptive outer break ---
@@ -2321,50 +2357,77 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
     let iters_done = plan.step_linear_stats.len();
     plan.outer_iterations = iters_done as u32;
 
-    let (outer_iters, outer_break_enabled) = {
+    let (outer_iters, outer_break_enabled, collect_convergence_stats) = {
         let r = res(plan);
-        (r.outer_iters, r.outer_break_enabled)
+        (
+            r.outer_iters,
+            r.outer_break_enabled,
+            plan.collect_convergence_stats,
+        )
     };
 
-    if !outer_break_enabled && !plan.collect_convergence_stats {
-        // Fixed-iteration mode: keep host overhead minimal and avoid per-iteration
-        // convergence readback until a GPU-side break path is implemented.
+    let break_should_run = outer_break_enabled
+        && outer_iters > 1
+        && plan.last_linear_stats.converged
+        && !plan.repeat_break;
+
+    if !break_should_run && !collect_convergence_stats {
         return;
     }
 
-    if outer_iters <= 1 && !plan.collect_convergence_stats {
+    if collect_convergence_stats {
+        let (delta, scale) = match compute_outer_residuals(plan) {
+            Some(result) => result,
+            None => return,
+        };
+        if !break_should_run {
+            return;
+        }
+        let Some(ref scale) = scale else {
+            return;
+        };
+        if scale.len() != delta.len() {
+            return;
+        }
+
+        let tol_rel = res(plan).outer_tol;
+        let tol_abs = res(plan).outer_tol_abs;
+        let monitor = res_mut(plan).outer_convergence.take();
+        let Some(monitor) = monitor else {
+            return;
+        };
+        match monitor.evaluate_break_from_current_buffers(plan, tol_rel, tol_abs) {
+            Ok(converged) => {
+                if converged {
+                    plan.repeat_break = true;
+                }
+            }
+            Err(err) => {
+                eprintln!("[cfd2][outer] failed to evaluate break status on gpu: {err}");
+            }
+        }
+
+        res_mut(plan).outer_convergence = Some(monitor);
         return;
     }
 
-    let (delta, scale) = match compute_outer_residuals(plan) {
-        Some(result) => result,
-        None => return,
+    if !break_should_run {
+        return;
+    }
+
+    let state = {
+        let r = res_mut(plan);
+        r.fields.current_state().clone()
     };
 
-    if !outer_break_enabled {
-        return;
-    }
-
-    if outer_iters <= 1 || !plan.last_linear_stats.converged || plan.repeat_break {
-        return;
-    }
-
-    let Some(ref scale) = scale else {
-        return;
-    };
-    if scale.len() != delta.len() {
-        return;
-    }
-
-    // Outer-loop convergence: evaluate tolerance checks on GPU and use the
-    // resulting status buffer to decide early break.
     let tol_rel = res(plan).outer_tol;
     let tol_abs = res(plan).outer_tol_abs;
     let monitor = res_mut(plan).outer_convergence.take();
-    let Some(monitor) = monitor else {
+    let Some(mut monitor) = monitor else {
         return;
     };
-    match monitor.evaluate_break_on_gpu(plan, &delta, scale, tol_rel, tol_abs) {
+
+    match monitor.evaluate_break_from_state_on_gpu(plan, &state, tol_rel, tol_abs) {
         Ok(converged) => {
             if converged {
                 plan.repeat_break = true;
@@ -2415,6 +2478,12 @@ fn compute_outer_residuals(plan: &mut GpuProgramPlan) -> Option<(Vec<f32>, Optio
         );
         res_mut(plan).outer_convergence = Some(monitor);
         return None;
+    }
+
+    if !delta.is_empty() {
+        plan.context
+            .queue
+            .write_buffer(&monitor.b_delta, 0, bytemuck::cast_slice(&delta));
     }
 
     // Always compute scaled residuals (state scale is populated by ensure_state_scale above).

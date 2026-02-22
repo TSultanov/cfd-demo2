@@ -291,8 +291,12 @@ continue to force encoded seeding.
 The one-submission path currently works with both adaptive and fixed-iteration modes.
 Future optimization opportunities:
 
-- [ ] Move outer convergence evaluation and break signaling to fully GPU-visible buffers
-  (partially done via `OuterConvergenceMonitor`).
+- [x] Move outer convergence evaluation and break signaling to fully GPU-visible buffers.
+  **Implemented:** Host-driven adaptive break now evaluates convergence directly from
+  GPU-resident `b_delta`/`b_scale` buffers and reads back only `b_break_status`
+  (`generic_coupled.rs`, `host_after_solve`). When convergence diagnostics are enabled,
+  per-field residual readback is still performed for reporting, but break signaling stays
+  buffer-driven.
 - [ ] Provide a GPU-driven outer-iteration loop primitive that avoids per-iteration host
   branching entirely (currently, adaptive break still requires iteration-counter readback
   after submission).

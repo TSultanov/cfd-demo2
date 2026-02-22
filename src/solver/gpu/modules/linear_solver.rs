@@ -8,6 +8,7 @@ use crate::solver::gpu::modules::krylov_solve::{
 };
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::structs::LinearSolverStats;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 /// Arguments for the `solve_fgmres` function to reduce parameter count.
@@ -23,6 +24,53 @@ pub struct SolveFgmresArgs<'a> {
     pub tol_abs: f32,
     pub precond_label: &'a str,
     pub use_encoded_seed_basis0: bool,
+}
+
+#[derive(Debug, Clone)]
+struct OneSubmissionEnvTunables {
+    restart_budget: Option<usize>,
+    total_iter_budget: Option<usize>,
+    min_tail_chunk: Option<usize>,
+    explicit_chunks: Option<Vec<usize>>,
+    cg_chunk_size: Option<usize>,
+}
+
+impl OneSubmissionEnvTunables {
+    fn from_env() -> Self {
+        Self {
+            restart_budget: parse_usize_env("CFD2_ONE_SUBMISSION_RESTART_BUDGET"),
+            total_iter_budget: parse_usize_env("CFD2_ONE_SUBMISSION_TOTAL_ITERS"),
+            min_tail_chunk: parse_usize_env("CFD2_ONE_SUBMISSION_MIN_TAIL"),
+            explicit_chunks: parse_chunks_env("CFD2_ONE_SUBMISSION_CHUNKS"),
+            cg_chunk_size: parse_usize_env("CFD2_ONE_SUBMISSION_CG_CHUNK_SIZE"),
+        }
+    }
+}
+
+fn parse_usize_env(key: &str) -> Option<usize> {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+}
+
+fn parse_chunks_env(key: &str) -> Option<Vec<usize>> {
+    std::env::var(key).ok().and_then(|raw| {
+        let parsed: Vec<usize> = raw
+            .split(',')
+            .filter_map(|s| s.trim().parse::<usize>().ok())
+            .filter(|&v| v > 0)
+            .collect();
+        if parsed.is_empty() {
+            None
+        } else {
+            Some(parsed)
+        }
+    })
+}
+
+fn one_submission_env_tunables() -> &'static OneSubmissionEnvTunables {
+    static TUNABLES: OnceLock<OneSubmissionEnvTunables> = OnceLock::new();
+    TUNABLES.get_or_init(OneSubmissionEnvTunables::from_env)
 }
 
 pub fn solve_fgmres<P: FgmresPreconditionerModule>(
@@ -246,14 +294,10 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
     let max_iters = max_iters.max(1);
     let capacity = krylov.fgmres.max_restart();
     let restart_len = max_restart.max(1).min(capacity);
-    let restart_budget = std::env::var("CFD2_ONE_SUBMISSION_RESTART_BUDGET")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(restart_len)
-        .max(1);
-    let total_iter_budget = std::env::var("CFD2_ONE_SUBMISSION_TOTAL_ITERS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
+    let tunables = one_submission_env_tunables();
+    let restart_budget = tunables.restart_budget.unwrap_or(restart_len).max(1);
+    let total_iter_budget = tunables
+        .total_iter_budget
         .unwrap_or(max_iters as usize)
         .max(1);
     let iter_restart = restart_len
@@ -261,25 +305,8 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
         .min(restart_budget)
         .max(1);
     let total_iters_to_encode = (max_iters as usize).min(total_iter_budget).max(1);
-    let min_tail_chunk = std::env::var("CFD2_ONE_SUBMISSION_MIN_TAIL")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(1)
-        .max(1);
-    let explicit_chunks: Option<Vec<usize>> = std::env::var("CFD2_ONE_SUBMISSION_CHUNKS")
-        .ok()
-        .and_then(|raw| {
-            let parsed: Vec<usize> = raw
-                .split(',')
-                .filter_map(|s| s.trim().parse::<usize>().ok())
-                .filter(|&v| v > 0)
-                .collect();
-            if parsed.is_empty() {
-                None
-            } else {
-                Some(parsed)
-            }
-        });
+    let min_tail_chunk = tunables.min_tail_chunk.unwrap_or(1).max(1);
+    let explicit_chunks: Option<Vec<usize>> = tunables.explicit_chunks.clone();
     let has_explicit_chunks = explicit_chunks.is_some();
 
     let mut params = RawFgmresParams {
@@ -428,14 +455,10 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: FgmresPreconditionerModul
     let max_iters = max_iters.max(1);
     let capacity = krylov.fgmres.max_restart();
     let restart_len = max_restart.max(1).min(capacity);
-    let restart_budget = std::env::var("CFD2_ONE_SUBMISSION_RESTART_BUDGET")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(restart_len)
-        .max(1);
-    let total_iter_budget = std::env::var("CFD2_ONE_SUBMISSION_TOTAL_ITERS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
+    let tunables = one_submission_env_tunables();
+    let restart_budget = tunables.restart_budget.unwrap_or(restart_len).max(1);
+    let total_iter_budget = tunables
+        .total_iter_budget
         .unwrap_or(max_iters as usize)
         .max(1);
     let iter_restart = restart_len
@@ -443,25 +466,8 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: FgmresPreconditionerModul
         .min(restart_budget)
         .max(1);
     let total_iters_to_encode = (max_iters as usize).min(total_iter_budget).max(1);
-    let min_tail_chunk = std::env::var("CFD2_ONE_SUBMISSION_MIN_TAIL")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(1)
-        .max(1);
-    let explicit_chunks: Option<Vec<usize>> = std::env::var("CFD2_ONE_SUBMISSION_CHUNKS")
-        .ok()
-        .and_then(|raw| {
-            let parsed: Vec<usize> = raw
-                .split(',')
-                .filter_map(|s| s.trim().parse::<usize>().ok())
-                .filter(|&v| v > 0)
-                .collect();
-            if parsed.is_empty() {
-                None
-            } else {
-                Some(parsed)
-            }
-        });
+    let min_tail_chunk = tunables.min_tail_chunk.unwrap_or(1).max(1);
+    let explicit_chunks: Option<Vec<usize>> = tunables.explicit_chunks.clone();
     let has_explicit_chunks = explicit_chunks.is_some();
 
     let mut params = RawFgmresParams {
@@ -621,9 +627,8 @@ pub fn submit_solve_cg_fixed_iterations_chunked(
     let start = Instant::now();
     let max_iters = max_iters.max(1) as usize;
 
-    let chunk_size = std::env::var("CFD2_ONE_SUBMISSION_CG_CHUNK_SIZE")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
+    let chunk_size = one_submission_env_tunables()
+        .cg_chunk_size
         .unwrap_or(DEFAULT_CG_CHUNK_SIZE)
         .max(1);
 

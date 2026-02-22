@@ -297,8 +297,7 @@ fn build_outer_convergence_break_wgsl() -> String {
                 // let bad_d = (!(d <= d)) || (abs(d) > 1.0e30);
                 let_expr(
                     "bad_d",
-                    (!d.clone().le(d.clone()))
-                        | abs(d.clone()).gt(Expr::lit_f32(1.0e30)),
+                    (!d.clone().le(d.clone())) | abs(d.clone()).gt(Expr::lit_f32(1.0e30)),
                 ),
                 // let bad_s = (!(s_raw <= s_raw)) || (abs(s_raw) > 1.0e30);
                 let_expr(
@@ -345,10 +344,7 @@ fn build_outer_convergence_break_wgsl() -> String {
             vec![Attribute::Builtin("global_invocation_id".into())],
         )],
         None,
-        vec![
-            Attribute::Compute,
-            Attribute::WorkgroupSize3(1, 1, 1),
-        ],
+        vec![Attribute::Compute, Attribute::WorkgroupSize3(1, 1, 1)],
         body,
     )));
 
@@ -498,10 +494,7 @@ fn build_outer_gate_wgsl() -> String {
             vec![Attribute::Builtin("global_invocation_id".into())],
         )],
         None,
-        vec![
-            Attribute::Compute,
-            Attribute::WorkgroupSize3(1, 1, 1),
-        ],
+        vec![Attribute::Compute, Attribute::WorkgroupSize3(1, 1, 1)],
         body,
     )));
 
@@ -556,10 +549,7 @@ fn build_outer_stop_inject_wgsl(scalar_stop: usize) -> String {
             vec![Attribute::Builtin("global_invocation_id".into())],
         )],
         None,
-        vec![
-            Attribute::Compute,
-            Attribute::WorkgroupSize3(1, 1, 1),
-        ],
+        vec![Attribute::Compute, Attribute::WorkgroupSize3(1, 1, 1)],
         body,
     )));
 
@@ -1590,7 +1580,12 @@ impl GenericCoupledProgramResources {
                 &runtime.common.context.queue,
                 runtime.common.num_cells,
                 runtime.common.num_faces,
-                runtime.common.context.device.limits().max_compute_workgroups_per_dimension,
+                runtime
+                    .common
+                    .context
+                    .device
+                    .limits()
+                    .max_compute_workgroups_per_dimension,
                 &oc.b_break_status,
             )
         });
@@ -2245,8 +2240,7 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
     };
 
     let r = res_mut(plan);
-    let use_encoded_seed_basis0 = r.outer_batched_mode
-        && encoded_seed_basis0_enabled();
+    let use_encoded_seed_basis0 = r.outer_batched_mode && encoded_seed_basis0_enabled();
 
     if let Some(schur) = &mut r.schur {
         let system = LinearSystemView {
@@ -2467,10 +2461,7 @@ fn compute_outer_residuals(plan: &mut GpuProgramPlan) -> Option<(Vec<f32>, Optio
 pub(crate) fn host_coupled_batch_tail(plan: &mut GpuProgramPlan) {
     let (outer_batched_mode, outer_iters) = {
         let r = res(plan);
-        (
-            r.outer_batched_mode,
-            r.outer_iters.max(1),
-        )
+        (r.outer_batched_mode, r.outer_iters.max(1))
     };
     if !outer_batched_mode || outer_iters <= 1 {
         return;
@@ -2493,6 +2484,10 @@ pub(crate) fn host_coupled_batch_tail(plan: &mut GpuProgramPlan) {
     // When adaptive break is enabled, uses indirect dispatch + GPU-side convergence
     // gating so converged iterations become zero-cost dispatches.
     if !try_host_coupled_batch_tail_one_submission(plan, remaining) {
+        // One-submission encode failed (unsupported/inconsistent solver state).
+        // Ensure the recipe-level repeat loop remains active so remaining outer
+        // iterations execute through the standard per-iteration path.
+        plan.repeat_break = false;
         eprintln!(
             "[cfd2][batch_tail] one-submission batch tail could not be used \
              (unsupported solver config); falling back to recipe-level per-iteration loop"
@@ -2500,10 +2495,7 @@ pub(crate) fn host_coupled_batch_tail(plan: &mut GpuProgramPlan) {
     }
 }
 
-fn try_host_coupled_batch_tail_one_submission(
-    plan: &mut GpuProgramPlan,
-    remaining: usize,
-) -> bool {
+fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaining: usize) -> bool {
     if remaining == 0 {
         return false;
     }
@@ -2712,15 +2704,12 @@ fn try_host_coupled_batch_tail_one_submission(
     // Read back adaptive iteration counter OUTSIDE the `r` borrow scope
     // so we can access `plan.staging_cache`.
     if let Some(b_iter_counter) = iter_counter_buf {
-        let staging = plan.staging_cache.take_or_create(
-            &device,
-            4,
-            "outer_gate:iter_counter_readback",
-        );
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("outer_gate:counter_readback"),
-            });
+        let staging =
+            plan.staging_cache
+                .take_or_create(&device, 4, "outer_gate:iter_counter_readback");
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("outer_gate:counter_readback"),
+        });
         encoder.copy_buffer_to_buffer(&b_iter_counter, 0, &staging, 0, 4);
         let sub_idx = queue.submit(Some(encoder.finish()));
         crate::count_submission!("Generic Coupled", "outer_gate:counter_readback");
@@ -2872,10 +2861,7 @@ pub(crate) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
     // nodes in this repeat-body execution.
     let (outer_batched_mode, outer_iters) = {
         let r = res(plan);
-        (
-            r.outer_batched_mode,
-            r.outer_iters.max(1),
-        )
+        (r.outer_batched_mode, r.outer_iters.max(1))
     };
     if !outer_batched_mode || outer_iters <= 1 {
         return;
@@ -3435,6 +3421,7 @@ pub(crate) fn param_low_mach_pressure_coupling_alpha(
 mod tests {
     use super::*;
     use crate::solver::dimensions::{Pressure, UnitDimension, Velocity};
+    use crate::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
     use crate::solver::model::backend::ast::{fvm, vol_scalar, vol_vector3, EquationSystem};
     use crate::solver::model::ports::PortRegistry;
     use crate::solver::model::{eos, primitives};
@@ -3591,5 +3578,71 @@ mod tests {
         assert_eq!(mapping.get_offset(0, 2), Some(2)); // U z
         assert_eq!(mapping.get_offset(1, 0), Some(3)); // p
         assert_eq!(mapping.get_offset(1, 1), None);
+    }
+
+    #[test]
+    fn batch_tail_fallback_clears_repeat_break_for_unsupported_solver_state() {
+        let mesh = generate_structured_rect_mesh(
+            6,
+            4,
+            1.0,
+            0.4,
+            BoundarySides {
+                left: BoundaryType::Inlet,
+                right: BoundaryType::Outlet,
+                bottom: BoundaryType::Wall,
+                top: BoundaryType::Wall,
+            },
+        );
+        let model = incompressible_momentum_model();
+
+        let mut plan = pollster::block_on(crate::solver::gpu::lowering::lower_program_plan(
+            &mesh,
+            &model,
+            crate::solver::gpu::program::plan_instance::PlanInitConfig {
+                advection_scheme: crate::solver::scheme::Scheme::Upwind,
+                time_scheme: crate::solver::gpu::enums::TimeScheme::BDF2,
+                preconditioner: crate::solver::gpu::structs::PreconditionerType::Jacobi,
+                stepping: crate::solver::gpu::recipe::SteppingMode::Coupled,
+            },
+            None,
+            None,
+        ))
+        .expect("build generic coupled plan");
+
+        {
+            let r = res_mut(&mut plan);
+            r.outer_batched_mode = true;
+            r.outer_iters = 2;
+            r.linear_solver.solver_type =
+                crate::solver::gpu::recipe::LinearSolverType::Fgmres { max_restart: 8 };
+
+            // Construct an intentionally unsupported/inconsistent state for the
+            // one-submission encoder: FGMRES selected but no Schur/Krylov resources.
+            r.schur = None;
+            r.krylov = None;
+        }
+
+        plan.step_linear_stats.clear();
+        plan.step_linear_stats.push(
+            crate::solver::gpu::structs::LinearSolverStats::max_iterations(
+                1,
+                1.0,
+                std::time::Duration::ZERO,
+            ),
+        );
+        plan.repeat_break = true;
+
+        host_coupled_batch_tail(&mut plan);
+
+        assert!(
+            !plan.repeat_break,
+            "fallback path must clear repeat_break so recipe-level loop continues"
+        );
+        assert_eq!(
+            plan.step_linear_stats.len(),
+            1,
+            "fallback path should keep existing per-iteration stats"
+        );
     }
 }

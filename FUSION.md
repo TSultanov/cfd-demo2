@@ -222,57 +222,63 @@ Cross-phase fusion has been investigated, implemented, and validated.
 
 ### 4a) Model Author Guide
 
-No documentation exists for model authors on how to:
+Model-author documentation is now available for how to:
 - Define a fusion-capable kernel (return `ModelKernelArtifact::DslProgram` from generator)
 - Declare `SideEffectMetadata` read/write sets
 - Write `ModelKernelFusionRule` with guards
 - Use the `fusion_coverage` binary for coverage auditing
 
-- [ ] Write a model-author guide (e.g., `docs/fusion-authoring.md`) covering the full
+- [x] Write a model-author guide (e.g., `docs/fusion-authoring.md`) covering the full
   workflow from kernel generator to fusion rule to validated synthesized output.
+  *(Added `docs/fusion-authoring.md`.)*
 
 ### 4b) Troubleshooting Guide
 
-No guide exists for debugging fusion synthesis failures (hazard rejections, bind-merge
-conflicts, dispatch-domain mismatches).
+Troubleshooting notes are now available for fusion synthesis failures (hazard
+rejections, bind-merge conflicts, dispatch-domain mismatches).
 
-- [ ] Add troubleshooting notes covering:
+- [x] Add troubleshooting notes covering:
   - How to read `FUSION_COVERAGE.md` hazard rejection messages
   - How to fix common RAW/WAR/WAW hazard errors
   - How to debug bind-merge incompatibilities
   - How to validate a new fusion rule with the parity test framework
+  *(Added `docs/fusion-troubleshooting.md`.)*
 
 ## 5) One-Submission Path Gaps
 
 ### 5a) Fallback Path After Multi-Submission Loop Removal (P1)
 
-The multi-submission fallback loop in `host_coupled_batch_tail` was removed per the
-rollout plan. When `try_host_coupled_batch_tail_one_submission` returns `false`
-(unsupported solver config), the code prints a warning but does not execute the
-remaining outer iterations. For edge-case solver configurations that don't match
-FGMRES, CG, or Schur paths, the solver would silently run only 1 outer iteration.
+The fallback behavior is now restored: when one-submission cannot be used, the
+recipe-level per-iteration loop continues.
 
-- [ ] Add a graceful fallback: when one-submission fails, fall back to per-iteration
+- [x] Add a graceful fallback: when one-submission fails, fall back to per-iteration
   recipe-level loop (re-enable `plan.repeat_break = false` so the recipe continues).
-- [ ] Add a test that exercises the fallback path with an unsupported solver config.
+  *(Implemented in `host_coupled_batch_tail`: failure path now clears
+  `plan.repeat_break` before returning to recipe-driven looping.)*
+- [x] Add a test that exercises the fallback path with an unsupported solver config.
+  *(Added unit test in `generic_coupled.rs`:
+  `batch_tail_fallback_clears_repeat_break_for_unsupported_solver_state`.)*
 
 ### 5b) Env-Var Reads in Hot Path (P3)
 
 The `CFD2_ONE_SUBMISSION_*` env vars (`RESTART_BUDGET`, `TOTAL_ITERS`, `CHUNKS`,
-`MIN_TAIL`, `CG_CHUNK_SIZE`) are read via `std::env::var()` on every call to the
-chunked submission functions (`linear_solver.rs:249-269`, `431-464`, `624`).
+`MIN_TAIL`, `CG_CHUNK_SIZE`) are now cached once per process and reused by the
+chunked submission functions.
 
-- [ ] Cache env-var reads in a `once_cell::sync::Lazy` or similar, or move them to
+- [x] Cache env-var reads in a `once_cell::sync::Lazy` or similar, or move them to
   solver config / named params.
+  *(Implemented via process-lifetime cached `OneSubmissionEnvTunables` in
+  `linear_solver.rs` using `std::sync::OnceLock`.)*
 
 ### 5c) `CFD2_ENABLE_ENCODED_SEED_BASIS0` Still Opt-In (P3)
 
-GPU-side `r0 = b - Ax` basis seeding is validated but default-off for the host-driven
-solve path (`generic_coupled.rs:2640-2644`). The batched path always uses it, but the
-host-driven path gates it behind both `outer_batched_mode` and the env var.
+GPU-side `r0 = b - Ax` basis seeding remains default-off for the host-driven
+solve path; batched one-submission paths still force encoded seeding.
 
 - [ ] Promote `CFD2_ENABLE_ENCODED_SEED_BASIS0` to default-on after confirming parity
   in the host-driven path, or remove the env var entirely.
+  *(Attempted during this pass, but rolled back pending broader parity confirmation
+  because OpenFOAM diagnostics showed increased worst-case error.)*
 
 ### 5d) Future: GPU-Driven Outer Loop Without Fixed-Iteration Requirement
 
@@ -294,9 +300,10 @@ Future optimization opportunities:
 Fusion is controlled by `KernelFusionPolicy` (runtime enum), not Cargo feature flags.
 The `Off` policy serves as the opt-out mechanism. No compile-time feature gate exists.
 
-- [ ] Decide whether a `--no-default-features` compile-time opt-out is needed for
+- [x] Decide whether a `--no-default-features` compile-time opt-out is needed for
   environments where even the codegen overhead of fusion synthesis is undesirable.
-  Current assessment: not needed — `Off` policy is sufficient.
+  **Decision:** not needed — runtime `KernelFusionPolicy::Off` remains the supported
+  opt-out and no compile-time fusion feature gate is added.
 
 ### 6b) Codegen-Level `FusionPatternRule` Cleanup (P3)
 
@@ -305,5 +312,7 @@ The `Off` policy serves as the opt-out mechanism. No compile-time feature gate e
 The model-level `ModelKernelFusionRule` / `apply_model_fusion_rules()` has replaced
 them. They are only used in `fusion.rs` unit tests.
 
-- [ ] Mark codegen-level `FusionPatternRule` as `#[cfg(test)]` or document it as
+- [x] Mark codegen-level `FusionPatternRule` as `#[cfg(test)]` or document it as
   test-only infrastructure.
+  *(Implemented: `FusionPatternRule`, `FusionCandidate`, and
+  `match_fusion_candidates()` are now `#[cfg(test)]`.)*

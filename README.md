@@ -8,6 +8,8 @@
 - Generated WGSL policy: `GENERATED_WGSL_POLICY.md`
 - Port refactor plan: `PORT_REFACTOR_PLAN.md`
 - Port refactor migration guide: `MIGRATION_PORT_REFACTOR.md` (type-level dimensions + port-based field access)
+- Fusion authoring guide: `docs/fusion-authoring.md`
+- Fusion troubleshooting guide: `docs/fusion-troubleshooting.md`
 
 ## How to Run
 

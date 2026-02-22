@@ -23,6 +23,8 @@ pub struct BindingRemap {
     pub to_binding: u32,
 }
 
+/// Test-only pattern-rule type for matcher unit tests.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FusionPatternRule {
     pub name: String,
@@ -31,6 +33,8 @@ pub struct FusionPatternRule {
     pub replacement_id: String,
 }
 
+/// Test-only matcher output type for matcher unit tests.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FusionCandidate {
     pub rule_name: String,
@@ -97,6 +101,7 @@ impl std::fmt::Display for HazardReport {
     }
 }
 
+#[cfg(test)]
 pub fn match_fusion_candidates(
     ordered_kernel_ids: &[&str],
     rules: &[FusionPatternRule],
@@ -144,6 +149,7 @@ pub fn match_fusion_candidates(
     out
 }
 
+#[cfg(test)]
 fn pattern_matches_at(ordered_kernel_ids: &[&str], pattern: &[String], start: usize) -> bool {
     if start + pattern.len() > ordered_kernel_ids.len() {
         return false;

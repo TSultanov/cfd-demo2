@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 2001b9478609b91ad8f504afc072cf39eec70fb0b9162281443025150ffd56c6
+// SourceHash: 5e4c685032db1b725f593a3bb78c15fa72c6344177ebbbb3675b754af685bbe3
 
 #![allow(
     unused,
@@ -33263,16 +33263,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     state[(base + 4u)] = k3_grad_out_p.x;
     state[(base + 5u)] = k3_grad_out_p.y;
     let k4_d_p = state[(base + 3u)];
-    let k4_grad_px = state[(base + 4u)];
-    let k4_grad_py = state[(base + 5u)];
+    let k4_grad_px = k3_grad_out_p.x;
+    let k4_grad_py = k3_grad_out_p.y;
     let k4_grad_old_x = state[(base + 6u)];
     let k4_grad_old_y = state[(base + 7u)];
     let k4_corr_x = (k4_d_p * (k4_grad_px - k4_grad_old_x));
     let k4_corr_y = (k4_d_p * (k4_grad_py - k4_grad_old_y));
-    let _e276 = state[(base + 0u)];
-    state[(base + 0u)] = (_e276 - k4_corr_x);
-    let _e286 = state[(base + 1u)];
-    state[(base + 1u)] = (_e286 - k4_corr_y);
+    let _e268 = state[(base + 0u)];
+    state[(base + 0u)] = (_e268 - k4_corr_x);
+    let _e278 = state[(base + 1u)];
+    state[(base + 1u)] = (_e278 - k4_corr_y);
     return;
 }
 "#;
@@ -33964,16 +33964,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     state[(base + 4u)] = k2_grad_out_p.x;
     state[(base + 5u)] = k2_grad_out_p.y;
     let k3_d_p = state[(base + 3u)];
-    let k3_grad_px = state[(base + 4u)];
-    let k3_grad_py = state[(base + 5u)];
+    let k3_grad_px = k2_grad_out_p.x;
+    let k3_grad_py = k2_grad_out_p.y;
     let k3_grad_old_x = state[(base + 6u)];
     let k3_grad_old_y = state[(base + 7u)];
     let k3_corr_x = (k3_d_p * (k3_grad_px - k3_grad_old_x));
     let k3_corr_y = (k3_d_p * (k3_grad_py - k3_grad_old_y));
-    let _e271 = state[(base + 0u)];
-    state[(base + 0u)] = (_e271 - k3_corr_x);
-    let _e281 = state[(base + 1u)];
-    state[(base + 1u)] = (_e281 - k3_corr_y);
+    let _e263 = state[(base + 0u)];
+    state[(base + 0u)] = (_e263 - k3_corr_x);
+    let _e273 = state[(base + 1u)];
+    state[(base + 1u)] = (_e273 - k3_corr_y);
     return;
 }
 "#;
@@ -34934,16 +34934,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     state[(base + 4u)] = grad_out_p.x;
     state[(base + 5u)] = grad_out_p.y;
     let k1_d_p = state[(base + 3u)];
-    let k1_grad_px = state[(base + 4u)];
-    let k1_grad_py = state[(base + 5u)];
+    let k1_grad_px = grad_out_p.x;
+    let k1_grad_py = grad_out_p.y;
     let k1_grad_old_x = state[(base + 6u)];
     let k1_grad_old_y = state[(base + 7u)];
     let k1_corr_x = (k1_d_p * (k1_grad_px - k1_grad_old_x));
     let k1_corr_y = (k1_d_p * (k1_grad_py - k1_grad_old_y));
-    let _e234 = state[(base + 0u)];
-    state[(base + 0u)] = (_e234 - k1_corr_x);
-    let _e244 = state[(base + 1u)];
-    state[(base + 1u)] = (_e244 - k1_corr_y);
+    let _e226 = state[(base + 0u)];
+    state[(base + 0u)] = (_e226 - k1_corr_x);
+    let _e236 = state[(base + 1u)];
+    state[(base + 1u)] = (_e236 - k1_corr_y);
     return;
 }
 "#;

@@ -111,6 +111,60 @@ pub struct SideEffectMetadata {
     pub uses_atomics: bool,
 }
 
+/// A simple buffer access expression tracked in structured body IR metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct KernelBufferAccess {
+    pub base: String,
+    pub index_expr: String,
+}
+
+impl KernelBufferAccess {
+    pub fn new(base: impl Into<String>, index_expr: impl Into<String>) -> Self {
+        Self {
+            base: base.into(),
+            index_expr: index_expr.into(),
+        }
+    }
+}
+
+/// A structured operation used by IR-only fusion cleanup passes.
+///
+/// `line_index` is 0-based within a kernel segment's executable section
+/// (`preamble` followed by `body`), excluding indexing lines and fused segment markers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KernelBodyIrOp {
+    /// `state[idx] = value;`-like write.
+    Store {
+        line_index: usize,
+        access: KernelBufferAccess,
+        value_expr: String,
+        /// Memory reads that appear in `value_expr`.
+        value_reads: Vec<KernelBufferAccess>,
+    },
+    /// `let x = state[idx];`-like direct load.
+    LetLoad {
+        line_index: usize,
+        name: String,
+        ty: Option<String>,
+        access: KernelBufferAccess,
+    },
+    /// `x = x;`-like no-op assignment to a local symbol.
+    NoopSelfAssign { line_index: usize },
+    /// Conservative invalidation barrier (e.g. control flow boundary).
+    Invalidate { line_index: usize },
+}
+
+impl KernelBodyIrOp {
+    pub fn line_index(&self) -> usize {
+        match self {
+            KernelBodyIrOp::Store { line_index, .. }
+            | KernelBodyIrOp::LetLoad { line_index, .. }
+            | KernelBodyIrOp::NoopSelfAssign { line_index }
+            | KernelBodyIrOp::Invalidate { line_index } => *line_index,
+        }
+    }
+}
+
 /// IR representation of a fusion-capable kernel program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KernelProgram {
@@ -126,6 +180,10 @@ pub struct KernelProgram {
     pub preamble: Vec<String>,
     pub indexing: Vec<String>,
     pub body: Vec<String>,
+    /// Structured per-segment operation metadata for IR-only cleanup passes.
+    ///
+    /// Operations are indexed over `preamble` + `body` for this kernel segment.
+    pub body_ir_ops: Vec<KernelBodyIrOp>,
     /// Local symbols that may need deterministic renaming when composing kernels.
     pub local_symbols: Vec<String>,
     pub side_effects: SideEffectMetadata,
@@ -150,6 +208,7 @@ impl KernelProgram {
             preamble: Vec::new(),
             indexing: Vec::new(),
             body: Vec::new(),
+            body_ir_ops: Vec::new(),
             local_symbols: Vec::new(),
             side_effects: SideEffectMetadata::default(),
             eos_params: Vec::new(),
@@ -207,5 +266,23 @@ mod tests {
         assert!(meta.write_set.is_empty());
         assert!(!meta.uses_barriers);
         assert!(!meta.uses_atomics);
+    }
+
+    #[test]
+    fn kernel_program_initializes_ir_ops_empty() {
+        let launch = LaunchSemantics::new([64, 1, 1], "idx", Some("idx >= n"));
+        let program = KernelProgram::new(
+            "kernel/a",
+            DispatchDomain::Cells,
+            launch,
+            vec![KernelBinding::new(
+                0,
+                0,
+                "state",
+                "array<f32>",
+                BindingAccess::ReadWriteStorage,
+            )],
+        );
+        assert!(program.body_ir_ops.is_empty());
     }
 }

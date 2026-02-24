@@ -104,8 +104,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // end fused segment: rhie_chow/grad_p_update
     // begin fused segment: rhie_chow/correct_velocity_delta
     let k4_d_p = state[base + 3u];
-    let k4_grad_px = state[base + 4u];
-    let k4_grad_py = state[base + 5u];
+    let k4_grad_px = k3_grad_out_p.x;
+    let k4_grad_py = k3_grad_out_p.y;
     let k4_grad_old_x = state[base + 6u];
     let k4_grad_old_y = state[base + 7u];
     let k4_corr_x = k4_d_p * (k4_grad_px - k4_grad_old_x);

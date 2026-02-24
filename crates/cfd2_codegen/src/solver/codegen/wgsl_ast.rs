@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::fmt;
 
+use cfd2_ir::solver::ir::{KernelBodyIrOp, KernelBufferAccess};
 use indexmap::{IndexMap, IndexSet};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -318,6 +319,135 @@ pub fn render_block_lines(block: &Block) -> Vec<String> {
 /// Render a statement slice into WGSL source lines.
 pub fn render_stmt_lines(stmts: &[Stmt]) -> Vec<String> {
     render_block_lines(&Block::new(stmts.to_vec()))
+}
+
+/// Render a statement slice into WGSL source lines and emit structured body IR ops.
+///
+/// The returned `KernelBodyIrOp::line_index` values are 0-based within the returned
+/// lines vector.
+pub fn render_stmt_lines_with_ir(stmts: &[Stmt]) -> (Vec<String>, Vec<KernelBodyIrOp>) {
+    let lines = render_stmt_lines(stmts);
+    let mut ops = Vec::new();
+    let mut line_cursor = 0usize;
+
+    for stmt in stmts {
+        let stmt_start = line_cursor;
+        let stmt_lines = render_stmt_lines(std::slice::from_ref(stmt));
+        line_cursor += stmt_lines.len();
+
+        match stmt {
+            Stmt::Let { name, ty, expr } => {
+                if let Some(access) = expr_as_buffer_access(*expr) {
+                    ops.push(KernelBodyIrOp::LetLoad {
+                        line_index: stmt_start,
+                        name: name.clone(),
+                        ty: ty.as_ref().map(ToString::to_string),
+                        access,
+                    });
+                }
+            }
+            Stmt::Assign { target, value } => {
+                if is_noop_local_self_assign(*target, *value) {
+                    ops.push(KernelBodyIrOp::NoopSelfAssign {
+                        line_index: stmt_start,
+                    });
+                } else if let Some(access) = expr_as_buffer_access(*target) {
+                    ops.push(KernelBodyIrOp::Store {
+                        line_index: stmt_start,
+                        access,
+                        value_expr: value.to_string(),
+                        value_reads: collect_buffer_accesses(*value),
+                    });
+                } else {
+                    // Unknown assignment shape: conservatively invalidate.
+                    ops.push(KernelBodyIrOp::Invalidate {
+                        line_index: stmt_start,
+                    });
+                }
+            }
+            // Treat control-flow and non-trivial operations as conservative
+            // invalidation boundaries for IR forwarding.
+            Stmt::If { .. }
+            | Stmt::For { .. }
+            | Stmt::Loop { .. }
+            | Stmt::While { .. }
+            | Stmt::AssignOp { .. }
+            | Stmt::Return(_)
+            | Stmt::Call(_)
+            | Stmt::Increment(_)
+            | Stmt::Decrement(_)
+            | Stmt::Break
+            | Stmt::Continue => {
+                ops.push(KernelBodyIrOp::Invalidate {
+                    line_index: stmt_start,
+                });
+            }
+            Stmt::Comment(_) | Stmt::Var { .. } => {}
+        }
+    }
+
+    (lines, ops)
+}
+
+fn is_noop_local_self_assign(target: Expr, value: Expr) -> bool {
+    match (expr_ident_name(target), expr_ident_name(value)) {
+        (Some(lhs), Some(rhs)) => lhs == rhs,
+        _ => false,
+    }
+}
+
+fn expr_ident_name(expr: Expr) -> Option<String> {
+    expr.with_node(|node| match node {
+        ExprNode::Ident(name) => Some(name.clone()),
+        _ => None,
+    })
+}
+
+fn expr_as_buffer_access(expr: Expr) -> Option<KernelBufferAccess> {
+    expr.with_node(|node| match node {
+        ExprNode::Index { base, index } => base.with_node(|base_node| match base_node {
+            ExprNode::Ident(base_name) => Some(KernelBufferAccess::new(
+                base_name.clone(),
+                index.to_string(),
+            )),
+            _ => None,
+        }),
+        _ => None,
+    })
+}
+
+fn collect_buffer_accesses(expr: Expr) -> Vec<KernelBufferAccess> {
+    fn visit(expr: Expr, out: &mut Vec<KernelBufferAccess>) {
+        expr.with_node(|node| match node {
+            ExprNode::Index { base, index } => {
+                if let Some(access) = expr_as_buffer_access(expr) {
+                    if !out.iter().any(|existing| existing == &access) {
+                        out.push(access);
+                    }
+                }
+                visit(*base, out);
+                visit(*index, out);
+            }
+            ExprNode::Field { base, .. } | ExprNode::Unary { expr: base, .. } => {
+                visit(*base, out);
+            }
+            ExprNode::Binary { left, right, .. } => {
+                visit(*left, out);
+                visit(*right, out);
+            }
+            ExprNode::Call { callee, args } => {
+                visit(*callee, out);
+                for arg in args {
+                    visit(*arg, out);
+                }
+            }
+            ExprNode::Literal(_) | ExprNode::Ident(_) => {}
+        });
+    }
+
+    let mut out = Vec::new();
+    visit(expr, &mut out);
+    out
 }
 
 /// Collect local symbol declarations (`let`/`var` and loop init symbols)
@@ -2180,5 +2310,44 @@ mod tests {
             collect_local_symbols(&stmts),
             vec!["a", "k", "inner", "alt"]
         );
+    }
+
+    #[test]
+    fn render_stmt_lines_with_ir_detects_noop_self_assign() {
+        let stmts = vec![Stmt::Assign {
+            target: Expr::ident("value"),
+            value: Expr::ident("value"),
+        }];
+
+        let (_lines, ops) = render_stmt_lines_with_ir(&stmts);
+        assert!(matches!(
+            ops.as_slice(),
+            [KernelBodyIrOp::NoopSelfAssign { line_index: 0 }]
+        ));
+    }
+
+    #[test]
+    fn render_stmt_lines_with_ir_detects_store_and_let_load() {
+        let stmts = vec![
+            Stmt::Assign {
+                target: Expr::ident("state").index(Expr::ident("idx")),
+                value: Expr::ident("rhs"),
+            },
+            Stmt::Let {
+                name: "x".to_string(),
+                ty: None,
+                expr: Expr::ident("state").index(Expr::ident("idx")),
+            },
+        ];
+
+        let (_lines, ops) = render_stmt_lines_with_ir(&stmts);
+        assert!(matches!(
+            ops[0],
+            KernelBodyIrOp::Store { line_index: 0, .. }
+        ));
+        assert!(matches!(
+            ops[1],
+            KernelBodyIrOp::LetLoad { line_index: 1, .. }
+        ));
     }
 }

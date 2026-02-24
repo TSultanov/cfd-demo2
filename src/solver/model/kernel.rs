@@ -986,7 +986,8 @@ mod contract_tests {
     use crate::solver::model::module::KernelBundleModule;
     use crate::solver::model::ModelSpec;
     use cfd2_ir::solver::ir::{
-        BindingAccess, DispatchDomain, KernelBinding, KernelProgram, LaunchSemantics,
+        BindingAccess, DispatchDomain, KernelBinding, KernelBodyIrOp, KernelBufferAccess,
+        KernelProgram, LaunchSemantics,
     };
 
     fn contract_kernel_generator(
@@ -1034,6 +1035,21 @@ mod contract_tests {
                 body_stmt.to_string(),
                 "state[idx] = value;".to_string(),
                 "state[inv] = state[idx];".to_string(),
+            ];
+            program.body_ir_ops = vec![
+                KernelBodyIrOp::Invalidate { line_index: 1 },
+                KernelBodyIrOp::Store {
+                    line_index: 2,
+                    access: KernelBufferAccess::new("state", "idx"),
+                    value_expr: "value".to_string(),
+                    value_reads: Vec::new(),
+                },
+                KernelBodyIrOp::Store {
+                    line_index: 3,
+                    access: KernelBufferAccess::new("state", "inv"),
+                    value_expr: "state[idx]".to_string(),
+                    value_reads: vec![KernelBufferAccess::new("state", "idx")],
+                },
             ];
             program.local_symbols = vec!["value".to_string(), "inv".to_string()];
             Ok(program)

@@ -2,7 +2,8 @@ use super::KernelWgsl;
 use cfd2_ir::solver::dimensions::{Dimensionless, UnitDimension};
 use cfd2_ir::solver::ir::ports::ParamSpec;
 use cfd2_ir::solver::ir::{
-    BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelProgram, SideEffectMetadata,
+    BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelBodyIrOp,
+    KernelBufferAccess, KernelProgram, SideEffectMetadata,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -225,6 +226,18 @@ pub fn synthesize_fused_program_with_report_remapped(
         apply_binding_remaps(programs, binding_remaps)?
     };
 
+    if policy == FusionSafetyPolicy::Aggressive {
+        if let Some(program) = remapped
+            .iter()
+            .find(|p| (!p.preamble.is_empty() || !p.body.is_empty()) && p.body_ir_ops.is_empty())
+        {
+            return Err(format!(
+                "fusion rejected: aggressive cleanup requires structured body_ir_ops for kernel '{}'",
+                program.id
+            ));
+        }
+    }
+
     let hazards = ensure_safe_composition(&remapped, policy)?;
 
     let dispatch = remapped[0].dispatch.clone();
@@ -232,6 +245,7 @@ pub fn synthesize_fused_program_with_report_remapped(
     let merged_bindings = merge_bindings(&remapped)?;
 
     let mut body = Vec::new();
+    let mut body_ir_ops = Vec::<KernelBodyIrOp>::new();
     let mut local_symbols = Vec::new();
     let mut side_effects = SideEffectMetadata::default();
     let mut helper_functions = Vec::<String>::new();
@@ -249,9 +263,20 @@ pub fn synthesize_fused_program_with_report_remapped(
         // Preserve per-kernel execution order by emitting each segment's preamble
         // immediately before that same segment's body.
         body.push(format!("// begin fused segment: {}", program.id));
-        body.extend(rename_lines(&program.preamble, &rename_map));
-        body.extend(rename_lines(&program.body, &rename_map));
+        let segment_exec_start = body.len();
+        let renamed_preamble = rename_lines(&program.preamble, &rename_map);
+        body.extend(renamed_preamble);
+        let renamed_body = rename_lines(&program.body, &rename_map);
+        body.extend(renamed_body);
         body.push(format!("// end fused segment: {}", program.id));
+
+        if !program.body_ir_ops.is_empty() {
+            body_ir_ops.extend(rename_and_offset_body_ir_ops(
+                &program.body_ir_ops,
+                &rename_map,
+                segment_exec_start,
+            ));
+        }
 
         local_symbols.extend(rename_symbols(&program.local_symbols, &rename_map));
         side_effects
@@ -274,6 +299,7 @@ pub fn synthesize_fused_program_with_report_remapped(
     fused.indexing = remapped[0].indexing.clone();
     fused.preamble = Vec::new();
     fused.body = body;
+    fused.body_ir_ops = body_ir_ops;
     fused.local_symbols = local_symbols;
     fused.side_effects = side_effects;
     fused.eos_params = merge_eos_params(&remapped);
@@ -596,6 +622,68 @@ fn deterministic_symbol_rename_map(
     out
 }
 
+fn rename_and_offset_body_ir_ops(
+    ops: &[KernelBodyIrOp],
+    rename_map: &BTreeMap<String, String>,
+    body_line_offset: usize,
+) -> Vec<KernelBodyIrOp> {
+    ops.iter()
+        .map(|op| match op {
+            KernelBodyIrOp::Store {
+                line_index,
+                access,
+                value_expr,
+                value_reads,
+            } => KernelBodyIrOp::Store {
+                line_index: body_line_offset + line_index,
+                access: KernelBufferAccess::new(
+                    rename_text(&access.base, rename_map),
+                    rename_text(&access.index_expr, rename_map),
+                ),
+                value_expr: rename_text(value_expr, rename_map),
+                value_reads: value_reads
+                    .iter()
+                    .map(|read| {
+                        KernelBufferAccess::new(
+                            rename_text(&read.base, rename_map),
+                            rename_text(&read.index_expr, rename_map),
+                        )
+                    })
+                    .collect(),
+            },
+            KernelBodyIrOp::LetLoad {
+                line_index,
+                name,
+                ty,
+                access,
+            } => KernelBodyIrOp::LetLoad {
+                line_index: body_line_offset + line_index,
+                name: rename_map
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| name.clone()),
+                ty: ty.clone(),
+                access: KernelBufferAccess::new(
+                    rename_text(&access.base, rename_map),
+                    rename_text(&access.index_expr, rename_map),
+                ),
+            },
+            KernelBodyIrOp::NoopSelfAssign { line_index } => KernelBodyIrOp::NoopSelfAssign {
+                line_index: body_line_offset + line_index,
+            },
+            KernelBodyIrOp::Invalidate { line_index } => KernelBodyIrOp::Invalidate {
+                line_index: body_line_offset + line_index,
+            },
+        })
+        .collect()
+}
+
+fn rename_text(src: &str, rename_map: &BTreeMap<String, String>) -> String {
+    rename_map.iter().fold(src.to_string(), |acc, (old, new)| {
+        rename_identifier(&acc, old, new)
+    })
+}
+
 fn rename_symbols(symbols: &[String], rename_map: &BTreeMap<String, String>) -> Vec<String> {
     symbols
         .iter()
@@ -717,34 +805,141 @@ fn constants_extra_params_for_program(program: &KernelProgram) -> Vec<ParamSpec>
 }
 
 fn apply_aggressive_cleanup(program: &mut KernelProgram) {
-    program
+    apply_ir_load_after_store_forwarding(program);
+    apply_ir_noop_self_assign_cleanup(program);
+}
+
+fn apply_ir_load_after_store_forwarding(program: &mut KernelProgram) {
+    if program.body_ir_ops.is_empty() {
+        return;
+    }
+
+    let mut ops = program.body_ir_ops.clone();
+    ops.sort_by_key(KernelBodyIrOp::line_index);
+
+    let mut last_store_by_access = BTreeMap::<(String, String), String>::new();
+
+    for op in ops {
+        match op {
+            KernelBodyIrOp::Store {
+                access,
+                value_expr,
+                value_reads,
+                ..
+            } => {
+                let key = (access.base, access.index_expr);
+                if value_reads.is_empty() {
+                    last_store_by_access.insert(key, value_expr);
+                } else {
+                    last_store_by_access.remove(&key);
+                }
+            }
+            KernelBodyIrOp::LetLoad {
+                line_index,
+                name,
+                ty,
+                access,
+            } => {
+                let key = (access.base, access.index_expr);
+                let Some(value_expr) = last_store_by_access.get(&key) else {
+                    continue;
+                };
+                if line_index >= program.body.len() {
+                    continue;
+                }
+                let mut line = format!("let {name}");
+                if let Some(ty) = ty {
+                    line.push_str(&format!(": {ty}"));
+                }
+                line.push_str(" = ");
+                line.push_str(value_expr);
+                line.push(';');
+                program.body[line_index] = line;
+            }
+            KernelBodyIrOp::NoopSelfAssign { .. } => {}
+            KernelBodyIrOp::Invalidate { .. } => {
+                last_store_by_access.clear();
+            }
+        }
+    }
+}
+
+fn apply_ir_noop_self_assign_cleanup(program: &mut KernelProgram) {
+    if program.body_ir_ops.is_empty() {
+        return;
+    }
+
+    let mut removal_indices: Vec<usize> = program
+        .body_ir_ops
+        .iter()
+        .filter_map(|op| match op {
+            KernelBodyIrOp::NoopSelfAssign { line_index } => Some(*line_index),
+            _ => None,
+        })
+        .filter(|line_index| *line_index < program.body.len())
+        .collect();
+
+    if removal_indices.is_empty() {
+        return;
+    }
+
+    removal_indices.sort_unstable();
+    removal_indices.dedup();
+
+    let remove_set: BTreeSet<usize> = removal_indices.iter().copied().collect();
+    program.body = program
         .body
-        .retain(|line| !is_noop_local_self_assignment(line));
-}
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            if remove_set.contains(&idx) {
+                None
+            } else {
+                Some(line.clone())
+            }
+        })
+        .collect();
 
-fn is_noop_local_self_assignment(line: &str) -> bool {
-    let trimmed = line.trim();
-    if !trimmed.ends_with(';') {
-        return false;
-    }
-    let stmt = trimmed.trim_end_matches(';').trim();
-    let Some((lhs, rhs)) = stmt.split_once('=') else {
-        return false;
+    let remap_index = |old_idx: usize| -> Option<usize> {
+        if remove_set.contains(&old_idx) {
+            return None;
+        }
+        let removed_before = removal_indices.iter().filter(|idx| **idx < old_idx).count();
+        Some(old_idx - removed_before)
     };
-    let lhs = lhs.trim();
-    let rhs = rhs.trim();
-    lhs == rhs && is_identifier(lhs)
-}
 
-fn is_identifier(token: &str) -> bool {
-    let mut chars = token.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !(first == '_' || first.is_ascii_alphabetic()) {
-        return false;
-    }
-    chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+    program.body_ir_ops = program
+        .body_ir_ops
+        .iter()
+        .filter_map(|op| match op {
+            KernelBodyIrOp::Store {
+                line_index,
+                access,
+                value_expr,
+                value_reads,
+            } => remap_index(*line_index).map(|line_index| KernelBodyIrOp::Store {
+                line_index,
+                access: access.clone(),
+                value_expr: value_expr.clone(),
+                value_reads: value_reads.clone(),
+            }),
+            KernelBodyIrOp::LetLoad {
+                line_index,
+                name,
+                ty,
+                access,
+            } => remap_index(*line_index).map(|line_index| KernelBodyIrOp::LetLoad {
+                line_index,
+                name: name.clone(),
+                ty: ty.clone(),
+                access: access.clone(),
+            }),
+            KernelBodyIrOp::NoopSelfAssign { .. } => None,
+            KernelBodyIrOp::Invalidate { line_index } => {
+                remap_index(*line_index).map(|line_index| KernelBodyIrOp::Invalidate { line_index })
+            }
+        })
+        .collect();
 }
 
 pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgsl, String> {
@@ -910,6 +1105,16 @@ mod tests {
             "value = value + 1.0;".to_string(),
             "state[idx] = value;".to_string(),
         ];
+        program.body_ir_ops = vec![
+            KernelBodyIrOp::Invalidate { line_index: 0 },
+            KernelBodyIrOp::Invalidate { line_index: 1 },
+            KernelBodyIrOp::Store {
+                line_index: 2,
+                access: KernelBufferAccess::new("state", "idx"),
+                value_expr: "value".to_string(),
+                value_reads: Vec::new(),
+            },
+        ];
         program.local_symbols = vec!["value".to_string()];
         program
     }
@@ -1072,6 +1277,17 @@ mod tests {
     fn aggressive_cleanup_removes_noop_local_self_assignment() {
         let mut a = sample_program("a");
         a.body.insert(0, "value = value;".to_string());
+        a.body_ir_ops = vec![
+            KernelBodyIrOp::Invalidate { line_index: 0 },
+            KernelBodyIrOp::NoopSelfAssign { line_index: 1 },
+            KernelBodyIrOp::Invalidate { line_index: 2 },
+            KernelBodyIrOp::Store {
+                line_index: 3,
+                access: KernelBufferAccess::new("state", "idx"),
+                value_expr: "value".to_string(),
+                value_reads: Vec::new(),
+            },
+        ];
         let b = sample_program("b");
 
         let safe = synthesize_fused_program(
@@ -1122,6 +1338,122 @@ mod tests {
             safe.body, aggressive.body,
             "aggressive cleanup should match safe output when no cleanup candidates exist"
         );
+    }
+
+    #[test]
+    fn aggressive_cleanup_forwards_ir_store_to_load() {
+        let launch = LaunchSemantics::new([64, 1, 1], "idx", Some("idx >= n"));
+        let mut program = KernelProgram::new(
+            "ir_forward_test",
+            DispatchDomain::Cells,
+            launch,
+            vec![KernelBinding::new(
+                0,
+                0,
+                "state",
+                "array<f32>",
+                BindingAccess::ReadWriteStorage,
+            )],
+        );
+        program.body = vec![
+            "state[idx] = value;".to_string(),
+            "let out = state[idx];".to_string(),
+        ];
+        program.body_ir_ops = vec![
+            KernelBodyIrOp::Store {
+                line_index: 0,
+                access: KernelBufferAccess::new("state", "idx"),
+                value_expr: "value".to_string(),
+                value_reads: Vec::new(),
+            },
+            KernelBodyIrOp::LetLoad {
+                line_index: 1,
+                name: "out".to_string(),
+                ty: None,
+                access: KernelBufferAccess::new("state", "idx"),
+            },
+        ];
+
+        apply_aggressive_cleanup(&mut program);
+        assert_eq!(program.body[1], "let out = value;");
+    }
+
+    #[test]
+    fn aggressive_cleanup_does_not_forward_when_store_value_reads_memory() {
+        let launch = LaunchSemantics::new([64, 1, 1], "idx", Some("idx >= n"));
+        let mut program = KernelProgram::new(
+            "ir_forward_guard_test",
+            DispatchDomain::Cells,
+            launch,
+            vec![KernelBinding::new(
+                0,
+                0,
+                "state",
+                "array<f32>",
+                BindingAccess::ReadWriteStorage,
+            )],
+        );
+        program.body = vec![
+            "state[idx] = state[idx2];".to_string(),
+            "let out = state[idx];".to_string(),
+        ];
+        program.body_ir_ops = vec![
+            KernelBodyIrOp::Store {
+                line_index: 0,
+                access: KernelBufferAccess::new("state", "idx"),
+                value_expr: "state[idx2]".to_string(),
+                value_reads: vec![KernelBufferAccess::new("state", "idx2")],
+            },
+            KernelBodyIrOp::LetLoad {
+                line_index: 1,
+                name: "out".to_string(),
+                ty: None,
+                access: KernelBufferAccess::new("state", "idx"),
+            },
+        ];
+
+        apply_aggressive_cleanup(&mut program);
+        assert_eq!(program.body[1], "let out = state[idx];");
+    }
+
+    #[test]
+    fn aggressive_cleanup_respects_invalidation_boundaries() {
+        let launch = LaunchSemantics::new([64, 1, 1], "idx", Some("idx >= n"));
+        let mut program = KernelProgram::new(
+            "ir_forward_invalidate_test",
+            DispatchDomain::Cells,
+            launch,
+            vec![KernelBinding::new(
+                0,
+                0,
+                "state",
+                "array<f32>",
+                BindingAccess::ReadWriteStorage,
+            )],
+        );
+        program.body = vec![
+            "state[idx] = value;".to_string(),
+            "if (cond) { return; }".to_string(),
+            "let out = state[idx];".to_string(),
+        ];
+        program.body_ir_ops = vec![
+            KernelBodyIrOp::Store {
+                line_index: 0,
+                access: KernelBufferAccess::new("state", "idx"),
+                value_expr: "value".to_string(),
+                value_reads: Vec::new(),
+            },
+            KernelBodyIrOp::Invalidate { line_index: 1 },
+            KernelBodyIrOp::LetLoad {
+                line_index: 2,
+                name: "out".to_string(),
+                ty: None,
+                access: KernelBufferAccess::new("state", "idx"),
+            },
+        ];
+
+        apply_aggressive_cleanup(&mut program);
+        assert_eq!(program.body[2], "let out = state[idx];");
     }
 
     #[test]

@@ -119,9 +119,15 @@ enable eliminating redundant loads/stores across fused kernel boundaries.
   `FaceScalarExpr`/`FaceVec2Expr` are face-centric and unsuitable as general body AST.
   Migrating `body: Vec<String>` to `body: Vec<Stmt>` would be a deep structural change
   touching every kernel generator. **Cost far exceeds benefit — deferred.**
-- [ ] If adopted in the future, implement a simple load-after-store elimination pass in
-  `synthesize_fused_program`. A lightweight string-pattern rewrite pass (~50–100 lines)
-  could achieve the same result without AST migration if the need arises.
+- [x] Implement a load-after-store elimination pass in `synthesize_fused_program`.
+  **Implemented (IR-only):** Added structured `KernelBodyIrOp` / `KernelBufferAccess`
+  metadata to `KernelProgram` and a `render_stmt_lines_with_ir()` extractor from WGSL AST
+  `Stmt` nodes. Aggressive cleanup now performs forwarding from `Store` to `LetLoad`
+  using this IR (no string parsing), and no-op local self-assign removal is also IR-driven
+  via `NoopSelfAssign`. `synthesize_fused_program_with_report_remapped()` now rejects
+  aggressive fusion inputs that lack `body_ir_ops` to prevent parser-style fallback.
+  `rhie_chow` DSL generators now populate `body_ir_ops`, enabling forwarding in the three
+  aggressive fused kernels where the round-trip loads existed.
 
 ### 2c) Binding Access Promotion (P3)
 

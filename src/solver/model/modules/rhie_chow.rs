@@ -409,8 +409,10 @@ fn generate_dp_init_kernel_program(
         dsl::array_access("state", Expr::ident("base") + d_p_offset),
         Expr::lit_f32(0.0),
     )];
-    program.indexing = rhie_chow_section_lines(indexing_stmts);
+    program.indexing = rhie_chow_section_lines(indexing_stmts.clone());
+    program.indexing_ast = Some(indexing_stmts);
     program.body = rhie_chow_section_lines(body_stmts.clone());
+    program.body_ast = Some(body_stmts.clone());
     program.body_ir_ops = rhie_chow_segment_ir_ops(&[], &body_stmts);
     program.local_symbols = rhie_chow_collect_local_symbols_sections(&[&body_stmts]);
     program
@@ -622,9 +624,12 @@ fn generate_dp_update_from_diag_kernel_program(
         dsl::array_access("state", Expr::ident("base") + d_p_offset),
         Expr::ident("d_p"),
     )];
-    program.indexing = rhie_chow_section_lines(indexing_stmts);
+    program.indexing = rhie_chow_section_lines(indexing_stmts.clone());
+    program.indexing_ast = Some(indexing_stmts);
     program.preamble = rhie_chow_section_lines(preamble_stmts.clone());
+    program.preamble_ast = Some(preamble_stmts.clone());
     program.body = rhie_chow_section_lines(body_stmts.clone());
+    program.body_ast = Some(body_stmts.clone());
     program.body_ir_ops = rhie_chow_segment_ir_ops(&preamble_stmts, &body_stmts);
     program.local_symbols =
         rhie_chow_collect_local_symbols_sections(&[&preamble_stmts, &body_stmts]);
@@ -685,7 +690,7 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
     let p_state_expr = dsl::array_access("state", Expr::ident("base") + p_offset);
     let p_other_state_expr =
         dsl::array_access("state", Expr::ident("other_idx") * state_stride + p_offset);
-    let p_boundary_expr = bc.ghost_value(p_unknown_offset, p_state_expr, Expr::ident("d_own"));
+    let p_boundary_expr = bc.ghost_value(p_unknown_offset, p_state_expr.clone(), Expr::ident("d_own"));
     let p_interp_expr = p_state_expr * Expr::ident("lambda")
         + dsl::select(
             p_other_state_expr,
@@ -874,9 +879,12 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
             Expr::ident("grad_out_p").field("y"),
         ),
     ];
-    program.indexing = rhie_chow_section_lines(indexing_stmts);
+    program.indexing = rhie_chow_section_lines(indexing_stmts.clone());
+    program.indexing_ast = Some(indexing_stmts);
     program.preamble = rhie_chow_section_lines(preamble_stmts.clone());
+    program.preamble_ast = Some(preamble_stmts.clone());
     program.body = rhie_chow_section_lines(body_stmts.clone());
+    program.body_ast = Some(body_stmts.clone());
     program.body_ir_ops = rhie_chow_segment_ir_ops(&preamble_stmts, &body_stmts);
     program.local_symbols =
         rhie_chow_collect_local_symbols_sections(&[&preamble_stmts, &body_stmts]);
@@ -976,8 +984,10 @@ fn generate_rhie_chow_store_grad_p_kernel_program(
             dsl::array_access("state", Expr::ident("base") + grad_p_y),
         ),
     ];
-    program.indexing = rhie_chow_section_lines(indexing_stmts);
+    program.indexing = rhie_chow_section_lines(indexing_stmts.clone());
+    program.indexing_ast = Some(indexing_stmts);
     program.body = rhie_chow_section_lines(body_stmts.clone());
+    program.body_ast = Some(body_stmts.clone());
     program.body_ir_ops = rhie_chow_segment_ir_ops(&[], &body_stmts);
     program.side_effects.read_set.extend([
         EffectResource::component(0, 0, format!("state:{grad_p_x}")),
@@ -1108,9 +1118,12 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_program(
             dsl::array_access("state", Expr::ident("base") + u_y) - Expr::ident("corr_y"),
         ),
     ];
-    program.indexing = rhie_chow_section_lines(indexing_stmts);
+    program.indexing = rhie_chow_section_lines(indexing_stmts.clone());
+    program.indexing_ast = Some(indexing_stmts);
     program.preamble = rhie_chow_section_lines(preamble_stmts.clone());
+    program.preamble_ast = Some(preamble_stmts.clone());
     program.body = rhie_chow_section_lines(body_stmts.clone());
+    program.body_ast = Some(body_stmts.clone());
     program.body_ir_ops = rhie_chow_segment_ir_ops(&preamble_stmts, &body_stmts);
     program.local_symbols =
         rhie_chow_collect_local_symbols_sections(&[&preamble_stmts, &body_stmts]);

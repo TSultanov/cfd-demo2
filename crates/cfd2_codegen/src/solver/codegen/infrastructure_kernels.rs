@@ -93,12 +93,12 @@ pub fn generate_dot_product() -> KernelWgsl {
     let num_workgroups = Expr::ident("num_workgroups");
 
     let body = block(vec![
-        let_expr("stride_x", num_workgroups.field("x") * 64u32),
+        let_expr("stride_x", num_workgroups.clone().field("x") * 64u32),
         let_expr(
             "idx",
-            global_id.field("y") * Expr::ident("stride_x") + global_id.field("x"),
+            global_id.clone().field("y") * Expr::ident("stride_x") + global_id.clone().field("x"),
         ),
-        let_expr("lid", local_id.field("x")),
+        let_expr("lid", local_id.clone().field("x")),
         var_expr("val", Expr::lit_f32(0.0)),
         if_block_expr(
             Expr::ident("idx").lt(Expr::ident("params").field("n")),
@@ -145,7 +145,7 @@ pub fn generate_dot_product() -> KernelWgsl {
             block(vec![
                 let_expr(
                     "group_flat",
-                    group_id.field("y") * num_workgroups.field("x") + group_id.field("x"),
+                    group_id.clone().field("y") * num_workgroups.clone().field("x") + group_id.clone().field("x"),
                 ),
                 if_block_expr(
                     Expr::ident("group_flat").lt(Expr::ident("params").field("num_groups")),
@@ -264,12 +264,12 @@ pub fn generate_dot_product_pair() -> KernelWgsl {
     let num_wg = Expr::ident("num_workgroups");
 
     let body = block(vec![
-        let_expr("stride_x", num_wg.field("x") * 64u32),
+        let_expr("stride_x", num_wg.clone().field("x") * 64u32),
         let_expr(
             "idx",
-            global_id.field("y") * Expr::ident("stride_x") + global_id.field("x"),
+            global_id.clone().field("y") * Expr::ident("stride_x") + global_id.clone().field("x"),
         ),
-        let_expr("lid", local_id.field("x")),
+        let_expr("lid", local_id.clone().field("x")),
         var_expr("val0", Expr::lit_f32(0.0)),
         var_expr("val1", Expr::lit_f32(0.0)),
         if_block_expr(
@@ -333,7 +333,7 @@ pub fn generate_dot_product_pair() -> KernelWgsl {
             block(vec![
                 let_expr(
                     "group_flat",
-                    group_id.field("y") * num_wg.field("x") + group_id.field("x"),
+                    group_id.clone().field("y") * num_wg.clone().field("x") + group_id.clone().field("x"),
                 ),
                 if_block_expr(
                     Expr::ident("group_flat").lt(Expr::ident("params").field("num_groups")),
@@ -448,18 +448,18 @@ pub fn generate_outer_convergence() -> KernelWgsl {
     let body = block(vec![
         let_expr("cell", gid.field("x")),
         if_block_expr(
-            Expr::ident("cell").ge(params.field("num_cells")),
+            Expr::ident("cell").ge(params.clone().field("num_cells")),
             block(vec![return_void()]),
             None,
         ),
-        let_expr("base", Expr::ident("cell") * params.field("stride")),
+        let_expr("base", Expr::ident("cell") * params.clone().field("stride")),
         for_loop_expr(
             ForInit::Var {
                 name: "t".into(),
                 ty: Some(Type::U32),
                 expr: Expr::lit_u32(0),
             },
-            Expr::ident("t").lt(params.field("num_targets")),
+            Expr::ident("t").lt(params.clone().field("num_targets")),
             ForStep::Assign {
                 target: Expr::ident("t"),
                 value: Expr::ident("t") + 1u32,
@@ -1812,7 +1812,7 @@ pub fn generate_generic_coupled_schur_setup() -> KernelWgsl {
                 + Expr::ident("global_id").field("x"),
         ),
         if_block_expr(
-            Expr::ident("cell").ge(params.field("num_cells")),
+            Expr::ident("cell").ge(params.clone().field("num_cells")),
             block(vec![return_void()]),
             None,
         ),
@@ -1835,7 +1835,7 @@ pub fn generate_generic_coupled_schur_setup() -> KernelWgsl {
         ),
         let_expr(
             "block_stride",
-            params.field("unknowns_per_cell") * params.field("unknowns_per_cell"),
+            params.clone().field("unknowns_per_cell") * params.clone().field("unknowns_per_cell"),
         ),
         let_expr(
             "start_row_0",
@@ -1843,18 +1843,18 @@ pub fn generate_generic_coupled_schur_setup() -> KernelWgsl {
         ),
         let_expr(
             "row_stride",
-            Expr::ident("num_neighbors") * params.field("unknowns_per_cell"),
+            Expr::ident("num_neighbors") * params.clone().field("unknowns_per_cell"),
         ),
         let_expr(
             "start_row_p",
-            Expr::ident("start_row_0") + params.field("p") * Expr::ident("row_stride"),
+            Expr::ident("start_row_0") + params.clone().field("p") * Expr::ident("row_stride"),
         ),
         let_expr(
             "diag_p",
             Expr::ident("matrix_values").index(
                 Expr::ident("start_row_p")
-                    + Expr::ident("diag_rank") * params.field("unknowns_per_cell")
-                    + params.field("p"),
+                    + Expr::ident("diag_rank") * params.clone().field("unknowns_per_cell")
+                    + params.clone().field("p"),
             ),
         ),
         for_loop_expr(
@@ -1863,7 +1863,7 @@ pub fn generate_generic_coupled_schur_setup() -> KernelWgsl {
                 ty: None,
                 expr: Expr::lit_u32(0),
             },
-            Expr::ident("i").lt(params.field("u_len")),
+            Expr::ident("i").lt(params.clone().field("u_len")),
             ForStep::Increment(Expr::ident("i")),
             block(vec![
                 let_expr("u", Expr::call_named("u_index", vec![Expr::ident("i")])),
@@ -1875,7 +1875,7 @@ pub fn generate_generic_coupled_schur_setup() -> KernelWgsl {
                     "diag_u",
                     Expr::ident("matrix_values").index(
                         Expr::ident("start_row_u")
-                            + Expr::ident("diag_rank") * params.field("unknowns_per_cell")
+                            + Expr::ident("diag_rank") * params.clone().field("unknowns_per_cell")
                             + Expr::ident("u"),
                     ),
                 ),
@@ -1885,7 +1885,7 @@ pub fn generate_generic_coupled_schur_setup() -> KernelWgsl {
                 ),
                 assign_expr(
                     Expr::ident("diag_u_inv")
-                        .index(Expr::ident("cell") * params.field("u_len") + Expr::ident("i")),
+                        .index(Expr::ident("cell") * params.clone().field("u_len") + Expr::ident("i")),
                     Expr::ident("inv_u"),
                 ),
             ]),
@@ -1907,8 +1907,8 @@ pub fn generate_generic_coupled_schur_setup() -> KernelWgsl {
                     .index(Expr::ident("scalar_offset") + Expr::ident("rank")),
                 Expr::ident("matrix_values").index(
                     Expr::ident("start_row_p")
-                        + Expr::ident("rank") * params.field("unknowns_per_cell")
-                        + params.field("p"),
+                        + Expr::ident("rank") * params.clone().field("unknowns_per_cell")
+                        + params.clone().field("p"),
                 ),
             )]),
         ),

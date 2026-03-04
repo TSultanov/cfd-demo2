@@ -4,13 +4,7 @@
 // Changes made to this file will not be saved.
 // SourceHash: 5e4c685032db1b725f593a3bb78c15fa72c6344177ebbbb3675b754af685bbe3
 
-#![allow(
-    unused,
-    non_snake_case,
-    non_camel_case_types,
-    non_upper_case_globals,
-    clippy::too_many_arguments
-)]
+#![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShaderEntry {
     GeneratedAmg,

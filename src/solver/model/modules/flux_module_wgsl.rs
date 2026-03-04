@@ -219,6 +219,7 @@ pub fn generate_flux_module_kernel_program(
     let mut program = KernelProgram::new(id, DispatchDomain::Faces, launch, bindings);
     program.helper_functions = vec![helper];
     program.body = body_lines;
+    program.body_ast = Some(kernel_stmts.to_vec());
     program.local_symbols = local_symbols;
     program.eos_params = eos_params.to_vec();
     Ok(program)
@@ -272,6 +273,7 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
     let mut program = KernelProgram::new(id, DispatchDomain::Faces, launch, bindings);
     program.helper_functions = vec![helper];
     program.body = body_lines;
+    program.body_ast = Some(kernel_stmts.to_vec());
     program.local_symbols = local_symbols;
     program.eos_params = eos_params.to_vec();
     Ok(program)
@@ -1234,7 +1236,7 @@ fn face_stmts_runtime_scheme(
         let scheme_lit =
             typed::EnumExpr::<Scheme>::from_expr(Expr::ident("constants").field("scheme"));
         let is_interior = !Expr::ident("is_boundary");
-        let cond_for = |scheme: Scheme| scheme_lit.eq(scheme) & is_interior;
+        let cond_for = |scheme: Scheme| scheme_lit.clone().eq(scheme) & is_interior.clone();
 
         // Declare one mutable flux var per component, initialized from the Upwind variant.
         let mut var_names: Vec<String> = Vec::with_capacity(upwind.components.len());
@@ -1359,7 +1361,7 @@ fn face_stmts_runtime_scheme(
 
     let scheme_lit = typed::EnumExpr::<Scheme>::from_expr(Expr::ident("constants").field("scheme"));
     let is_interior = !Expr::ident("is_boundary");
-    let cond_for = |scheme: Scheme| scheme_lit.eq(scheme) & is_interior;
+    let cond_for = |scheme: Scheme| scheme_lit.clone().eq(scheme) & is_interior.clone();
 
     // Wave speed selection.
     let a_plus_upwind = lower_scalar(upwind.a_plus, &ctx);
@@ -1831,7 +1833,7 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
                     is_boundary
                 };
                 return typed::VecExpr::<2>::from_components([
-                    dsl::select(x, Expr::from(0.0), zero_cond),
+                    dsl::select(x, Expr::from(0.0), zero_cond.clone()),
                     dsl::select(y, Expr::from(0.0), zero_cond),
                 ]);
             }
@@ -1847,7 +1849,7 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
                 state_component_at_resolver(
                     ctx.resolver,
                     "state",
-                    idx,
+                    idx.clone(),
                     field.as_str(),
                     XY::X.to_usize() as u32,
                 ),
@@ -2001,8 +2003,8 @@ fn state_component_at_side_resolver(
             Expr::call_named(
                 "bc_neighbor_scalar",
                 vec![
-                    owner,
-                    owner,
+                    owner.clone(),
+                    owner.clone(),
                     kind,
                     value,
                     Expr::ident("d_own"),
@@ -2014,7 +2016,7 @@ fn state_component_at_side_resolver(
                 "bc_neighbor_scalar",
                 vec![
                     interior,
-                    owner,
+                    owner.clone(),
                     kind,
                     value,
                     Expr::ident("d_own"),
@@ -2081,9 +2083,9 @@ fn apply_slipwall_velocity_reflection_resolver(
         field,
         XY::Y.to_usize() as u32,
     );
-    let nx = Expr::ident("normal_vec").field("x");
+    let nx = Expr::ident("normal_vec").clone().field("x");
     let ny = Expr::ident("normal_vec").field("y");
-    let un = ux * nx + uy * ny;
+    let un = ux.clone() * nx.clone() + uy.clone() * ny.clone();
 
     let slip_projected = match axis {
         XY::X => ux - un * nx,

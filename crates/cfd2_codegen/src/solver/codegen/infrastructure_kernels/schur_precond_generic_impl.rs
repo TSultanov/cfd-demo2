@@ -245,7 +245,7 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                 ),
             ),
             if_block_expr(
-                Expr::ident("cell").ge(params.field("num_cells")),
+                Expr::ident("cell").ge(params.clone().field("num_cells")),
                 block(vec![return_void()]),
                 None,
             ),
@@ -298,7 +298,7 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                 mix(
                     Expr::ident("x_prev"),
                     Expr::ident("hat_x"),
-                    params.field("omega"),
+                    params.clone().field("omega"),
                 ),
             ),
             assign_expr(
@@ -327,13 +327,13 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                 ),
             ),
             if_block_expr(
-                Expr::ident("cell").ge(params.field("num_cells")),
+                Expr::ident("cell").ge(params.clone().field("num_cells")),
                 block(vec![return_void()]),
                 None,
             ),
             let_expr(
                 "base",
-                Expr::ident("cell") * params.field("unknowns_per_cell"),
+                Expr::ident("cell") * params.clone().field("unknowns_per_cell"),
             ),
             let_expr("p_val", Expr::ident("p_sol").index(Expr::ident("cell"))),
             for_loop_expr(
@@ -342,7 +342,7 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                     ty: Some(Type::U32),
                     expr: Expr::lit_u32(0),
                 },
-                Expr::ident("i").lt(params.field("u_len")),
+                Expr::ident("i").lt(params.clone().field("u_len")),
                 ForStep::Increment(Expr::ident("i")),
                 block(vec![
                     let_expr("u", Expr::call_named("u_index", vec![Expr::ident("i")])),
@@ -367,12 +367,12 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                         block(vec![
                             let_expr("col", Expr::ident("col_indices").index(Expr::ident("k"))),
                             if_block_expr(
-                                (Expr::ident("col").modulo(params.field("unknowns_per_cell")))
-                                    .eq(params.field("p")),
+                                (Expr::ident("col").modulo(params.clone().field("unknowns_per_cell")))
+                                    .eq(params.clone().field("p")),
                                 block(vec![
                                     let_expr(
                                         "p_cell",
-                                        Expr::ident("col") / params.field("unknowns_per_cell"),
+                                        Expr::ident("col") / params.clone().field("unknowns_per_cell"),
                                     ),
                                     assign_op_expr(
                                         AssignOp::Add,
@@ -389,13 +389,13 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                         AssignOp::Sub,
                         Expr::ident("z_out").index(Expr::ident("row_u")),
                         Expr::ident("diag_u_inv")
-                            .index(Expr::ident("cell") * params.field("u_len") + Expr::ident("i"))
+                            .index(Expr::ident("cell") * params.clone().field("u_len") + Expr::ident("i"))
                             * Expr::ident("correction_u"),
                     ),
                 ]),
             ),
             assign_expr(
-                Expr::ident("z_out").index(Expr::ident("base") + params.field("p")),
+                Expr::ident("z_out").index(Expr::ident("base") + params.clone().field("p")),
                 Expr::ident("p_val"),
             ),
         ]);
@@ -420,7 +420,7 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                 ),
             ),
             if_block_expr(
-                Expr::ident("cell").ge(params.field("num_cells")),
+                Expr::ident("cell").ge(params.clone().field("num_cells")),
                 block(vec![return_void()]),
                 None,
             ),
@@ -428,9 +428,9 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
             comment("Part 1: Predict Velocity (Local)"),
             let_expr(
                 "base",
-                Expr::ident("cell") * params.field("unknowns_per_cell"),
+                Expr::ident("cell") * params.clone().field("unknowns_per_cell"),
             ),
-            let_expr("row_p", Expr::ident("base") + params.field("p")),
+            let_expr("row_p", Expr::ident("base") + params.clone().field("p")),
             // Default to identity for non-(u,p) components
             for_loop_expr(
                 ForInit::Var {
@@ -438,7 +438,7 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                     ty: Some(Type::U32),
                     expr: Expr::lit_u32(0),
                 },
-                Expr::ident("c").lt(params.field("unknowns_per_cell")),
+                Expr::ident("c").lt(params.clone().field("unknowns_per_cell")),
                 ForStep::Increment(Expr::ident("c")),
                 block(vec![assign_expr(
                     Expr::ident("z_out").index(Expr::ident("base") + Expr::ident("c")),
@@ -451,7 +451,7 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                     ty: Some(Type::U32),
                     expr: Expr::lit_u32(0),
                 },
-                Expr::ident("i").lt(params.field("u_len")),
+                Expr::ident("i").lt(params.clone().field("u_len")),
                 ForStep::Increment(Expr::ident("i")),
                 block(vec![
                     let_expr("u", Expr::call_named("u_index", vec![Expr::ident("i")])),
@@ -459,7 +459,7 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                     assign_expr(
                         Expr::ident("z_out").index(Expr::ident("row_u")),
                         Expr::ident("diag_u_inv")
-                            .index(Expr::ident("cell") * params.field("u_len") + Expr::ident("i"))
+                            .index(Expr::ident("cell") * params.clone().field("u_len") + Expr::ident("i"))
                             * Expr::ident("r_in").index(Expr::ident("row_u")),
                     ),
                 ]),
@@ -491,7 +491,7 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                     let_expr("col", Expr::ident("col_indices").index(Expr::ident("k"))),
                     let_expr(
                         "rem",
-                        Expr::ident("col").modulo(params.field("unknowns_per_cell")),
+                        Expr::ident("col").modulo(params.clone().field("unknowns_per_cell")),
                     ),
                     var_expr("z_val", Expr::lit_f32(0.0)),
                     for_loop_expr(
@@ -500,7 +500,7 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                             ty: Some(Type::U32),
                             expr: Expr::lit_u32(0),
                         },
-                        Expr::ident("i").lt(params.field("u_len")),
+                        Expr::ident("i").lt(params.clone().field("u_len")),
                         ForStep::Increment(Expr::ident("i")),
                         block(vec![
                             let_expr("u", Expr::call_named("u_index", vec![Expr::ident("i")])),
@@ -509,13 +509,13 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                                 block(vec![
                                     let_expr(
                                         "c",
-                                        Expr::ident("col") / params.field("unknowns_per_cell"),
+                                        Expr::ident("col") / params.clone().field("unknowns_per_cell"),
                                     ),
                                     assign_expr(
                                         Expr::ident("z_val"),
                                         Expr::ident("r_in").index(Expr::ident("col"))
                                             * Expr::ident("diag_u_inv").index(
-                                                Expr::ident("c") * params.field("u_len")
+                                                Expr::ident("c") * params.clone().field("u_len")
                                                     + Expr::ident("i"),
                                             ),
                                     ),

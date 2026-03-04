@@ -356,7 +356,7 @@ impl<const N: usize> VecExpr<N> {
     }
 
     pub fn expr(&self) -> Expr {
-        self.expr
+        self.expr.clone()
     }
 
     pub fn component(&self, index: usize) -> Expr {
@@ -372,7 +372,7 @@ impl<const N: usize> VecExpr<N> {
         if let Some(ctor_name) = ctor_name {
             if let Some(args) = self.expr.try_call_named(ctor_name) {
                 if args.len() == N {
-                    return args[index];
+                    return args[index].clone();
                 }
             }
         }
@@ -417,7 +417,7 @@ impl<const N: usize> VecExpr<N> {
 
 impl VecExpr<2> {
     pub fn from_xy_fields(value: Expr) -> Self {
-        Self::from_components([value.field("x"), value.field("y")])
+        Self::from_components([value.clone().field("x"), value.field("y")])
     }
 
     pub fn to_vector2_struct(&self) -> Expr {
@@ -526,7 +526,7 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
                 out.push(Stmt::Var {
                     name: format!("{prefix}_{row}{col}"),
                     ty: None,
-                    expr: Some(init),
+                    expr: Some(init.clone()),
                 });
             }
         }
@@ -534,7 +534,7 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
     }
 
     pub fn entry(&self, row: usize, col: usize) -> Expr {
-        self.entries[row][col]
+        self.entries[row][col].clone()
     }
 
     pub fn add(&self, rhs: &Self) -> Self {
@@ -575,9 +575,9 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
                 return 0.0.into();
             }
             if expr_is_one(&entry) {
-                return scalar;
+                return scalar.clone();
             }
-            entry * scalar
+            entry * scalar.clone()
         })
     }
 
@@ -613,7 +613,7 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
             out.push(Stmt::AssignOp {
                 target: self.entry(idx, idx),
                 op,
-                value,
+                value: value.clone(),
             });
         }
         out
@@ -625,8 +625,8 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
             for col in 0..C {
                 let target = Expr::ident(format!("{prefix}_{row}{col}"));
                 let mut value = self.entry(row, col);
-                if let Some(scale) = scale {
-                    value = value * scale;
+                if let Some(ref scale) = scale {
+                    value = value * scale.clone();
                 }
                 out.push(Stmt::Assign { target, value });
             }
@@ -645,8 +645,8 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
             for col in 0..C {
                 let target = Expr::ident(format!("{prefix}_{row}{col}"));
                 let mut value = self.entry(row, col);
-                if let Some(scale) = scale {
-                    value = value * scale;
+                if let Some(ref scale) = scale {
+                    value = value * scale.clone();
                 }
                 out.push(Stmt::AssignOp { target, op, value });
             }
@@ -666,8 +666,8 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
                 let col_u8 = col as u8;
                 let target = entry.access_expr(row_u8, col_u8);
                 let mut value = self.entry(row, col);
-                if let Some(scale) = scale {
-                    value = value * scale;
+                if let Some(ref scale) = scale {
+                    value = value * scale.clone();
                 }
                 out.push(Stmt::Assign { target, value });
             }
@@ -690,8 +690,8 @@ impl<const R: usize, const C: usize> MatExpr<R, C> {
                     BlockCol::new(Ax::from_u32(col as u32)),
                 );
                 let mut value = self.entry(row, col);
-                if let Some(scale) = scale {
-                    value = value * scale;
+                if let Some(ref scale) = scale {
+                    value = value * scale.clone();
                 }
                 out.push(Stmt::Assign { target, value });
             }

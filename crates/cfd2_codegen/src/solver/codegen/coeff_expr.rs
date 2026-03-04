@@ -34,7 +34,7 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
         "inv_dt" => {
             let dt = Expr::ident("constants").field("dt");
             let dtau = Expr::ident("constants").field("dtau");
-            let dt_eff = Expr::call_named("select", vec![dt, dtau, dtau.gt(0.0)]);
+            let dt_eff = Expr::call_named("select", vec![dt, dtau.clone(), dtau.gt(0.0)]);
             let expr = Expr::from(1.0) / dt_eff;
             Some(DynExpr::new(expr, DslType::f32(), InvTime::UNIT))
         }

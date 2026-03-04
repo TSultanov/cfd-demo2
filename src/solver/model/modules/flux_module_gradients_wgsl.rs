@@ -93,6 +93,7 @@ pub fn generate_flux_module_gradients_kernel_program(
 
     let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
     program.body = body_lines;
+    program.body_ast = Some(kernel_stmts.to_vec());
     program.local_symbols = local_symbols;
     Ok(program)
 }
@@ -384,10 +385,10 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
 
             let mut other_val = if let Some(off) = target.bc_unknown_offset {
                 let bc = BcTable::new(Expr::ident("face_idx"), Expr::from(unknown_stride));
-                let from_bc = bc.ghost_value(Expr::from(off), cell_val, Expr::ident("d_own"));
+                let from_bc = bc.ghost_value(Expr::from(off), cell_val.clone(), Expr::ident("d_own"));
                 dsl::select(interior_other, from_bc, Expr::ident("is_boundary"))
             } else {
-                dsl::select(interior_other, cell_val, Expr::ident("is_boundary"))
+                dsl::select(interior_other, cell_val.clone(), Expr::ident("is_boundary"))
             };
 
             // SlipWall projection for velocity-like vec2 fields: enforce zero normal component at
@@ -401,9 +402,9 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
 
                     let vx = Expr::ident("state").index(Expr::ident("idx") * stride + vec_x_off);
                     let vy = Expr::ident("state").index(Expr::ident("idx") * stride + vec_y_off);
-                    let nx = Expr::ident("normal_vec").field("x");
+                    let nx = Expr::ident("normal_vec").clone().field("x");
                     let ny = Expr::ident("normal_vec").field("y");
-                    let un = vx * nx + vy * ny;
+                    let un = vx.clone() * nx.clone() + vy.clone() * ny.clone();
 
                     let axis = XY::from_index(target.base_component);
                     let projected = match axis {
@@ -457,7 +458,7 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
             stmts.push(dsl::assign_expr(
                 Expr::ident("state")
                     .index(Expr::ident("idx") * stride + grad_offsets[axis.to_usize()]),
-                out.field(axis.suffix()),
+                out.clone().field(axis.suffix()),
             ));
         }
     }

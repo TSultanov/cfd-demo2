@@ -183,12 +183,12 @@ pub fn vec4_u32(
 
 pub fn vec2_f32_xy_fields(name: &str) -> Expr {
     let v = Expr::ident(name);
-    vec2_f32(v.field("x"), v.field("y"))
+    vec2_f32(v.clone().field("x"), v.field("y"))
 }
 
 pub fn vec2_f32_from_xy_fields(value: impl Into<Expr>) -> Expr {
     let value = value.into();
-    vec2_f32(value.field("x"), value.field("y"))
+    vec2_f32(value.clone().field("x"), value.field("y"))
 }
 
 pub fn dot_expr(lhs: Expr, rhs: Expr) -> Expr {
@@ -437,8 +437,8 @@ pub fn assign_op_matrix_from_prefix_scaled_expr(
     for_each_mat_entry(n, |row, col| {
         let target = Expr::ident(format!("{dest_prefix}_{row}{col}"));
         let mut value = Expr::ident(format!("{src_prefix}_{row}{col}"));
-        if let Some(scale) = scale {
-            value = value * scale;
+        if let Some(ref scale) = scale {
+            value = value * scale.clone();
         }
         assign_op_expr(op, target, value)
     })
@@ -456,8 +456,8 @@ pub fn assign_matrix_array_from_prefix_scaled_expr(
         let index = base + col as u32;
         let target = Expr::ident(matrix_array).index(index);
         let mut value = Expr::ident(format!("{src_prefix}_{row}{col}"));
-        if let Some(scale) = scale {
-            value = value * scale;
+        if let Some(ref scale) = scale {
+            value = value * scale.clone();
         }
         assign_expr(target, value)
     })

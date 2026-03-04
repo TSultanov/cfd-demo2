@@ -69,7 +69,7 @@ impl DynExpr {
     }
 
     pub fn to_wgsl(&self) -> Expr {
-        self.expr
+        self.expr.clone()
     }
 
     pub fn add(&self, rhs: &Self) -> Result<Self, DslError> {
@@ -287,7 +287,7 @@ impl DynExpr {
                 rhs: D::UNIT,
             });
         }
-        Ok(TypedExpr::new(self.expr, self.ty))
+        Ok(TypedExpr::new(self.expr.clone(), self.ty))
     }
 }
 
@@ -375,7 +375,7 @@ impl<D: UnitDimension> TypedExpr<D> {
     }
 
     pub fn to_wgsl(&self) -> Expr {
-        self.expr
+        self.expr.clone()
     }
 
     /// Convert to a dynamic expression, erasing the type-level dimension.

@@ -317,7 +317,7 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
                 .index(Expr::ident("other_idx") * stride + Expr::from(component));
 
             let bc = BcTable::new(Expr::ident("face_idx"), Expr::from(unknown_stride));
-            let from_bc = bc.ghost_value(Expr::from(component), cell_val, Expr::ident("d_own"));
+            let from_bc = bc.ghost_value(Expr::from(component), cell_val.clone(), Expr::ident("d_own"));
 
             let other_val = dsl::select(interior_other, from_bc, Expr::ident("is_boundary"));
             let phi_face =
@@ -359,8 +359,8 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
         let out = Expr::ident(format!("grad_out_{component}"));
         let out_idx = Expr::ident("idx") * stride + Expr::from(component);
         stmts.push(dsl::assign_expr(
-            Expr::ident("grad_state").index(out_idx).field("x"),
-            out.field("x"),
+            Expr::ident("grad_state").index(out_idx.clone()).field("x"),
+            out.clone().field("x"),
         ));
         stmts.push(dsl::assign_expr(
             Expr::ident("grad_state").index(out_idx).field("y"),
@@ -380,10 +380,10 @@ const PACKED_STATE_GRADIENTS_WORKGROUP_SIZE: u32 = 64;
 ///   1: if (idx >= ...) { return; }  (bounds check)
 ///   2: if (constants.scheme == 0u) { return; }  (scheme guard — goes into preamble)
 ///
-/// Returns (launch, preamble_lines, consumed_stmts).
+/// Returns (launch, preamble_stmts, preamble_lines, consumed_stmts).
 fn launch_from_gradient_statements(
     stmts: &[Stmt],
-) -> Result<(LaunchSemantics, Vec<String>, usize), String> {
+) -> Result<(LaunchSemantics, Vec<Stmt>, Vec<String>, usize), String> {
     // Statement 0: `let idx = ...`
     let idx_expr = match stmts.first() {
         Some(Stmt::Let { name, expr, .. }) if name == "idx" => expr.to_string(),
@@ -433,6 +433,7 @@ fn launch_from_gradient_statements(
             );
         }
     };
+    let preamble_stmts = stmts[2..3].to_vec();
 
     Ok((
         LaunchSemantics::new(
@@ -440,6 +441,7 @@ fn launch_from_gradient_statements(
             idx_expr,
             Some(bounds_expr),
         ),
+        preamble_stmts,
         preamble_lines,
         3,
     ))
@@ -466,13 +468,15 @@ pub fn generate_packed_state_gradients_kernel_program(
     let items = base_items(eos_params);
     let bindings = kernel_bindings_from_items(&items)?;
     let main = main_fn(layout, unknown_stride);
-    let (launch, preamble_lines, consumed_stmts) =
+    let (launch, preamble_stmts, preamble_lines, consumed_stmts) =
         launch_from_gradient_statements(&main.body.stmts)?;
     let kernel_stmts = &main.body.stmts[consumed_stmts..];
 
     let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
     program.preamble = preamble_lines;
+    program.preamble_ast = Some(preamble_stmts);
     program.body = super::wgsl_ast::render_stmt_lines(kernel_stmts);
+    program.body_ast = Some(kernel_stmts.to_vec());
     program.local_symbols = super::wgsl_ast::collect_local_symbols(kernel_stmts);
     program.eos_params = eos_params.to_vec();
 

@@ -123,6 +123,7 @@ pub fn generate_unified_assembly_kernel_program(
 
             let mut program = KernelProgram::new(self.id, DispatchDomain::Cells, launch, bindings);
             program.body = super::wgsl_ast::render_stmt_lines(kernel_stmts);
+            program.body_ast = Some(kernel_stmts.to_vec());
             program.local_symbols = super::wgsl_ast::collect_local_symbols(kernel_stmts);
             program.eos_params = self.eos_params.to_vec();
             Ok(program)
@@ -293,9 +294,9 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             .get(equation.target.name())
             .expect("missing target offset");
         let rho_expr = coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
-        let base_coeff = Expr::ident("vol") * rho_expr / Expr::ident("constants").field("dt");
+        let base_coeff = Expr::ident("vol") * rho_expr.clone() / Expr::ident("constants").field("dt");
         let dtau = Expr::ident("constants").field("dtau");
-        let dual_time_coeff = Expr::ident("vol") * rho_expr / dtau;
+        let dual_time_coeff = Expr::ident("vol") * rho_expr / dtau.clone();
 
         let dt = Expr::ident("constants").field("dt");
         let dt_old = Expr::ident("constants").field("dt_old");
@@ -322,17 +323,17 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                 state_component_slot(slots.stride, "state_iter", "idx", target_slot, component);
 
             // Default BDF1
-            stmts.push(acc.add_diag(u_idx, base_coeff));
-            stmts.push(acc.add_rhs(u_idx, base_coeff * phi_n));
+            stmts.push(acc.add_diag(u_idx, base_coeff.clone()));
+            stmts.push(acc.add_rhs(u_idx, base_coeff.clone() * phi_n.clone()));
 
             // Optional BDF2.
             stmts.push(dsl::if_block_expr(
                 time_scheme.eq(TimeScheme::BDF2),
                 dsl::block(vec![
-                    dsl::let_expr("r", dt / dt_old),
+                    dsl::let_expr("r", dt.clone() / dt_old.clone()),
                     dsl::let_expr(
                         "diag_bdf2",
-                        base_coeff * (Expr::ident("r") * 2.0 + 1.0) / (Expr::ident("r") + 1.0),
+                        base_coeff.clone() * (Expr::ident("r") * 2.0 + 1.0) / (Expr::ident("r") + 1.0),
                     ),
                     dsl::let_expr("factor_n", Expr::ident("r") + 1.0),
                     dsl::let_expr(
@@ -341,12 +342,12 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     ),
                     acc.set_diag(
                         u_idx,
-                        acc.diag(u_idx) - base_coeff + Expr::ident("diag_bdf2"),
+                        acc.diag(u_idx) - base_coeff.clone() + Expr::ident("diag_bdf2"),
                     ),
                     acc.set_rhs(
                         u_idx,
-                        acc.rhs(u_idx) - base_coeff * phi_n
-                            + base_coeff
+                        acc.rhs(u_idx) - base_coeff.clone() * phi_n.clone()
+                            + base_coeff.clone()
                                 * (Expr::ident("factor_n") * phi_n
                                     - Expr::ident("factor_nm1") * phi_nm1),
                     ),
@@ -358,10 +359,10 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             // Add a diagonal `rho/dtau` term along with the matching RHS term so the
             // converged physical-time solution remains unchanged.
             stmts.push(dsl::if_block_expr(
-                dtau.gt(0.0),
+                dtau.clone().gt(0.0),
                 dsl::block(vec![
-                    acc.add_diag(u_idx, dual_time_coeff),
-                    acc.add_rhs(u_idx, dual_time_coeff * phi_iter),
+                    acc.add_diag(u_idx, dual_time_coeff.clone()),
+                    acc.add_rhs(u_idx, dual_time_coeff.clone() * phi_iter),
                 ]),
                 None,
             ));
@@ -407,7 +408,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         // LHS -= term * phi.
                         // Assuming term is the coefficient S_p where S = S_p * phi.
                         // Contribution to diagonal is -S_p * V.
-                        stmts.push(acc.sub_diag(row_u_idx, term));
+                        stmts.push(acc.sub_diag(row_u_idx, term.clone()));
                     } else {
                         // Cross-coupled source term: contribute to the (row, col) block entry.
                         stmts.push(dsl::assign_op_expr(
@@ -418,7 +419,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                                     typed::block_col::<Ax>(col_u_idx),
                                 )
                                 .expr,
-                            term,
+                            term.clone(),
                         ));
                     }
                 }
@@ -426,7 +427,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                 // RHS += term.
                 for component in 0..equation.target.kind().component_count() as u32 {
                     let u_idx = base_offset + component;
-                    stmts.push(acc.add_rhs(u_idx, term));
+                    stmts.push(acc.add_rhs(u_idx, term.clone()));
                 }
             }
         }
@@ -596,7 +597,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     coefficient_value_expr(slots, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
                 // Use arithmetic mean for interior faces; for boundaries use owner value.
                 let kappa = dsl::select(
-                    kappa_own,
+                    kappa_own.clone(),
                     (kappa_own + kappa_other) * 0.5,
                     !Expr::ident("is_boundary"),
                 );
@@ -604,7 +605,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                 let diff_coeff_name = format!("diff_coeff_{}", equation.target.name());
                 body.push(dsl::let_expr(
                     &diff_coeff_name,
-                    kappa * Expr::ident("area") / Expr::ident("dist"),
+                    kappa.clone() * Expr::ident("area") / Expr::ident("dist"),
                 ));
 
                 for component in 0..equation.target.kind().component_count() as u32 {
@@ -648,7 +649,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         ),
                     ]);
 
-                    let neumann_rhs = -(kappa * Expr::ident("area") * bc_value_expr);
+                    let neumann_rhs = -(kappa.clone() * Expr::ident("area") * bc_value_expr.clone());
                     let boundary_contrib = {
                         let is_velocity_field = matches!(field_name, "u" | "U" | "rho_u" | "rhoU");
                         let is_slipwall = Expr::ident("boundary_type").eq(Expr::from(4u32));
@@ -673,7 +674,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                                 state_component_slot(slots.stride, "state", "idx", field_slot, 1);
                             let nx = Expr::ident("normal").field("x");
                             let ny = Expr::ident("normal").field("y");
-                            let un = vx * nx + vy * ny;
+                            let un = vx.clone() * nx.clone() + vy.clone() * ny.clone();
 
                             Some(if component == 0 {
                                 vx - un * nx
@@ -763,8 +764,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                 let kappa_other =
                     coefficient_value_expr(slots, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
                 let kappa_face = dsl::select(
-                    kappa_own,
-                    (kappa_own + kappa_other) * 0.5,
+                    kappa_own.clone(),
+                    (kappa_own.clone() + kappa_other) * 0.5,
                     !Expr::ident("is_boundary"),
                 );
 
@@ -802,7 +803,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     let interior_contrib =
                         dsl::block(vec![acc.add_rhs(
                             u_idx,
-                            Expr::ident(&diff_coeff_name) * (phi_neigh - phi_own),
+                            Expr::ident(&diff_coeff_name) * (phi_neigh - phi_own.clone()),
                         )]);
 
                     let boundary_contrib = if let Some(field_base_offset) = field_offset_opt {
@@ -810,7 +811,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         let bc = BcTable::new(Expr::ident("face_idx"), coupled_stride);
                         let (bc_kind_expr, bc_value_expr) = bc.lookup(field_u_idx);
 
-                        let neumann_rhs = -(kappa_own * Expr::ident("area") * bc_value_expr);
+                        let neumann_rhs = -(kappa_own.clone() * Expr::ident("area") * bc_value_expr.clone());
 
                         dsl::block(vec![dsl::if_block_expr(
                             bc_kind_expr.eq(GpuBcKind::Dirichlet),
@@ -849,7 +850,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         let rho_bc_safe = dsl::max(rho_bc, 1e-12);
                         let u_bc = bc_rho_u_val / rho_bc_safe;
                         let u_other =
-                            dsl::select(phi_own, u_bc, bc_rho_u_kind.eq(GpuBcKind::Dirichlet));
+                            dsl::select(phi_own.clone(), u_bc, bc_rho_u_kind.eq(GpuBcKind::Dirichlet));
 
                         dsl::block(vec![acc.add_rhs(
                             u_idx,
@@ -989,16 +990,16 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             );
                             (grad_own, grad_neigh)
                         } else {
-                            let diff = phi_neigh - phi_own;
+                            let diff = phi_neigh.clone() - phi_own.clone();
                             let denom = dsl::max(
                                 Expr::ident("dx") * Expr::ident("dx")
                                     + Expr::ident("dy") * Expr::ident("dy"),
                                 1e-12,
                             );
-                            let g_x = diff * Expr::ident("dx") / denom;
+                            let g_x = diff.clone() * Expr::ident("dx") / denom.clone();
                             let g_y = diff * Expr::ident("dy") / denom;
                             let grad = dsl::vec2_f32(g_x, g_y);
-                            (grad, grad)
+                            (grad.clone(), grad)
                         };
 
                         let rec = scalar_reconstruction(
@@ -1021,7 +1022,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         let dc_term = acc.phi(u_idx) * (rec.phi_ho - rec.phi_upwind);
 
                         let interior_contrib = dsl::block(vec![
-                            acc.add_diag(u_idx, flux_pos),
+                            acc.add_diag(u_idx, flux_pos.clone()),
                             dsl::assign_op_expr(
                                 AssignOp::Add,
                                 block_matrix
@@ -1031,7 +1032,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                                         typed::block_col::<Ax>(u_idx),
                                     )
                                     .expr,
-                                flux_neg,
+                                flux_neg.clone(),
                             ),
                             acc.sub_rhs(u_idx, dc_term),
                         ]);
@@ -1088,7 +1089,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         Expr::ident("normal").field("y")
                     };
 
-                    let term_common = factor * n_comp;
+                    let term_common = factor.clone() * n_comp;
 
                     if let Some(&p_idx) = p_offset_opt {
                         if grad_op.discretization == Discretization::Implicit {
@@ -1103,7 +1104,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                                         typed::block_col::<Ax>(p_idx),
                                     )
                                     .expr,
-                                term_common,
+                                term_common.clone(),
                             ));
                             // Neighbor p contribution -> Neighbor block (u, p)
                             body.push(dsl::assign_op_expr(
@@ -1118,11 +1119,11 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                                 term_common,
                             ));
                         } else {
-                            let val = term_common * (phi_own + phi_neigh);
+                            let val = term_common * (phi_own.clone() + phi_neigh.clone());
                             body.push(acc.sub_rhs(u_idx, val));
                         }
                     } else {
-                        let val = term_common * (phi_own + phi_neigh);
+                        let val = term_common * (phi_own.clone() + phi_neigh.clone());
                         body.push(acc.sub_rhs(u_idx, val));
                     }
                 }

@@ -190,6 +190,16 @@ pub struct KernelProgram {
     /// EOS parameters referenced by this kernel (structured declaration that replaces
     /// string-scan heuristic in `constants_extra_params_for_program`).
     pub eos_params: Vec<ParamSpec>,
+
+    // ── Structured AST fields (authoritative when present) ─────────
+
+    /// Structured AST body statements. When `Some`, this is the single source
+    /// of truth; `body` (`Vec<String>`) is a lazily-derived cache or empty.
+    pub body_ast: Option<Vec<crate::ast::Stmt>>,
+    /// Structured AST preamble statements.
+    pub preamble_ast: Option<Vec<crate::ast::Stmt>>,
+    /// Structured AST indexing statements.
+    pub indexing_ast: Option<Vec<crate::ast::Stmt>>,
 }
 
 impl KernelProgram {
@@ -212,6 +222,9 @@ impl KernelProgram {
             local_symbols: Vec::new(),
             side_effects: SideEffectMetadata::default(),
             eos_params: Vec::new(),
+            body_ast: None,
+            preamble_ast: None,
+            indexing_ast: None,
         }
     }
 

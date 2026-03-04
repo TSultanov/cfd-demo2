@@ -80,7 +80,7 @@ impl CoupledAccumulators {
         for row in 1..self.coupled_stride {
             stmts.push(dsl::let_expr(
                 &Self::start_row_name(row),
-                self.start_row(0) + num_neighbors * self.coupled_stride * row,
+                self.start_row(0) + num_neighbors.clone() * self.coupled_stride * row,
             ));
         }
         stmts
@@ -171,7 +171,7 @@ impl CoupledAccumulators {
                 self.diag(i),
             ));
             stmts.push(dsl::assign_expr(
-                dsl::array_access_linear(rhs_array, idx_expr, self.coupled_stride, i),
+                dsl::array_access_linear(rhs_array, idx_expr.clone(), self.coupled_stride, i),
                 self.rhs(i),
             ));
         }

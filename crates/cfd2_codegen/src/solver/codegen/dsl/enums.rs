@@ -6,7 +6,7 @@ pub trait WgslEnum: Copy {
     fn wgsl_id(self) -> u32;
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct EnumExpr<E: WgslEnum> {
     expr: Expr,
     _marker: PhantomData<E>,
@@ -20,24 +20,24 @@ impl<E: WgslEnum> EnumExpr<E> {
         }
     }
 
-    pub fn expr(self) -> Expr {
-        self.expr
+    pub fn expr(&self) -> Expr {
+        self.expr.clone()
     }
 
-    pub fn eq(self, rhs: E) -> Expr {
-        self.expr.eq(rhs.wgsl_id())
+    pub fn eq(&self, rhs: E) -> Expr {
+        self.expr.clone().eq(rhs.wgsl_id())
     }
 
-    pub fn ne(self, rhs: E) -> Expr {
-        self.expr.ne(rhs.wgsl_id())
+    pub fn ne(&self, rhs: E) -> Expr {
+        self.expr.clone().ne(rhs.wgsl_id())
     }
 
-    pub fn eq_expr(self, rhs: Self) -> Expr {
-        self.expr.eq(rhs.expr)
+    pub fn eq_expr(&self, rhs: &Self) -> Expr {
+        self.expr.clone().eq(rhs.expr.clone())
     }
 
-    pub fn ne_expr(self, rhs: Self) -> Expr {
-        self.expr.ne(rhs.expr)
+    pub fn ne_expr(&self, rhs: &Self) -> Expr {
+        self.expr.clone().ne(rhs.expr.clone())
     }
 }
 

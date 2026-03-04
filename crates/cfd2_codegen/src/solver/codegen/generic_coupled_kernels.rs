@@ -114,8 +114,17 @@ pub fn generate_generic_coupled_update_kernel_program(
     let kernel_stmts = &main.body.stmts[consumed_stmts..];
 
     let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
-    program.indexing = vec![format!("let base = idx * {}u;", slots.stride)];
+    let indexing_stmts = vec![cfd2_ir::ast::Stmt::Let {
+        name: "base".to_string(),
+        ty: None,
+        expr: cfd2_ir::ast::Expr::ident("idx") * cfd2_ir::ast::Expr::lit_u32(slots.stride as u32),
+    }];
+    program.indexing = super::wgsl_ast::render_block_lines(
+        &cfd2_ir::ast::Block::new(indexing_stmts.clone()),
+    );
+    program.indexing_ast = Some(indexing_stmts);
     program.body = super::wgsl_ast::render_stmt_lines(kernel_stmts);
+    program.body_ast = Some(kernel_stmts.to_vec());
     program.local_symbols = super::wgsl_ast::collect_local_symbols(kernel_stmts);
     program.eos_params = eos_params.to_vec();
     Ok(program)
@@ -177,6 +186,7 @@ pub fn generate_generic_coupled_apply_kernel_program(
 
     let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
     program.body = body_lines;
+    program.body_ast = Some(kernel_stmts.to_vec());
     program.local_symbols = local_symbols;
     program.eos_params = eos_params.to_vec();
     Ok(program)
@@ -382,12 +392,12 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             .get(equation.target.name())
             .expect("missing target offset");
         let rho_expr = coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
-        let base_coeff = Expr::ident("vol") * rho_expr / Expr::ident("constants").field("dt");
-        let dtau = Expr::ident("constants").field("dtau");
-        let dual_time_coeff = Expr::ident("vol") * rho_expr / dtau;
+        let base_coeff = Expr::ident("vol") * rho_expr.clone() / Expr::ident("constants").field("dt");
+        let dtau = Expr::ident("constants").clone().field("dtau");
+        let dual_time_coeff = Expr::ident("vol") * rho_expr / dtau.clone();
 
-        let dt = Expr::ident("constants").field("dt");
-        let dt_old = Expr::ident("constants").field("dt_old");
+        let dt = Expr::ident("constants").clone().field("dt");
+        let dt_old = Expr::ident("constants").clone().field("dt_old");
         let time_scheme =
             typed::EnumExpr::<TimeScheme>::from_expr(Expr::ident("constants").field("time_scheme"));
 
@@ -411,17 +421,17 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                 state_component_slot(slots.stride, "state_iter", "idx", target_slot, component);
 
             // Default BDF1
-            stmts.push(acc.add_diag(u_idx, base_coeff));
-            stmts.push(acc.add_rhs(u_idx, base_coeff * phi_n));
+            stmts.push(acc.add_diag(u_idx, base_coeff.clone()));
+            stmts.push(acc.add_rhs(u_idx, base_coeff.clone() * phi_n.clone()));
 
             // Optional BDF2.
             stmts.push(dsl::if_block_expr(
                 time_scheme.eq(TimeScheme::BDF2),
                 dsl::block(vec![
-                    dsl::let_expr("r", dt / dt_old),
+                    dsl::let_expr("r", dt.clone() / dt_old.clone()),
                     dsl::let_expr(
                         "diag_bdf2",
-                        base_coeff * (Expr::ident("r") * 2.0 + 1.0) / (Expr::ident("r") + 1.0),
+                        base_coeff.clone() * (Expr::ident("r") * 2.0 + 1.0) / (Expr::ident("r") + 1.0),
                     ),
                     dsl::let_expr("factor_n", Expr::ident("r") + 1.0),
                     dsl::let_expr(
@@ -430,12 +440,12 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     ),
                     acc.set_diag(
                         u_idx,
-                        acc.diag(u_idx) - base_coeff + Expr::ident("diag_bdf2"),
+                        acc.diag(u_idx) - base_coeff.clone() + Expr::ident("diag_bdf2"),
                     ),
                     acc.set_rhs(
                         u_idx,
-                        acc.rhs(u_idx) - base_coeff * phi_n
-                            + base_coeff
+                        acc.rhs(u_idx) - base_coeff.clone() * phi_n.clone()
+                            + base_coeff.clone()
                                 * (Expr::ident("factor_n") * phi_n
                                     - Expr::ident("factor_nm1") * phi_nm1),
                     ),
@@ -447,10 +457,10 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             // Add a diagonal `rho/dtau` term along with the matching RHS term so the
             // converged physical-time solution remains unchanged.
             stmts.push(dsl::if_block_expr(
-                dtau.gt(0.0),
+                dtau.clone().gt(0.0),
                 dsl::block(vec![
-                    acc.add_diag(u_idx, dual_time_coeff),
-                    acc.add_rhs(u_idx, dual_time_coeff * phi_iter),
+                    acc.add_diag(u_idx, dual_time_coeff.clone()),
+                    acc.add_rhs(u_idx, dual_time_coeff.clone() * phi_iter),
                 ]),
                 None,
             ));
@@ -614,7 +624,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             let diff_coeff_name = format!("diff_coeff_{}", equation.target.name());
             body.push(dsl::let_expr(
                 &diff_coeff_name,
-                kappa * Expr::ident("area") / Expr::ident("dist"),
+                kappa.clone() * Expr::ident("area") / Expr::ident("dist"),
             ));
 
             for component in 0..equation.target.kind().component_count() as u32 {
@@ -637,7 +647,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     ),
                 ]);
 
-                let neumann_rhs = -(kappa * Expr::ident("area") * bc_value_expr);
+                let neumann_rhs = -(kappa.clone() * Expr::ident("area") * bc_value_expr.clone());
                 let boundary_contrib = dsl::block(vec![dsl::if_block_expr(
                     bc_kind_expr.eq(GpuBcKind::Dirichlet),
                     dsl::block(vec![
@@ -739,7 +749,7 @@ fn main_update_fn(
         let target = state_component_slot(slots.stride, "state", "idx", field_slot, *component);
         let x_entry =
             dsl::array_access_linear("x", Expr::ident("idx"), coupled_stride, u_idx as u32);
-        let value = x_entry;
+        let value = x_entry.clone();
 
         // Under-relaxation for SIMPLE-like coupled solvers.
         //
@@ -767,17 +777,17 @@ fn main_update_fn(
         } else {
             Expr::lit_f32(1.0)
         };
-        let prev = target;
-        let prev_is_finite = prev.eq(prev) & dsl::abs(prev).lt(Expr::lit_f32(3.4e38));
-        let value_is_finite = value.eq(value) & dsl::abs(value).lt(Expr::lit_f32(3.4e38));
+        let prev = target.clone();
+        let prev_is_finite = prev.clone().eq(prev.clone()) & dsl::abs(prev.clone()).lt(Expr::lit_f32(3.4e38));
+        let value_is_finite = value.clone().eq(value.clone()) & dsl::abs(value.clone()).lt(Expr::lit_f32(3.4e38));
 
         // Avoid propagating NaN/Inf from the linear solver into the state.
         // If the previous iterate is already non-finite, prefer a finite `value`.
-        let relaxed = Expr::call_named("mix", vec![prev, value, alpha]);
-        let candidate = dsl::select(value, relaxed, prev_is_finite);
+        let relaxed = Expr::call_named("mix", vec![prev.clone(), value.clone(), alpha]);
+        let candidate = dsl::select(value.clone(), relaxed, prev_is_finite);
         let out = dsl::select(prev, candidate, value_is_finite);
 
-        stmts.push(dsl::assign_expr(target, out));
+        stmts.push(dsl::assign_expr(target, out.clone()));
         stmts.push(dsl::assign_expr(x_entry, out));
     }
 
@@ -790,7 +800,7 @@ fn main_update_fn(
     if !primitives.is_empty() {
         let cell_idx = Expr::ident("idx");
         for (offset, expr) in primitives {
-            let value = lower_primitive_expr(expr, slots, cell_idx, "state");
+            let value = lower_primitive_expr(expr, slots, cell_idx.clone(), "state");
             let target = dsl::array_access_linear("state", Expr::ident("idx"), stride, *offset);
             stmts.push(dsl::assign_expr(target, value));
         }

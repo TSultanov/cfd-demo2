@@ -295,22 +295,22 @@ pub fn generate_block_precond() -> KernelWgsl {
                 + Expr::ident("global_id").field("x"),
         ),
         if_block_expr(
-            Expr::ident("cell").ge(params.field("num_cells")),
+            Expr::ident("cell").ge(params.clone().field("num_cells")),
             block(vec![return_void()]),
             None,
         ),
         if_block_expr(
-            params.field("num_cells").eq(0u32),
+            params.clone().field("num_cells").eq(0u32),
             block(vec![return_void()]),
             None,
         ),
-        let_expr("b", params.field("n") / params.field("num_cells")),
+        let_expr("b", params.clone().field("n") / params.clone().field("num_cells")),
         if_block_expr(
-            b_var.eq(0u32) | b_var.gt(Expr::ident("MAX_BLOCK")),
+            b_var.clone().eq(0u32) | b_var.clone().gt(Expr::ident("MAX_BLOCK")),
             block(vec![return_void()]),
             None,
         ),
-        let_expr("base", Expr::ident("cell") * b_var),
+        let_expr("base", Expr::ident("cell") * b_var.clone()),
         // Declare local arrays
         var_typed_expr("a", nested_array_ty.clone(), None),
         var_typed_expr("inv", nested_array_ty.clone(), None),
@@ -322,21 +322,21 @@ pub fn generate_block_precond() -> KernelWgsl {
         // Initialize a and inv, extract diagonal block from CSR
         for_loop_expr(
             for_init_var_expr("r", Expr::lit_u32(0)),
-            Expr::ident("r").lt(b_var),
+            Expr::ident("r").lt(b_var.clone()),
             for_step_assign_expr(Expr::ident("r"), Expr::ident("r") + 1u32),
             block(vec![
                 // Zero out a[r][c] and inv[r][c]
                 for_loop_expr(
                     for_init_var_expr("c", Expr::lit_u32(0)),
-                    Expr::ident("c").lt(b_var),
+                    Expr::ident("c").lt(b_var.clone()),
                     for_step_assign_expr(Expr::ident("c"), Expr::ident("c") + 1u32),
                     block(vec![
                         assign_expr(
-                            a.index(Expr::ident("r")).index(Expr::ident("c")),
+                            a.clone().index(Expr::ident("r")).index(Expr::ident("c")),
                             Expr::lit_f32(0.0),
                         ),
                         assign_expr(
-                            inv.index(Expr::ident("r")).index(Expr::ident("c")),
+                            inv.clone().index(Expr::ident("r")).index(Expr::ident("c")),
                             Expr::lit_f32(0.0),
                         ),
                     ]),
@@ -359,11 +359,11 @@ pub fn generate_block_precond() -> KernelWgsl {
                         let_expr("col", Expr::ident("col_indices").index(Expr::ident("k"))),
                         if_block_expr(
                             Expr::ident("col").ge(Expr::ident("base"))
-                                & Expr::ident("col").lt(Expr::ident("base") + b_var),
+                                & Expr::ident("col").lt(Expr::ident("base") + b_var.clone()),
                             block(vec![
                                 let_expr("local", Expr::ident("col") - Expr::ident("base")),
                                 assign_expr(
-                                    a.index(Expr::ident("r")).index(Expr::ident("local")),
+                                    a.clone().index(Expr::ident("r")).index(Expr::ident("local")),
                                     Expr::ident("matrix_values").index(Expr::ident("k")),
                                 ),
                             ]),
@@ -373,13 +373,13 @@ pub fn generate_block_precond() -> KernelWgsl {
                 ),
                 // inv[r][r] = 1.0
                 assign_expr(
-                    inv.index(Expr::ident("r")).index(Expr::ident("r")),
+                    inv.clone().index(Expr::ident("r")).index(Expr::ident("r")),
                     Expr::lit_f32(1.0),
                 ),
                 // diag_orig[r] = a[r][r]
                 assign_expr(
                     Expr::ident("diag_orig").index(Expr::ident("r")),
-                    a.index(Expr::ident("r")).index(Expr::ident("r")),
+                    a.clone().index(Expr::ident("r")).index(Expr::ident("r")),
                 ),
             ]),
         ),
@@ -387,23 +387,23 @@ pub fn generate_block_precond() -> KernelWgsl {
         var_expr("singular", Expr::lit_bool(false)),
         for_loop_expr(
             for_init_var_expr("i", Expr::lit_u32(0)),
-            Expr::ident("i").lt(b_var),
+            Expr::ident("i").lt(b_var.clone()),
             for_step_assign_expr(Expr::ident("i"), Expr::ident("i") + 1u32),
             block(vec![
                 // Find pivot
                 var_expr("pivot", Expr::ident("i")),
                 var_expr(
                     "pivot_val",
-                    abs(a.index(Expr::ident("i")).index(Expr::ident("i"))),
+                    abs(a.clone().index(Expr::ident("i")).index(Expr::ident("i"))),
                 ),
                 for_loop_expr(
                     for_init_var_expr("r", Expr::ident("i") + 1u32),
-                    Expr::ident("r").lt(b_var),
+                    Expr::ident("r").lt(b_var.clone()),
                     for_step_assign_expr(Expr::ident("r"), Expr::ident("r") + 1u32),
                     block(vec![
                         let_expr(
                             "val",
-                            abs(a.index(Expr::ident("r")).index(Expr::ident("i"))),
+                            abs(a.clone().index(Expr::ident("r")).index(Expr::ident("i"))),
                         ),
                         if_block_expr(
                             Expr::ident("val").gt(Expr::ident("pivot_val")),
@@ -427,15 +427,15 @@ pub fn generate_block_precond() -> KernelWgsl {
                 call_stmt_expr(Expr::call_named(
                     "swap_rows",
                     vec![
-                        a.addr_of(),
-                        inv.addr_of(),
+                        a.clone().addr_of(),
+                        inv.clone().addr_of(),
                         Expr::ident("i"),
                         Expr::ident("pivot"),
-                        b_var,
+                        b_var.clone(),
                     ],
                 )),
                 // Clamp pivot value
-                var_expr("piv", a.index(Expr::ident("i")).index(Expr::ident("i"))),
+                var_expr("piv", a.clone().index(Expr::ident("i")).index(Expr::ident("i"))),
                 if_block_expr(
                     abs(Expr::ident("piv")).lt(Expr::lit_f32(1e-12)),
                     block(vec![assign_expr(
@@ -452,17 +452,17 @@ pub fn generate_block_precond() -> KernelWgsl {
                 // Scale pivot row
                 for_loop_expr(
                     for_init_var_expr("c", Expr::lit_u32(0)),
-                    Expr::ident("c").lt(b_var),
+                    Expr::ident("c").lt(b_var.clone()),
                     for_step_assign_expr(Expr::ident("c"), Expr::ident("c") + 1u32),
                     block(vec![
                         assign_expr(
-                            a.index(Expr::ident("i")).index(Expr::ident("c")),
-                            a.index(Expr::ident("i")).index(Expr::ident("c"))
+                            a.clone().index(Expr::ident("i")).index(Expr::ident("c")),
+                            a.clone().index(Expr::ident("i")).index(Expr::ident("c"))
                                 * Expr::ident("inv_piv"),
                         ),
                         assign_expr(
-                            inv.index(Expr::ident("i")).index(Expr::ident("c")),
-                            inv.index(Expr::ident("i")).index(Expr::ident("c"))
+                            inv.clone().index(Expr::ident("i")).index(Expr::ident("c")),
+                            inv.clone().index(Expr::ident("i")).index(Expr::ident("c"))
                                 * Expr::ident("inv_piv"),
                         ),
                     ]),
@@ -470,7 +470,7 @@ pub fn generate_block_precond() -> KernelWgsl {
                 // Eliminate column i from all other rows
                 for_loop_expr(
                     for_init_var_expr("r", Expr::lit_u32(0)),
-                    Expr::ident("r").lt(b_var),
+                    Expr::ident("r").lt(b_var.clone()),
                     for_step_assign_expr(Expr::ident("r"), Expr::ident("r") + 1u32),
                     block(vec![
                         if_block_expr(
@@ -478,23 +478,23 @@ pub fn generate_block_precond() -> KernelWgsl {
                             block(vec![continue_stmt()]),
                             None,
                         ),
-                        let_expr("factor", a.index(Expr::ident("r")).index(Expr::ident("i"))),
+                        let_expr("factor", a.clone().index(Expr::ident("r")).index(Expr::ident("i"))),
                         for_loop_expr(
                             for_init_var_expr("c", Expr::lit_u32(0)),
-                            Expr::ident("c").lt(b_var),
+                            Expr::ident("c").lt(b_var.clone()),
                             for_step_assign_expr(Expr::ident("c"), Expr::ident("c") + 1u32),
                             block(vec![
                                 assign_expr(
-                                    a.index(Expr::ident("r")).index(Expr::ident("c")),
-                                    a.index(Expr::ident("r")).index(Expr::ident("c"))
+                                    a.clone().index(Expr::ident("r")).index(Expr::ident("c")),
+                                    a.clone().index(Expr::ident("r")).index(Expr::ident("c"))
                                         - Expr::ident("factor")
                                             * a.index(Expr::ident("i")).index(Expr::ident("c")),
                                 ),
                                 assign_expr(
-                                    inv.index(Expr::ident("r")).index(Expr::ident("c")),
-                                    inv.index(Expr::ident("r")).index(Expr::ident("c"))
+                                    inv.clone().index(Expr::ident("r")).index(Expr::ident("c")),
+                                    inv.clone().index(Expr::ident("r")).index(Expr::ident("c"))
                                         - Expr::ident("factor")
-                                            * inv.index(Expr::ident("i")).index(Expr::ident("c")),
+                                            * inv.clone().index(Expr::ident("i")).index(Expr::ident("c")),
                                 ),
                             ]),
                         ),
@@ -507,20 +507,20 @@ pub fn generate_block_precond() -> KernelWgsl {
             Expr::ident("singular"),
             block(vec![for_loop_expr(
                 for_init_var_expr("r", Expr::lit_u32(0)),
-                Expr::ident("r").lt(b_var),
+                Expr::ident("r").lt(b_var.clone()),
                 for_step_assign_expr(Expr::ident("r"), Expr::ident("r") + 1u32),
                 block(vec![
                     for_loop_expr(
                         for_init_var_expr("c", Expr::lit_u32(0)),
-                        Expr::ident("c").lt(b_var),
+                        Expr::ident("c").lt(b_var.clone()),
                         for_step_assign_expr(Expr::ident("c"), Expr::ident("c") + 1u32),
                         block(vec![assign_expr(
-                            inv.index(Expr::ident("r")).index(Expr::ident("c")),
+                            inv.clone().index(Expr::ident("r")).index(Expr::ident("c")),
                             Expr::lit_f32(0.0),
                         )]),
                     ),
                     assign_expr(
-                        inv.index(Expr::ident("r")).index(Expr::ident("r")),
+                        inv.clone().index(Expr::ident("r")).index(Expr::ident("r")),
                         Expr::call_named(
                             "safe_inverse",
                             vec![Expr::ident("diag_orig").index(Expr::ident("r"))],
@@ -531,14 +531,14 @@ pub fn generate_block_precond() -> KernelWgsl {
             None,
         ),
         // Write result to block_inv buffer
-        let_expr("offset", Expr::ident("cell") * (b_var * b_var)),
+        let_expr("offset", Expr::ident("cell") * (b_var.clone() * b_var.clone())),
         for_loop_expr(
             for_init_var_expr("r", Expr::lit_u32(0)),
-            Expr::ident("r").lt(b_var),
+            Expr::ident("r").lt(b_var.clone()),
             for_step_assign_expr(Expr::ident("r"), Expr::ident("r") + 1u32),
             block(vec![for_loop_expr(
                 for_init_var_expr("c", Expr::lit_u32(0)),
-                Expr::ident("c").lt(b_var),
+                Expr::ident("c").lt(b_var.clone()),
                 for_step_assign_expr(Expr::ident("c"), Expr::ident("c") + 1u32),
                 block(vec![assign_expr(
                     Expr::ident("block_inv")
@@ -567,16 +567,16 @@ pub fn generate_block_precond() -> KernelWgsl {
                 + Expr::ident("global_id").field("x"),
         ),
         if_block_expr(
-            Expr::ident("cell").ge(params.field("num_cells")),
+            Expr::ident("cell").ge(params.clone().field("num_cells")),
             block(vec![return_void()]),
             None,
         ),
         if_block_expr(
-            params.field("num_cells").eq(0u32),
+            params.clone().field("num_cells").eq(0u32),
             block(vec![return_void()]),
             None,
         ),
-        let_expr("b", params.field("n") / params.field("num_cells")),
+        let_expr("b", params.clone().field("n") / params.clone().field("num_cells")),
         if_block_expr(
             Expr::ident("b").eq(0u32) | Expr::ident("b").gt(Expr::ident("MAX_BLOCK")),
             block(vec![return_void()]),

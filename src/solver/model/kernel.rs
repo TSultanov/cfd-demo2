@@ -1003,12 +1003,13 @@ mod contract_tests {
 
     fn contract_dsl_kernel_generator(
         kernel_id: &'static str,
-        body_stmt: &'static str,
+        body_stmt: cfd2_ir::ast::Stmt,
     ) -> impl Fn(&ModelSpec, &crate::solver::ir::SchemeRegistry) -> Result<KernelProgram, String>
            + Send
            + Sync
            + 'static {
         move |_model, _schemes| {
+            use cfd2_ir::ast::{Expr, Stmt, Type};
             let launch = LaunchSemantics::new(
                 [64, 1, 1],
                 "global_id.y * constants.stride_x + global_id.x",
@@ -1029,13 +1030,39 @@ mod contract_tests {
                     KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
                 ],
             );
-            program.indexing = vec!["let inv = idx;".to_string()];
-            program.preamble = vec!["var value: f32 = state[idx];".to_string()];
-            program.body = vec![
-                body_stmt.to_string(),
-                "state[idx] = value;".to_string(),
-                "state[inv] = state[idx];".to_string(),
+            let indexing_stmts = vec![Stmt::Let {
+                name: "inv".to_string(),
+                ty: None,
+                expr: Expr::ident("idx"),
+            }];
+            let preamble_stmts = vec![Stmt::Var {
+                name: "value".to_string(),
+                ty: Some(Type::F32),
+                expr: Some(Expr::ident("state").index(Expr::ident("idx"))),
+            }];
+            let body_stmts = vec![
+                body_stmt.clone(),
+                Stmt::Assign {
+                    target: Expr::ident("state").index(Expr::ident("idx")),
+                    value: Expr::ident("value"),
+                },
+                Stmt::Assign {
+                    target: Expr::ident("state").index(Expr::ident("inv")),
+                    value: Expr::ident("state").index(Expr::ident("idx")),
+                },
             ];
+            program.indexing = cfd2_codegen::solver::codegen::wgsl_ast::render_block_lines(
+                &cfd2_ir::ast::Block::new(indexing_stmts.clone()),
+            );
+            program.indexing_ast = Some(indexing_stmts);
+            program.preamble = cfd2_codegen::solver::codegen::wgsl_ast::render_block_lines(
+                &cfd2_ir::ast::Block::new(preamble_stmts.clone()),
+            );
+            program.preamble_ast = Some(preamble_stmts);
+            program.body = cfd2_codegen::solver::codegen::wgsl_ast::render_block_lines(
+                &cfd2_ir::ast::Block::new(body_stmts.clone()),
+            );
+            program.body_ast = Some(body_stmts.clone());
             program.body_ir_ops = vec![
                 KernelBodyIrOp::Invalidate { line_index: 1 },
                 KernelBodyIrOp::Store {
@@ -1177,7 +1204,10 @@ mod contract_tests {
                 ModelKernelGeneratorSpec::new(wgsl_id, contract_kernel_generator),
                 ModelKernelGeneratorSpec::new_dsl(
                     dsl_id,
-                    contract_dsl_kernel_generator(dsl_id.as_str(), "value = value + 1.0;"),
+                    contract_dsl_kernel_generator(dsl_id.as_str(), cfd2_ir::ast::Stmt::Assign {
+                        target: cfd2_ir::ast::Expr::ident("value"),
+                        value: cfd2_ir::ast::Expr::ident("value") + cfd2_ir::ast::Expr::lit_f32(1.0),
+                    }),
                 ),
             ],
             ..Default::default()
@@ -1243,11 +1273,17 @@ mod contract_tests {
             generators: vec![
                 ModelKernelGeneratorSpec::new_dsl(
                     a_id,
-                    contract_dsl_kernel_generator(a_id.as_str(), "value = value + 1.0;"),
+                    contract_dsl_kernel_generator(a_id.as_str(), cfd2_ir::ast::Stmt::Assign {
+                        target: cfd2_ir::ast::Expr::ident("value"),
+                        value: cfd2_ir::ast::Expr::ident("value") + cfd2_ir::ast::Expr::lit_f32(1.0),
+                    }),
                 ),
                 ModelKernelGeneratorSpec::new_dsl(
                     b_id,
-                    contract_dsl_kernel_generator(b_id.as_str(), "value = value + 2.0;"),
+                    contract_dsl_kernel_generator(b_id.as_str(), cfd2_ir::ast::Stmt::Assign {
+                        target: cfd2_ir::ast::Expr::ident("value"),
+                        value: cfd2_ir::ast::Expr::ident("value") + cfd2_ir::ast::Expr::lit_f32(2.0),
+                    }),
                 ),
             ],
             fusion_rules: vec![ModelKernelFusionRule {

@@ -13,6 +13,7 @@ pub mod plan;
 pub mod primitive_expr;
 pub mod reconstruction;
 pub mod state_access;
+pub mod time_integration;
 pub mod unified_assembly;
 pub mod wgsl;
 pub mod wgsl_ast;

@@ -13,7 +13,6 @@ use super::KernelWgsl;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
 use crate::solver::codegen::reconstruction::scalar_reconstruction;
 use crate::solver::gpu::enums::GpuBcKind;
-use crate::solver::gpu::enums::TimeScheme;
 use crate::solver::ir::ports::{ParamSpec, ResolvedStateSlotsSpec};
 use crate::solver::ir::{Discretization, DispatchDomain, KernelProgram, LaunchSemantics, TermOp};
 use crate::solver::scheme::Scheme;
@@ -280,92 +279,9 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
     stmts.extend(acc.declare());
 
     // Time derivative contributions (implicit only).
-    for equation in &system.equations {
-        let Some(ddt_op) = equation.ops.iter().find(|op| {
-            op.kind == DiscreteOpKind::TimeDerivative
-                && op.discretization == Discretization::Implicit
-        }) else {
-            continue;
-        };
-
-        let base_offset = *offsets
-            .get(equation.target.name())
-            .expect("missing target offset");
-        let rho_expr = coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
-        let base_coeff = Expr::ident("vol") * rho_expr.clone() / Expr::ident("constants").field("dt");
-        let dtau = Expr::ident("constants").field("dtau");
-        let dual_time_coeff = Expr::ident("vol") * rho_expr / dtau.clone();
-
-        let dt = Expr::ident("constants").field("dt");
-        let dt_old = Expr::ident("constants").field("dt_old");
-        let time_scheme =
-            typed::EnumExpr::<TimeScheme>::from_expr(Expr::ident("constants").field("time_scheme"));
-
-        for component in 0..equation.target.kind().component_count() as u32 {
-            let u_idx = base_offset + component;
-            let target_slot = slots
-                .slots
-                .iter()
-                .find(|s| s.name == equation.target.name())
-                .unwrap_or_else(|| {
-                    panic!(
-                        "missing field '{}' in resolved state slots",
-                        equation.target.name()
-                    )
-                });
-            let phi_n =
-                state_component_slot(slots.stride, "state_old", "idx", target_slot, component);
-            let phi_nm1 =
-                state_component_slot(slots.stride, "state_old_old", "idx", target_slot, component);
-            let phi_iter =
-                state_component_slot(slots.stride, "state_iter", "idx", target_slot, component);
-
-            // Default BDF1
-            stmts.push(acc.add_diag(u_idx, base_coeff.clone()));
-            stmts.push(acc.add_rhs(u_idx, base_coeff.clone() * phi_n.clone()));
-
-            // Optional BDF2.
-            stmts.push(dsl::if_block_expr(
-                time_scheme.eq(TimeScheme::BDF2),
-                dsl::block(vec![
-                    dsl::let_expr("r", dt.clone() / dt_old.clone()),
-                    dsl::let_expr(
-                        "diag_bdf2",
-                        base_coeff.clone() * (Expr::ident("r") * 2.0 + 1.0) / (Expr::ident("r") + 1.0),
-                    ),
-                    dsl::let_expr("factor_n", Expr::ident("r") + 1.0),
-                    dsl::let_expr(
-                        "factor_nm1",
-                        (Expr::ident("r") * Expr::ident("r")) / (Expr::ident("r") + 1.0),
-                    ),
-                    acc.set_diag(
-                        u_idx,
-                        acc.diag(u_idx) - base_coeff.clone() + Expr::ident("diag_bdf2"),
-                    ),
-                    acc.set_rhs(
-                        u_idx,
-                        acc.rhs(u_idx) - base_coeff.clone() * phi_n.clone()
-                            + base_coeff.clone()
-                                * (Expr::ident("factor_n") * phi_n
-                                    - Expr::ident("factor_nm1") * phi_nm1),
-                    ),
-                ]),
-                None,
-            ));
-
-            // Optional pseudo-time continuation (dual-time stepping):
-            // Add a diagonal `rho/dtau` term along with the matching RHS term so the
-            // converged physical-time solution remains unchanged.
-            stmts.push(dsl::if_block_expr(
-                dtau.clone().gt(0.0),
-                dsl::block(vec![
-                    acc.add_diag(u_idx, dual_time_coeff.clone()),
-                    acc.add_rhs(u_idx, dual_time_coeff.clone() * phi_iter),
-                ]),
-                None,
-            ));
-        }
-    }
+    stmts.extend(super::coupled_common::emit_ddt_contributions(
+        system, slots, &offsets, &acc,
+    ));
 
     // Source terms.
     for equation in &system.equations {

@@ -2,8 +2,8 @@ use super::KernelWgsl;
 use cfd2_ir::solver::dimensions::{Dimensionless, UnitDimension};
 use cfd2_ir::solver::ir::ports::ParamSpec;
 use cfd2_ir::solver::ir::{
-    BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelBodyIrOp,
-    KernelBufferAccess, KernelProgram, SideEffectMetadata,
+    BindingAccess, DispatchDomain, EffectResource, KernelBinding,
+    KernelProgram, SideEffectMetadata,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -227,15 +227,7 @@ pub fn synthesize_fused_program_with_report_remapped(
     };
 
     if policy == FusionSafetyPolicy::Aggressive {
-        if let Some(program) = remapped
-            .iter()
-            .find(|p| (!p.preamble.is_empty() || !p.body.is_empty()) && p.body_ir_ops.is_empty())
-        {
-            return Err(format!(
-                "fusion rejected: aggressive cleanup requires structured body_ir_ops for kernel '{}'",
-                program.id
-            ));
-        }
+        // AST-based cleanup operates directly on body — no additional metadata needed.
     }
 
     let hazards = ensure_safe_composition(&remapped, policy)?;
@@ -244,18 +236,13 @@ pub fn synthesize_fused_program_with_report_remapped(
     let launch = remapped[0].launch.clone();
     let merged_bindings = merge_bindings(&remapped)?;
 
-    let mut body = Vec::new();
-    let mut body_ir_ops = Vec::<KernelBodyIrOp>::new();
-    let mut local_symbols = Vec::new();
+    let mut fused_body: Vec<cfd2_ir::ast::Stmt> = Vec::new();
     let mut side_effects = SideEffectMetadata::default();
     let mut helper_functions = Vec::<String>::new();
 
-    // Track whether all programs have structured AST bodies.
-    let all_have_body_ast = remapped.iter().all(|p| p.body_ast.is_some());
-    let mut fused_body_ast: Vec<cfd2_ir::ast::Stmt> = Vec::new();
-
     for (idx, program) in remapped.iter().enumerate() {
-        let rename_map = deterministic_symbol_rename_map(idx, &program.local_symbols);
+        let local_syms = program.local_symbols();
+        let rename_map = deterministic_symbol_rename_map(idx, &local_syms);
 
         // Merge helper functions (deduplicate by content).
         for helper in &program.helper_functions {
@@ -264,37 +251,12 @@ pub fn synthesize_fused_program_with_report_remapped(
             }
         }
 
-        // Preserve per-kernel execution order by emitting each segment's preamble
-        // immediately before that same segment's body.
-        body.push(format!("// begin fused segment: {}", program.id));
-        let segment_exec_start = body.len();
-        let renamed_preamble = rename_lines(&program.preamble, &rename_map);
-        body.extend(renamed_preamble);
-        let renamed_body = rename_lines(&program.body, &rename_map);
-        body.extend(renamed_body);
-        body.push(format!("// end fused segment: {}", program.id));
+        // AST-based body concatenation with segment markers.
+        fused_body.push(cfd2_ir::ast::Stmt::Comment(format!("begin fused segment: {}", program.id)));
+        fused_body.extend(rename_stmts(&program.preamble, &rename_map));
+        fused_body.extend(rename_stmts(&program.body, &rename_map));
+        fused_body.push(cfd2_ir::ast::Stmt::Comment(format!("end fused segment: {}", program.id)));
 
-        // AST-based body concatenation (alongside string-based)
-        if all_have_body_ast {
-            fused_body_ast.push(cfd2_ir::ast::Stmt::Comment(format!("begin fused segment: {}", program.id)));
-            if let Some(ref preamble_ast) = program.preamble_ast {
-                fused_body_ast.extend(rename_stmts(preamble_ast, &rename_map));
-            }
-            if let Some(ref body_ast) = program.body_ast {
-                fused_body_ast.extend(rename_stmts(body_ast, &rename_map));
-            }
-            fused_body_ast.push(cfd2_ir::ast::Stmt::Comment(format!("end fused segment: {}", program.id)));
-        }
-
-        if !program.body_ir_ops.is_empty() {
-            body_ir_ops.extend(rename_and_offset_body_ir_ops(
-                &program.body_ir_ops,
-                &rename_map,
-                segment_exec_start,
-            ));
-        }
-
-        local_symbols.extend(rename_symbols(&program.local_symbols, &rename_map));
         side_effects
             .read_set
             .extend(program.side_effects.read_set.clone());
@@ -313,13 +275,8 @@ pub fn synthesize_fused_program_with_report_remapped(
     );
     fused.helper_functions = helper_functions;
     fused.indexing = remapped[0].indexing.clone();
-    fused.indexing_ast = remapped[0].indexing_ast.clone();
     fused.preamble = Vec::new();
-    fused.preamble_ast = Some(Vec::new());
-    fused.body = body;
-    fused.body_ast = if all_have_body_ast { Some(fused_body_ast) } else { None };
-    fused.body_ir_ops = body_ir_ops;
-    fused.local_symbols = local_symbols;
+    fused.body = fused_body;
     fused.side_effects = side_effects;
     fused.eos_params = merge_eos_params(&remapped);
 
@@ -330,10 +287,7 @@ pub fn synthesize_fused_program_with_report_remapped(
     // Attach an explicit synthesis marker as a deterministic first preamble line.
     fused
         .preamble
-        .insert(0, format!("// synthesized by fusion rule: {rule_name}"));
-    if let Some(ref mut preamble_ast) = fused.preamble_ast {
-        preamble_ast.insert(0, cfd2_ir::ast::Stmt::Comment(format!("synthesized by fusion rule: {rule_name}")));
-    }
+        .insert(0, cfd2_ir::ast::Stmt::Comment(format!("synthesized by fusion rule: {rule_name}")));
 
     Ok((fused, hazards))
 }
@@ -644,171 +598,15 @@ fn deterministic_symbol_rename_map(
     out
 }
 
-fn rename_and_offset_body_ir_ops(
-    ops: &[KernelBodyIrOp],
-    rename_map: &BTreeMap<String, String>,
-    body_line_offset: usize,
-) -> Vec<KernelBodyIrOp> {
-    ops.iter()
-        .map(|op| match op {
-            KernelBodyIrOp::Store {
-                line_index,
-                access,
-                value_expr,
-                value_reads,
-            } => KernelBodyIrOp::Store {
-                line_index: body_line_offset + line_index,
-                access: KernelBufferAccess::new(
-                    rename_text(&access.base, rename_map),
-                    rename_text(&access.index_expr, rename_map),
-                ),
-                value_expr: rename_text(value_expr, rename_map),
-                value_reads: value_reads
-                    .iter()
-                    .map(|read| {
-                        KernelBufferAccess::new(
-                            rename_text(&read.base, rename_map),
-                            rename_text(&read.index_expr, rename_map),
-                        )
-                    })
-                    .collect(),
-            },
-            KernelBodyIrOp::LetLoad {
-                line_index,
-                name,
-                ty,
-                access,
-            } => KernelBodyIrOp::LetLoad {
-                line_index: body_line_offset + line_index,
-                name: rename_map
-                    .get(name)
-                    .cloned()
-                    .unwrap_or_else(|| name.clone()),
-                ty: ty.clone(),
-                access: KernelBufferAccess::new(
-                    rename_text(&access.base, rename_map),
-                    rename_text(&access.index_expr, rename_map),
-                ),
-            },
-            KernelBodyIrOp::NoopSelfAssign { line_index } => KernelBodyIrOp::NoopSelfAssign {
-                line_index: body_line_offset + line_index,
-            },
-            KernelBodyIrOp::Invalidate { line_index } => KernelBodyIrOp::Invalidate {
-                line_index: body_line_offset + line_index,
-            },
-        })
-        .collect()
-}
-
-fn rename_text(src: &str, rename_map: &BTreeMap<String, String>) -> String {
-    rename_map.iter().fold(src.to_string(), |acc, (old, new)| {
-        rename_identifier(&acc, old, new)
-    })
-}
-
-fn rename_symbols(symbols: &[String], rename_map: &BTreeMap<String, String>) -> Vec<String> {
-    symbols
-        .iter()
-        .map(|s| rename_map.get(s).cloned().unwrap_or_else(|| s.clone()))
-        .collect()
-}
-
-fn rename_lines(lines: &[String], rename_map: &BTreeMap<String, String>) -> Vec<String> {
-    lines
-        .iter()
-        .map(|line| {
-            rename_map.iter().fold(line.clone(), |acc, (old, new)| {
-                rename_identifier(&acc, old, new)
-            })
-        })
-        .collect()
-}
-
-fn rename_identifier(src: &str, old: &str, new: &str) -> String {
-    if old.is_empty() || old == new {
-        return src.to_string();
-    }
-    let src_bytes = src.as_bytes();
-    let old_bytes = old.as_bytes();
-    let mut out = String::with_capacity(src.len());
-    let mut i = 0usize;
-    while i < src_bytes.len() {
-        let end = i + old_bytes.len();
-        if end <= src_bytes.len()
-            && &src_bytes[i..end] == old_bytes
-            && is_ident_boundary(src_bytes, i, end)
-            && !is_member_access_field(src_bytes, i)
-        {
-            out.push_str(new);
-            i = end;
-            continue;
-        }
-        out.push(src_bytes[i] as char);
-        i += 1;
-    }
-    out
-}
-
-fn is_ident_boundary(src: &[u8], start: usize, end: usize) -> bool {
-    let left_ok = if start == 0 {
-        true
-    } else {
-        !is_ident_char(src[start - 1])
-    };
-    let right_ok = if end == src.len() {
-        true
-    } else {
-        !is_ident_char(src[end])
-    };
-    left_ok && right_ok
-}
-
-fn is_member_access_field(src: &[u8], ident_start: usize) -> bool {
-    if ident_start == 0 {
-        return false;
-    }
-    let mut i = ident_start;
-    while i > 0 {
-        let prev = src[i - 1];
-        if prev.is_ascii_whitespace() {
-            i -= 1;
-            continue;
-        }
-        return prev == b'.';
-    }
-    false
-}
-
-fn is_ident_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
 fn program_references_constants_field(program: &KernelProgram, field: &str) -> bool {
-    // Prefer AST-based search when available.
     let needle = format!("constants.{field}");
 
-    // Check AST sections first.
-    let has_ast = program.indexing_ast.is_some()
-        || program.preamble_ast.is_some()
-        || program.body_ast.is_some();
-
-    if has_ast {
-        let all_stmts = program.indexing_ast.iter()
-            .chain(program.preamble_ast.iter())
-            .chain(program.body_ast.iter())
-            .flat_map(|stmts| stmts.iter());
-        for stmt in all_stmts {
-            if ast_stmt_references_field(stmt, "constants", field) {
-                return true;
-            }
-        }
-    } else {
-        // Legacy string-based search.
-        let mut sections = program.indexing.iter().chain(program.preamble.iter());
-        if sections.any(|line| line.contains(&needle)) {
-            return true;
-        }
-        if program.body.iter().any(|line| line.contains(&needle)) {
+    // Structural AST search across all sections.
+    let all_stmts = program.indexing.iter()
+        .chain(program.preamble.iter())
+        .chain(program.body.iter());
+    for stmt in all_stmts {
+        if ast_stmt_references_field(stmt, "constants", field) {
             return true;
         }
     }
@@ -954,7 +752,7 @@ fn rename_expr(expr: &cfd2_ir::ast::Expr, rename_map: &BTreeMap<String, String>)
 
 /// Rename identifiers in a statement tree using a rename map.
 fn rename_stmt(stmt: &cfd2_ir::ast::Stmt, rename_map: &BTreeMap<String, String>) -> cfd2_ir::ast::Stmt {
-    use cfd2_ir::ast::{Block, ForInit, ForStep, Stmt};
+    use cfd2_ir::ast::{Stmt};
     match stmt {
         Stmt::Comment(text) => Stmt::Comment(text.clone()),
         Stmt::Let { name, ty, expr } => Stmt::Let {
@@ -1050,36 +848,26 @@ fn rename_stmts(stmts: &[cfd2_ir::ast::Stmt], rename_map: &BTreeMap<String, Stri
 }
 
 fn apply_aggressive_cleanup(program: &mut KernelProgram) {
-    if program.body_ast.is_some() {
-        apply_ast_load_after_store_forwarding(program);
-        apply_ast_noop_self_assign_cleanup(program);
-    } else {
-        apply_ir_load_after_store_forwarding(program);
-        apply_ir_noop_self_assign_cleanup(program);
-    }
+    apply_ast_load_after_store_forwarding(program);
+    apply_ast_noop_self_assign_cleanup(program);
 }
 
 // ── AST-based aggressive cleanup passes ────────────────────────────────
 
 /// AST-based load-after-store forwarding.
 ///
-/// Walks the flat `body_ast` statement list. For each store (`Assign` to a
+/// Walks the flat body statement list. For each store (`Assign` to a
 /// buffer index), records the stored value expression. When a subsequent
 /// `Let` loads from the same buffer+index, replaces the load expression with
 /// the forwarded value. Control-flow and non-trivial ops conservatively
 /// invalidate the store map.
 fn apply_ast_load_after_store_forwarding(program: &mut KernelProgram) {
-    use cfd2_ir::ast::{Expr, ExprNode, Stmt};
-
-    let body_ast = match program.body_ast.as_mut() {
-        Some(ast) => ast,
-        None => return,
-    };
+    use cfd2_ir::ast::{Expr, Stmt};
 
     // Key: (base_name, index_expr_str) -> forwarded value Expr
     let mut last_store: BTreeMap<(String, String), Expr> = BTreeMap::new();
 
-    for stmt in body_ast.iter_mut() {
+    for stmt in program.body.iter_mut() {
         match stmt {
             Stmt::Assign { target, value } => {
                 if let Some((base, idx_str)) = ast_buffer_access_key(target) {
@@ -1123,17 +911,12 @@ fn apply_ast_load_after_store_forwarding(program: &mut KernelProgram) {
 /// AST-based noop self-assign cleanup.
 ///
 /// Removes statements of the form `ident = ident` where both sides are the
-/// same identifier. Also keeps `body_ast` consistent by filtering out the
+/// same identifier. Also keeps body consistent by filtering out the
 /// removed statements (no line-index tracking needed).
 fn apply_ast_noop_self_assign_cleanup(program: &mut KernelProgram) {
     use cfd2_ir::ast::{ExprNode, Stmt};
 
-    let body_ast = match program.body_ast.as_mut() {
-        Some(ast) => ast,
-        None => return,
-    };
-
-    body_ast.retain(|stmt| {
+    program.body.retain(|stmt| {
         if let Stmt::Assign { target, value } = stmt {
             if let (ExprNode::Ident(lhs), ExprNode::Ident(rhs)) = (target.node(), value.node()) {
                 if lhs == rhs {
@@ -1143,12 +926,6 @@ fn apply_ast_noop_self_assign_cleanup(program: &mut KernelProgram) {
         }
         true
     });
-
-    // Also sync the string body and body_ir_ops if present (keep dual paths consistent).
-    if !program.body_ir_ops.is_empty() {
-        apply_ir_load_after_store_forwarding(program);
-        apply_ir_noop_self_assign_cleanup(program);
-    }
 }
 
 /// Extract (base_name, index_expr_string) from a buffer-index expression like `state[idx]`.
@@ -1165,7 +942,6 @@ fn ast_buffer_access_key(expr: &cfd2_ir::ast::Expr) -> Option<(String, String)> 
 
 /// Collect all buffer accesses (base[index]) from an expression tree.
 fn ast_collect_buffer_accesses(expr: &cfd2_ir::ast::Expr) -> Vec<(String, String)> {
-    use cfd2_ir::ast::ExprNode;
     let mut accesses = Vec::new();
     ast_collect_buffer_accesses_recursive(expr, &mut accesses);
     accesses
@@ -1201,138 +977,6 @@ fn ast_collect_buffer_accesses_recursive(expr: &cfd2_ir::ast::Expr, out: &mut Ve
     }
 }
 
-fn apply_ir_load_after_store_forwarding(program: &mut KernelProgram) {
-    if program.body_ir_ops.is_empty() {
-        return;
-    }
-
-    let mut ops = program.body_ir_ops.clone();
-    ops.sort_by_key(KernelBodyIrOp::line_index);
-
-    let mut last_store_by_access = BTreeMap::<(String, String), String>::new();
-
-    for op in ops {
-        match op {
-            KernelBodyIrOp::Store {
-                access,
-                value_expr,
-                value_reads,
-                ..
-            } => {
-                let key = (access.base, access.index_expr);
-                if value_reads.is_empty() {
-                    last_store_by_access.insert(key, value_expr);
-                } else {
-                    last_store_by_access.remove(&key);
-                }
-            }
-            KernelBodyIrOp::LetLoad {
-                line_index,
-                name,
-                ty,
-                access,
-            } => {
-                let key = (access.base, access.index_expr);
-                let Some(value_expr) = last_store_by_access.get(&key) else {
-                    continue;
-                };
-                if line_index >= program.body.len() {
-                    continue;
-                }
-                let mut line = format!("let {name}");
-                if let Some(ty) = ty {
-                    line.push_str(&format!(": {ty}"));
-                }
-                line.push_str(" = ");
-                line.push_str(value_expr);
-                line.push(';');
-                program.body[line_index] = line;
-            }
-            KernelBodyIrOp::NoopSelfAssign { .. } => {}
-            KernelBodyIrOp::Invalidate { .. } => {
-                last_store_by_access.clear();
-            }
-        }
-    }
-}
-
-fn apply_ir_noop_self_assign_cleanup(program: &mut KernelProgram) {
-    if program.body_ir_ops.is_empty() {
-        return;
-    }
-
-    let mut removal_indices: Vec<usize> = program
-        .body_ir_ops
-        .iter()
-        .filter_map(|op| match op {
-            KernelBodyIrOp::NoopSelfAssign { line_index } => Some(*line_index),
-            _ => None,
-        })
-        .filter(|line_index| *line_index < program.body.len())
-        .collect();
-
-    if removal_indices.is_empty() {
-        return;
-    }
-
-    removal_indices.sort_unstable();
-    removal_indices.dedup();
-
-    let remove_set: BTreeSet<usize> = removal_indices.iter().copied().collect();
-    program.body = program
-        .body
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, line)| {
-            if remove_set.contains(&idx) {
-                None
-            } else {
-                Some(line.clone())
-            }
-        })
-        .collect();
-
-    let remap_index = |old_idx: usize| -> Option<usize> {
-        if remove_set.contains(&old_idx) {
-            return None;
-        }
-        let removed_before = removal_indices.iter().filter(|idx| **idx < old_idx).count();
-        Some(old_idx - removed_before)
-    };
-
-    program.body_ir_ops = program
-        .body_ir_ops
-        .iter()
-        .filter_map(|op| match op {
-            KernelBodyIrOp::Store {
-                line_index,
-                access,
-                value_expr,
-                value_reads,
-            } => remap_index(*line_index).map(|line_index| KernelBodyIrOp::Store {
-                line_index,
-                access: access.clone(),
-                value_expr: value_expr.clone(),
-                value_reads: value_reads.clone(),
-            }),
-            KernelBodyIrOp::LetLoad {
-                line_index,
-                name,
-                ty,
-                access,
-            } => remap_index(*line_index).map(|line_index| KernelBodyIrOp::LetLoad {
-                line_index,
-                name: name.clone(),
-                ty: ty.clone(),
-                access: access.clone(),
-            }),
-            KernelBodyIrOp::NoopSelfAssign { .. } => None,
-            KernelBodyIrOp::Invalidate { line_index } => {
-                remap_index(*line_index).map(|line_index| KernelBodyIrOp::Invalidate { line_index })
-            }
-        })
-        .collect();
-}
 
 pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgsl, String> {
     let mut lines = Vec::<String>::new();
@@ -1457,36 +1101,18 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
     }
 
     // Emit indexing section
-    if let Some(ref indexing_ast) = program.indexing_ast {
-        for line in cfd2_ir::ast::stmt::render_stmt_lines(indexing_ast) {
-            lines.push(format!("    {line}"));
-        }
-    } else {
-        for line in &program.indexing {
-            lines.push(format!("    {line}"));
-        }
+    for line in cfd2_ir::ast::stmt::render_stmt_lines(&program.indexing) {
+        lines.push(format!("    {line}"));
     }
 
     // Emit preamble section
-    if let Some(ref preamble_ast) = program.preamble_ast {
-        for line in cfd2_ir::ast::stmt::render_stmt_lines(preamble_ast) {
-            lines.push(format!("    {line}"));
-        }
-    } else {
-        for line in &program.preamble {
-            lines.push(format!("    {line}"));
-        }
+    for line in cfd2_ir::ast::stmt::render_stmt_lines(&program.preamble) {
+        lines.push(format!("    {line}"));
     }
 
     // Emit body section
-    if let Some(ref body_ast) = program.body_ast {
-        for line in cfd2_ir::ast::stmt::render_stmt_lines(body_ast) {
-            lines.push(format!("    {line}"));
-        }
-    } else {
-        for line in &program.body {
-            lines.push(format!("    {line}"));
-        }
+    for line in cfd2_ir::ast::stmt::render_stmt_lines(&program.body) {
+        lines.push(format!("    {line}"));
     }
 
     lines.push("}".to_string());
@@ -1516,12 +1142,12 @@ mod tests {
                 KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
             ],
         );
-        let preamble_stmts = vec![Stmt::Var {
+        program.preamble = vec![Stmt::Var {
             name: "value".to_string(),
             ty: Some(Type::F32),
             expr: Some(Expr::lit_f32(0.0)),
         }];
-        let body_stmts = vec![
+        program.body = vec![
             Stmt::Assign {
                 target: Expr::ident("value"),
                 value: Expr::ident("value") + Expr::lit_f32(1.0),
@@ -1531,24 +1157,6 @@ mod tests {
                 value: Expr::ident("value"),
             },
         ];
-        program.preamble = super::super::wgsl_ast::render_block_lines(
-            &cfd2_ir::ast::Block::new(preamble_stmts.clone()),
-        );
-        program.preamble_ast = Some(preamble_stmts);
-        program.body = super::super::wgsl_ast::render_block_lines(
-            &cfd2_ir::ast::Block::new(body_stmts.clone()),
-        );
-        program.body_ast = Some(body_stmts);
-        program.body_ir_ops = vec![
-            KernelBodyIrOp::Invalidate { line_index: 0 },
-            KernelBodyIrOp::Store {
-                line_index: 1,
-                access: KernelBufferAccess::new("state", "idx"),
-                value_expr: "value".to_string(),
-                value_reads: Vec::new(),
-            },
-        ];
-        program.local_symbols = vec!["value".to_string()];
         program
     }
 
@@ -1612,9 +1220,10 @@ mod tests {
         let fused =
             synthesize_fused_program("fused", "rule/a_b", &[a, b], FusionSafetyPolicy::Aggressive)
                 .expect("fused synthesis");
-        let joined = fused.body.join("\n");
-        assert!(joined.contains("value = value + 1.0;"));
-        assert!(joined.contains("k1_value = k1_value + 1.0;"));
+        let rendered = cfd2_ir::ast::stmt::render_stmt_lines(&fused.body);
+        let joined = rendered.join("\n");
+        assert!(joined.contains("value = value + 1.0;"), "missing original value assignment in:\n{joined}");
+        assert!(joined.contains("k1_value = k1_value + 1.0;"), "missing renamed value assignment in:\n{joined}");
     }
 
     #[test]
@@ -1651,10 +1260,6 @@ mod tests {
             ],
         );
         program.body = vec![
-            "let c = constants.eos_gamma / max(constants.eos_gm1, 1e-12);".to_string(),
-            "state[idx] = c;".to_string(),
-        ];
-        program.body_ast = Some(vec![
             cfd2_ir::ast::Stmt::Let {
                 name: "c".to_string(),
                 ty: None,
@@ -1671,7 +1276,7 @@ mod tests {
                 target: cfd2_ir::ast::Expr::ident("state").index(cfd2_ir::ast::Expr::ident("idx")),
                 value: cfd2_ir::ast::Expr::ident("c"),
             },
-        ]);
+        ];
 
         let wgsl = lower_kernel_program_to_wgsl(&program).expect("lowering should succeed");
         let src = wgsl.to_wgsl();
@@ -1709,13 +1314,12 @@ mod tests {
                 KernelBinding::new(0, 2, "constants", "Constants", BindingAccess::Uniform),
             ],
         );
-        program.body = vec!["state[idx] = cell_centers[idx].x;".to_string()];
-        program.body_ast = Some(vec![cfd2_ir::ast::Stmt::Assign {
+        program.body = vec![cfd2_ir::ast::Stmt::Assign {
             target: cfd2_ir::ast::Expr::ident("state").index(cfd2_ir::ast::Expr::ident("idx")),
             value: cfd2_ir::ast::Expr::ident("cell_centers")
                 .index(cfd2_ir::ast::Expr::ident("idx"))
                 .field("x"),
-        }]);
+        }];
 
         let wgsl = lower_kernel_program_to_wgsl(&program)
             .expect("lowering with Vector2 binding should succeed");
@@ -1732,19 +1336,13 @@ mod tests {
 
     #[test]
     fn aggressive_cleanup_removes_noop_local_self_assignment() {
+        use cfd2_ir::ast::{Expr, Stmt};
         let mut a = sample_program("a");
-        a.body.insert(0, "value = value;".to_string());
-        a.body_ir_ops = vec![
-            KernelBodyIrOp::Invalidate { line_index: 0 },
-            KernelBodyIrOp::NoopSelfAssign { line_index: 1 },
-            KernelBodyIrOp::Invalidate { line_index: 2 },
-            KernelBodyIrOp::Store {
-                line_index: 3,
-                access: KernelBufferAccess::new("state", "idx"),
-                value_expr: "value".to_string(),
-                value_reads: Vec::new(),
-            },
-        ];
+        // Insert a noop self-assignment at the beginning of body.
+        a.body.insert(0, Stmt::Assign {
+            target: Expr::ident("value"),
+            value: Expr::ident("value"),
+        });
         let b = sample_program("b");
 
         let safe = synthesize_fused_program(
@@ -1758,15 +1356,18 @@ mod tests {
             synthesize_fused_program("fused", "rule/a_b", &[a, b], FusionSafetyPolicy::Aggressive)
                 .expect("aggressive fused synthesis");
 
+        let is_noop = |stmt: &Stmt| -> bool {
+            matches!(stmt, Stmt::Assign { target, value }
+                if matches!((target.node(), value.node()),
+                    (cfd2_ir::ast::ExprNode::Ident(l), cfd2_ir::ast::ExprNode::Ident(r)) if l == r))
+        };
+
         assert!(
-            safe.body.iter().any(|line| line.trim() == "value = value;"),
+            safe.body.iter().any(is_noop),
             "safe policy should preserve no-op local assignment"
         );
         assert!(
-            aggressive
-                .body
-                .iter()
-                .all(|line| line.trim() != "value = value;"),
+            aggressive.body.iter().all(|s| !is_noop(s)),
             "aggressive policy should remove no-op local assignment"
         );
     }
@@ -1798,22 +1399,18 @@ mod tests {
     }
 
     #[test]
-    fn aggressive_cleanup_forwards_ir_store_to_load() {
+    fn aggressive_cleanup_forwards_store_to_load() {
         use cfd2_ir::ast::{Expr, Stmt};
         let launch = LaunchSemantics::new([64, 1, 1], "idx", Some("idx >= n"));
         let mut program = KernelProgram::new(
-            "ir_forward_test",
+            "forward_test",
             DispatchDomain::Cells,
             launch,
             vec![KernelBinding::new(
-                0,
-                0,
-                "state",
-                "array<f32>",
-                BindingAccess::ReadWriteStorage,
+                0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage,
             )],
         );
-        let body_stmts = vec![
+        program.body = vec![
             Stmt::Assign {
                 target: Expr::ident("state").index(Expr::ident("idx")),
                 value: Expr::ident("value"),
@@ -1824,29 +1421,9 @@ mod tests {
                 expr: Expr::ident("state").index(Expr::ident("idx")),
             },
         ];
-        program.body = super::super::wgsl_ast::render_block_lines(
-            &cfd2_ir::ast::Block::new(body_stmts.clone()),
-        );
-        program.body_ast = Some(body_stmts);
-        program.body_ir_ops = vec![
-            KernelBodyIrOp::Store {
-                line_index: 0,
-                access: KernelBufferAccess::new("state", "idx"),
-                value_expr: "value".to_string(),
-                value_reads: Vec::new(),
-            },
-            KernelBodyIrOp::LetLoad {
-                line_index: 1,
-                name: "out".to_string(),
-                ty: None,
-                access: KernelBufferAccess::new("state", "idx"),
-            },
-        ];
 
         apply_aggressive_cleanup(&mut program);
-        // After forwarding, the let should load the stored value directly.
-        let forwarded_body = program.body_ast.as_ref().expect("body_ast should be set");
-        match &forwarded_body[1] {
+        match &program.body[1] {
             Stmt::Let { name, expr, .. } => {
                 assert_eq!(name, "out");
                 assert_eq!(expr.to_string(), "value");
@@ -1860,18 +1437,14 @@ mod tests {
         use cfd2_ir::ast::{Expr, Stmt};
         let launch = LaunchSemantics::new([64, 1, 1], "idx", Some("idx >= n"));
         let mut program = KernelProgram::new(
-            "ir_forward_guard_test",
+            "forward_guard_test",
             DispatchDomain::Cells,
             launch,
             vec![KernelBinding::new(
-                0,
-                0,
-                "state",
-                "array<f32>",
-                BindingAccess::ReadWriteStorage,
+                0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage,
             )],
         );
-        let body_stmts = vec![
+        program.body = vec![
             Stmt::Assign {
                 target: Expr::ident("state").index(Expr::ident("idx")),
                 value: Expr::ident("state").index(Expr::ident("idx2")),
@@ -1882,29 +1455,9 @@ mod tests {
                 expr: Expr::ident("state").index(Expr::ident("idx")),
             },
         ];
-        program.body = super::super::wgsl_ast::render_block_lines(
-            &cfd2_ir::ast::Block::new(body_stmts.clone()),
-        );
-        program.body_ast = Some(body_stmts);
-        program.body_ir_ops = vec![
-            KernelBodyIrOp::Store {
-                line_index: 0,
-                access: KernelBufferAccess::new("state", "idx"),
-                value_expr: "state[idx2]".to_string(),
-                value_reads: vec![KernelBufferAccess::new("state", "idx2")],
-            },
-            KernelBodyIrOp::LetLoad {
-                line_index: 1,
-                name: "out".to_string(),
-                ty: None,
-                access: KernelBufferAccess::new("state", "idx"),
-            },
-        ];
 
         apply_aggressive_cleanup(&mut program);
-        // Should NOT forward because the stored value reads from memory.
-        let body = program.body_ast.as_ref().expect("body_ast should be set");
-        match &body[1] {
+        match &program.body[1] {
             Stmt::Let { name, expr, .. } => {
                 assert_eq!(name, "out");
                 assert_eq!(expr.to_string(), "state[idx]");
@@ -1918,18 +1471,14 @@ mod tests {
         use cfd2_ir::ast::{Expr, Stmt};
         let launch = LaunchSemantics::new([64, 1, 1], "idx", Some("idx >= n"));
         let mut program = KernelProgram::new(
-            "ir_forward_invalidate_test",
+            "forward_invalidate_test",
             DispatchDomain::Cells,
             launch,
             vec![KernelBinding::new(
-                0,
-                0,
-                "state",
-                "array<f32>",
-                BindingAccess::ReadWriteStorage,
+                0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage,
             )],
         );
-        let body_stmts = vec![
+        program.body = vec![
             Stmt::Assign {
                 target: Expr::ident("state").index(Expr::ident("idx")),
                 value: Expr::ident("value"),
@@ -1945,30 +1494,9 @@ mod tests {
                 expr: Expr::ident("state").index(Expr::ident("idx")),
             },
         ];
-        program.body = super::super::wgsl_ast::render_block_lines(
-            &cfd2_ir::ast::Block::new(body_stmts.clone()),
-        );
-        program.body_ast = Some(body_stmts);
-        program.body_ir_ops = vec![
-            KernelBodyIrOp::Store {
-                line_index: 0,
-                access: KernelBufferAccess::new("state", "idx"),
-                value_expr: "value".to_string(),
-                value_reads: Vec::new(),
-            },
-            KernelBodyIrOp::Invalidate { line_index: 1 },
-            KernelBodyIrOp::LetLoad {
-                line_index: 2,
-                name: "out".to_string(),
-                ty: None,
-                access: KernelBufferAccess::new("state", "idx"),
-            },
-        ];
 
         apply_aggressive_cleanup(&mut program);
-        // Should NOT forward past the invalidation boundary (if stmt).
-        let body = program.body_ast.as_ref().expect("body_ast should be set");
-        match &body[2] {
+        match &program.body[2] {
             Stmt::Let { name, expr, .. } => {
                 assert_eq!(name, "out");
                 assert_eq!(expr.to_string(), "state[idx]");
@@ -1977,12 +1505,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn symbol_rename_skips_member_access_fields() {
-        let src = "let dt = max(constants.dt, state[idx].dt);";
-        let renamed = rename_identifier(src, "dt", "k1_dt");
-        assert_eq!(renamed, "let k1_dt = max(constants.dt, state[idx].dt);");
-    }
 
     #[test]
     fn detect_hazards_finds_raw() {
@@ -2185,10 +1707,6 @@ mod tests {
         // Body references eos_gamma only — but since it's declared, eos_r
         // should also appear in the Constants struct.
         program.body = vec![
-            "let c = constants.eos_gamma;".to_string(),
-            "state[idx] = c;".to_string(),
-        ];
-        program.body_ast = Some(vec![
             cfd2_ir::ast::Stmt::Let {
                 name: "c".to_string(),
                 ty: None,
@@ -2198,7 +1716,7 @@ mod tests {
                 target: cfd2_ir::ast::Expr::ident("state").index(cfd2_ir::ast::Expr::ident("idx")),
                 value: cfd2_ir::ast::Expr::ident("c"),
             },
-        ]);
+        ];
 
         let wgsl = lower_kernel_program_to_wgsl(&program).expect("lowering should succeed");
         let src = wgsl.to_wgsl();
@@ -2217,14 +1735,14 @@ mod tests {
     }
 
     #[test]
-    fn lowering_falls_back_to_string_scan_when_eos_params_empty() {
+    fn lowering_detects_eos_from_ast_when_eos_params_empty() {
         let launch = LaunchSemantics::new(
             [64, 1, 1],
             "global_id.y * constants.stride_x + global_id.x",
             Some("idx >= arrayLength(&state) / 2u"),
         );
         let mut program = KernelProgram::new(
-            "fallback_eos_test",
+            "ast_eos_test",
             DispatchDomain::Cells,
             launch,
             vec![
@@ -2232,10 +1750,17 @@ mod tests {
                 KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
             ],
         );
-        // No eos_params set (empty vec), but body references eos_gamma
+        // No eos_params set (empty vec), but body references eos_gamma via AST
         program.body = vec![
-            "let c = constants.eos_gamma;".to_string(),
-            "state[idx] = c;".to_string(),
+            cfd2_ir::ast::Stmt::Let {
+                name: "c".to_string(),
+                ty: None,
+                expr: cfd2_ir::ast::Expr::ident("constants").field("eos_gamma"),
+            },
+            cfd2_ir::ast::Stmt::Assign {
+                target: cfd2_ir::ast::Expr::ident("state").index(cfd2_ir::ast::Expr::ident("idx")),
+                value: cfd2_ir::ast::Expr::ident("c"),
+            },
         ];
         assert!(program.eos_params.is_empty());
 
@@ -2243,7 +1768,7 @@ mod tests {
         let src = wgsl.to_wgsl();
         assert!(
             src.contains("eos_gamma: f32"),
-            "string-scan fallback should detect eos_gamma in body"
+            "AST search should detect eos_gamma in body"
         );
     }
 

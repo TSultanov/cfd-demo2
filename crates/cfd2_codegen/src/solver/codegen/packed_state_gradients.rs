@@ -380,10 +380,10 @@ const PACKED_STATE_GRADIENTS_WORKGROUP_SIZE: u32 = 64;
 ///   1: if (idx >= ...) { return; }  (bounds check)
 ///   2: if (constants.scheme == 0u) { return; }  (scheme guard — goes into preamble)
 ///
-/// Returns (launch, preamble_stmts, preamble_lines, consumed_stmts).
+/// Returns (launch, preamble_stmts, consumed_stmts).
 fn launch_from_gradient_statements(
     stmts: &[Stmt],
-) -> Result<(LaunchSemantics, Vec<Stmt>, Vec<String>, usize), String> {
+) -> Result<(LaunchSemantics, Vec<Stmt>, usize), String> {
     // Statement 0: `let idx = ...`
     let idx_expr = match stmts.first() {
         Some(Stmt::Let { name, expr, .. }) if name == "idx" => expr.to_string(),
@@ -416,7 +416,7 @@ fn launch_from_gradient_statements(
     };
 
     // Statement 2: `if (constants.scheme == 0u) { return; }` — scheme guard, goes into preamble
-    let preamble_lines = match stmts.get(2) {
+    let preamble_stmts = match stmts.get(2) {
         Some(Stmt::If {
             then_block,
             else_block,
@@ -425,7 +425,7 @@ fn launch_from_gradient_statements(
             && then_block.stmts.len() == 1
             && matches!(then_block.stmts.first(), Some(Stmt::Return(None))) =>
         {
-            super::wgsl_ast::render_stmt_lines(&stmts[2..3])
+            stmts[2..3].to_vec()
         }
         _ => {
             return Err(
@@ -433,7 +433,6 @@ fn launch_from_gradient_statements(
             );
         }
     };
-    let preamble_stmts = stmts[2..3].to_vec();
 
     Ok((
         LaunchSemantics::new(
@@ -442,7 +441,6 @@ fn launch_from_gradient_statements(
             Some(bounds_expr),
         ),
         preamble_stmts,
-        preamble_lines,
         3,
     ))
 }
@@ -468,16 +466,13 @@ pub fn generate_packed_state_gradients_kernel_program(
     let items = base_items(eos_params);
     let bindings = kernel_bindings_from_items(&items)?;
     let main = main_fn(layout, unknown_stride);
-    let (launch, preamble_stmts, preamble_lines, consumed_stmts) =
+    let (launch, preamble_stmts, consumed_stmts) =
         launch_from_gradient_statements(&main.body.stmts)?;
     let kernel_stmts = &main.body.stmts[consumed_stmts..];
 
     let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
-    program.preamble = preamble_lines;
-    program.preamble_ast = Some(preamble_stmts);
-    program.body = super::wgsl_ast::render_stmt_lines(kernel_stmts);
-    program.body_ast = Some(kernel_stmts.to_vec());
-    program.local_symbols = super::wgsl_ast::collect_local_symbols(kernel_stmts);
+    program.preamble = preamble_stmts;
+    program.body = kernel_stmts.to_vec();
     program.eos_params = eos_params.to_vec();
 
     // Side-effect metadata for hazard analysis.

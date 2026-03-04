@@ -986,7 +986,7 @@ mod contract_tests {
     use crate::solver::model::module::KernelBundleModule;
     use crate::solver::model::ModelSpec;
     use cfd2_ir::solver::ir::{
-        BindingAccess, DispatchDomain, KernelBinding, KernelBodyIrOp, KernelBufferAccess,
+        BindingAccess, DispatchDomain, KernelBinding,
         KernelProgram, LaunchSemantics,
     };
 
@@ -1051,34 +1051,9 @@ mod contract_tests {
                     value: Expr::ident("state").index(Expr::ident("idx")),
                 },
             ];
-            program.indexing = cfd2_codegen::solver::codegen::wgsl_ast::render_block_lines(
-                &cfd2_ir::ast::Block::new(indexing_stmts.clone()),
-            );
-            program.indexing_ast = Some(indexing_stmts);
-            program.preamble = cfd2_codegen::solver::codegen::wgsl_ast::render_block_lines(
-                &cfd2_ir::ast::Block::new(preamble_stmts.clone()),
-            );
-            program.preamble_ast = Some(preamble_stmts);
-            program.body = cfd2_codegen::solver::codegen::wgsl_ast::render_block_lines(
-                &cfd2_ir::ast::Block::new(body_stmts.clone()),
-            );
-            program.body_ast = Some(body_stmts.clone());
-            program.body_ir_ops = vec![
-                KernelBodyIrOp::Invalidate { line_index: 1 },
-                KernelBodyIrOp::Store {
-                    line_index: 2,
-                    access: KernelBufferAccess::new("state", "idx"),
-                    value_expr: "value".to_string(),
-                    value_reads: Vec::new(),
-                },
-                KernelBodyIrOp::Store {
-                    line_index: 3,
-                    access: KernelBufferAccess::new("state", "inv"),
-                    value_expr: "state[idx]".to_string(),
-                    value_reads: vec![KernelBufferAccess::new("state", "idx")],
-                },
-            ];
-            program.local_symbols = vec!["value".to_string(), "inv".to_string()];
+            program.indexing = indexing_stmts;
+            program.preamble = preamble_stmts;
+            program.body = body_stmts;
             Ok(program)
         }
     }

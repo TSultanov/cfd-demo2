@@ -367,8 +367,8 @@ pub mod reconstruction;
 
 // Re-export port types for convenience
 pub use kernel_program::{
-    BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelBodyIrOp,
-    KernelBufferAccess, KernelProgram, LaunchSemantics, SideEffectMetadata,
+    BindingAccess, DispatchDomain, EffectResource, KernelBinding,
+    KernelProgram, LaunchSemantics, SideEffectMetadata,
 };
 pub use ports::{BufferAccess, BufferSpec, FieldSpec, ParamSpec, PortFieldKind, PortManifest};
 

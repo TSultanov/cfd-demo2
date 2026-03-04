@@ -122,9 +122,7 @@ pub fn generate_unified_assembly_kernel_program(
             let kernel_stmts = &main.body.stmts[consumed_stmts..];
 
             let mut program = KernelProgram::new(self.id, DispatchDomain::Cells, launch, bindings);
-            program.body = super::wgsl_ast::render_stmt_lines(kernel_stmts);
-            program.body_ast = Some(kernel_stmts.to_vec());
-            program.local_symbols = super::wgsl_ast::collect_local_symbols(kernel_stmts);
+            program.body = kernel_stmts.to_vec();
             program.eos_params = self.eos_params.to_vec();
             Ok(program)
         }

@@ -114,18 +114,12 @@ pub fn generate_generic_coupled_update_kernel_program(
     let kernel_stmts = &main.body.stmts[consumed_stmts..];
 
     let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
-    let indexing_stmts = vec![cfd2_ir::ast::Stmt::Let {
+    program.indexing = vec![cfd2_ir::ast::Stmt::Let {
         name: "base".to_string(),
         ty: None,
         expr: cfd2_ir::ast::Expr::ident("idx") * cfd2_ir::ast::Expr::lit_u32(slots.stride as u32),
     }];
-    program.indexing = super::wgsl_ast::render_block_lines(
-        &cfd2_ir::ast::Block::new(indexing_stmts.clone()),
-    );
-    program.indexing_ast = Some(indexing_stmts);
-    program.body = super::wgsl_ast::render_stmt_lines(kernel_stmts);
-    program.body_ast = Some(kernel_stmts.to_vec());
-    program.local_symbols = super::wgsl_ast::collect_local_symbols(kernel_stmts);
+    program.body = kernel_stmts.to_vec();
     program.eos_params = eos_params.to_vec();
     Ok(program)
 }
@@ -181,13 +175,9 @@ pub fn generate_generic_coupled_apply_kernel_program(
     );
 
     let kernel_stmts = &main.body.stmts[3..];
-    let body_lines = super::wgsl_ast::render_stmt_lines(kernel_stmts);
-    let local_symbols = super::wgsl_ast::collect_local_symbols(kernel_stmts);
 
     let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
-    program.body = body_lines;
-    program.body_ast = Some(kernel_stmts.to_vec());
-    program.local_symbols = local_symbols;
+    program.body = kernel_stmts.to_vec();
     program.eos_params = eos_params.to_vec();
     Ok(program)
 }
@@ -976,12 +966,13 @@ mod tests {
             program.launch.bounds_check_expr.as_deref(),
             Some("idx >= (arrayLength(&state) / 1u)")
         );
+        let rendered = cfd2_ir::ast::stmt::render_stmt_lines(&program.body);
         assert!(
-            !program.body.iter().any(|line| line.contains("let idx")),
+            !rendered.iter().any(|line| line.contains("let idx")),
             "idx declaration should be represented by launch semantics, not body lines"
         );
         assert!(
-            !program.body.iter().any(|line| line.contains("num_cells")),
+            !rendered.iter().any(|line| line.contains("num_cells")),
             "num_cells helper should be folded into launch bounds check"
         );
     }
@@ -1013,15 +1004,15 @@ mod tests {
         .expect("generate update kernel program");
 
         assert!(
-            program.local_symbols.is_empty(),
+            program.local_symbols().is_empty(),
             "update body emits no `let`/`var` declarations after launch extraction"
         );
         assert!(
-            !program.local_symbols.iter().any(|s| s == "idx"),
+            !program.local_symbols().iter().any(|s| s == "idx"),
             "`idx` launch alias should not be tracked as a renameable local symbol"
         );
         assert!(
-            !program.local_symbols.iter().any(|s| s == "num_cells"),
+            !program.local_symbols().iter().any(|s| s == "num_cells"),
             "`num_cells` launch helper should not remain after launch extraction"
         );
     }

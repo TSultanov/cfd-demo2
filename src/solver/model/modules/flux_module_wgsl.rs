@@ -210,17 +210,12 @@ pub fn generate_flux_module_kernel_program(
     let (launch, skip) = extract_launch_pattern_b(&main)?;
 
     let kernel_stmts = &main.body.stmts[skip..];
-    let body_lines = cfd2_codegen::solver::codegen::wgsl_ast::render_stmt_lines(kernel_stmts);
-    let local_symbols =
-        cfd2_codegen::solver::codegen::wgsl_ast::collect_local_symbols(kernel_stmts);
 
     let helper = render_bc_neighbor_scalar_helper();
 
     let mut program = KernelProgram::new(id, DispatchDomain::Faces, launch, bindings);
     program.helper_functions = vec![helper];
-    program.body = body_lines;
-    program.body_ast = Some(kernel_stmts.to_vec());
-    program.local_symbols = local_symbols;
+    program.body = kernel_stmts.to_vec();
     program.eos_params = eos_params.to_vec();
     Ok(program)
 }
@@ -264,17 +259,12 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
     let (launch, skip) = extract_launch_pattern_b(&main)?;
 
     let kernel_stmts = &main.body.stmts[skip..];
-    let body_lines = cfd2_codegen::solver::codegen::wgsl_ast::render_stmt_lines(kernel_stmts);
-    let local_symbols =
-        cfd2_codegen::solver::codegen::wgsl_ast::collect_local_symbols(kernel_stmts);
 
     let helper = render_bc_neighbor_scalar_helper();
 
     let mut program = KernelProgram::new(id, DispatchDomain::Faces, launch, bindings);
     program.helper_functions = vec![helper];
-    program.body = body_lines;
-    program.body_ast = Some(kernel_stmts.to_vec());
-    program.local_symbols = local_symbols;
+    program.body = kernel_stmts.to_vec();
     program.eos_params = eos_params.to_vec();
     Ok(program)
 }

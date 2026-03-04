@@ -111,61 +111,11 @@ pub struct SideEffectMetadata {
     pub uses_atomics: bool,
 }
 
-/// A simple buffer access expression tracked in structured body IR metadata.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct KernelBufferAccess {
-    pub base: String,
-    pub index_expr: String,
-}
-
-impl KernelBufferAccess {
-    pub fn new(base: impl Into<String>, index_expr: impl Into<String>) -> Self {
-        Self {
-            base: base.into(),
-            index_expr: index_expr.into(),
-        }
-    }
-}
-
-/// A structured operation used by IR-only fusion cleanup passes.
-///
-/// `line_index` is 0-based within a kernel segment's executable section
-/// (`preamble` followed by `body`), excluding indexing lines and fused segment markers.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum KernelBodyIrOp {
-    /// `state[idx] = value;`-like write.
-    Store {
-        line_index: usize,
-        access: KernelBufferAccess,
-        value_expr: String,
-        /// Memory reads that appear in `value_expr`.
-        value_reads: Vec<KernelBufferAccess>,
-    },
-    /// `let x = state[idx];`-like direct load.
-    LetLoad {
-        line_index: usize,
-        name: String,
-        ty: Option<String>,
-        access: KernelBufferAccess,
-    },
-    /// `x = x;`-like no-op assignment to a local symbol.
-    NoopSelfAssign { line_index: usize },
-    /// Conservative invalidation barrier (e.g. control flow boundary).
-    Invalidate { line_index: usize },
-}
-
-impl KernelBodyIrOp {
-    pub fn line_index(&self) -> usize {
-        match self {
-            KernelBodyIrOp::Store { line_index, .. }
-            | KernelBodyIrOp::LetLoad { line_index, .. }
-            | KernelBodyIrOp::NoopSelfAssign { line_index }
-            | KernelBodyIrOp::Invalidate { line_index } => *line_index,
-        }
-    }
-}
-
 /// IR representation of a fusion-capable kernel program.
+///
+/// All code sections (indexing, preamble, body) are represented as typed
+/// `Vec<Stmt>` ASTs. String emission (`lower_kernel_program_to_wgsl`) is
+/// the absolute final step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KernelProgram {
     pub id: String,
@@ -177,29 +127,16 @@ pub struct KernelProgram {
     /// Each entry is a complete WGSL function definition (including `fn` keyword and body).
     /// During fusion, helper functions from all programs are merged (deduplicated by content).
     pub helper_functions: Vec<String>,
-    pub preamble: Vec<String>,
-    pub indexing: Vec<String>,
-    pub body: Vec<String>,
-    /// Structured per-segment operation metadata for IR-only cleanup passes.
-    ///
-    /// Operations are indexed over `preamble` + `body` for this kernel segment.
-    pub body_ir_ops: Vec<KernelBodyIrOp>,
-    /// Local symbols that may need deterministic renaming when composing kernels.
-    pub local_symbols: Vec<String>,
+    /// Typed AST preamble statements (local declarations, scheme guards, etc.).
+    pub preamble: Vec<crate::ast::Stmt>,
+    /// Typed AST indexing statements (base address computation, etc.).
+    pub indexing: Vec<crate::ast::Stmt>,
+    /// Typed AST body statements (the main kernel computation).
+    pub body: Vec<crate::ast::Stmt>,
     pub side_effects: SideEffectMetadata,
     /// EOS parameters referenced by this kernel (structured declaration that replaces
     /// string-scan heuristic in `constants_extra_params_for_program`).
     pub eos_params: Vec<ParamSpec>,
-
-    // ── Structured AST fields (authoritative when present) ─────────
-
-    /// Structured AST body statements. When `Some`, this is the single source
-    /// of truth; `body` (`Vec<String>`) is a lazily-derived cache or empty.
-    pub body_ast: Option<Vec<crate::ast::Stmt>>,
-    /// Structured AST preamble statements.
-    pub preamble_ast: Option<Vec<crate::ast::Stmt>>,
-    /// Structured AST indexing statements.
-    pub indexing_ast: Option<Vec<crate::ast::Stmt>>,
 }
 
 impl KernelProgram {
@@ -218,14 +155,23 @@ impl KernelProgram {
             preamble: Vec::new(),
             indexing: Vec::new(),
             body: Vec::new(),
-            body_ir_ops: Vec::new(),
-            local_symbols: Vec::new(),
             side_effects: SideEffectMetadata::default(),
             eos_params: Vec::new(),
-            body_ast: None,
-            preamble_ast: None,
-            indexing_ast: None,
         }
+    }
+
+    /// Collect local symbols by walking Let/Var declarations in preamble and body.
+    ///
+    /// Indexing symbols are excluded because the indexing section is shared across
+    /// fused programs and never renamed.
+    pub fn local_symbols(&self) -> Vec<String> {
+        let stmts: Vec<crate::ast::Stmt> = self
+            .preamble
+            .iter()
+            .chain(self.body.iter())
+            .cloned()
+            .collect();
+        crate::ast::stmt::collect_local_symbols(&stmts)
     }
 
     pub fn sorted_bindings(&self) -> Vec<KernelBinding> {
@@ -279,23 +225,5 @@ mod tests {
         assert!(meta.write_set.is_empty());
         assert!(!meta.uses_barriers);
         assert!(!meta.uses_atomics);
-    }
-
-    #[test]
-    fn kernel_program_initializes_ir_ops_empty() {
-        let launch = LaunchSemantics::new([64, 1, 1], "idx", Some("idx >= n"));
-        let program = KernelProgram::new(
-            "kernel/a",
-            DispatchDomain::Cells,
-            launch,
-            vec![KernelBinding::new(
-                0,
-                0,
-                "state",
-                "array<f32>",
-                BindingAccess::ReadWriteStorage,
-            )],
-        );
-        assert!(program.body_ir_ops.is_empty());
     }
 }

@@ -8,7 +8,7 @@ use crate::solver::model::KernelId;
 use cfd2_codegen::solver::codegen::{
     bc_table::BcTable,
     dsl::XY,
-    wgsl_ast::{AssignOp, Block, Expr, ForStep, Stmt, Type},
+    wgsl_ast::{AssignOp, Expr, ForStep, Type},
     wgsl_dsl as dsl,
 };
 use cfd2_ir::solver::ir::{
@@ -409,12 +409,8 @@ fn generate_dp_init_kernel_program(
         dsl::array_access("state", Expr::ident("base") + d_p_offset),
         Expr::lit_f32(0.0),
     )];
-    program.indexing = rhie_chow_section_lines(indexing_stmts.clone());
-    program.indexing_ast = Some(indexing_stmts);
-    program.body = rhie_chow_section_lines(body_stmts.clone());
-    program.body_ast = Some(body_stmts.clone());
-    program.body_ir_ops = rhie_chow_segment_ir_ops(&[], &body_stmts);
-    program.local_symbols = rhie_chow_collect_local_symbols_sections(&[&body_stmts]);
+    program.indexing = indexing_stmts;
+    program.body = body_stmts;
     program
         .side_effects
         .read_set
@@ -443,42 +439,6 @@ fn rhie_chow_state_bindings() -> Vec<KernelBinding> {
         KernelBinding::new(0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage),
         KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
     ]
-}
-
-fn rhie_chow_section_lines(stmts: Vec<Stmt>) -> Vec<String> {
-    cfd2_codegen::solver::codegen::wgsl_ast::render_block_lines(&Block::new(stmts))
-}
-
-fn rhie_chow_segment_ir_ops(
-    preamble_stmts: &[Stmt],
-    body_stmts: &[Stmt],
-) -> Vec<cfd2_ir::solver::ir::KernelBodyIrOp> {
-    let (preamble_lines, mut preamble_ops) =
-        cfd2_codegen::solver::codegen::wgsl_ast::render_stmt_lines_with_ir(preamble_stmts);
-    let (_, mut body_ops) = cfd2_codegen::solver::codegen::wgsl_ast::render_stmt_lines_with_ir(body_stmts);
-    let body_offset = preamble_lines.len();
-
-    for op in &mut body_ops {
-        match op {
-            cfd2_ir::solver::ir::KernelBodyIrOp::Store { line_index, .. }
-            | cfd2_ir::solver::ir::KernelBodyIrOp::LetLoad { line_index, .. }
-            | cfd2_ir::solver::ir::KernelBodyIrOp::NoopSelfAssign { line_index }
-            | cfd2_ir::solver::ir::KernelBodyIrOp::Invalidate { line_index } => {
-                *line_index += body_offset;
-            }
-        }
-    }
-
-    preamble_ops.extend(body_ops);
-    preamble_ops
-}
-
-fn rhie_chow_collect_local_symbols_sections(sections: &[&[Stmt]]) -> Vec<String> {
-    let mut merged = Vec::new();
-    for section in sections {
-        merged.extend((*section).iter().cloned());
-    }
-    cfd2_codegen::solver::codegen::wgsl_ast::collect_local_symbols(&merged)
 }
 
 fn rhie_chow_grad_p_update_bindings() -> Vec<KernelBinding> {
@@ -624,15 +584,9 @@ fn generate_dp_update_from_diag_kernel_program(
         dsl::array_access("state", Expr::ident("base") + d_p_offset),
         Expr::ident("d_p"),
     )];
-    program.indexing = rhie_chow_section_lines(indexing_stmts.clone());
-    program.indexing_ast = Some(indexing_stmts);
-    program.preamble = rhie_chow_section_lines(preamble_stmts.clone());
-    program.preamble_ast = Some(preamble_stmts.clone());
-    program.body = rhie_chow_section_lines(body_stmts.clone());
-    program.body_ast = Some(body_stmts.clone());
-    program.body_ir_ops = rhie_chow_segment_ir_ops(&preamble_stmts, &body_stmts);
-    program.local_symbols =
-        rhie_chow_collect_local_symbols_sections(&[&preamble_stmts, &body_stmts]);
+    program.indexing = indexing_stmts;
+    program.preamble = preamble_stmts;
+    program.body = body_stmts;
     program
         .side_effects
         .read_set
@@ -879,15 +833,9 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
             Expr::ident("grad_out_p").field("y"),
         ),
     ];
-    program.indexing = rhie_chow_section_lines(indexing_stmts.clone());
-    program.indexing_ast = Some(indexing_stmts);
-    program.preamble = rhie_chow_section_lines(preamble_stmts.clone());
-    program.preamble_ast = Some(preamble_stmts.clone());
-    program.body = rhie_chow_section_lines(body_stmts.clone());
-    program.body_ast = Some(body_stmts.clone());
-    program.body_ir_ops = rhie_chow_segment_ir_ops(&preamble_stmts, &body_stmts);
-    program.local_symbols =
-        rhie_chow_collect_local_symbols_sections(&[&preamble_stmts, &body_stmts]);
+    program.indexing = indexing_stmts;
+    program.preamble = preamble_stmts;
+    program.body = body_stmts;
     for (group, binding) in [
         (0u32, 1u32),
         (1, 0),
@@ -984,11 +932,8 @@ fn generate_rhie_chow_store_grad_p_kernel_program(
             dsl::array_access("state", Expr::ident("base") + grad_p_y),
         ),
     ];
-    program.indexing = rhie_chow_section_lines(indexing_stmts.clone());
-    program.indexing_ast = Some(indexing_stmts);
-    program.body = rhie_chow_section_lines(body_stmts.clone());
-    program.body_ast = Some(body_stmts.clone());
-    program.body_ir_ops = rhie_chow_segment_ir_ops(&[], &body_stmts);
+    program.indexing = indexing_stmts;
+    program.body = body_stmts;
     program.side_effects.read_set.extend([
         EffectResource::component(0, 0, format!("state:{grad_p_x}")),
         EffectResource::component(0, 0, format!("state:{grad_p_y}")),
@@ -1118,15 +1063,9 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_program(
             dsl::array_access("state", Expr::ident("base") + u_y) - Expr::ident("corr_y"),
         ),
     ];
-    program.indexing = rhie_chow_section_lines(indexing_stmts.clone());
-    program.indexing_ast = Some(indexing_stmts);
-    program.preamble = rhie_chow_section_lines(preamble_stmts.clone());
-    program.preamble_ast = Some(preamble_stmts.clone());
-    program.body = rhie_chow_section_lines(body_stmts.clone());
-    program.body_ast = Some(body_stmts.clone());
-    program.body_ir_ops = rhie_chow_segment_ir_ops(&preamble_stmts, &body_stmts);
-    program.local_symbols =
-        rhie_chow_collect_local_symbols_sections(&[&preamble_stmts, &body_stmts]);
+    program.indexing = indexing_stmts;
+    program.preamble = preamble_stmts;
+    program.body = body_stmts;
     program.side_effects.read_set.extend([
         EffectResource::component(0, 0, format!("state:{d_p_offset}")),
         EffectResource::component(0, 0, format!("state:{grad_p_x}")),
@@ -1437,12 +1376,12 @@ mod tests {
             };
 
             assert!(
-                !program.local_symbols.iter().any(|s| s == "base"),
+                !program.local_symbols().iter().any(|s| s == "base"),
                 "{kernel_id}: indexing aliases should not be renamed in fusion"
             );
             for expected in expected_symbols {
                 assert!(
-                    program.local_symbols.iter().any(|s| s == expected),
+                    program.local_symbols().iter().any(|s| s == expected),
                     "{kernel_id}: missing expected local symbol '{expected}'"
                 );
             }

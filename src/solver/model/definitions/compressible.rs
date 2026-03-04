@@ -213,13 +213,10 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     system.add_equation(p_eqn);
     system.add_equation(t_eqn);
 
-    // Validate units to ensure the system is consistent (debug builds only)
-    #[cfg(debug_assertions)]
-    {
-        system
-            .validate_units()
-            .expect("compressible system failed unit validation");
-    }
+    // Validate units to ensure the system is consistent
+    system
+        .validate_units()
+        .expect("compressible system failed unit validation");
 
     system
 }
@@ -492,7 +489,18 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
         modules: vec![
             crate::solver::model::modules::eos::eos_module(eos),
             flux_module_module,
-            crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
+            {
+                let mut m =
+                    crate::solver::model::modules::generic_coupled::generic_coupled_module(method);
+                // Compressible dual-time stepping is most stable with conservative relaxation.
+                // These parameters are only applied in the update kernel when `dtau > 0`.
+                m.relaxation_defaults =
+                    Some(crate::solver::model::module::RelaxationDefaults {
+                        alpha_u: 0.2,
+                        alpha_p: 1.0,
+                    });
+                m
+            },
         ],
         // Use global defaults.
         linear_solver: None,

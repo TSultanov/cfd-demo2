@@ -162,7 +162,7 @@ fn solve_identity_system(solver: &mut UnifiedSolver, mesh: &Mesh) {
 }
 
 fn assert_fgmres_sizing(solver: &mut UnifiedSolver) {
-    let fgmres = solver.fgmres_sizing(10).expect("fgmres sizing");
+    let fgmres = solver.fgmres_sizing().expect("fgmres sizing");
     let expected_unknowns = solver.coupled_unknowns().expect("coupled unknowns");
     let expected_groups = (expected_unknowns + 63) / 64;
     assert_eq!(fgmres.num_unknowns, expected_unknowns);

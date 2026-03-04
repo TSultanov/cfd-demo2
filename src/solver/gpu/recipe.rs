@@ -318,11 +318,9 @@ impl SolverRecipe {
             time_scheme: time_scheme as u32,
             ..Default::default()
         };
-        if model.id == "compressible" {
-            // Compressible dual-time stepping is most stable with conservative relaxation by
-            // default. These parameters are only applied in the update kernel when `dtau > 0`.
-            initial_constants.alpha_u = 0.2;
-            initial_constants.alpha_p = 1.0;
+        if let Some(defaults) = model.relaxation_defaults() {
+            initial_constants.alpha_u = defaults.alpha_u;
+            initial_constants.alpha_p = defaults.alpha_p;
         }
 
         // Solver-level settings are model-owned defaults used for recipe derivation.

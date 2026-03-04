@@ -17,21 +17,6 @@ pub use crate::solver::model::backend::{
 
 use crate::solver::scheme::Scheme;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum EosSpec {
-    IdealGas { gamma: f32 },
-    Constant,
-}
-
-impl EosSpec {
-    pub fn ideal_gas_gamma(&self) -> Option<f32> {
-        match self {
-            EosSpec::IdealGas { gamma } => Some(*gamma),
-            EosSpec::Constant => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FluxComponent {
     pub name: String,

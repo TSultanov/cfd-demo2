@@ -40,13 +40,10 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
     let mut system = EquationSystem::new();
     system.add_equation(eqn);
 
-    // Validate units to ensure the system is consistent (debug builds only)
-    #[cfg(debug_assertions)]
-    {
-        system
-            .validate_units()
-            .expect("generic diffusion demo system failed unit validation");
-    }
+    // Validate units to ensure the system is consistent
+    system
+        .validate_units()
+        .expect("generic diffusion demo system failed unit validation");
 
     // Use typed field constructor for StateLayout/boundaries
     let phi = vol_scalar_dim::<Dimensionless>("phi");
@@ -113,13 +110,10 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
     let mut system = EquationSystem::new();
     system.add_equation(eqn);
 
-    // Validate units to ensure the system is consistent (debug builds only)
-    #[cfg(debug_assertions)]
-    {
-        system
-            .validate_units()
-            .expect("generic diffusion demo neumann system failed unit validation");
-    }
+    // Validate units to ensure the system is consistent
+    system
+        .validate_units()
+        .expect("generic diffusion demo neumann system failed unit validation");
 
     // Use typed field constructor for StateLayout/boundaries
     let phi = vol_scalar_dim::<Dimensionless>("phi");

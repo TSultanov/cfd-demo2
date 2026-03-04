@@ -78,6 +78,20 @@ impl ModelSpec {
             .ok_or_else(|| "model defines no EOS module".to_string())
     }
 
+    /// Query the model-declared relaxation defaults (if any module provides them).
+    pub fn relaxation_defaults(
+        &self,
+    ) -> Option<crate::solver::model::module::RelaxationDefaults> {
+        let mut found: Option<crate::solver::model::module::RelaxationDefaults> = None;
+        for module in &self.modules {
+            if let Some(defaults) = module.relaxation_defaults {
+                // Last-one-wins (like EOS), but typically only one module declares these.
+                found = Some(defaults);
+            }
+        }
+        found
+    }
+
     pub fn method(&self) -> Result<crate::solver::model::method::MethodSpec, String> {
         let mut found: Option<(&'static str, crate::solver::model::method::MethodSpec)> = None;
         for module in &self.modules {

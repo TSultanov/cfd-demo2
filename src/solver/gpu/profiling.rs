@@ -1,3 +1,5 @@
+pub use super::profiling_types::*;
+
 #[cfg(not(feature = "profiling"))]
 #[path = "profiling_disabled.rs"]
 mod profiling_disabled;

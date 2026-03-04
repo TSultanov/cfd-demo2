@@ -550,8 +550,7 @@ impl GpuUnifiedSolver {
         Ok(self.num_cells() * self.model.system.unknowns_per_cell())
     }
 
-    pub fn fgmres_sizing(&mut self, max_restart: usize) -> Result<FgmresSizing, String> {
-        let _ = max_restart;
+    pub fn fgmres_sizing(&mut self) -> Result<FgmresSizing, String> {
         let n = self.coupled_unknowns()?;
         Ok(FgmresSizing {
             num_unknowns: n,

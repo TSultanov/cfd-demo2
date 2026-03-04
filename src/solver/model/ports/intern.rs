@@ -25,7 +25,8 @@ fn get_interner() -> &'static DashMap<String, &'static str> {
 /// Otherwise, allocates a new `String`, leaks it to get a `&'static str`,
 /// stores it in the interner, and returns it.
 ///
-/// This is thread-safe and deduplicates identical strings.
+/// This is thread-safe and deduplicates identical strings. Uses `entry()` API
+/// to avoid leaking memory on race conditions.
 pub fn intern(s: &str) -> &'static str {
     let interner = get_interner();
 
@@ -34,15 +35,16 @@ pub fn intern(s: &str) -> &'static str {
         return entry.value();
     }
 
-    // Slow path: intern the string
-    // We need to handle the race condition where another thread interns
-    // the same string between our check and insert
-    let static_str: &'static str = Box::leak(s.to_string().into_boxed_str());
-
-    // insert returns the old value if the key already existed
-    match interner.insert(s.to_string(), static_str) {
-        Some(existing) => existing,
-        None => static_str,
+    // Slow path: use entry API to atomically check-and-insert, only leaking
+    // when the entry is actually vacant.
+    let entry = interner.entry(s.to_string());
+    match entry {
+        dashmap::Entry::Occupied(e) => *e.get(),
+        dashmap::Entry::Vacant(e) => {
+            let static_str: &'static str = Box::leak(s.to_string().into_boxed_str());
+            e.insert(static_str);
+            static_str
+        }
     }
 }
 
@@ -58,12 +60,16 @@ pub fn intern_string(s: String) -> &'static str {
         return entry.value();
     }
 
-    // Slow path: intern the string
-    let static_str: &'static str = Box::leak(s.clone().into_boxed_str());
-
-    match interner.insert(s, static_str) {
-        Some(existing) => existing,
-        None => static_str,
+    // Slow path: use entry API to atomically check-and-insert, only leaking
+    // when the entry is actually vacant.
+    let entry = interner.entry(s);
+    match entry {
+        dashmap::Entry::Occupied(e) => *e.get(),
+        dashmap::Entry::Vacant(e) => {
+            let static_str: &'static str = Box::leak(e.key().clone().into_boxed_str());
+            e.insert(static_str);
+            static_str
+        }
     }
 }
 

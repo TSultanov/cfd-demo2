@@ -3,6 +3,18 @@ use crate::solver::model::kernel::{
     ModelKernelFusionRule, ModelKernelGeneratorSpec, ModelKernelSpec,
 };
 
+/// Default relaxation parameters that a model module can declare.
+///
+/// These are used by the recipe builder to set initial `GpuConstants` values,
+/// avoiding hardcoded `model.id == "..."` checks in the recipe.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RelaxationDefaults {
+    /// Default velocity/momentum under-relaxation factor.
+    pub alpha_u: f32,
+    /// Default pressure under-relaxation factor.
+    pub alpha_p: f32,
+}
+
 /// Re-export IR-safe port manifest types for convenience.
 #[allow(unused_imports)]
 pub use cfd2_ir::solver::ir::ports::{
@@ -79,6 +91,12 @@ pub struct KernelBundleModule {
     /// This provides a structured declaration of params, fields, and buffers
     /// that can be used for validation and code generation.
     pub port_manifest: Option<PortManifest>,
+
+    /// Default relaxation parameters declared by this module.
+    ///
+    /// When present, the recipe uses these defaults instead of hardcoding
+    /// model-specific relaxation constants in the recipe builder.
+    pub relaxation_defaults: Option<RelaxationDefaults>,
 }
 
 impl ModelModule for KernelBundleModule {

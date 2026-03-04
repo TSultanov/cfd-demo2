@@ -1,0 +1,10 @@
+- What are the main architectural layers and how do they compose? Trace data flow from mesh generation through solver execution to readback.
+- How is the kernel fusion system designed? What are its invariants, edge cases, and potential failure modes?
+- Review the GPU resource management (buffers, bind groups, pipelines). Are there any leak risks or synchronization issues?
+- How robust is the linear solver stack (FGMRES, AMG, CG)? Are there numerical stability concerns?
+- Evaluate the codegen pipeline (cfd2_ir → cfd2_codegen → WGSL). What are its strengths and weaknesses?
+- What error handling patterns are used throughout? Are there places where panics could occur in production paths?
+- How is the port/field system designed? Is the type safety actually enforced at compile time vs runtime?
+- Review the boundary condition implementation. Are all BC types correctly handled for both compressible and incompressible solvers?
+- What are the most complex/fragile parts of the codebase that would benefit from refactoring?
+- Are there any performance bottlenecks visible from code structure alone (unnecessary allocations, redundant GPU dispatches, suboptimal data layouts)?

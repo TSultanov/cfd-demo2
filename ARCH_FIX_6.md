@@ -1,5 +1,10 @@
 # ARCH_FIX_6: Decouple Preconditioner Trait from FGMRES
 
+**Status: ✅ COMPLETE (Phases 1–6)**  
+All preconditioners now use the solver-agnostic `PreconditionerModule` trait and
+`PrecondContext` struct.  The old `FgmresPreconditionerModule` is deprecated and
+has zero remaining callers.
+
 ## Problem (Architecture Review Issue #6)
 
 The `FgmresPreconditionerModule` trait (in `krylov_precond.rs`) is the sole abstraction for
@@ -193,12 +198,19 @@ Completed full migration — `FgmresPreconditionerModule` is no longer used:
 `generic_linear_solver.rs`, `runtime_preconditioner.rs`, `coupled_schur.rs`,
 `generic_coupled_schur.rs`
 
-### Phase 7 (Optional): Unify CG solver path
+### Phase 7 (Optional / Deferred): Unify CG solver path
 
-With a solver-agnostic preconditioner trait, `ScalarCgModule` could be refactored to accept
-a `PreconditionerModule` for preconditioning. This would eliminate the duplicated CG code path
-and allow preconditioned CG. This is a stretch goal — the CG path currently works without
-preconditioning and is only used for specific SPD sub-problems.
+`ScalarCgModule` is a fully self-contained unpreconditioned CG solver with its own
+pipelines, bind group layouts, and buffer management.  It does not share any infrastructure
+with the FGMRES solver or the preconditioner trait.
+
+With `PreconditionerModule` now solver-agnostic, it would be possible to add a
+`preconditioner: Option<Box<dyn PreconditionerModule>>` to the CG solver, enabling
+preconditioned CG.  However this is a feature addition, not a refactor, and the CG
+solver's pipeline layout and iteration structure are sufficiently different from FGMRES
+that the integration would require new WGSL kernels and bind groups.
+
+**Status**: Deferred — not required for the core ARCH_FIX_6 objective.
 
 ## Risks
 

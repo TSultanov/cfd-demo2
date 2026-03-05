@@ -1,9 +1,6 @@
 use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
-use crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
 use crate::solver::gpu::lowering::kernel_registry;
-use crate::solver::gpu::modules::krylov_precond::{
-    DispatchGrids, FgmresPreconditionerModule, PrecondContext, PreconditionerModule,
-};
+use crate::solver::gpu::modules::krylov_precond::{PrecondContext, PreconditionerModule};
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::structs::PreconditionerType;
 use crate::solver::gpu::wgsl_reflect;
@@ -395,20 +392,5 @@ impl PreconditionerModule for CoupledSchurModule {
             ctx.dispatch.cells,
             "Schur Correct Vel",
         );
-    }
-}
-
-impl FgmresPreconditionerModule for CoupledSchurModule {
-    fn encode_apply(
-        &mut self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-        fgmres: &FgmresWorkspace,
-        input: wgpu::BindingResource<'_>,
-        output: wgpu::BindingResource<'_>,
-        dispatch: DispatchGrids,
-    ) {
-        let ctx = fgmres.precond_context(dispatch);
-        PreconditionerModule::encode_apply(self, device, encoder, &ctx, input, output);
     }
 }

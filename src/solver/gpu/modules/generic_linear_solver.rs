@@ -5,9 +5,7 @@
 //! with pluggable preconditioners.
 
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
-use crate::solver::gpu::modules::krylov_precond::{
-    DispatchGrids, FgmresPreconditionerModule, PrecondContext, PreconditionerModule,
-};
+use crate::solver::gpu::modules::krylov_precond::{PrecondContext, PreconditionerModule};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::recipe::{LinearSolverSpec, LinearSolverType};
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -54,13 +52,13 @@ impl From<&LinearSolverSpec> for GenericLinearSolverConfig {
 ///
 /// This is designed to be usable by any solver family (compressible, incompressible,
 /// generic coupled) without duplication of solver logic.
-pub struct GenericLinearSolverModule<P: FgmresPreconditionerModule> {
+pub struct GenericLinearSolverModule<P: PreconditionerModule> {
     resources: Option<KrylovSolveModule<P>>,
     config: GenericLinearSolverConfig,
     last_stats: LinearSolverStats,
 }
 
-impl<P: FgmresPreconditionerModule> GenericLinearSolverModule<P> {
+impl<P: PreconditionerModule> GenericLinearSolverModule<P> {
     /// Create a new linear solver module with the given configuration.
     pub fn new(config: GenericLinearSolverConfig) -> Self {
         Self {
@@ -115,7 +113,7 @@ impl<P: FgmresPreconditionerModule> GenericLinearSolverModule<P> {
 ///
 /// This allows different solver families to plug in their own preconditioner
 /// creation logic while sharing the solver infrastructure.
-pub trait PreconditionerFactory<P: FgmresPreconditionerModule> {
+pub trait PreconditionerFactory<P: PreconditionerModule> {
     /// Create the preconditioner-specific buffers and return bindings for FGMRES.
     fn create_precond_bindings(
         &self,
@@ -139,7 +137,7 @@ pub trait PreconditionerFactory<P: FgmresPreconditionerModule> {
 }
 
 /// Extended trait for preconditioners that own buffers.
-pub trait PreconditionerWithBuffers: FgmresPreconditionerModule {
+pub trait PreconditionerWithBuffers: PreconditionerModule {
     type Buffers;
 }
 
@@ -190,21 +188,6 @@ impl PreconditionerModule for IdentityPreconditioner {
             out_buf.offset,
             size,
         );
-    }
-}
-
-impl FgmresPreconditionerModule for IdentityPreconditioner {
-    fn encode_apply(
-        &mut self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-        fgmres: &FgmresWorkspace,
-        input: wgpu::BindingResource<'_>,
-        output: wgpu::BindingResource<'_>,
-        dispatch: DispatchGrids,
-    ) {
-        let ctx = fgmres.precond_context(dispatch);
-        PreconditionerModule::encode_apply(self, device, encoder, &ctx, input, output);
     }
 }
 

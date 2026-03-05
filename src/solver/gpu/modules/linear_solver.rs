@@ -2,7 +2,7 @@ use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::linear_solver::fgmres::{
     write_params, FgmresSolveOnceConfig, IterParams, RawFgmresParams,
 };
-use crate::solver::gpu::modules::krylov_precond::{FgmresPreconditionerModule, KrylovDispatch};
+use crate::solver::gpu::modules::krylov_precond::{KrylovDispatch, PreconditionerModule};
 use crate::solver::gpu::modules::krylov_solve::{
     EncodeSolveOnceArgs, KrylovSolveModule, SolveOnceArgs,
 };
@@ -73,7 +73,7 @@ fn one_submission_env_tunables() -> &'static OneSubmissionEnvTunables {
     TUNABLES.get_or_init(OneSubmissionEnvTunables::from_env)
 }
 
-pub fn solve_fgmres<P: FgmresPreconditionerModule>(
+pub fn solve_fgmres<P: PreconditionerModule>(
     krylov: &mut KrylovSolveModule<P>,
     args: SolveFgmresArgs<'_>,
 ) -> LinearSolverStats {
@@ -271,7 +271,7 @@ pub fn solve_fgmres<P: FgmresPreconditionerModule>(
 ///
 /// This path is intended for one-submission outer-loop batching where host readbacks inside the
 /// linear solve must be avoided. It does not perform host-side residual checks between restarts.
-pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
+pub fn encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>(
     krylov: &mut KrylovSolveModule<P>,
     args: SolveFgmresArgs<'_>,
     encoder: &mut wgpu::CommandEncoder,
@@ -431,7 +431,7 @@ pub fn encode_solve_fgmres_fixed_iterations<P: FgmresPreconditionerModule>(
 ///
 /// The caller can also encode assembly/update graphs into the returned encoders via the
 /// `pre_encode` and `post_encode` callbacks.
-pub fn submit_solve_fgmres_fixed_iterations_chunked<P: FgmresPreconditionerModule>(
+pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
     krylov: &mut KrylovSolveModule<P>,
     args: SolveFgmresArgs<'_>,
     pre_encode: &mut dyn FnMut(&mut wgpu::CommandEncoder),

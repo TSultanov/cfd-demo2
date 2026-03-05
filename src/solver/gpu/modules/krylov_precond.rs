@@ -37,9 +37,13 @@ impl DispatchGrids {
 
 /// A preconditioner module that can be plugged into the GPU FGMRES loop.
 ///
-/// The module owns any GPU resources it needs (buffers/pipelines/bind-groups) and
-/// records work into the caller-provided encoder. The only cross-module coupling
-/// should be via the public `FgmresWorkspace` interface.
+/// **Deprecated**: Use [`PreconditionerModule`] instead.  This trait is retained
+/// only for backward compatibility with code that has not yet migrated to the
+/// solver-agnostic [`PrecondContext`] API.
+#[deprecated(
+    since = "0.1.0",
+    note = "Use PreconditionerModule with PrecondContext instead"
+)]
 pub trait FgmresPreconditionerModule {
     fn encode_prepare(
         &mut self,
@@ -190,12 +194,16 @@ pub trait PreconditionerModule {
 /// Adapter that wraps a [`PreconditionerModule`] so it can be used where
 /// [`FgmresPreconditionerModule`] is expected.
 ///
-/// This enables incremental migration: new preconditioners implement the
-/// solver-agnostic [`PreconditionerModule`] trait, and this adapter bridges
-/// them into the existing FGMRES infrastructure without requiring changes
-/// to [`KrylovSolveModule`] or calling code.
+/// **Deprecated**: No longer needed since all solver infrastructure now uses
+/// [`PreconditionerModule`] directly.
+#[deprecated(
+    since = "0.1.0",
+    note = "No longer needed — KrylovSolveModule now uses PreconditionerModule directly"
+)]
+#[allow(deprecated)]
 pub struct PrecondAdapter<P>(pub P);
 
+#[allow(deprecated)]
 impl<P: PreconditionerModule> FgmresPreconditionerModule for PrecondAdapter<P> {
     fn encode_prepare(
         &mut self,

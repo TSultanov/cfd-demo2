@@ -169,12 +169,29 @@ Converted `CoupledSchurModule` and `GenericCoupledSchurPreconditioner` to use `P
 
 **Files**: `coupled_schur.rs`, `generic_coupled_schur.rs`
 
-### Phase 6: Deprecate `FgmresPreconditionerModule`
+### Phase 6: Deprecate `FgmresPreconditionerModule` ✅ DONE
 
-Once all preconditioners implement `PreconditionerModule`:
-- Mark `FgmresPreconditionerModule` as deprecated
-- Update `KrylovSolveModule` to accept `PreconditionerModule` (via the adapter or directly)
-- Remove the old trait in a follow-up
+Completed full migration — `FgmresPreconditionerModule` is no longer used:
+- `KrylovSolveModule<P>` bound changed from `FgmresPreconditionerModule` to `PreconditionerModule`
+- `KrylovSolveModule` now creates `PrecondContext` from its own `FgmresWorkspace` when calling
+  preconditioner methods
+- All generic function bounds in `linear_solver.rs` changed:
+  `solve_fgmres<P: PreconditionerModule>`,
+  `encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>`,
+  `submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>`
+- `GenericLinearSolverModule<P>` bound changed to `PreconditionerModule`
+- `PreconditionerWithBuffers` supertrait changed to `PreconditionerModule`
+- `PreconditionerFactory<P>` bound changed to `PreconditionerModule`
+- Removed all `FgmresPreconditionerModule` impls from preconditioner types
+  (RuntimePreconditionerModule, CoupledSchurModule, GenericCoupledSchurPreconditioner,
+  IdentityPreconditioner) — no longer needed since callers use `PreconditionerModule`
+- `FgmresPreconditionerModule` trait and `PrecondAdapter` struct marked
+  `#[deprecated]` — retained only for external backward compatibility
+- `coupled_schur.rs` no longer imports `FgmresWorkspace` at all
+
+**Files**: `krylov_precond.rs`, `krylov_solve.rs`, `linear_solver.rs`,
+`generic_linear_solver.rs`, `runtime_preconditioner.rs`, `coupled_schur.rs`,
+`generic_coupled_schur.rs`
 
 ### Phase 7 (Optional): Unify CG solver path
 

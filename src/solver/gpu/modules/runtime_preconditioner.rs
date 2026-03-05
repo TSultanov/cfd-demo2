@@ -1,9 +1,7 @@
 use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::generic_linear_solver::IdentityPreconditioner;
-use crate::solver::gpu::modules::krylov_precond::{
-    DispatchGrids, FgmresPreconditionerModule, PrecondContext, PreconditionerModule,
-};
+use crate::solver::gpu::modules::krylov_precond::{PrecondContext, PreconditionerModule};
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::structs::PreconditionerType;
 use crate::solver::gpu::wgsl_reflect;
@@ -633,52 +631,5 @@ impl PreconditionerModule for RuntimePreconditionerModule {
         );
         amg.sync_control_scalars(encoder, ctx.scalars_buffer);
         amg.v_cycle(encoder, Some(&override_bg));
-    }
-}
-
-impl FgmresPreconditionerModule for RuntimePreconditionerModule {
-    fn encode_prepare(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
-        rhs: wgpu::BindingResource<'_>,
-        dispatch: DispatchGrids,
-    ) {
-        let ctx = fgmres.precond_context(dispatch);
-        PreconditionerModule::encode_prepare(self, device, queue, encoder, &ctx, rhs);
-    }
-
-    fn prepare(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
-        _rhs: wgpu::BindingResource<'_>,
-        dispatch: DispatchGrids,
-    ) {
-        let ctx = fgmres.precond_context(dispatch);
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("runtime_preconditioner:prepare"),
-        });
-        if let Some(label) = self.encode_prepare_impl(device, queue, &mut encoder, &ctx)
-        {
-            queue.submit(Some(encoder.finish()));
-            crate::count_submission!("Runtime Preconditioner", label);
-        }
-    }
-
-    fn encode_apply(
-        &mut self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
-        input: wgpu::BindingResource<'_>,
-        output: wgpu::BindingResource<'_>,
-        dispatch: DispatchGrids,
-    ) {
-        let ctx = fgmres.precond_context(dispatch);
-        PreconditionerModule::encode_apply(self, device, encoder, &ctx, input, output);
     }
 }

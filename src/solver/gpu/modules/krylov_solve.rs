@@ -6,7 +6,7 @@ use crate::solver::gpu::linear_solver::fgmres::{
     FgmresSolveOnceResult, FgmresWorkspace, IterParams, RawFgmresParams, FGMRES_SCALAR_CONVERGED,
     FGMRES_SCALAR_RESIDUAL_EST,
 };
-use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
+use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, PreconditionerModule};
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::structs::LinearSolverStats;
 
@@ -99,7 +99,7 @@ impl<P> KrylovSolveModule<P> {
     }
 }
 
-impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {
+impl<P: PreconditionerModule> KrylovSolveModule<P> {
     pub fn solve_once(&mut self, args: SolveOnceArgs<'_>) -> FgmresSolveOnceResult {
         self.solve_once_with_prepare(args, false, false)
     }
@@ -143,13 +143,13 @@ impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {
         encode_write_params(&core, encoder, &args.params);
 
         if prepare_preconditioner {
+            let ctx = self.fgmres.precond_context(dispatch);
             self.precond.encode_prepare(
                 &context.device,
                 &context.queue,
                 encoder,
-                &self.fgmres,
+                &ctx,
                 system.rhs().as_entire_binding(),
-                dispatch,
             );
         }
         if seed_basis_from_system {
@@ -201,13 +201,13 @@ impl<P: FgmresPreconditionerModule> KrylovSolveModule<P> {
             rhs_norm_system,
             |_j, encoder, vj, z_buf| {
                 encoder.push_debug_group(precond_label);
+                let ctx = self.fgmres.precond_context(dispatch);
                 self.precond.encode_apply(
                     &context.device,
                     encoder,
-                    &self.fgmres,
+                    &ctx,
                     vj,
                     z_buf,
-                    dispatch,
                 );
                 encoder.pop_debug_group();
             },

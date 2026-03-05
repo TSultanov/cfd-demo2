@@ -8,12 +8,17 @@
 /// during module construction and pass the mapping into codegen.
 use std::collections::{HashMap, HashSet};
 
-use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
+use crate::solver::ir::ports::ResolvedStateSlotsSpec;
 use crate::solver::ir::{FaceScalarExpr, FaceVec2Expr, FieldKind, FluxModuleKernelSpec, StateLayout};
+use crate::solver::model::ports::PortRegistry;
 use crate::solver::shared::PrimitiveExpr;
 use crate::solver::units::UnitDim;
 
 /// Field metadata for precomputed layout lookups.
+///
+/// The `unit` and `offset` fields are only used in the legacy
+/// `resolve_fields_against_layout` path (test-only).
+#[allow(dead_code)]
 struct FieldMetadata {
     kind: FieldKind,
     unit: UnitDim,
@@ -38,6 +43,8 @@ fn build_field_metadata_map(layout: &StateLayout) -> HashMap<String, FieldMetada
         .collect()
 }
 
+/// Legacy layout-based resolver — retained for test equivalence checks only.
+#[cfg(test)]
 pub fn resolve_flux_module_state_slots(
     spec: &FluxModuleKernelSpec,
     primitives: &[(String, PrimitiveExpr)],
@@ -52,6 +59,8 @@ pub fn resolve_flux_module_state_slots(
     resolve_fields_against_layout(fields, &field_map, layout.stride())
 }
 
+/// Legacy layout-based runtime-scheme resolver — retained for test equivalence checks only.
+#[cfg(test)]
 pub fn resolve_flux_module_state_slots_runtime_scheme(
     variants: &[(crate::solver::scheme::Scheme, FluxModuleKernelSpec)],
     primitives: &[(String, PrimitiveExpr)],
@@ -66,6 +75,50 @@ pub fn resolve_flux_module_state_slots_runtime_scheme(
         collect_fields_from_flux_spec(spec, &primitive_map, &field_map, &mut fields)?;
     }
     resolve_fields_against_layout(fields, &field_map, layout.stride())
+}
+
+/// Resolve flux module state slots using a [`PortRegistry`] as the single source of truth.
+///
+/// This replaces `resolve_flux_module_state_slots` by delegating layout resolution to
+/// `PortRegistry::to_resolved_state_slots_for()` instead of manually walking `StateLayout`.
+pub fn resolve_flux_module_state_slots_via_registry(
+    spec: &FluxModuleKernelSpec,
+    primitives: &[(String, PrimitiveExpr)],
+    registry: &PortRegistry,
+) -> Result<ResolvedStateSlotsSpec, String> {
+    let layout = registry.state_layout();
+    let field_map = build_field_metadata_map(layout);
+    let primitive_map: HashMap<&str, &PrimitiveExpr> =
+        primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
+
+    let mut fields = HashSet::<String>::new();
+    collect_fields_from_flux_spec(spec, &primitive_map, &field_map, &mut fields)?;
+    registry
+        .to_resolved_state_slots_for(&fields)
+        .map_err(|e| format!("flux_module: {e}"))
+}
+
+/// Resolve flux module state slots for runtime scheme selection using a [`PortRegistry`].
+///
+/// This replaces `resolve_flux_module_state_slots_runtime_scheme` by delegating layout
+/// resolution to `PortRegistry::to_resolved_state_slots_for()`.
+pub fn resolve_flux_module_state_slots_runtime_scheme_via_registry(
+    variants: &[(crate::solver::scheme::Scheme, FluxModuleKernelSpec)],
+    primitives: &[(String, PrimitiveExpr)],
+    registry: &PortRegistry,
+) -> Result<ResolvedStateSlotsSpec, String> {
+    let layout = registry.state_layout();
+    let field_map = build_field_metadata_map(layout);
+    let primitive_map: HashMap<&str, &PrimitiveExpr> =
+        primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
+
+    let mut fields = HashSet::<String>::new();
+    for (_, spec) in variants {
+        collect_fields_from_flux_spec(spec, &primitive_map, &field_map, &mut fields)?;
+    }
+    registry
+        .to_resolved_state_slots_for(&fields)
+        .map_err(|e| format!("flux_module: {e}"))
 }
 
 fn collect_fields_from_flux_spec(
@@ -258,11 +311,14 @@ fn resolve_primitive_field_base(
     Ok(base.to_string())
 }
 
+/// Legacy layout-based resolution helper — retained for test equivalence checks only.
+#[cfg(test)]
 fn resolve_fields_against_layout(
     fields: HashSet<String>,
     field_map: &HashMap<String, FieldMetadata>,
     stride: u32,
 ) -> Result<ResolvedStateSlotsSpec, String> {
+    use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec};
     let mut slots = Vec::new();
     for name in fields {
         let meta = field_map.get(&name).ok_or_else(|| {
@@ -350,11 +406,17 @@ mod tests {
             ],
         };
 
-        let resolved = resolve_flux_module_state_slots(&spec, &primitives, &layout).unwrap();
-        assert_eq!(resolved.stride, 3);
-        assert_eq!(resolved.slots.len(), 2);
-        assert!(resolved.slots.iter().any(|s| s.name == "rho"));
-        assert!(resolved.slots.iter().any(|s| s.name == "rho_u"));
+        // Verify old (layout-based) and new (registry-based) resolvers produce the same result.
+        let resolved_old = resolve_flux_module_state_slots(&spec, &primitives, &layout).unwrap();
+        let registry = PortRegistry::new(layout);
+        let resolved_new =
+            resolve_flux_module_state_slots_via_registry(&spec, &primitives, &registry).unwrap();
+
+        assert_eq!(resolved_old, resolved_new, "registry-based resolver must match layout-based");
+        assert_eq!(resolved_new.stride, 3);
+        assert_eq!(resolved_new.slots.len(), 2);
+        assert!(resolved_new.slots.iter().any(|s| s.name == "rho"));
+        assert!(resolved_new.slots.iter().any(|s| s.name == "rho_u"));
     }
 }
 

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use cfd2_codegen::solver::codegen::KernelWgsl;
 use cfd2_ir::ports::{
-    ParamSpec, PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec,
+    ParamSpec, ResolvedStateSlotSpec, ResolvedStateSlotsSpec,
 };
 use cfd2_ir::kernel::StateLayout;
 
@@ -523,25 +523,13 @@ pub fn kernel_output_name_for_model(model_id: &str, kernel_id: KernelId) -> Resu
 }
 
 /// Convert a StateLayout to a ResolvedStateSlotsSpec for use in codegen.
+/// Build a [`ResolvedStateSlotsSpec`] from a [`StateLayout`].
+///
+/// Delegates to [`PortRegistry::to_resolved_state_slots()`] to avoid duplicating
+/// the field-to-slot conversion logic.
 fn resolved_slots_from_layout(layout: &StateLayout) -> ResolvedStateSlotsSpec {
-    let mut slots = Vec::new();
-    for field in layout.fields() {
-        let kind = match field.kind() {
-            cfd2_ir::kernel::FieldKind::Scalar => PortFieldKind::Scalar,
-            cfd2_ir::kernel::FieldKind::Vector2 => PortFieldKind::Vector2,
-            cfd2_ir::kernel::FieldKind::Vector3 => PortFieldKind::Vector3,
-        };
-        slots.push(ResolvedStateSlotSpec {
-            name: field.name().to_string(),
-            kind,
-            unit: field.unit(),
-            base_offset: field.offset(),
-        });
-    }
-    ResolvedStateSlotsSpec {
-        stride: layout.stride(),
-        slots,
-    }
+    let registry = crate::solver::model::ports::PortRegistry::new(layout.clone());
+    registry.to_resolved_state_slots()
 }
 
 /// Extract EOS params for WGSL generation.

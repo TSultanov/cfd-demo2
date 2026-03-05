@@ -141,6 +141,24 @@ impl PortRegistry {
         }
     }
 
+    /// Create a new port registry from a list of field references.
+    ///
+    /// This is the preferred constructor: the `StateLayout` is built internally,
+    /// so there is no separate layout object that can diverge from the registry.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let registry = PortRegistry::from_fields(vec![
+    ///     vol_vector_dim::<Velocity>("U"),
+    ///     vol_scalar_dim::<Pressure>("p"),
+    /// ]);
+    /// ```
+    pub fn from_fields(fields: Vec<crate::solver::model::backend::ast::FieldRef>) -> Self {
+        let state_layout = StateLayout::new(fields);
+        Self::new(state_layout)
+    }
+
     /// Get the state layout.
     pub fn state_layout(&self) -> &StateLayout {
         &self.state_layout
@@ -631,6 +649,84 @@ impl PortRegistry {
         self.field_name_to_id
             .get(name)
             .and_then(|id| self.field_ports.get(id))
+    }
+
+    /// Build a [`ResolvedStateSlotsSpec`] covering *all* fields in the underlying
+    /// [`StateLayout`].
+    ///
+    /// This is the preferred way to obtain an IR-safe snapshot of the full state
+    /// layout for codegen, replacing the pattern of manually walking `StateLayout`
+    /// in a separate resolver pass.
+    pub fn to_resolved_state_slots(
+        &self,
+    ) -> crate::solver::ir::ports::ResolvedStateSlotsSpec {
+        use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec};
+
+        let mut slots: Vec<ResolvedStateSlotSpec> = self
+            .state_layout
+            .fields()
+            .iter()
+            .map(|f| {
+                let kind = match f.component_count() {
+                    1 => PortFieldKind::Scalar,
+                    2 => PortFieldKind::Vector2,
+                    3 => PortFieldKind::Vector3,
+                    n => panic!("unsupported component count {n} for field '{}'", f.name()),
+                };
+                ResolvedStateSlotSpec {
+                    name: f.name().to_string(),
+                    kind,
+                    unit: f.unit(),
+                    base_offset: f.offset(),
+                }
+            })
+            .collect();
+        slots.sort_by(|a, b| a.name.cmp(&b.name));
+
+        crate::solver::ir::ports::ResolvedStateSlotsSpec {
+            stride: self.state_layout.stride(),
+            slots,
+        }
+    }
+
+    /// Build a [`ResolvedStateSlotsSpec`] covering only the named fields.
+    ///
+    /// Returns an error if any requested field is not present in the state layout.
+    pub fn to_resolved_state_slots_for(
+        &self,
+        field_names: &std::collections::HashSet<String>,
+    ) -> Result<crate::solver::ir::ports::ResolvedStateSlotsSpec, String> {
+        use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec};
+
+        let mut slots = Vec::new();
+        for name in field_names {
+            let f = self
+                .state_layout
+                .field(name)
+                .ok_or_else(|| format!("state field '{name}' not found in state layout"))?;
+            let kind = match f.component_count() {
+                1 => PortFieldKind::Scalar,
+                2 => PortFieldKind::Vector2,
+                3 => PortFieldKind::Vector3,
+                n => {
+                    return Err(format!(
+                        "unsupported component count {n} for field '{name}'"
+                    ))
+                }
+            };
+            slots.push(ResolvedStateSlotSpec {
+                name: name.clone(),
+                kind,
+                unit: f.unit(),
+                base_offset: f.offset(),
+            });
+        }
+        slots.sort_by(|a, b| a.name.cmp(&b.name));
+
+        Ok(crate::solver::ir::ports::ResolvedStateSlotsSpec {
+            stride: self.state_layout.stride(),
+            slots,
+        })
     }
 
     /// Get a parameter port entry by ID.
@@ -1922,5 +2018,84 @@ mod tests {
 
         // Should be idempotent
         assert_eq!(grad_p.id(), grad_p2.id());
+    }
+
+    #[test]
+    fn to_resolved_state_slots_covers_all_fields() {
+        let layout = StateLayout::new(vec![
+            vol_vector("U", si::VELOCITY),
+            vol_scalar("p", si::PRESSURE),
+            vol_scalar("d_p", si::D_P),
+        ]);
+        let registry = PortRegistry::new(layout);
+
+        let resolved = registry.to_resolved_state_slots();
+        assert_eq!(resolved.stride, 4);
+        assert_eq!(resolved.slots.len(), 3);
+
+        let u = resolved.slots.iter().find(|s| s.name == "U").unwrap();
+        assert_eq!(u.base_offset, 0);
+        assert_eq!(
+            u.kind,
+            crate::solver::ir::ports::PortFieldKind::Vector2
+        );
+
+        let p = resolved.slots.iter().find(|s| s.name == "p").unwrap();
+        assert_eq!(p.base_offset, 2);
+        assert_eq!(
+            p.kind,
+            crate::solver::ir::ports::PortFieldKind::Scalar
+        );
+
+        let dp = resolved.slots.iter().find(|s| s.name == "d_p").unwrap();
+        assert_eq!(dp.base_offset, 3);
+    }
+
+    #[test]
+    fn to_resolved_state_slots_for_subset() {
+        let layout = StateLayout::new(vec![
+            vol_vector("U", si::VELOCITY),
+            vol_scalar("p", si::PRESSURE),
+            vol_scalar("d_p", si::D_P),
+        ]);
+        let registry = PortRegistry::new(layout);
+
+        let names: std::collections::HashSet<String> =
+            ["U", "p"].iter().map(|s| s.to_string()).collect();
+        let resolved = registry.to_resolved_state_slots_for(&names).unwrap();
+        assert_eq!(resolved.stride, 4);
+        assert_eq!(resolved.slots.len(), 2);
+        assert!(resolved.slots.iter().any(|s| s.name == "U"));
+        assert!(resolved.slots.iter().any(|s| s.name == "p"));
+    }
+
+    #[test]
+    fn to_resolved_state_slots_for_missing_field_errors() {
+        let layout = StateLayout::new(vec![
+            vol_scalar("p", si::PRESSURE),
+        ]);
+        let registry = PortRegistry::new(layout);
+
+        let names: std::collections::HashSet<String> =
+            ["p", "nonexistent"].iter().map(|s| s.to_string()).collect();
+        let err = registry.to_resolved_state_slots_for(&names).unwrap_err();
+        assert!(err.contains("nonexistent"), "expected error to mention missing field: {err}");
+    }
+
+    #[test]
+    fn from_fields_constructs_equivalent_registry() {
+        let u = vol_vector("U", si::VELOCITY);
+        let p = vol_scalar("p", si::PRESSURE);
+
+        // Construct via from_fields (new path)
+        let registry_new = PortRegistry::from_fields(vec![u, p]);
+        // Construct via StateLayout (old path)
+        let layout = StateLayout::new(vec![u, p]);
+        let registry_old = PortRegistry::new(layout);
+
+        // Both should produce the same resolved state slots
+        let resolved_new = registry_new.to_resolved_state_slots();
+        let resolved_old = registry_old.to_resolved_state_slots();
+        assert_eq!(resolved_new, resolved_old);
     }
 }

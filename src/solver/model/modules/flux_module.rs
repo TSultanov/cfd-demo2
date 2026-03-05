@@ -285,6 +285,10 @@ pub fn flux_module_module(
         FluxModuleSpec::Scheme { gradients, .. } => gradients.is_some(),
     };
 
+    // Build a PortRegistry from the state layout — this becomes the single source of
+    // truth for field offset resolution throughout this module.
+    let registry = crate::solver::model::ports::PortRegistry::new(state_layout.clone());
+
     // Pre-resolve gradient targets and attach to manifest when gradients are enabled
     let mut gradient_targets = Vec::new();
     if has_gradients {
@@ -311,7 +315,7 @@ pub fn flux_module_module(
         .ordered()
         .map_err(|e| format!("primitive recovery ordering failed: {e}"))?;
     let resolved_state_slots =
-        resolve_state_slots_for_flux(&flux, system, state_layout, &ordered_primitives)?;
+        resolve_state_slots_for_flux(&flux, system, &registry, &ordered_primitives)?;
 
     let mut out = KernelBundleModule {
         name: "flux_module",
@@ -418,15 +422,20 @@ fn generate_flux_module_gradients_kernel_program_for_model(
 }
 
 /// Resolve state slots for flux module based on the spec type.
+///
+/// Uses the `PortRegistry` as the single source of truth for field offset resolution,
+/// replacing direct `StateLayout` scanning.
 fn resolve_state_slots_for_flux(
     flux: &FluxModuleSpec,
     system: &crate::solver::model::backend::ast::EquationSystem,
-    state_layout: &StateLayout,
+    registry: &crate::solver::model::ports::PortRegistry,
     primitives: &[(String, crate::solver::shared::PrimitiveExpr)],
 ) -> Result<crate::solver::ir::ports::ResolvedStateSlotsSpec, String> {
     match flux {
         FluxModuleSpec::Kernel { kernel, .. } => {
-            resolver_pass::resolve_flux_module_state_slots(kernel, primitives, state_layout)
+            resolver_pass::resolve_flux_module_state_slots_via_registry(
+                kernel, primitives, registry,
+            )
         }
         FluxModuleSpec::Scheme { scheme, .. } => {
             use crate::solver::scheme::Scheme;
@@ -452,10 +461,8 @@ fn resolve_state_slots_for_flux(
                 variants.push((reconstruction, kernel));
             }
 
-            resolver_pass::resolve_flux_module_state_slots_runtime_scheme(
-                &variants,
-                primitives,
-                state_layout,
+            resolver_pass::resolve_flux_module_state_slots_runtime_scheme_via_registry(
+                &variants, primitives, registry,
             )
         }
     }

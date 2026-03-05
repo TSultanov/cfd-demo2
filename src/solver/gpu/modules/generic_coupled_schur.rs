@@ -3,7 +3,9 @@ use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::coupled_schur::{
     CoupledPressureSolveKind, CoupledSchurInputs, CoupledSchurKernelIds, CoupledSchurModule,
 };
-use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
+use crate::solver::gpu::modules::krylov_precond::{
+    DispatchGrids, FgmresPreconditionerModule, PrecondContext, PreconditionerModule,
+};
 use crate::solver::gpu::structs::GpuGenericCoupledSchurSetupParams;
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
@@ -207,18 +209,17 @@ impl GenericCoupledSchurPreconditioner {
     }
 }
 
-impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
+impl PreconditionerModule for GenericCoupledSchurPreconditioner {
     fn encode_prepare(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        _fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
+        ctx: &PrecondContext<'_>,
         _rhs: wgpu::BindingResource<'_>,
-        dispatch: DispatchGrids,
     ) {
         self.write_setup_params(queue);
-        self.encode_setup(encoder, dispatch);
+        self.encode_setup(encoder, ctx.dispatch);
 
         if self.schur.pressure_kind() == CoupledPressureSolveKind::Amg {
             if !self.schur.has_amg_resources() {
@@ -247,6 +248,32 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
         }
     }
 
+    fn encode_apply(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        ctx: &PrecondContext<'_>,
+        input: wgpu::BindingResource<'_>,
+        output: wgpu::BindingResource<'_>,
+    ) {
+        PreconditionerModule::encode_apply(&mut self.schur, device, encoder, ctx, input, output);
+    }
+}
+
+impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
+    fn encode_prepare(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        fgmres: &crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace,
+        rhs: wgpu::BindingResource<'_>,
+        dispatch: DispatchGrids,
+    ) {
+        let ctx = fgmres.precond_context(dispatch);
+        PreconditionerModule::encode_prepare(self, device, queue, encoder, &ctx, rhs);
+    }
+
     fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -258,7 +285,8 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Generic Coupled Schur Setup"),
         });
-        self.encode_prepare(device, queue, &mut encoder, fgmres, rhs, dispatch);
+        let ctx = fgmres.precond_context(dispatch);
+        PreconditionerModule::encode_prepare(self, device, queue, &mut encoder, &ctx, rhs);
         queue.submit(Some(encoder.finish()));
         crate::count_submission!("Generic Coupled Schur", "setup");
     }
@@ -272,7 +300,7 @@ impl FgmresPreconditionerModule for GenericCoupledSchurPreconditioner {
         output: wgpu::BindingResource<'_>,
         dispatch: DispatchGrids,
     ) {
-        self.schur
-            .encode_apply(device, encoder, fgmres, input, output, dispatch);
+        let ctx = fgmres.precond_context(dispatch);
+        PreconditionerModule::encode_apply(self, device, encoder, &ctx, input, output);
     }
 }

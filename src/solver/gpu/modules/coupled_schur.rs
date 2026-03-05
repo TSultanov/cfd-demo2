@@ -1,7 +1,9 @@
 use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
 use crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
 use crate::solver::gpu::lowering::kernel_registry;
-use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
+use crate::solver::gpu::modules::krylov_precond::{
+    DispatchGrids, FgmresPreconditionerModule, PrecondContext, PreconditionerModule,
+};
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::structs::PreconditionerType;
 use crate::solver::gpu::wgsl_reflect;
@@ -237,7 +239,7 @@ impl CoupledSchurModule {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         pipeline: &wgpu::ComputePipeline,
-        fgmres: &FgmresWorkspace,
+        ctx: &PrecondContext<'_>,
         schur_bg: &wgpu::BindGroup,
         _dispatch: (u32, u32),
         label: &str,
@@ -248,12 +250,12 @@ impl CoupledSchurModule {
         });
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, schur_bg, &[]);
-        pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
+        pass.set_bind_group(1, ctx.matrix_bg, &[]);
         pass.set_bind_group(2, &self.bg_schur_precond, &[]);
         pass.set_bind_group(3, &self.bg_pressure_matrix, &[]);
         pass.dispatch_workgroups_indirect(
-            fgmres.indirect_args_buffer(),
-            FgmresWorkspace::indirect_dispatch_cells_offset(),
+            ctx.indirect_args,
+            PrecondContext::INDIRECT_DISPATCH_CELLS_OFFSET,
         );
     }
 
@@ -285,17 +287,16 @@ impl CoupledSchurModule {
     }
 }
 
-impl FgmresPreconditionerModule for CoupledSchurModule {
+impl PreconditionerModule for CoupledSchurModule {
     fn encode_apply(
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        fgmres: &FgmresWorkspace,
+        ctx: &PrecondContext<'_>,
         input: wgpu::BindingResource<'_>,
         output: wgpu::BindingResource<'_>,
-        dispatch: DispatchGrids,
     ) {
-        let aux = fgmres.temp_buffer().as_entire_binding();
+        let aux = ctx.scratch_b.as_entire_binding();
 
         let current_bg = self.create_schur_bg(
             device,
@@ -317,9 +318,9 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
         self.dispatch_schur(
             encoder,
             &self.pipeline_predict_and_form,
-            fgmres,
+            ctx,
             &current_bg,
-            dispatch.cells,
+            ctx.dispatch.cells,
             "Schur Predict & Form",
         );
 
@@ -330,7 +331,7 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
                         .amg_level0_state_override
                         .as_ref()
                         .expect("AMG override bind group missing");
-                    amg.sync_control_scalars(encoder, fgmres.scalars_buffer());
+                    amg.sync_control_scalars(encoder, ctx.scalars_buffer);
                     amg.v_cycle(encoder, Some(override_bg));
                 }
             }
@@ -348,7 +349,7 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
                     timestamp_writes: None,
                 });
                 pass.set_pipeline(&self.pipeline_relax_pressure);
-                pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
+                pass.set_bind_group(1, ctx.matrix_bg, &[]);
                 pass.set_bind_group(2, &self.bg_schur_precond, &[]);
                 pass.set_bind_group(3, &self.bg_pressure_matrix, &[]);
 
@@ -360,8 +361,8 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
                     };
                     pass.set_bind_group(0, bg, &[]);
                     pass.dispatch_workgroups_indirect(
-                        fgmres.indirect_args_buffer(),
-                        FgmresWorkspace::indirect_dispatch_cells_offset(),
+                        ctx.indirect_args,
+                        PrecondContext::INDIRECT_DISPATCH_CELLS_OFFSET,
                     );
                     p_result_in_sol = !p_result_in_sol;
                 }
@@ -376,9 +377,9 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
                 self.dispatch_schur(
                     encoder,
                     &self.pipeline_correct_vel,
-                    fgmres,
+                    ctx,
                     correct_bg,
-                    dispatch.cells,
+                    ctx.dispatch.cells,
                     "Schur Correct Vel",
                 );
                 return;
@@ -389,10 +390,25 @@ impl FgmresPreconditionerModule for CoupledSchurModule {
         self.dispatch_schur(
             encoder,
             &self.pipeline_correct_vel,
-            fgmres,
+            ctx,
             &current_bg,
-            dispatch.cells,
+            ctx.dispatch.cells,
             "Schur Correct Vel",
         );
+    }
+}
+
+impl FgmresPreconditionerModule for CoupledSchurModule {
+    fn encode_apply(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        fgmres: &FgmresWorkspace,
+        input: wgpu::BindingResource<'_>,
+        output: wgpu::BindingResource<'_>,
+        dispatch: DispatchGrids,
+    ) {
+        let ctx = fgmres.precond_context(dispatch);
+        PreconditionerModule::encode_apply(self, device, encoder, &ctx, input, output);
     }
 }

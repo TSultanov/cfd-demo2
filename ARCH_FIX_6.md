@@ -137,23 +137,35 @@ unchanged.
 
 **Files**: `generic_linear_solver.rs`
 
-### Phase 4: Migrate `RuntimePreconditionerModule`
+### Phase 4: Migrate `RuntimePreconditionerModule` ✅ DONE
 
-Convert Jacobi, Block-Jacobi, and AMG preconditioner code to use `PrecondContext` instead of
-`FgmresWorkspace`. This is the largest migration since `RuntimePreconditionerModule` uses the
-most workspace internals.
+Converted Jacobi, Block-Jacobi, and AMG preconditioner code to use `PrecondContext`:
+- Refactored `encode_refresh_jacobi_diag_inv`, `encode_build_block_jacobi`,
+  and `encode_prepare_impl` to take `&PrecondContext<'_>` instead of `&FgmresWorkspace`
+- `fgmres.create_vector_bind_group()` → `ctx.create_vector_bind_group()`
+- `fgmres.matrix_bg()` → `ctx.matrix_bg`, etc.
+- `fgmres.w_buffer()` → `ctx.scratch_a`, `fgmres.temp_buffer()` → `ctx.scratch_b`,
+  `fgmres.z_binding(0)` → `ctx.scratch_c`
+- `FgmresWorkspace::indirect_dispatch_{dofs,cells}_offset()` →
+  `PrecondContext::INDIRECT_DISPATCH_{DOFS,CELLS}_OFFSET`
+- Identity fallbacks now use `PreconditionerModule::encode_apply` on the identity field
+- `FgmresPreconditionerModule` impl is a thin delegation layer (creates context + delegates)
 
-The key changes:
-- `create_vector_bind_group()` calls must be replaced with direct bind group creation using
-  the input/output bindings (the helper is just a convenience wrapper)
-- `matrix_bg()`, `precond_bg()`, `params_bg()` → `ctx.matrix_bg`, `ctx.precond_bg`, `ctx.params_bg`
-- `indirect_args_buffer()` → `ctx.indirect_args`
+Extended `PrecondContext` with:
+- `vectors_layout: &'a wgpu::BindGroupLayout` — group-0 vector BGL
+- `vector_bindings: &'static [WgslBindingDesc]` — group-0 binding descriptors
+- `create_vector_bind_group()` helper method (replaces `FgmresWorkspace::create_vector_bind_group`)
 
-**Files**: `runtime_preconditioner.rs`
+**Files**: `krylov_precond.rs`, `fgmres.rs`, `runtime_preconditioner.rs`
 
-### Phase 5: Migrate Schur preconditioners
+### Phase 5: Migrate Schur preconditioners ✅ DONE
 
-Convert `CoupledSchurModule` and `GenericCoupledSchurPreconditioner` to use `PrecondContext`.
+Converted `CoupledSchurModule` and `GenericCoupledSchurPreconditioner` to use `PrecondContext`:
+- `dispatch_schur` refactored: `fgmres.matrix_bg()` → `ctx.matrix_bg`,
+  `fgmres.indirect_args_buffer()` → `ctx.indirect_args`
+- `fgmres.temp_buffer()` → `ctx.scratch_b` (used as Chebyshev swap buffer / `p_prev`)
+- `fgmres.scalars_buffer()` → `ctx.scalars_buffer` (AMG sync)
+- `GenericCoupledSchurPreconditioner` delegates prepare/apply through `PreconditionerModule`
 
 **Files**: `coupled_schur.rs`, `generic_coupled_schur.rs`
 

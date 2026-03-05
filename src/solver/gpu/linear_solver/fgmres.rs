@@ -962,6 +962,8 @@ impl FgmresWorkspace {
             scratch_a: &self.b_w,
             scratch_b: &self.b_temp,
             scratch_c: self.z_binding(0),
+            vectors_layout: &self.bgl_vectors,
+            vector_bindings: self.vector_bindings,
             dispatch,
             num_dofs: self.n,
         }

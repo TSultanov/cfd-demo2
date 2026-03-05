@@ -2,6 +2,7 @@ use crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
 use crate::solver::gpu::linear_solver::fgmres::{
     dispatch_2d, dispatch_x_threads, workgroups_for_size,
 };
+use crate::solver::gpu::wgsl_reflect::{self, WgslBindingDesc};
 
 /// Dispatch grid dimensions in workgroups.
 #[derive(Clone, Copy, Debug)]
@@ -105,17 +106,49 @@ pub struct PrecondContext<'a> {
     ///
     /// In the FGMRES workspace this corresponds to `z_binding(0)`.
     pub scratch_c: wgpu::BindingResource<'a>,
+    /// Bind group layout for group-0 vector bindings (`vec_x`, `vec_y`, `vec_z`).
+    pub vectors_layout: &'a wgpu::BindGroupLayout,
+    /// Binding descriptors for group-0 vector bindings.
+    pub(crate) vector_bindings: &'static [WgslBindingDesc],
     /// Dispatch grid dimensions.
     pub dispatch: DispatchGrids,
     /// Total number of DOFs in the linear system.
     pub num_dofs: u32,
 }
 
-impl PrecondContext<'_> {
+impl<'a> PrecondContext<'a> {
     /// Byte offset within [`Self::indirect_args`] for a DOF-count indirect dispatch.
     pub const INDIRECT_DISPATCH_DOFS_OFFSET: u64 = 0;
     /// Byte offset within [`Self::indirect_args`] for a cell-count indirect dispatch.
     pub const INDIRECT_DISPATCH_CELLS_OFFSET: u64 = 16;
+
+    /// Create a group-0 vector bind group binding `vec_x`, `vec_y`, `vec_z`.
+    ///
+    /// This is the solver-agnostic replacement for
+    /// `FgmresWorkspace::create_vector_bind_group`.
+    pub fn create_vector_bind_group(
+        &self,
+        device: &wgpu::Device,
+        x: wgpu::BindingResource<'a>,
+        y: wgpu::BindingResource<'a>,
+        z: wgpu::BindingResource<'a>,
+        label: &str,
+    ) -> wgpu::BindGroup {
+        wgsl_reflect::create_bind_group_from_bindings(
+            device,
+            label,
+            self.vectors_layout,
+            self.vector_bindings,
+            0,
+            |name| match name {
+                "vec_x" => Some(x.clone()),
+                "vec_y" => Some(y.clone()),
+                "vec_z" => Some(z.clone()),
+                _ => None,
+            },
+        )
+        .unwrap_or_else(|err| panic!("{label} creation failed: {err}"))
+    }
 }
 
 /// Solver-agnostic preconditioner trait.

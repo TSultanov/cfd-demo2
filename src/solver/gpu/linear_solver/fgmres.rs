@@ -1,4 +1,5 @@
 use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, PrecondContext};
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::wgsl_reflect;
@@ -944,6 +945,26 @@ impl FgmresWorkspace {
 
     pub fn params_bg(&self) -> &wgpu::BindGroup {
         &self.bg_params
+    }
+
+    /// Build a solver-agnostic [`PrecondContext`] from this workspace.
+    ///
+    /// This bundles the shared GPU resources (matrix/precond/params bind groups,
+    /// indirect dispatch buffer, scratch buffers) into a struct that
+    /// preconditioners can use without depending on `FgmresWorkspace` internals.
+    pub fn precond_context(&self, dispatch: DispatchGrids) -> PrecondContext<'_> {
+        PrecondContext {
+            matrix_bg: &self.bg_matrix,
+            precond_bg: &self.bg_precond,
+            params_bg: &self.bg_params,
+            indirect_args: &self.b_indirect_args,
+            scalars_buffer: &self.b_scalars,
+            scratch_a: &self.b_w,
+            scratch_b: &self.b_temp,
+            scratch_c: self.z_binding(0),
+            dispatch,
+            num_dofs: self.n,
+        }
     }
 
     pub fn logic_bg(&self) -> &wgpu::BindGroup {

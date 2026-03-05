@@ -5,7 +5,9 @@
 //! with pluggable preconditioners.
 
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
-use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, FgmresPreconditionerModule};
+use crate::solver::gpu::modules::krylov_precond::{
+    DispatchGrids, FgmresPreconditionerModule, PrecondContext, PreconditionerModule,
+};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::recipe::{LinearSolverSpec, LinearSolverType};
 use crate::solver::gpu::structs::LinearSolverStats;
@@ -151,17 +153,43 @@ pub struct SolveResult {
 
 /// Identity preconditioner (no preconditioning).
 ///
-/// Note: A true identity preconditioner would simply copy input to output.
-/// For FGMRES, this is not typically useful, but we provide it for completeness.
-/// In practice, use at least Jacobi preconditioning.
+/// Simply copies the input vector to the output vector unchanged.
+/// Uses `encoder.copy_buffer_to_buffer()` — no compute pipeline needed.
 #[derive(Default)]
-pub struct IdentityPreconditioner {
-    copy_pipeline: Option<wgpu::ComputePipeline>,
-}
+pub struct IdentityPreconditioner;
 
 impl IdentityPreconditioner {
     pub fn new() -> Self {
-        Self::default()
+        Self
+    }
+}
+
+impl PreconditionerModule for IdentityPreconditioner {
+    fn encode_apply(
+        &mut self,
+        _device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        ctx: &PrecondContext<'_>,
+        input: wgpu::BindingResource<'_>,
+        output: wgpu::BindingResource<'_>,
+    ) {
+        let wgpu::BindingResource::Buffer(in_buf) = &input else {
+            return;
+        };
+        let wgpu::BindingResource::Buffer(out_buf) = &output else {
+            return;
+        };
+        let size = in_buf
+            .size
+            .map(|s| s.get())
+            .unwrap_or((ctx.num_dofs as u64) * 4);
+        encoder.copy_buffer_to_buffer(
+            in_buf.buffer,
+            in_buf.offset,
+            out_buf.buffer,
+            out_buf.offset,
+            size,
+        );
     }
 }
 
@@ -173,33 +201,10 @@ impl FgmresPreconditionerModule for IdentityPreconditioner {
         fgmres: &FgmresWorkspace,
         input: wgpu::BindingResource<'_>,
         output: wgpu::BindingResource<'_>,
-        _dispatch: DispatchGrids,
+        dispatch: DispatchGrids,
     ) {
-        let _ = &self.copy_pipeline;
-
-        let vector_bg = fgmres.create_vector_bind_group(
-            device,
-            input,
-            output.clone(),
-            output,
-            "Identity preconditioner copy BG",
-        );
-
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Identity preconditioner copy"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(fgmres.pipeline_copy());
-            pass.set_bind_group(0, &vector_bg, &[]);
-            pass.set_bind_group(1, fgmres.matrix_bg(), &[]);
-            pass.set_bind_group(2, fgmres.precond_bg(), &[]);
-            pass.set_bind_group(3, fgmres.params_bg(), &[]);
-            pass.dispatch_workgroups_indirect(
-                fgmres.indirect_args_buffer(),
-                FgmresWorkspace::indirect_dispatch_dofs_offset(),
-            );
-        }
+        let ctx = fgmres.precond_context(dispatch);
+        PreconditionerModule::encode_apply(self, device, encoder, &ctx, input, output);
     }
 }
 

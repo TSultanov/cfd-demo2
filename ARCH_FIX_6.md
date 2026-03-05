@@ -93,77 +93,47 @@ of `FgmresWorkspace`.
 
 ## Phased Plan
 
-### Phase 1: Extract `PreconditionerContext` struct
+### Phase 1: Extract `PreconditionerContext` struct ✅ DONE
 
-Create a new struct that bundles the solver-agnostic resources currently accessed via
-`FgmresWorkspace`:
+Created `PrecondContext<'a>` in `krylov_precond.rs` with solver-agnostic fields:
+- `matrix_bg`, `precond_bg`, `params_bg` — bind groups (groups 1–3)
+- `indirect_args` — indirect dispatch buffer
+- `scalars_buffer` — solver control scalars
+- `scratch_a`, `scratch_b` — full-size scratch buffers (mapped to FGMRES `w` and `temp`)
+- `scratch_c` — scratch binding resource (mapped to FGMRES `z_binding(0)`)
+- `dispatch: DispatchGrids` — workgroup dimensions
+- `num_dofs: u32` — system size
 
-```rust
-/// Solver-agnostic context passed to preconditioners.
-///
-/// Carries bind groups, dispatch parameters, and workspace buffers that any
-/// linear solver (FGMRES, CG, BiCGSTAB, ...) would need to provide.
-pub struct PrecondContext<'a> {
-    pub device: &'a wgpu::Device,
-    pub queue: &'a wgpu::Queue,
-    /// CSR matrix bind group (group 1 in current layout).
-    pub matrix_bg: &'a wgpu::BindGroup,
-    /// Diagonal preconditioner bind group (group 2).
-    pub precond_bg: &'a wgpu::BindGroup,
-    /// Solver params bind group (group 3).
-    pub params_bg: &'a wgpu::BindGroup,
-    /// Indirect dispatch buffer for variable-size dispatches.
-    pub indirect_args: &'a wgpu::Buffer,
-    /// Temporary workspace buffer (at least num_dofs * 4 bytes).
-    pub temp_buffer: &'a wgpu::Buffer,
-    /// Solver control scalars buffer (for AMG sync, convergence flags).
-    pub scalars_buffer: &'a wgpu::Buffer,
-    /// Dispatch grid dimensions.
-    pub dispatch: DispatchGrids,
-}
-```
+Added `INDIRECT_DISPATCH_DOFS_OFFSET` and `INDIRECT_DISPATCH_CELLS_OFFSET` constants.
 
-Add a method `FgmresWorkspace::precond_context()` that constructs this from the workspace.
+Added `FgmresWorkspace::precond_context(dispatch)` method that constructs a
+`PrecondContext` from the workspace's internal buffers and bind groups.
 
-**Files**: `krylov_precond.rs` (new struct), `fgmres.rs` (new method)
+**Files**: `krylov_precond.rs`, `fgmres.rs`
 
-### Phase 2: Introduce `PreconditionerModule` trait
+### Phase 2: Introduce `PreconditionerModule` trait ✅ DONE
 
-Define a new solver-agnostic preconditioner trait alongside the existing one:
+Defined `PreconditionerModule` trait in `krylov_precond.rs`:
+- `encode_prepare(device, queue, encoder, ctx, rhs)` — default no-op
+- `encode_apply(device, encoder, ctx, input, output)` — required
 
-```rust
-pub trait PreconditionerModule {
-    fn encode_prepare(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        ctx: &PrecondContext<'_>,
-        rhs: wgpu::BindingResource<'_>,
-    ) {
-        // Default: no-op
-    }
+Created `PrecondAdapter<P: PreconditionerModule>` wrapper struct that implements
+`FgmresPreconditionerModule` by constructing a `PrecondContext` from the
+`FgmresWorkspace` and delegating to the wrapped `PreconditionerModule`.
 
-    fn encode_apply(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        ctx: &PrecondContext<'_>,
-        input: wgpu::BindingResource<'_>,
-        output: wgpu::BindingResource<'_>,
-    );
-}
-```
+**Files**: `krylov_precond.rs`
 
-Implement a blanket adapter `FgmresPrecondAdapter<P: PreconditionerModule>` that implements
-`FgmresPreconditionerModule` by constructing a `PrecondContext` from the `FgmresWorkspace`.
+### Phase 3: Migrate `IdentityPreconditioner` ✅ DONE
 
-**Files**: `krylov_precond.rs` (new trait + adapter)
+Converted `IdentityPreconditioner` to implement `PreconditionerModule`:
+- Uses `encoder.copy_buffer_to_buffer()` instead of dispatching a compute pipeline
+- No longer needs `pipeline_copy`, `create_vector_bind_group`, or FGMRES bind groups
+- Removed dead `copy_pipeline: Option<wgpu::ComputePipeline>` field
 
-### Phase 3: Migrate `IdentityPreconditioner`
-
-Convert `IdentityPreconditioner` to implement `PreconditionerModule` instead of
-`FgmresPreconditionerModule`. The identity operation becomes a simple buffer copy using
-`encoder.copy_buffer_to_buffer()` rather than dispatching a compute pipeline.
-
-Update `GenericLinearSolverModule` to use the adapter where needed.
+Kept `impl FgmresPreconditionerModule for IdentityPreconditioner` as a thin
+delegation layer that creates a `PrecondContext` and calls the
+`PreconditionerModule` implementation. All existing callers continue to work
+unchanged.
 
 **Files**: `generic_linear_solver.rs`
 

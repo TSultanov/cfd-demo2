@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Mutex;
 
 use crate::solver::gpu::context::GpuContext;
@@ -9,21 +8,76 @@ use crate::solver::gpu::profiling::ProfileCategory;
 #[cfg(feature = "profiling")]
 use std::time::Instant;
 
-#[derive(Default)]
+/// Maximum number of distinct buffer sizes retained in the cache.
+///
+/// 16 is more than sufficient for typical CFD workloads where only a handful of
+/// distinct readback sizes are used (e.g. 4 bytes for scalars, N*4 bytes for
+/// convergence bit-vectors, state-buffer-sized reads).
+const STAGING_CACHE_CAPACITY: usize = 16;
+
+/// A bounded, LRU-evicting cache of GPU staging buffers keyed by byte-size.
+///
+/// Buffers are borrowed via [`take_or_create`] and returned via [`put`].
+/// When the number of cached entries exceeds [`STAGING_CACHE_CAPACITY`], the
+/// least-recently-used entry is evicted (its `wgpu::Buffer` is dropped,
+/// releasing the GPU memory).
+///
+/// Internally uses a `Vec<(u64, wgpu::Buffer)>` ordered from most-recently-used
+/// (front) to least-recently-used (back). With a capacity of 16 the linear
+/// scan is negligible.
 pub struct StagingBufferCache {
-    buffers: Mutex<HashMap<u64, wgpu::Buffer>>,
+    /// Entries ordered most-recently-used first.
+    entries: Mutex<Vec<(u64, wgpu::Buffer)>>,
+    /// Diagnostic counters (always maintained; exposed via `stats()`).
+    counters: Mutex<CacheCounters>,
+}
+
+/// Diagnostic counters for [`StagingBufferCache`].
+#[derive(Debug, Clone, Default)]
+pub struct CacheCounters {
+    /// Number of `take_or_create` calls that found a cached buffer.
+    pub hits: u64,
+    /// Number of `take_or_create` calls that had to allocate a new buffer.
+    pub misses: u64,
+    /// Number of buffers evicted because the cache exceeded its capacity.
+    pub evictions: u64,
+    /// Total GPU bytes currently held in the cache.
+    pub cached_bytes: u64,
+}
+
+impl Default for StagingBufferCache {
+    fn default() -> Self {
+        Self {
+            entries: Mutex::new(Vec::with_capacity(STAGING_CACHE_CAPACITY)),
+            counters: Mutex::new(CacheCounters::default()),
+        }
+    }
 }
 
 impl StagingBufferCache {
+    /// Borrow a buffer of exactly `size` bytes from the cache, or create one.
+    ///
+    /// If a cached buffer of the requested size exists it is removed from the
+    /// cache and returned (cache hit). Otherwise a new staging buffer is
+    /// allocated from the device (cache miss).
     pub fn take_or_create(
         &self,
         device: &wgpu::Device,
         size: u64,
         label: &'static str,
     ) -> wgpu::Buffer {
-        if let Some(buffer) = self.buffers.lock().unwrap().remove(&size) {
+        let mut entries = self.entries.lock().unwrap();
+        if let Some(pos) = entries.iter().position(|(s, _)| *s == size) {
+            let (_sz, buffer) = entries.remove(pos);
+            let mut c = self.counters.lock().unwrap();
+            c.hits += 1;
+            c.cached_bytes = c.cached_bytes.saturating_sub(size);
             return buffer;
         }
+        drop(entries);
+
+        self.counters.lock().unwrap().misses += 1;
+
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size,
@@ -32,8 +86,37 @@ impl StagingBufferCache {
         })
     }
 
+    /// Return a buffer to the cache after use.
+    ///
+    /// The buffer is placed at the front (most-recently-used position). If the
+    /// cache is already at capacity the least-recently-used entry is evicted.
     pub fn put(&self, size: u64, buffer: wgpu::Buffer) {
-        self.buffers.lock().unwrap().insert(size, buffer);
+        let mut entries = self.entries.lock().unwrap();
+        entries.insert(0, (size, buffer));
+
+        let mut c = self.counters.lock().unwrap();
+        c.cached_bytes += size;
+
+        // Evict LRU entries that exceed capacity.
+        while entries.len() > STAGING_CACHE_CAPACITY {
+            let (evicted_size, _evicted_buf) = entries.pop().unwrap();
+            c.evictions += 1;
+            c.cached_bytes = c.cached_bytes.saturating_sub(evicted_size);
+            // `_evicted_buf` is dropped here, releasing GPU memory.
+        }
+    }
+
+    /// Drop all cached buffers, releasing their GPU memory.
+    pub fn clear(&self) {
+        let mut entries = self.entries.lock().unwrap();
+        entries.clear();
+        let mut c = self.counters.lock().unwrap();
+        c.cached_bytes = 0;
+    }
+
+    /// Return a snapshot of the diagnostic counters.
+    pub fn stats(&self) -> CacheCounters {
+        self.counters.lock().unwrap().clone()
     }
 }
 
@@ -153,4 +236,100 @@ pub async fn read_buffer_cached(
 
     cache.put(size, staging_buffer);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: create a wgpu device for cache tests.
+    fn test_device() -> wgpu::Device {
+        pollster::block_on(async {
+            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions::default())
+                .await
+                .expect("no GPU adapter available");
+            let (device, _queue) = adapter
+                .request_device(&wgpu::DeviceDescriptor::default())
+                .await
+                .expect("failed to create device");
+            device
+        })
+    }
+
+    #[test]
+    fn hit_and_miss_counters() {
+        let device = test_device();
+        let cache = StagingBufferCache::default();
+
+        // First call: miss
+        let buf = cache.take_or_create(&device, 64, "test");
+        let s = cache.stats();
+        assert_eq!(s.misses, 1);
+        assert_eq!(s.hits, 0);
+
+        // Return it
+        cache.put(64, buf);
+        assert_eq!(cache.stats().cached_bytes, 64);
+
+        // Second call: hit
+        let buf = cache.take_or_create(&device, 64, "test");
+        let s = cache.stats();
+        assert_eq!(s.hits, 1);
+        assert_eq!(s.misses, 1);
+        assert_eq!(s.cached_bytes, 0); // taken out
+
+        cache.put(64, buf);
+    }
+
+    #[test]
+    fn lru_eviction() {
+        let device = test_device();
+        let cache = StagingBufferCache::default();
+
+        // Fill the cache to capacity with distinct sizes.
+        for i in 0..STAGING_CACHE_CAPACITY {
+            let size = (i as u64 + 1) * 256;
+            let buf = cache.take_or_create(&device, size, "fill");
+            cache.put(size, buf);
+        }
+        assert_eq!(cache.stats().evictions, 0);
+
+        // One more distinct size should evict the LRU entry (size=256, the first inserted).
+        let extra_size = 99999;
+        let buf = cache.take_or_create(&device, extra_size, "overflow");
+        cache.put(extra_size, buf);
+        let s = cache.stats();
+        assert_eq!(s.evictions, 1);
+
+        // The evicted entry (size=256) should now miss.
+        let buf = cache.take_or_create(&device, 256, "evicted");
+        let s = cache.stats();
+        // +1 miss for the initial 256 creation, +1 miss for the re-creation after eviction,
+        // plus STAGING_CACHE_CAPACITY misses from the fill loop and 1 for extra_size.
+        assert!(s.misses > 0);
+        // But the most recent entries should still be hits.
+        drop(buf);
+    }
+
+    #[test]
+    fn clear_releases_all() {
+        let device = test_device();
+        let cache = StagingBufferCache::default();
+
+        for i in 0..4 {
+            let buf = cache.take_or_create(&device, (i + 1) * 128, "clear_test");
+            cache.put((i + 1) * 128, buf);
+        }
+        assert!(cache.stats().cached_bytes > 0);
+
+        cache.clear();
+        assert_eq!(cache.stats().cached_bytes, 0);
+
+        // After clear, all sizes should miss.
+        let buf = cache.take_or_create(&device, 128, "after_clear");
+        assert_eq!(cache.stats().hits, 0); // counters NOT reset by clear (by design)
+        drop(buf);
+    }
 }

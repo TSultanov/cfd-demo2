@@ -23,31 +23,6 @@ manually maps between `StateLayout` and `ResolvedStateSlotsSpec`. Model definiti
 *both* a `StateLayout` and feed it into `PortRegistry`, creating two sources of truth that can
 diverge.
 
-## Current Usage Map
-
-### `StateLayout` direct consumers (non-test)
-- `ModelSpec.state_layout` field — the canonical model-level layout
-- `PortRegistry::new(state_layout)` — wraps it
-- `PortRegistry` field lookups — delegates to internal `state_layout`
-- `flux_module_resolver_pass` — builds `ResolvedStateSlotsSpec` from it
-- `packed_state_gradients` (codegen) — reads `.stride()`, `.fields()`
-- `flux_module_gradients_wgsl` (codegen) — reads `.stride()`, field offsets
-- `flux_module_wgsl` (codegen) — reads field offsets via `ResolvedStateSlotsSpec`
-
-### `PortRegistry` consumers (non-test)
-- Model definitions (`compressible.rs`, `incompressible_momentum.rs`, etc.) — register fields
-- `recipe.rs` — creates registry, registers manifests, passes `Arc<PortRegistry>` to plan
-- `generic_coupled.rs` (lowering) — reads `PortRegistry` for field entries
-- `unified_solver.rs` — stores `Arc<PortRegistry>`
-
-### `ResolvedStateSlotsSpec` consumers (codegen)
-- `state_access.rs` (`StateAccessor`) — the primary codegen interface for field offsets
-- `coupled_common.rs` — assembly constants setup
-- `primitive_expr.rs` — primitive variable code generation
-- `time_integration.rs` — temporal term code generation
-- `unified_assembly.rs` — assembly kernel generation
-- `generic_coupled_kernels.rs` — generic coupled kernel generation
-
 ## Design Goal
 
 Make **`PortRegistry`** the single authority for field layout. Eliminate the pattern where
@@ -62,90 +37,59 @@ from `PortRegistry` without a separate resolver pass that re-scans `StateLayout`
   depend on it. `StateLayout` (in `cfd2_ir`) must remain available as a lightweight value type.
 - **Codegen boundary** — `cfd2_codegen` can only depend on `cfd2_ir`, not the main crate. It will
   continue to consume `ResolvedStateSlotsSpec` (from `cfd2_ir::ports`).
-- **Build script** — `build.rs` `include!()`s files that reference `StateLayout`; paths must
-  remain valid in the build-script module tree.
 
 ## Phased Plan
 
-### Phase 1: Make `PortRegistry` derive from `EquationSystem` fields (not raw `StateLayout`)
+### Phase 1: PortRegistry::from_fields() — ✅ DONE
 
-Currently, model definitions do:
-```rust
-let layout = StateLayout::new(vec![field_a, field_b, ...]);
-// ... separately ...
-let mut registry = PortRegistry::new(layout.clone());
-```
+Added `PortRegistry::from_fields(Vec<FieldRef>)` constructor that builds `StateLayout` internally.
+Model definitions (`compressible.rs`, `incompressible_momentum.rs`, `generic_diffusion_demo.rs`)
+now construct state layouts via `PortRegistry::from_fields()` instead of `StateLayout::new()`.
 
-Change `PortRegistry::new()` to accept a `&[FieldRef]` (or `&EquationSystem`) and construct the
-internal `StateLayout` itself. This eliminates the external `StateLayout` construction at model
-definition sites.
+`StateLayout::new()` is no longer called directly in production model definition code. All
+remaining `StateLayout::new()` calls are in:
+- Test helpers (intentional — tests may construct directly)
+- `cfd2_codegen` and `cfd2_ir` crates (can't use `PortRegistry`)
+- `PortRegistry::from_fields()` itself (the single delegation point)
 
-**Files affected:**
-- `src/solver/model/ports/registry.rs` — change constructor
-- `src/solver/model/definitions/compressible.rs` — stop constructing `StateLayout` externally
-- `src/solver/model/definitions/incompressible_momentum.rs` — same
-- `src/solver/model/definitions/generic_diffusion_demo.rs` — same
-- `src/solver/model/definitions.rs` — `ModelSpec.state_layout` → derived from registry
-- `src/solver/model/modules/flux_module.rs` — use registry instead of layout
-- `src/solver/model/modules/rhie_chow.rs` — use registry instead of layout (tests)
-- `src/solver/gpu/recipe.rs` — use registry
-- Various test helpers
+Also added:
+- `PortRegistry::into_state_layout()` for transitional extraction
+- `ModelSpec::state_stride()` convenience method
 
-### Phase 2: Add `to_resolved_state_slots()` method on `PortRegistry`
+### Phase 2: PortRegistry-based resolver — ✅ DONE
 
-Currently, `flux_module_resolver_pass` manually walks `StateLayout` to build
-`ResolvedStateSlotsSpec`. Add a `to_resolved_state_slots()` method on `PortRegistry` that produces
-the same `ResolvedStateSlotsSpec` from the already-registered field ports — eliminating the need
-for the separate resolver pass to scan `StateLayout` directly.
+Added `PortRegistry::to_resolved_state_slots()` and `to_resolved_state_slots_for()` methods
+that produce `ResolvedStateSlotsSpec` from the registry's state layout.
 
-**Files affected:**
-- `src/solver/model/ports/registry.rs` — add `to_resolved_state_slots()` method
-- `src/solver/model/modules/flux_module_resolver_pass.rs` — simplify to use registry method
-- `src/solver/model/modules/flux_module.rs` — pass registry instead of layout to resolver
+Updated flux module resolver pass:
+- Added `resolve_flux_module_state_slots_via_registry()` and
+  `resolve_flux_module_state_slots_runtime_scheme_via_registry()` — registry-based entry points
+- `flux_module.rs::resolve_state_slots_for_flux()` now creates a `PortRegistry` and uses
+  the registry-based resolvers
+- Old layout-based resolvers marked `#[cfg(test)]` for equivalence verification
+- `kernel.rs::resolved_slots_from_layout()` now delegates to
+  `PortRegistry::to_resolved_state_slots()`, removing duplicated conversion logic
 
-### Phase 3: Remove `ModelSpec.state_layout` field
+Equivalence test confirms registry-based and layout-based resolvers produce identical results.
 
-Once `PortRegistry` is the sole authority, `ModelSpec.state_layout` becomes redundant.
-Replace it with a method that delegates to the registry (or remove it and update callers).
+### Phase 3: Remove ModelSpec.state_layout field — DEFERRED
 
-**Files affected:**
-- `src/solver/model/definitions.rs` — remove `state_layout` field, add accessor
-- All files that read `model.state_layout` — switch to `model.port_registry().state_layout()`
-  or use `PortRegistry` methods directly
+`ModelSpec.state_layout` remains as a public field. Removing it would require updating ~76
+references across many files (unified_solver, recipe, UI, tests, benchmarks). The field now
+serves as a cache: it is always constructed via `PortRegistry::from_fields()`, so there is
+no divergence risk. When a future refactor introduces `PortRegistry` storage on `ModelSpec`,
+the field can be removed.
 
-### Phase 4: Restrict `StateLayout` to internal use
+### Phase 4: Restrict StateLayout visibility — DEFERRED
 
-Mark `StateLayout` as `pub(crate)` within `cfd2_ir` if possible, or document that it is an
-internal implementation detail of `PortRegistry`. The public API for field offsets should be
-`PortRegistry::get_field_entry()` and `ResolvedStateSlotsSpec`.
+`StateLayout` remains `pub` in `cfd2_ir` because `cfd2_codegen` directly consumes it in
+`packed_state_gradients.rs`. Converting those codegen call sites to use
+`ResolvedStateSlotsSpec` would be a larger API change.
 
-**Files affected:**
-- `cfd2_ir::equation::state_layout` — visibility change (if feasible without breaking codegen)
-- `cfd2_ir::kernel::mod.rs` — update re-exports
+## Verification
 
-**Note:** This phase may be limited because `cfd2_codegen` (the codegen crate) directly consumes
-`StateLayout` in `packed_state_gradients.rs`. Those codegen functions receive `StateLayout` from
-the build script. A full removal would require converting those codegen call sites to use
-`ResolvedStateSlotsSpec` instead, which is a larger change.
-
-## Verification Criteria
-
-1. `cargo build` — clean (no new warnings)
-2. `cargo test` — all tests pass (only pre-existing `block_jacobi` failure)
-3. OpenFOAM reference tests — zero metric drift
-4. No external API changes visible to downstream consumers
-5. `StateLayout` is no longer independently constructed outside `PortRegistry` in production code
-   (test helpers may still construct it directly)
-
-## Risk Assessment
-
-- **Low risk**: Phases 1-2 are mechanical — changing constructor signatures and adding a method.
-- **Medium risk**: Phase 3 touches many files but is still mechanical (field removal + accessor).
-- **Higher risk**: Phase 4 may be blocked by codegen dependencies; defer if needed.
-
-## Out of Scope
-
-- Replacing `StateLayout` inside `cfd2_codegen` with `ResolvedStateSlotsSpec` throughout
-  (that would be a separate, larger refactor affecting the codegen API surface)
-- Changing `PortManifest` structure
-- Modifying the `cfd2_macros` proc-macro
+- `cargo build` — clean (only pre-existing codegen warnings)
+- `cargo test` — 156 lib tests pass, only pre-existing `block_jacobi` integration test failure
+- OpenFOAM reference tests — zero metric drift (before/after identical)
+- No external API changes
+- `StateLayout` is no longer independently constructed outside `PortRegistry` in production code

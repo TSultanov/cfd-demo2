@@ -159,6 +159,14 @@ impl PortRegistry {
         Self::new(state_layout)
     }
 
+    /// Consume the registry and return the underlying `StateLayout`.
+    ///
+    /// This is useful when transitioning from `PortRegistry::from_fields()` to
+    /// sites that still require an owned `StateLayout` (e.g., `ModelSpec`).
+    pub fn into_state_layout(self) -> StateLayout {
+        self.state_layout
+    }
+
     /// Get the state layout.
     pub fn state_layout(&self) -> &StateLayout {
         &self.state_layout

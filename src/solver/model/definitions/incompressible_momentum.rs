@@ -2,10 +2,11 @@ use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{
     surface_scalar_dim, vol_scalar_dim, vol_vector_dim, EquationSystem, FieldRef, FluxRef,
 };
-use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::backend::typed_ast::{
     typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
+use crate::solver::model::backend::state_layout::StateLayout;
+use crate::solver::model::ports::PortRegistry;
 // si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_codegen::solver::codegen::dsl::XY;
 use cfd2_ir::dimensions::{
@@ -13,7 +14,6 @@ use cfd2_ir::dimensions::{
 };
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
-use crate::solver::model::ports::PortRegistry;
 
 #[derive(Debug, Clone)]
 pub struct IncompressibleMomentumFields {
@@ -123,13 +123,13 @@ pub fn incompressible_momentum_system() -> EquationSystem {
 pub fn incompressible_momentum_model() -> ModelSpec {
     let fields = IncompressibleMomentumFields::new();
     let system = build_incompressible_momentum_system(&fields);
-    let layout = StateLayout::new(vec![
+    let layout = PortRegistry::from_fields(vec![
         fields.u,
         fields.p,
         fields.d_p,
         fields.grad_p,
         fields.grad_p_old,
-    ]);
+    ]).into_state_layout();
     let flux_kernel = rhie_chow_flux_module_kernel(&system, &layout)
         .expect("failed to derive Rhie–Chow flux formula from model system/layout");
 

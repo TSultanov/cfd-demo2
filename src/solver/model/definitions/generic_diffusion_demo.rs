@@ -1,7 +1,7 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{vol_scalar_dim, EquationSystem};
-use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::backend::typed_ast::{typed_fvm, Scalar, TypedCoeff, TypedFieldRef};
+use crate::solver::model::ports::PortRegistry;
 // si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_ir::dimensions::{Area, Dimensionless, DivDim, Length, Time, Volume};
 // Type alias for dimensionless gradient (used for boundary conditions)
@@ -45,9 +45,9 @@ pub fn generic_diffusion_demo_model() -> ModelSpec {
         .validate_units()
         .expect("generic diffusion demo system failed unit validation");
 
-    // Use typed field constructor for StateLayout/boundaries
+    // Build state layout via PortRegistry (single source of truth for field offsets)
     let phi = vol_scalar_dim::<Dimensionless>("phi");
-    let layout = StateLayout::new(vec![phi]);
+    let layout = PortRegistry::from_fields(vec![phi]).into_state_layout();
     let mut boundaries = BoundarySpec::default();
     boundaries.set_field(
         "phi",
@@ -115,9 +115,9 @@ pub fn generic_diffusion_demo_neumann_model() -> ModelSpec {
         .validate_units()
         .expect("generic diffusion demo neumann system failed unit validation");
 
-    // Use typed field constructor for StateLayout/boundaries
+    // Build state layout via PortRegistry (single source of truth for field offsets)
     let phi = vol_scalar_dim::<Dimensionless>("phi");
-    let layout = StateLayout::new(vec![phi]);
+    let layout = PortRegistry::from_fields(vec![phi]).into_state_layout();
     let mut boundaries = BoundarySpec::default();
     boundaries.set_field(
         "phi",

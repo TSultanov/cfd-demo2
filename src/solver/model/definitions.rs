@@ -33,6 +33,13 @@ pub struct ModelSpec {
 }
 
 impl ModelSpec {
+    /// Get the state stride (number of f32 per cell in the state buffer).
+    ///
+    /// Convenience accessor — equivalent to `self.state_layout.stride()`.
+    pub fn state_stride(&self) -> u32 {
+        self.state_layout.stride()
+    }
+
     pub fn named_param_keys(&self) -> Vec<&'static str> {
         let mut out: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
 

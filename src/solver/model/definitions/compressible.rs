@@ -3,10 +3,10 @@ use crate::solver::model::backend::ast::{
     surface_scalar_dim, surface_vector_dim, vol_scalar_dim, vol_vector_dim, EquationSystem,
     FieldRef, FluxRef,
 };
-use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::backend::typed_ast::{
     typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
+use crate::solver::model::ports::PortRegistry;
 // si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_ir::dimensions::{
     Density, Dimensionless, DivDim, DynamicViscosity, EnergyDensity, Force, InvTime, Length,
@@ -247,7 +247,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
     let grad_t = vol_vector_dim::<DivDim<Temperature, Length>>("grad_T");
     let grad_u_x = vol_vector_dim::<DivDim<Velocity, Length>>("grad_u_x");
     let grad_u_y = vol_vector_dim::<DivDim<Velocity, Length>>("grad_u_y");
-    let layout = StateLayout::new(vec![
+    let layout = PortRegistry::from_fields(vec![
         fields.rho,
         fields.rho_u,
         grad_rho_u_x,
@@ -261,7 +261,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
         grad_t,
         grad_u_x,
         grad_u_y,
-    ]);
+    ]).into_state_layout();
 
     let mut boundaries = BoundarySpec::default();
     boundaries.set_field(

@@ -7,7 +7,6 @@ use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::model::ModelSpec;
-use std::any::{Any, TypeId};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
@@ -307,32 +306,15 @@ impl ProgramSpecBuilder {
     }
 }
 
-pub(crate) struct ProgramResources {
-    by_type: HashMap<TypeId, Box<dyn Any + Send>>,
-}
-
-impl ProgramResources {
-    pub fn new() -> Self {
-        Self {
-            by_type: HashMap::new(),
-        }
-    }
-
-    pub fn insert<T: Any + Send>(&mut self, value: T) {
-        self.by_type.insert(TypeId::of::<T>(), Box::new(value));
-    }
-
-    pub fn get<T: Any + Send>(&self) -> Option<&T> {
-        self.by_type
-            .get(&TypeId::of::<T>())
-            .and_then(|v| v.downcast_ref::<T>())
-    }
-
-    pub fn get_mut<T: Any + Send>(&mut self) -> Option<&mut T> {
-        self.by_type
-            .get_mut(&TypeId::of::<T>())
-            .and_then(|v| v.downcast_mut::<T>())
-    }
+/// Strongly-typed container for program-level resources.
+///
+/// Replaces the former type-erased `HashMap<TypeId, Box<dyn Any>>` bag.
+/// All fields are known at compile time — no runtime downcasts needed.
+pub(crate) struct PlanResources {
+    /// The solver backend (currently always GenericCoupled).
+    pub backend: crate::solver::gpu::lowering::programs::generic_coupled::GenericCoupledProgramResources,
+    /// Cached port registry for field offset lookups.
+    pub port_registry: Arc<crate::solver::model::ports::PortRegistry>,
 }
 
 pub(crate) struct ModelGpuProgramSpec {
@@ -357,7 +339,7 @@ pub(crate) struct GpuProgramPlan {
     pub context: GpuContext,
     pub profiling_stats: Arc<ProfilingStats>,
     pub staging_cache: StagingBufferCache,
-    pub resources: ProgramResources,
+    pub resources: PlanResources,
     pub spec: ModelGpuProgramSpec,
     pub last_linear_stats: LinearSolverStats,
     pub collect_convergence_stats: bool,
@@ -378,7 +360,7 @@ impl GpuProgramPlan {
         model: ModelSpec,
         context: GpuContext,
         profiling_stats: Arc<ProfilingStats>,
-        resources: ProgramResources,
+        resources: PlanResources,
         spec: ModelGpuProgramSpec,
     ) -> Self {
         Self {

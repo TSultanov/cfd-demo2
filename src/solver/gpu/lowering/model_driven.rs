@@ -96,11 +96,10 @@ async fn lower_parts_for_model(
     let mut ops = ProgramOpRegistry::new();
     programs::universal::register_ops_from_recipe(&recipe, &mut ops)?;
 
-    let mut resources = crate::solver::gpu::program::plan::ProgramResources::new();
-    resources
-        .insert(programs::universal::UniversalProgramResources::new_generic_coupled(built.backend));
-    // Store the port registry so helpers can access cached field offsets
-    resources.insert(std::sync::Arc::clone(&recipe.port_registry));
+    let resources = crate::solver::gpu::program::plan::PlanResources {
+        backend: built.backend,
+        port_registry: std::sync::Arc::clone(&recipe.port_registry),
+    };
 
     let named_params = programs::generic_coupled::named_params_for_recipe(&built.model, &recipe)?;
 

@@ -1,4 +1,3 @@
-use super::universal::UniversalProgramResources;
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
 use crate::solver::gpu::lowering::kernel_registry;
@@ -2116,17 +2115,11 @@ impl PlanLinearSystemDebug for GenericCoupledProgramResources {
 }
 
 fn res(plan: &GpuProgramPlan) -> &GenericCoupledProgramResources {
-    plan.resources
-        .get::<UniversalProgramResources>()
-        .and_then(|u| u.generic_coupled())
-        .expect("missing GenericCoupledProgramResources backend")
+    &plan.resources.backend
 }
 
 fn res_mut(plan: &mut GpuProgramPlan) -> &mut GenericCoupledProgramResources {
-    plan.resources
-        .get_mut::<UniversalProgramResources>()
-        .and_then(|u| u.generic_coupled_mut())
-        .expect("missing GenericCoupledProgramResources backend")
+    &mut plan.resources.backend
 }
 
 /// Register ops using the unified registry builder.

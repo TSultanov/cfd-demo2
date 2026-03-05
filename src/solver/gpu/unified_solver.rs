@@ -167,10 +167,7 @@ impl GpuUnifiedSolver {
     /// Access the cached port registry from the plan resources.
     /// Returns `None` if the registry is not available.
     pub fn port_registry(&self) -> Option<&PortRegistry> {
-        self.plan
-            .resources
-            .get::<Arc<PortRegistry>>()
-            .map(|arc| arc.as_ref())
+        Some(self.plan.resources.port_registry.as_ref())
     }
 
     /// Get the UI port set for accessing common field offsets.

@@ -1,64 +1,17 @@
 use super::generic_coupled as generic_coupled_program;
-use super::generic_coupled::GenericCoupledProgramResources;
 use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
 use crate::solver::gpu::lowering::unified_registry::UnifiedOpRegistryConfig;
 use crate::solver::gpu::program::plan::{GpuProgramPlan, ProgramOpRegistry};
 use crate::solver::gpu::program::plan_instance::{
-    PlanFuture, PlanLinearSystemDebug, PlanStepStats,
+    PlanLinearSystemDebug, PlanStepStats,
 };
 use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
-use crate::solver::gpu::structs::LinearSolverStats;
-
-// --- Single universal program resource ---
-
-pub(in crate::solver::gpu::lowering) struct UniversalProgramResources {
-    plan: GenericCoupledProgramResources,
-}
-
-impl UniversalProgramResources {
-    pub(in crate::solver::gpu::lowering) fn new_generic_coupled(
-        plan: GenericCoupledProgramResources,
-    ) -> Self {
-        Self { plan }
-    }
-
-    pub(in crate::solver::gpu::lowering) fn generic_coupled(
-        &self,
-    ) -> Option<&GenericCoupledProgramResources> {
-        Some(&self.plan)
-    }
-
-    pub(in crate::solver::gpu::lowering) fn generic_coupled_mut(
-        &mut self,
-    ) -> Option<&mut GenericCoupledProgramResources> {
-        Some(&mut self.plan)
-    }
-}
-
-impl PlanLinearSystemDebug for UniversalProgramResources {
-    fn set_linear_system(&self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
-        PlanLinearSystemDebug::set_linear_system(&self.plan, matrix_values, rhs)
-    }
-
-    fn solve_linear_system_with_size(
-        &mut self,
-        n: u32,
-        max_iters: u32,
-        tol: f32,
-    ) -> Result<LinearSolverStats, String> {
-        PlanLinearSystemDebug::solve_linear_system_with_size(&mut self.plan, n, max_iters, tol)
-    }
-
-    fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
-        PlanLinearSystemDebug::get_linear_solution(&self.plan)
-    }
-}
 
 // --- Universal op registration ---
 
 /// Single universal lowering path: register the unified op kinds emitted by `SolverRecipe::build_program_spec()`.
 ///
-/// The actual host/graph handlers are implemented against type-erased `ProgramResources` and downcast at runtime.
+/// The actual host/graph handlers access the strongly-typed `PlanResources` fields directly.
 pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
     recipe: &SolverRecipe,
     registry: &mut ProgramOpRegistry,
@@ -186,8 +139,7 @@ pub(in crate::solver::gpu::lowering) fn step_stats(plan: &GpuProgramPlan) -> Pla
 pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
     plan: &mut GpuProgramPlan,
 ) -> Option<&mut dyn PlanLinearSystemDebug> {
-    let u = plan.resources.get_mut::<UniversalProgramResources>()?;
-    Some(u as &mut dyn PlanLinearSystemDebug)
+    Some(&mut plan.resources.backend as &mut dyn PlanLinearSystemDebug)
 }
 
 // --- Generic-coupled handlers (explicit/implicit) ---

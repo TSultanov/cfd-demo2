@@ -2,7 +2,7 @@ use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::program::plan::{
     ModelGpuProgramSpec, ProgramF32Fn, ProgramInitRun, ProgramLinearDebugProvider,
-    ProgramOpDispatcher, ProgramOpRegistry, ProgramParamHandler, ProgramResources,
+    ProgramOpDispatcher, ProgramOpRegistry, ProgramParamHandler, PlanResources,
     ProgramSetBcValueFn, ProgramSetNamedParamFallback, ProgramSpec, ProgramStateBufferFn,
     ProgramStepStatsFn, ProgramStepWithStatsFn, ProgramU32Fn, ProgramWriteStateFn,
 };
@@ -53,6 +53,6 @@ pub(crate) struct LoweredProgramParts {
     pub model: ModelSpec,
     pub context: GpuContext,
     pub profiling_stats: Arc<ProfilingStats>,
-    pub resources: ProgramResources,
+    pub resources: PlanResources,
     pub spec: ModelGpuProgramSpecParts,
 }

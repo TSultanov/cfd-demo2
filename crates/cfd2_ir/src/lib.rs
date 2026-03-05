@@ -1,2 +1,9 @@
 pub mod ast;
-pub mod solver;
+pub mod dimensions;
+pub mod equation;
+pub mod flux;
+pub mod gpu_enums;
+pub mod kernel;
+pub mod ports;
+pub mod scheme;
+pub mod units;

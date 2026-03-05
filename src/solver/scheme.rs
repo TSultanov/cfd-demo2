@@ -1,1 +1,1 @@
-pub use cfd2_ir::solver::scheme::*;
+pub use cfd2_ir::scheme::*;

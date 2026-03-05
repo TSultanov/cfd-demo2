@@ -1,7 +1,7 @@
 use crate::solver::codegen::dsl::{DslType, DynExpr, TypedExpr};
 use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
-use cfd2_ir::solver::dimensions::UnitDimension;
+use cfd2_ir::dimensions::UnitDimension;
 
 /// Find a slot by name in the resolved state slots spec.
 pub fn find_slot<'a>(
@@ -259,7 +259,7 @@ pub fn state_component_slot_dim<D: UnitDimension>(
 mod tests {
     use super::*;
     use crate::solver::ir::ports::PortFieldKind;
-    use cfd2_ir::solver::dimensions::{Density, MomentumDensity, Pressure, Velocity};
+    use cfd2_ir::dimensions::{Density, MomentumDensity, Pressure, Velocity};
 
     /// Helper to create a ResolvedStateSlotsSpec from field definitions for testing.
     fn test_slots_from_fields(

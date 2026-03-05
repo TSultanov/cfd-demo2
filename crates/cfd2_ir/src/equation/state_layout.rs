@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::ast::{FieldKind, FieldRef};
-use crate::solver::units::UnitDim;
+use crate::units::UnitDim;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateField {
@@ -111,8 +111,8 @@ impl StateLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::backend::ast::{vol_scalar, vol_vector};
-    use crate::solver::units::si;
+    use crate::equation::ast::{vol_scalar, vol_vector};
+    use crate::units::si;
 
     #[test]
     fn state_layout_assigns_offsets_and_stride() {

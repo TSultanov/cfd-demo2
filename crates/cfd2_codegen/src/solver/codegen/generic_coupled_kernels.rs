@@ -823,7 +823,7 @@ mod tests {
 
     #[test]
     fn generic_coupled_ddt_adds_dtau_diagonal_when_enabled() {
-        let u = vol_scalar_dim::<cfd2_ir::solver::dimensions::Velocity>("u");
+        let u = vol_scalar_dim::<cfd2_ir::dimensions::Velocity>("u");
 
         let mut eqn = Equation::new(u);
         eqn.add_term(fvm::ddt(u));
@@ -849,7 +849,7 @@ mod tests {
 
     #[test]
     fn generic_coupled_update_program_extracts_launch_and_body_from_dsl() {
-        let u = vol_scalar_dim::<cfd2_ir::solver::dimensions::Velocity>("u");
+        let u = vol_scalar_dim::<cfd2_ir::dimensions::Velocity>("u");
 
         let mut eqn = Equation::new(u);
         eqn.add_term(fvm::ddt(u));
@@ -895,7 +895,7 @@ mod tests {
 
     #[test]
     fn generic_coupled_update_program_local_symbols_exclude_launch_aliases() {
-        let u = vol_scalar_dim::<cfd2_ir::solver::dimensions::Velocity>("u");
+        let u = vol_scalar_dim::<cfd2_ir::dimensions::Velocity>("u");
 
         let mut eqn = Equation::new(u);
         eqn.add_term(fvm::ddt(u));

@@ -1,1 +1,1 @@
-pub use cfd2_ir::solver::gpu::enums::*;
+pub use cfd2_ir::gpu_enums::*;

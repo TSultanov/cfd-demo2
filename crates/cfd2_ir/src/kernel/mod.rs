@@ -1,10 +1,10 @@
 // Internal IR facade.
 //
 // Incremental boundary: codegen must depend on types from this module rather than reaching into
-// `crate::solver::model::backend` directly.
+// `crate::equation` directly.
 
 #[allow(unused_imports)]
-pub use crate::solver::model::backend::{
+pub use crate::equation::{
     ast::{
         surface_scalar, surface_scalar_dim, surface_vector, surface_vector3, surface_vector3_dim,
         surface_vector_dim, vol_scalar, vol_scalar_dim, vol_vector, vol_vector3, vol_vector3_dim,
@@ -15,7 +15,7 @@ pub use crate::solver::model::backend::{
     StateLayout, Term, TermKey, TermOp,
 };
 
-use crate::solver::scheme::Scheme;
+use crate::scheme::Scheme;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FluxComponent {
@@ -361,15 +361,15 @@ pub enum LimiterSpec {
 /// embedding separate numeric literals.
 pub const VANLEER_EPS: f32 = 1e-8;
 
-pub mod kernel_program;
-pub mod ports;
+pub mod program;
+
 pub mod reconstruction;
 
 // Re-export port types for convenience
-pub use kernel_program::{
+pub use program::{
     BindingAccess, DispatchDomain, EffectResource, KernelBinding,
     KernelProgram, LaunchSemantics, SideEffectMetadata,
 };
-pub use ports::{BufferAccess, BufferSpec, FieldSpec, ParamSpec, PortFieldKind, PortManifest};
+pub use crate::ports::{BufferAccess, BufferSpec, FieldSpec, ParamSpec, PortFieldKind, PortManifest};
 
 // Intentionally no test fixtures here: `cfd2_ir` must not depend on model definitions.

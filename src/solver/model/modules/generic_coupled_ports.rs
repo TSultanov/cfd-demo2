@@ -1,5 +1,5 @@
 /// Generic coupled module port definitions - separate from the main module to avoid build script issues.
-use cfd2_ir::solver::dimensions::{Dimensionless, Density, DynamicViscosity, Time, UnitDimension};
+use cfd2_ir::dimensions::{Dimensionless, Density, DynamicViscosity, Time, UnitDimension};
 use crate::solver::ir::ports::ParamSpec;
 use crate::solver::model::module::PortManifest as ModulePortManifest;
 

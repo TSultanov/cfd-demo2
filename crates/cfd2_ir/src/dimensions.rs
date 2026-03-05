@@ -8,12 +8,12 @@
 //! - Rational exponents for all base dimensions (M, L, T, TEMP)
 //! - Type constructors: [`MulDim`], [`DivDim`], [`PowDim`], [`SqrtDim`]
 //! - Typed aliases for common SI dimensions
-//! - Conversion to runtime [`UnitDim`](crate::solver::units::UnitDim)
+//! - Conversion to runtime [`UnitDim`](crate::units::UnitDim)
 //!
 //! # Example
 //!
 //! ```rust,ignore
-//! use cfd2_ir::solver::dimensions::*;
+//! use cfd2_ir::dimensions::*;
 //!
 //! // Define a custom dimension
 //! type MyDim = DivDim<MulDim<Pressure, Area>, Force>;
@@ -22,7 +22,7 @@
 //! let runtime: UnitDim = MyDim::to_runtime();
 //! ```
 
-use crate::solver::units::UnitDim;
+use crate::units::UnitDim;
 
 /// Trait for type-level physical dimensions with rational exponents.
 ///
@@ -33,7 +33,7 @@ use crate::solver::units::UnitDim;
 /// # Example
 ///
 /// ```rust,ignore
-/// use cfd2_ir::solver::dimensions::UnitDimension;
+/// use cfd2_ir::dimensions::UnitDimension;
 ///
 /// struct MyCustomDim;
 /// impl UnitDimension for MyCustomDim {
@@ -85,7 +85,7 @@ pub trait UnitDimension: 'static + Copy + Send + Sync + Eq + PartialEq + std::fm
 /// # Example
 ///
 /// ```rust,ignore
-/// use cfd2_ir::solver::dimensions::Dim;
+/// use cfd2_ir::dimensions::Dim;
 ///
 /// // Velocity = Length / Time = L^1 * T^-1
 /// type Velocity = Dim<0, 1, 1, 1, -1, 1, 0, 1>;
@@ -364,7 +364,7 @@ pub type Diffusivity = DivDim<Area, Time>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::units::UnitDim;
+    use crate::units::UnitDim;
 
     #[test]
     fn base_dimensions_have_correct_exponents() {
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn derived_dimensions_match_si_constants() {
-        use crate::solver::units::si;
+        use crate::units::si;
 
         // Verify that type-level dimensions match runtime SI constants
         assert_eq!(Dimensionless::UNIT, si::DIMENSIONLESS);

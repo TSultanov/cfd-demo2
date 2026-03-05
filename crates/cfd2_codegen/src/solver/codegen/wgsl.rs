@@ -861,7 +861,7 @@ mod tests {
     use crate::solver::ir::{
         fvc, fvm, surface_scalar_dim, vol_scalar_dim, vol_vector_dim, SchemeRegistry,
     };
-    use cfd2_ir::solver::dimensions::{
+    use cfd2_ir::dimensions::{
         Density, DynamicViscosity, InvTime, MassFlux, Pressure, UnitDimension, Velocity, D_P,
     };
 

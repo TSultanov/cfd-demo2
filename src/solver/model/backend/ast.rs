@@ -1,2 +1,2 @@
-pub use cfd2_ir::solver::model::backend::ast::*;
+pub use cfd2_ir::equation::ast::*;
 

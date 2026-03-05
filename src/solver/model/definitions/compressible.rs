@@ -8,7 +8,7 @@ use crate::solver::model::backend::typed_ast::{
     typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
 // si module no longer needed for boundary conditions - using type-level dimensions
-use cfd2_ir::solver::dimensions::{
+use cfd2_ir::dimensions::{
     Density, Dimensionless, DivDim, DynamicViscosity, EnergyDensity, Force, InvTime, Length,
     MassFlux, MomentumDensity, MulDim, Power, Pressure, Temperature, Velocity,
 };
@@ -107,7 +107,7 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     // ========================================
     // Thermal conductivity field coefficient: kappa has unit Power/(Length*Temperature)
     let kappa_typed = TypedCoeff::from_field(TypedFieldRef::<
-        cfd2_ir::solver::dimensions::DivDim<Power, MulDim<Length, Temperature>>,
+        cfd2_ir::dimensions::DivDim<Power, MulDim<Length, Temperature>>,
         Scalar,
     >::new("kappa"));
 
@@ -145,7 +145,7 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     // EOS field-based coefficients (preserving original semantics)
     let gm1_typed = TypedCoeff::from_field(TypedFieldRef::<Dimensionless, Scalar>::new("eos_gm1"));
     let dp_drho_typed = TypedCoeff::from_field(TypedFieldRef::<
-        cfd2_ir::solver::dimensions::DivDim<Pressure, Density>,
+        cfd2_ir::dimensions::DivDim<Pressure, Density>,
         Scalar,
     >::new("eos_dp_drho"));
     let p_offset_typed =
@@ -190,7 +190,7 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     // ========================================
     // EOS gas constant field coefficient (preserving original semantics)
     let r_typed = TypedCoeff::from_field(TypedFieldRef::<
-        cfd2_ir::solver::dimensions::DivDim<Pressure, MulDim<Density, Temperature>>,
+        cfd2_ir::dimensions::DivDim<Pressure, MulDim<Density, Temperature>>,
         Scalar,
     >::new("eos_r"));
 

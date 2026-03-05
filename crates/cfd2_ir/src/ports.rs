@@ -2,7 +2,7 @@
 ///
 /// These types provide a pure-data representation of port metadata that can cross
 /// the IR/codegen boundary without depending on runtime port types.
-use crate::solver::units::UnitDim;
+use crate::units::UnitDim;
 
 /// Sentinel value for "any dimension" - used as an escape hatch to skip unit checks.
 ///

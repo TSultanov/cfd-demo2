@@ -11,7 +11,7 @@ use cfd2_codegen::solver::codegen::{
     wgsl_ast::{AssignOp, Expr, ForStep, Type},
     wgsl_dsl as dsl,
 };
-use cfd2_ir::solver::ir::{
+use cfd2_ir::kernel::{
     BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelProgram, LaunchSemantics,
 };
 

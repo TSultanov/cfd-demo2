@@ -5,7 +5,7 @@ use crate::solver::codegen::state_access::{
 use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotsSpec};
 use crate::solver::ir::Coefficient;
-use cfd2_ir::solver::dimensions::{
+use cfd2_ir::dimensions::{
     Density, Dimensionless, DivDim, DynamicViscosity, InvTime, Length, MulDim, Power, Pressure,
     Temperature, UnitDimension,
 };
@@ -277,7 +277,7 @@ mod tests {
     use super::*;
     use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
     use crate::solver::ir::{vol_scalar_dim, vol_vector3_dim, vol_vector_dim};
-    use cfd2_ir::solver::dimensions::{
+    use cfd2_ir::dimensions::{
         Density, Dimensionless, DivDim, DynamicViscosity, InvTime, Length, MulDim, Power, Pressure,
         Temperature, Velocity, D_P,
     };

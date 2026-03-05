@@ -17,7 +17,7 @@ pub struct RelaxationDefaults {
 
 /// Re-export IR-safe port manifest types for convenience.
 #[allow(unused_imports)]
-pub use cfd2_ir::solver::ir::ports::{
+pub use cfd2_ir::ports::{
     BufferAccess, BufferSpec, FieldSpec, ParamSpec, PortFieldKind, PortManifest,
 };
 

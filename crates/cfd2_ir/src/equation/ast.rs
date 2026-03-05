@@ -1,7 +1,7 @@
 use std::fmt;
 use std::ops::Add;
 
-use crate::solver::units::{si, UnitDim};
+use crate::units::{si, UnitDim};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FieldKind {
@@ -522,38 +522,38 @@ pub fn surface_vector3(name: &'static str, unit: UnitDim) -> FluxRef {
 }
 
 /// Typed volume scalar field constructor using type-level dimensions.
-pub fn vol_scalar_dim<D: crate::solver::dimensions::UnitDimension>(name: &'static str) -> FieldRef {
+pub fn vol_scalar_dim<D: crate::dimensions::UnitDimension>(name: &'static str) -> FieldRef {
     FieldRef::new(name, FieldKind::Scalar, D::UNIT)
 }
 
 /// Typed volume vector2 field constructor using type-level dimensions.
-pub fn vol_vector_dim<D: crate::solver::dimensions::UnitDimension>(name: &'static str) -> FieldRef {
+pub fn vol_vector_dim<D: crate::dimensions::UnitDimension>(name: &'static str) -> FieldRef {
     FieldRef::new(name, FieldKind::Vector2, D::UNIT)
 }
 
 /// Typed volume vector3 field constructor using type-level dimensions.
-pub fn vol_vector3_dim<D: crate::solver::dimensions::UnitDimension>(
+pub fn vol_vector3_dim<D: crate::dimensions::UnitDimension>(
     name: &'static str,
 ) -> FieldRef {
     FieldRef::new(name, FieldKind::Vector3, D::UNIT)
 }
 
 /// Typed surface scalar flux constructor using type-level dimensions.
-pub fn surface_scalar_dim<D: crate::solver::dimensions::UnitDimension>(
+pub fn surface_scalar_dim<D: crate::dimensions::UnitDimension>(
     name: &'static str,
 ) -> FluxRef {
     FluxRef::new(name, FieldKind::Scalar, D::UNIT)
 }
 
 /// Typed surface vector2 flux constructor using type-level dimensions.
-pub fn surface_vector_dim<D: crate::solver::dimensions::UnitDimension>(
+pub fn surface_vector_dim<D: crate::dimensions::UnitDimension>(
     name: &'static str,
 ) -> FluxRef {
     FluxRef::new(name, FieldKind::Vector2, D::UNIT)
 }
 
 /// Typed surface vector3 flux constructor using type-level dimensions.
-pub fn surface_vector3_dim<D: crate::solver::dimensions::UnitDimension>(
+pub fn surface_vector3_dim<D: crate::dimensions::UnitDimension>(
     name: &'static str,
 ) -> FluxRef {
     FluxRef::new(name, FieldKind::Vector3, D::UNIT)

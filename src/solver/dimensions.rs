@@ -1,6 +1,6 @@
 //! Type-level physical dimensions with rational exponents.
 //!
-//! This module re-exports the canonical dimension system from `cfd2_ir::solver::dimensions`,
+//! This module re-exports the canonical dimension system from `cfd2_ir::dimensions`,
 //! providing a unified type-level dimension system for use in ports and throughout the solver.
 //!
 //! # Example
@@ -12,4 +12,4 @@
 //! let port: FieldPort<Pressure, Scalar> = ...;
 //! ```
 
-pub use cfd2_ir::solver::dimensions::*;
+pub use cfd2_ir::dimensions::*;

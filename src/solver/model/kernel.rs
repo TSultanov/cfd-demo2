@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use cfd2_codegen::solver::codegen::KernelWgsl;
-use cfd2_ir::solver::ir::ports::{
+use cfd2_ir::ports::{
     ParamSpec, PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec,
 };
-use cfd2_ir::solver::ir::StateLayout;
+use cfd2_ir::kernel::StateLayout;
 
 /// Stable identifier for a compute kernel.
 ///
@@ -527,9 +527,9 @@ fn resolved_slots_from_layout(layout: &StateLayout) -> ResolvedStateSlotsSpec {
     let mut slots = Vec::new();
     for field in layout.fields() {
         let kind = match field.kind() {
-            cfd2_ir::solver::ir::FieldKind::Scalar => PortFieldKind::Scalar,
-            cfd2_ir::solver::ir::FieldKind::Vector2 => PortFieldKind::Vector2,
-            cfd2_ir::solver::ir::FieldKind::Vector3 => PortFieldKind::Vector3,
+            cfd2_ir::kernel::FieldKind::Scalar => PortFieldKind::Scalar,
+            cfd2_ir::kernel::FieldKind::Vector2 => PortFieldKind::Vector2,
+            cfd2_ir::kernel::FieldKind::Vector3 => PortFieldKind::Vector3,
         };
         slots.push(ResolvedStateSlotSpec {
             name: field.name().to_string(),
@@ -985,7 +985,7 @@ mod contract_tests {
     use super::*;
     use crate::solver::model::module::KernelBundleModule;
     use crate::solver::model::ModelSpec;
-    use cfd2_ir::solver::ir::{
+    use cfd2_ir::kernel::{
         BindingAccess, DispatchDomain, KernelBinding,
         KernelProgram, LaunchSemantics,
     };

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use super::ast::{EquationSystem, FieldRef, TermOp, UnitValidationError};
 use super::SchemeRegistry;
-use crate::solver::scheme::Scheme;
+use crate::scheme::Scheme;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemeExpansion {
@@ -65,8 +65,8 @@ pub fn expand_schemes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::model::backend::ast::{fvm, surface_scalar, vol_scalar, vol_vector};
-    use crate::solver::units::si;
+    use crate::equation::ast::{fvm, surface_scalar, vol_scalar, vol_vector};
+    use crate::units::si;
 
     #[test]
     fn expand_schemes_reports_no_gradients_for_upwind() {

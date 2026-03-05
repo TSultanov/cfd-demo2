@@ -123,7 +123,7 @@ pub fn lower_primitive_expr(
 mod tests {
     use super::*;
     use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
-    use cfd2_ir::solver::dimensions::{
+    use cfd2_ir::dimensions::{
         Area, Density, Length, MomentumDensity, Pressure, UnitDimension, Velocity,
     };
 

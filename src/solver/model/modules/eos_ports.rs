@@ -1,5 +1,5 @@
 /// EOS port definitions - separate from the main eos module to avoid build script issues.
-use cfd2_ir::solver::dimensions::{Dimensionless, DivDim, MulDim, Pressure, Density, Temperature, UnitDimension};
+use cfd2_ir::dimensions::{Dimensionless, DivDim, MulDim, Pressure, Density, Temperature, UnitDimension};
 use crate::solver::ir::ports::ParamSpec;
 use crate::solver::model::module::PortManifest as ModulePortManifest;
 

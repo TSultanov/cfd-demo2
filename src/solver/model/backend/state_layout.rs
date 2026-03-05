@@ -1,2 +1,2 @@
-pub use cfd2_ir::solver::model::backend::state_layout::*;
+pub use cfd2_ir::equation::state_layout::*;
 

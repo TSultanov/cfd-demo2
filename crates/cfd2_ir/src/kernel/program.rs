@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use super::ParamSpec;
+use crate::ports::ParamSpec;
 
 /// Kernel dispatch domain used for compatibility checks during fusion.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]

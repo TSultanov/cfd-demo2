@@ -8,7 +8,7 @@ use crate::solver::model::backend::typed_ast::{
 };
 // si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_codegen::solver::codegen::dsl::XY;
-use cfd2_ir::solver::dimensions::{
+use cfd2_ir::dimensions::{
     Density, DivDim, DynamicViscosity, Force, InvTime, Length, MassFlux, Pressure, Velocity,
 };
 
@@ -35,7 +35,7 @@ impl IncompressibleMomentumFields {
             phi: surface_scalar_dim::<MassFlux>("phi"),
             mu: vol_scalar_dim::<DynamicViscosity>("mu"),
             rho: vol_scalar_dim::<Density>("rho"),
-            d_p: vol_scalar_dim::<cfd2_ir::solver::dimensions::D_P>("d_p"),
+            d_p: vol_scalar_dim::<cfd2_ir::dimensions::D_P>("d_p"),
             grad_p: vol_vector_dim::<DivDim<Pressure, Length>>("grad_p"),
             grad_p_old: vol_vector_dim::<DivDim<Pressure, Length>>("grad_p_old"),
         }
@@ -60,7 +60,7 @@ fn build_incompressible_momentum_system(_fields: &IncompressibleMomentumFields) 
     let phi_typed = TypedFluxRef::<MassFlux, Scalar>::new("phi");
     let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
     let mu_typed = TypedFieldRef::<DynamicViscosity, Scalar>::new("mu");
-    let d_p_typed = TypedFieldRef::<cfd2_ir::solver::dimensions::D_P, Scalar>::new("d_p");
+    let d_p_typed = TypedFieldRef::<cfd2_ir::dimensions::D_P, Scalar>::new("d_p");
 
     // Build coefficients
     let rho_coeff = TypedCoeff::from_field(rho_typed);
@@ -428,7 +428,7 @@ fn rhie_chow_flux_module_kernel(
     // Use PortRegistry validation to filter for scalar fields with D_P dimension
     let mut d_p_candidates: Vec<String> = Vec::new();
     for f in &coeff_fields {
-        match registry.validate_scalar_field::<cfd2_ir::solver::dimensions::D_P>(
+        match registry.validate_scalar_field::<cfd2_ir::dimensions::D_P>(
             "rhie_chow_flux_module_kernel",
             f.name(),
         ) {

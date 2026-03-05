@@ -20,7 +20,7 @@ use cfd2_codegen::solver::codegen::wgsl_bindings::{
 use cfd2_codegen::solver::codegen::wgsl_dsl as dsl;
 #[cfg(test)]
 use cfd2_codegen::solver::codegen::KernelWgsl;
-use cfd2_ir::solver::ir::{DispatchDomain, KernelProgram, LaunchSemantics};
+use cfd2_ir::kernel::{DispatchDomain, KernelProgram, LaunchSemantics};
 
 /// Build a resolver from ResolvedStateSlotsSpec.
 struct ResolvedSlotResolver {

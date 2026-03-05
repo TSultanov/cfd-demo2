@@ -1015,14 +1015,14 @@ fn contract_reconstruction_paths_share_vanleer_eps_constant() {
     // Drift guard: ensure unified_assembly and flux-module reconstruction use the same shared
     // epsilon constant (no duplicated numeric literals in separate implementations).
 
-    let ir_path = repo_root().join("crates/cfd2_ir/src/solver/ir/mod.rs");
+    let ir_path = repo_root().join("crates/cfd2_ir/src/kernel/mod.rs");
     let ir_src = read_utf8(&ir_path);
-    assert_contains_ident(&ir_src, "VANLEER_EPS", "cfd2_ir::ir/mod.rs");
+    assert_contains_ident(&ir_src, "VANLEER_EPS", "cfd2_ir::kernel/mod.rs");
 
-    let recon_path = repo_root().join("crates/cfd2_ir/src/solver/ir/reconstruction.rs");
+    let recon_path = repo_root().join("crates/cfd2_ir/src/kernel/reconstruction.rs");
     let recon_src = read_utf8(&recon_path);
-    assert_contains_ident(&recon_src, "VANLEER_EPS", "cfd2_ir::ir/reconstruction.rs");
-    assert_not_contains(&recon_src, "1e-8", "cfd2_ir::ir/reconstruction.rs");
+    assert_contains_ident(&recon_src, "VANLEER_EPS", "cfd2_ir::kernel/reconstruction.rs");
+    assert_not_contains(&recon_src, "1e-8", "cfd2_ir::kernel/reconstruction.rs");
 
     let flux_path = repo_root().join("src/solver/model/flux_schemes.rs");
     let flux_src = read_utf8(&flux_path);

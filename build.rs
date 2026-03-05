@@ -5,9 +5,21 @@ use std::path::{Path, PathBuf};
 use wgsl_bindgen::{WgslBindgenOptionBuilder, WgslTypeSerializeStrategy};
 
 #[allow(dead_code)]
+// Top-level aliases for cfd2_ir paths used by include!()'d files
+// (typed_ast.rs is compiled in both cfd2_ir and build.rs contexts)
+mod dimensions {
+    pub use cfd2_ir::dimensions::*;
+}
+mod equation {
+    pub mod ast {
+        pub use cfd2_ir::equation::ast::*;
+    }
+}
+
+#[allow(dead_code)]
 mod solver {
     pub mod dimensions {
-        pub use cfd2_ir::solver::dimensions::*;
+        pub use cfd2_ir::dimensions::*;
     }
     pub mod units {
         include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/solver/units.rs"));
@@ -25,7 +37,7 @@ mod solver {
     }
 
     pub mod shared {
-        pub use cfd2_ir::solver::shared::*;
+        pub use cfd2_ir::flux::*;
     }
 
     pub mod ir {
@@ -109,7 +121,7 @@ mod solver {
             pub mod typed_ast {
                 include!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/crates/cfd2_ir/src/solver/model/backend/typed_ast.rs"
+                    "/crates/cfd2_ir/src/equation/typed_ast.rs"
                 ));
             }
             #[allow(unused_imports)]
@@ -221,7 +233,7 @@ fn main() {
             Err(e) => println!("cargo:warning=Glob error: {:?}", e),
         }
     }
-    for entry in glob("crates/cfd2_ir/src/solver/**/*.rs").expect("Failed to read ir glob") {
+    for entry in glob("crates/cfd2_ir/src/**/*.rs").expect("Failed to read ir glob") {
         match entry {
             Ok(path) => {
                 println!("cargo:rerun-if-changed={}", path.display());

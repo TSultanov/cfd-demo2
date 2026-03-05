@@ -356,7 +356,7 @@ pub fn flux_module_module(
 fn generate_flux_module_gradients_kernel_program_for_model(
     model: &crate::solver::model::ModelSpec,
     _schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<cfd2_ir::solver::ir::KernelProgram, String> {
+) -> Result<cfd2_ir::kernel::KernelProgram, String> {
     let flux = model
         .flux_module()
         .map_err(|e| e.to_string())?
@@ -464,7 +464,7 @@ fn resolve_state_slots_for_flux(
 fn generate_flux_module_kernel_program_for_model(
     model: &crate::solver::model::ModelSpec,
     _schemes: &crate::solver::ir::SchemeRegistry,
-) -> Result<cfd2_ir::solver::ir::KernelProgram, String> {
+) -> Result<cfd2_ir::kernel::KernelProgram, String> {
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
     let flux_stride = model.system.unknowns_per_cell();
     let prims = model

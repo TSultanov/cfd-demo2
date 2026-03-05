@@ -7,8 +7,8 @@
 /// # Example
 ///
 /// ```rust,ignore
-/// use cfd2_ir::solver::model::backend::typed_ast::*;
-/// use cfd2_ir::solver::dimensions::*;
+/// use cfd2_ir::equation::typed_ast::*;
+/// use cfd2_ir::dimensions::*;
 ///
 /// // Create typed field references
 /// let p = TypedFieldRef::<Pressure, Scalar>::new("p");
@@ -20,8 +20,8 @@
 use std::marker::PhantomData;
 use std::ops::Add;
 
-use crate::solver::dimensions::UnitDimension;
-use crate::solver::model::backend::ast::{
+use crate::dimensions::UnitDimension;
+use crate::equation::ast::{
     Coefficient, Discretization, Equation, EquationSystem, FieldKind, FieldRef, FluxRef, Term,
     TermOp, TermSum,
 };
@@ -161,7 +161,7 @@ impl<D: UnitDimension> TypedCoeff<D> {
     /// Returns a coefficient with squared dimension: D * D
     pub fn mag_sqr<K: Kind>(
         field: TypedFieldRef<D, K>,
-    ) -> TypedCoeff<crate::solver::dimensions::MulDim<D, D>> {
+    ) -> TypedCoeff<crate::dimensions::MulDim<D, D>> {
         TypedCoeff {
             inner: Coefficient::mag_sqr(field.to_untyped()),
             _dim: PhantomData,
@@ -172,7 +172,7 @@ impl<D: UnitDimension> TypedCoeff<D> {
     pub fn multiply<OtherD: UnitDimension>(
         self,
         other: TypedCoeff<OtherD>,
-    ) -> TypedCoeff<crate::solver::dimensions::MulDim<D, OtherD>> {
+    ) -> TypedCoeff<crate::dimensions::MulDim<D, OtherD>> {
         TypedCoeff {
             inner: Coefficient::Product(Box::new(self.inner), Box::new(other.inner)),
             _dim: PhantomData,
@@ -190,7 +190,7 @@ where
     D: UnitDimension,
     OtherD: UnitDimension,
 {
-    type Output = TypedCoeff<crate::solver::dimensions::MulDim<D, OtherD>>;
+    type Output = TypedCoeff<crate::dimensions::MulDim<D, OtherD>>;
 
     fn mul(self, other: TypedCoeff<OtherD>) -> Self::Output {
         TypedCoeff {
@@ -363,7 +363,7 @@ impl TypedEquationSystem {
     /// Validate units in the underlying equation system.
     pub fn validate_units(
         &self,
-    ) -> Result<(), crate::solver::model::backend::ast::UnitValidationError> {
+    ) -> Result<(), crate::equation::ast::UnitValidationError> {
         self.inner.validate_units()
     }
 }
@@ -407,42 +407,42 @@ impl<D: UnitDimension, K: Kind> TypedEquation<D, K> {
 // ============================================================================
 
 /// Type-level computation for ddt integrated unit: coeff * field_unit * volume / time
-pub type DdtUnit<FieldD, CoeffD> = crate::solver::dimensions::DivDim<
-    crate::solver::dimensions::MulDim<
-        crate::solver::dimensions::MulDim<CoeffD, FieldD>,
-        crate::solver::dimensions::Volume,
+pub type DdtUnit<FieldD, CoeffD> = crate::dimensions::DivDim<
+    crate::dimensions::MulDim<
+        crate::dimensions::MulDim<CoeffD, FieldD>,
+        crate::dimensions::Volume,
     >,
-    crate::solver::dimensions::Time,
+    crate::dimensions::Time,
 >;
 
 /// Type-level computation for div integrated unit: flux_unit * field_unit
-pub type DivUnit<FluxD, FieldD> = crate::solver::dimensions::MulDim<FluxD, FieldD>;
+pub type DivUnit<FluxD, FieldD> = crate::dimensions::MulDim<FluxD, FieldD>;
 
 /// Type-level computation for div_flux integrated unit: flux_unit
 pub type DivFluxUnit<FluxD> = FluxD;
 
 /// Type-level computation for grad integrated unit: field_unit * area
 pub type GradUnit<FieldD> =
-    crate::solver::dimensions::MulDim<FieldD, crate::solver::dimensions::Area>;
+    crate::dimensions::MulDim<FieldD, crate::dimensions::Area>;
 
 /// Type-level computation for laplacian integrated unit: coeff * field_unit * area / length
-pub type LaplacianUnit<FieldD, CoeffD> = crate::solver::dimensions::DivDim<
-    crate::solver::dimensions::MulDim<
-        crate::solver::dimensions::MulDim<CoeffD, FieldD>,
-        crate::solver::dimensions::Area,
+pub type LaplacianUnit<FieldD, CoeffD> = crate::dimensions::DivDim<
+    crate::dimensions::MulDim<
+        crate::dimensions::MulDim<CoeffD, FieldD>,
+        crate::dimensions::Area,
     >,
-    crate::solver::dimensions::Length,
+    crate::dimensions::Length,
 >;
 
 /// Type-level computation for implicit source integrated unit: coeff * field_unit * volume
-pub type SourceImplicitUnit<FieldD, CoeffD> = crate::solver::dimensions::MulDim<
-    crate::solver::dimensions::MulDim<CoeffD, FieldD>,
-    crate::solver::dimensions::Volume,
+pub type SourceImplicitUnit<FieldD, CoeffD> = crate::dimensions::MulDim<
+    crate::dimensions::MulDim<CoeffD, FieldD>,
+    crate::dimensions::Volume,
 >;
 
 /// Type-level computation for explicit source integrated unit: coeff * volume
 pub type SourceExplicitUnit<CoeffD> =
-    crate::solver::dimensions::MulDim<CoeffD, crate::solver::dimensions::Volume>;
+    crate::dimensions::MulDim<CoeffD, crate::dimensions::Volume>;
 
 pub mod typed_fvm {
     use super::*;
@@ -452,7 +452,7 @@ pub mod typed_fvm {
     /// Integrated unit: coeff_unit * field_unit * volume / time
     pub fn ddt<D: UnitDimension, K: Kind>(
         field: TypedFieldRef<D, K>,
-    ) -> TypedTerm<DdtUnit<D, crate::solver::dimensions::Dimensionless>> {
+    ) -> TypedTerm<DdtUnit<D, crate::dimensions::Dimensionless>> {
         TypedTerm {
             inner: Term::new(
                 TermOp::Ddt,
@@ -561,7 +561,7 @@ pub mod typed_fvm {
     /// For implicit discretization: field_unit * volume
     pub fn source<D: UnitDimension, K: Kind>(
         field: TypedFieldRef<D, K>,
-    ) -> TypedTerm<SourceImplicitUnit<D, crate::solver::dimensions::Dimensionless>> {
+    ) -> TypedTerm<SourceImplicitUnit<D, crate::dimensions::Dimensionless>> {
         TypedTerm {
             inner: Term::new(
                 TermOp::Source,
@@ -604,7 +604,7 @@ pub mod typed_fvc {
     /// Explicit time derivative term.
     pub fn ddt<D: UnitDimension, K: Kind>(
         field: TypedFieldRef<D, K>,
-    ) -> TypedTerm<DdtUnit<D, crate::solver::dimensions::Dimensionless>> {
+    ) -> TypedTerm<DdtUnit<D, crate::dimensions::Dimensionless>> {
         TypedTerm {
             inner: Term::new(
                 TermOp::Ddt,
@@ -705,7 +705,7 @@ pub mod typed_fvc {
     /// For explicit discretization: volume (field-independent, coeff = dimensionless)
     pub fn source<D: UnitDimension, K: Kind>(
         field: TypedFieldRef<D, K>,
-    ) -> TypedTerm<SourceExplicitUnit<crate::solver::dimensions::Dimensionless>> {
+    ) -> TypedTerm<SourceExplicitUnit<crate::dimensions::Dimensionless>> {
         TypedTerm {
             inner: Term::new(
                 TermOp::Source,
@@ -745,8 +745,8 @@ pub mod typed_fvc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::dimensions::*;
-    use crate::solver::units::si;
+    use crate::dimensions::*;
+    use crate::units::si;
 
     #[test]
     fn typed_field_ref_creates_untyped_with_correct_units() {
@@ -923,7 +923,7 @@ mod tests {
 
     #[test]
     fn typed_equation_system_matches_untyped_construction() {
-        use crate::solver::units::si;
+        use crate::units::si;
 
         // Build the same system using both APIs and verify they match
         let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
@@ -937,7 +937,7 @@ mod tests {
         // Untyped construction
         let p_untyped = FieldRef::new("p", FieldKind::Scalar, si::PRESSURE);
 
-        let eqn_untyped = crate::solver::model::backend::ast::fvm::ddt(p_untyped).eqn(p_untyped);
+        let eqn_untyped = crate::equation::ast::fvm::ddt(p_untyped).eqn(p_untyped);
 
         let mut untyped_system = EquationSystem::new();
         untyped_system.add_equation(eqn_untyped);

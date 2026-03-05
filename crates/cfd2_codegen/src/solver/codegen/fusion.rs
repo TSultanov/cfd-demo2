@@ -1,7 +1,7 @@
 use super::KernelWgsl;
-use cfd2_ir::solver::dimensions::{Dimensionless, UnitDimension};
-use cfd2_ir::solver::ir::ports::ParamSpec;
-use cfd2_ir::solver::ir::{
+use cfd2_ir::dimensions::{Dimensionless, UnitDimension};
+use cfd2_ir::ports::ParamSpec;
+use cfd2_ir::kernel::{
     BindingAccess, DispatchDomain, EffectResource, KernelBinding,
     KernelProgram, SideEffectMetadata,
 };
@@ -1124,7 +1124,7 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cfd2_ir::solver::ir::{DispatchDomain, LaunchSemantics};
+    use cfd2_ir::kernel::{DispatchDomain, LaunchSemantics};
 
     fn sample_program(id: &str) -> KernelProgram {
         use cfd2_ir::ast::{Expr, Stmt, Type};
@@ -1674,7 +1674,7 @@ mod tests {
 
     #[test]
     fn lowering_uses_structured_eos_params_from_ir() {
-        use cfd2_ir::solver::dimensions::Dimensionless;
+        use cfd2_ir::dimensions::Dimensionless;
         let launch = LaunchSemantics::new(
             [64, 1, 1],
             "global_id.y * constants.stride_x + global_id.x",
@@ -1774,7 +1774,7 @@ mod tests {
 
     #[test]
     fn fusion_merges_eos_params_from_input_programs() {
-        use cfd2_ir::solver::dimensions::Dimensionless;
+        use cfd2_ir::dimensions::Dimensionless;
         let mut a = sample_program("a");
         a.eos_params = vec![ParamSpec {
             key: "eos.gamma",

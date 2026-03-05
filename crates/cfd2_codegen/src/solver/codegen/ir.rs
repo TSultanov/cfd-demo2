@@ -106,7 +106,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
 mod tests {
     use super::*;
     use crate::solver::ir::{fvc, fvm, surface_scalar_dim, vol_scalar_dim, vol_vector_dim};
-    use cfd2_ir::solver::dimensions::{
+    use cfd2_ir::dimensions::{
         Density, DynamicViscosity, MassFlux, Pressure, PressureGradient, UnitDimension, Velocity,
     };
 

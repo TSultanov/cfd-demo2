@@ -1,1 +1,1 @@
-pub use cfd2_ir::solver::shared::*;
+pub use cfd2_ir::flux::*;

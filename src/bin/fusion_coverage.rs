@@ -152,7 +152,7 @@ fn collect_model_coverage(
     let rules = model::kernel::derive_kernel_fusion_rules_for_model(spec);
 
     let mut impl_by_id = BTreeMap::<&'static str, &'static str>::new();
-    let mut dsl_program_by_id = BTreeMap::<&'static str, cfd2_ir::solver::ir::KernelProgram>::new();
+    let mut dsl_program_by_id = BTreeMap::<&'static str, cfd2_ir::kernel::KernelProgram>::new();
 
     let mut by_id = BTreeMap::<&'static str, KernelCoverageRow>::new();
     for module in &spec.modules {

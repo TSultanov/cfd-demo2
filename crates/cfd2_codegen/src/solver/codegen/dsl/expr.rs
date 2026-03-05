@@ -2,7 +2,7 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use crate::solver::codegen::wgsl_ast::Expr;
-use cfd2_ir::solver::dimensions::{DivDim, MulDim, SqrtDim, UnitDimension};
+use cfd2_ir::dimensions::{DivDim, MulDim, SqrtDim, UnitDimension};
 
 use super::{DslType, ScalarType, Shape, UnitDim};
 
@@ -473,7 +473,7 @@ mod tests {
     use super::*;
     use crate::solver::codegen::dsl::types::{DslType, Shape};
     use crate::solver::codegen::dsl::units::UnitDim;
-    use cfd2_ir::solver::dimensions::{Dimensionless, Length, Time, Velocity};
+    use cfd2_ir::dimensions::{Dimensionless, Length, Time, Velocity};
 
     // ============================================================================
     // Dynamic expression tests (runtime unit checking)
@@ -569,12 +569,12 @@ mod tests {
 
     #[test]
     fn typed_expr_multiplication_combines_dimensions() {
-        let mass: TypedExpr<cfd2_ir::solver::dimensions::Mass> =
+        let mass: TypedExpr<cfd2_ir::dimensions::Mass> =
             TypedExpr::ident("m", DslType::f32());
         let velocity: TypedExpr<Velocity> = TypedExpr::ident("v", DslType::f32());
 
         // Mass * Velocity = MomentumDensity (or Mass * L / T)
-        type Momentum = MulDim<cfd2_ir::solver::dimensions::Mass, Velocity>;
+        type Momentum = MulDim<cfd2_ir::dimensions::Mass, Velocity>;
         let _momentum: TypedExpr<Momentum> = mass * velocity;
 
         // Momentum should have M: 1, L: 1, T: -1

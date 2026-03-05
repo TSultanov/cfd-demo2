@@ -13,7 +13,7 @@ use cfd2_codegen::solver::codegen::wgsl_bindings::{
 use cfd2_codegen::solver::codegen::wgsl_dsl as dsl;
 #[cfg(test)]
 use cfd2_codegen::solver::codegen::{wgsl_ast::Module, KernelWgsl};
-use cfd2_ir::solver::ir::{DispatchDomain, KernelProgram, LaunchSemantics};
+use cfd2_ir::kernel::{DispatchDomain, KernelProgram, LaunchSemantics};
 
 /// Generate flux module gradients WGSL kernel from pre-resolved gradient targets.
 ///

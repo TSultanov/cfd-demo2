@@ -1,7 +1,7 @@
 // Compile-time physical dimension tracking for ports.
 //
 // This module re-exports the canonical type-level dimension system from
-// `cfd2_ir::solver::dimensions`. The canonical system provides:
+// `cfd2_ir::dimensions`. The canonical system provides:
 //
 // - Rational exponents for all base dimensions (M, L, T, TEMP)
 // - Type constructors: [`MulDim`], [`DivDim`], [`PowDim`], [`SqrtDim`]

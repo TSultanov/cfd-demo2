@@ -7,7 +7,11 @@ use crate::solver::model::linear_solver::FgmresSolutionUpdateStrategy;
 use crate::solver::model::KernelId;
 use bytemuck::{bytes_of, Pod, Zeroable};
 
-pub const WORKGROUP_SIZE: u32 = 64;
+/// Default workgroup size used by GPU linear solver kernels.
+///
+/// Can be overridden at construction time via [`FgmresWorkspace::new_from_system`]
+/// or [`ScalarCgModule`] to match device-specific optimal sizes.
+pub const DEFAULT_WORKGROUP_SIZE: u32 = 64;
 pub const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
 
 pub(crate) const FGMRES_SCALAR_COUNT: usize = 16;
@@ -110,30 +114,6 @@ pub struct FgmresCore<'a> {
     pub pipeline_update_w_cgs: &'a wgpu::ComputePipeline,
 }
 
-pub enum FgmresPrecondBindings<'a> {
-    Diag {
-        diag_u: &'a wgpu::Buffer,
-        diag_v: &'a wgpu::Buffer,
-        diag_p: &'a wgpu::Buffer,
-    },
-    DiagWithParams {
-        diag_u: &'a wgpu::Buffer,
-        diag_v: &'a wgpu::Buffer,
-        diag_p: &'a wgpu::Buffer,
-        precond_params: &'a wgpu::Buffer,
-    },
-
-    /// Schur complement preconditioner inputs.
-    ///
-    /// `diag_u` stores per-cell diagonal inverses for all velocity-like components,
-    /// packed as `[cell0_u0, cell0_u1, ..., cell0_u_{u_len-1}, cell1_u0, ...]`.
-    SchurWithParams {
-        diag_u: &'a wgpu::Buffer,
-        diag_p: &'a wgpu::Buffer,
-        precond_params: &'a wgpu::Buffer,
-    },
-}
-
 pub struct FgmresWorkspace {
     max_restart: usize,
     n: u32,
@@ -195,6 +175,50 @@ pub struct FgmresWorkspace {
 }
 
 impl FgmresWorkspace {
+    /// Build a preconditioner bind group (group 2) compatible with the FGMRES
+    /// ops shader layout.
+    ///
+    /// This is a convenience helper so callers don't need to look up the shader
+    /// bindings themselves.  The `resolve` callback maps WGSL binding names
+    /// (e.g. `"diag_u"`, `"diag_v"`, `"diag_p"`) to buffer bindings.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let bg = FgmresWorkspace::build_precond_bind_group(device, "my solver", |name| {
+    ///     match name {
+    ///         "diag_u" => Some(buf_u.as_entire_binding()),
+    ///         "diag_v" => Some(buf_v.as_entire_binding()),
+    ///         "diag_p" => Some(buf_p.as_entire_binding()),
+    ///         _ => None,
+    ///     }
+    /// });
+    /// ```
+    pub fn build_precond_bind_group<'a>(
+        device: &wgpu::Device,
+        label: &str,
+        resolve: impl FnMut(&str) -> Option<wgpu::BindingResource<'a>>,
+    ) -> wgpu::BindGroup {
+        let ops_src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_SPMV)
+            .expect("gmres_ops/spmv shader missing from kernel registry");
+        let pipeline = (ops_src.create_pipeline)(device);
+        let bgl_precond = pipeline.get_bind_group_layout(2);
+        wgsl_reflect::create_bind_group_from_bindings(
+            device,
+            label,
+            &bgl_precond,
+            ops_src.bindings,
+            2,
+            resolve,
+        )
+        .unwrap_or_else(|err| panic!("{label} creation failed: {err}"))
+    }
+
+    /// Create a new FGMRES workspace.
+    ///
+    /// `precond_bind_group` is the caller-built bind group for group 2
+    /// (the preconditioner diagonal/parameter buffers).  This keeps the
+    /// FGMRES solver agnostic of which physics-specific buffers are
+    /// bound — the caller decides the layout.
     pub fn new_from_system(
         device: &wgpu::Device,
         n: u32,
@@ -202,7 +226,7 @@ impl FgmresWorkspace {
         max_restart: usize,
         solution_update_strategy: FgmresSolutionUpdateStrategy,
         system: LinearSystemView<'_>,
-        precond: FgmresPrecondBindings<'_>,
+        precond_bind_group: wgpu::BindGroup,
         label_prefix: &str,
     ) -> Self {
         let matrix_row_offsets = system.row_offsets();
@@ -428,23 +452,6 @@ impl FgmresWorkspace {
         let bgl_precond = pipeline_spmv.get_bind_group_layout(2);
         let bgl_params = pipeline_spmv.get_bind_group_layout(3);
 
-        let (diag_u, diag_v, diag_p) = match &precond {
-            FgmresPrecondBindings::Diag {
-                diag_u,
-                diag_v,
-                diag_p,
-            } => (*diag_u, *diag_v, *diag_p),
-            FgmresPrecondBindings::DiagWithParams {
-                diag_u,
-                diag_v,
-                diag_p,
-                ..
-            } => (*diag_u, *diag_v, *diag_p),
-            FgmresPrecondBindings::SchurWithParams { diag_u, diag_p, .. } => {
-                (*diag_u, *diag_p, *diag_p)
-            }
-        };
-
         let bg_matrix = {
             let registry = ResourceRegistry::new()
                 .with_buffer("row_offsets", matrix_row_offsets)
@@ -461,21 +468,7 @@ impl FgmresWorkspace {
             .unwrap_or_else(|err| panic!("FGMRES matrix BG creation failed: {err}"))
         };
 
-        let bg_precond = {
-            let registry = ResourceRegistry::new()
-                .with_buffer("diag_u", diag_u)
-                .with_buffer("diag_v", diag_v)
-                .with_buffer("diag_p", diag_p);
-            wgsl_reflect::create_bind_group_from_bindings(
-                device,
-                &format!("{label_prefix} FGMRES precond BG"),
-                &bgl_precond,
-                ops_bindings,
-                2,
-                |name| registry.resolve(name),
-            )
-            .unwrap_or_else(|err| panic!("FGMRES precond BG creation failed: {err}"))
-        };
+        let bg_precond = precond_bind_group;
 
         let bg_params = {
             let registry = ResourceRegistry::new()
@@ -1122,7 +1115,7 @@ impl FgmresWorkspace {
             num_cells: 0,
             num_iters: 0,
             omega: 0.0,
-            dispatch_x: WORKGROUP_SIZE,
+            dispatch_x: DEFAULT_WORKGROUP_SIZE,
             max_restart: 0,
             column_offset: 0,
             _pad3: 0,
@@ -1204,7 +1197,13 @@ pub struct FgmresEncodeSolveOnceResult {
 }
 
 pub fn workgroups_for_size(n: u32) -> u32 {
-    n.div_ceil(WORKGROUP_SIZE)
+    workgroups_for_size_ws(n, DEFAULT_WORKGROUP_SIZE)
+}
+
+/// Compute the number of workgroups needed to cover `n` elements with the
+/// given `workgroup_size`.
+pub fn workgroups_for_size_ws(n: u32, workgroup_size: u32) -> u32 {
+    n.div_ceil(workgroup_size)
 }
 
 pub fn dispatch_2d(workgroups: u32) -> (u32, u32) {
@@ -1218,8 +1217,14 @@ pub fn dispatch_2d(workgroups: u32) -> (u32, u32) {
 }
 
 pub fn dispatch_x_threads(workgroups: u32) -> u32 {
+    dispatch_x_threads_ws(workgroups, DEFAULT_WORKGROUP_SIZE)
+}
+
+/// Compute the total number of threads in the X dimension for a 2D dispatch
+/// layout using the given `workgroup_size`.
+pub fn dispatch_x_threads_ws(workgroups: u32, workgroup_size: u32) -> u32 {
     let (dispatch_x, _) = dispatch_2d(workgroups);
-    dispatch_x * WORKGROUP_SIZE
+    dispatch_x * workgroup_size
 }
 
 pub fn basis_binding<'a>(
@@ -1520,7 +1525,7 @@ pub fn encode_fgmres_seed_basis0_from_system<'a>(
         num_cells: 0,
         num_iters: 0,
         omega: 0.0,
-        dispatch_x: WORKGROUP_SIZE,
+        dispatch_x: DEFAULT_WORKGROUP_SIZE,
         max_restart: 0,
         column_offset: 0,
         _pad3: 0,
@@ -1680,7 +1685,7 @@ pub fn encode_rhs_norm_into_scalars<'a>(
         num_cells: 0,
         num_iters: 0,
         omega: 0.0,
-        dispatch_x: WORKGROUP_SIZE,
+        dispatch_x: DEFAULT_WORKGROUP_SIZE,
         max_restart: 0,
         column_offset: 0,
         _pad3: 0,
@@ -2032,7 +2037,7 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
 
     let params_reduce_base = RawFgmresParams {
         n: core.num_dot_groups,
-        dispatch_x: WORKGROUP_SIZE,
+        dispatch_x: DEFAULT_WORKGROUP_SIZE,
         ..params
     };
     let params_reduce_table: Vec<RawFgmresParams> = (0..max_restart)

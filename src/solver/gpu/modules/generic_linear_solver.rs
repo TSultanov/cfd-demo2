@@ -4,7 +4,6 @@
 //! This module provides a common abstraction over FGMRES, CG, and other Krylov methods,
 //! with pluggable preconditioners.
 
-use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
 use crate::solver::gpu::modules::krylov_precond::{PrecondContext, PreconditionerModule};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::recipe::{LinearSolverSpec, LinearSolverType};
@@ -109,38 +108,6 @@ impl<P: PreconditionerModule> GenericLinearSolverModule<P> {
     }
 }
 
-/// Trait for creating preconditioners for the generic linear solver.
-///
-/// This allows different solver families to plug in their own preconditioner
-/// creation logic while sharing the solver infrastructure.
-pub trait PreconditionerFactory<P: PreconditionerModule> {
-    /// Create the preconditioner-specific buffers and return bindings for FGMRES.
-    fn create_precond_bindings(
-        &self,
-        device: &wgpu::Device,
-        n: u32,
-        num_cells: u32,
-    ) -> (P::Buffers, FgmresPrecondBindings<'_>)
-    where
-        P: PreconditionerWithBuffers;
-
-    /// Create the preconditioner module from the workspace and buffers.
-    fn create_precond(
-        &self,
-        device: &wgpu::Device,
-        fgmres: &FgmresWorkspace,
-        num_cells: u32,
-        buffers: P::Buffers,
-    ) -> P
-    where
-        P: PreconditionerWithBuffers;
-}
-
-/// Extended trait for preconditioners that own buffers.
-pub trait PreconditionerWithBuffers: PreconditionerModule {
-    type Buffers;
-}
-
 /// Solve result with detailed timing information.
 #[derive(Debug, Clone, Default)]
 pub struct SolveResult {
@@ -189,10 +156,6 @@ impl PreconditionerModule for IdentityPreconditioner {
             size,
         );
     }
-}
-
-impl PreconditionerWithBuffers for IdentityPreconditioner {
-    type Buffers = ();
 }
 
 #[cfg(test)]

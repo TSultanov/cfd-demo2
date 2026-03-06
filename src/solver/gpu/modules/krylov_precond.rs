@@ -161,6 +161,32 @@ impl<'a> PrecondContext<'a> {
 /// [`FgmresWorkspace`] — it operates on the generic [`PrecondContext`] instead,
 /// making preconditioner implementations reusable across different Krylov
 /// solvers (FGMRES, CG, BiCGSTAB, etc.).
+///
+/// # Contract
+///
+/// **Inputs / outputs.** The solver passes `input` and `output` as
+/// [`wgpu::BindingResource::Buffer`] sub-ranges of at least
+/// `ctx.num_dofs * 4` bytes.  The preconditioner must read from `input`
+/// and write the result `M⁻¹ · input` into `output`.  The solver
+/// guarantees that `input` and `output` do not alias (they point to
+/// different buffer regions).
+///
+/// **Scratch buffers.** The preconditioner may use `ctx.scratch_a`,
+/// `ctx.scratch_b`, and `ctx.scratch_c` as temporary storage.  These are
+/// each at least `ctx.num_dofs * 4` bytes.  Their contents are undefined
+/// on entry and may be clobbered freely.  The preconditioner must **not**
+/// read from or write to the solver's internal buffers (basis vectors,
+/// Hessenberg matrix, Givens rotations, etc.).
+///
+/// **Bind groups.** The context provides `matrix_bg` (group 1),
+/// `precond_bg` (group 2), and `params_bg` (group 3) for convenience.
+/// These correspond to the standard FGMRES shader layout.  A
+/// preconditioner may use them directly, or create its own pipelines
+/// and bind groups from the raw buffers accessible via the context.
+///
+/// **Idempotency.** `encode_apply` may be called multiple times per solve
+/// (once per Krylov iteration).  Implementations must not accumulate
+/// state across calls unless explicitly reset in `encode_prepare`.
 pub trait PreconditionerModule {
     /// Encode any per-solve preparation work (e.g. diagonal extraction, AMG setup).
     ///

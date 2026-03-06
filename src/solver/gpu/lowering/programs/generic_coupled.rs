@@ -1,5 +1,5 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
-use crate::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
+use crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::coupled_schur::CoupledPressureSolveKind;
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
@@ -1873,11 +1873,16 @@ fn build_generic_schur(
         space: &runtime.linear_port_space,
     };
 
-    let precond_bindings = FgmresPrecondBindings::SchurWithParams {
-        diag_u: &b_diag_u,
-        diag_p: &b_diag_p,
-        precond_params: &b_precond_params,
-    };
+    let precond_bg = FgmresWorkspace::build_precond_bind_group(
+        device,
+        "generic_coupled FGMRES precond BG",
+        |name| match name {
+            "diag_u" => Some(b_diag_u.as_entire_binding()),
+            "diag_v" => Some(b_diag_p.as_entire_binding()),
+            "diag_p" => Some(b_diag_p.as_entire_binding()),
+            _ => None,
+        },
+    );
     let fgmres = FgmresWorkspace::new_from_system(
         device,
         num_dofs,
@@ -1885,7 +1890,7 @@ fn build_generic_schur(
         max_restart,
         recipe.linear_solver.update_strategy,
         system,
-        precond_bindings,
+        precond_bg,
         "generic_coupled",
     );
 
@@ -1966,11 +1971,16 @@ fn build_generic_krylov(
         space: &runtime.linear_port_space,
     };
 
-    let precond_bindings = FgmresPrecondBindings::Diag {
-        diag_u: &b_diag_u,
-        diag_v: &b_diag_v,
-        diag_p: &b_diag_p,
-    };
+    let precond_bg = FgmresWorkspace::build_precond_bind_group(
+        device,
+        "generic_coupled FGMRES precond BG",
+        |name| match name {
+            "diag_u" => Some(b_diag_u.as_entire_binding()),
+            "diag_v" => Some(b_diag_v.as_entire_binding()),
+            "diag_p" => Some(b_diag_p.as_entire_binding()),
+            _ => None,
+        },
+    );
 
     let fgmres = FgmresWorkspace::new_from_system(
         device,
@@ -1979,7 +1989,7 @@ fn build_generic_krylov(
         max_restart.max(1),
         recipe.linear_solver.update_strategy,
         system,
-        precond_bindings,
+        precond_bg,
         "generic_coupled",
     );
 

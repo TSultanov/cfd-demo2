@@ -7,7 +7,7 @@
 //! higher-level coupled-solver loop.
 
 use cfd2::solver::gpu::context::GpuContext;
-use cfd2::solver::gpu::linear_solver::fgmres::{FgmresPrecondBindings, FgmresWorkspace};
+use cfd2::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
 use cfd2::solver::gpu::modules::generic_linear_solver::IdentityPreconditioner;
 use cfd2::solver::gpu::modules::krylov_precond::DispatchGrids;
 use cfd2::solver::gpu::modules::krylov_solve::KrylovSolveModule;
@@ -188,11 +188,16 @@ fn encoded_fgmres_matches_host_fgmres_on_small_system() {
     let b_diag_u = device_buffer_f32(&ctx.device, &diag_inv, "diag_u");
     let b_diag_v = device_buffer_f32(&ctx.device, &diag_inv, "diag_v");
     let b_diag_p = device_buffer_f32(&ctx.device, &diag_inv, "diag_p");
-    let precond_bindings = FgmresPrecondBindings::Diag {
-        diag_u: &b_diag_u,
-        diag_v: &b_diag_v,
-        diag_p: &b_diag_p,
-    };
+    let precond_bg = FgmresWorkspace::build_precond_bind_group(
+        &ctx.device,
+        "test FGMRES precond BG",
+        |name| match name {
+            "diag_u" => Some(b_diag_u.as_entire_binding()),
+            "diag_v" => Some(b_diag_v.as_entire_binding()),
+            "diag_p" => Some(b_diag_p.as_entire_binding()),
+            _ => None,
+        },
+    );
 
     // --- Create FGMRES workspace ---
     let max_restart = n as usize; // Big enough to converge in one restart cycle.
@@ -203,7 +208,7 @@ fn encoded_fgmres_matches_host_fgmres_on_small_system() {
         max_restart,
         FgmresSolutionUpdateStrategy::FusedContiguous,
         system,
-        precond_bindings,
+        precond_bg,
         "test",
     );
 

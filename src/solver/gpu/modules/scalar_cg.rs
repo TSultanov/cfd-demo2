@@ -1,5 +1,5 @@
 use crate::solver::gpu::context::GpuContext;
-use crate::solver::gpu::linear_solver::fgmres::dispatch_2d;
+use crate::solver::gpu::linear_solver::fgmres::{dispatch_2d, DEFAULT_WORKGROUP_SIZE};
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::structs::{LinearSolverStats, SolverParams};
@@ -81,7 +81,7 @@ pub struct ScalarCgModule {
 }
 
 impl ScalarCgModule {
-    const WORKGROUP_SIZE: u32 = 64;
+    const WORKGROUP_SIZE: u32 = DEFAULT_WORKGROUP_SIZE;
 
     pub fn new(inputs: &ScalarCgModuleInputs<'_>) -> Self {
         let bgl_dot_pair_inputs = inputs.pipeline_dot_pair.get_bind_group_layout(1);

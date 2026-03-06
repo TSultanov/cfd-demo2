@@ -429,7 +429,7 @@ fn resolve_state_slots_for_flux(
     flux: &FluxModuleSpec,
     system: &crate::solver::model::backend::ast::EquationSystem,
     registry: &crate::solver::model::ports::PortRegistry,
-    primitives: &[(String, crate::solver::shared::PrimitiveExpr)],
+    primitives: &[(String, cfd2_ir::ast::Expr)],
 ) -> Result<crate::solver::ir::ports::ResolvedStateSlotsSpec, String> {
     match flux {
         FluxModuleSpec::Kernel { kernel, .. } => {

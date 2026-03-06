@@ -6,7 +6,6 @@ use crate::solver::ir::{
     FluxLayout, FluxModuleKernelSpec, LowMachParam,
 };
 use crate::solver::scheme::Scheme;
-use crate::solver::shared::PrimitiveExpr;
 use cfd2_codegen::solver::codegen::bc_table::BcTable;
 use cfd2_codegen::solver::codegen::constants::constants_struct;
 use cfd2_codegen::solver::codegen::dsl as typed;
@@ -55,7 +54,7 @@ pub fn generate_flux_module_wgsl(
     resolved_slots: &ResolvedStateSlotsSpec,
     flux_layout: &FluxLayout,
     flux_stride: u32,
-    primitives: &[(String, PrimitiveExpr)],
+    primitives: &[(String, Expr)],
     spec: &FluxModuleKernelSpec,
     eos_params: &[ParamSpec],
 ) -> KernelWgsl {
@@ -65,7 +64,7 @@ pub fn generate_flux_module_wgsl(
         "flux_stride must match FluxLayout.stride"
     );
 
-    let primitive_map: HashMap<&str, &PrimitiveExpr> =
+    let primitive_map: HashMap<&str, &Expr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
     let resolver = ResolvedSlotResolver::from_spec(resolved_slots);
@@ -98,7 +97,7 @@ pub fn generate_flux_module_wgsl_runtime_scheme(
     resolved_slots: &ResolvedStateSlotsSpec,
     flux_layout: &FluxLayout,
     flux_stride: u32,
-    primitives: &[(String, PrimitiveExpr)],
+    primitives: &[(String, Expr)],
     variants: &[(Scheme, FluxModuleKernelSpec)],
     eos_params: &[ParamSpec],
 ) -> KernelWgsl {
@@ -108,7 +107,7 @@ pub fn generate_flux_module_wgsl_runtime_scheme(
         "flux_stride must match FluxLayout.stride"
     );
 
-    let primitive_map: HashMap<&str, &PrimitiveExpr> =
+    let primitive_map: HashMap<&str, &Expr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
     let resolver = ResolvedSlotResolver::from_spec(resolved_slots);
@@ -185,7 +184,7 @@ pub fn generate_flux_module_kernel_program(
     resolved_slots: &ResolvedStateSlotsSpec,
     flux_layout: &FluxLayout,
     flux_stride: u32,
-    primitives: &[(String, PrimitiveExpr)],
+    primitives: &[(String, Expr)],
     spec: &FluxModuleKernelSpec,
     eos_params: &[ParamSpec],
 ) -> Result<KernelProgram, String> {
@@ -200,7 +199,7 @@ pub fn generate_flux_module_kernel_program(
     let bindings =
         cfd2_codegen::solver::codegen::coupled_common::kernel_bindings_from_items(&items)?;
 
-    let primitive_map: HashMap<&str, &PrimitiveExpr> =
+    let primitive_map: HashMap<&str, &Expr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
     let resolver = ResolvedSlotResolver::from_spec(resolved_slots);
@@ -226,7 +225,7 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
     resolved_slots: &ResolvedStateSlotsSpec,
     flux_layout: &FluxLayout,
     flux_stride: u32,
-    primitives: &[(String, PrimitiveExpr)],
+    primitives: &[(String, Expr)],
     variants: &[(Scheme, FluxModuleKernelSpec)],
     eos_params: &[ParamSpec],
 ) -> Result<KernelProgram, String> {
@@ -243,7 +242,7 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
     let bindings =
         cfd2_codegen::solver::codegen::coupled_common::kernel_bindings_from_items(&items)?;
 
-    let primitive_map: HashMap<&str, &PrimitiveExpr> =
+    let primitive_map: HashMap<&str, &Expr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
     let resolver = ResolvedSlotResolver::from_spec(resolved_slots);
@@ -388,9 +387,8 @@ mod tests {
 
     #[test]
     fn flux_module_codegen_accepts_vector_component_selector() {
-        // Regression test: PrimitiveExpr::Field("rho_u_x")-style component selectors
+        // Regression test: Expr::ident("rho_u_x")-style component selectors
         // should resolve correctly to state offsets via PortRegistry.
-        use crate::solver::shared::PrimitiveExpr;
 
         let rho_u = vol_vector_dim::<MomentumDensity>("rho_u");
         let layout = StateLayout::new(vec![rho_u]);
@@ -409,15 +407,15 @@ mod tests {
             ],
         };
 
-        // Use primitive expressions that access vector components by name
+        // Use expressions that access vector components by name
         let primitives = vec![
             (
                 "mom_x".to_string(),
-                PrimitiveExpr::Field("rho_u_x".to_string()),
+                Expr::ident("rho_u_x"),
             ),
             (
                 "mom_y".to_string(),
-                PrimitiveExpr::Field("rho_u_y".to_string()),
+                Expr::ident("rho_u_y"),
             ),
         ];
 
@@ -636,7 +634,7 @@ fn main_fn(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
     flux_stride: u32,
-    primitives: &HashMap<&str, &PrimitiveExpr>,
+    primitives: &HashMap<&str, &Expr>,
     spec: &FluxModuleKernelSpec,
 ) -> Function {
     let params = vec![Param::new(
@@ -658,7 +656,7 @@ fn main_fn_runtime_scheme(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
     flux_stride: u32,
-    primitives: &HashMap<&str, &PrimitiveExpr>,
+    primitives: &HashMap<&str, &Expr>,
     variants: &[(Scheme, FluxModuleKernelSpec)],
 ) -> Function {
     let params = vec![Param::new(
@@ -680,7 +678,7 @@ fn main_body(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
     flux_stride: u32,
-    primitives: &HashMap<&str, &PrimitiveExpr>,
+    primitives: &HashMap<&str, &Expr>,
     spec: &FluxModuleKernelSpec,
 ) -> Block {
     let mut stmts = vec![
@@ -782,7 +780,7 @@ fn main_body_runtime_scheme(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
     flux_stride: u32,
-    primitives: &HashMap<&str, &PrimitiveExpr>,
+    primitives: &HashMap<&str, &Expr>,
     variants: &[(Scheme, FluxModuleKernelSpec)],
 ) -> Block {
     let mut stmts = vec![
@@ -884,7 +882,7 @@ fn face_stmts(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
     flux_stride: u32,
-    primitives: &HashMap<&str, &PrimitiveExpr>,
+    primitives: &HashMap<&str, &Expr>,
     spec: &FluxModuleKernelSpec,
 ) -> Vec<Stmt> {
     let mut body = vec![dsl::let_expr(
@@ -1072,7 +1070,7 @@ fn face_stmts_runtime_scheme(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
     flux_stride: u32,
-    primitives: &HashMap<&str, &PrimitiveExpr>,
+    primitives: &HashMap<&str, &Expr>,
     variants: &[(Scheme, FluxModuleKernelSpec)],
 ) -> Vec<Stmt> {
     #[derive(Clone, Copy)]
@@ -1552,7 +1550,7 @@ fn state_var_name(resolver: &dyn OffsetResolver, key: StateKey<'_>) -> String {
 
 fn collect_state_keys_from_flux_spec<'a>(
     spec: &'a FluxModuleKernelSpec,
-    primitives: &'a HashMap<&'a str, &'a PrimitiveExpr>,
+    primitives: &'a HashMap<&'a str, &'a Expr>,
     resolver: &dyn OffsetResolver,
     out: &mut HashSet<StateKey<'a>>,
 ) {
@@ -1594,7 +1592,7 @@ fn collect_state_keys_from_flux_spec<'a>(
 
 fn collect_state_keys_from_vec2<'a>(
     expr: &'a FaceVec2Expr,
-    primitives: &'a HashMap<&'a str, &'a PrimitiveExpr>,
+    primitives: &'a HashMap<&'a str, &'a Expr>,
     resolver: &dyn OffsetResolver,
     out: &mut HashSet<StateKey<'a>>,
 ) {
@@ -1628,14 +1626,15 @@ fn collect_state_keys_from_vec2<'a>(
 }
 
 fn collect_state_keys_from_primitive_expr<'a>(
-    expr: &'a PrimitiveExpr,
+    expr: &'a Expr,
     side: FaceSide,
     resolver: &dyn OffsetResolver,
     out: &mut HashSet<StateKey<'a>>,
 ) {
-    match expr {
-        PrimitiveExpr::Literal(_) => {}
-        PrimitiveExpr::Field(name) => {
+    use cfd2_ir::ast::ExprNode;
+    match expr.node() {
+        ExprNode::Literal(_) => {}
+        ExprNode::Ident(name) => {
             let (base, component) = resolve_state_field_component_resolver(resolver, name);
             out.insert(StateKey {
                 side,
@@ -1643,22 +1642,31 @@ fn collect_state_keys_from_primitive_expr<'a>(
                 component,
             });
         }
-        PrimitiveExpr::Add(a, b)
-        | PrimitiveExpr::Sub(a, b)
-        | PrimitiveExpr::Mul(a, b)
-        | PrimitiveExpr::Div(a, b) => {
-            collect_state_keys_from_primitive_expr(a, side, resolver, out);
-            collect_state_keys_from_primitive_expr(b, side, resolver, out);
+        ExprNode::Binary { left, right, .. } => {
+            collect_state_keys_from_primitive_expr(left, side, resolver, out);
+            collect_state_keys_from_primitive_expr(right, side, resolver, out);
         }
-        PrimitiveExpr::Sqrt(inner) | PrimitiveExpr::Neg(inner) => {
+        ExprNode::Unary { expr: inner, .. } => {
             collect_state_keys_from_primitive_expr(inner, side, resolver, out);
+        }
+        ExprNode::Call { args, .. } => {
+            for arg in args {
+                collect_state_keys_from_primitive_expr(arg, side, resolver, out);
+            }
+        }
+        ExprNode::Field { base, .. } => {
+            collect_state_keys_from_primitive_expr(base, side, resolver, out);
+        }
+        ExprNode::Index { base, index } => {
+            collect_state_keys_from_primitive_expr(base, side, resolver, out);
+            collect_state_keys_from_primitive_expr(index, side, resolver, out);
         }
     }
 }
 
 fn collect_state_keys_from_scalar<'a>(
     expr: &'a FaceScalarExpr,
-    primitives: &'a HashMap<&'a str, &'a PrimitiveExpr>,
+    primitives: &'a HashMap<&'a str, &'a Expr>,
     resolver: &dyn OffsetResolver,
     out: &mut HashSet<StateKey<'a>>,
 ) {
@@ -1736,7 +1744,7 @@ fn precompute_state_vars<'a>(
 
 struct LowerCtx<'a> {
     resolver: &'a dyn OffsetResolver,
-    primitives: &'a HashMap<&'a str, &'a PrimitiveExpr>,
+    primitives: &'a HashMap<&'a str, &'a Expr>,
     flux_layout: &'a FluxLayout,
     state_vars: HashMap<StateKey<'a>, String>,
 }
@@ -1744,7 +1752,7 @@ struct LowerCtx<'a> {
 impl<'a> LowerCtx<'a> {
     fn new(
         resolver: &'a dyn OffsetResolver,
-        primitives: &'a HashMap<&'a str, &'a PrimitiveExpr>,
+        primitives: &'a HashMap<&'a str, &'a Expr>,
         flux_layout: &'a FluxLayout,
         state_vars: HashMap<StateKey<'a>, String>,
     ) -> Self {
@@ -2197,39 +2205,59 @@ fn scalar_uses_low_mach(expr: &FaceScalarExpr) -> bool {
 }
 
 fn lower_primitive_expr_at_side<'a>(
-    expr: &'a PrimitiveExpr,
+    expr: &'a Expr,
     ctx: &LowerCtx<'a>,
     side: FaceSide,
 ) -> Expr {
-    match expr {
-        PrimitiveExpr::Literal(val) => Expr::lit_f32(*val),
+    use cfd2_ir::ast::ExprNode;
+    match expr.node() {
+        ExprNode::Literal(_lit) => {
+            // Reconstruct the literal as an Expr
+            expr.clone()
+        }
 
-        PrimitiveExpr::Field(name) => {
+        ExprNode::Ident(name) => {
             let (base, component) = resolve_state_field_component_resolver(ctx.resolver, name);
             ctx.state_scalar(side, base, component)
         }
 
-        PrimitiveExpr::Add(lhs, rhs) => {
-            lower_primitive_expr_at_side(lhs, ctx, side)
-                + lower_primitive_expr_at_side(rhs, ctx, side)
-        }
-        PrimitiveExpr::Sub(lhs, rhs) => {
-            lower_primitive_expr_at_side(lhs, ctx, side)
-                - lower_primitive_expr_at_side(rhs, ctx, side)
-        }
-        PrimitiveExpr::Mul(lhs, rhs) => {
-            lower_primitive_expr_at_side(lhs, ctx, side)
-                * lower_primitive_expr_at_side(rhs, ctx, side)
-        }
-        PrimitiveExpr::Div(lhs, rhs) => {
-            lower_primitive_expr_at_side(lhs, ctx, side)
-                / lower_primitive_expr_at_side(rhs, ctx, side)
+        ExprNode::Binary { left, op, right } => {
+            let lhs = lower_primitive_expr_at_side(left, ctx, side);
+            let rhs = lower_primitive_expr_at_side(right, ctx, side);
+            Expr::binary(lhs, *op, rhs)
         }
 
-        PrimitiveExpr::Sqrt(inner) => {
-            Expr::call_named("sqrt", vec![lower_primitive_expr_at_side(inner, ctx, side)])
+        ExprNode::Unary { op, expr: inner } => {
+            let inner_lowered = lower_primitive_expr_at_side(inner, ctx, side);
+            match op {
+                cfd2_ir::ast::UnaryOp::Negate => -inner_lowered,
+                _ => Expr::alloc_node(ExprNode::Unary {
+                    op: *op,
+                    expr: inner_lowered,
+                }),
+            }
         }
-        PrimitiveExpr::Neg(inner) => -lower_primitive_expr_at_side(inner, ctx, side),
+
+        ExprNode::Call { callee, args } => {
+            // Resolve args recursively
+            let resolved_args: Vec<Expr> = args
+                .iter()
+                .map(|a| lower_primitive_expr_at_side(a, ctx, side))
+                .collect();
+            let callee_lowered = lower_primitive_expr_at_side(callee, ctx, side);
+            Expr::call(callee_lowered, resolved_args)
+        }
+
+        ExprNode::Field { base, field } => {
+            let base_lowered = lower_primitive_expr_at_side(base, ctx, side);
+            base_lowered.field(field.clone())
+        }
+
+        ExprNode::Index { base, index } => {
+            let base_lowered = lower_primitive_expr_at_side(base, ctx, side);
+            let index_lowered = lower_primitive_expr_at_side(index, ctx, side);
+            base_lowered.index(index_lowered)
+        }
     }
 }
 

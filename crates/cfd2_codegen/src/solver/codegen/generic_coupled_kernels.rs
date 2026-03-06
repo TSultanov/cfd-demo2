@@ -13,12 +13,11 @@ use super::wgsl_dsl as dsl;
 use super::KernelWgsl;
 use crate::solver::codegen::coupled_common::kernel_bindings_from_items;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
-use crate::solver::codegen::primitive_expr::lower_primitive_expr;
+use crate::solver::codegen::primitive_expr::resolve_field_refs;
 
 use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::ir::ports::{ParamSpec, ResolvedStateSlotsSpec};
 use crate::solver::ir::{Discretization, DispatchDomain, KernelProgram, LaunchSemantics};
-use crate::solver::shared::PrimitiveExpr;
 
 const GENERIC_COUPLED_WORKGROUP_SIZE: u32 = 64;
 
@@ -70,7 +69,7 @@ pub fn generate_generic_coupled_assembly_wgsl(
 pub fn generate_generic_coupled_update_wgsl(
     system: &DiscreteSystem,
     slots: &ResolvedStateSlotsSpec,
-    primitives: &[(u32, PrimitiveExpr)],
+    primitives: &[(u32, Expr)],
     apply_relaxation: bool,
     relaxation_requires_dtau: bool,
     eos_params: &[ParamSpec],
@@ -95,7 +94,7 @@ pub fn generate_generic_coupled_update_kernel_program(
     id: &str,
     system: &DiscreteSystem,
     slots: &ResolvedStateSlotsSpec,
-    primitives: &[(u32, PrimitiveExpr)],
+    primitives: &[(u32, Expr)],
     apply_relaxation: bool,
     relaxation_requires_dtau: bool,
     eos_params: &[ParamSpec],
@@ -616,7 +615,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 fn main_update_fn(
     system: &DiscreteSystem,
     slots: &ResolvedStateSlotsSpec,
-    primitives: &[(u32, PrimitiveExpr)],
+    primitives: &[(u32, Expr)],
     apply_relaxation: bool,
     relaxation_requires_dtau: bool,
 ) -> Function {
@@ -706,7 +705,7 @@ fn main_update_fn(
     if !primitives.is_empty() {
         let cell_idx = Expr::ident("idx");
         for (offset, expr) in primitives {
-            let value = lower_primitive_expr(expr, slots, cell_idx.clone(), "state");
+            let value = resolve_field_refs(expr, slots, cell_idx.clone(), "state");
             let target = dsl::array_access_linear("state", Expr::ident("idx"), stride, *offset);
             stmts.push(dsl::assign_expr(target, value));
         }

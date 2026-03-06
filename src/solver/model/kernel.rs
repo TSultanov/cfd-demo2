@@ -678,7 +678,7 @@ pub(crate) fn generate_generic_coupled_update_kernel_program(
     let slots = resolved_slots_from_layout(&model.state_layout);
 
     // Pre-resolve primitive output offsets (skip primitives that cannot be resolved)
-    let resolved_prims: Vec<(u32, cfd2_codegen::solver::shared::PrimitiveExpr)> = prims
+    let resolved_prims: Vec<(u32, cfd2_ir::ast::Expr)> = prims
         .into_iter()
         .filter_map(|(name, expr)| {
             resolve_offset_from_slots(&slots, &name).map(|offset| (offset, expr))

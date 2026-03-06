@@ -2,7 +2,7 @@
 ///
 /// Maps primitive field names (e.g., "p", "u_x") to expressions over conserved state.
 /// Codegen uses these to generate primitive recovery kernels without hardcoding physics.
-use crate::solver::shared::PrimitiveExpr;
+use cfd2_ir::ast::Expr;
 use std::collections::HashMap;
 use std::collections::{BTreeSet, VecDeque};
 
@@ -17,7 +17,7 @@ pub struct PrimitiveDerivations {
     /// - "u_x" → rho_u_x / rho
     /// - "u_y" → rho_u_y / rho
     /// - "p" → (gamma - 1) * (rho_e - 0.5 * rho * u^2)
-    pub derivations: HashMap<String, PrimitiveExpr>,
+    pub derivations: HashMap<String, Expr>,
 }
 
 impl PrimitiveDerivations {
@@ -41,22 +41,21 @@ impl PrimitiveDerivations {
     /// - u = rho_u / rho
     /// - p = (gamma - 1) * (rho_e - 0.5 * rho * |u|^2)
     pub fn euler_ideal_gas(gamma: f32) -> Self {
-        use PrimitiveExpr as E;
         let mut derivations = HashMap::new();
 
         // rho is conserved (identity mapping)
-        derivations.insert("rho".into(), E::field("rho"));
+        derivations.insert("rho".into(), Expr::ident("rho"));
 
         // u_x = rho_u_x / rho
         derivations.insert(
             "u_x".into(),
-            E::Div(Box::new(E::field("rho_u_x")), Box::new(E::field("rho"))),
+            Expr::ident("rho_u_x") / Expr::ident("rho"),
         );
 
         // u_y = rho_u_y / rho
         derivations.insert(
             "u_y".into(),
-            E::Div(Box::new(E::field("rho_u_y")), Box::new(E::field("rho"))),
+            Expr::ident("rho_u_y") / Expr::ident("rho"),
         );
 
         // kinetic_energy = 0.5 * (rho_u_x^2 + rho_u_y^2) / rho
@@ -64,28 +63,14 @@ impl PrimitiveDerivations {
         // Important: avoid referencing derived primitives (u_x/u_y) when defining `p`.
         // Primitive recovery kernels may compute outputs in any order unless an
         // explicit dependency graph is enforced.
-        let rho_u_sq = E::Add(
-            Box::new(E::Mul(
-                Box::new(E::field("rho_u_x")),
-                Box::new(E::field("rho_u_x")),
-            )),
-            Box::new(E::Mul(
-                Box::new(E::field("rho_u_y")),
-                Box::new(E::field("rho_u_y")),
-            )),
-        );
-        let ke = E::Mul(
-            Box::new(E::lit(0.5)),
-            Box::new(E::Div(Box::new(rho_u_sq), Box::new(E::field("rho")))),
-        );
+        let rho_u_sq = Expr::ident("rho_u_x") * Expr::ident("rho_u_x")
+            + Expr::ident("rho_u_y") * Expr::ident("rho_u_y");
+        let ke = Expr::lit_f32(0.5) * (rho_u_sq / Expr::ident("rho"));
 
         // p = (gamma - 1) * (rho_e - ke)
         derivations.insert(
             "p".into(),
-            E::Mul(
-                Box::new(E::lit(gamma - 1.0)),
-                Box::new(E::Sub(Box::new(E::field("rho_e")), Box::new(ke))),
-            ),
+            Expr::lit_f32(gamma - 1.0) * (Expr::ident("rho_e") - ke),
         );
 
         Self { derivations }
@@ -101,48 +86,33 @@ impl PrimitiveDerivations {
     /// - p = (gamma - 1) * (rho_e - 0.5 * (rho_u_x^2 + rho_u_y^2) / rho)
     /// - T = p / rho  (solver nondimensional units; equivalent to p / (rho * R) with R=1)
     pub fn euler_ideal_gas_pressure_t(gamma: f32) -> Self {
-        use PrimitiveExpr as E;
         let mut derivations = HashMap::new();
 
         // rho is conserved (identity mapping)
-        derivations.insert("rho".into(), E::field("rho"));
+        derivations.insert("rho".into(), Expr::ident("rho"));
 
         // kinetic_energy = 0.5 * (rho_u_x^2 + rho_u_y^2) / rho
-        let rho_u_sq = E::Add(
-            Box::new(E::Mul(
-                Box::new(E::field("rho_u_x")),
-                Box::new(E::field("rho_u_x")),
-            )),
-            Box::new(E::Mul(
-                Box::new(E::field("rho_u_y")),
-                Box::new(E::field("rho_u_y")),
-            )),
-        );
-        let ke = E::Mul(
-            Box::new(E::lit(0.5)),
-            Box::new(E::Div(Box::new(rho_u_sq), Box::new(E::field("rho")))),
-        );
+        let rho_u_sq = Expr::ident("rho_u_x") * Expr::ident("rho_u_x")
+            + Expr::ident("rho_u_y") * Expr::ident("rho_u_y");
+        let ke = Expr::lit_f32(0.5) * (rho_u_sq / Expr::ident("rho"));
 
         // p = (gamma - 1) * (rho_e - ke)
         derivations.insert(
             "p".into(),
-            E::Mul(
-                Box::new(E::lit(gamma - 1.0)),
-                Box::new(E::Sub(Box::new(E::field("rho_e")), Box::new(ke))),
-            ),
+            Expr::lit_f32(gamma - 1.0) * (Expr::ident("rho_e") - ke),
         );
 
         // T = p / rho
         derivations.insert(
             "T".into(),
-            E::Div(Box::new(E::field("p")), Box::new(E::field("rho"))),
+            Expr::ident("p") / Expr::ident("rho"),
         );
 
         Self { derivations }
     }
 
     /// Get the primitive expression for a given field name.
-    pub fn get(&self, name: &str) -> Option<&PrimitiveExpr> {
+    pub fn get(&self, name: &str) -> Option<&Expr> {
         self.derivations.get(name)
     }
 
@@ -152,7 +122,7 @@ impl PrimitiveDerivations {
     }
 
     /// Iterator over all (name, expression) pairs.
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &PrimitiveExpr)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &Expr)> {
         self.derivations.iter()
     }
 
@@ -160,22 +130,31 @@ impl PrimitiveDerivations {
     ///
     /// This allows derived primitives to reference other derived primitives safely, as long as
     /// the dependency graph is acyclic.
-    pub fn ordered(&self) -> Result<Vec<(String, PrimitiveExpr)>, String> {
-        fn collect_field_refs(expr: &PrimitiveExpr, out: &mut BTreeSet<String>) {
-            match expr {
-                PrimitiveExpr::Literal(_) => {}
-                PrimitiveExpr::Field(name) => {
+    pub fn ordered(&self) -> Result<Vec<(String, Expr)>, String> {
+        fn collect_field_refs(expr: &Expr, out: &mut BTreeSet<String>) {
+            match expr.node() {
+                cfd2_ir::ast::ExprNode::Ident(name) => {
                     out.insert(name.clone());
                 }
-                PrimitiveExpr::Add(lhs, rhs)
-                | PrimitiveExpr::Sub(lhs, rhs)
-                | PrimitiveExpr::Mul(lhs, rhs)
-                | PrimitiveExpr::Div(lhs, rhs) => {
-                    collect_field_refs(lhs, out);
-                    collect_field_refs(rhs, out);
+                cfd2_ir::ast::ExprNode::Literal(_) => {}
+                cfd2_ir::ast::ExprNode::Binary { left, right, .. } => {
+                    collect_field_refs(left, out);
+                    collect_field_refs(right, out);
                 }
-                PrimitiveExpr::Sqrt(inner) | PrimitiveExpr::Neg(inner) => {
-                    collect_field_refs(inner, out);
+                cfd2_ir::ast::ExprNode::Unary { expr, .. } => {
+                    collect_field_refs(expr, out);
+                }
+                cfd2_ir::ast::ExprNode::Call { args, .. } => {
+                    for arg in args {
+                        collect_field_refs(arg, out);
+                    }
+                }
+                cfd2_ir::ast::ExprNode::Field { base, .. } => {
+                    collect_field_refs(base, out);
+                }
+                cfd2_ir::ast::ExprNode::Index { base, index } => {
+                    collect_field_refs(base, out);
+                    collect_field_refs(index, out);
                 }
             }
         }
@@ -198,7 +177,7 @@ impl PrimitiveDerivations {
                 if self.derivations.contains_key(&f) {
                     if f == *name {
                         // Allow identity mappings like `rho = rho` (these are redundant but harmless).
-                        if matches!(expr, PrimitiveExpr::Field(inner) if inner == name) {
+                        if matches!(expr.node(), cfd2_ir::ast::ExprNode::Ident(inner) if inner == name) {
                             continue;
                         }
                         return Err(format!("primitive '{name}' depends on itself"));
@@ -288,6 +267,7 @@ impl Default for PrimitiveDerivations {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cfd2_ir::ast::ExprNode;
 
     #[test]
     fn euler_ideal_gas_defines_expected_primitives() {
@@ -299,21 +279,21 @@ mod tests {
         assert!(prims.contains("p"));
 
         // rho should be identity (just a field reference)
-        match prims.get("rho").unwrap() {
-            PrimitiveExpr::Field(name) => assert_eq!(name, "rho"),
-            other => panic!("expected Field, got {:?}", other),
+        match prims.get("rho").unwrap().node() {
+            ExprNode::Ident(name) => assert_eq!(name, "rho"),
+            other => panic!("expected Ident, got {:?}", other),
         }
 
         // u_x should be division
-        match prims.get("u_x").unwrap() {
-            PrimitiveExpr::Div(_, _) => {}
-            other => panic!("expected Div, got {:?}", other),
+        match prims.get("u_x").unwrap().node() {
+            ExprNode::Binary { op, .. } => assert_eq!(*op, cfd2_ir::ast::BinaryOp::Div),
+            other => panic!("expected Binary Div, got {:?}", other),
         }
 
         // p should be multiplication (gamma-1) * (...)
-        match prims.get("p").unwrap() {
-            PrimitiveExpr::Mul(_, _) => {}
-            other => panic!("expected Mul, got {:?}", other),
+        match prims.get("p").unwrap().node() {
+            ExprNode::Binary { op, .. } => assert_eq!(*op, cfd2_ir::ast::BinaryOp::Mul),
+            other => panic!("expected Binary Mul, got {:?}", other),
         }
     }
 
@@ -325,17 +305,15 @@ mod tests {
 
     #[test]
     fn ordered_allows_derived_to_depend_on_derived() {
-        use PrimitiveExpr as E;
-
         let mut derivations = HashMap::new();
-        derivations.insert("rho".into(), E::field("rho"));
+        derivations.insert("rho".into(), Expr::ident("rho"));
         derivations.insert(
             "u_x".into(),
-            E::Div(Box::new(E::field("rho_u_x")), Box::new(E::field("rho"))),
+            Expr::ident("rho_u_x") / Expr::ident("rho"),
         );
         derivations.insert(
             "p".into(),
-            E::Mul(Box::new(E::lit(1.0)), Box::new(E::field("u_x"))),
+            Expr::lit_f32(1.0) * Expr::ident("u_x"),
         );
 
         let prims = PrimitiveDerivations { derivations };
@@ -351,11 +329,9 @@ mod tests {
 
     #[test]
     fn ordered_rejects_cycles() {
-        use PrimitiveExpr as E;
-
         let mut derivations = HashMap::new();
-        derivations.insert("a".into(), E::field("b"));
-        derivations.insert("b".into(), E::field("a"));
+        derivations.insert("a".into(), Expr::ident("b"));
+        derivations.insert("b".into(), Expr::ident("a"));
 
         let prims = PrimitiveDerivations { derivations };
         assert!(prims.ordered().unwrap_err().contains("cycle"));

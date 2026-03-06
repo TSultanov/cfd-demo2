@@ -37,7 +37,9 @@ mod solver {
     }
 
     pub mod shared {
-        pub use cfd2_ir::flux::*;
+        // Kept for backwards compatibility; previously re-exported PrimitiveExpr.
+        #[allow(unused_imports)]
+        pub use cfd2_ir::ast::Expr;
     }
 
     pub mod ir {

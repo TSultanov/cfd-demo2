@@ -1,8 +1,9 @@
 use crate::solver::codegen::dsl::{DslType, DynExpr};
 use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::ir::ports::{ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
-use crate::solver::shared::PrimitiveExpr;
 use crate::solver::units::UnitDim;
+
+use cfd2_ir::ast::ExprNode;
 
 /// Resolve a field name to a slot and component index.
 ///
@@ -39,84 +40,126 @@ fn resolve_field_slot_component<'a>(
     Some((slot, component))
 }
 
-/// Lower a PrimitiveExpr to a DynExpr with runtime unit checking.
+/// Resolve field references in an `Expr` tree, replacing bare `Ident` nodes matching
+/// field names with state array index expressions (`state[idx * stride + offset]`).
 ///
-/// This function provides unit consistency checking for primitive expression lowering.
-/// Operations like `+` and `-` will panic at runtime if the operands have mismatched units.
-pub fn lower_primitive_expr_dyn(
-    expr: &PrimitiveExpr,
+/// This is a recursive tree walk that also produces a `DynExpr` with runtime unit tracking.
+pub fn resolve_field_refs_dyn(
+    expr: &Expr,
     slots: &ResolvedStateSlotsSpec,
     cell_idx: Expr,
     state_array: &str,
 ) -> DynExpr {
-    match expr {
-        PrimitiveExpr::Literal(val) => {
+    match expr.node() {
+        ExprNode::Literal(lit) => {
             // Literals are dimensionless (scalar f32)
-            DynExpr::f32(*val, UnitDim::dimensionless())
+            match lit {
+                cfd2_ir::ast::Literal::Float(s) => {
+                    let val: f32 = s.parse().unwrap_or(0.0);
+                    DynExpr::f32(val, UnitDim::dimensionless())
+                }
+                cfd2_ir::ast::Literal::Int(v) => {
+                    DynExpr::f32(*v as f32, UnitDim::dimensionless())
+                }
+                cfd2_ir::ast::Literal::Uint(v) => {
+                    DynExpr::f32(*v as f32, UnitDim::dimensionless())
+                }
+                cfd2_ir::ast::Literal::Bool(_) => {
+                    DynExpr::f32(0.0, UnitDim::dimensionless())
+                }
+            }
         }
 
-        PrimitiveExpr::Field(name) => {
-            let (slot, component) =
-                resolve_field_slot_component(slots, name).unwrap_or_else(|| {
-                    panic!(
-                        "primitive field '{}' not found in resolved state slots",
-                        name
-                    )
-                });
-            let offset = slot.base_offset + component;
-            let stride = slots.stride;
-            let expr = Expr::ident(state_array).index(cell_idx * stride + offset);
-            DynExpr::new(expr, DslType::f32(), slot.unit)
+        ExprNode::Ident(name) => {
+            // Try to resolve as a field reference
+            if let Some((slot, component)) = resolve_field_slot_component(slots, name) {
+                let offset = slot.base_offset + component;
+                let stride = slots.stride;
+                let resolved = Expr::ident(state_array).index(cell_idx * stride + offset);
+                DynExpr::new(resolved, DslType::f32(), slot.unit)
+            } else {
+                // Not a field - pass through as-is (e.g. local variable name)
+                DynExpr::new(expr.clone(), DslType::f32(), UnitDim::dimensionless())
+            }
         }
 
-        PrimitiveExpr::Add(lhs, rhs) => {
-            let lhs_dyn = lower_primitive_expr_dyn(lhs, slots, cell_idx.clone(), state_array);
-            let rhs_dyn = lower_primitive_expr_dyn(rhs, slots, cell_idx, state_array);
-            lhs_dyn + rhs_dyn
+        ExprNode::Binary { left, op, right } => {
+            let lhs_dyn = resolve_field_refs_dyn(left, slots, cell_idx.clone(), state_array);
+            let rhs_dyn = resolve_field_refs_dyn(right, slots, cell_idx, state_array);
+            match op {
+                cfd2_ir::ast::BinaryOp::Add => lhs_dyn + rhs_dyn,
+                cfd2_ir::ast::BinaryOp::Sub => lhs_dyn - rhs_dyn,
+                cfd2_ir::ast::BinaryOp::Mul => lhs_dyn * rhs_dyn,
+                cfd2_ir::ast::BinaryOp::Div => lhs_dyn / rhs_dyn,
+                _ => {
+                    // For other binary ops, combine as dimensionless
+                    let combined = Expr::binary(lhs_dyn.expr, *op, rhs_dyn.expr);
+                    DynExpr::new(combined, DslType::f32(), UnitDim::dimensionless())
+                }
+            }
         }
 
-        PrimitiveExpr::Sub(lhs, rhs) => {
-            let lhs_dyn = lower_primitive_expr_dyn(lhs, slots, cell_idx.clone(), state_array);
-            let rhs_dyn = lower_primitive_expr_dyn(rhs, slots, cell_idx, state_array);
-            lhs_dyn - rhs_dyn
+        ExprNode::Unary { op, expr: inner } => {
+            let inner_dyn = resolve_field_refs_dyn(inner, slots, cell_idx, state_array);
+            match op {
+                cfd2_ir::ast::UnaryOp::Negate => -inner_dyn,
+                _ => {
+                    let combined = Expr::alloc_node(ExprNode::Unary {
+                        op: *op,
+                        expr: inner_dyn.expr,
+                    });
+                    DynExpr::new(combined, inner_dyn.ty, inner_dyn.unit)
+                }
+            }
         }
 
-        PrimitiveExpr::Mul(lhs, rhs) => {
-            let lhs_dyn = lower_primitive_expr_dyn(lhs, slots, cell_idx.clone(), state_array);
-            let rhs_dyn = lower_primitive_expr_dyn(rhs, slots, cell_idx, state_array);
-            lhs_dyn * rhs_dyn
+        ExprNode::Call { callee, args } => {
+            // Check for sqrt
+            if let ExprNode::Ident(name) = callee.node() {
+                if name == "sqrt" && args.len() == 1 {
+                    let inner_dyn =
+                        resolve_field_refs_dyn(&args[0], slots, cell_idx, state_array);
+                    return inner_dyn.sqrt().expect("sqrt operation failed");
+                }
+            }
+            // For other calls, resolve args but treat as dimensionless
+            let resolved_args: Vec<Expr> = args
+                .iter()
+                .map(|a| resolve_field_refs_dyn(a, slots, cell_idx.clone(), state_array).expr)
+                .collect();
+            let callee_resolved =
+                resolve_field_refs_dyn(callee, slots, cell_idx, state_array).expr;
+            let combined = Expr::call(callee_resolved, resolved_args);
+            DynExpr::new(combined, DslType::f32(), UnitDim::dimensionless())
         }
 
-        PrimitiveExpr::Div(lhs, rhs) => {
-            let lhs_dyn = lower_primitive_expr_dyn(lhs, slots, cell_idx.clone(), state_array);
-            let rhs_dyn = lower_primitive_expr_dyn(rhs, slots, cell_idx, state_array);
-            lhs_dyn / rhs_dyn
+        ExprNode::Field { base, field } => {
+            let base_dyn = resolve_field_refs_dyn(base, slots, cell_idx, state_array);
+            let combined = base_dyn.expr.field(field.clone());
+            DynExpr::new(combined, base_dyn.ty, base_dyn.unit)
         }
 
-        PrimitiveExpr::Sqrt(inner) => {
-            let inner_dyn = lower_primitive_expr_dyn(inner, slots, cell_idx, state_array);
-            inner_dyn.sqrt().expect("sqrt operation failed")
-        }
-
-        PrimitiveExpr::Neg(inner) => {
-            let inner_dyn = lower_primitive_expr_dyn(inner, slots, cell_idx, state_array);
-            -inner_dyn
+        ExprNode::Index { base, index } => {
+            let base_dyn = resolve_field_refs_dyn(base, slots, cell_idx.clone(), state_array);
+            let index_dyn = resolve_field_refs_dyn(index, slots, cell_idx, state_array);
+            let combined = base_dyn.expr.index(index_dyn.expr);
+            DynExpr::new(combined, base_dyn.ty, base_dyn.unit)
         }
     }
 }
 
-/// Lower a PrimitiveExpr to a WGSL Expr.
+/// Resolve field references in an `Expr` tree, replacing bare `Ident` nodes matching
+/// field names with state array index expressions.
 ///
-/// This is the legacy API that delegates to `lower_primitive_expr_dyn` and extracts
-/// the underlying expression. Unit checking is performed during lowering and will
-/// panic on mismatches.
-pub fn lower_primitive_expr(
-    expr: &PrimitiveExpr,
+/// This is the simple API that discards unit tracking. For unit-aware resolution,
+/// use `resolve_field_refs_dyn`.
+pub fn resolve_field_refs(
+    expr: &Expr,
     slots: &ResolvedStateSlotsSpec,
     cell_idx: Expr,
     state_array: &str,
 ) -> Expr {
-    lower_primitive_expr_dyn(expr, slots, cell_idx, state_array).expr
+    resolve_field_refs_dyn(expr, slots, cell_idx, state_array).expr
 }
 
 #[cfg(test)]
@@ -149,41 +192,34 @@ mod tests {
     }
 
     #[test]
-    fn primitive_expr_lowers_field_access_and_ops() {
+    fn expr_resolves_field_access_and_ops() {
         let slots = test_slots_from_fields(vec![
             ("rho", PortFieldKind::Scalar, Density::UNIT),
             ("rho_u", PortFieldKind::Vector2, MomentumDensity::UNIT),
         ]);
 
         // (rho_u_x / rho) - a dimensionally consistent expression
-        // momentum_density / density = velocity
-        let expr = PrimitiveExpr::Div(
-            Box::new(PrimitiveExpr::field("rho_u_x")),
-            Box::new(PrimitiveExpr::field("rho")),
-        );
+        let expr = Expr::ident("rho_u_x") / Expr::ident("rho");
 
         let cell_idx = Expr::ident("i");
-        let wgsl = lower_primitive_expr(&expr, &slots, cell_idx, "state").to_string();
+        let wgsl = resolve_field_refs(&expr, &slots, cell_idx, "state").to_string();
         assert!(wgsl.contains("state[i * 3u + 0u]"));
         assert!(wgsl.contains("state[i * 3u + 1u]"));
         assert!(wgsl.contains("/"));
     }
 
     #[test]
-    fn primitive_expr_dyn_tracks_units() {
+    fn expr_dyn_tracks_units() {
         let slots = test_slots_from_fields(vec![
             ("rho", PortFieldKind::Scalar, Density::UNIT),
             ("rho_u", PortFieldKind::Vector2, MomentumDensity::UNIT),
         ]);
 
         // rho_u_x / rho produces velocity units
-        let expr = PrimitiveExpr::Div(
-            Box::new(PrimitiveExpr::field("rho_u_x")),
-            Box::new(PrimitiveExpr::field("rho")),
-        );
+        let expr = Expr::ident("rho_u_x") / Expr::ident("rho");
 
         let cell_idx = Expr::ident("i");
-        let dyn_expr = lower_primitive_expr_dyn(&expr, &slots, cell_idx, "state");
+        let dyn_expr = resolve_field_refs_dyn(&expr, &slots, cell_idx, "state");
 
         // Verify the expression produces the expected WGSL
         assert!(dyn_expr.expr.to_string().contains("state[i * 3u + 1u]"));
@@ -195,59 +231,56 @@ mod tests {
     }
 
     #[test]
-    fn primitive_expr_dyn_tracks_component_units() {
+    fn expr_dyn_tracks_component_units() {
         let slots = test_slots_from_fields(vec![("U", PortFieldKind::Vector2, Velocity::UNIT)]);
 
         // Access U_x component - should have velocity units
-        let expr = PrimitiveExpr::field("U_x");
+        let expr = Expr::ident("U_x");
 
         let cell_idx = Expr::ident("i");
-        let dyn_expr = lower_primitive_expr_dyn(&expr, &slots, cell_idx, "state");
+        let dyn_expr = resolve_field_refs_dyn(&expr, &slots, cell_idx, "state");
 
         assert_eq!(dyn_expr.unit, Velocity::UNIT);
         assert_eq!(dyn_expr.expr.to_string(), "state[i * 2u + 0u]");
     }
 
     #[test]
-    fn primitive_expr_dyn_literal_is_dimensionless() {
+    fn expr_dyn_literal_is_dimensionless() {
         let slots = test_slots_from_fields(vec![]);
 
-        let expr = PrimitiveExpr::lit(3.25);
+        let expr = Expr::lit_f32(3.25);
         let cell_idx = Expr::ident("i");
-        let dyn_expr = lower_primitive_expr_dyn(&expr, &slots, cell_idx, "state");
+        let dyn_expr = resolve_field_refs_dyn(&expr, &slots, cell_idx, "state");
 
         assert_eq!(dyn_expr.unit, UnitDim::dimensionless());
         assert_eq!(dyn_expr.expr.to_string(), "3.25");
     }
 
     #[test]
-    fn primitive_expr_dyn_mul_combines_units() {
+    fn expr_dyn_mul_combines_units() {
         let slots = test_slots_from_fields(vec![
             ("rho", PortFieldKind::Scalar, Density::UNIT),
             ("U", PortFieldKind::Vector2, Velocity::UNIT),
         ]);
 
         // rho * U_x produces momentum density
-        let expr = PrimitiveExpr::Mul(
-            Box::new(PrimitiveExpr::field("rho")),
-            Box::new(PrimitiveExpr::field("U_x")),
-        );
+        let expr = Expr::ident("rho") * Expr::ident("U_x");
 
         let cell_idx = Expr::ident("i");
-        let dyn_expr = lower_primitive_expr_dyn(&expr, &slots, cell_idx, "state");
+        let dyn_expr = resolve_field_refs_dyn(&expr, &slots, cell_idx, "state");
 
         assert_eq!(dyn_expr.unit, MomentumDensity::UNIT);
     }
 
     #[test]
-    fn primitive_expr_dyn_sqrt_applies_sqrt_to_units() {
+    fn expr_dyn_sqrt_applies_sqrt_to_units() {
         let slots = test_slots_from_fields(vec![("area", PortFieldKind::Scalar, Area::UNIT)]);
 
         // sqrt(area) produces length
-        let expr = PrimitiveExpr::Sqrt(Box::new(PrimitiveExpr::field("area")));
+        let expr = Expr::ident("area").sqrt();
 
         let cell_idx = Expr::ident("i");
-        let dyn_expr = lower_primitive_expr_dyn(&expr, &slots, cell_idx, "state");
+        let dyn_expr = resolve_field_refs_dyn(&expr, &slots, cell_idx, "state");
 
         assert_eq!(dyn_expr.unit, Length::UNIT);
         assert!(dyn_expr.expr.to_string().contains("sqrt"));
@@ -255,39 +288,33 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "typed add failed")]
-    fn primitive_expr_dyn_panics_on_unit_mismatch_add() {
+    fn expr_dyn_panics_on_unit_mismatch_add() {
         let slots = test_slots_from_fields(vec![
             ("rho", PortFieldKind::Scalar, Density::UNIT),
             ("U", PortFieldKind::Scalar, Velocity::UNIT),
         ]);
 
         // rho + U is a unit mismatch (density + velocity)
-        let expr = PrimitiveExpr::Add(
-            Box::new(PrimitiveExpr::field("rho")),
-            Box::new(PrimitiveExpr::field("U")),
-        );
+        let expr = Expr::ident("rho") + Expr::ident("U");
 
         let cell_idx = Expr::ident("i");
         // This should panic due to unit mismatch
-        let _ = lower_primitive_expr_dyn(&expr, &slots, cell_idx, "state");
+        let _ = resolve_field_refs_dyn(&expr, &slots, cell_idx, "state");
     }
 
     #[test]
     #[should_panic(expected = "typed sub failed")]
-    fn primitive_expr_dyn_panics_on_unit_mismatch_sub() {
+    fn expr_dyn_panics_on_unit_mismatch_sub() {
         let slots = test_slots_from_fields(vec![
             ("p", PortFieldKind::Scalar, Pressure::UNIT),
             ("rho", PortFieldKind::Scalar, Density::UNIT),
         ]);
 
         // p - rho is a unit mismatch (pressure - density)
-        let expr = PrimitiveExpr::Sub(
-            Box::new(PrimitiveExpr::field("p")),
-            Box::new(PrimitiveExpr::field("rho")),
-        );
+        let expr = Expr::ident("p") - Expr::ident("rho");
 
         let cell_idx = Expr::ident("i");
         // This should panic due to unit mismatch
-        let _ = lower_primitive_expr_dyn(&expr, &slots, cell_idx, "state");
+        let _ = resolve_field_refs_dyn(&expr, &slots, cell_idx, "state");
     }
 }

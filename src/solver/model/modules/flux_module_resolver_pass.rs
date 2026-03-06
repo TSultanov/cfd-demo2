@@ -1,7 +1,7 @@
 /// Resolver pass for flux module state field references.
 ///
 /// This module provides a lowering pass that pre-resolves all state fields referenced by a
-/// `FluxModuleKernelSpec` (and any referenced `PrimitiveExpr`s) into an IR-safe mapping that can
+/// `FluxModuleKernelSpec` (and any referenced `Expr`s) into an IR-safe mapping that can
 /// be stored on `PortManifest`.
 ///
 /// The goal is to avoid probing `StateLayout` during WGSL generation: we resolve the offsets once
@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use crate::solver::ir::ports::ResolvedStateSlotsSpec;
 use crate::solver::ir::{FaceScalarExpr, FaceVec2Expr, FieldKind, FluxModuleKernelSpec, StateLayout};
 use crate::solver::model::ports::PortRegistry;
-use crate::solver::shared::PrimitiveExpr;
+use cfd2_ir::ast::{Expr, ExprNode};
 use crate::solver::units::UnitDim;
 
 /// Field metadata for precomputed layout lookups.
@@ -47,11 +47,11 @@ fn build_field_metadata_map(layout: &StateLayout) -> HashMap<String, FieldMetada
 #[cfg(test)]
 pub fn resolve_flux_module_state_slots(
     spec: &FluxModuleKernelSpec,
-    primitives: &[(String, PrimitiveExpr)],
+    primitives: &[(String, Expr)],
     layout: &StateLayout,
 ) -> Result<ResolvedStateSlotsSpec, String> {
     let field_map = build_field_metadata_map(layout);
-    let primitive_map: HashMap<&str, &PrimitiveExpr> =
+    let primitive_map: HashMap<&str, &Expr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
     let mut fields = HashSet::<String>::new();
@@ -63,11 +63,11 @@ pub fn resolve_flux_module_state_slots(
 #[cfg(test)]
 pub fn resolve_flux_module_state_slots_runtime_scheme(
     variants: &[(crate::solver::scheme::Scheme, FluxModuleKernelSpec)],
-    primitives: &[(String, PrimitiveExpr)],
+    primitives: &[(String, Expr)],
     layout: &StateLayout,
 ) -> Result<ResolvedStateSlotsSpec, String> {
     let field_map = build_field_metadata_map(layout);
-    let primitive_map: HashMap<&str, &PrimitiveExpr> =
+    let primitive_map: HashMap<&str, &Expr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
     let mut fields = HashSet::<String>::new();
@@ -83,12 +83,12 @@ pub fn resolve_flux_module_state_slots_runtime_scheme(
 /// `PortRegistry::to_resolved_state_slots_for()` instead of manually walking `StateLayout`.
 pub fn resolve_flux_module_state_slots_via_registry(
     spec: &FluxModuleKernelSpec,
-    primitives: &[(String, PrimitiveExpr)],
+    primitives: &[(String, Expr)],
     registry: &PortRegistry,
 ) -> Result<ResolvedStateSlotsSpec, String> {
     let layout = registry.state_layout();
     let field_map = build_field_metadata_map(layout);
-    let primitive_map: HashMap<&str, &PrimitiveExpr> =
+    let primitive_map: HashMap<&str, &Expr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
     let mut fields = HashSet::<String>::new();
@@ -104,12 +104,12 @@ pub fn resolve_flux_module_state_slots_via_registry(
 /// resolution to `PortRegistry::to_resolved_state_slots_for()`.
 pub fn resolve_flux_module_state_slots_runtime_scheme_via_registry(
     variants: &[(crate::solver::scheme::Scheme, FluxModuleKernelSpec)],
-    primitives: &[(String, PrimitiveExpr)],
+    primitives: &[(String, Expr)],
     registry: &PortRegistry,
 ) -> Result<ResolvedStateSlotsSpec, String> {
     let layout = registry.state_layout();
     let field_map = build_field_metadata_map(layout);
-    let primitive_map: HashMap<&str, &PrimitiveExpr> =
+    let primitive_map: HashMap<&str, &Expr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
 
     let mut fields = HashSet::<String>::new();
@@ -123,7 +123,7 @@ pub fn resolve_flux_module_state_slots_runtime_scheme_via_registry(
 
 fn collect_fields_from_flux_spec(
     spec: &FluxModuleKernelSpec,
-    primitives: &HashMap<&str, &PrimitiveExpr>,
+    primitives: &HashMap<&str, &Expr>,
     field_map: &HashMap<String, FieldMetadata>,
     out: &mut HashSet<String>,
 ) -> Result<(), String> {
@@ -167,7 +167,7 @@ fn collect_fields_from_flux_spec(
 
 fn collect_from_scalar_expr(
     expr: &FaceScalarExpr,
-    primitives: &HashMap<&str, &PrimitiveExpr>,
+    primitives: &HashMap<&str, &Expr>,
     field_map: &HashMap<String, FieldMetadata>,
     out: &mut HashSet<String>,
 ) -> Result<(), String> {
@@ -214,7 +214,7 @@ fn collect_from_scalar_expr(
 
 fn collect_from_vec2_expr(
     expr: &FaceVec2Expr,
-    primitives: &HashMap<&str, &PrimitiveExpr>,
+    primitives: &HashMap<&str, &Expr>,
     field_map: &HashMap<String, FieldMetadata>,
     out: &mut HashSet<String>,
 ) -> Result<(), String> {
@@ -247,28 +247,40 @@ fn collect_from_vec2_expr(
 }
 
 fn collect_from_primitive_expr(
-    expr: &PrimitiveExpr,
+    expr: &Expr,
     field_map: &HashMap<String, FieldMetadata>,
     out: &mut HashSet<String>,
 ) -> Result<(), String> {
-    match expr {
-        PrimitiveExpr::Literal(_) => {}
+    match expr.node() {
+        ExprNode::Literal(_) => {}
 
-        PrimitiveExpr::Field(name) => {
+        ExprNode::Ident(name) => {
             let base = resolve_primitive_field_base(field_map, name)?;
             out.insert(base);
         }
 
-        PrimitiveExpr::Add(a, b)
-        | PrimitiveExpr::Sub(a, b)
-        | PrimitiveExpr::Mul(a, b)
-        | PrimitiveExpr::Div(a, b) => {
-            collect_from_primitive_expr(a, field_map, out)?;
-            collect_from_primitive_expr(b, field_map, out)?;
+        ExprNode::Binary { left, right, .. } => {
+            collect_from_primitive_expr(left, field_map, out)?;
+            collect_from_primitive_expr(right, field_map, out)?;
         }
 
-        PrimitiveExpr::Sqrt(inner) | PrimitiveExpr::Neg(inner) => {
+        ExprNode::Unary { expr: inner, .. } => {
             collect_from_primitive_expr(inner, field_map, out)?;
+        }
+
+        ExprNode::Call { args, .. } => {
+            for arg in args {
+                collect_from_primitive_expr(arg, field_map, out)?;
+            }
+        }
+
+        ExprNode::Field { base, .. } => {
+            collect_from_primitive_expr(base, field_map, out)?;
+        }
+
+        ExprNode::Index { base, index } => {
+            collect_from_primitive_expr(base, field_map, out)?;
+            collect_from_primitive_expr(index, field_map, out)?;
         }
     }
 
@@ -392,7 +404,7 @@ mod tests {
 
         let primitives = vec![(
             "mom_x".to_string(),
-            PrimitiveExpr::Field("rho_u_x".to_string()),
+            Expr::ident("rho_u_x"),
         )];
 
         let spec = FluxModuleKernelSpec::ScalarPerComponent {

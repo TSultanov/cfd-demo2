@@ -14,6 +14,11 @@ impl Expr {
         Expr(Arc::new(node))
     }
 
+    /// Public constructor from an `ExprNode`.
+    pub fn alloc_node(node: ExprNode) -> Self {
+        Self::alloc(node)
+    }
+
     /// Access the inner `ExprNode`.
     #[inline]
     pub fn node(&self) -> &ExprNode {
@@ -64,6 +69,11 @@ impl Expr {
 
     pub fn call_named(name: &str, args: Vec<Expr>) -> Self {
         Expr::call(Expr::ident(name), args)
+    }
+
+    /// Convenience: `sqrt(self)`.
+    pub fn sqrt(self) -> Self {
+        Expr::call_named("sqrt", vec![self])
     }
 
     pub fn addr_of(self) -> Self {

@@ -172,6 +172,7 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                         to_binding: 1,
                     },
                 ],
+                expected_hazards: vec![],
             },
         ],
         method: Some(method),

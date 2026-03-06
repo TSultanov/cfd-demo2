@@ -5,6 +5,8 @@ use crate::solver::model::kernel::{
 use crate::solver::model::module::{KernelBundleModule, ModuleInvariant};
 use crate::solver::model::KernelId;
 
+use cfd2_codegen::solver::codegen::fusion::{ExpectedHazard, HazardKind};
+
 use cfd2_codegen::solver::codegen::{
     bc_table::BcTable,
     dsl::XY,
@@ -208,6 +210,7 @@ pub fn rhie_chow_aux_module(
                 FusionGuard::ExactPolicy(crate::solver::model::kernel::KernelFusionPolicy::Safe),
             ],
             binding_remaps: vec![],
+            expected_hazards: vec![],
         },
         ModelKernelFusionRule {
             name: "rhie_chow:dp_update_store_grad_p_v1",
@@ -229,6 +232,7 @@ pub fn rhie_chow_aux_module(
                 FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Safe),
             ],
             binding_remaps: vec![],
+            expected_hazards: vec![],
         },
         ModelKernelFusionRule {
             name:
@@ -260,6 +264,30 @@ pub fn rhie_chow_aux_module(
                 ),
             ],
             binding_remaps: vec![],
+            expected_hazards: vec![
+                ExpectedHazard {
+                    kind: HazardKind::WAW,
+                    kernel_id: "dp_update_from_diag",
+                    justification: "dp_init and dp_update both write d_p at same index; \
+                                    dp_update overwrites dp_init's zero, last-writer-wins is correct \
+                                    because both are per-cell scalar writes at idx*stride+offset",
+                },
+                ExpectedHazard {
+                    kind: HazardKind::WAR,
+                    kernel_id: "rhie_chow/grad_p_update",
+                    justification: "store_grad_p reads grad_p before grad_p_update writes it; \
+                                    safe because both operate on the same cell index (idx) and \
+                                    store_grad_p's read is sequentially before grad_p_update's write \
+                                    in the fused body",
+                },
+                ExpectedHazard {
+                    kind: HazardKind::RAW,
+                    kernel_id: "rhie_chow/correct_velocity_delta",
+                    justification: "correct_velocity_delta reads d_p, grad_p, grad_p_old written \
+                                    by earlier segments; safe because all accesses are per-cell at \
+                                    idx*stride+offset with no cross-cell dependencies",
+                },
+            ],
         },
         ModelKernelFusionRule {
             name: "rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1",
@@ -288,6 +316,20 @@ pub fn rhie_chow_aux_module(
                 ),
             ],
             binding_remaps: vec![],
+            expected_hazards: vec![
+                ExpectedHazard {
+                    kind: HazardKind::WAR,
+                    kernel_id: "rhie_chow/grad_p_update",
+                    justification: "store_grad_p reads grad_p before grad_p_update writes it; \
+                                    safe because both operate on the same cell index",
+                },
+                ExpectedHazard {
+                    kind: HazardKind::RAW,
+                    kernel_id: "rhie_chow/correct_velocity_delta",
+                    justification: "correct_velocity_delta reads d_p, grad_p, grad_p_old written \
+                                    by earlier segments; safe because all accesses are per-cell",
+                },
+            ],
         },
         ModelKernelFusionRule {
             name: "rhie_chow:dp_update_store_grad_p_grad_p_update_v1",
@@ -312,6 +354,14 @@ pub fn rhie_chow_aux_module(
                 ),
             ],
             binding_remaps: vec![],
+            expected_hazards: vec![
+                ExpectedHazard {
+                    kind: HazardKind::WAR,
+                    kernel_id: "rhie_chow/grad_p_update",
+                    justification: "store_grad_p reads grad_p before grad_p_update writes it; \
+                                    safe because both operate on the same cell index",
+                },
+            ],
         },
         // Standalone fusion rule for grad_p_update + correct_velocity_delta (aggressive-only)
         ModelKernelFusionRule {
@@ -339,6 +389,14 @@ pub fn rhie_chow_aux_module(
                 ),
             ],
             binding_remaps: vec![],
+            expected_hazards: vec![
+                ExpectedHazard {
+                    kind: HazardKind::RAW,
+                    kernel_id: "rhie_chow/correct_velocity_delta",
+                    justification: "correct_velocity_delta reads grad_p written by grad_p_update; \
+                                    safe because both operate on the same cell index",
+                },
+            ],
         },
         // Standalone fusion rule for store_grad_p + grad_p_update (aggressive-only)
         ModelKernelFusionRule {
@@ -363,6 +421,14 @@ pub fn rhie_chow_aux_module(
                 ),
             ],
             binding_remaps: vec![],
+            expected_hazards: vec![
+                ExpectedHazard {
+                    kind: HazardKind::WAR,
+                    kernel_id: "rhie_chow/grad_p_update",
+                    justification: "store_grad_p reads grad_p before grad_p_update writes it; \
+                                    safe because both operate on the same cell index",
+                },
+            ],
         },
     ];
 
@@ -1556,5 +1622,66 @@ mod tests {
             crate::solver::ir::ports::ANY_DIMENSION,
             "momentum should use ANY_DIMENSION sentinel"
         );
+    }
+
+    /// CI gate: validate that all aggressive fusion rules have accurate hazard
+    /// whitelists. Catches both new hazards introduced by code changes AND stale
+    /// whitelist entries from refactored kernels.
+    #[test]
+    fn aggressive_fusion_rules_have_accurate_hazard_whitelists() {
+        use crate::solver::model::kernel::*;
+        let model = crate::solver::model::incompressible_momentum_model();
+        let schemes = crate::solver::ir::SchemeRegistry::default();
+        let rules = derive_kernel_fusion_rules_for_model(&model);
+
+        for rule in &rules {
+            // Only process rules that require Aggressive policy.
+            let is_aggressive = rule.guards.iter().any(|g| matches!(
+                g,
+                FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Aggressive)
+            ));
+            if !is_aggressive {
+                continue;
+            }
+
+            // Generate DSL programs via module generators.
+            let mut programs = Vec::new();
+            for module in &model.modules {
+                let module: &dyn crate::solver::model::module::ModelModule = module;
+                for atom in &rule.pattern {
+                    if let Some(gen) = module.kernel_generators().iter().find(|g| g.id == atom.id) {
+                        if let Ok(ModelKernelArtifact::DslProgram(p)) =
+                            (gen.generator.as_ref())(&model, &schemes)
+                        {
+                            programs.push(p);
+                        }
+                    }
+                }
+            }
+            if programs.len() != rule.pattern.len() {
+                continue;
+            }
+
+            let hazards = cfd2_codegen::solver::codegen::fusion::detect_hazards(&programs);
+
+            // Verify that expected_hazards covers all detected hazards.
+            for h in &hazards {
+                assert!(
+                    rule.expected_hazards.iter().any(|e| e.matches(h)),
+                    "Rule '{}': unwhitelisted {} hazard at kernel '{}' — \
+                     add an ExpectedHazard entry with a justification",
+                    rule.name, h.kind, h.kernel_id
+                );
+            }
+            // Verify no stale entries.
+            for e in &rule.expected_hazards {
+                assert!(
+                    hazards.iter().any(|h| e.matches(h)),
+                    "Rule '{}': stale expected_hazards entry: {} at '{}' — \
+                     remove it or update the kernel side-effects",
+                    rule.name, e.kind, e.kernel_id
+                );
+            }
+        }
     }
 }

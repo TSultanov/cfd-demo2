@@ -6,7 +6,10 @@ use cfd2::solver::model::kernel::{
 use cfd2::solver::scheme::Scheme;
 use cfd2_codegen::solver::codegen::fusion::{
     synthesize_fused_program, synthesize_fused_program_remapped,
-    synthesize_fused_program_with_report_remapped, FusionSafetyPolicy, HazardReport,
+    synthesize_fused_program_whitelisted,
+    synthesize_fused_program_with_report_remapped,
+    detect_hazards, ExpectedHazard,
+    FusionSafetyPolicy, HazardReport,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -273,14 +276,28 @@ fn collect_model_coverage(
                 Ok(_) => (true, "compatible".to_string()),
                 Err(err) => (false, compact_error(&err)),
             };
-            let (aggressive_fuseable, aggressive_reason) = match synthesize_fused_program(
-                format!("reassess/{}_{}", lhs.id.as_str(), rhs.id.as_str()),
-                "reassess_pair",
-                &pair_programs,
-                FusionSafetyPolicy::Aggressive,
-            ) {
-                Ok(_) => (true, "compatible".to_string()),
-                Err(err) => (false, compact_error(&err)),
+            let (aggressive_fuseable, aggressive_reason) = {
+                // For pair assessment, auto-whitelist detected hazards since this
+                // is a diagnostic tool checking structural fusibility.
+                let auto_whitelist: Vec<ExpectedHazard> = detect_hazards(&pair_programs)
+                    .iter()
+                    .map(|h| ExpectedHazard {
+                        kind: h.kind,
+                        // Leak the kernel_id string for the &'static str requirement.
+                        kernel_id: Box::leak(h.kernel_id.clone().into_boxed_str()),
+                        justification: "auto-whitelisted by fusion_coverage diagnostic",
+                    })
+                    .collect();
+                match synthesize_fused_program_whitelisted(
+                    format!("reassess/{}_{}", lhs.id.as_str(), rhs.id.as_str()),
+                    "reassess_pair",
+                    &pair_programs,
+                    FusionSafetyPolicy::Aggressive,
+                    &auto_whitelist,
+                ) {
+                    Ok(_) => (true, "compatible".to_string()),
+                    Err(err) => (false, compact_error(&err)),
+                }
             };
             let note = if !safe_fuseable && aggressive_fuseable {
                 "aggressive-only opportunity".to_string()
@@ -375,6 +392,7 @@ fn collect_model_coverage(
                     &rule_programs,
                     FusionSafetyPolicy::Aggressive,
                     &rule.binding_remaps,
+                    &rule.expected_hazards,
                 ) {
                     Ok((_program, hazards)) => (true, "compatible".to_string(), hazards),
                     Err(err) => (false, compact_error(&err), Vec::new()),

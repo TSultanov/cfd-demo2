@@ -218,6 +218,17 @@ pub struct ModelKernelFusionRule {
     /// kernel vs group 3 in another), each entry instructs the synthesizer to
     /// relocate a specific program's binding slot to the target layout.
     pub binding_remaps: Vec<cfd2_codegen::solver::codegen::fusion::BindingRemap>,
+    /// Hazard whitelist for aggressive fusion rules.
+    ///
+    /// Each entry is a `(HazardKind, kernel_id)` pair that the rule author has
+    /// audited and confirmed is safe (e.g. because the kernels operate on
+    /// disjoint index ranges, or the dependency is a false positive from
+    /// conservative side-effect tracking).
+    ///
+    /// Under `Safe` policy this field is ignored (all hazards reject).
+    /// Under `Aggressive` policy, only whitelisted hazards are tolerated;
+    /// any non-whitelisted hazard still causes a hard rejection.
+    pub expected_hazards: Vec<cfd2_codegen::solver::codegen::fusion::ExpectedHazard>,
 }
 
 #[derive(Debug, Clone)]
@@ -867,12 +878,13 @@ fn synthesize_fusion_replacement_wgsl_for_model(
         )?);
     }
 
-    let fused_program = cfd2_codegen::solver::codegen::fusion::synthesize_fused_program_remapped(
+    let fused_program = cfd2_codegen::solver::codegen::fusion::synthesize_fused_program_remapped_whitelisted(
         replacement_id.as_str().to_string(),
         selected.name,
         &programs,
         synthesis_policy,
         &selected.binding_remaps,
+        &selected.expected_hazards,
     )?;
     let wgsl = cfd2_codegen::solver::codegen::fusion::lower_kernel_program_to_wgsl(&fused_program)?;
     Ok(Some(wgsl.to_wgsl()))
@@ -1113,6 +1125,7 @@ mod contract_tests {
                 },
                 guards: Vec::new(),
                 binding_remaps: vec![],
+                expected_hazards: vec![],
             }],
             ..Default::default()
         };
@@ -1262,6 +1275,7 @@ mod contract_tests {
                 },
                 guards: Vec::new(),
                 binding_remaps: vec![],
+                expected_hazards: vec![],
             }],
             ..Default::default()
         };
@@ -1356,6 +1370,7 @@ mod tests {
                 replacement: fused_ab,
                 guards: Vec::new(),
                 binding_remaps: vec![],
+                expected_hazards: vec![],
             },
             ModelKernelFusionRule {
                 name: "fuse_abc",
@@ -1369,6 +1384,7 @@ mod tests {
                 replacement: fused_abc,
                 guards: Vec::new(),
                 binding_remaps: vec![],
+                expected_hazards: vec![],
             },
         ];
         let kernels = vec![a, b, c];
@@ -1409,6 +1425,7 @@ mod tests {
             replacement: fused,
             guards: vec![FusionGuard::MinPolicy(KernelFusionPolicy::Aggressive)],
             binding_remaps: vec![],
+            expected_hazards: vec![],
         }];
         let kernels = vec![base];
         let module_names = ["fusion_module"];
@@ -1458,6 +1475,7 @@ mod tests {
             replacement: fused,
             guards: vec![FusionGuard::ExactPolicy(KernelFusionPolicy::Safe)],
             binding_remaps: vec![],
+            expected_hazards: vec![],
         }];
         let kernels = vec![base];
         let module_names = ["fusion_module"];
@@ -1509,6 +1527,7 @@ mod tests {
             replacement,
             guards: Vec::new(),
             binding_remaps: vec![],
+            expected_hazards: vec![],
         };
 
         let safe = fusion_safety_policy_for_rule(&base_rule);

@@ -1,3 +1,48 @@
+//! Kernel fusion synthesis engine.
+//!
+//! # Safety Model
+//!
+//! Fusion merges multiple kernel programs into a single GPU dispatch. This is
+//! only safe when the kernels have no inter-kernel data dependencies that would
+//! require memory barriers.
+//!
+//! ## Hazard Detection
+//!
+//! The [`detect_hazards`] function performs conservative side-effect analysis
+//! across a sequence of [`KernelProgram`]s, using their `read_set` and
+//! `write_set` metadata. It reports RAW (read-after-write), WAR
+//! (write-after-read), WAW (write-after-write), and barrier/atomics hazards.
+//!
+//! This analysis is *conservative*: it reports hazards whenever two kernels
+//! touch the same buffer binding slot, even if they access disjoint index
+//! ranges at runtime (e.g. two per-cell kernels writing different state
+//! components at `state[idx * stride + offset_a]` vs `state[idx * stride +
+//! offset_b]`). False positives are common.
+//!
+//! ## Safety Policies
+//!
+//! - [`FusionSafetyPolicy::Safe`]: Any detected hazard rejects fusion. This
+//!   is the default for production rules.
+//!
+//! - [`FusionSafetyPolicy::Aggressive`]: Hazards are checked against an
+//!   explicit whitelist ([`ExpectedHazard`] entries). Only whitelisted hazards
+//!   are tolerated; any non-whitelisted hazard still causes rejection. Each
+//!   whitelist entry requires a human-readable justification explaining why
+//!   the hazard is safe (e.g. "per-cell writes at disjoint offsets").
+//!
+//! ## Cleanup Passes
+//!
+//! Post-synthesis AST optimization passes are controlled by
+//! [`FusionCleanupPolicy`], which is orthogonal to hazard policy:
+//!
+//! - `apply_ast_load_after_store_forwarding`: Replaces loads from a buffer
+//!   with the previously stored value when the store is provably local.
+//!   Conservative: invalidates on control flow, does not forward when the
+//!   stored value itself reads from memory.
+//!
+//! - `apply_ast_noop_self_assign_cleanup`: Removes `x = x` statements that
+//!   arise from symbol renaming during fusion.
+
 use super::KernelWgsl;
 use cfd2_ir::dimensions::{Dimensionless, UnitDimension};
 use cfd2_ir::ports::ParamSpec;
@@ -50,6 +95,19 @@ pub enum FusionSafetyPolicy {
     Aggressive,
 }
 
+/// Controls whether post-synthesis AST optimization passes run.
+///
+/// This is orthogonal to [`FusionSafetyPolicy`]: cleanup transforms are
+/// semantics-preserving and can run independently of hazard policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FusionCleanupPolicy {
+    /// No post-synthesis AST cleanup.
+    None,
+    /// Run conservative AST cleanup passes (store→load forwarding,
+    /// noop self-assign removal). These passes do not change semantics.
+    Standard,
+}
+
 /// Classification of a data hazard detected during fusion safety analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HazardKind {
@@ -80,6 +138,29 @@ pub struct HazardReport {
     pub kind: HazardKind,
     pub kernel_id: String,
     pub resources: Vec<EffectResource>,
+}
+
+/// A declared hazard that the fusion rule author has audited and confirmed is
+/// safe (e.g. because the kernels operate on disjoint index ranges, or the
+/// dependency is a false positive from conservative side-effect tracking).
+///
+/// Under `Safe` policy this is ignored (all hazards reject).
+/// Under `Aggressive` policy, only hazards matching an `ExpectedHazard` entry
+/// in the rule's whitelist are tolerated; any non-whitelisted hazard still
+/// causes a hard rejection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpectedHazard {
+    pub kind: HazardKind,
+    pub kernel_id: &'static str,
+    /// Human-readable justification for why this hazard is safe.
+    pub justification: &'static str,
+}
+
+impl ExpectedHazard {
+    /// Check whether this expected hazard matches a detected [`HazardReport`].
+    pub fn matches(&self, report: &HazardReport) -> bool {
+        self.kind == report.kind && self.kernel_id == report.kernel_id
+    }
 }
 
 impl std::fmt::Display for HazardReport {
@@ -172,6 +253,25 @@ pub fn synthesize_fused_program(
     synthesize_fused_program_remapped(replacement_id, rule_name, programs, policy, &[])
 }
 
+/// Like [`synthesize_fused_program`], but with an explicit hazard whitelist
+/// for Aggressive policy rules.
+pub fn synthesize_fused_program_whitelisted(
+    replacement_id: impl Into<String>,
+    rule_name: &str,
+    programs: &[KernelProgram],
+    policy: FusionSafetyPolicy,
+    expected_hazards: &[ExpectedHazard],
+) -> Result<KernelProgram, String> {
+    synthesize_fused_program_remapped_whitelisted(
+        replacement_id,
+        rule_name,
+        programs,
+        policy,
+        &[],
+        expected_hazards,
+    )
+}
+
 /// Like [`synthesize_fused_program`], but applies binding slot remaps before
 /// merging. Use this when the kernels being fused have conflicting bind group
 /// layouts that must be reconciled (e.g. a gradients kernel using group 2 for
@@ -183,27 +283,51 @@ pub fn synthesize_fused_program_remapped(
     policy: FusionSafetyPolicy,
     binding_remaps: &[BindingRemap],
 ) -> Result<KernelProgram, String> {
+    synthesize_fused_program_remapped_whitelisted(
+        replacement_id,
+        rule_name,
+        programs,
+        policy,
+        binding_remaps,
+        &[],
+    )
+}
+
+/// Like [`synthesize_fused_program_remapped`], but with an explicit hazard
+/// whitelist for Aggressive policy rules.
+pub fn synthesize_fused_program_remapped_whitelisted(
+    replacement_id: impl Into<String>,
+    rule_name: &str,
+    programs: &[KernelProgram],
+    policy: FusionSafetyPolicy,
+    binding_remaps: &[BindingRemap],
+    expected_hazards: &[ExpectedHazard],
+) -> Result<KernelProgram, String> {
     let (program, _hazards) = synthesize_fused_program_with_report_remapped(
         replacement_id,
         rule_name,
         programs,
         policy,
         binding_remaps,
+        expected_hazards,
     )?;
     Ok(program)
 }
 
 /// Like [`synthesize_fused_program`], but also returns any hazard reports detected
 /// during composition analysis. Under `Safe` policy, hazards cause rejection (Err).
-/// Under `Aggressive` policy, hazards are collected and returned alongside the
-/// successfully fused program so callers have visibility.
+/// Under `Aggressive` policy, hazards are checked against the expected whitelist;
+/// non-whitelisted hazards cause rejection, whitelisted ones are collected and
+/// returned alongside the successfully fused program.
 pub fn synthesize_fused_program_with_report(
     replacement_id: impl Into<String>,
     rule_name: &str,
     programs: &[KernelProgram],
     policy: FusionSafetyPolicy,
 ) -> Result<(KernelProgram, Vec<HazardReport>), String> {
-    synthesize_fused_program_with_report_remapped(replacement_id, rule_name, programs, policy, &[])
+    synthesize_fused_program_with_report_remapped(
+        replacement_id, rule_name, programs, policy, &[], &[],
+    )
 }
 
 /// Like [`synthesize_fused_program_with_report`], but applies binding slot
@@ -214,6 +338,7 @@ pub fn synthesize_fused_program_with_report_remapped(
     programs: &[KernelProgram],
     policy: FusionSafetyPolicy,
     binding_remaps: &[BindingRemap],
+    expected_hazards: &[ExpectedHazard],
 ) -> Result<(KernelProgram, Vec<HazardReport>), String> {
     if programs.is_empty() {
         return Err("fusion synthesis requires at least one input kernel".to_string());
@@ -230,7 +355,7 @@ pub fn synthesize_fused_program_with_report_remapped(
         // AST-based cleanup operates directly on body — no additional metadata needed.
     }
 
-    let hazards = ensure_safe_composition(&remapped, policy)?;
+    let hazards = ensure_safe_composition(&remapped, policy, expected_hazards)?;
 
     let dispatch = remapped[0].dispatch.clone();
     let launch = remapped[0].launch.clone();
@@ -280,8 +405,15 @@ pub fn synthesize_fused_program_with_report_remapped(
     fused.side_effects = side_effects;
     fused.eos_params = merge_eos_params(&remapped);
 
-    if policy == FusionSafetyPolicy::Aggressive {
-        apply_aggressive_cleanup(&mut fused);
+    // Cleanup policy: Aggressive safety policy enables standard cleanup;
+    // Safe policy skips cleanup (preserving current behavior).
+    let cleanup_policy = match policy {
+        FusionSafetyPolicy::Safe => FusionCleanupPolicy::None,
+        FusionSafetyPolicy::Aggressive => FusionCleanupPolicy::Standard,
+    };
+
+    if cleanup_policy == FusionCleanupPolicy::Standard {
+        apply_fusion_cleanup(&mut fused);
     }
 
     // Attach an explicit synthesis marker as a deterministic first preamble line.
@@ -353,6 +485,7 @@ pub fn detect_hazards(programs: &[KernelProgram]) -> Vec<HazardReport> {
 fn ensure_safe_composition(
     programs: &[KernelProgram],
     policy: FusionSafetyPolicy,
+    expected_hazards: &[ExpectedHazard],
 ) -> Result<Vec<HazardReport>, String> {
     let first = &programs[0];
     for program in programs.iter().skip(1) {
@@ -379,17 +512,35 @@ fn ensure_safe_composition(
 
     let hazards = detect_hazards(programs);
 
-    if policy == FusionSafetyPolicy::Safe {
-        // Under Safe policy, any hazard is a hard rejection.
-        if let Some(h) = hazards.first() {
-            return Err(format!(
-                "fusion rejected: {} hazard at kernel '{}'",
-                h.kind, h.kernel_id
-            ));
+    match policy {
+        FusionSafetyPolicy::Safe => {
+            // Under Safe policy, any hazard is a hard rejection.
+            if let Some(h) = hazards.first() {
+                return Err(format!(
+                    "fusion rejected: {} hazard at kernel '{}'",
+                    h.kind, h.kernel_id
+                ));
+            }
+        }
+        FusionSafetyPolicy::Aggressive => {
+            // Under Aggressive policy, only whitelisted hazards are tolerated.
+            // Any hazard not covered by an ExpectedHazard entry is a hard rejection.
+            //
+            // When expected_hazards is empty AND hazards exist, this is a
+            // whitelist-not-yet-populated situation. Still reject to enforce the
+            // invariant that every hazard must be explicitly audited.
+            for h in &hazards {
+                if !expected_hazards.iter().any(|e| e.matches(h)) {
+                    return Err(format!(
+                        "fusion rejected: unexpected {} hazard at kernel '{}' \
+                         (not in expected_hazards whitelist)",
+                        h.kind, h.kernel_id
+                    ));
+                }
+            }
         }
     }
 
-    // Under Aggressive policy, hazards are collected but do not block synthesis.
     Ok(hazards)
 }
 
@@ -847,7 +998,12 @@ fn rename_stmts(stmts: &[cfd2_ir::ast::Stmt], rename_map: &BTreeMap<String, Stri
     stmts.iter().map(|s| rename_stmt(s, rename_map)).collect()
 }
 
-fn apply_aggressive_cleanup(program: &mut KernelProgram) {
+/// Post-synthesis AST cleanup passes (semantics-preserving).
+///
+/// Runs conservative optimizations on the fused program body:
+/// 1. Load-after-store forwarding (CSE for buffer accesses)
+/// 2. Noop self-assign removal (`x = x` → removed)
+fn apply_fusion_cleanup(program: &mut KernelProgram) {
     apply_ast_load_after_store_forwarding(program);
     apply_ast_noop_self_assign_cleanup(program);
 }
@@ -1422,7 +1578,7 @@ mod tests {
             },
         ];
 
-        apply_aggressive_cleanup(&mut program);
+        apply_fusion_cleanup(&mut program);
         match &program.body[1] {
             Stmt::Let { name, expr, .. } => {
                 assert_eq!(name, "out");
@@ -1456,7 +1612,7 @@ mod tests {
             },
         ];
 
-        apply_aggressive_cleanup(&mut program);
+        apply_fusion_cleanup(&mut program);
         match &program.body[1] {
             Stmt::Let { name, expr, .. } => {
                 assert_eq!(name, "out");
@@ -1495,7 +1651,7 @@ mod tests {
             },
         ];
 
-        apply_aggressive_cleanup(&mut program);
+        apply_fusion_cleanup(&mut program);
         match &program.body[2] {
             Stmt::Let { name, expr, .. } => {
                 assert_eq!(name, "out");
@@ -1614,7 +1770,7 @@ mod tests {
     }
 
     #[test]
-    fn aggressive_policy_succeeds_with_hazards_and_returns_report() {
+    fn aggressive_policy_succeeds_with_whitelisted_hazards_and_returns_report() {
         let mut a = sample_program("a");
         a.side_effects
             .write_set
@@ -1625,17 +1781,73 @@ mod tests {
             .read_set
             .insert(EffectResource::binding(0, 0));
 
-        let result = synthesize_fused_program_with_report(
+        let expected = vec![ExpectedHazard {
+            kind: HazardKind::RAW,
+            kernel_id: "b",
+            justification: "test: disjoint index ranges",
+        }];
+
+        let result = synthesize_fused_program_with_report_remapped(
             "fused",
             "rule/a_b",
             &[a, b],
             FusionSafetyPolicy::Aggressive,
+            &[],
+            &expected,
         );
         let (program, hazards) =
-            result.expect("aggressive synthesis should succeed despite hazards");
+            result.expect("aggressive synthesis should succeed with whitelisted hazards");
         assert!(!hazards.is_empty(), "hazards should be reported");
         assert_eq!(hazards[0].kind, HazardKind::RAW);
         assert!(!program.body.is_empty());
+    }
+
+    #[test]
+    fn aggressive_policy_rejects_non_whitelisted_hazards() {
+        let mut a = sample_program("a");
+        a.side_effects
+            .write_set
+            .insert(EffectResource::binding(0, 0));
+
+        let mut b = sample_program("b");
+        b.side_effects
+            .read_set
+            .insert(EffectResource::binding(0, 0));
+
+        // Provide empty whitelist — should reject even under Aggressive.
+        let err = synthesize_fused_program_with_report_remapped(
+            "fused",
+            "rule/a_b",
+            &[a.clone(), b.clone()],
+            FusionSafetyPolicy::Aggressive,
+            &[],
+            &[],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("not in expected_hazards whitelist"),
+            "unexpected error: {err}"
+        );
+
+        // Provide wrong hazard kind — should also reject.
+        let wrong_whitelist = vec![ExpectedHazard {
+            kind: HazardKind::WAW,
+            kernel_id: "b",
+            justification: "wrong kind",
+        }];
+        let err2 = synthesize_fused_program_with_report_remapped(
+            "fused",
+            "rule/a_b",
+            &[a, b],
+            FusionSafetyPolicy::Aggressive,
+            &[],
+            &wrong_whitelist,
+        )
+        .unwrap_err();
+        assert!(
+            err2.contains("not in expected_hazards whitelist"),
+            "unexpected error: {err2}"
+        );
     }
 
     #[test]

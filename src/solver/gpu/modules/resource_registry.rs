@@ -103,6 +103,62 @@ impl<'a> ResourceRegistry<'a> {
 
         None
     }
+
+    /// Resolve a binding by name, returning a descriptive error on failure.
+    ///
+    /// The error message includes the list of all available binding names to
+    /// help diagnose typos and stale WGSL variable references.
+    pub fn resolve_or_err(
+        &self,
+        name: &str,
+        kernel: &str,
+    ) -> Result<wgpu::BindingResource<'a>, String> {
+        self.resolve(name).ok_or_else(|| {
+            format!(
+                "ResourceRegistry: no buffer for binding '{}' required by kernel '{}'. \
+                 Available: {:?}",
+                name,
+                kernel,
+                self.available_names()
+            )
+        })
+    }
+
+    /// List all binding names that this registry can currently resolve.
+    ///
+    /// Useful for diagnostics when a binding lookup fails.
+    pub fn available_names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = Vec::new();
+
+        for (name, _) in &self.named_resources {
+            names.push(name);
+        }
+        for (name, _) in &self.named_buffers {
+            names.push(name);
+        }
+
+        if self.constants.is_some() {
+            names.push("constants");
+        } else if self.unified_fields.map_or(false, |f| f.constants.buffer().size() > 0) {
+            names.push("constants");
+        }
+
+        if let Some(mesh) = self.mesh {
+            for name in mesh.binding_names() {
+                names.push(name);
+            }
+        }
+
+        if let Some(fields) = self.unified_fields {
+            for name in fields.binding_names(self.ping_pong_phase) {
+                names.push(name);
+            }
+        }
+
+        names.sort_unstable();
+        names.dedup();
+        names
+    }
 }
 
 impl<'a> Default for ResourceRegistry<'a> {

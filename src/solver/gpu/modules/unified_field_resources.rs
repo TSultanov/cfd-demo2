@@ -293,6 +293,29 @@ impl UnifiedFieldResources {
         }
     }
 
+    /// Return the list of all binding names this resource can currently resolve.
+    pub fn binding_names(&self, ping_pong_phase: usize) -> Vec<&str> {
+        let _ = ping_pong_phase; // state/state_old/state_old_old always available
+        let mut names = vec!["state", "state_old", "state_old_old"];
+        if self.iteration_snapshot.is_some() {
+            names.push("state_iter");
+        }
+        if self.flux_buffer.is_some() {
+            names.push("fluxes");
+        }
+        if self.low_mach_params_buffer.is_some() {
+            names.push("low_mach_params");
+        }
+        for key in self.gradients.keys() {
+            // We can't easily return &str for a dynamic "grad_{key}" without
+            // allocation, but we note the gradient keys for diagnostics.
+            if key == "state" {
+                names.push("grad_state");
+            }
+        }
+        names
+    }
+
     /// Get the step handle for the ping-pong state.
     pub fn step_handle(&self) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
         self.state.step_handle()

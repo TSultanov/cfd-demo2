@@ -24,7 +24,7 @@ pub use ir::{
     lower_system, lower_system_unchecked, DiscreteEquation, DiscreteOp, DiscreteOpKind,
     DiscreteSystem,
 };
-pub use kernel_wgsl::KernelWgsl;
+pub use kernel_wgsl::{BindingDesc, KernelWgsl};
 pub use packed_state_gradients::generate_packed_state_gradients_kernel_program;
 pub use packed_state_gradients::generate_packed_state_gradients_wgsl;
 // Slot-based state access helpers are publicly available via state_access module

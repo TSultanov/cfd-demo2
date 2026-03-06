@@ -2252,4 +2252,67 @@ mod tests {
         assert!(wgsl.contains("&a"));
         assert!(wgsl.contains("&inv"));
     }
+
+    /// Phase 2a cross-check: every infrastructure kernel must have non-empty
+    /// structured bindings when generated through `KernelWgsl::new(Module)`.
+    ///
+    /// This ensures that `Module::bindings()` extracts the same metadata that
+    /// the text-based parser would, and catches regressions where a kernel
+    /// accidentally drops all its `@group/@binding` annotations.
+    #[test]
+    fn all_infrastructure_kernels_have_structured_bindings() {
+        for (filename, generator) in all_infrastructure_kernels() {
+            let kernel = generator();
+            let bindings = kernel.bindings();
+            assert!(
+                !bindings.is_empty(),
+                "infrastructure kernel '{}' has no structured bindings — \
+                 did Module::bindings() extraction break?",
+                filename
+            );
+            // Verify that every binding has a non-empty name
+            for bd in bindings {
+                assert!(
+                    !bd.name.is_empty(),
+                    "infrastructure kernel '{}': binding @group({}) @binding({}) has empty name",
+                    filename,
+                    bd.group,
+                    bd.binding
+                );
+            }
+        }
+    }
+
+    /// Cross-check: structured bindings from Module::bindings() must match
+    /// the text-parsed bindings from the WGSL output.
+    #[test]
+    fn infrastructure_kernel_bindings_match_text_parse() {
+        use crate::solver::codegen::kernel_wgsl::parse_wgsl_bindings_from_text;
+
+        for (filename, generator) in all_infrastructure_kernels() {
+            let kernel = generator();
+            let structured = kernel.bindings();
+            let text_parsed = parse_wgsl_bindings_from_text(&kernel.to_wgsl());
+
+            assert_eq!(
+                structured.len(),
+                text_parsed.len(),
+                "infrastructure kernel '{}': structured binding count ({}) != text-parsed count ({})",
+                filename,
+                structured.len(),
+                text_parsed.len()
+            );
+
+            for (s, t) in structured.iter().zip(text_parsed.iter()) {
+                assert_eq!(
+                    (s.group, s.binding, &s.name),
+                    (t.group, t.binding, &t.name),
+                    "infrastructure kernel '{}': binding mismatch at @group({}) @binding({})",
+                    filename,
+                    s.group,
+                    s.binding
+                );
+            }
+        }
+    }
 }

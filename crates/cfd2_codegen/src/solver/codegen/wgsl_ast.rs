@@ -49,6 +49,31 @@ impl Module {
         }
         out
     }
+
+    /// Extract all `(group, binding, var_name)` triples from `GlobalVar` items.
+    ///
+    /// Results are sorted by `(group, binding)` for deterministic output.
+    pub fn bindings(&self) -> Vec<(u32, u32, String)> {
+        let mut out = Vec::new();
+        for item in &self.items {
+            if let Item::GlobalVar(gv) = item {
+                let mut group = None;
+                let mut binding = None;
+                for attr in &gv.attributes {
+                    match attr {
+                        Attribute::Group(g) => group = Some(*g),
+                        Attribute::Binding(b) => binding = Some(*b),
+                        _ => {}
+                    }
+                }
+                if let (Some(g), Some(b)) = (group, binding) {
+                    out.push((g, b, gv.name.clone()));
+                }
+            }
+        }
+        out.sort_by_key(|&(g, b, _)| (g, b));
+        out
+    }
 }
 
 impl Default for Module {
@@ -784,6 +809,46 @@ mod tests {
         assert!(output.contains("struct Foo"));
         assert!(output.contains("fn main()"));
         assert!(output.contains("return;"));
+    }
+
+    #[test]
+    fn module_bindings_extracts_group_binding_name_triples() {
+        let mut module = Module::new();
+        module.push(Item::GlobalVar(GlobalVar::new(
+            "face_owner",
+            Type::array(Type::U32),
+            StorageClass::Storage,
+            Some(AccessMode::Read),
+            vec![Attribute::Group(0), Attribute::Binding(0)],
+        )));
+        module.push(Item::GlobalVar(GlobalVar::new(
+            "state",
+            Type::array(Type::F32),
+            StorageClass::Storage,
+            Some(AccessMode::ReadWrite),
+            vec![Attribute::Group(0), Attribute::Binding(1)],
+        )));
+        module.push(Item::GlobalVar(GlobalVar::new(
+            "constants",
+            Type::Custom("Constants".into()),
+            StorageClass::Uniform,
+            None,
+            vec![Attribute::Group(1), Attribute::Binding(4)],
+        )));
+        // Workgroup var without group/binding should be excluded
+        module.push(Item::GlobalVar(GlobalVar::new(
+            "scratch",
+            Type::array(Type::F32),
+            StorageClass::Workgroup,
+            None,
+            vec![],
+        )));
+
+        let bindings = module.bindings();
+        assert_eq!(bindings.len(), 3);
+        assert_eq!(bindings[0], (0, 0, "face_owner".to_string()));
+        assert_eq!(bindings[1], (0, 1, "state".to_string()));
+        assert_eq!(bindings[2], (1, 4, "constants".to_string()));
     }
 
     #[test]

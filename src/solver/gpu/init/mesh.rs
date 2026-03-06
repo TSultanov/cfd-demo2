@@ -40,6 +40,26 @@ impl MeshResources {
             _ => None,
         }
     }
+
+    /// Return the list of all binding names this resource can resolve.
+    pub fn binding_names(&self) -> &'static [&'static str] {
+        &[
+            "cell_centers",
+            "cell_face_matrix_indices",
+            "cell_face_offsets",
+            "cell_faces",
+            "cell_vols",
+            "diagonal_indices",
+            "face_areas",
+            "face_boundary",
+            "face_centers",
+            "face_neighbor",
+            "face_normals",
+            "face_owner",
+            "scalar_col_indices",
+            "scalar_row_offsets",
+        ]
+    }
 }
 
 pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {

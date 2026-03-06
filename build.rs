@@ -1,4 +1,5 @@
 use cfd2_codegen::solver::codegen::infrastructure_kernels;
+use cfd2_codegen::solver::codegen::kernel_wgsl;
 use glob::glob;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -353,6 +354,12 @@ fn postprocess_bindings_for_clippy(bindings_path: &str) {
     });
 }
 
+/// Stopgap boundary enforcement: scans `cfd2_codegen/` source files for
+/// accidental imports of `crate::solver::model`.
+///
+/// This is a textual firewall, not a structural one.  It will become
+/// unnecessary once `cfd2_codegen` is extracted into a workspace crate
+/// with its own `pub` visibility boundary (see ARCHITECTURE_REVIEW.md §2).
 fn enforce_codegen_ir_boundary(manifest_dir: &str) {
     let codegen_dir = PathBuf::from(manifest_dir)
         .join("crates")
@@ -1147,71 +1154,10 @@ fn rust_string_literal(raw: &str) -> String {
 }
 
 fn parse_wgsl_bindings(shader: &str) -> Vec<(u32, u32, String)> {
-    let mut out = Vec::new();
-    let mut pending: Option<(u32, u32)> = None;
-
-    for raw in shader.lines() {
-        let line = raw.trim();
-
-        if pending.is_none() && line.contains("@group(") && line.contains("@binding(") {
-            let group = parse_attr_u32(line, "@group(");
-            let binding = parse_attr_u32(line, "@binding(");
-            if let (Some(group), Some(binding)) = (group, binding) {
-                pending = Some((group, binding));
-
-                // Handle inline declarations like:
-                // `@group(0) @binding(0) var<storage, read> foo: array<u32>;`
-                if let Some(var_idx) = line.find("var") {
-                    if let Some(name) = parse_var_name(line[var_idx..].trim_start()) {
-                        out.push((group, binding, name));
-                    }
-                    pending = None;
-                }
-            }
-            continue;
-        }
-
-        let Some((group, binding)) = pending else {
-            continue;
-        };
-
-        if line.starts_with("var") {
-            if let Some(name) = parse_var_name(line) {
-                out.push((group, binding, name));
-            }
-            pending = None;
-        }
-    }
-
-    out.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-    out.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
-    out
-}
-
-fn parse_attr_u32(line: &str, prefix: &str) -> Option<u32> {
-    let start = line.find(prefix)? + prefix.len();
-    let rest = &line[start..];
-    let end = rest.find(')')?;
-    rest[..end].trim().parse().ok()
-}
-
-fn parse_var_name(line: &str) -> Option<String> {
-    // Expected patterns:
-    // - var<storage, read> face_owner: array<u32>;
-    // - var<uniform> constants: Constants;
-    // - var state: array<f32>;
-    let after_var = line.strip_prefix("var")?.trim_start();
-    let after_decl = if let Some(idx) = after_var.find('>') {
-        after_var[idx + 1..].trim_start()
-    } else {
-        after_var
-    };
-    let name_end = after_decl.find(':')?;
-    let name = after_decl[..name_end].trim();
-    if name.is_empty() {
-        return None;
-    }
-    Some(name.to_string())
+    kernel_wgsl::parse_wgsl_bindings_from_text(shader)
+        .into_iter()
+        .map(|b| (b.group, b.binding, b.name))
+        .collect()
 }
 
 fn list_wgsl_files_recursive(dir: &Path) -> Vec<PathBuf> {

@@ -275,12 +275,11 @@ defaults.
 
 ## Estimated Impact
 
-| Metric | Before | After |
-|--------|--------|-------|
-| `generic_coupled.rs` | 3755 lines | ~3100 lines (–650) |
-| `linear_solver.rs` | 691 lines | ~530 lines (–160) |
-| One-submission infrastructure total | ~1514 lines | ~900 lines (–600) |
-| Runtime WGSL generation | 3 shaders | 0 shaders |
+| Metric | Before | After (actual) |
+|--------|--------|----------------|
+| `generic_coupled.rs` | 3755 lines | 2365 lines (–1390) |
+| `linear_solver.rs` | 691 lines | 636 lines (–55) |
+| Runtime WGSL generation | 3 shaders | 1 shader (convergence break) |
 | Env vars | 8 | 6 |
 | Batch-tail entry points | 2 | 1 |
 | New modules | 0 | 2 (`outer_convergence`, `outer_gate`) |
@@ -309,10 +308,23 @@ defaults.
 
 ## Verification Checklist
 
-- [ ] `cargo test --features meshgen --lib` — all tests pass
+- [x] `cargo test --features meshgen --lib` — all 175 tests pass
 - [ ] `cargo check --tests` — test binaries compile
 - [ ] OpenFOAM reference metrics unchanged (per AGENTS.md drift check)
+      (NOTE: OpenFOAM test files have pre-existing compile errors unrelated to this work)
 - [ ] `bench_submission_path` — no regression vs baseline
 - [ ] `rhie_chow_fusion_parity_test` — host-driven and batched paths produce
       identical results (this test exercises both modes)
-- [ ] `generic_coupled.rs` line count drops below 3200
+- [x] `generic_coupled.rs` line count drops below 3200 (now 2365)
+
+## Implementation Progress
+
+| Phase | Status | Result |
+|-------|--------|--------|
+| 1 — Extract `OuterConvergenceMonitor` | ✅ Done | 3755→2914 lines; new `outer_convergence.rs` (860 lines) |
+| 2 — Extract `OuterAdaptiveGate` | ✅ Done | 2914→2439 lines; new `outer_gate.rs` (480 lines) |
+| 3 — Compile-time WGSL generation | ⬜ Not started | Touches codegen crate; deferred |
+| 4 — Remove `coupled:batch_tail` | ✅ Done | 2440→2390 lines; removed from recipe/registry/universal |
+| 5 — Simplify linear solver API | ⬜ Not started | |
+| 6 — Remove env vars | ✅ Done | 2390→2365 lines; `linear_solver.rs` 691→636 |
+| 7 — Documentation & benchmarks | ⬜ Not started | |

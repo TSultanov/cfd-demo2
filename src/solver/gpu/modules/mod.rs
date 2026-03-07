@@ -10,6 +10,7 @@ pub mod krylov_precond;
 pub mod krylov_solve;
 pub mod linear_solver;
 pub mod linear_system;
+pub mod outer_convergence;
 pub mod model_lowerer;
 pub mod ports;
 pub mod resource_registry;

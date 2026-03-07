@@ -248,6 +248,10 @@ pub trait SolverRuntimeParamsExt {
     fn set_precond_pressure_coupling_alpha(&mut self, alpha: f32) -> Result<(), String>;
     /// Set the under-relaxation factor applied when the linear solver does not converge.
     fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String>;
+    /// Set the next-step physical timestep scale applied after a nonconverged dual-time step.
+    fn set_nonconverged_dt_scale(&mut self, scale: f32) -> Result<(), String>;
+    /// Set the next-step pseudo-timestep scale applied after a nonconverged dual-time step.
+    fn set_nonconverged_dtau_scale(&mut self, scale: f32) -> Result<(), String>;
     /// Set the FGMRES solution-update strategy (e.g. classical vs modified Gram-Schmidt).
     fn set_linear_solver_solution_update_strategy(
         &mut self,
@@ -327,6 +331,14 @@ impl SolverRuntimeParamsExt for GpuUnifiedSolver {
 
     fn set_nonconverged_relax(&mut self, alpha: f32) -> Result<(), String> {
         self.set_named_param("nonconverged_relax", PlanParamValue::F32(alpha))
+    }
+
+    fn set_nonconverged_dt_scale(&mut self, scale: f32) -> Result<(), String> {
+        self.set_named_param("nonconverged_dt_scale", PlanParamValue::F32(scale))
+    }
+
+    fn set_nonconverged_dtau_scale(&mut self, scale: f32) -> Result<(), String> {
+        self.set_named_param("nonconverged_dtau_scale", PlanParamValue::F32(scale))
     }
 
     fn set_linear_solver_solution_update_strategy(

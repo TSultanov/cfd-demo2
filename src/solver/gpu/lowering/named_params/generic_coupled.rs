@@ -21,6 +21,8 @@ pub(crate) fn handler_for_key(key: &'static str) -> Option<ProgramParamHandler> 
         "alpha_u" => Some(generic_coupled::param_alpha_u),
         "alpha_p" => Some(generic_coupled::param_alpha_p),
         "nonconverged_relax" => Some(generic_coupled::param_nonconverged_relax),
+        "nonconverged_dt_scale" => Some(generic_coupled::param_nonconverged_dt_scale),
+        "nonconverged_dtau_scale" => Some(generic_coupled::param_nonconverged_dtau_scale),
         "outer_iters" => Some(generic_coupled::param_outer_iters),
         "outer_tol" => Some(generic_coupled::param_outer_tol),
         "outer_tol_abs" => Some(generic_coupled::param_outer_tol_abs),

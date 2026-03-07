@@ -45,6 +45,8 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
 
     if apply_relaxation_in_update {
         named_params.push("nonconverged_relax");
+        named_params.push("nonconverged_dt_scale");
+        named_params.push("nonconverged_dtau_scale");
     }
 
     KernelBundleModule {

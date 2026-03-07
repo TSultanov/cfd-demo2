@@ -63,7 +63,7 @@ The implementation should expose enough residual, positivity, and pseudo-time st
 Status as of 2026-03-07:
 - Completed: Phase 1 observability/status plumbing for compressible dual-time acceptance.
 - Completed: Phase 6 partial regression coverage for explicit pseudo-time acceptance status.
-- Partial: Phase 1 convergence classification now uses scaled pseudo-time correction norms for conserved compressible variables, but step rejection/retry is not implemented yet.
+- Partial: Phase 1 convergence classification now uses scaled pseudo-time correction norms for conserved compressible variables, and nonconverged dual-time steps now automatically reduce the next step's `dt` and `dtau`, but true retry/reject is not implemented yet.
 - Partial: Phase 2 relaxation policy now defaults the compressible dual-time path to full updates and reserves `nonconverged_relax` for explicitly nonconverged pseudo-time steps or linear-solver failures.
 - Not started: local pseudo-time stepping, boundary-condition changes, and positivity protection.
 
@@ -83,7 +83,7 @@ Tasks:
    - Define convergence on the pseudo-time correction norm, not on the final Krylov residual alone.
 
 3. Add a failure path for nonconverged pseudo-time steps.
-   - Status: partial. Nonconverged dual-time steps are now surfaced explicitly as `accepted_nonconverged`, but retry/reject behavior is still pending.
+   - Status: partial. Nonconverged dual-time steps are now surfaced explicitly as `accepted_nonconverged`, and they automatically reduce the next step's `dt` and `dtau`, but retry/reject behavior is still pending.
    - If the outer loop hits `outer_iters` without sufficient reduction, do not silently accept the state as if it were converged.
    - Introduce one of these behaviors:
      - reject the physical step and retry with reduced `dt`, or
@@ -104,6 +104,7 @@ Acceptance criteria:
 - Status: partial.
 - Done: compressible dual-time runs report scaled outer residuals for conserved variables.
 - Done: a pseudo-time loop that fails to converge is detectable and no longer silently indistinguishable from a converged step.
+- Done: nonconverged compressible dual-time steps now trigger automatic backoff of the next step's `dt` and `dtau`.
 - Done: existing non-dual-time paths remain unchanged.
 - Remaining: nonconverged steps are still accepted rather than retried/rejected.
 

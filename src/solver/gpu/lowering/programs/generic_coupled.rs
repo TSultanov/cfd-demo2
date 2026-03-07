@@ -149,6 +149,8 @@ pub(crate) struct GenericCoupledProgramResources {
     outer_break_enabled: bool,
     outer_batched_mode: bool,
     nonconverged_relax: f32,
+    nonconverged_dt_scale: f32,
+    nonconverged_dtau_scale: f32,
     implicit_base_alpha_u: Option<f32>,
     linear_solver: crate::solver::gpu::recipe::LinearSolverSpec,
     schur: Option<GenericCoupledSchurResources>,
@@ -316,6 +318,9 @@ impl GenericCoupledProgramResources {
         };
 
         Ok(Self {
+            nonconverged_relax: if model.id == "compressible" { 1.0 } else { 1.0 },
+            nonconverged_dt_scale: if model.id == "compressible" { 0.5 } else { 1.0 },
+            nonconverged_dtau_scale: if model.id == "compressible" { 0.5 } else { 1.0 },
             runtime,
             fields,
             time_integration: TimeIntegrationModule::new(),
@@ -333,7 +338,6 @@ impl GenericCoupledProgramResources {
             outer_tol_abs: 1e-6,
             outer_break_enabled: DEFAULT_OUTER_BREAK_ENABLED,
             outer_batched_mode: DEFAULT_OUTER_BATCHED_MODE,
-            nonconverged_relax: 1.0,
             implicit_base_alpha_u: None,
             linear_solver,
             schur,
@@ -947,6 +951,8 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
 }
 
 pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
+    let model_id = plan.model.id;
+    let outer_step_status = plan.outer_step_status;
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
@@ -955,6 +961,22 @@ pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
     }
     r.time_integration
         .finalize_step(&mut r.fields.constants, &queue);
+
+    if let Some((next_dt, next_dtau)) = next_step_backoff_targets(
+        model_id,
+        outer_step_status,
+        r.time_integration.dt,
+        r.fields.constants.values().dtau,
+        r.nonconverged_dt_scale,
+        r.nonconverged_dtau_scale,
+    ) {
+        r.time_integration.set_dt(next_dt, &mut r.fields.constants, &queue);
+        {
+            let values = r.fields.constants.values_mut();
+            values.dtau = next_dtau;
+        }
+        r.fields.constants.write(&queue);
+    }
 }
 
 pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
@@ -1232,6 +1254,34 @@ fn should_relax_nonconverged_apply(
         Some(OuterStepStatus::AcceptedConverged) => false,
         Some(OuterStepStatus::AcceptedNonconverged | OuterStepStatus::RejectedRetry) => true,
         None => !last_linear_stats.converged,
+    }
+}
+
+fn next_step_backoff_targets(
+    model_id: &str,
+    outer_step_status: Option<OuterStepStatus>,
+    current_dt: f32,
+    current_dtau: f32,
+    dt_scale: f32,
+    dtau_scale: f32,
+) -> Option<(f32, f32)> {
+    if model_id != "compressible" || current_dtau <= 0.0 {
+        return None;
+    }
+
+    match outer_step_status {
+        Some(OuterStepStatus::AcceptedNonconverged | OuterStepStatus::RejectedRetry) => {
+            let dt_scale = dt_scale.clamp(0.0, 1.0);
+            let dtau_scale = dtau_scale.clamp(0.0, 1.0);
+            let next_dt = (current_dt * dt_scale).clamp(1e-9, current_dt.max(1e-9));
+            let next_dtau = (current_dtau * dtau_scale).clamp(1e-9, current_dtau.max(1e-9));
+            if (next_dt - current_dt).abs() > 1e-12 || (next_dtau - current_dtau).abs() > 1e-12 {
+                Some((next_dt, next_dtau))
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
 }
 
@@ -1848,6 +1898,28 @@ pub(crate) fn param_nonconverged_relax(
         return Err("NonconvergedRelax expects F32".to_string());
     };
     res_mut(plan).nonconverged_relax = alpha.clamp(0.0, 1.0);
+    Ok(())
+}
+
+pub(crate) fn param_nonconverged_dt_scale(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(scale) = value else {
+        return Err("NonconvergedDtScale expects F32".to_string());
+    };
+    res_mut(plan).nonconverged_dt_scale = scale.clamp(0.0, 1.0);
+    Ok(())
+}
+
+pub(crate) fn param_nonconverged_dtau_scale(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(scale) = value else {
+        return Err("NonconvergedDtauScale expects F32".to_string());
+    };
+    res_mut(plan).nonconverged_dtau_scale = scale.clamp(0.0, 1.0);
     Ok(())
 }
 
@@ -2516,5 +2588,53 @@ mod tests {
         assert!(should_relax_nonconverged_apply(1.0e-5, stalled_linear, None));
         assert!(should_relax_nonconverged_apply(0.0, stalled_linear, None));
         assert!(!should_relax_nonconverged_apply(0.0, converged_linear, None));
+    }
+
+    #[test]
+    fn next_step_backoff_targets_only_trigger_for_nonconverged_compressible_dual_time() {
+        assert_eq!(
+            next_step_backoff_targets(
+                "compressible",
+                Some(OuterStepStatus::AcceptedConverged),
+                1.0e-3,
+                1.0e-5,
+                0.5,
+                0.5,
+            ),
+            None
+        );
+        assert_eq!(
+            next_step_backoff_targets(
+                "compressible",
+                Some(OuterStepStatus::AcceptedNonconverged),
+                1.0e-3,
+                1.0e-5,
+                0.5,
+                0.5,
+            ),
+            Some((5.0e-4, 5.0e-6))
+        );
+        assert_eq!(
+            next_step_backoff_targets(
+                "incompressible_momentum",
+                Some(OuterStepStatus::AcceptedNonconverged),
+                1.0e-3,
+                1.0e-5,
+                0.5,
+                0.5,
+            ),
+            None
+        );
+        assert_eq!(
+            next_step_backoff_targets(
+                "compressible",
+                Some(OuterStepStatus::AcceptedNonconverged),
+                1.0e-3,
+                0.0,
+                0.5,
+                0.5,
+            ),
+            None
+        );
     }
 }

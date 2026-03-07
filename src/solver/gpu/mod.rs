@@ -23,5 +23,6 @@ pub mod submission_counter;
 pub mod unified_solver;
 pub(crate) mod wgsl_reflect;
 
+pub use program::plan_instance::OuterStepStatus;
 pub use recipe::{LinearSolverSpec, SolverRecipe, TimeIntegrationSpec};
 pub use unified_solver::{FgmresSizing, GpuUnifiedSolver, SolverConfig, UiPortSet};

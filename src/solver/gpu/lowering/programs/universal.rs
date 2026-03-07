@@ -130,6 +130,7 @@ pub(in crate::solver::gpu::lowering) fn step_stats(plan: &GpuProgramPlan) -> Pla
         outer_iterations: (plan.outer_iterations > 0).then_some(plan.outer_iterations),
         outer_residual_u: plan.outer_residual_u,
         outer_residual_p: plan.outer_residual_p,
+        outer_step_status: plan.outer_step_status,
         linear_stats,
         ..Default::default()
     }

@@ -26,7 +26,7 @@ use crate::solver::gpu::modules::unified_graph::{
 };
 use crate::solver::gpu::program::plan::{GpuProgramPlan, ProgramParamHandler};
 use crate::solver::gpu::program::plan_instance::{
-    PlanFuture, PlanLinearSystemDebug, PlanParamValue,
+    OuterStepStatus, PlanFuture, PlanLinearSystemDebug, PlanParamValue,
 };
 use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
@@ -892,6 +892,7 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     plan.outer_iterations = 0;
     plan.outer_residual_u = None;
     plan.outer_residual_p = None;
+    plan.outer_step_status = None;
     plan.outer_field_residuals.clear();
     plan.outer_field_residuals_scaled.clear();
     plan.repeat_break = false;
@@ -1052,6 +1053,7 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
             plan.collect_convergence_stats,
         )
     };
+    let is_final_outer_iter = iters_done >= outer_iters;
 
     let break_should_run = outer_break_enabled
         && outer_iters > 1
@@ -1059,21 +1061,40 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
         && !plan.repeat_break;
 
     if !break_should_run && !collect_convergence_stats {
+        if is_final_outer_iter {
+            finalize_outer_step_status(plan, None);
+        }
         return;
     }
+
+    let mut break_converged = None;
 
     if collect_convergence_stats {
         let (delta, scale) = match compute_outer_residuals(plan) {
             Some(result) => result,
-            None => return,
+            None => {
+                if is_final_outer_iter {
+                    finalize_outer_step_status(plan, None);
+                }
+                return;
+            }
         };
         if !break_should_run {
+            if is_final_outer_iter {
+                finalize_outer_step_status(plan, None);
+            }
             return;
         }
         let Some(ref scale) = scale else {
+            if is_final_outer_iter {
+                finalize_outer_step_status(plan, None);
+            }
             return;
         };
         if scale.len() != delta.len() {
+            if is_final_outer_iter {
+                finalize_outer_step_status(plan, None);
+            }
             return;
         }
 
@@ -1085,6 +1106,7 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
         };
         match monitor.evaluate_break_from_current_buffers(plan, tol_rel, tol_abs) {
             Ok(converged) => {
+                break_converged = Some(converged);
                 if converged {
                     plan.repeat_break = true;
                 }
@@ -1095,10 +1117,16 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
         }
 
         res_mut(plan).outer_convergence = Some(monitor);
+        if break_converged == Some(true) || is_final_outer_iter {
+            finalize_outer_step_status(plan, break_converged);
+        }
         return;
     }
 
     if !break_should_run {
+        if is_final_outer_iter {
+            finalize_outer_step_status(plan, None);
+        }
         return;
     }
 
@@ -1116,6 +1144,7 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
 
     match monitor.evaluate_break_from_state_on_gpu(plan, &state, tol_rel, tol_abs) {
         Ok(converged) => {
+            break_converged = Some(converged);
             if converged {
                 plan.repeat_break = true;
             }
@@ -1126,6 +1155,68 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
     }
 
     res_mut(plan).outer_convergence = Some(monitor);
+    if break_converged == Some(true) || is_final_outer_iter {
+        finalize_outer_step_status(plan, break_converged);
+    }
+}
+
+fn should_track_outer_step_status(plan: &GpuProgramPlan) -> bool {
+    res(plan).fields.constants.values().dtau > 0.0
+}
+
+fn scaled_outer_targets_converged(plan: &GpuProgramPlan) -> Option<bool> {
+    if plan.outer_field_residuals.is_empty() {
+        return None;
+    }
+
+    let tol_rel = res(plan).outer_tol.max(0.0);
+    let tol_abs = res(plan).outer_tol_abs.max(0.0);
+    let scaled_by_name: HashMap<&str, f32> = plan
+        .outer_field_residuals_scaled
+        .iter()
+        .map(|(name, value)| (name.as_str(), *value))
+        .collect();
+    let conserved_targets = ["rho", "rho_u", "rho_e"];
+    let use_conserved_targets = conserved_targets
+        .iter()
+        .all(|target| plan.outer_field_residuals.iter().any(|(name, _)| name == target));
+
+    let mut matched = false;
+    for (name, abs_residual) in &plan.outer_field_residuals {
+        if use_conserved_targets && !conserved_targets.contains(&name.as_str()) {
+            continue;
+        }
+
+        matched = true;
+        let scaled_residual = scaled_by_name
+            .get(name.as_str())
+            .copied()
+            .unwrap_or(f32::INFINITY);
+        if scaled_residual > tol_rel && *abs_residual > tol_abs {
+            return Some(false);
+        }
+    }
+
+    matched.then_some(true)
+}
+
+fn finalize_outer_step_status(plan: &mut GpuProgramPlan, fallback_converged: Option<bool>) {
+    if !should_track_outer_step_status(plan) {
+        return;
+    }
+
+    if plan.outer_field_residuals.is_empty() {
+        let _ = compute_outer_residuals(plan);
+    }
+
+    let converged = scaled_outer_targets_converged(plan)
+        .or(fallback_converged)
+        .unwrap_or(false);
+    plan.outer_step_status = Some(if converged {
+        OuterStepStatus::AcceptedConverged
+    } else {
+        OuterStepStatus::AcceptedNonconverged
+    });
 }
 
 /// Compute outer-loop correction norms (field residuals) via the
@@ -1486,6 +1577,8 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
     // once at the end of the step — the per-iteration savings from the
     // encoded path are preserved.
     compute_outer_residuals(plan);
+    let adaptive_break_converged = adaptive_iter_count.map(|iters| iters < remaining as u32);
+    finalize_outer_step_status(plan, adaptive_break_converged);
 
     if plan.collect_trace {
         plan.step_graph_timings

@@ -14,4 +14,6 @@ pub use gpu::enums::{GpuBcKind, GpuBoundaryType, GpuLowMachPrecondModel, TimeSch
 pub use gpu::profiling::{ProfileCategory, ProfilingStats};
 pub use gpu::recipe::SteppingMode;
 pub use gpu::structs::{LinearSolverStats, PreconditionerType};
-pub use gpu::{FgmresSizing, GpuUnifiedSolver as UnifiedSolver, SolverConfig, UiPortSet};
+pub use gpu::{
+	FgmresSizing, GpuUnifiedSolver as UnifiedSolver, OuterStepStatus, SolverConfig, UiPortSet,
+};

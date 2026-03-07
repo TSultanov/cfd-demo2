@@ -11,8 +11,8 @@ use crate::solver::model::{
 };
 use crate::solver::scheme::Scheme;
 use crate::solver::{
-    GpuLowMachPrecondModel, LinearSolverStats, PreconditionerType, SolverConfig, SteppingMode,
-    TimeScheme as GpuTimeScheme, UiPortSet, UnifiedSolver,
+    GpuLowMachPrecondModel, LinearSolverStats, OuterStepStatus, PreconditionerType,
+    SolverConfig, SteppingMode, TimeScheme as GpuTimeScheme, UiPortSet, UnifiedSolver,
 };
 use crate::trace as tracefmt;
 use crate::ui::{cfd_renderer, fluid::Fluid};
@@ -172,6 +172,7 @@ struct CachedGpuStats {
     outer_residual_u: f32,
     outer_residual_p: f32,
     outer_iterations: u32,
+    outer_step_status: Option<OuterStepStatus>,
     step_time_ms: f32,
 }
 
@@ -2463,11 +2464,16 @@ impl eframe::App for CFDApp {
                             ));
                         }
                         if stats.outer_iterations > 0 {
+                            let status_suffix = stats
+                                .outer_step_status
+                                .map(|status| format!(" ({})", status.as_str()))
+                                .unwrap_or_default();
                             ui.label(format!(
-                                "Coupled: {} iters, U:{:.2e} P:{:.2e}",
+                                "Coupled: {} iters, U:{:.2e} P:{:.2e}{}",
                                 stats.outer_iterations,
                                 stats.outer_residual_u,
                                 stats.outer_residual_p,
+                                status_suffix,
                             ));
                         }
                         ui.label(format!("Step time: {:.1} ms", stats.step_time_ms));
@@ -2926,6 +2932,7 @@ fn solver_worker_main(
         if let Some(res_p) = step_stats.outer_residual_p {
             stats.outer_residual_p = res_p;
         }
+        stats.outer_step_status = step_stats.outer_step_status;
         let log_every_steps = params.log_every_steps.max(1) as u64;
         let should_log = params.log_convergence && (step_idx % log_every_steps == 0);
 
@@ -2978,6 +2985,10 @@ fn solver_worker_main(
                 let outer_str = step_stats
                     .outer_iterations
                     .map(|iters| {
+                        let status_suffix = step_stats
+                            .outer_step_status
+                            .map(|status| format!(", status={}", status.as_str()))
+                            .unwrap_or_default();
                         let abs_residuals = solver.outer_field_residuals();
                         let scaled_residuals = solver.outer_field_residuals_scaled();
 
@@ -2991,7 +3002,7 @@ fn solver_worker_main(
                                 })
                                 .collect::<Vec<_>>()
                                 .join(", ");
-                            format!(" outer(iters={iters}, res=[{fields}])")
+                            format!(" outer(iters={iters}, res=[{fields}]{status_suffix})")
                         } else if let Some(fields) = abs_residuals {
                             // Only absolute residuals available
                             let fields = fields
@@ -2999,13 +3010,15 @@ fn solver_worker_main(
                                 .map(|(name, res)| format!("{name}={res:.3e}"))
                                 .collect::<Vec<_>>()
                                 .join(", ");
-                            format!(" outer(iters={iters}, res=[{fields}])")
+                            format!(" outer(iters={iters}, res=[{fields}]{status_suffix})")
                         } else if let (Some(res_u), Some(res_p)) =
                             (step_stats.outer_residual_u, step_stats.outer_residual_p)
                         {
-                            format!(" outer(iters={iters}, u={res_u:.3e}, p={res_p:.3e})")
+                            format!(
+                                " outer(iters={iters}, u={res_u:.3e}, p={res_p:.3e}{status_suffix})"
+                            )
                         } else {
-                            format!(" outer(iters={iters})")
+                            format!(" outer(iters={iters}{status_suffix})")
                         }
                     })
                     .unwrap_or_default();

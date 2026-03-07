@@ -9,8 +9,8 @@ use cfd2::solver::model::helpers::{
 };
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{
-    GpuLowMachPrecondModel, PreconditionerType, SolverConfig, SteppingMode, TimeScheme,
-    UnifiedSolver,
+    GpuLowMachPrecondModel, OuterStepStatus, PreconditionerType, SolverConfig, SteppingMode,
+    TimeScheme, UnifiedSolver,
 };
 use nalgebra::Vector2;
 
@@ -242,6 +242,7 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
         }
 
         let stats = solver.step_with_stats().expect("step with stats");
+        let step_stats = solver.step_stats();
         let last = stats.last().cloned().unwrap_or_default();
         eprintln!(
             "[ui_dual_time_backstep] step={step} linear_stats_len={} last(iters={}, res={:.3e}, conv={}, div={})",
@@ -258,6 +259,15 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
         assert!(
             !last.diverged,
             "step {step}: linear solver diverged: {last:?}"
+        );
+        assert!(
+            matches!(
+                step_stats.outer_step_status,
+                Some(OuterStepStatus::AcceptedConverged)
+                    | Some(OuterStepStatus::AcceptedNonconverged)
+            ),
+            "step {step}: dual-time run should surface an explicit pseudo-time acceptance status, got {:?}",
+            step_stats.outer_step_status
         );
 
         // Debug: if the implicit solve early-exits, `x` may remain zero and clobber state in the update pass.

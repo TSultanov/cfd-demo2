@@ -14,6 +14,23 @@ pub struct FgmresSizing {
     pub num_dot_groups: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OuterStepStatus {
+    AcceptedConverged,
+    AcceptedNonconverged,
+    RejectedRetry,
+}
+
+impl OuterStepStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AcceptedConverged => "accepted_converged",
+            Self::AcceptedNonconverged => "accepted_nonconverged",
+            Self::RejectedRetry => "rejected_retry",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PlanStepStats {
     pub should_stop: Option<bool>,
@@ -21,6 +38,7 @@ pub struct PlanStepStats {
     pub outer_iterations: Option<u32>,
     pub outer_residual_u: Option<f32>,
     pub outer_residual_p: Option<f32>,
+    pub outer_step_status: Option<OuterStepStatus>,
     pub linear_stats: Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)>,
 }
 

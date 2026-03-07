@@ -9,7 +9,9 @@ use cfd2::solver::model::helpers::{
 };
 use cfd2::solver::model::{incompressible_momentum_model, kernel::KernelFusionPolicy};
 use cfd2::solver::scheme::Scheme;
-use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
+use cfd2::solver::{
+    OuterStepStatus, PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver,
+};
 use std::sync::{Mutex, OnceLock};
 
 struct RhieChowSnapshot {
@@ -510,6 +512,8 @@ struct ConvergenceDiagnostics {
     /// Per-field named residuals.
     outer_residual_u: Option<f32>,
     outer_residual_p: Option<f32>,
+    /// Final pseudo-time acceptance status when dual-time stepping is active.
+    outer_step_status: Option<OuterStepStatus>,
     /// Linear solver stats from the last outer iteration.
     last_linear_stats: LinearSolverStats,
 }
@@ -586,6 +590,7 @@ fn run_with_convergence_diagnostics(
         outer_field_residuals_scaled: solver.outer_field_residuals_scaled().map(|s| s.to_vec()),
         outer_residual_u: stats.outer_residual_u,
         outer_residual_p: stats.outer_residual_p,
+        outer_step_status: stats.outer_step_status,
         last_linear_stats: stats
             .linear_stats
             .map(|(_first, _best, last)| last)
@@ -670,6 +675,10 @@ fn one_submission_convergence_stats_populated() {
     assert!(
         !scaled.is_empty(),
         "outer_field_residuals_scaled should not be empty"
+    );
+    assert!(
+        diag.outer_step_status.is_none(),
+        "non-dual-time coupled runs should not report a pseudo-time acceptance status"
     );
 
     eprintln!(

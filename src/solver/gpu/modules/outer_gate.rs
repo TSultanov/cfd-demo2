@@ -5,215 +5,8 @@
 //! convergence flag into the FGMRES/CG solver scalars buffer so subsequent
 //! linear solver iterations become near-zero-cost).
 
-use crate::solver::gpu::linear_solver::fgmres::FGMRES_SCALAR_STOP;
-use crate::solver::gpu::modules::scalar_cg::CG_SCALAR_STOP;
-use cfd2_codegen::solver::codegen::wgsl_ast::*;
-use cfd2_codegen::solver::codegen::wgsl_dsl::*;
-
-/// Builds the outer gate kernel WGSL via the structured DSL.
-///
-/// Single-thread kernel that reads `break_status[0]`:
-/// - If NOT converged (0): copies real dispatch args to indirect args for cells/faces,
-///   and atomically increments the iteration counter.
-/// - If converged (1): writes zeros to indirect args (zero-cost dispatch).
-fn build_outer_gate_wgsl() -> String {
-    let mut m = Module::new();
-
-    m.push(Item::GlobalVar(GlobalVar::new(
-        "break_status",
-        Type::array(Type::U32),
-        StorageClass::Storage,
-        Some(AccessMode::Read),
-        vec![Attribute::Group(0), Attribute::Binding(0)],
-    )));
-    m.push(Item::GlobalVar(GlobalVar::new(
-        "real_args_cells",
-        Type::array(Type::U32),
-        StorageClass::Storage,
-        Some(AccessMode::Read),
-        vec![Attribute::Group(0), Attribute::Binding(1)],
-    )));
-    m.push(Item::GlobalVar(GlobalVar::new(
-        "indirect_args_cells",
-        Type::array(Type::U32),
-        StorageClass::Storage,
-        Some(AccessMode::ReadWrite),
-        vec![Attribute::Group(0), Attribute::Binding(2)],
-    )));
-    m.push(Item::GlobalVar(GlobalVar::new(
-        "real_args_faces",
-        Type::array(Type::U32),
-        StorageClass::Storage,
-        Some(AccessMode::Read),
-        vec![Attribute::Group(0), Attribute::Binding(3)],
-    )));
-    m.push(Item::GlobalVar(GlobalVar::new(
-        "indirect_args_faces",
-        Type::array(Type::U32),
-        StorageClass::Storage,
-        Some(AccessMode::ReadWrite),
-        vec![Attribute::Group(0), Attribute::Binding(4)],
-    )));
-    m.push(Item::GlobalVar(GlobalVar::new(
-        "iter_counter",
-        Type::array(Type::atomic(Type::U32)),
-        StorageClass::Storage,
-        Some(AccessMode::ReadWrite),
-        vec![Attribute::Group(0), Attribute::Binding(5)],
-    )));
-
-    let global_id = Expr::ident("global_id");
-    let break_status = Expr::ident("break_status");
-    let real_args_cells = Expr::ident("real_args_cells");
-    let indirect_args_cells = Expr::ident("indirect_args_cells");
-    let real_args_faces = Expr::ident("real_args_faces");
-    let indirect_args_faces = Expr::ident("indirect_args_faces");
-    let iter_counter = Expr::ident("iter_counter");
-    let converged = Expr::ident("converged");
-
-    let body = block(vec![
-        // if (global_id.x != 0u) { return; }
-        if_block_expr(
-            global_id.clone().field("x").ne(Expr::lit_u32(0)),
-            block(vec![return_void()]),
-            None,
-        ),
-        // let converged = break_status[0];
-        let_expr("converged", break_status.clone().index(Expr::lit_u32(0))),
-        // if (converged == 0u) { ... } else { ... }
-        if_block_expr(
-            converged.clone().eq(Expr::lit_u32(0)),
-            block(vec![
-                // Not converged: enable dispatches with real args
-                assign_expr(
-                    indirect_args_cells.clone().index(Expr::lit_u32(0)),
-                    real_args_cells.clone().index(Expr::lit_u32(0)),
-                ),
-                assign_expr(
-                    indirect_args_cells.clone().index(Expr::lit_u32(1)),
-                    real_args_cells.clone().index(Expr::lit_u32(1)),
-                ),
-                assign_expr(
-                    indirect_args_cells.clone().index(Expr::lit_u32(2)),
-                    real_args_cells.clone().index(Expr::lit_u32(2)),
-                ),
-                assign_expr(
-                    indirect_args_faces.clone().index(Expr::lit_u32(0)),
-                    real_args_faces.clone().index(Expr::lit_u32(0)),
-                ),
-                assign_expr(
-                    indirect_args_faces.clone().index(Expr::lit_u32(1)),
-                    real_args_faces.clone().index(Expr::lit_u32(1)),
-                ),
-                assign_expr(
-                    indirect_args_faces.clone().index(Expr::lit_u32(2)),
-                    real_args_faces.clone().index(Expr::lit_u32(2)),
-                ),
-                // Increment iteration counter
-                call_stmt_expr(atomic_add(
-                    iter_counter.clone().index(Expr::lit_u32(0)).addr_of(),
-                    Expr::lit_u32(1),
-                )),
-            ]),
-            Some(block(vec![
-                // Converged: zero out dispatches
-                assign_expr(
-                    indirect_args_cells.clone().index(Expr::lit_u32(0)),
-                    Expr::lit_u32(0),
-                ),
-                assign_expr(
-                    indirect_args_cells.clone().index(Expr::lit_u32(1)),
-                    Expr::lit_u32(0),
-                ),
-                assign_expr(
-                    indirect_args_cells.clone().index(Expr::lit_u32(2)),
-                    Expr::lit_u32(0),
-                ),
-                assign_expr(
-                    indirect_args_faces.clone().index(Expr::lit_u32(0)),
-                    Expr::lit_u32(0),
-                ),
-                assign_expr(
-                    indirect_args_faces.clone().index(Expr::lit_u32(1)),
-                    Expr::lit_u32(0),
-                ),
-                assign_expr(
-                    indirect_args_faces.clone().index(Expr::lit_u32(2)),
-                    Expr::lit_u32(0),
-                ),
-            ])),
-        ),
-    ]);
-
-    m.push(Item::Function(Function::new(
-        "main",
-        vec![Param::new(
-            "global_id",
-            Type::vec3_u32(),
-            vec![Attribute::Builtin("global_invocation_id".into())],
-        )],
-        None,
-        vec![Attribute::Compute, Attribute::WorkgroupSize3(1, 1, 1)],
-        body,
-    )));
-
-    m.to_wgsl()
-}
-
-/// Builds the STOP-inject kernel WGSL via the structured DSL.
-///
-/// Single-thread kernel that reads `break_status[0]` and writes `f32(break_status[0])`
-/// into the scalars buffer at the given `scalar_stop` index.
-fn build_outer_stop_inject_wgsl(scalar_stop: usize) -> String {
-    let mut m = Module::new();
-
-    m.push(Item::GlobalVar(GlobalVar::new(
-        "break_status",
-        Type::array(Type::U32),
-        StorageClass::Storage,
-        Some(AccessMode::Read),
-        vec![Attribute::Group(0), Attribute::Binding(0)],
-    )));
-    m.push(Item::GlobalVar(GlobalVar::new(
-        "scalars",
-        Type::array(Type::F32),
-        StorageClass::Storage,
-        Some(AccessMode::ReadWrite),
-        vec![Attribute::Group(0), Attribute::Binding(1)],
-    )));
-
-    let global_id = Expr::ident("global_id");
-    let break_status = Expr::ident("break_status");
-    let scalars = Expr::ident("scalars");
-
-    let body = block(vec![
-        // if (global_id.x != 0u) { return; }
-        if_block_expr(
-            global_id.clone().field("x").ne(Expr::lit_u32(0)),
-            block(vec![return_void()]),
-            None,
-        ),
-        // scalars[SCALAR_STOP] = f32(break_status[0]);
-        assign_expr(
-            scalars.clone().index(Expr::lit_u32(scalar_stop as u32)),
-            f32_cast(break_status.clone().index(Expr::lit_u32(0))),
-        ),
-    ]);
-
-    m.push(Item::Function(Function::new(
-        "main",
-        vec![Param::new(
-            "global_id",
-            Type::vec3_u32(),
-            vec![Attribute::Builtin("global_invocation_id".into())],
-        )],
-        None,
-        vec![Attribute::Compute, Attribute::WorkgroupSize3(1, 1, 1)],
-        body,
-    )));
-
-    m.to_wgsl()
-}
+use crate::solver::gpu::lowering::kernel_registry;
+use crate::solver::model::KernelId;
 
 /// GPU-side adaptive outer break gate resources.
 ///
@@ -301,19 +94,10 @@ impl OuterAdaptiveGate {
             mapped_at_creation: false,
         }));
 
-        // Gate pipeline
-        let gate_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("outer_gate:gate"),
-            source: wgpu::ShaderSource::Wgsl(build_outer_gate_wgsl().into()),
-        });
-        let gate_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("outer_gate:gate"),
-            layout: None,
-            module: &gate_module,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        // Gate pipeline (pre-compiled infrastructure kernel)
+        let gate_src = kernel_registry::kernel_source_by_id("", KernelId::OUTER_GATE)
+            .expect("missing outer_gate infrastructure kernel");
+        let gate_pipeline = (gate_src.create_pipeline)(device);
         let gate_bgl = gate_pipeline.get_bind_group_layout(0);
         let gate_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("outer_gate:gate_bg"),
@@ -346,37 +130,19 @@ impl OuterAdaptiveGate {
             ],
         });
 
-        // STOP-inject pipeline (bind group created per-FGMRES workspace)
-        let stop_inject_src = build_outer_stop_inject_wgsl(FGMRES_SCALAR_STOP);
-        let stop_inject_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("outer_gate:stop_inject"),
-            source: wgpu::ShaderSource::Wgsl(stop_inject_src.into()),
-        });
-        let stop_inject_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("outer_gate:stop_inject"),
-                layout: None,
-                module: &stop_inject_module,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            });
+        // STOP-inject pipeline for FGMRES (pre-compiled infrastructure kernel)
+        let stop_inject_src = kernel_registry::kernel_source_by_id(
+            "",
+            KernelId::OUTER_STOP_INJECT_FGMRES,
+        )
+        .expect("missing outer_stop_inject_fgmres infrastructure kernel");
+        let stop_inject_pipeline = (stop_inject_src.create_pipeline)(device);
 
-        // STOP-inject pipeline for CG (same shader, different scalar offset)
-        let cg_stop_inject_src = build_outer_stop_inject_wgsl(CG_SCALAR_STOP);
-        let cg_stop_inject_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("outer_gate:cg_stop_inject"),
-            source: wgpu::ShaderSource::Wgsl(cg_stop_inject_src.into()),
-        });
-        let cg_stop_inject_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("outer_gate:cg_stop_inject"),
-                layout: None,
-                module: &cg_stop_inject_module,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                cache: None,
-            });
+        // STOP-inject pipeline for CG (pre-compiled infrastructure kernel)
+        let cg_stop_inject_src =
+            kernel_registry::kernel_source_by_id("", KernelId::OUTER_STOP_INJECT_CG)
+                .expect("missing outer_stop_inject_cg infrastructure kernel");
+        let cg_stop_inject_pipeline = (cg_stop_inject_src.create_pipeline)(device);
 
         Self {
             gate_pipeline,

@@ -1936,6 +1936,346 @@ pub fn generate_generic_coupled_schur_setup() -> KernelWgsl {
     KernelWgsl::new(m)
 }
 
+// ─── outer_gate ─────────────────────────────────────────────────────────
+
+/// GPU-side adaptive outer-loop gate.  Single `main` entry point,
+/// workgroup_size(1,1,1).
+///
+/// Reads `break_status[0]`:
+/// - If 0 (not converged): copies real dispatch args into indirect args and
+///   atomically increments the iteration counter.
+/// - If ≠ 0 (converged): zeroes the indirect dispatch args so subsequent
+///   dispatches are no-ops.
+pub fn generate_outer_gate() -> KernelWgsl {
+    let mut m = Module::new();
+
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "break_status",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::Read),
+        vec![Attribute::Group(0), Attribute::Binding(0)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "real_args_cells",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::Read),
+        vec![Attribute::Group(0), Attribute::Binding(1)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "indirect_args_cells",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::ReadWrite),
+        vec![Attribute::Group(0), Attribute::Binding(2)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "real_args_faces",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::Read),
+        vec![Attribute::Group(0), Attribute::Binding(3)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "indirect_args_faces",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::ReadWrite),
+        vec![Attribute::Group(0), Attribute::Binding(4)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "iter_counter",
+        Type::array(Type::atomic(Type::U32)),
+        StorageClass::Storage,
+        Some(AccessMode::ReadWrite),
+        vec![Attribute::Group(0), Attribute::Binding(5)],
+    )));
+
+    let global_id = Expr::ident("global_id");
+    let break_status = Expr::ident("break_status");
+    let real_args_cells = Expr::ident("real_args_cells");
+    let indirect_args_cells = Expr::ident("indirect_args_cells");
+    let real_args_faces = Expr::ident("real_args_faces");
+    let indirect_args_faces = Expr::ident("indirect_args_faces");
+    let iter_counter = Expr::ident("iter_counter");
+    let converged = Expr::ident("converged");
+
+    let body = block(vec![
+        if_block_expr(
+            global_id.clone().field("x").ne(Expr::lit_u32(0)),
+            block(vec![return_void()]),
+            None,
+        ),
+        let_expr("converged", break_status.clone().index(Expr::lit_u32(0))),
+        if_block_expr(
+            converged.clone().eq(Expr::lit_u32(0)),
+            block(vec![
+                assign_expr(
+                    indirect_args_cells.clone().index(Expr::lit_u32(0)),
+                    real_args_cells.clone().index(Expr::lit_u32(0)),
+                ),
+                assign_expr(
+                    indirect_args_cells.clone().index(Expr::lit_u32(1)),
+                    real_args_cells.clone().index(Expr::lit_u32(1)),
+                ),
+                assign_expr(
+                    indirect_args_cells.clone().index(Expr::lit_u32(2)),
+                    real_args_cells.clone().index(Expr::lit_u32(2)),
+                ),
+                assign_expr(
+                    indirect_args_faces.clone().index(Expr::lit_u32(0)),
+                    real_args_faces.clone().index(Expr::lit_u32(0)),
+                ),
+                assign_expr(
+                    indirect_args_faces.clone().index(Expr::lit_u32(1)),
+                    real_args_faces.clone().index(Expr::lit_u32(1)),
+                ),
+                assign_expr(
+                    indirect_args_faces.clone().index(Expr::lit_u32(2)),
+                    real_args_faces.clone().index(Expr::lit_u32(2)),
+                ),
+                call_stmt_expr(atomic_add(
+                    iter_counter.clone().index(Expr::lit_u32(0)).addr_of(),
+                    Expr::lit_u32(1),
+                )),
+            ]),
+            Some(block(vec![
+                assign_expr(
+                    indirect_args_cells.clone().index(Expr::lit_u32(0)),
+                    Expr::lit_u32(0),
+                ),
+                assign_expr(
+                    indirect_args_cells.clone().index(Expr::lit_u32(1)),
+                    Expr::lit_u32(0),
+                ),
+                assign_expr(
+                    indirect_args_cells.clone().index(Expr::lit_u32(2)),
+                    Expr::lit_u32(0),
+                ),
+                assign_expr(
+                    indirect_args_faces.clone().index(Expr::lit_u32(0)),
+                    Expr::lit_u32(0),
+                ),
+                assign_expr(
+                    indirect_args_faces.clone().index(Expr::lit_u32(1)),
+                    Expr::lit_u32(0),
+                ),
+                assign_expr(
+                    indirect_args_faces.clone().index(Expr::lit_u32(2)),
+                    Expr::lit_u32(0),
+                ),
+            ])),
+        ),
+    ]);
+
+    m.push(Item::Function(Function::new(
+        "main",
+        vec![Param::new(
+            "global_id",
+            Type::vec3_u32(),
+            vec![Attribute::Builtin("global_invocation_id".into())],
+        )],
+        None,
+        vec![Attribute::Compute, Attribute::WorkgroupSize3(1, 1, 1)],
+        body,
+    )));
+
+    KernelWgsl::new(m)
+}
+
+// ─── outer_stop_inject ──────────────────────────────────────────────────
+
+/// STOP-inject kernel that reads `break_status[0]` and writes it as an f32
+/// into a scalars buffer at the given index.  Single `main` entry point,
+/// workgroup_size(1,1,1).
+fn generate_outer_stop_inject(scalar_stop: usize) -> KernelWgsl {
+    let mut m = Module::new();
+
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "break_status",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::Read),
+        vec![Attribute::Group(0), Attribute::Binding(0)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "scalars",
+        Type::array(Type::F32),
+        StorageClass::Storage,
+        Some(AccessMode::ReadWrite),
+        vec![Attribute::Group(0), Attribute::Binding(1)],
+    )));
+
+    let global_id = Expr::ident("global_id");
+    let break_status = Expr::ident("break_status");
+    let scalars = Expr::ident("scalars");
+
+    let body = block(vec![
+        if_block_expr(
+            global_id.clone().field("x").ne(Expr::lit_u32(0)),
+            block(vec![return_void()]),
+            None,
+        ),
+        assign_expr(
+            scalars.clone().index(Expr::lit_u32(scalar_stop as u32)),
+            f32_cast(break_status.clone().index(Expr::lit_u32(0))),
+        ),
+    ]);
+
+    m.push(Item::Function(Function::new(
+        "main",
+        vec![Param::new(
+            "global_id",
+            Type::vec3_u32(),
+            vec![Attribute::Builtin("global_invocation_id".into())],
+        )],
+        None,
+        vec![Attribute::Compute, Attribute::WorkgroupSize3(1, 1, 1)],
+        body,
+    )));
+
+    KernelWgsl::new(m)
+}
+
+/// STOP-inject for FGMRES (scalar index 8).
+pub fn generate_outer_stop_inject_fgmres() -> KernelWgsl {
+    generate_outer_stop_inject(8)
+}
+
+/// STOP-inject for CG (scalar index 6).
+pub fn generate_outer_stop_inject_cg() -> KernelWgsl {
+    generate_outer_stop_inject(6)
+}
+
+// ─── outer_convergence_break ────────────────────────────────────────────
+
+/// Convergence break kernel: checks per-target delta vs scale tolerances.
+/// Single `main` entry point, workgroup_size(1,1,1).
+///
+/// Reads `delta[i]` and `scale[i]` for `i < params.count`, applies
+/// `tol = tol_abs + tol_rel * max(scale, 1.0)`, and writes `status[0] = 1`
+/// if all targets are converged, `0` otherwise.
+pub fn generate_outer_convergence_break() -> KernelWgsl {
+    let mut m = Module::new();
+
+    m.push(Item::Struct(StructDef::new(
+        "BreakParams",
+        vec![
+            StructField::new("count", Type::U32),
+            StructField::new("tol_rel", Type::F32),
+            StructField::new("tol_abs", Type::F32),
+            StructField::new("_pad0", Type::U32),
+        ],
+    )));
+
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "delta",
+        Type::array(Type::F32),
+        StorageClass::Storage,
+        Some(AccessMode::Read),
+        vec![Attribute::Group(0), Attribute::Binding(0)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "scale",
+        Type::array(Type::F32),
+        StorageClass::Storage,
+        Some(AccessMode::Read),
+        vec![Attribute::Group(0), Attribute::Binding(1)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "status",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::ReadWrite),
+        vec![Attribute::Group(0), Attribute::Binding(2)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "params",
+        Type::Custom("BreakParams".into()),
+        StorageClass::Uniform,
+        None,
+        vec![Attribute::Group(0), Attribute::Binding(3)],
+    )));
+
+    let global_id = Expr::ident("global_id");
+    let params = Expr::ident("params");
+    let delta = Expr::ident("delta");
+    let scale = Expr::ident("scale");
+    let status = Expr::ident("status");
+    let i = Expr::ident("i");
+    let d = Expr::ident("d");
+    let s_raw = Expr::ident("s_raw");
+    let bad_d = Expr::ident("bad_d");
+    let bad_s = Expr::ident("bad_s");
+    let s = Expr::ident("s");
+    let tol = Expr::ident("tol");
+    let converged = Expr::ident("converged");
+
+    let body = block(vec![
+        if_block_expr(
+            global_id.clone().field("x").ne(Expr::lit_u32(0)),
+            block(vec![return_void()]),
+            None,
+        ),
+        var_typed_expr("converged", Type::U32, Some(Expr::lit_u32(1))),
+        for_loop_expr(
+            for_init_var_typed_expr("i", Type::U32, Expr::lit_u32(0)),
+            i.clone().lt(params.clone().field("count")),
+            for_step_increment_expr(i.clone()),
+            block(vec![
+                let_expr("d", delta.clone().index(i.clone())),
+                let_expr("s_raw", scale.clone().index(i.clone())),
+                let_expr(
+                    "bad_d",
+                    (!d.clone().le(d.clone())) | abs(d.clone()).gt(Expr::lit_f32(1.0e30)),
+                ),
+                let_expr(
+                    "bad_s",
+                    (!s_raw.clone().le(s_raw.clone()))
+                        | abs(s_raw.clone()).gt(Expr::lit_f32(1.0e30)),
+                ),
+                if_block_expr(
+                    bad_d.clone() | bad_s.clone(),
+                    block(vec![
+                        assign_expr(converged.clone(), Expr::lit_u32(0)),
+                        break_stmt(),
+                    ]),
+                    None,
+                ),
+                let_expr("s", max(s_raw.clone(), Expr::lit_f32(1.0))),
+                let_expr(
+                    "tol",
+                    params.clone().field("tol_abs") + params.clone().field("tol_rel") * s.clone(),
+                ),
+                if_block_expr(
+                    d.clone().gt(tol.clone()),
+                    block(vec![
+                        assign_expr(converged.clone(), Expr::lit_u32(0)),
+                        break_stmt(),
+                    ]),
+                    None,
+                ),
+            ]),
+        ),
+        assign_expr(status.clone().index(Expr::lit_u32(0)), converged.clone()),
+    ]);
+
+    m.push(Item::Function(Function::new(
+        "main",
+        vec![Param::new(
+            "global_id",
+            Type::vec3_u32(),
+            vec![Attribute::Builtin("global_invocation_id".into())],
+        )],
+        None,
+        vec![Attribute::Compute, Attribute::WorkgroupSize3(1, 1, 1)],
+        body,
+    )));
+
+    KernelWgsl::new(m)
+}
+
 /// Returns all infrastructure kernel generators as `(filename, generator)` pairs.
 /// The filename should be used when writing to `shaders/generated/`.
 pub fn all_infrastructure_kernels() -> Vec<(&'static str, fn() -> KernelWgsl)> {
@@ -1943,6 +2283,19 @@ pub fn all_infrastructure_kernels() -> Vec<(&'static str, fn() -> KernelWgsl)> {
         ("dot_product.wgsl", generate_dot_product),
         ("dot_product_pair.wgsl", generate_dot_product_pair),
         ("outer_convergence.wgsl", generate_outer_convergence),
+        (
+            "outer_convergence_break.wgsl",
+            generate_outer_convergence_break,
+        ),
+        ("outer_gate.wgsl", generate_outer_gate),
+        (
+            "outer_stop_inject_fgmres.wgsl",
+            generate_outer_stop_inject_fgmres,
+        ),
+        (
+            "outer_stop_inject_cg.wgsl",
+            generate_outer_stop_inject_cg,
+        ),
         ("scalars.wgsl", generate_scalars),
         ("linear_solver.wgsl", generate_linear_solver),
         ("amg.wgsl", generate_amg),
@@ -1995,6 +2348,49 @@ mod tests {
         assert!(wgsl.contains("atomicMax"));
         assert!(wgsl.contains("bitcast<u32>"));
         assert!(wgsl.contains("TargetDesc"));
+    }
+
+    #[test]
+    fn outer_gate_generates_valid_wgsl() {
+        let wgsl = generate_outer_gate().to_wgsl();
+        assert!(wgsl.contains("fn main("));
+        assert!(wgsl.contains("@workgroup_size(1, 1, 1)"));
+        assert!(wgsl.contains("break_status"));
+        assert!(wgsl.contains("indirect_args_cells"));
+        assert!(wgsl.contains("indirect_args_faces"));
+        assert!(wgsl.contains("atomicAdd"));
+        assert!(wgsl.contains("iter_counter"));
+    }
+
+    #[test]
+    fn outer_stop_inject_fgmres_generates_valid_wgsl() {
+        let wgsl = generate_outer_stop_inject_fgmres().to_wgsl();
+        assert!(wgsl.contains("fn main("));
+        assert!(wgsl.contains("@workgroup_size(1, 1, 1)"));
+        assert!(wgsl.contains("break_status"));
+        assert!(wgsl.contains("scalars[8u]"));
+    }
+
+    #[test]
+    fn outer_stop_inject_cg_generates_valid_wgsl() {
+        let wgsl = generate_outer_stop_inject_cg().to_wgsl();
+        assert!(wgsl.contains("fn main("));
+        assert!(wgsl.contains("@workgroup_size(1, 1, 1)"));
+        assert!(wgsl.contains("break_status"));
+        assert!(wgsl.contains("scalars[6u]"));
+    }
+
+    #[test]
+    fn outer_convergence_break_generates_valid_wgsl() {
+        let wgsl = generate_outer_convergence_break().to_wgsl();
+        assert!(wgsl.contains("fn main("));
+        assert!(wgsl.contains("@workgroup_size(1, 1, 1)"));
+        assert!(wgsl.contains("BreakParams"));
+        assert!(wgsl.contains("delta"));
+        assert!(wgsl.contains("scale"));
+        assert!(wgsl.contains("status[0u]"));
+        assert!(wgsl.contains("tol_abs"));
+        assert!(wgsl.contains("tol_rel"));
     }
 
     #[test]

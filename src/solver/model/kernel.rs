@@ -29,6 +29,10 @@ impl KernelId {
     pub const DOT_PRODUCT: KernelId = KernelId("dot_product");
     pub const DOT_PRODUCT_PAIR: KernelId = KernelId("dot_product_pair");
     pub const OUTER_CONVERGENCE: KernelId = KernelId("outer_convergence");
+    pub const OUTER_CONVERGENCE_BREAK: KernelId = KernelId("outer_convergence_break");
+    pub const OUTER_GATE: KernelId = KernelId("outer_gate");
+    pub const OUTER_STOP_INJECT_FGMRES: KernelId = KernelId("outer_stop_inject_fgmres");
+    pub const OUTER_STOP_INJECT_CG: KernelId = KernelId("outer_stop_inject_cg");
 
     pub const SCALARS_INIT_CG: KernelId = KernelId("scalars/init_cg_scalars");
     pub const SCALARS_REDUCE_RHO_NEW_R_R: KernelId = KernelId("scalars/reduce_rho_new_r_r");

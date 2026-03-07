@@ -6,10 +6,8 @@
 
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::program::plan::GpuProgramPlan;
-use crate::solver::model::ModelSpec;
+use crate::solver::model::{KernelId, ModelSpec};
 use bytemuck::{bytes_of, Pod, Zeroable};
-use cfd2_codegen::solver::codegen::wgsl_ast::*;
-use cfd2_codegen::solver::codegen::wgsl_dsl::*;
 
 use super::super::lowering::programs::generic_coupled::ResolvedUnknownMapping;
 
@@ -43,141 +41,6 @@ struct GpuOuterConvergenceBreakParams {
 
 /// Builds the outer convergence break kernel WGSL via the structured DSL.
 ///
-/// Single-thread kernel that checks whether all (delta, scale) pairs satisfy the
-/// convergence criterion, writing `1u` (converged) or `0u` (not converged) into
-/// `status[0]`.
-fn build_outer_convergence_break_wgsl() -> String {
-    let mut m = Module::new();
-
-    m.push(Item::Struct(StructDef::new(
-        "BreakParams",
-        vec![
-            StructField::new("count", Type::U32),
-            StructField::new("tol_rel", Type::F32),
-            StructField::new("tol_abs", Type::F32),
-            StructField::new("_pad0", Type::U32),
-        ],
-    )));
-
-    m.push(Item::GlobalVar(GlobalVar::new(
-        "delta",
-        Type::array(Type::F32),
-        StorageClass::Storage,
-        Some(AccessMode::Read),
-        vec![Attribute::Group(0), Attribute::Binding(0)],
-    )));
-    m.push(Item::GlobalVar(GlobalVar::new(
-        "scale",
-        Type::array(Type::F32),
-        StorageClass::Storage,
-        Some(AccessMode::Read),
-        vec![Attribute::Group(0), Attribute::Binding(1)],
-    )));
-    m.push(Item::GlobalVar(GlobalVar::new(
-        "status",
-        Type::array(Type::U32),
-        StorageClass::Storage,
-        Some(AccessMode::ReadWrite),
-        vec![Attribute::Group(0), Attribute::Binding(2)],
-    )));
-    m.push(Item::GlobalVar(GlobalVar::new(
-        "params",
-        Type::Custom("BreakParams".into()),
-        StorageClass::Uniform,
-        None,
-        vec![Attribute::Group(0), Attribute::Binding(3)],
-    )));
-
-    let global_id = Expr::ident("global_id");
-    let params = Expr::ident("params");
-    let delta = Expr::ident("delta");
-    let scale = Expr::ident("scale");
-    let status = Expr::ident("status");
-    let i = Expr::ident("i");
-    let d = Expr::ident("d");
-    let s_raw = Expr::ident("s_raw");
-    let bad_d = Expr::ident("bad_d");
-    let bad_s = Expr::ident("bad_s");
-    let s = Expr::ident("s");
-    let tol = Expr::ident("tol");
-    let converged = Expr::ident("converged");
-
-    let body = block(vec![
-        // if (global_id.x != 0u) { return; }
-        if_block_expr(
-            global_id.clone().field("x").ne(Expr::lit_u32(0)),
-            block(vec![return_void()]),
-            None,
-        ),
-        // var converged: u32 = 1u;
-        var_typed_expr("converged", Type::U32, Some(Expr::lit_u32(1))),
-        // for (var i: u32 = 0u; i < params.count; i = i + 1u) { ... }
-        for_loop_expr(
-            for_init_var_typed_expr("i", Type::U32, Expr::lit_u32(0)),
-            i.clone().lt(params.clone().field("count")),
-            for_step_increment_expr(i.clone()),
-            block(vec![
-                // let d = delta[i];
-                let_expr("d", delta.clone().index(i.clone())),
-                // let s_raw = scale[i];
-                let_expr("s_raw", scale.clone().index(i.clone())),
-                // let bad_d = (!(d <= d)) || (abs(d) > 1.0e30);
-                let_expr(
-                    "bad_d",
-                    (!d.clone().le(d.clone())) | abs(d.clone()).gt(Expr::lit_f32(1.0e30)),
-                ),
-                // let bad_s = (!(s_raw <= s_raw)) || (abs(s_raw) > 1.0e30);
-                let_expr(
-                    "bad_s",
-                    (!s_raw.clone().le(s_raw.clone()))
-                        | abs(s_raw.clone()).gt(Expr::lit_f32(1.0e30)),
-                ),
-                // if (bad_d || bad_s) { converged = 0u; break; }
-                if_block_expr(
-                    bad_d.clone() | bad_s.clone(),
-                    block(vec![
-                        assign_expr(converged.clone(), Expr::lit_u32(0)),
-                        break_stmt(),
-                    ]),
-                    None,
-                ),
-                // let s = max(s_raw, 1.0);
-                let_expr("s", max(s_raw.clone(), Expr::lit_f32(1.0))),
-                // let tol = params.tol_abs + params.tol_rel * s;
-                let_expr(
-                    "tol",
-                    params.clone().field("tol_abs") + params.clone().field("tol_rel") * s.clone(),
-                ),
-                // if (d > tol) { converged = 0u; break; }
-                if_block_expr(
-                    d.clone().gt(tol.clone()),
-                    block(vec![
-                        assign_expr(converged.clone(), Expr::lit_u32(0)),
-                        break_stmt(),
-                    ]),
-                    None,
-                ),
-            ]),
-        ),
-        // status[0] = converged;
-        assign_expr(status.clone().index(Expr::lit_u32(0)), converged.clone()),
-    ]);
-
-    m.push(Item::Function(Function::new(
-        "main",
-        vec![Param::new(
-            "global_id",
-            Type::vec3_u32(),
-            vec![Attribute::Builtin("global_invocation_id".into())],
-        )],
-        None,
-        vec![Attribute::Compute, Attribute::WorkgroupSize3(1, 1, 1)],
-        body,
-    )));
-
-    m.to_wgsl()
-}
-
 pub(crate) struct OuterConvergenceMonitor {
     target_names: Vec<String>,
     pipeline: wgpu::ComputePipeline,
@@ -290,18 +153,12 @@ impl OuterConvergenceMonitor {
             (src.create_pipeline)(device)
         };
         let bgl = pipeline.get_bind_group_layout(0);
-        let break_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("outer_convergence:break"),
-            source: wgpu::ShaderSource::Wgsl(build_outer_convergence_break_wgsl().into()),
-        });
-        let break_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("outer_convergence:break"),
-            layout: None,
-            module: &break_module,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        let break_src = kernel_registry::kernel_source_by_id(
+            "",
+            KernelId::OUTER_CONVERGENCE_BREAK,
+        )
+        .map_err(|e| format!("missing outer_convergence_break infrastructure kernel: {e}"))?;
+        let break_pipeline = (break_src.create_pipeline)(device);
 
         let b_params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outer_convergence:params_x"),

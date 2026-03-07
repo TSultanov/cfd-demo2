@@ -520,12 +520,15 @@ impl ScalarCgModule {
     ) -> LinearSolverStats {
         let slice = self.b_staging_scalar.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
+        slice.map_async(wgpu::MapMode::Read, move |v| { let _ = tx.send(v); });
         let _ = context.device.poll(wgpu::PollType::Wait {
             submission_index: Some(submission_index),
             timeout: None,
         });
-        rx.recv().unwrap().unwrap();
+        rx.recv()
+            .map_err(|e| format!("CG staging readback recv failed: {e}"))
+            .and_then(|r| r.map_err(|e| format!("CG buffer mapping failed: {e:?}")))
+            .expect("CG staging readback failed");
         let data = slice.get_mapped_range();
         let values: &[f32] = bytemuck::cast_slice(&data);
         let r_r = values.get(5).copied().unwrap_or(0.0);
@@ -575,12 +578,15 @@ impl ScalarCgModule {
 
         let slice = self.b_staging_scalar.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
+        slice.map_async(wgpu::MapMode::Read, move |v| { let _ = tx.send(v); });
         let _ = context.device.poll(wgpu::PollType::Wait {
             submission_index: Some(submission_index),
             timeout: None,
         });
-        rx.recv().unwrap().unwrap();
+        rx.recv()
+            .map_err(|e| format!("CG staging readback recv failed: {e}"))
+            .and_then(|r| r.map_err(|e| format!("CG buffer mapping failed: {e:?}")))
+            .expect("CG staging readback failed");
         let data = slice.get_mapped_range();
         let values: &[f32] = bytemuck::cast_slice(&data);
         let r_r = values.get(5).copied().unwrap_or(0.0);

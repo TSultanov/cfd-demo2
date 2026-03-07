@@ -50,7 +50,7 @@ pub fn init_scalar_linear_solver(
     num_cells: u32,
     scalar_row_offsets: &[u32],
     scalar_col_indices: &[u32],
-) -> ScalarLinearSolverResources {
+) -> Result<ScalarLinearSolverResources, String> {
     let mut port_space = PortSpace::new();
 
     debug_assert_eq!(
@@ -80,9 +80,9 @@ pub fn init_scalar_linear_solver(
         }
     };
 
-    let pipeline_res = pipelines::init_pipelines(device, &matrix_res, &state_res);
+    let pipeline_res = pipelines::init_pipelines(device, &matrix_res, &state_res)?;
 
-    ScalarLinearSolverResources {
+    Ok(ScalarLinearSolverResources {
         b_row_offsets: matrix_res.b_row_offsets,
         b_col_indices: matrix_res.b_col_indices,
         num_nonzeros: matrix_res.num_nonzeros,
@@ -111,7 +111,7 @@ pub fn init_scalar_linear_solver(
         pipeline_cg_update_p: pipeline_res.pipeline_cg_update_p.clone(),
         ports,
         port_space,
-    }
+    })
 }
 
 pub fn init_scalar_cg(
@@ -119,33 +119,33 @@ pub fn init_scalar_cg(
     num_cells: u32,
     scalar_row_offsets: &[u32],
     scalar_col_indices: &[u32],
-) -> ScalarCgInit {
+) -> Result<ScalarCgInit, String> {
     let linear_res =
-        init_scalar_linear_solver(device, num_cells, scalar_row_offsets, scalar_col_indices);
-    let scalar_cg = build_scalar_cg(device, num_cells, &linear_res);
+        init_scalar_linear_solver(device, num_cells, scalar_row_offsets, scalar_col_indices)?;
+    let scalar_cg = build_scalar_cg(device, num_cells, &linear_res)?;
 
-    ScalarCgInit {
+    Ok(ScalarCgInit {
         num_nonzeros: linear_res.num_nonzeros,
         ports: linear_res.ports,
         port_space: linear_res.port_space,
         scalar_cg,
-    }
+    })
 }
 
 fn build_scalar_cg(
     device: &wgpu::Device,
     num_cells: u32,
     linear_res: &ScalarLinearSolverResources,
-) -> ScalarCgModule {
+) -> Result<ScalarCgModule, String> {
     let scalar_res = scalars::init_scalars(
         device,
         &linear_res.b_scalars,
         &linear_res.b_dot_result,
         &linear_res.b_dot_result_2,
         &linear_res.b_solver_params,
-    );
+    )?;
 
-    ScalarCgModule::new(&ScalarCgModuleInputs {
+    Ok(ScalarCgModule::new(&ScalarCgModuleInputs {
         capacity: num_cells,
         b_rhs: &linear_res.b_rhs,
         b_x: &linear_res.b_x,
@@ -174,5 +174,5 @@ fn build_scalar_cg(
         pipeline_reduce_r0_v: &scalar_res.pipeline_reduce_r0_v,
         pipeline_reduce_rho_new_r_r: &scalar_res.pipeline_reduce_rho_new_r_r,
         device,
-    })
+    }))
 }

@@ -71,7 +71,7 @@ pub struct CoupledSchurModule {
 }
 
 impl CoupledSchurModule {
-    pub fn new(device: &wgpu::Device, inputs: CoupledSchurInputs<'_>) -> Self {
+    pub fn new(device: &wgpu::Device, inputs: CoupledSchurInputs<'_>) -> Result<Self, String> {
         let b_temp_p = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Schur temp_p"),
             size: (inputs.num_cells as u64) * 4,
@@ -91,18 +91,18 @@ impl CoupledSchurModule {
         });
 
         let schur_src = kernel_registry::kernel_source_by_id("", inputs.kernels.predict_and_form)
-            .expect("schur_precond predict_and_form shader missing from kernel registry");
+            .map_err(|e| format!("schur_precond predict_and_form shader missing: {e}"))?;
         let schur_bindings = schur_src.bindings;
 
         let pipeline_predict_and_form = (schur_src.create_pipeline)(device);
         let pipeline_relax_pressure = {
             let src = kernel_registry::kernel_source_by_id("", inputs.kernels.relax_pressure)
-                .expect("schur_precond relax_pressure shader missing from kernel registry");
+                .map_err(|e| format!("schur_precond relax_pressure shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
         let pipeline_correct_vel = {
             let src = kernel_registry::kernel_source_by_id("", inputs.kernels.correct_velocity)
-                .expect("schur_precond correct_velocity shader missing from kernel registry");
+                .map_err(|e| format!("schur_precond correct_velocity shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
 
@@ -140,7 +140,7 @@ impl CoupledSchurModule {
             .unwrap_or_else(|err| panic!("Schur pressure matrix BG creation failed: {err}"))
         };
 
-        Self {
+        Ok(Self {
             num_cells: inputs.num_cells,
             pressure_kind: inputs.pressure_kind,
             b_temp_p,
@@ -154,7 +154,7 @@ impl CoupledSchurModule {
             pipeline_correct_vel,
             amg: None,
             amg_level0_state_override: None,
-        }
+        })
     }
 
     pub fn set_pressure_kind(&mut self, kind: CoupledPressureSolveKind) {
@@ -181,11 +181,11 @@ impl CoupledSchurModule {
         &self.bg_pressure_matrix
     }
 
-    pub fn ensure_amg_resources(&mut self, device: &wgpu::Device, matrix: CsrMatrix) {
+    pub fn ensure_amg_resources(&mut self, device: &wgpu::Device, matrix: CsrMatrix) -> Result<(), String> {
         if self.amg.is_some() {
-            return;
+            return Ok(());
         }
-        let amg = AmgResources::new(device, &matrix, 20);
+        let amg = AmgResources::new(device, &matrix, 20)?;
 
         let level0 = &amg.levels[0];
         let override_bg = amg.create_state_override_bind_group(
@@ -198,6 +198,7 @@ impl CoupledSchurModule {
 
         self.amg = Some(amg);
         self.amg_level0_state_override = Some(override_bg);
+        Ok(())
     }
 
     pub fn refresh_amg_level0_matrix(
@@ -327,7 +328,7 @@ impl PreconditionerModule for CoupledSchurModule {
                     let override_bg = self
                         .amg_level0_state_override
                         .as_ref()
-                        .expect("AMG override bind group missing");
+                        .expect("AMG override bind group must be set when AMG resources are present");
                     amg.sync_control_scalars(encoder, ctx.scalars_buffer);
                     amg.v_cycle(encoder, Some(override_bg));
                 }

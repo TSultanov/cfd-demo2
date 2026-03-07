@@ -4,9 +4,9 @@ pub struct GpuContext {
 }
 
 impl GpuContext {
-    pub async fn new(device: Option<wgpu::Device>, queue: Option<wgpu::Queue>) -> Self {
+    pub async fn new(device: Option<wgpu::Device>, queue: Option<wgpu::Queue>) -> Result<Self, String> {
         if let (Some(device), Some(queue)) = (device, queue) {
-            return Self { device, queue };
+            return Ok(Self { device, queue });
         }
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -21,7 +21,7 @@ impl GpuContext {
                 force_fallback_adapter: false,
             })
             .await
-            .unwrap();
+            .map_err(|e| format!("no compatible GPU adapter found: {e}"))?;
 
         // Get the adapter's supported limits to allow larger buffers for fine meshes
         let adapter_limits = adapter.limits();
@@ -42,8 +42,8 @@ impl GpuContext {
                 trace: wgpu::Trace::Off,
             })
             .await
-            .unwrap();
+            .map_err(|e| format!("failed to create GPU device: {e}"))?;
 
-        Self { device, queue }
+        Ok(Self { device, queue })
     }
 }

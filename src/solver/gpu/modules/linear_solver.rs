@@ -176,7 +176,8 @@ pub fn solve_fgmres<P: PreconditionerModule>(
             // relative tolerance scale.
             rel_scale = Some(rhs_norm.min(residual));
         }
-        let rel_scale_for_restart = rel_scale.unwrap();
+        let rel_scale_for_restart = rel_scale
+            .expect("rel_scale must be Some after the is_none guard above");
 
         if residual <= tol * rel_scale_for_restart || residual <= tol_abs {
             converged = true;

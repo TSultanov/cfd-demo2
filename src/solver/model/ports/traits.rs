@@ -128,6 +128,9 @@ pub enum PortValidationError {
         expected: String,
         found: String,
     },
+    /// Internal inconsistency: a lookup by ID failed despite the ID being
+    /// present in the name→ID index.
+    InternalInconsistency { detail: String },
 }
 
 impl std::fmt::Display for PortValidationError {
@@ -179,6 +182,9 @@ impl std::fmt::Display for PortValidationError {
                     "Parameter '{}' has type '{}' but expected '{}'",
                     param, found, expected
                 )
+            }
+            PortValidationError::InternalInconsistency { detail } => {
+                write!(f, "Internal inconsistency: {}", detail)
             }
         }
     }

@@ -1844,7 +1844,7 @@ fn build_generic_schur(
         mapped_at_creation: false,
     });
 
-    let setup_pipeline = GenericCoupledSchurPreconditioner::build_setup_pipeline(device);
+    let setup_pipeline = GenericCoupledSchurPreconditioner::build_setup_pipeline(device)?;
     let matrix_values = runtime
         .linear_port_space
         .buffer(runtime.linear_ports.values);
@@ -1882,7 +1882,7 @@ fn build_generic_schur(
             "diag_p" => Some(b_diag_p.as_entire_binding()),
             _ => None,
         },
-    );
+    )?;
     let fgmres = FgmresWorkspace::new_from_system(
         device,
         num_dofs,
@@ -1892,7 +1892,7 @@ fn build_generic_schur(
         system,
         precond_bg,
         "generic_coupled",
-    );
+    )?;
 
     let precond = GenericCoupledSchurPreconditioner::new(
         device,
@@ -1919,7 +1919,7 @@ fn build_generic_schur(
                 recipe.linear_solver.preconditioner,
             ),
         },
-    );
+    )?;
 
     let dispatch = DispatchGrids::for_sizes(num_dofs, num_cells);
 
@@ -1980,7 +1980,7 @@ fn build_generic_krylov(
             "diag_p" => Some(b_diag_p.as_entire_binding()),
             _ => None,
         },
-    );
+    )?;
 
     let fgmres = FgmresWorkspace::new_from_system(
         device,
@@ -1991,7 +1991,7 @@ fn build_generic_krylov(
         system,
         precond_bg,
         "generic_coupled",
-    );
+    )?;
 
     let unknowns_per_cell: u32 = recipe
         .unknowns_per_cell
@@ -2640,8 +2640,10 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
 
         // Prepare adaptive resources (indirect graphs, bind groups, etc.)
         let adaptive_resources = if use_adaptive {
-            let gate = r.outer_gate.as_ref().unwrap();
-            let monitor = r.outer_convergence.as_ref().unwrap();
+            let gate = r.outer_gate.as_ref()
+                .expect("outer_gate must be Some when use_adaptive is true (checked above)");
+            let monitor = r.outer_convergence.as_ref()
+                .expect("outer_convergence must be Some when use_adaptive is true (checked above)");
 
             // Create indirect-dispatch variants of assembly and update graphs
             let indirect_cells = gate.b_indirect_args_cells.clone();
@@ -2704,7 +2706,8 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                 if let Some((ref asm_indirect, _, _, ref stop_bg)) = adaptive_resources {
                     if is_indirect {
                         // Inject STOP scalar so the linear solver becomes zero-cost when converged
-                        let gate = r.outer_gate.as_ref().unwrap();
+                        let gate = r.outer_gate.as_ref()
+                            .expect("outer_gate must be Some in adaptive path");
                         if solver_is_cg {
                             gate.encode_stop_inject_cg_into(encoder, stop_bg);
                         } else {
@@ -2724,8 +2727,10 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                         update_graph.encode_into(encoder, kernels, runtime_dims);
                     }
                     // Convergence check + gate after every iteration in adaptive mode
-                    let monitor = r.outer_convergence.as_ref().unwrap();
-                    let gate = r.outer_gate.as_ref().unwrap();
+                    let monitor = r.outer_convergence.as_ref()
+                        .expect("outer_convergence must be Some in adaptive path");
+                    let gate = r.outer_gate.as_ref()
+                        .expect("outer_gate must be Some in adaptive path");
                     let first_iter = iter_idx == 0;
                     monitor.encode_convergence_check(encoder, bg_state, first_iter);
                     gate.encode_gate_into(encoder);

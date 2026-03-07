@@ -33,7 +33,7 @@ pub(crate) async fn build_generic_coupled_backend(
         .unknowns_per_cell
         .try_into()
         .map_err(|_| "recipe.unknowns_per_cell overflows u32".to_string())?;
-    let runtime = GpuCsrRuntime::new(mesh, unknowns_per_cell, device, queue).await;
+    let runtime = GpuCsrRuntime::new(mesh, unknowns_per_cell, device, queue).await?;
 
     let device = &runtime.common.context.device;
 

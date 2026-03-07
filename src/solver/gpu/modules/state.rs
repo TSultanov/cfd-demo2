@@ -63,11 +63,14 @@ impl PingPongState {
     }
 }
 
+/// Returns `(current, old, old_old)` buffer indices for triple-buffered
+/// ping-pong state.  The input `i` is taken modulo 3, so only values
+/// 0, 1, 2 are reachable — the wildcard arm is unreachable by construction.
 pub fn ping_pong_indices(i: usize) -> (usize, usize, usize) {
     match i % 3 {
         0 => (0, 1, 2),
         1 => (2, 0, 1),
         2 => (1, 2, 0),
-        _ => (0, 1, 2),
+        _ => unreachable!("i % 3 is always 0, 1, or 2"),
     }
 }

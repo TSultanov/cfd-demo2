@@ -212,7 +212,11 @@ impl PortRegistry {
             });
         };
 
-        let entry = self.param_ports.get(&id).expect("entry exists");
+        let entry = self.param_ports.get(&id).ok_or_else(|| {
+            PortValidationError::InternalInconsistency {
+                detail: format!("param port entry for key '{key}' (id={id:?}) not found after index lookup"),
+            }
+        })?;
         let expected = ParamTypeKind::from_type::<T>();
         if entry.param_type != expected {
             return Err(PortValidationError::ParameterTypeMismatch {
@@ -385,7 +389,11 @@ impl PortRegistry {
 
         // Check if already registered
         if let Some(&existing_id) = self.field_name_to_id.get(name) {
-            let entry = self.field_ports.get(&existing_id).expect("entry exists");
+            let entry = self.field_ports.get(&existing_id).ok_or_else(|| {
+                PortRegistryError::InternalInconsistency {
+                    detail: format!("field port entry for '{name}' (id={existing_id:?}) not found after index lookup"),
+                }
+            })?;
             // Verify kind matches
             let expected_components = K::COMPONENT_COUNT;
             if entry.component_count != expected_components {
@@ -478,7 +486,9 @@ impl PortRegistry {
             let entry = self
                 .param_ports
                 .get_mut(&existing_id)
-                .expect("entry exists");
+                .ok_or_else(|| PortRegistryError::InternalInconsistency {
+                    detail: format!("param port entry for key '{key}' (id={existing_id:?}) not found after index lookup"),
+                })?;
             // Verify wgsl_field matches
             if entry.wgsl_field != wgsl_field_name {
                 return Err(PortRegistryError::ParamSpecConflict {
@@ -563,7 +573,11 @@ impl PortRegistry {
 
         // Check if already registered
         if let Some(&existing_id) = self.buffer_key_to_id.get(&buffer_key) {
-            let entry = self.buffer_ports.get(&existing_id).expect("entry exists");
+            let entry = self.buffer_ports.get(&existing_id).ok_or_else(|| {
+                PortRegistryError::InternalInconsistency {
+                    detail: format!("buffer port entry for '{name}' (id={existing_id:?}) not found after index lookup"),
+                }
+            })?;
             // Verify type matches
             let expected_type = T::into_kind();
             if entry.buffer_type != expected_type {
@@ -794,7 +808,9 @@ impl PortRegistry {
             let entry = self
                 .param_ports
                 .get_mut(&existing_id)
-                .expect("entry exists");
+                .ok_or_else(|| PortRegistryError::InternalInconsistency {
+                    detail: format!("param port entry for key '{}' (id={existing_id:?}) not found after index lookup", param.key),
+                })?;
             // Verify wgsl_field matches
             if entry.wgsl_field != param.wgsl_field {
                 return Err(PortRegistryError::ParamSpecConflict {
@@ -849,7 +865,11 @@ impl PortRegistry {
     ) -> Result<(), PortRegistryError> {
         // Check if already registered
         if let Some(&existing_id) = self.field_name_to_id.get(field.name) {
-            let entry = self.field_ports.get(&existing_id).expect("entry exists");
+            let entry = self.field_ports.get(&existing_id).ok_or_else(|| {
+                PortRegistryError::InternalInconsistency {
+                    detail: format!("field port entry for '{}' (id={existing_id:?}) not found after index lookup", field.name),
+                }
+            })?;
             // Verify kind matches
             let expected_components = field.kind.component_count();
             if entry.component_count != expected_components {
@@ -956,7 +976,11 @@ impl PortRegistry {
 
         // Check if already registered
         if let Some(&existing_id) = self.buffer_key_to_id.get(&buffer_key) {
-            let entry = self.buffer_ports.get(&existing_id).expect("entry exists");
+            let entry = self.buffer_ports.get(&existing_id).ok_or_else(|| {
+                PortRegistryError::InternalInconsistency {
+                    detail: format!("buffer port entry for '{}' (id={existing_id:?}) not found after index lookup", buffer.name),
+                }
+            })?;
             // Verify type matches
             if entry.buffer_type != buffer_type {
                 return Err(PortRegistryError::BufferTypeConflict {
@@ -1150,6 +1174,9 @@ pub enum PortRegistryError {
         expected: UnitDim,
         found: UnitDim,
     },
+    /// Internal inconsistency: a lookup by ID failed despite the ID being
+    /// present in the name→ID index.
+    InternalInconsistency { detail: String },
 }
 
 impl std::fmt::Display for PortRegistryError {
@@ -1271,6 +1298,9 @@ impl std::fmt::Display for PortRegistryError {
                     "Parameter '{}' has unit {}, expected {}",
                     key, found, expected
                 )
+            }
+            PortRegistryError::InternalInconsistency { detail } => {
+                write!(f, "Internal inconsistency: {}", detail)
             }
         }
     }

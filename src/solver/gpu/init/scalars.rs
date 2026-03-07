@@ -16,9 +16,9 @@ pub fn init_scalars(
     b_dot_result: &wgpu::Buffer,
     b_dot_result_2: &wgpu::Buffer,
     b_solver_params: &wgpu::Buffer,
-) -> ScalarResources {
+) -> Result<ScalarResources, String> {
     let init_cg_src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_INIT_CG)
-        .unwrap_or_else(|e| panic!("missing scalars/init_cg_scalars kernel: {e}"));
+        .map_err(|e| format!("missing scalars/init_cg_scalars kernel: {e}"))?;
     let pipeline_init_cg_scalars = (init_cg_src.create_pipeline)(device);
 
     let bgl_scalars = pipeline_init_cg_scalars.get_bind_group_layout(0);
@@ -35,23 +35,23 @@ pub fn init_scalars(
         0,
         |name| registry.resolve(name),
     )
-    .unwrap_or_else(|err| panic!("failed to create scalars bind group: {err}"));
+    .map_err(|e| format!("failed to create scalars bind group: {e}"))?;
 
     let pipeline_reduce_rho_new_r_r = {
         let src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_REDUCE_RHO_NEW_R_R)
-            .unwrap_or_else(|e| panic!("missing scalars/reduce_rho_new_r_r kernel: {e}"));
+            .map_err(|e| format!("missing scalars/reduce_rho_new_r_r kernel: {e}"))?;
         (src.create_pipeline)(device)
     };
     let pipeline_reduce_r0_v = {
         let src = kernel_registry::kernel_source_by_id("", KernelId::SCALARS_REDUCE_R0_V)
-            .unwrap_or_else(|e| panic!("missing scalars/reduce_r0_v kernel: {e}"));
+            .map_err(|e| format!("missing scalars/reduce_r0_v kernel: {e}"))?;
         (src.create_pipeline)(device)
     };
 
-    ScalarResources {
+    Ok(ScalarResources {
         bg_scalars,
         pipeline_init_cg_scalars,
         pipeline_reduce_rho_new_r_r,
         pipeline_reduce_r0_v,
-    }
+    })
 }

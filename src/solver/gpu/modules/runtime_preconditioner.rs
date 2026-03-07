@@ -190,7 +190,7 @@ impl RuntimePreconditionerModule {
 
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
+        slice.map_async(wgpu::MapMode::Read, move |v| { let _ = tx.send(v); });
         let _ = device.poll(wgpu::PollType::Wait {
             submission_index: Some(submission_index),
             timeout: None,
@@ -231,7 +231,13 @@ impl RuntimePreconditionerModule {
             num_cols: self.num_dofs as usize,
         };
 
-        self.amg = Some(AmgResources::new(device, &matrix, 20));
+        self.amg = match AmgResources::new(device, &matrix, 20) {
+            Ok(amg) => Some(amg),
+            Err(_err) => {
+                self.amg_init_failed = true;
+                return;
+            }
+        };
     }
 
     fn encode_build_block_jacobi(

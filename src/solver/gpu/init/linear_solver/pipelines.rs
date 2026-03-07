@@ -22,32 +22,33 @@ pub fn init_pipelines(
     device: &wgpu::Device,
     matrix: &MatrixResources,
     state: &StateResources,
-) -> PipelineResources {
+) -> Result<PipelineResources, String> {
     // Pipelines
     let linear_src = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_SPMV_P_V)
-        .unwrap_or_else(|err| panic!("missing linear_solver/spmv_p_v kernel: {err}"));
+        .map_err(|e| format!("missing linear_solver/spmv_p_v kernel: {e}"))?;
     let pipeline_spmv_p_v = (linear_src.create_pipeline)(device);
 
     let dot_src = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT)
-        .unwrap_or_else(|err| panic!("missing dot_product kernel: {err}"));
+        .map_err(|e| format!("missing dot_product kernel: {e}"))?;
     let pipeline_dot = (dot_src.create_pipeline)(device);
 
     let dot_pair_src = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT_PAIR)
-        .unwrap_or_else(|err| panic!("missing dot_product_pair kernel: {err}"));
+        .map_err(|e| format!("missing dot_product_pair kernel: {e}"))?;
     let pipeline_dot_pair = (dot_pair_src.create_pipeline)(device);
+
     let pipeline_cg_update_x_r = {
         let source =
             kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_CG_UPDATE_X_R)
-                .unwrap_or_else(|err| {
-                    panic!("missing linear_solver/cg_update_x_r kernel registry entry: {err}")
-                });
+                .map_err(|e| {
+                    format!("missing linear_solver/cg_update_x_r kernel: {e}")
+                })?;
         (source.create_pipeline)(device)
     };
     let pipeline_cg_update_p = {
         let source = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_CG_UPDATE_P)
-            .unwrap_or_else(|err| {
-                panic!("missing linear_solver/cg_update_p kernel registry entry: {err}")
-            });
+            .map_err(|e| {
+                format!("missing linear_solver/cg_update_p kernel: {e}")
+            })?;
         (source.create_pipeline)(device)
     };
 
@@ -76,7 +77,7 @@ pub fn init_pipelines(
         0,
         |name| linear_registry.resolve(name),
     )
-    .unwrap_or_else(|err| panic!("failed to create linear state bind group: {err}"));
+    .map_err(|e| format!("failed to create linear state bind group: {e}"))?;
 
     let bg_linear_matrix = wgsl_reflect::create_bind_group_from_bindings(
         device,
@@ -86,7 +87,7 @@ pub fn init_pipelines(
         1,
         |name| linear_registry.resolve(name),
     )
-    .unwrap_or_else(|err| panic!("failed to create linear matrix bind group: {err}"));
+    .map_err(|e| format!("failed to create linear matrix bind group: {e}"))?;
 
     let dot_params_registry = ResourceRegistry::new().with_buffer("params", &state.b_solver_params);
     let bg_dot_params = wgsl_reflect::create_bind_group_from_bindings(
@@ -97,7 +98,7 @@ pub fn init_pipelines(
         0,
         |name| dot_params_registry.resolve(name),
     )
-    .unwrap_or_else(|err| panic!("failed to create dot params bind group: {err}"));
+    .map_err(|e| format!("failed to create dot params bind group: {e}"))?;
 
     let bg_dot_p_v = {
         let registry = ResourceRegistry::new()
@@ -112,7 +113,7 @@ pub fn init_pipelines(
             1,
             |name| registry.resolve(name),
         )
-        .unwrap_or_else(|err| panic!("failed to create dot p_v bind group: {err}"))
+        .map_err(|e| format!("failed to create dot p_v bind group: {e}"))?
     };
 
     let bg_dot_r_r = {
@@ -128,10 +129,10 @@ pub fn init_pipelines(
             1,
             |name| registry.resolve(name),
         )
-        .unwrap_or_else(|err| panic!("failed to create dot r_r bind group: {err}"))
+        .map_err(|e| format!("failed to create dot r_r bind group: {e}"))?
     };
 
-    PipelineResources {
+    Ok(PipelineResources {
         bg_linear_matrix,
         bg_linear_state,
         bg_dot_params,
@@ -142,5 +143,5 @@ pub fn init_pipelines(
         pipeline_dot_pair,
         pipeline_cg_update_x_r,
         pipeline_cg_update_p,
-    }
+    })
 }

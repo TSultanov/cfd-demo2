@@ -62,7 +62,7 @@ impl MeshResources {
     }
 }
 
-pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
+pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, String> {
     let num_cells = mesh.cell_cx.len() as u32;
 
     // --- CSR Matrix Structure ---
@@ -260,7 +260,7 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
         if let Ok(idx) = cols.binary_search(&i) {
             diagonal_indices.push((row_start + idx) as u32);
         } else {
-            panic!("Diagonal not found in CSR cols");
+            return Err(format!("diagonal not found in CSR cols for cell {i}"));
         }
     }
 
@@ -270,7 +270,7 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
 
-    MeshResources {
+    Ok(MeshResources {
         b_face_owner,
         b_face_neighbor,
         b_face_boundary,
@@ -287,5 +287,5 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> MeshResources {
         b_scalar_col_indices,
         scalar_row_offsets,
         scalar_col_indices,
-    }
+    })
 }

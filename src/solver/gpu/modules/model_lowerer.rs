@@ -11,17 +11,17 @@ pub struct LoweredCommon {
 }
 
 impl LoweredCommon {
-    pub fn new(device: &wgpu::Device, mesh_input: &Mesh) -> Self {
+    pub fn new(device: &wgpu::Device, mesh_input: &Mesh) -> Result<Self, String> {
         let num_cells = mesh_input.cell_cx.len() as u32;
         let num_faces = mesh_input.face_owner.len() as u32;
-        let mesh = mesh::init_mesh(device, mesh_input);
+        let mesh = mesh::init_mesh(device, mesh_input)?;
         let ports = PortSpace::new();
-        Self {
+        Ok(Self {
             num_cells,
             num_faces,
             mesh,
             ports,
-        }
+        })
     }
 
     pub fn lowerer<'a>(&'a mut self, device: &'a wgpu::Device) -> Lowerer<'a> {

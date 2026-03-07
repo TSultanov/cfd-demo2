@@ -197,9 +197,9 @@ impl FgmresWorkspace {
         device: &wgpu::Device,
         label: &str,
         resolve: impl FnMut(&str) -> Option<wgpu::BindingResource<'a>>,
-    ) -> wgpu::BindGroup {
+    ) -> Result<wgpu::BindGroup, String> {
         let ops_src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_SPMV)
-            .expect("gmres_ops/spmv shader missing from kernel registry");
+            .map_err(|e| format!("gmres_ops/spmv shader missing: {e}"))?;
         let pipeline = (ops_src.create_pipeline)(device);
         let bgl_precond = pipeline.get_bind_group_layout(2);
         wgsl_reflect::create_bind_group_from_bindings(
@@ -210,7 +210,7 @@ impl FgmresWorkspace {
             2,
             resolve,
         )
-        .unwrap_or_else(|err| panic!("{label} creation failed: {err}"))
+        .map_err(|e| format!("{label} creation failed: {e}"))
     }
 
     /// Create a new FGMRES workspace.
@@ -228,7 +228,7 @@ impl FgmresWorkspace {
         system: LinearSystemView<'_>,
         precond_bind_group: wgpu::BindGroup,
         label_prefix: &str,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let matrix_row_offsets = system.row_offsets();
         let matrix_col_indices = system.col_indices();
         let matrix_values = system.values();
@@ -396,7 +396,7 @@ impl FgmresWorkspace {
         });
 
         let ops_spmv_src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_SPMV)
-            .expect("gmres_ops/spmv shader missing from kernel registry");
+            .map_err(|e| format!("gmres_ops/spmv shader missing: {e}"))?;
         let ops_bindings = ops_spmv_src.bindings;
 
         let pipeline_spmv = (ops_spmv_src.create_pipeline)(device);
@@ -405,37 +405,37 @@ impl FgmresWorkspace {
                 "",
                 KernelId("gmres_update_fused/accumulate_solution"),
             )
-            .expect("gmres_update_fused/accumulate_solution shader missing from kernel registry");
+            .map_err(|e| format!("gmres_update_fused/accumulate_solution shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
         let pipeline_axpby = {
             let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_AXPBY)
-                .expect("gmres_ops/axpby shader missing from kernel registry");
+                .map_err(|e| format!("gmres_ops/axpby shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
         let pipeline_scale = {
             let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_SCALE)
-                .expect("gmres_ops/scale shader missing from kernel registry");
+                .map_err(|e| format!("gmres_ops/scale shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
         let pipeline_scale_in_place = {
             let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_SCALE_IN_PLACE)
-                .expect("gmres_ops/scale_in_place shader missing from kernel registry");
+                .map_err(|e| format!("gmres_ops/scale_in_place shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
         let pipeline_copy = {
             let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_COPY)
-                .expect("gmres_ops/copy shader missing from kernel registry");
+                .map_err(|e| format!("gmres_ops/copy shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
         let pipeline_norm_sq = {
             let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_NORM_SQ_PARTIAL)
-                .expect("gmres_ops/norm_sq_partial shader missing from kernel registry");
+                .map_err(|e| format!("gmres_ops/norm_sq_partial shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
         let pipeline_reduce_final = {
             let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_REDUCE_FINAL)
-                .expect("gmres_ops/reduce_final shader missing from kernel registry");
+                .map_err(|e| format!("gmres_ops/reduce_final shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
         let pipeline_reduce_final_and_finish_norm = {
@@ -443,7 +443,7 @@ impl FgmresWorkspace {
                 "",
                 KernelId::GMRES_OPS_REDUCE_FINAL_AND_FINISH_NORM,
             )
-            .expect("gmres_ops/reduce_final_and_finish_norm shader missing from kernel registry");
+            .map_err(|e| format!("gmres_ops/reduce_final_and_finish_norm shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
 
@@ -465,7 +465,7 @@ impl FgmresWorkspace {
                 1,
                 |name| registry.resolve(name),
             )
-            .unwrap_or_else(|err| panic!("FGMRES matrix BG creation failed: {err}"))
+            .map_err(|e| format!("FGMRES matrix BG creation failed: {e}"))?
         };
 
         let bg_precond = precond_bind_group;
@@ -485,19 +485,19 @@ impl FgmresWorkspace {
                 3,
                 |name| registry.resolve(name),
             )
-            .unwrap_or_else(|err| panic!("FGMRES params BG creation failed: {err}"))
+            .map_err(|e| format!("FGMRES params BG creation failed: {e}"))?
         };
 
         let logic_update_src = kernel_registry::kernel_source_by_id(
             "",
             KernelId::GMRES_LOGIC_UPDATE_HESSENBERG_GIVENS,
         )
-        .expect("gmres_logic/update_hessenberg_givens shader missing from kernel registry");
+        .map_err(|e| format!("gmres_logic/update_hessenberg_givens shader missing: {e}"))?;
         let pipeline_update_hessenberg = (logic_update_src.create_pipeline)(device);
         let pipeline_solve_triangular = {
             let src =
                 kernel_registry::kernel_source_by_id("", KernelId::GMRES_LOGIC_SOLVE_TRIANGULAR)
-                    .expect("gmres_logic/solve_triangular shader missing from kernel registry");
+                    .map_err(|e| format!("gmres_logic/solve_triangular shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
 
@@ -518,7 +518,7 @@ impl FgmresWorkspace {
                 0,
                 |name| registry.resolve(name),
             )
-            .unwrap_or_else(|err| panic!("FGMRES logic BG creation failed: {err}"))
+            .map_err(|e| format!("FGMRES logic BG creation failed: {e}"))?
         };
 
         let bg_logic_params = {
@@ -534,20 +534,20 @@ impl FgmresWorkspace {
                 1,
                 |name| registry.resolve(name),
             )
-            .unwrap_or_else(|err| panic!("FGMRES logic params BG creation failed: {err}"))
+            .map_err(|e| format!("FGMRES logic params BG creation failed: {e}"))?
         };
 
         let cgs_calc_src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_CGS_CALC_DOTS)
-            .expect("gmres_cgs/calc_dots_cgs shader missing from kernel registry");
+            .map_err(|e| format!("gmres_cgs/calc_dots_cgs shader missing: {e}"))?;
         let pipeline_calc_dots_cgs = (cgs_calc_src.create_pipeline)(device);
         let pipeline_reduce_dots_cgs = {
             let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_CGS_REDUCE_DOTS)
-                .expect("gmres_cgs/reduce_dots_cgs shader missing from kernel registry");
+                .map_err(|e| format!("gmres_cgs/reduce_dots_cgs shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
         let pipeline_update_w_cgs = {
             let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_CGS_UPDATE_W)
-                .expect("gmres_cgs/update_w_cgs shader missing from kernel registry");
+                .map_err(|e| format!("gmres_cgs/update_w_cgs shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
 
@@ -568,10 +568,10 @@ impl FgmresWorkspace {
                 0,
                 |name| registry.resolve(name),
             )
-            .unwrap_or_else(|err| panic!("FGMRES cgs BG creation failed: {err}"))
+            .map_err(|e| format!("FGMRES cgs BG creation failed: {e}"))?
         };
 
-        Self {
+        Ok(Self {
             max_restart,
             n,
             num_cells,
@@ -623,7 +623,7 @@ impl FgmresWorkspace {
             pipeline_calc_dots_cgs,
             pipeline_reduce_dots_cgs,
             pipeline_update_w_cgs,
-        }
+        })
     }
 
     pub fn core<'a>(&'a self, device: &'a wgpu::Device, queue: &'a wgpu::Queue) -> FgmresCore<'a> {
@@ -1270,7 +1270,7 @@ fn create_vector_bind_group<'a>(
             _ => None,
         }
     })
-    .unwrap_or_else(|err| panic!("{label} creation failed: {err}"))
+    .unwrap_or_else(|e| panic!("{label} creation failed: {e}"))
 }
 
 pub fn dispatch_vector_pipeline(
@@ -1784,7 +1784,10 @@ pub fn read_scalar_after_submit(
         submission_index: Some(submission_index),
         timeout: None,
     });
-    rx.recv().ok().and_then(|v| v.ok()).unwrap();
+    rx.recv()
+        .map_err(|e| format!("FGMRES staging readback recv failed: {e}"))
+        .and_then(|r| r.map_err(|e| format!("FGMRES buffer mapping failed: {e:?}")))
+        .expect("FGMRES staging readback failed");
 
     let data = slice.get_mapped_range();
     let value: f32 = *bytemuck::from_bytes(&data[0..4]);
@@ -1806,7 +1809,10 @@ pub(crate) fn read_solver_scalars_after_submit(
         submission_index: Some(submission_index),
         timeout: None,
     });
-    rx.recv().ok().and_then(|v| v.ok()).unwrap();
+    rx.recv()
+        .map_err(|e| format!("FGMRES scalar readback recv failed: {e}"))
+        .and_then(|r| r.map_err(|e| format!("FGMRES buffer mapping failed: {e:?}")))
+        .expect("FGMRES scalar readback failed");
 
     let data = slice.get_mapped_range();
     let values: &[f32] = bytemuck::cast_slice(&data);

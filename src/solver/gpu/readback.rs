@@ -192,7 +192,7 @@ pub async fn read_buffer_cached(
         "read_buffer:map_async_request",
         ProfileCategory::Other,
         {
-            slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
+            slice.map_async(wgpu::MapMode::Read, move |v| { let _ = tx.send(v); });
         }
     );
 
@@ -213,7 +213,10 @@ pub async fn read_buffer_cached(
         "read_buffer:channel_recv",
         ProfileCategory::Other,
         {
-            rx.recv().unwrap().unwrap();
+            rx.recv()
+                .map_err(|e| format!("GPU readback channel recv failed: {e}"))
+                .and_then(|r| r.map_err(|e| format!("GPU buffer mapping failed: {e:?}")))
+                .expect("GPU readback failed");
         }
     );
 

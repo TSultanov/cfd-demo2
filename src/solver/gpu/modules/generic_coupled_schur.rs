@@ -64,8 +64,8 @@ pub struct GenericCoupledSchurPreconditioner {
 }
 
 impl GenericCoupledSchurPreconditioner {
-    pub fn new(device: &wgpu::Device, inputs: GenericCoupledSchurPreconditionerInputs<'_>) -> Self {
-        Self {
+    pub fn new(device: &wgpu::Device, inputs: GenericCoupledSchurPreconditionerInputs<'_>) -> Result<Self, String> {
+        Ok(Self {
             schur: CoupledSchurModule::new(
                 device,
                 CoupledSchurInputs {
@@ -83,7 +83,7 @@ impl GenericCoupledSchurPreconditioner {
                         correct_velocity: KernelId::SCHUR_GENERIC_PRECOND_CORRECT_VELOCITY,
                     },
                 },
-            ),
+            )?,
             setup_pipeline: inputs.setup_pipeline,
             setup_bg: inputs.setup_bg,
             setup_params: inputs.setup_params,
@@ -97,16 +97,16 @@ impl GenericCoupledSchurPreconditioner {
             u_len: inputs.u_len,
             u0123: inputs.u0123,
             u4567: inputs.u4567,
-        }
+        })
     }
 
-    pub fn build_setup_pipeline(device: &wgpu::Device) -> wgpu::ComputePipeline {
+    pub fn build_setup_pipeline(device: &wgpu::Device) -> Result<wgpu::ComputePipeline, String> {
         let src = kernel_registry::kernel_source_by_id(
             "",
             KernelId::GENERIC_COUPLED_SCHUR_SETUP_BUILD_DIAG_AND_PRESSURE,
         )
-        .expect("generic_coupled_schur_setup shader missing from kernel registry");
-        (src.create_pipeline)(device)
+        .map_err(|e| format!("generic_coupled_schur_setup shader missing: {e}"))?;
+        Ok((src.create_pipeline)(device))
     }
 
     pub fn build_setup_bind_group(
@@ -143,8 +143,8 @@ impl GenericCoupledSchurPreconditioner {
         self.schur.set_pressure_kind(kind);
     }
 
-    pub fn ensure_amg_resources(&mut self, device: &wgpu::Device, matrix: CsrMatrix) {
-        self.schur.ensure_amg_resources(device, matrix);
+    pub fn ensure_amg_resources(&mut self, device: &wgpu::Device, matrix: CsrMatrix) -> Result<(), String> {
+        self.schur.ensure_amg_resources(device, matrix)
     }
 
     fn read_pressure_values(
@@ -169,7 +169,7 @@ impl GenericCoupledSchurPreconditioner {
 
         let slice = staging.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
+        slice.map_async(wgpu::MapMode::Read, move |v| { let _ = tx.send(v); });
         let _ = device.poll(wgpu::PollType::Wait {
             submission_index: Some(submission_index),
             timeout: None,
@@ -233,7 +233,9 @@ impl PreconditionerModule for GenericCoupledSchurPreconditioner {
                             num_rows: self.num_cells as usize,
                             num_cols: self.num_cells as usize,
                         },
-                    );
+                    ).unwrap_or_else(|_| {
+                        self.schur.set_pressure_kind(CoupledPressureSolveKind::Chebyshev);
+                    });
                 } else {
                     self.schur
                         .set_pressure_kind(CoupledPressureSolveKind::Chebyshev);

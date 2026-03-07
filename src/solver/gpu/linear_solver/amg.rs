@@ -253,20 +253,20 @@ pub struct AmgParams {
 }
 
 impl AmgResources {
-    pub fn new(device: &wgpu::Device, fine_matrix: &CsrMatrix, max_levels: usize) -> Self {
+    pub fn new(device: &wgpu::Device, fine_matrix: &CsrMatrix, max_levels: usize) -> Result<Self, String> {
         let mut levels = Vec::new();
         let mut current_matrix = fine_matrix.clone();
 
         let smooth_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_SMOOTH_OP)
-            .expect("amg/smooth_op shader missing from kernel registry");
+            .map_err(|e| format!("amg/smooth_op shader missing: {e}"))?;
         let restrict_src =
             kernel_registry::kernel_source_by_id("", KernelId::AMG_RESTRICT_RESIDUAL)
-                .expect("amg/restrict_residual shader missing from kernel registry");
+                .map_err(|e| format!("amg/restrict_residual shader missing: {e}"))?;
         let bindings = restrict_src.bindings;
         let prolongate_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_PROLONGATE_OP)
-            .expect("amg/prolongate_op shader missing from kernel registry");
+            .map_err(|e| format!("amg/prolongate_op shader missing: {e}"))?;
         let clear_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_CLEAR)
-            .expect("amg/clear shader missing from kernel registry");
+            .map_err(|e| format!("amg/clear shader missing: {e}"))?;
 
         let pipeline_smooth = (smooth_src.create_pipeline)(device);
         let pipeline_restrict_residual = (restrict_src.create_pipeline)(device);
@@ -342,7 +342,7 @@ impl AmgResources {
                     0,
                     |name| registry.resolve(name),
                 )
-                .unwrap_or_else(|err| panic!("AMG L{level_idx} matrix BG creation failed: {err}"))
+                .map_err(|e| format!("AMG L{level_idx} matrix BG creation failed: {e}"))?
             };
 
             // Params buffer
@@ -370,7 +370,7 @@ impl AmgResources {
                     1,
                     |name| registry.resolve(name),
                 )
-                .unwrap_or_else(|err| panic!("AMG L{level_idx} state BG creation failed: {err}"))
+                .map_err(|e| format!("AMG L{level_idx} state BG creation failed: {e}"))?
             };
 
             // Coarsening (if not last level)
@@ -453,7 +453,7 @@ impl AmgResources {
                     2,
                     |name| registry.resolve(name),
                 )
-                .unwrap_or_else(|err| panic!("AMG L{level_idx} P BG creation failed: {err}"))
+                .map_err(|e| format!("AMG L{level_idx} P BG creation failed: {e}"))?
             };
 
             let bg_r = {
@@ -469,7 +469,7 @@ impl AmgResources {
                     2,
                     |name| registry.resolve(name),
                 )
-                .unwrap_or_else(|err| panic!("AMG L{level_idx} R BG creation failed: {err}"))
+                .map_err(|e| format!("AMG L{level_idx} R BG creation failed: {e}"))?
             };
 
             levels.push(AmgLevel {
@@ -516,7 +516,7 @@ impl AmgResources {
                     3,
                     |name| registry.resolve(name),
                 )
-                .unwrap_or_else(|err| panic!("AMG L{i} cross restrict BG creation failed: {err}"))
+                .map_err(|e| format!("AMG L{i} cross restrict BG creation failed: {e}"))?
             };
 
             let bg_prolongate = {
@@ -531,7 +531,7 @@ impl AmgResources {
                     3,
                     |name| registry.resolve(name),
                 )
-                .unwrap_or_else(|err| panic!("AMG L{i} cross prolongate BG creation failed: {err}"))
+                .map_err(|e| format!("AMG L{i} cross prolongate BG creation failed: {e}"))?
             };
 
             levels[i].bg_restrict = Some(bg_restrict);
@@ -541,7 +541,7 @@ impl AmgResources {
         let bg_cross_dummy = {
             let coarsest = levels
                 .last()
-                .expect("AMG hierarchy must contain at least one level");
+                .ok_or_else(|| "AMG hierarchy must contain at least one level".to_string())?;
             let registry = ResourceRegistry::new()
                 .with_buffer("coarse_vec", &coarsest.b_x)
                 .with_buffer("scalars", &b_control_scalars);
@@ -553,10 +553,10 @@ impl AmgResources {
                 3,
                 |name| registry.resolve(name),
             )
-            .unwrap_or_else(|err| panic!("AMG cross dummy BG creation failed: {err}"))
+            .map_err(|e| format!("AMG cross dummy BG creation failed: {e}"))?
         };
 
-        AmgResources {
+        Ok(AmgResources {
             levels,
             pipeline_smooth,
             pipeline_restrict_residual,
@@ -569,7 +569,7 @@ impl AmgResources {
             b_control_scalars,
             bg_cross_dummy,
             bindings,
-        }
+        })
     }
 
     pub(crate) fn sync_control_scalars(
@@ -600,7 +600,7 @@ impl AmgResources {
             1,
             |name| registry.resolve(name),
         )
-        .unwrap_or_else(|err| panic!("{label} creation failed: {err}"))
+        .unwrap_or_else(|e| panic!("{label} creation failed: {e}"))
     }
 
     pub fn v_cycle(

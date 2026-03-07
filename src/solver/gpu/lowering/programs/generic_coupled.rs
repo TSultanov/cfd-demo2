@@ -1217,43 +1217,6 @@ fn compute_outer_residuals(plan: &mut GpuProgramPlan) -> Option<(Vec<f32>, Optio
     Some((delta, scale))
 }
 
-pub(crate) fn host_coupled_batch_tail(plan: &mut GpuProgramPlan) {
-    let (outer_batched_mode, outer_iters) = {
-        let r = res(plan);
-        (r.outer_batched_mode, r.outer_iters.max(1))
-    };
-    if !outer_batched_mode || outer_iters <= 1 {
-        return;
-    }
-
-    // This host op is placed at the end of the per-iteration block.
-    // When enabled, run all remaining fixed outer iterations here and break
-    // the recipe-level repeat loop to avoid duplicated outer passes.
-    let iters_done = plan.step_linear_stats.len();
-    if iters_done != 1 {
-        return;
-    }
-
-    let remaining = outer_iters.saturating_sub(iters_done);
-    if remaining == 0 {
-        return;
-    }
-
-    // Encode all remaining outer iterations into one submission.
-    // When adaptive break is enabled, uses indirect dispatch + GPU-side convergence
-    // gating so converged iterations become zero-cost dispatches.
-    if !try_host_coupled_batch_tail_one_submission(plan, remaining) {
-        // One-submission encode failed (unsupported/inconsistent solver state).
-        // Ensure the recipe-level repeat loop remains active so remaining outer
-        // iterations execute through the standard per-iteration path.
-        plan.repeat_break = false;
-        eprintln!(
-            "[cfd2][batch_tail] one-submission batch tail could not be used \
-             (unsupported solver config); falling back to recipe-level per-iteration loop"
-        );
-    }
-}
-
 fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaining: usize) -> bool {
     if remaining == 0 {
         return false;
@@ -2372,7 +2335,7 @@ mod tests {
     }
 
     #[test]
-    fn batch_tail_fallback_clears_repeat_break_for_unsupported_solver_state() {
+    fn before_iter_does_not_skip_block_when_one_submission_fails() {
         let mesh = generate_structured_rect_mesh(
             6,
             4,
@@ -2415,25 +2378,13 @@ mod tests {
         }
 
         plan.step_linear_stats.clear();
-        plan.step_linear_stats.push(
-            crate::solver::gpu::structs::LinearSolverStats::max_iterations(
-                1,
-                1.0,
-                std::time::Duration::ZERO,
-            ),
-        );
-        plan.repeat_break = true;
+        plan.skip_remaining_block = false;
 
-        host_coupled_batch_tail(&mut plan);
+        host_coupled_before_iter(&mut plan);
 
         assert!(
-            !plan.repeat_break,
-            "fallback path must clear repeat_break so recipe-level loop continues"
-        );
-        assert_eq!(
-            plan.step_linear_stats.len(),
-            1,
-            "fallback path should keep existing per-iteration stats"
+            !plan.skip_remaining_block,
+            "before_iter must not skip the block when one-submission encoding fails"
         );
     }
 }

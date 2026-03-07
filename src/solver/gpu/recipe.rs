@@ -660,10 +660,6 @@ impl SolverRecipe {
                         kind: GraphOpKind("coupled:update"),
                         mode: GraphExecMode::SingleSubmit,
                     },
-                    ProgramSpecNode::Host {
-                        label: "coupled:batch_tail",
-                        kind: HostOpKind("coupled:batch_tail"),
-                    },
                 ] {
                     program.push(iter_block, node);
                 }
@@ -961,6 +957,7 @@ mod tests {
             "incompressible coupled spec should have a Repeat loop"
         );
 
+        // Verify that coupled:batch_tail is NOT in the spec (removed in ARCH_FIX_7 phase 4).
         let has_batch_tail = spec.blocks.iter().flat_map(|b| b.nodes.iter()).any(|n| {
             matches!(
                 n,
@@ -971,8 +968,8 @@ mod tests {
             )
         });
         assert!(
-            has_batch_tail,
-            "incompressible coupled spec should include coupled:batch_tail host hook"
+            !has_batch_tail,
+            "coupled:batch_tail should not be in the program spec (consolidated into coupled:before_iter)"
         );
     }
 

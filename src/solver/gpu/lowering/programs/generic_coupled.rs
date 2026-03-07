@@ -1219,6 +1219,22 @@ fn finalize_outer_step_status(plan: &mut GpuProgramPlan, fallback_converged: Opt
     });
 }
 
+fn should_relax_nonconverged_apply(
+    dtau: f32,
+    last_linear_stats: LinearSolverStats,
+    outer_step_status: Option<OuterStepStatus>,
+) -> bool {
+    if dtau <= 0.0 {
+        return !last_linear_stats.converged;
+    }
+
+    match outer_step_status {
+        Some(OuterStepStatus::AcceptedConverged) => false,
+        Some(OuterStepStatus::AcceptedNonconverged | OuterStepStatus::RejectedRetry) => true,
+        None => !last_linear_stats.converged,
+    }
+}
+
 /// Compute outer-loop correction norms (field residuals) via the
 /// `OuterConvergenceMonitor` and populate `plan.outer_field_residuals`,
 /// `plan.outer_field_residuals_scaled`, `plan.outer_residual_u`, and
@@ -1595,17 +1611,21 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
 
 pub(crate) fn host_implicit_set_alpha_for_apply(plan: &mut GpuProgramPlan) {
     let queue = plan.context.queue.clone();
-    let converged = plan.last_linear_stats.converged;
+    let should_relax = should_relax_nonconverged_apply(
+        res(plan).fields.constants.values().dtau,
+        plan.last_linear_stats,
+        plan.outer_step_status,
+    );
     let r = res_mut(plan);
 
     let base_alpha_u = r.fields.constants.values().alpha_u;
     r.implicit_base_alpha_u = Some(base_alpha_u);
 
-    if converged {
+    if !should_relax {
         return;
     }
 
-    let apply_alpha_u = base_alpha_u * r.nonconverged_relax.max(0.0);
+    let apply_alpha_u = base_alpha_u * r.nonconverged_relax.clamp(0.0, 1.0);
     if (apply_alpha_u - base_alpha_u).abs() > 1e-6 {
         {
             let values = r.fields.constants.values_mut();
@@ -1827,7 +1847,7 @@ pub(crate) fn param_nonconverged_relax(
     let PlanParamValue::F32(alpha) = value else {
         return Err("NonconvergedRelax expects F32".to_string());
     };
-    res_mut(plan).nonconverged_relax = alpha.max(0.0);
+    res_mut(plan).nonconverged_relax = alpha.clamp(0.0, 1.0);
     Ok(())
 }
 
@@ -2242,6 +2262,7 @@ pub(crate) fn param_low_mach_pressure_coupling_alpha(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::solver::gpu::structs::LinearSolverStats;
     use crate::solver::dimensions::{Pressure, UnitDimension, Velocity};
     use crate::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
     use crate::solver::model::backend::ast::{fvm, vol_scalar, vol_vector3, EquationSystem};
@@ -2454,5 +2475,46 @@ mod tests {
             !plan.skip_remaining_block,
             "before_iter must not skip the block when one-submission encoding fails"
         );
+    }
+
+    #[test]
+    fn nonconverged_relaxation_prefers_outer_step_status_for_dual_time() {
+        let converged_linear = LinearSolverStats {
+            converged: true,
+            ..Default::default()
+        };
+
+        assert!(!should_relax_nonconverged_apply(
+            1.0e-5,
+            converged_linear,
+            Some(OuterStepStatus::AcceptedConverged),
+        ));
+        assert!(should_relax_nonconverged_apply(
+            1.0e-5,
+            converged_linear,
+            Some(OuterStepStatus::AcceptedNonconverged),
+        ));
+        assert!(should_relax_nonconverged_apply(
+            1.0e-5,
+            converged_linear,
+            Some(OuterStepStatus::RejectedRetry),
+        ));
+    }
+
+    #[test]
+    fn nonconverged_relaxation_falls_back_to_linear_convergence_without_dual_time_status() {
+        let converged_linear = LinearSolverStats {
+            converged: true,
+            ..Default::default()
+        };
+        let stalled_linear = LinearSolverStats {
+            converged: false,
+            ..Default::default()
+        };
+
+        assert!(!should_relax_nonconverged_apply(1.0e-5, converged_linear, None));
+        assert!(should_relax_nonconverged_apply(1.0e-5, stalled_linear, None));
+        assert!(should_relax_nonconverged_apply(0.0, stalled_linear, None));
+        assert!(!should_relax_nonconverged_apply(0.0, converged_linear, None));
     }
 }

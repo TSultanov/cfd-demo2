@@ -64,7 +64,8 @@ Status as of 2026-03-07:
 - Completed: Phase 1 observability/status plumbing for compressible dual-time acceptance.
 - Completed: Phase 6 partial regression coverage for explicit pseudo-time acceptance status.
 - Partial: Phase 1 convergence classification now uses scaled pseudo-time correction norms for conserved compressible variables, but step rejection/retry is not implemented yet.
-- Not started: relaxation-default changes, local pseudo-time stepping, boundary-condition changes, and positivity protection.
+- Partial: Phase 2 relaxation policy now defaults the compressible dual-time path to full updates and reserves `nonconverged_relax` for explicitly nonconverged pseudo-time steps or linear-solver failures.
+- Not started: local pseudo-time stepping, boundary-condition changes, and positivity protection.
 
 ## Phase 1: Strengthen pseudo-time convergence control
 
@@ -112,14 +113,17 @@ Objective: stop using `alpha_u = 0.2` as the default mechanism holding the solve
 
 Tasks:
 1. Revisit compressible dual-time relaxation defaults in [src/solver/model/definitions/compressible.rs](src/solver/model/definitions/compressible.rs).
+   - Status: partial. The compressible model now defaults dual-time updates to `alpha_u = 1.0` and `alpha_p = 1.0`; further tuning still needs validation against tougher low-Mach cases.
    - Raise the default `alpha_u` toward 1.0.
    - Keep `alpha_p = 1.0` unless a later study shows a better physically consistent treatment.
 
 2. Use relaxation as a fallback, not the primary path.
+   - Status: partial. The generic coupled update now only applies `nonconverged_relax` when a dual-time step is explicitly classified as nonconverged, or when the linear solve itself fails before a pseudo-time status is available.
    - Keep or extend the existing `nonconverged_relax` control so that relaxation is only strengthened when the pseudo-time loop is demonstrably struggling.
    - Distinguish between normal pseudo-time updates and degraded fallback behavior.
 
 3. Tie relaxation policy to pseudo-time convergence state.
+   - Status: partial. Apply-time damping now keys off `accepted_converged` versus `accepted_nonconverged` status for dual-time steps, but there is still no automatic retry/backoff path.
    - Converged or nearly converged pseudo-iterations should use minimal damping.
    - Repeated stalled iterations may activate a fallback relaxation policy for robustness.
 
@@ -129,8 +133,10 @@ Expected file focus:
 - [src/solver/model/modules/generic_coupled.rs](src/solver/model/modules/generic_coupled.rs)
 
 Acceptance criteria:
-- The compressible dual-time path can run with materially less damping than the current default.
-- Stability is maintained by pseudo-time convergence control rather than by default heavy under-relaxation.
+- Status: partial.
+- Done: the compressible dual-time path now defaults to materially less damping than the previous `alpha_u = 0.2` baseline.
+- Done: fallback damping is keyed to pseudo-time convergence classification instead of being the default path.
+- Remaining: validate whether the higher-default path stays robust enough across broader low-Mach regression coverage.
 
 ## Phase 3: Add local pseudo-time stepping
 

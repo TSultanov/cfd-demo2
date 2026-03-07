@@ -2316,7 +2316,7 @@ impl eframe::App for CFDApp {
                             let compressible_dual_time =
                                 self.model_id == "compressible" && self.dual_time;
                             ui.weak(if compressible_dual_time {
-                                "Tip: for compressible dual-time, start with α_U≈0.2; α_P is fixed to 1.0 for stability."
+                                "Tip: compressible dual-time now defaults to α_U=1.0; lower it or set nonconverged fallback damping only if pseudo-time steps stall."
                             } else {
                                 "Tip: start with α_U≈0.7 and α_P≈0.3; α=1 can diverge at high Re."
                             });
@@ -2394,10 +2394,10 @@ impl eframe::App for CFDApp {
                                 && (self.alpha_u - 0.7).abs() < 1e-12
                                 && (self.alpha_p - 0.3).abs() < 1e-12
                             {
-                                // Dual-time stepping for the compressible solver is sensitive
-                                // to update damping. Prefer conservative defaults (pressure
-                                // stays unrelaxed; all other coupled unknowns use α_U).
-                                self.alpha_u = 0.2;
+                                // Compressible dual-time now uses full updates by default and
+                                // relies on pseudo-time convergence classification to decide
+                                // when extra damping is necessary.
+                                self.alpha_u = 1.0;
                                 self.alpha_p = 1.0;
                             }
                             self.init_solver();

@@ -492,11 +492,12 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
             {
                 let mut m =
                     crate::solver::model::modules::generic_coupled::generic_coupled_module(method);
-                // Compressible dual-time stepping is most stable with conservative relaxation.
-                // These parameters are only applied in the update kernel when `dtau > 0`.
+                // Use full updates by default for compressible dual-time stepping.
+                // Runtime fallback damping can still be applied when pseudo-time convergence
+                // is explicitly classified as nonconverged.
                 m.relaxation_defaults =
                     Some(crate::solver::model::module::RelaxationDefaults {
-                        alpha_u: 0.2,
+                        alpha_u: 1.0,
                         alpha_p: 1.0,
                     });
                 m

@@ -1,3 +1,21 @@
+//! Linear solver encoding helpers for one-submission outer-loop batching.
+//!
+//! This module provides three families of linear solver execution:
+//!
+//! 1. **Host-driven** (`solve_fgmres`) — Standard FGMRES solve with host readbacks
+//!    between restarts.  Used for the per-iteration recipe-level path.
+//!
+//! 2. **Encoded** (`encode_solve_fgmres_fixed_iterations`) — Encodes a fixed budget
+//!    of FGMRES restarts into a caller-provided `CommandEncoder` without host
+//!    readbacks.  Used for parity testing and the single-encoder batched path.
+//!
+//! 3. **Chunked submit** (`submit_solve_fgmres_fixed_iterations_chunked`,
+//!    `submit_solve_cg_fixed_iterations_chunked`) — Splits the iteration budget
+//!    across multiple encoder→submit cycles to avoid Metal backend command buffer
+//!    size limits.  Used by the one-submission outer-loop orchestration.
+//!
+//! All three share the same `FgmresChunkLayout` computation for consistency.
+
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::linear_solver::fgmres::{
     write_params, FgmresSolveOnceConfig, IterParams, RawFgmresParams,

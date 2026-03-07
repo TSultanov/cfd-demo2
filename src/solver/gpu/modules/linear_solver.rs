@@ -31,7 +31,6 @@ struct OneSubmissionEnvTunables {
     restart_budget: Option<usize>,
     total_iter_budget: Option<usize>,
     min_tail_chunk: Option<usize>,
-    explicit_chunks: Option<Vec<usize>>,
     cg_chunk_size: Option<usize>,
 }
 
@@ -41,7 +40,6 @@ impl OneSubmissionEnvTunables {
             restart_budget: parse_usize_env("CFD2_ONE_SUBMISSION_RESTART_BUDGET"),
             total_iter_budget: parse_usize_env("CFD2_ONE_SUBMISSION_TOTAL_ITERS"),
             min_tail_chunk: parse_usize_env("CFD2_ONE_SUBMISSION_MIN_TAIL"),
-            explicit_chunks: parse_chunks_env("CFD2_ONE_SUBMISSION_CHUNKS"),
             cg_chunk_size: parse_usize_env("CFD2_ONE_SUBMISSION_CG_CHUNK_SIZE"),
         }
     }
@@ -51,21 +49,6 @@ fn parse_usize_env(key: &str) -> Option<usize> {
     std::env::var(key)
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
-}
-
-fn parse_chunks_env(key: &str) -> Option<Vec<usize>> {
-    std::env::var(key).ok().and_then(|raw| {
-        let parsed: Vec<usize> = raw
-            .split(',')
-            .filter_map(|s| s.trim().parse::<usize>().ok())
-            .filter(|&v| v > 0)
-            .collect();
-        if parsed.is_empty() {
-            None
-        } else {
-            Some(parsed)
-        }
-    })
 }
 
 fn one_submission_env_tunables() -> &'static OneSubmissionEnvTunables {
@@ -307,8 +290,6 @@ pub fn encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>(
         .max(1);
     let total_iters_to_encode = (max_iters as usize).min(total_iter_budget).max(1);
     let min_tail_chunk = tunables.min_tail_chunk.unwrap_or(1).max(1);
-    let explicit_chunks: Option<Vec<usize>> = tunables.explicit_chunks.clone();
-    let has_explicit_chunks = explicit_chunks.is_some();
 
     let mut params = RawFgmresParams {
         n,
@@ -321,24 +302,7 @@ pub fn encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>(
         _pad3: 0,
     };
 
-    let mut chunk_sizes: Vec<usize> = if let Some(mut chunks) = explicit_chunks {
-        let mut normalized: Vec<usize> = Vec::new();
-        let mut remaining = total_iters_to_encode;
-        for c in chunks.drain(..) {
-            if remaining == 0 {
-                break;
-            }
-            let chunk = c.min(iter_restart).min(remaining).max(1);
-            normalized.push(chunk);
-            remaining -= chunk;
-        }
-        while remaining > 0 {
-            let chunk = iter_restart.min(remaining).max(1);
-            normalized.push(chunk);
-            remaining -= chunk;
-        }
-        normalized
-    } else {
+    let mut chunk_sizes: Vec<usize> = {
         let mut defaults: Vec<usize> = Vec::new();
         let mut remaining = total_iters_to_encode;
         while remaining > 0 {
@@ -348,7 +312,7 @@ pub fn encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>(
         }
         defaults
     };
-    if !has_explicit_chunks && chunk_sizes.len() >= 2 {
+    if chunk_sizes.len() >= 2 {
         let last_idx = chunk_sizes.len() - 1;
         if chunk_sizes[last_idx] < min_tail_chunk {
             let mut need = min_tail_chunk - chunk_sizes[last_idx];
@@ -468,8 +432,6 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
         .max(1);
     let total_iters_to_encode = (max_iters as usize).min(total_iter_budget).max(1);
     let min_tail_chunk = tunables.min_tail_chunk.unwrap_or(1).max(1);
-    let explicit_chunks: Option<Vec<usize>> = tunables.explicit_chunks.clone();
-    let has_explicit_chunks = explicit_chunks.is_some();
 
     let mut params = RawFgmresParams {
         n,
@@ -482,24 +444,7 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
         _pad3: 0,
     };
 
-    let mut chunk_sizes: Vec<usize> = if let Some(mut chunks) = explicit_chunks {
-        let mut normalized: Vec<usize> = Vec::new();
-        let mut remaining = total_iters_to_encode;
-        for c in chunks.drain(..) {
-            if remaining == 0 {
-                break;
-            }
-            let chunk = c.min(iter_restart).min(remaining).max(1);
-            normalized.push(chunk);
-            remaining -= chunk;
-        }
-        while remaining > 0 {
-            let chunk = iter_restart.min(remaining).max(1);
-            normalized.push(chunk);
-            remaining -= chunk;
-        }
-        normalized
-    } else {
+    let mut chunk_sizes: Vec<usize> = {
         let mut defaults: Vec<usize> = Vec::new();
         let mut remaining = total_iters_to_encode;
         while remaining > 0 {
@@ -509,7 +454,7 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
         }
         defaults
     };
-    if !has_explicit_chunks && chunk_sizes.len() >= 2 {
+    if chunk_sizes.len() >= 2 {
         let last_idx = chunk_sizes.len() - 1;
         if chunk_sizes[last_idx] < min_tail_chunk {
             let mut need = min_tail_chunk - chunk_sizes[last_idx];

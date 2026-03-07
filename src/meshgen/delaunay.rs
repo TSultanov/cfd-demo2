@@ -2,6 +2,7 @@ use nalgebra::{Point2, Vector2};
 use std::collections::{HashMap, HashSet};
 
 use super::geometry::Geometry;
+use super::mesh_builder::{MeshBuilder, VertexId, FaceId};
 use super::tolerances::MeshgenTolerances;
 use crate::solver::mesh::Mesh;
 
@@ -737,35 +738,28 @@ pub fn generate_delaunay_mesh(
 ) -> Mesh {
     let tol = MeshgenTolerances::from_geometry(min_cell_size, domain_size);
 
-    let mut mesh = Mesh::new();
-    mesh.cell_face_offsets.push(0);
-    mesh.cell_vertex_offsets.push(0);
-
     let (points, triangles, fixed_nodes) =
         triangulate(geo, min_cell_size, max_cell_size, growth_rate, domain_size);
 
-    // 3. Convert to Mesh
-    mesh.vx = points.iter().map(|p| p.x).collect();
-    mesh.vy = points.iter().map(|p| p.y).collect();
-    mesh.v_fixed = fixed_nodes;
+    // Convert to Mesh via MeshBuilder
+    let mut builder = MeshBuilder::with_capacity(
+        points.len(),
+        triangles.len(),
+        triangles.len() * 2, // rough estimate
+    );
+
+    // Add all vertices
+    let vert_ids: Vec<VertexId> = points
+        .iter()
+        .zip(fixed_nodes.iter())
+        .map(|(p, &fixed)| builder.add_vertex(p.x, p.y, fixed))
+        .collect();
 
     // Build faces and cells
-    let mut edge_face_map: HashMap<Edge, usize> = HashMap::new();
+    let mut edge_face_map: HashMap<Edge, FaceId> = HashMap::new();
 
     for t in triangles {
-        let cell_idx = mesh.cell_cx.len();
-
-        // Calculate centroid and area
-        let p1 = points[t.v1];
-        let p2 = points[t.v2];
-        let p3 = points[t.v3];
-
-        let center = Point2::new((p1.x + p2.x + p3.x) / 3.0, (p1.y + p2.y + p3.y) / 3.0);
-        let area = 0.5 * ((p2.x - p1.x) * (p3.y - p1.y) - (p3.x - p1.x) * (p2.y - p1.y)).abs();
-
-        mesh.cell_cx.push(center.x);
-        mesh.cell_cy.push(center.y);
-        mesh.cell_vol.push(area);
+        let cell_id = builder.add_cell(&[vert_ids[t.v1], vert_ids[t.v2], vert_ids[t.v3]]);
 
         let edges = [
             Edge::new(t.v1, t.v2),
@@ -774,65 +768,33 @@ pub fn generate_delaunay_mesh(
         ];
 
         for edge in edges {
-            if let Some(&face_idx) = edge_face_map.get(&edge) {
-                mesh.face_neighbor[face_idx] = Some(cell_idx);
-                mesh.face_boundary[face_idx] = None; // Internal
-                mesh.cell_faces.push(face_idx);
+            if let Some(&face_id) = edge_face_map.get(&edge) {
+                builder.set_face_neighbor(face_id, cell_id);
             } else {
-                let face_idx = mesh.face_cx.len();
-                let p_a = points[edge.v1];
-                let p_b = points[edge.v2];
-                let f_center = Point2::new((p_a.x + p_b.x) / 2.0, (p_a.y + p_b.y) / 2.0);
-                let f_len = (p_a - p_b).norm();
-                let normal = Vector2::new(p_b.y - p_a.y, p_a.x - p_b.x).normalize();
-
-                mesh.face_v1.push(edge.v1);
-                mesh.face_v2.push(edge.v2);
-                mesh.face_owner.push(cell_idx);
-                mesh.face_neighbor.push(None);
-
-                let is_boundary = mesh.v_fixed[edge.v1] && mesh.v_fixed[edge.v2];
+                let is_boundary = fixed_nodes[edge.v1] && fixed_nodes[edge.v2];
                 let boundary_type = if is_boundary {
-                    tol.classify_boundary(f_center.x, f_center.y, domain_size.x, domain_size.y)
+                    let (x1, y1) = builder.vertex_pos(vert_ids[edge.v1]);
+                    let (x2, y2) = builder.vertex_pos(vert_ids[edge.v2]);
+                    let fc_x = (x1 + x2) * 0.5;
+                    let fc_y = (y1 + y2) * 0.5;
+                    tol.classify_boundary(fc_x, fc_y, domain_size.x, domain_size.y)
                 } else {
                     None
                 };
 
-                mesh.face_boundary.push(boundary_type);
-                mesh.face_nx.push(normal.x);
-                mesh.face_ny.push(normal.y);
-                mesh.face_area.push(f_len);
-                mesh.face_cx.push(f_center.x);
-                mesh.face_cy.push(f_center.y);
-
-                edge_face_map.insert(edge, face_idx);
-                mesh.cell_faces.push(face_idx);
+                let face_id = builder.add_face(
+                    vert_ids[edge.v1],
+                    vert_ids[edge.v2],
+                    cell_id,
+                    None,
+                    boundary_type,
+                );
+                edge_face_map.insert(edge, face_id);
             }
         }
-
-        mesh.cell_face_offsets.push(mesh.cell_faces.len());
-
-        // Vertices
-        mesh.cell_vertices.push(t.v1);
-        mesh.cell_vertices.push(t.v2);
-        mesh.cell_vertices.push(t.v3);
-        mesh.cell_vertex_offsets.push(mesh.cell_vertices.len());
     }
 
-    // Fix normals (must point from owner to neighbor)
-    for i in 0..mesh.face_cx.len() {
-        let owner = mesh.face_owner[i];
-        let c_owner = Point2::new(mesh.cell_cx[owner], mesh.cell_cy[owner]);
-        let f_center = Point2::new(mesh.face_cx[i], mesh.face_cy[i]);
-        let normal = Vector2::new(mesh.face_nx[i], mesh.face_ny[i]);
-
-        if (f_center - c_owner).dot(&normal) < 0.0 {
-            mesh.face_nx[i] = -normal.x;
-            mesh.face_ny[i] = -normal.y;
-        }
-    }
-
-    mesh
+    builder.build()
 }
 
 fn sort_points_morton(points: &mut Vec<Point2<f64>>, fixed_nodes: &mut Vec<bool>) {

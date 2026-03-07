@@ -393,21 +393,24 @@ pub fn generate_cut_cell_mesh(
     }
     println!("Hanging nodes imprinted in {:.2?}", t1.elapsed());
 
-    // 7. Finalize Mesh
+    // 7. Finalize Mesh via MeshBuilder
     let _t2 = Instant::now();
-    let mut mesh = Mesh::new();
-    mesh.vx = vx;
-    mesh.vy = vy;
-    mesh.v_fixed = v_fixed;
 
-    let n_polys = cells.len();
-    mesh.cell_cx.reserve(n_polys);
-    mesh.cell_cy.reserve(n_polys);
-    mesh.cell_vol.reserve(n_polys);
-    mesh.cell_face_offsets.push(0);
-    mesh.cell_vertex_offsets.push(0);
+    let mut builder = super::mesh_builder::MeshBuilder::with_capacity(
+        vx.len(),
+        cells.len(),
+        cells.len() * 4, // rough estimate
+    );
 
-    let mut face_map: AHashMap<(usize, usize), usize> = AHashMap::new();
+    // Add all vertices
+    let vert_ids: Vec<super::mesh_builder::VertexId> = vx
+        .iter()
+        .zip(vy.iter())
+        .zip(v_fixed.iter())
+        .map(|((&x, &y), &fixed)| builder.add_vertex(x, y, fixed))
+        .collect();
+
+    let mut face_map: AHashMap<(usize, usize), super::mesh_builder::FaceId> = AHashMap::new();
 
     for cell_v_indices in cells {
         let mut center = Vector2::new(0.0, 0.0);
@@ -417,11 +420,11 @@ pub fn generate_cut_cell_mesh(
         for k in 0..n {
             let idx_i = cell_v_indices[k];
             let idx_j = cell_v_indices[(k + 1) % n];
-            let p_i = Point2::new(mesh.vx[idx_i], mesh.vy[idx_i]);
-            let p_j = Point2::new(mesh.vx[idx_j], mesh.vy[idx_j]);
-            let cross = p_i.x * p_j.y - p_j.x * p_i.y;
+            let (pi_x, pi_y) = builder.vertex_pos(vert_ids[idx_i]);
+            let (pj_x, pj_y) = builder.vertex_pos(vert_ids[idx_j]);
+            let cross = pi_x * pj_y - pj_x * pi_y;
             area += cross;
-            center += (p_i.coords + p_j.coords) * cross;
+            center += Vector2::new(pi_x + pj_x, pi_y + pj_y) * cross;
         }
         area *= 0.5;
 
@@ -429,8 +432,9 @@ pub fn generate_cut_cell_mesh(
             continue;
         }
 
-        center /= 6.0 * area;
-        let cell_idx = mesh.cell_cx.len();
+        let cell_verts: Vec<super::mesh_builder::VertexId> =
+            cell_v_indices.iter().map(|&i| vert_ids[i]).collect();
+        let cell_id = builder.add_cell(&cell_verts);
 
         for k in 0..n {
             let v1 = cell_v_indices[k];
@@ -440,10 +444,9 @@ pub fn generate_cut_cell_mesh(
                 continue;
             }
 
-            let p1 = Point2::new(mesh.vx[v1], mesh.vy[v1]);
-            let p2 = Point2::new(mesh.vx[v2], mesh.vy[v2]);
-            let edge_vec = p2 - p1;
-            let edge_len = edge_vec.norm();
+            let (p1_x, p1_y) = builder.vertex_pos(vert_ids[v1]);
+            let (p2_x, p2_y) = builder.vertex_pos(vert_ids[v2]);
+            let edge_len = ((p2_x - p1_x).powi(2) + (p2_y - p1_y).powi(2)).sqrt();
 
             if edge_len < tol.edge_len_eps {
                 continue;
@@ -452,41 +455,28 @@ pub fn generate_cut_cell_mesh(
             let (min_v, max_v) = if v1 < v2 { (v1, v2) } else { (v2, v1) };
             let key = (min_v, max_v);
 
-            if let Some(&face_idx) = face_map.get(&key) {
-                mesh.face_neighbor[face_idx] = Some(cell_idx);
-                mesh.face_boundary[face_idx] = None;
-                mesh.cell_faces.push(face_idx);
+            if let Some(&face_id) = face_map.get(&key) {
+                builder.set_face_neighbor(face_id, cell_id);
             } else {
-                let face_center = Point2::from((p1.coords + p2.coords) * 0.5);
-                let normal = Vector2::new(edge_vec.y, -edge_vec.x).normalize();
+                let fc_x = (p1_x + p2_x) * 0.5;
+                let fc_y = (p1_y + p2_y) * 0.5;
 
                 let boundary_type =
-                    tol.classify_boundary(face_center.x, face_center.y, domain_size.x, domain_size.y);
+                    tol.classify_boundary(fc_x, fc_y, domain_size.x, domain_size.y);
 
-                let face_idx = mesh.face_cx.len();
-                mesh.face_v1.push(v1);
-                mesh.face_v2.push(v2);
-                mesh.face_owner.push(cell_idx);
-                mesh.face_neighbor.push(None);
-                mesh.face_boundary.push(boundary_type);
-                mesh.face_nx.push(normal.x);
-                mesh.face_ny.push(normal.y);
-                mesh.face_area.push(edge_len);
-                mesh.face_cx.push(face_center.x);
-                mesh.face_cy.push(face_center.y);
-
-                face_map.insert(key, face_idx);
-                mesh.cell_faces.push(face_idx);
+                let face_id = builder.add_face(
+                    vert_ids[v1],
+                    vert_ids[v2],
+                    cell_id,
+                    None,
+                    boundary_type,
+                );
+                face_map.insert(key, face_id);
             }
         }
-
-        mesh.cell_cx.push(center.x);
-        mesh.cell_cy.push(center.y);
-        mesh.cell_vol.push(area.abs());
-        mesh.cell_face_offsets.push(mesh.cell_faces.len());
-        mesh.cell_vertices.extend_from_slice(&cell_v_indices);
-        mesh.cell_vertex_offsets.push(mesh.cell_vertices.len());
     }
+
+    let mesh = builder.build();
 
     let mut min_vol = f64::MAX;
     let mut max_vol = f64::MIN;

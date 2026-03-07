@@ -1,6 +1,6 @@
 # ARCH_FIX_5: Fix Computational Geometry Anti-Patterns in Mesh Generation
 
-## Status: Phase 1 + 3 + 4 Implemented, Phase 2 (MeshBuilder) Deferred
+## Status: All Phases Implemented
 
 ### Implementation Notes
 
@@ -13,6 +13,14 @@
 - `src/meshgen/meshgen_ext.rs` — added `smooth_with_tolerances()`, auto-derives tolerances from mesh bounds
 - `src/meshgen/mod.rs` — added `pub(crate) mod tolerances` and re-export
 
+**Phase 2** (MeshBuilder): ✅ Done
+- `src/meshgen/mesh_builder.rs` created with `MeshBuilder`, `VertexId`, `CellId`, `FaceId`
+- `src/meshgen/delaunay.rs` — `generate_delaunay_mesh` rewritten to use `MeshBuilder`
+- `src/meshgen/cut_cell.rs` — finalization section rewritten to use `MeshBuilder`
+- `src/meshgen/voronoi.rs` — `fix_concave_cells` rewritten to use `MeshBuilder`
+  (reduced from ~230 lines of manual array synchronization to ~160 lines)
+- 4 unit tests for MeshBuilder (single quad, two triangles, set_face_neighbor, normals)
+
 **Phase 3** (scale-invariance tests): ✅ Done — 6 new tests in `tests.rs`
 - `quantize_does_not_collapse_distinct_vertices_at_small_scale`
 - `quantize_merges_nearby_vertices_at_large_scale`
@@ -23,10 +31,8 @@
 
 **Phase 4** (boundary detection helper): ✅ Done — `classify_boundary()` method on `MeshgenTolerances`, called from all 5 sites.
 
-**Phase 2** (MeshBuilder): ⏳ Deferred — code quality improvement, not a correctness fix. Lower priority, higher risk.
-
 **Verification:**
-- All 171 lib tests pass (including 11 meshgen tests: 5 original + 6 new)
+- All 175 lib tests pass (including 11 meshgen + 4 MeshBuilder tests)
 - OpenFOAM reference metrics: identical before/after (zero diff)
 - No new clippy warnings in meshgen
 
@@ -293,7 +299,7 @@ pub fn in_circumcircle(&self, p: Point2<f64>, points: &[Point2<f64>], eps: f64) 
 
 ~4 lines changed across 2 methods; ~10 call sites updated.
 
-### Phase 2: Introduce `MeshBuilder` for safe topological mutations ⏳ Deferred
+### Phase 2: Introduce `MeshBuilder` for safe topological mutations ✅
 
 **Goal:** Encapsulate the error-prone parallel-array bookkeeping in a
 builder struct that enforces consistency, then flatten to `Mesh` at the end.
@@ -561,20 +567,19 @@ pattern in all 5 sites:
 | `src/meshgen/meshgen_utils.rs` | Add `&MeshgenTolerances` param to `compute_normal`, `intersect_lines` | ✅ |
 | `src/meshgen/meshgen_ext.rs` | Add `smooth_with_tolerances`; auto-derive tolerances from mesh bounds | ✅ |
 | `src/meshgen/tests.rs` | Add 6 scale-invariance and quantization tests | ✅ |
-| `src/meshgen/mesh_builder.rs` | **New file**: `MeshBuilder`, `VertexId`, `CellId`, `FaceId` | ⏳ Deferred |
+| `src/meshgen/mesh_builder.rs` | **New file**: `MeshBuilder`, `VertexId`, `CellId`, `FaceId` | ✅ |
 
 ## Estimated Scope
 
 - Phase 1: ~160 lines (new struct + threading through all files) ✅
-- Phase 2: ~270 lines (new MeshBuilder + rewrites of 3 construction sites) ⏳
+- Phase 2: ~270 lines (new MeshBuilder + rewrites of 3 construction sites) ✅
 - Phase 3: ~80 lines (tests) ✅
 - Phase 4: ~35 lines (boundary helper + call site updates) ✅
-- **Total completed: ~275 lines** (~220 new, ~55 modified)
-- **Total remaining (Phase 2): ~270 lines**
+- **Total: ~545 lines touched** (~220 new, ~325 modified) — all complete
 
 ## Verification
 
-1. ✅ `cargo test --features meshgen --lib` — all 171 tests pass (including 11 meshgen).
+1. ✅ `cargo test --features meshgen --lib` — all 175 tests pass (including 11 meshgen + 4 MeshBuilder).
 2. ✅ New scale-invariance tests pass at scales 1.0 and 1e-3.
 3. ✅ New quantization edge-case tests pass at microfluidic (1e-6) and large (10.0) scales.
 4. ✅ OpenFOAM reference metrics — zero diff before/after.
@@ -619,4 +624,4 @@ the tolerance scaling. ✅
 
 **Phase 2** (MeshBuilder) is independent and lower priority — it improves
 code quality and maintainability but does not fix a correctness issue. It
-can be done at any time. ⏳
+can be done at any time. ✅

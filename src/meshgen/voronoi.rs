@@ -1,5 +1,6 @@
 use super::delaunay::{triangulate, Edge};
 use super::geometry::Geometry;
+use super::tolerances::MeshgenTolerances;
 use crate::solver::mesh::{BoundaryType, Mesh};
 use nalgebra::{Point2, Vector2};
 use rayon::prelude::*;
@@ -27,6 +28,8 @@ pub fn generate_voronoi_mesh(
     growth_rate: f64,
     domain_size: Vector2<f64>,
 ) -> Mesh {
+    let tol = MeshgenTolerances::from_geometry(min_cell_size, domain_size);
+
     let (points, triangles, _fixed_nodes) =
         triangulate(geo, min_cell_size, max_cell_size, growth_rate, domain_size);
 
@@ -171,13 +174,8 @@ pub fn generate_voronoi_mesh(
                 normal = -normal;
             }
 
-            let boundary_type = if f1_center.x < 1e-6 {
-                Some(BoundaryType::Inlet)
-            } else if (f1_center.x - domain_size.x).abs() < 1e-6 {
-                Some(BoundaryType::Outlet)
-            } else {
-                Some(BoundaryType::Wall)
-            };
+            let boundary_type =
+                tol.classify_boundary(f1_center.x, f1_center.y, domain_size.x, domain_size.y);
 
             results.push(FaceResult {
                 v1: idx_mid,
@@ -196,13 +194,8 @@ pub fn generate_voronoi_mesh(
 
             // Face 2: Midpoint - V2
             let f2_center = Point2::new((p_mid.x + p_v2_vor.x) / 2.0, (p_mid.y + p_v2_vor.y) / 2.0);
-            let boundary_type_2 = if f2_center.x < 1e-6 {
-                Some(BoundaryType::Inlet)
-            } else if (f2_center.x - domain_size.x).abs() < 1e-6 {
-                Some(BoundaryType::Outlet)
-            } else {
-                Some(BoundaryType::Wall)
-            };
+            let boundary_type_2 =
+                tol.classify_boundary(f2_center.x, f2_center.y, domain_size.x, domain_size.y);
 
             results.push(FaceResult {
                 v1: idx_mid,
@@ -272,8 +265,6 @@ pub fn generate_voronoi_mesh(
         mesh.cell_face_offsets.push(mesh.cell_faces.len());
 
         // Reconstruct cell polygon by chaining faces
-        // We have a set of edges (faces). We need to order the vertices.
-        // Build adjacency for this cell's vertices.
         let mut adj: HashMap<usize, Vec<usize>> = HashMap::new();
         for &f_idx in &cell_faces[i] {
             let v1 = mesh.face_v1[f_idx];
@@ -281,10 +272,6 @@ pub fn generate_voronoi_mesh(
             adj.entry(v1).or_default().push(v2);
             adj.entry(v2).or_default().push(v1);
         }
-
-        // Find the start vertex.
-        // If boundary cell, start at V (the cell center vertex).
-        // If internal cell, pick any vertex.
 
         let start_node = if let Some(idx) = vertex_indices[i] {
             idx
@@ -294,21 +281,13 @@ pub fn generate_voronoi_mesh(
                 first
             } else {
                 mesh.cell_vertex_offsets.push(mesh.cell_vertices.len());
-                continue; // Should not happen
+                continue;
             }
         };
 
         let mut c_verts = Vec::new();
         let mut curr = start_node;
         let mut visited = HashSet::new();
-
-        // Traverse the cycle
-        // For boundary cells, V has degree 2 (connected to M1 and M2).
-        // For internal cells, all vertices have degree 2 (simple polygon).
-        // Just walk.
-
-        // We need to handle the first step carefully to ensure we don't go back immediately.
-        // But since it's a cycle, we just need to pick a neighbor and go.
 
         if let Some(neighbors) = adj.get(&curr) {
             if neighbors.is_empty() {
@@ -320,19 +299,15 @@ pub fn generate_voronoi_mesh(
             visited.insert(curr);
 
             let mut next = neighbors[0];
-            // If we are at V, we have 2 neighbors. Pick one.
 
             while next != start_node {
                 c_verts.push(next);
                 visited.insert(next);
 
                 if let Some(next_neighbors) = adj.get(&next) {
-                    // Find neighbor that is not the one we came from
-                    // Note: 'curr' is where we came from.
                     let mut found = false;
                     for &n in next_neighbors {
                         if n != curr {
-                            // Also check if we visited it already (unless it's start_node)
                             if n == start_node {
                                 found = true;
                                 curr = next;
@@ -348,8 +323,6 @@ pub fn generate_voronoi_mesh(
                         }
                     }
                     if !found {
-                        // Dead end or loop closed prematurely?
-                        // If we reached start_node, loop terminates.
                         break;
                     }
                 } else {
@@ -358,11 +331,7 @@ pub fn generate_voronoi_mesh(
             }
         }
 
-        // Ensure CCW (counter-clockwise) ordering for consistent polygon rendering.
-        // The traversal above can produce either CW or CCW ordering depending on
-        // which neighbor was arbitrarily chosen first. We fix this by calculating
-        // the signed area (using the shoelace formula) and reversing if negative.
-        // CCW polygons have positive signed area; CW polygons have negative.
+        // Ensure CCW ordering
         if c_verts.len() >= 3 {
             let mut signed_area = 0.0;
             let n = c_verts.len();
@@ -375,7 +344,6 @@ pub fn generate_voronoi_mesh(
                 let p1_y = voronoi_points[v_idx1].y;
                 signed_area += p0_x * p1_y - p1_x * p0_y;
             }
-            // If signed area is negative, vertices are CW - reverse to make CCW
             if signed_area < 0.0 {
                 c_verts.reverse();
             }
@@ -389,9 +357,7 @@ pub fn generate_voronoi_mesh(
     mesh.recalculate_geometry();
 
     // 4. Fix Concave Cells
-    // Some boundary cells might be concave due to the way we handle boundary edges.
-    // We split them into triangles to ensure convexity.
-    mesh = fix_concave_cells(mesh, &points);
+    mesh = fix_concave_cells(mesh, &points, &tol);
 
     mesh
 }
@@ -402,7 +368,7 @@ struct SplitInfo {
     center_vert_idx: usize,
 }
 
-fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>]) -> Mesh {
+fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>], tol: &MeshgenTolerances) -> Mesh {
     let mut new_mesh = Mesh::new();
     new_mesh.cell_face_offsets.push(0);
     new_mesh.cell_vertex_offsets.push(0);
@@ -416,7 +382,7 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>]) -> Mesh {
 
     // 2. Process Cells
     for i in 0..old_mesh.num_cells() {
-        if is_concave(&old_mesh, i) {
+        if is_concave(&old_mesh, i, tol) {
             // Split
             let gen = generators[i];
             let start = old_mesh.cell_vertex_offsets[i];
@@ -425,10 +391,11 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>]) -> Mesh {
 
             // Check if generator is a vertex
             let mut match_idx = None;
+            let gen_match_dist = tol.boundary_eps;
             for k in 0..n {
                 let v_idx = old_mesh.cell_vertices[start + k];
                 let p_v = Point2::new(new_mesh.vx[v_idx], new_mesh.vy[v_idx]);
-                if (p_v - gen).norm() < 1e-6 {
+                if (p_v - gen).norm() < gen_match_dist {
                     match_idx = Some(k);
                     break;
                 }
@@ -457,7 +424,7 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>]) -> Mesh {
                         let pk1 = Point2::new(new_mesh.vx[uk1], new_mesh.vy[uk1]);
                         let pk2 = Point2::new(new_mesh.vx[uk2], new_mesh.vy[uk2]);
 
-                        if is_poly_convex(&[p0, pk, pk1, pk2]) {
+                        if is_poly_convex(&[p0, pk, pk1, pk2], tol) {
                             // Create Quad
                             let new_cell_idx = new_mesh.num_cells();
                             new_mesh.cell_cx.push(0.0);
@@ -536,7 +503,7 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>]) -> Mesh {
                         let p_v3 = Point2::new(new_mesh.vx[v3], new_mesh.vy[v3]);
 
                         let quad_verts = vec![p_c, p_v1, p_v2, p_v3];
-                        if is_poly_convex(&quad_verts) {
+                        if is_poly_convex(&quad_verts, tol) {
                             let new_cell_idx = new_mesh.num_cells();
                             new_mesh.cell_cx.push(0.0);
                             new_mesh.cell_cy.push(0.0);
@@ -678,14 +645,13 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>]) -> Mesh {
                 }
 
                 // Face between sub_cell[k] and sub_cell[prev]
-                // Shared edge is (Center, v_curr)
                 let idx_k = k;
                 let idx_prev = (k + n - 1) % n;
 
                 let cell_k = info.new_cell_indices[idx_k];
                 let cell_prev = info.new_cell_indices[idx_prev];
 
-                // Skip if same cell (e.g. internal edge of a Quad, or boundary edge in vertex fan)
+                // Skip if same cell
                 if cell_k == cell_prev {
                     continue;
                 }
@@ -720,7 +686,7 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>]) -> Mesh {
     new_mesh
 }
 
-fn is_concave(mesh: &Mesh, cell_idx: usize) -> bool {
+fn is_concave(mesh: &Mesh, cell_idx: usize, tol: &MeshgenTolerances) -> bool {
     let start = mesh.cell_vertex_offsets[cell_idx];
     let end = mesh.cell_vertex_offsets[cell_idx + 1];
     let n = end - start;
@@ -744,7 +710,7 @@ fn is_concave(mesh: &Mesh, cell_idx: usize) -> bool {
 
         let cross = v1.x * v2.y - v1.y * v2.x;
 
-        if cross.abs() > 1e-12 {
+        if cross.abs() > tol.cross_eps {
             if target_sign == 0.0 {
                 target_sign = cross.signum();
             } else if cross.signum() != target_sign {
@@ -755,7 +721,7 @@ fn is_concave(mesh: &Mesh, cell_idx: usize) -> bool {
     false
 }
 
-fn is_poly_convex(verts: &[Point2<f64>]) -> bool {
+fn is_poly_convex(verts: &[Point2<f64>], tol: &MeshgenTolerances) -> bool {
     let n = verts.len();
     if n < 3 {
         return true;
@@ -770,7 +736,7 @@ fn is_poly_convex(verts: &[Point2<f64>]) -> bool {
         let v2 = p_next - p_curr;
         let cross = v1.x * v2.y - v1.y * v2.x;
 
-        if cross.abs() > 1e-12 {
+        if cross.abs() > tol.cross_eps {
             if target_sign == 0.0 {
                 target_sign = cross.signum();
             } else if cross.signum() != target_sign {

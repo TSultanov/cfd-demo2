@@ -2,10 +2,67 @@ use nalgebra::{Point2, Vector2};
 use rayon::prelude::*;
 
 use super::geometry::Geometry;
+use super::tolerances::MeshgenTolerances;
 use crate::solver::mesh::Mesh;
 
 impl Mesh {
-    pub fn smooth<G: Geometry + Sync>(&mut self, geo: &G, target_skew: f64, max_iterations: usize) {
+    pub fn smooth<G: Geometry + Sync>(
+        &mut self,
+        geo: &G,
+        target_skew: f64,
+        max_iterations: usize,
+    ) {
+        self.smooth_with_tolerances(geo, target_skew, max_iterations, None);
+    }
+
+    pub fn smooth_with_tolerances<G: Geometry + Sync>(
+        &mut self,
+        geo: &G,
+        target_skew: f64,
+        max_iterations: usize,
+        tolerances: Option<&MeshgenTolerances>,
+    ) {
+        // Compute tolerances from mesh bounding box if not provided
+        let default_tol;
+        let tol = match tolerances {
+            Some(t) => t,
+            None => {
+                let mut min_bound = Point2::new(f64::MAX, f64::MAX);
+                let mut max_bound = Point2::new(f64::MIN, f64::MIN);
+                for i in 0..self.vx.len() {
+                    if self.vx[i] < min_bound.x {
+                        min_bound.x = self.vx[i];
+                    }
+                    if self.vy[i] < min_bound.y {
+                        min_bound.y = self.vy[i];
+                    }
+                    if self.vx[i] > max_bound.x {
+                        max_bound.x = self.vx[i];
+                    }
+                    if self.vy[i] > max_bound.y {
+                        max_bound.y = self.vy[i];
+                    }
+                }
+                let domain_size = Vector2::new(
+                    max_bound.x - min_bound.x,
+                    max_bound.y - min_bound.y,
+                );
+                // Estimate min_cell_size from smallest face
+                let min_face_len = self
+                    .face_area
+                    .iter()
+                    .copied()
+                    .fold(f64::MAX, f64::min);
+                let min_cell_size = if min_face_len > 0.0 && min_face_len < f64::MAX {
+                    min_face_len
+                } else {
+                    domain_size.x.min(domain_size.y) * 0.01
+                };
+                default_tol = MeshgenTolerances::from_geometry(min_cell_size, domain_size);
+                &default_tol
+            }
+        };
+
         let n_verts = self.vx.len();
         let mut adj = vec![Vec::new(); n_verts];
 
@@ -36,18 +93,22 @@ impl Mesh {
             }
         }
 
+        let boundary_eps = tol.boundary_eps;
         let is_on_box = |x: f64, y: f64| -> bool {
-            let eps = 1e-6;
-            (x - min_bound.x).abs() < eps
-                || (x - max_bound.x).abs() < eps
-                || (y - min_bound.y).abs() < eps
-                || (y - max_bound.y).abs() < eps
+            (x - min_bound.x).abs() < boundary_eps
+                || (x - max_bound.x).abs() < boundary_eps
+                || (y - min_bound.y).abs() < boundary_eps
+                || (y - max_bound.y).abs() < boundary_eps
         };
+
+        let sdf_grad_eps = tol.sdf_grad_eps;
+        let edge_collapse_sq = tol.edge_collapse_sq;
+        let normal_degenerate_sq = tol.normal_degenerate_sq;
 
         for iter in 0..max_iterations {
             // Check skewness
             self.recalculate_geometry();
-            let current_skew = self.calculate_max_skewness();
+            let current_skew = self.calculate_max_skewness_with_eps(normal_degenerate_sq);
             if current_skew < target_skew {
                 println!(
                     "Target skewness reached: {:.6} < {:.6} at iter {}",
@@ -78,7 +139,6 @@ impl Mesh {
                     let mut sum_y = 0.0;
                     let mut count = 0;
 
-                    // Internal smoothing: consider all neighbors
                     for &neigh in &adj[i] {
                         sum_x += self.vx[neigh];
                         sum_y += self.vy[neigh];
@@ -99,11 +159,10 @@ impl Mesh {
                         let d = geo.sdf(&p_curr);
 
                         // Numerical Gradient
-                        let eps = 1e-6;
-                        let d_x = geo.sdf(&Point2::new(x_new + eps, y_new))
-                            - geo.sdf(&Point2::new(x_new - eps, y_new));
-                        let d_y = geo.sdf(&Point2::new(x_new, y_new + eps))
-                            - geo.sdf(&Point2::new(x_new, y_new - eps));
+                        let d_x = geo.sdf(&Point2::new(x_new + sdf_grad_eps, y_new))
+                            - geo.sdf(&Point2::new(x_new - sdf_grad_eps, y_new));
+                        let d_y = geo.sdf(&Point2::new(x_new, y_new + sdf_grad_eps))
+                            - geo.sdf(&Point2::new(x_new, y_new - sdf_grad_eps));
                         let grad = Vector2::new(d_x, d_y).normalize();
 
                         let p_proj = p_curr - grad * d;
@@ -117,8 +176,7 @@ impl Mesh {
                         let nx = self.vx[neigh];
                         let ny = self.vy[neigh];
                         let dist_sq = (x_new - nx).powi(2) + (y_new - ny).powi(2);
-                        if dist_sq < 1e-8 {
-                            // 1e-4 squared
+                        if dist_sq < edge_collapse_sq {
                             bad_move = true;
                             break;
                         }
@@ -137,10 +195,17 @@ impl Mesh {
         }
 
         self.recalculate_geometry();
-        println!("Final skewness: {:.6}", self.calculate_max_skewness());
+        println!(
+            "Final skewness: {:.6}",
+            self.calculate_max_skewness_with_eps(normal_degenerate_sq)
+        );
     }
 
     pub fn calculate_max_skewness(&self) -> f64 {
+        self.calculate_max_skewness_with_eps(1e-12)
+    }
+
+    fn calculate_max_skewness_with_eps(&self, normal_eps_sq: f64) -> f64 {
         (0..self.face_cx.len())
             .into_par_iter()
             .map(|i| {
@@ -156,7 +221,7 @@ impl Mesh {
                     f_c - c1
                 };
 
-                let d_norm = if d.norm_squared() > 1e-12 {
+                let d_norm = if d.norm_squared() > normal_eps_sq {
                     d.normalize()
                 } else {
                     Vector2::zeros()

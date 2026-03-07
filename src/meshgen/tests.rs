@@ -315,3 +315,130 @@ fn test_voronoi_generation() {
         cw_count
     );
 }
+
+// --- Phase 3: Scale-invariance and quantization tests ---
+
+#[test]
+fn quantize_does_not_collapse_distinct_vertices_at_small_scale() {
+    use super::tolerances::MeshgenTolerances;
+    let tol = MeshgenTolerances::from_geometry(1e-7, Vector2::new(1e-4, 1e-4));
+    // Two points separated by 0.5 * min_cell_size should get distinct keys
+    let k1 = tol.quantize_point(0.0, 0.0);
+    let k2 = tol.quantize_point(5e-8, 0.0);
+    assert_ne!(k1, k2, "Points 0.5*min_cell_size apart must not collapse");
+}
+
+#[test]
+fn quantize_merges_nearby_vertices_at_large_scale() {
+    use super::tolerances::MeshgenTolerances;
+    let tol = MeshgenTolerances::from_geometry(10.0, Vector2::new(1000.0, 1000.0));
+    // Two points separated by 0.1 * vertex_merge should get same key
+    // vertex_merge = 10.0 * 1e-6 = 1e-5
+    // 0.1 * vertex_merge = 1e-6
+    let k1 = tol.quantize_point(500.0, 500.0);
+    let k2 = tol.quantize_point(500.0 + 1e-7, 500.0);
+    assert_eq!(k1, k2, "Points 0.01*vertex_merge apart must merge");
+}
+
+#[test]
+fn quantize_adapts_to_microfluidic_scale() {
+    use super::tolerances::MeshgenTolerances;
+    // Microfluidic: domain 200µm x 100µm, min_cell_size = 1µm
+    let tol = MeshgenTolerances::from_geometry(1e-6, Vector2::new(2e-4, 1e-4));
+
+    // Points 0.5µm apart should be distinct (half a cell)
+    let k1 = tol.quantize_point(1e-4, 5e-5);
+    let k2 = tol.quantize_point(1e-4 + 5e-7, 5e-5);
+    assert_ne!(k1, k2, "Points 0.5*min_cell_size apart must be distinct at µm scale");
+
+    // Points 0.001 * vertex_merge apart should merge
+    // vertex_merge = 1e-6 * 1e-6 = 1e-12
+    let k3 = tol.quantize_point(1e-4, 5e-5);
+    let k4 = tol.quantize_point(1e-4 + 1e-15, 5e-5);
+    assert_eq!(k3, k4, "Points 0.001*vertex_merge apart must merge at µm scale");
+}
+
+#[test]
+fn classify_boundary_scales_with_domain() {
+    use super::tolerances::MeshgenTolerances;
+
+    // Standard scale
+    let tol1 = MeshgenTolerances::from_geometry(0.01, Vector2::new(2.0, 1.0));
+    // Should classify x=0 as inlet
+    assert!(tol1.classify_boundary(0.0, 0.5, 2.0, 1.0).is_some());
+    // Should NOT classify x=0.5 as boundary
+    assert!(tol1.classify_boundary(0.5, 0.5, 2.0, 1.0).is_none());
+
+    // Micro scale
+    let tol2 = MeshgenTolerances::from_geometry(1e-6, Vector2::new(2e-4, 1e-4));
+    // Should classify x=0 as inlet
+    assert!(tol2.classify_boundary(0.0, 5e-5, 2e-4, 1e-4).is_some());
+    // Should NOT classify x=1e-4 (interior) as boundary
+    assert!(tol2.classify_boundary(1e-4, 5e-5, 2e-4, 1e-4).is_none());
+}
+
+#[test]
+fn cut_cell_mesh_scale_invariance_topology() {
+    use super::geometry::RectangularChannel;
+
+    // Scale 1: standard
+    let geo1 = RectangularChannel {
+        length: 2.0,
+        height: 1.0,
+    };
+    let mesh1 = generate_cut_cell_mesh(&geo1, 0.1, 0.1, 1.2, Vector2::new(2.0, 1.0));
+
+    // Scale 1e-3: millimeter
+    let geo2 = RectangularChannel {
+        length: 2e-3,
+        height: 1e-3,
+    };
+    let mesh2 = generate_cut_cell_mesh(&geo2, 1e-4, 1e-4, 1.2, Vector2::new(2e-3, 1e-3));
+
+    // For a simple rectangular channel with uniform cell size, topology must match
+    assert_eq!(
+        mesh1.num_cells(),
+        mesh2.num_cells(),
+        "Cell count must match across scales: {} vs {}",
+        mesh1.num_cells(),
+        mesh2.num_cells()
+    );
+    assert_eq!(
+        mesh1.num_faces(),
+        mesh2.num_faces(),
+        "Face count must match across scales: {} vs {}",
+        mesh1.num_faces(),
+        mesh2.num_faces()
+    );
+
+    // Volume ratio should be scale^2
+    let scale = 1e-3;
+    let vol_ratio = mesh2.cell_vol.iter().sum::<f64>() / mesh1.cell_vol.iter().sum::<f64>();
+    let expected_ratio = scale * scale;
+    assert!(
+        (vol_ratio / expected_ratio - 1.0).abs() < 1e-6,
+        "Total volume ratio {vol_ratio} should be {expected_ratio}"
+    );
+}
+
+#[test]
+fn tolerances_are_self_consistent() {
+    use super::tolerances::MeshgenTolerances;
+
+    let tol = MeshgenTolerances::from_geometry(0.025, Vector2::new(2.0, 1.0));
+
+    // vertex_merge = mcs * 1e-6 = 2.5e-8
+    // quantize_inv = 1/vertex_merge = 4e7
+    // A point at x=1.0 quantizes to (1.0 * 4e7).round() = 40_000_000
+    let k = tol.quantize(1.0);
+    assert_eq!(k, 40_000_000);
+
+    // Two points 2*vertex_merge apart should get different keys
+    let k1 = tol.quantize(0.0);
+    let k2 = tol.quantize(5e-8);
+    assert_ne!(k1, k2);
+
+    // boundary_eps should be small relative to domain
+    let diag = (2.0f64 * 2.0 + 1.0 * 1.0).sqrt();
+    assert!((tol.boundary_eps - diag * 1e-6).abs() < 1e-15);
+}

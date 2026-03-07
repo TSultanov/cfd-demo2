@@ -2,7 +2,8 @@ use nalgebra::{Point2, Vector2};
 use std::collections::{HashMap, HashSet};
 
 use super::geometry::Geometry;
-use crate::solver::mesh::{BoundaryType, Mesh};
+use super::tolerances::MeshgenTolerances;
+use crate::solver::mesh::Mesh;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Edge {
@@ -85,9 +86,8 @@ impl Triangle {
         (center, r_sq)
     }
 
-    pub fn in_circumcircle(&self, p: Point2<f64>, points: &[Point2<f64>]) -> bool {
+    pub fn in_circumcircle(&self, p: Point2<f64>, points: &[Point2<f64>], eps: f64) -> bool {
         // Robust check using determinant
-        // We use the points array to get coordinates
         let a = points[self.v1];
         let b = points[self.v2];
         let c = points[self.v3];
@@ -96,7 +96,6 @@ impl Triangle {
         let det_abc = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 
         // If det_abc is negative, points are clockwise. Swap b and c to make them CCW for the check.
-        // Note: we don't change self.v2/v3, just local variables.
         let (b, c) = if det_abc < 0.0 { (c, b) } else { (b, c) };
 
         // Using relative coordinates to p improves precision
@@ -114,7 +113,7 @@ impl Triangle {
         let det = adx * (bdy * clift - cdy * blift) - ady * (bdx * clift - cdx * blift)
             + alift * (bdx * cdy - cdx * bdy);
 
-        det > 1e-10 // Positive means inside
+        det > eps
     }
 }
 
@@ -129,6 +128,8 @@ pub fn triangulate(
     growth_rate: f64,
     domain_size: Vector2<f64>,
 ) -> (Vec<Point2<f64>>, Vec<Triangle>, Vec<bool>) {
+    let tol = MeshgenTolerances::from_geometry(min_cell_size, domain_size);
+
     // 1. Generate Points
     // Step 1a: Boundary Points
     let boundary_points = geo.get_boundary_points(min_cell_size);
@@ -136,11 +137,10 @@ pub fn triangulate(
     let mut points = Vec::new();
     let mut fixed_nodes = Vec::new();
     let mut unique_map = HashMap::new();
-    let quantize = |x: f64, y: f64| ((x * 100000.0).round() as i64, (y * 100000.0).round() as i64);
 
     // Add boundary points
     for p in boundary_points {
-        let key = quantize(p.x, p.y);
+        let key = tol.quantize_point(p.x, p.y);
         if !unique_map.contains_key(&key) {
             unique_map.insert(key, points.len());
             points.push(p);
@@ -168,10 +168,9 @@ pub fn triangulate(
     sort_points_morton(&mut points, &mut fixed_nodes);
 
     // 2. Initial Triangulation
-    let mut triangles = compute_triangulation(&points, domain_size, &fixed_nodes, geo);
+    let mut triangles = compute_triangulation(&points, domain_size, &fixed_nodes, geo, &tol);
 
     // 3. Smooth Generators (Laplacian Smoothing)
-    // This helps to smooth out the sharp steps
     let smoothing_iters = 20;
     println!(
         "Starting generator smoothing for {} iterations...",
@@ -186,12 +185,13 @@ pub fn triangulate(
             min_cell_size,
             max_cell_size,
             growth_rate,
+            &tol,
         );
         points = new_points;
         if iter % 10 == 0 {
             println!("  Gen Smooth iter {}: max disp = {:.6}", iter, max_disp);
         }
-        triangles = compute_triangulation(&points, domain_size, &fixed_nodes, geo);
+        triangles = compute_triangulation(&points, domain_size, &fixed_nodes, geo, &tol);
     }
 
     (points, triangles, fixed_nodes)
@@ -237,8 +237,6 @@ fn generate_poisson_points(
     // Sizing function
     let get_radius = |p: Point2<f64>| -> f64 {
         let dist = geo.sdf(&p).abs();
-        // Growth: r = min_size + (growth_rate - 1) * dist
-        // But we want to cap at max_size
         let r = min_cell_size + (growth_rate - 1.0).max(0.0) * dist;
         r.min(max_cell_size)
     };
@@ -290,10 +288,6 @@ fn generate_poisson_points(
                             let neighbor = points[n_idx];
                             let d2 = (neighbor - new_p).norm_squared();
 
-                            // Check distance against radius of the NEW point (conservative)
-                            // or max(r_new, r_neighbor)?
-                            // Standard Bridson uses r (of the active point).
-                            // Variable radius usually uses r_new.
                             let required_dist = r_new;
 
                             if d2 < required_dist * required_dist {
@@ -329,7 +323,6 @@ fn generate_poisson_points(
     }
 
     // Return only the new points (exclude initial boundary points)
-    // boundary_points.len() is the count of initial points.
     points.into_iter().skip(boundary_points.len()).collect()
 }
 
@@ -341,6 +334,7 @@ fn smooth_generators(
     min_cell_size: f64,
     max_cell_size: f64,
     growth_rate: f64,
+    tol: &MeshgenTolerances,
 ) -> (Vec<Point2<f64>>, f64) {
     let n = points.len();
     let mut new_points = points.to_vec();
@@ -361,6 +355,8 @@ fn smooth_generators(
         let r = min_cell_size + (growth_rate - 1.0).max(0.0) * dist;
         r.min(max_cell_size)
     };
+
+    let smoothing_denom_eps = tol.smoothing_denom_eps;
 
     let compute_new_pos = |i: usize| -> (Point2<f64>, f64) {
         if fixed_nodes[i] {
@@ -392,7 +388,7 @@ fn smooth_generators(
             let gr = f64x4::splat((growth_rate - 1.0).max(0.0));
 
             let r = (min_sz + gr * dist).min(max_sz);
-            let w = f64x4::splat(1.0) / r.max(f64x4::splat(1e-6));
+            let w = f64x4::splat(1.0) / r.max(f64x4::splat(smoothing_denom_eps));
 
             let wx = px * w;
             let wy = py * w;
@@ -408,7 +404,7 @@ fn smooth_generators(
 
         for &neigh in chunks.remainder() {
             let r = get_radius(points[neigh]);
-            let w = 1.0 / r.max(1e-6);
+            let w = 1.0 / r.max(smoothing_denom_eps);
 
             sum_x += points[neigh].x * w;
             sum_y += points[neigh].y * w;
@@ -487,6 +483,7 @@ fn compute_triangulation(
     domain_size: Vector2<f64>,
     fixed_nodes: &[bool],
     geo: &(impl Geometry + Sync),
+    tol: &MeshgenTolerances,
 ) -> Vec<Triangle> {
     let n_points = points.len();
     let mut dt = DelaunayTriangulation::new(n_points * 3);
@@ -510,6 +507,8 @@ fn compute_triangulation(
     dt.add_triangle(t_super);
 
     let mut last_tri_idx = 0;
+    let cross_eps = tol.cross_eps;
+    let circumcircle_eps = tol.circumcircle_eps;
 
     for (i, &p) in points.iter().enumerate() {
         let mut curr = last_tri_idx;
@@ -544,19 +543,19 @@ fn compute_triangulation(
                 (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
             };
 
-            if cross(p_a, p_b, p) < -1e-10 {
+            if cross(p_a, p_b, p) < -cross_eps {
                 if let Some(n) = t.neighbors[0] {
                     curr = n;
                     continue;
                 }
             }
-            if cross(p_b, p_c, p) < -1e-10 {
+            if cross(p_b, p_c, p) < -cross_eps {
                 if let Some(n) = t.neighbors[1] {
                     curr = n;
                     continue;
                 }
             }
-            if cross(p_c, p_a, p) < -1e-10 {
+            if cross(p_c, p_a, p) < -cross_eps {
                 if let Some(n) = t.neighbors[2] {
                     curr = n;
                     continue;
@@ -571,14 +570,14 @@ fn compute_triangulation(
         let mut queue = Vec::new();
         let mut visited = HashSet::new();
 
-        if dt.triangles[start_bad].in_circumcircle(p, &working_points) {
+        if dt.triangles[start_bad].in_circumcircle(p, &working_points, circumcircle_eps) {
             queue.push(start_bad);
             visited.insert(start_bad);
         }
 
         while let Some(t_idx) = queue.pop() {
             let t = dt.triangles[t_idx];
-            if t.in_circumcircle(p, &working_points) {
+            if t.in_circumcircle(p, &working_points, circumcircle_eps) {
                 bad_triangles.push(t_idx);
                 for &n_opt in &t.neighbors {
                     if let Some(n) = n_opt {
@@ -641,7 +640,7 @@ fn compute_triangulation(
             } else if t.v3 == u && t.v1 == v {
                 t.neighbors[2] = neighbor;
             }
-            // Handle swapped cases if any (though u,v should match edge direction)
+            // Handle swapped cases
             else if t.v1 == v && t.v2 == u {
                 t.neighbors[0] = neighbor;
             } else if t.v2 == v && t.v3 == u {
@@ -736,6 +735,8 @@ pub fn generate_delaunay_mesh(
     growth_rate: f64,
     domain_size: Vector2<f64>,
 ) -> Mesh {
+    let tol = MeshgenTolerances::from_geometry(min_cell_size, domain_size);
+
     let mut mesh = Mesh::new();
     mesh.cell_face_offsets.push(0);
     mesh.cell_vertex_offsets.push(0);
@@ -749,7 +750,6 @@ pub fn generate_delaunay_mesh(
     mesh.v_fixed = fixed_nodes;
 
     // Build faces and cells
-    // Map edge -> face_index
     let mut edge_face_map: HashMap<Edge, usize> = HashMap::new();
 
     for t in triangles {
@@ -791,20 +791,9 @@ pub fn generate_delaunay_mesh(
                 mesh.face_owner.push(cell_idx);
                 mesh.face_neighbor.push(None);
 
-                // Determine boundary
-                // If edge vertices are both fixed, it MIGHT be a boundary face.
-                // But internal edges can also connect fixed vertices (e.g. corner to corner).
-                // Better check: is the face center on boundary?
                 let is_boundary = mesh.v_fixed[edge.v1] && mesh.v_fixed[edge.v2];
                 let boundary_type = if is_boundary {
-                    // Check position
-                    if f_center.x < 1e-6 {
-                        Some(BoundaryType::Inlet)
-                    } else if (f_center.x - domain_size.x).abs() < 1e-6 {
-                        Some(BoundaryType::Outlet)
-                    } else {
-                        Some(BoundaryType::Wall)
-                    }
+                    tol.classify_boundary(f_center.x, f_center.y, domain_size.x, domain_size.y)
                 } else {
                     None
                 };
@@ -831,7 +820,6 @@ pub fn generate_delaunay_mesh(
     }
 
     // Fix normals (must point from owner to neighbor)
-    // And handle single-neighbor faces (boundary)
     for i in 0..mesh.face_cx.len() {
         let owner = mesh.face_owner[i];
         let c_owner = Point2::new(mesh.cell_cx[owner], mesh.cell_cy[owner]);

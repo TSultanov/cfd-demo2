@@ -1,7 +1,8 @@
 use super::geometry::Geometry;
 use super::meshgen_utils::{compute_normal, intersect_lines};
 use super::quadtree::{collect_leaves, refine_node, QuadNode};
-use crate::solver::mesh::{BoundaryType, Mesh};
+use super::tolerances::MeshgenTolerances;
+use crate::solver::mesh::Mesh;
 use ahash::AHashMap;
 use nalgebra::{Point2, Vector2};
 use std::time::Instant;
@@ -15,6 +16,7 @@ pub fn generate_cut_cell_mesh(
     domain_size: Vector2<f64>,
 ) -> Mesh {
     let start_total = Instant::now();
+    let tol = MeshgenTolerances::from_geometry(min_cell_size, domain_size);
 
     // --- State for connected graph generation ---
     let mut vx: Vec<f64> = Vec::new();
@@ -23,11 +25,9 @@ pub fn generate_cut_cell_mesh(
     let mut vertex_map: AHashMap<(i64, i64), usize> = AHashMap::new();
     let mut cells: Vec<Vec<usize>> = Vec::new();
 
-    let quantize = |v: f64| (v * 100000.0).round() as i64;
-
     // Helper to add/find vertex
     let mut add_vertex = |p: Point2<f64>, fixed: bool| -> usize {
-        let key = (quantize(p.x), quantize(p.y));
+        let key = tol.quantize_point(p.x, p.y);
         if let Some(&idx) = vertex_map.get(&key) {
             if fixed && !v_fixed[idx] {
                 v_fixed[idx] = true;
@@ -75,7 +75,7 @@ pub fn generate_cut_cell_mesh(
                 let d11 = geo.sdf(&p11);
                 let d01 = geo.sdf(&p01);
 
-                let sdf_tol = 1e-9;
+                let sdf_tol = tol.sdf_root_eps;
                 let all_outside =
                     d00 >= -sdf_tol && d10 >= -sdf_tol && d11 >= -sdf_tol && d01 >= -sdf_tol;
 
@@ -123,7 +123,7 @@ pub fn generate_cut_cell_mesh(
                                 let p_inter = p_curr + (p_next - p_curr) * t;
                                 let d_inter = geo.sdf(&p_inter);
 
-                                if d_inter.abs() < 1e-12 {
+                                if d_inter.abs() < tol.determinant_eps {
                                     break;
                                 }
 
@@ -159,17 +159,19 @@ pub fn generate_cut_cell_mesh(
                         reconstructed_poly.push((p_curr, is_inter_curr));
 
                         if is_inter_curr && is_inter_next {
-                            let n1 = compute_normal(geo, p_curr);
-                            let n2 = compute_normal(geo, p_next);
+                            let n1 = compute_normal(geo, p_curr, &tol);
+                            let n2 = compute_normal(geo, p_next, &tol);
 
                             if n1.dot(&n2) < 0.7 {
-                                if let Some(p_corner) = intersect_lines(p_curr, n1, p_next, n2) {
-                                    let tol = 1e-5;
+                                if let Some(p_corner) =
+                                    intersect_lines(p_curr, n1, p_next, n2, &tol)
+                                {
+                                    let corner_tol = 1e-5;
                                     if geo.sdf(&p_corner).abs() <= 1e-4 {
-                                        if p_corner.x >= min.x - tol
-                                            && p_corner.x <= max.x + tol
-                                            && p_corner.y >= min.y - tol
-                                            && p_corner.y <= max.y + tol
+                                        if p_corner.x >= min.x - corner_tol
+                                            && p_corner.x <= max.x + corner_tol
+                                            && p_corner.y >= min.y - corner_tol
+                                            && p_corner.y <= max.y + corner_tol
                                         {
                                             reconstructed_poly.push((p_corner, true));
                                         }
@@ -242,6 +244,10 @@ pub fn generate_cut_cell_mesh(
         }
     }
 
+    // Precompute SIMD tolerance values from MeshgenTolerances
+    let point_coincidence_sq_val = tol.point_coincidence_sq;
+    let t_eps_val = tol.t_eps;
+
     // 6. Process cells
     for cell in cells.iter_mut() {
         let mut new_cell = Vec::new();
@@ -259,7 +265,7 @@ pub fn generate_cut_cell_mesh(
             let seg_vec = p_next - p_curr;
             let seg_len_sq = seg_vec.norm_squared();
 
-            if seg_len_sq < 1e-12 {
+            if seg_len_sq < tol.segment_degenerate_sq {
                 continue;
             }
 
@@ -273,9 +279,9 @@ pub fn generate_cut_cell_mesh(
             let seg_vec_x = f64x4::splat(seg_vec.x);
             let seg_vec_y = f64x4::splat(seg_vec.y);
             let seg_len_sq_simd = f64x4::splat(seg_len_sq);
-            let epsilon = f64x4::splat(1e-10);
-            let t_min = f64x4::splat(1e-6);
-            let t_max = f64x4::splat(1.0 - 1e-6);
+            let epsilon = f64x4::splat(point_coincidence_sq_val);
+            let t_min = f64x4::splat(t_eps_val);
+            let t_max = f64x4::splat(1.0 - t_eps_val);
 
             let min_x = p_curr.x.min(p_next.x);
             let max_x = p_curr.x.max(p_next.x);
@@ -361,16 +367,16 @@ pub fn generate_cut_cell_mesh(
                         let d_curr = (v - p_curr).norm_squared();
                         let d_next = (v - p_next).norm_squared();
 
-                        if d_curr < 1e-10 || d_next < 1e-10 {
+                        if d_curr < point_coincidence_sq_val || d_next < point_coincidence_sq_val {
                             continue;
                         }
 
                         let v_vec = v - p_curr;
                         let t = v_vec.dot(&seg_vec) / seg_len_sq;
 
-                        if t > 1e-6 && t < 1.0 - 1e-6 {
+                        if t > t_eps_val && t < 1.0 - t_eps_val {
                             let proj = p_curr + seg_vec * t;
-                            if (v - proj).norm_squared() < 1e-10 {
+                            if (v - proj).norm_squared() < point_coincidence_sq_val {
                                 on_segment.push((t, indices[j]));
                             }
                         }
@@ -419,7 +425,7 @@ pub fn generate_cut_cell_mesh(
         }
         area *= 0.5;
 
-        if area.abs() < 1e-9 {
+        if area.abs() < tol.area_eps {
             continue;
         }
 
@@ -439,7 +445,7 @@ pub fn generate_cut_cell_mesh(
             let edge_vec = p2 - p1;
             let edge_len = edge_vec.norm();
 
-            if edge_len < 1e-9 {
+            if edge_len < tol.edge_len_eps {
                 continue;
             }
 
@@ -454,13 +460,8 @@ pub fn generate_cut_cell_mesh(
                 let face_center = Point2::from((p1.coords + p2.coords) * 0.5);
                 let normal = Vector2::new(edge_vec.y, -edge_vec.x).normalize();
 
-                let boundary_type = if face_center.x < 1e-6 {
-                    Some(BoundaryType::Inlet)
-                } else if (face_center.x - domain_size.x).abs() < 1e-6 {
-                    Some(BoundaryType::Outlet)
-                } else {
-                    Some(BoundaryType::Wall)
-                };
+                let boundary_type =
+                    tol.classify_boundary(face_center.x, face_center.y, domain_size.x, domain_size.y);
 
                 let face_idx = mesh.face_cx.len();
                 mesh.face_v1.push(v1);

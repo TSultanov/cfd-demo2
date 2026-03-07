@@ -340,7 +340,7 @@ fn low_mach_equivalence_vortex_street() {
 
     let mut incomp = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        incompressible_momentum_model(),
+        incompressible_momentum_model().expect(\"model\"),
         SolverConfig {
             advection_scheme: Scheme::QUICK,
             time_scheme: TimeScheme::Euler,
@@ -397,7 +397,7 @@ fn low_mach_equivalence_vortex_street() {
 
     let mut comp = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model(),
+        compressible_model().expect(\"model\"),
         SolverConfig {
             advection_scheme: Scheme::QUICK,
             time_scheme: TimeScheme::BDF2,

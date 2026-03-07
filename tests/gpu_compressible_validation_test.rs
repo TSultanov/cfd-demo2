@@ -50,7 +50,7 @@ fn compressible_shock_tube_relaxes_discontinuity() {
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model(),
+        compressible_model().expect(\"model\"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::BDF2,
@@ -137,7 +137,7 @@ fn compressible_acoustic_pulse_propagates() {
     let p_initial = p.clone();
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model(),
+        compressible_model().expect(\"model\"),
         SolverConfig {
             advection_scheme: Scheme::QUICK,
             time_scheme: TimeScheme::BDF2,

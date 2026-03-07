@@ -624,7 +624,7 @@ fn main() {
     let schemes = model::backend::SchemeRegistry::new(Scheme::Upwind);
     let mut coverages = Vec::new();
 
-    for spec in model::all_models() {
+    for spec in model::all_models().expect("failed to build model definitions") {
         let coverage = collect_model_coverage(&spec, &schemes).unwrap_or_else(|err| {
             eprintln!(
                 "Failed to collect fusion coverage for model '{}': {err}",

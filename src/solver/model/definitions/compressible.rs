@@ -226,7 +226,7 @@ pub fn compressible_system() -> EquationSystem {
     build_compressible_system(&fields)
 }
 
-pub fn compressible_model() -> ModelSpec {
+pub fn compressible_model() -> Result<ModelSpec, String> {
     compressible_model_with_eos(crate::solver::model::eos::EosSpec::IdealGas {
         gamma: 1.4,
         // Default to nondimensional theta_ref=1 (p=rho*R*T with rho=1 -> p=1).
@@ -235,7 +235,7 @@ pub fn compressible_model() -> ModelSpec {
     })
 }
 
-pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> ModelSpec {
+pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> Result<ModelSpec, String> {
     let fields = CompressibleFields::new();
     let system = build_compressible_system(&fields);
     // Flux module reconstruction uses gradient fields in the state layout when enabled.
@@ -477,9 +477,9 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
         &layout_for_flux,
         &primitives,
     )
-    .expect("failed to build flux_module module");
+    .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
-    ModelSpec {
+    Ok(ModelSpec {
         id: "compressible",
         // Route compressible through the generic coupled pipeline.
         system,
@@ -505,5 +505,5 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> M
         // Use global defaults.
         linear_solver: None,
         primitives,
-    }
+    })
 }

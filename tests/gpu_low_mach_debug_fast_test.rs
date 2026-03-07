@@ -113,7 +113,7 @@ fn low_mach_debug_fast() {
 
     let mut comp = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model(),
+        compressible_model().expect(\"model\"),
         SolverConfig {
             advection_scheme: Scheme::QUICK,
             time_scheme: TimeScheme::BDF2,

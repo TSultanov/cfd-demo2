@@ -1230,7 +1230,7 @@ mod tests {
 
     #[test]
     fn contract_rhie_chow_fused_kernel_is_synthesized_from_dsl_inputs() {
-        let model = crate::solver::model::incompressible_momentum_model();
+        let model = crate::solver::model::incompressible_momentum_model().expect("model");
         let rhie_chow_module = model
             .modules
             .iter()
@@ -1377,7 +1377,7 @@ mod tests {
 
     #[test]
     fn contract_rhie_chow_dp_init_and_correct_velocity_delta_are_dsl_artifacts() {
-        let model = crate::solver::model::incompressible_momentum_model();
+        let model = crate::solver::model::incompressible_momentum_model().expect("model");
         let rhie_chow_module = model
             .modules
             .iter()
@@ -1406,7 +1406,7 @@ mod tests {
 
     #[test]
     fn contract_rhie_chow_local_symbols_are_derived_from_dsl_statements() {
-        let model = crate::solver::model::incompressible_momentum_model();
+        let model = crate::solver::model::incompressible_momentum_model().expect("model");
         let rhie_chow_module = model
             .modules
             .iter()
@@ -1630,7 +1630,7 @@ mod tests {
     #[test]
     fn aggressive_fusion_rules_have_accurate_hazard_whitelists() {
         use crate::solver::model::kernel::*;
-        let model = crate::solver::model::incompressible_momentum_model();
+        let model = crate::solver::model::incompressible_momentum_model().expect("model");
         let schemes = crate::solver::ir::SchemeRegistry::default();
         let rules = derive_kernel_fusion_rules_for_model(&model);
 

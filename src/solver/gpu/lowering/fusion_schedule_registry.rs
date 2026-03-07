@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn compile_time_schedule_exists_for_all_registered_models_and_contexts() {
-        let models = crate::solver::model::all_models();
+        let models = crate::solver::model::all_models().expect("failed to build model definitions");
         let steppings = [
             SteppingMode::Explicit,
             SteppingMode::Implicit { outer_iters: 1 },
@@ -273,7 +273,7 @@ mod tests {
     /// kernels (e.g., `generic_coupled_apply`) for all models.
     #[test]
     fn explicit_stepping_schedule_excludes_implicit_only_kernels() {
-        let models = crate::solver::model::all_models();
+        let models = crate::solver::model::all_models().expect("failed to build model definitions");
         let policies = [
             KernelFusionPolicy::Off,
             KernelFusionPolicy::Safe,

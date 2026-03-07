@@ -99,9 +99,9 @@ fn load_trace(path: &str) -> Result<LoadedTrace, String> {
 
 fn build_model(case: &tracefmt::TraceCase) -> Result<cfd2::solver::model::ModelSpec, String> {
     if case.model_id == "compressible" {
-        return Ok(compressible_model_with_eos(case.fluid.eos.into()));
+        return compressible_model_with_eos(case.fluid.eos.into());
     }
-    all_models()
+    all_models().expect("failed to build model definitions")
         .into_iter()
         .find(|m| m.id == case.model_id)
         .ok_or_else(|| format!("unknown model id '{}'", case.model_id))
@@ -650,9 +650,9 @@ fn cmd_init(opts: InitOpts) -> Result<(), String> {
             gamma: 1.4,
             gas_constant: 287.0,
             temperature: 300.0,
-        })
+        })?
     } else {
-        all_models()
+        all_models().expect("failed to build model definitions")
             .into_iter()
             .find(|m| m.id == opts.model_id)
             .ok_or_else(|| format!("unknown model id '{}'", opts.model_id))?

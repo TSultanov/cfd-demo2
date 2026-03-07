@@ -57,7 +57,7 @@ mod tests {
 
     #[test]
     fn generic_coupled_named_params_include_linear_solver_tuning_keys() {
-        let model = crate::solver::model::generic_diffusion_demo_model();
+        let model = crate::solver::model::generic_diffusion_demo_model().expect("model");
         let params = named_params_for_model(&model).expect("named params");
 
         for key in [
@@ -78,7 +78,7 @@ mod tests {
     fn named_params_include_eos_keys_via_port_manifest() {
         // Regression test: EOS uniform params are declared via port_manifest,
         // not named_params. Ensure they are still discoverable.
-        let model = crate::solver::model::compressible_model();
+        let model = crate::solver::model::compressible_model().expect("model");
         let params = named_params_for_model(&model).expect("named params");
 
         // These keys come from eos.port_manifest, not eos.named_params
@@ -106,7 +106,7 @@ mod tests {
     fn named_params_include_generic_coupled_keys_via_port_manifest() {
         // Regression test: generic_coupled uniform params are declared via port_manifest,
         // not named_params. Ensure they are still discoverable.
-        let model = crate::solver::model::generic_diffusion_demo_model();
+        let model = crate::solver::model::generic_diffusion_demo_model().expect("model");
         let params = named_params_for_model(&model).expect("named params");
 
         // These keys come from generic_coupled.port_manifest
@@ -146,7 +146,7 @@ mod tests {
     fn named_params_include_generic_coupled_relaxation_keys_when_enabled() {
         // Test that alpha_u/alpha_p are present when relaxation is enabled
         // (compressible model has apply_relaxation_in_update = true)
-        let model = crate::solver::model::compressible_model();
+        let model = crate::solver::model::compressible_model().expect("model");
         let params = named_params_for_model(&model).expect("named params");
 
         // Relaxation params should be present for compressible model

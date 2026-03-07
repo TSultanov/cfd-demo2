@@ -32,7 +32,7 @@ async fn run_coupled_solver(
     // Initialize Solver
     let mut solver = UnifiedSolver::new(
         &mesh,
-        incompressible_momentum_model(),
+        incompressible_momentum_model().expect(\"model\"),
         SolverConfig {
             advection_scheme: scheme,
             time_scheme,

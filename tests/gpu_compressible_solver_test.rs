@@ -34,7 +34,7 @@ fn gpu_compressible_solver_preserves_uniform_state() {
     };
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model(),
+        compressible_model().expect(\"model\"),
         config,
         None,
         None,

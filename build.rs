@@ -257,7 +257,8 @@ fn main() {
 
     let schemes = solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
 
-    let models = solver::model::all_models();
+    let models = solver::model::all_models()
+        .expect("failed to build model definitions");
 
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let model_codegen_fingerprint = fingerprint_files(&model_codegen_inputs);

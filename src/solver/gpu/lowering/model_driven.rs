@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn model_owned_schur_allows_preconditioner_config() {
-        let model = incompressible_momentum_model();
+        let model = incompressible_momentum_model().expect("model");
         assert!(matches!(
             model.linear_solver.unwrap().preconditioner,
             ModelPreconditionerSpec::Schur { .. }

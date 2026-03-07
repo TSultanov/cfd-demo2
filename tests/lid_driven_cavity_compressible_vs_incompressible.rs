@@ -44,7 +44,7 @@ fn lid_driven_cavity_compressible_vs_incompressible() {
 
     let mut solver_inc = pollster::block_on(UnifiedSolver::new(
         &mesh_inc,
-        incompressible_momentum_model(),
+        incompressible_momentum_model().expect(\"model\"),
         SolverConfig {
             advection_scheme: Scheme::SecondOrderUpwind,
             time_scheme: TimeScheme::BDF2,
@@ -93,7 +93,7 @@ fn lid_driven_cavity_compressible_vs_incompressible() {
 
     let mut solver_comp = pollster::block_on(UnifiedSolver::new(
         &mesh_comp,
-        compressible_model_with_eos(eos),
+        compressible_model_with_eos(eos).expect("model"),
         SolverConfig {
             advection_scheme: Scheme::SecondOrderUpwindVanLeer,
             time_scheme: TimeScheme::BDF2,

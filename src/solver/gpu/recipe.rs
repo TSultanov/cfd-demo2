@@ -691,7 +691,7 @@ mod tests {
         };
         use crate::solver::model::{ModelLinearSolverSpec, ModelPreconditionerSpec};
 
-        let mut model = generic_diffusion_demo_model();
+        let mut model = generic_diffusion_demo_model().expect("model");
         model.linear_solver = Some(ModelLinearSolverSpec {
             preconditioner: ModelPreconditionerSpec::Default,
             solver: ModelLinearSolverSettings {
@@ -738,7 +738,7 @@ mod tests {
     fn recipe_rejects_schur_preconditioning_without_fgmres_solver_type() {
         use crate::solver::model::linear_solver::ModelLinearSolverType;
 
-        let mut model = incompressible_momentum_model();
+        let mut model = incompressible_momentum_model().expect("model");
         let mut spec = model.linear_solver.expect("missing linear_solver spec");
         spec.solver.solver_type = ModelLinearSolverType::Cg;
         model.linear_solver = Some(spec);
@@ -759,7 +759,7 @@ mod tests {
 
     #[test]
     fn implicit_recipe_includes_apply_kernel_via_module_composition() {
-        let model = generic_diffusion_demo_model();
+        let model = generic_diffusion_demo_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,
@@ -780,7 +780,7 @@ mod tests {
 
     #[test]
     fn test_recipe_from_generic_diffusion_model() {
-        let model = generic_diffusion_demo_model();
+        let model = generic_diffusion_demo_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,
@@ -815,7 +815,7 @@ mod tests {
 
     #[test]
     fn recipe_selects_packed_gradients_and_assembly_variant_from_scheme() {
-        let model = compressible_model();
+        let model = compressible_model().expect("model");
 
         let upwind = SolverRecipe::from_model(
             &model,
@@ -892,7 +892,7 @@ mod tests {
 
     #[test]
     fn test_build_program_spec_for_coupled() {
-        let model = generic_diffusion_demo_model();
+        let model = generic_diffusion_demo_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,
@@ -913,7 +913,7 @@ mod tests {
 
     #[test]
     fn test_build_program_spec_for_compressible_emits_implicit_outer_loop() {
-        let model = compressible_model();
+        let model = compressible_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,
@@ -938,7 +938,7 @@ mod tests {
 
     #[test]
     fn test_build_program_spec_for_incompressible_emits_outer_loop() {
-        let model = incompressible_momentum_model();
+        let model = incompressible_momentum_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,
@@ -978,7 +978,7 @@ mod tests {
 
     #[test]
     fn test_recipe_for_incompressible_includes_flux_and_generic_assembly() {
-        let model = incompressible_momentum_model();
+        let model = incompressible_momentum_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,
@@ -1006,7 +1006,7 @@ mod tests {
 
     #[test]
     fn recipe_applies_rhie_chow_fusion_rule_for_coupled() {
-        let model = incompressible_momentum_model();
+        let model = incompressible_momentum_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,
@@ -1038,7 +1038,7 @@ mod tests {
 
     #[test]
     fn recipe_does_not_apply_rhie_chow_fusion_when_policy_off() {
-        let mut model = incompressible_momentum_model();
+        let mut model = incompressible_momentum_model().expect("model");
         let mut linear_solver = model.linear_solver.expect("missing linear_solver spec");
         linear_solver.solver.kernel_fusion_policy = KernelFusionPolicy::Off;
         model.linear_solver = Some(linear_solver);
@@ -1076,14 +1076,14 @@ mod tests {
 
     #[test]
     fn recipe_aggressive_applies_extended_rhie_chow_fusion_rule() {
-        let mut safe_model = incompressible_momentum_model();
+        let mut safe_model = incompressible_momentum_model().expect("model");
         let mut safe_solver = safe_model
             .linear_solver
             .expect("missing linear_solver for safe model");
         safe_solver.solver.kernel_fusion_policy = KernelFusionPolicy::Safe;
         safe_model.linear_solver = Some(safe_solver);
 
-        let mut aggressive_model = incompressible_momentum_model();
+        let mut aggressive_model = incompressible_momentum_model().expect("model");
         let mut aggressive_solver = aggressive_model
             .linear_solver
             .expect("missing linear_solver for aggressive model");
@@ -1162,21 +1162,21 @@ mod tests {
     fn recipe_standalone_grad_p_update_correct_velocity_delta_fusion_is_aggressive_only() {
         // Test that the standalone grad_p_update + correct_velocity_delta fusion rule
         // is only applied under Aggressive policy, not Safe or Off.
-        let mut off_model = incompressible_momentum_model();
+        let mut off_model = incompressible_momentum_model().expect("model");
         let mut off_solver = off_model
             .linear_solver
             .expect("missing linear_solver for off model");
         off_solver.solver.kernel_fusion_policy = KernelFusionPolicy::Off;
         off_model.linear_solver = Some(off_solver);
 
-        let mut safe_model = incompressible_momentum_model();
+        let mut safe_model = incompressible_momentum_model().expect("model");
         let mut safe_solver = safe_model
             .linear_solver
             .expect("missing linear_solver for safe model");
         safe_solver.solver.kernel_fusion_policy = KernelFusionPolicy::Safe;
         safe_model.linear_solver = Some(safe_solver);
 
-        let mut aggressive_model = incompressible_momentum_model();
+        let mut aggressive_model = incompressible_momentum_model().expect("model");
         let mut aggressive_solver = aggressive_model
             .linear_solver
             .expect("missing linear_solver for aggressive model");
@@ -1237,7 +1237,7 @@ mod tests {
 
     #[test]
     fn recipe_errors_when_compile_time_schedule_is_missing() {
-        let mut model = generic_diffusion_demo_model();
+        let mut model = generic_diffusion_demo_model().expect("model");
         model.id = "generic_diffusion_demo_unregistered";
 
         let err = SolverRecipe::from_model(
@@ -1257,7 +1257,7 @@ mod tests {
 
     #[test]
     fn recipe_derives_initial_constants_from_eos_module() {
-        let model = compressible_model();
+        let model = compressible_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::QUICK,
@@ -1284,7 +1284,7 @@ mod tests {
     #[test]
     fn recipe_populates_port_registry_from_eos_manifest() {
         // Regression test: ensure PortRegistry is populated at runtime from module manifests
-        let model = compressible_model();
+        let model = compressible_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,
@@ -1320,7 +1320,7 @@ mod tests {
     #[test]
     fn recipe_populates_port_registry_from_generic_coupled_manifest() {
         // Regression test: ensure generic_coupled port manifest is registered at runtime
-        let model = generic_diffusion_demo_model();
+        let model = generic_diffusion_demo_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,
@@ -1372,7 +1372,7 @@ mod tests {
     fn recipe_populates_relaxation_params_when_enabled() {
         // Test that alpha_u/alpha_p are registered when relaxation is enabled
         // (compressible model has apply_relaxation_in_update = true)
-        let model = compressible_model();
+        let model = compressible_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,

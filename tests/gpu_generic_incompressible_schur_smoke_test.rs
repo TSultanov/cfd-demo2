@@ -23,7 +23,7 @@ fn gpu_incompressible_schur_smoke() {
         },
     );
 
-    let model = incompressible_momentum_model();
+    let model = incompressible_momentum_model().expect(\"model\");
     assert!(matches!(
         model
             .linear_solver

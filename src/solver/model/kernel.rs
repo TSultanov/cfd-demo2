@@ -765,7 +765,8 @@ pub fn emit_shared_kernels_wgsl_with_ids(
 ) -> std::io::Result<Vec<(KernelId, std::path::PathBuf)>> {
     emit_shared_kernels_wgsl_with_ids_for_models(
         base_dir,
-        &crate::solver::model::all_models(),
+        &crate::solver::model::all_models()
+            .expect("failed to build model definitions"),
         &crate::solver::ir::SchemeRegistry::default(),
     )
 }
@@ -1077,7 +1078,7 @@ mod contract_tests {
             ..Default::default()
         };
 
-        let mut model = crate::solver::model::generic_diffusion_demo_model();
+        let mut model = crate::solver::model::generic_diffusion_demo_model().expect("model");
         model.modules.push(module);
 
         let specs = derive_kernel_specs_for_model(&model).expect("failed to derive kernel specs");
@@ -1130,7 +1131,7 @@ mod contract_tests {
             ..Default::default()
         };
 
-        let mut model = crate::solver::model::generic_diffusion_demo_model();
+        let mut model = crate::solver::model::generic_diffusion_demo_model().expect("model");
         model.modules.push(module);
 
         let replacement_ids = derive_fusion_replacement_kernel_ids_for_model(&model);
@@ -1189,7 +1190,7 @@ mod contract_tests {
             ..Default::default()
         };
 
-        let mut model = crate::solver::model::generic_diffusion_demo_model();
+        let mut model = crate::solver::model::generic_diffusion_demo_model().expect("model");
         model.modules.push(module);
         let schemes = crate::solver::ir::SchemeRegistry::default();
 
@@ -1280,7 +1281,7 @@ mod contract_tests {
             ..Default::default()
         };
 
-        let mut model = crate::solver::model::generic_diffusion_demo_model();
+        let mut model = crate::solver::model::generic_diffusion_demo_model().expect("model");
         model.modules.push(module);
         let schemes = crate::solver::ir::SchemeRegistry::default();
 
@@ -1560,7 +1561,7 @@ mod tests {
     #[test]
     fn generic_coupled_kernels_are_dsl_artifacts() {
         let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
-        let model = crate::solver::model::compressible_model();
+        let model = crate::solver::model::compressible_model().expect("model");
 
         for kernel_id in [
             KernelId::GENERIC_COUPLED_ASSEMBLY,
@@ -1587,7 +1588,7 @@ mod tests {
         // in WGSL (even though shipped defaults remain Upwind).
         let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
 
-        let model = crate::solver::model::compressible_model();
+        let model = crate::solver::model::compressible_model().expect("model");
         let wgsl = generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE)
             .expect("failed to generate flux_module WGSL");
 
@@ -1626,7 +1627,7 @@ mod tests {
         // the limited reconstruction paths in WGSL (even though shipped defaults remain Upwind).
         let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
 
-        let model = crate::solver::model::incompressible_momentum_model();
+        let model = crate::solver::model::incompressible_momentum_model().expect("model");
         let wgsl = generate_kernel_wgsl_for_model_by_id(
             &model,
             &schemes,
@@ -1676,7 +1677,7 @@ mod tests {
         // and cannot silently degrade back to unlimited reconstruction.
         let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
 
-        let model = crate::solver::model::incompressible_momentum_model();
+        let model = crate::solver::model::incompressible_momentum_model().expect("model");
         let wgsl = generate_kernel_wgsl_for_model_by_id(
             &model,
             &schemes,
@@ -1716,7 +1717,7 @@ mod tests {
     #[test]
     fn contract_unified_assembly_variants_have_distinct_grad_state_bindings() {
         let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
-        let model = crate::solver::model::incompressible_momentum_model();
+        let model = crate::solver::model::incompressible_momentum_model().expect("model");
 
         let no_grad = generate_kernel_wgsl_for_model_by_id(
             &model,

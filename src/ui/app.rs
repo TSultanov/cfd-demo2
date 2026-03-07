@@ -587,7 +587,7 @@ impl CFDApp {
 
     fn supported_ui_models() -> Vec<(&'static str, &'static str)> {
         let mut out = Vec::new();
-        for model in all_models() {
+        for model in all_models().expect("failed to build model definitions") {
             // Use UiPortSet to check for required fields (validates types too)
             let ui_ports = UiPortSet::from_layout(&model.state_layout);
             if !ui_ports.is_complete() {
@@ -601,9 +601,9 @@ impl CFDApp {
 
     fn build_selected_model(&self) -> Result<ModelSpec, String> {
         if self.model_id == "compressible" {
-            return Ok(compressible_model_with_eos(self.current_fluid.eos));
+            return compressible_model_with_eos(self.current_fluid.eos);
         }
-        all_models()
+        all_models()?
             .into_iter()
             .find(|m| m.id == self.model_id)
             .ok_or_else(|| format!("unknown model id '{}'", self.model_id))
@@ -615,7 +615,7 @@ impl CFDApp {
             Err(_) => {
                 self.model_id = "incompressible_momentum";
                 self.build_selected_model()
-                    .expect("default UI model must exist")
+                    .expect("default UI model 'incompressible_momentum' must exist")
             }
         };
 
@@ -940,7 +940,10 @@ impl CFDApp {
         self.init_rx = None;
         self.init_in_flight = None;
 
-        let request = self.pending_init_request.take().unwrap();
+        let request = match self.pending_init_request.take() {
+            Some(r) => r,
+            None => return, // should be unreachable due to guard above
+        };
         self.init_in_flight = Some(request.generation);
         let (tx, rx) = mpsc::channel();
         self.init_rx = Some(rx);
@@ -1122,9 +1125,9 @@ impl CFDApp {
         );
 
         let model = if request.model_id == "compressible" {
-            compressible_model_with_eos(request.current_fluid.eos)
+            compressible_model_with_eos(request.current_fluid.eos)?
         } else {
-            all_models()
+            all_models()?
                 .into_iter()
                 .find(|m| m.id == request.model_id)
                 .ok_or_else(|| format!("unknown model id '{}'", request.model_id))?

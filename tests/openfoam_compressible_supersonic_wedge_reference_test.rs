@@ -49,7 +49,7 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
             gamma: 1.4,
             gas_constant: 287.0,
             temperature: 300.0,
-        }),
+        }).expect("model"),
         SolverConfig {
             // OpenFOAM uses vanLeer reconstruction for rho/U/T with the Kurganov flux.
             advection_scheme: Scheme::SecondOrderUpwindVanLeer,

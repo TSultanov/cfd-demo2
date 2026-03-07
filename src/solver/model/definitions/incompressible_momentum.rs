@@ -120,7 +120,7 @@ pub fn incompressible_momentum_system() -> EquationSystem {
     build_incompressible_momentum_system(&fields)
 }
 
-pub fn incompressible_momentum_model() -> ModelSpec {
+pub fn incompressible_momentum_model() -> Result<ModelSpec, String> {
     let fields = IncompressibleMomentumFields::new();
     let system = build_incompressible_momentum_system(&fields);
     let layout = PortRegistry::from_fields(vec![
@@ -131,7 +131,7 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         fields.grad_p_old,
     ]).into_state_layout();
     let flux_kernel = rhie_chow_flux_module_kernel(&system, &layout)
-        .expect("failed to derive Rhie–Chow flux formula from model system/layout");
+        .map_err(|e| format!("failed to derive Rhie–Chow flux formula: {e}"))?;
 
     // Port-based validation and offset resolution (replaces ad-hoc StateLayout lookups)
     let (u0, u1, p) = {
@@ -142,26 +142,26 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         // Validate required fields with clear errors
         registry
             .validate_vector2_field::<Velocity>("incompressible_momentum_model", "U")
-            .expect("state layout validation failed");
+            .map_err(|e| format!("state layout validation failed: {e}"))?;
         registry
             .validate_scalar_field::<Pressure>("incompressible_momentum_model", "p")
-            .expect("state layout validation failed");
+            .map_err(|e| format!("state layout validation failed: {e}"))?;
 
         // Resolve offsets via ports (no StateLayout probing in this function)
         let u_port = registry
             .register_vector2_field::<Velocity>("U")
-            .expect("U field registration failed");
+            .map_err(|e| format!("U field registration failed: {e}"))?;
         let p_port = registry
             .register_scalar_field::<Pressure>("p")
-            .expect("p field registration failed");
+            .map_err(|e| format!("p field registration failed: {e}"))?;
 
         let u0 = u_port
             .component(XY::X.to_usize() as u32)
-            .expect("U component x")
+            .ok_or_else(|| "U component x not found".to_string())?
             .full_offset();
         let u1 = u_port
             .component(XY::Y.to_usize() as u32)
-            .expect("U component y")
+            .ok_or_else(|| "U component y not found".to_string())?
             .full_offset();
         let p = p_port.offset();
         (u0, u1, p)
@@ -259,14 +259,14 @@ pub fn incompressible_momentum_model() -> ModelSpec {
         &layout_for_flux,
         &primitives,
     )
-    .expect("failed to build flux_module module");
+    .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
     // Build rhie_chow module before system is moved into ModelSpec
     let rhie_chow_module =
         crate::solver::model::modules::rhie_chow::rhie_chow_aux_module(&system, "d_p", true, true)
-            .expect("failed to create rhie_chow_aux_module");
+            .map_err(|e| format!("failed to create rhie_chow_aux_module: {e}"))?;
 
-    ModelSpec {
+    Ok(ModelSpec {
         id: "incompressible_momentum",
         system,
         state_layout: layout,
@@ -288,12 +288,12 @@ pub fn incompressible_momentum_model() -> ModelSpec {
                     &[u0, u1],
                     p,
                 )
-                .expect("invalid SchurBlockLayout"),
+                .map_err(|e| format!("invalid SchurBlockLayout: {e}"))?,
             },
             ..Default::default()
         }),
         primitives,
-    }
+    })
 }
 
 #[derive(Debug, Clone)]

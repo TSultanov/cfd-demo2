@@ -2,7 +2,7 @@ use cfd2::solver::model::{compressible_model, incompressible_momentum_model};
 
 #[test]
 fn contract_relaxation_named_params_follow_method_capabilities() {
-    let compressible = compressible_model();
+    let compressible = compressible_model().expect(\"model\");
     let keys = compressible.named_param_keys();
     for key in ["alpha_u", "alpha_p", "nonconverged_relax"] {
         assert!(
@@ -11,7 +11,7 @@ fn contract_relaxation_named_params_follow_method_capabilities() {
         );
     }
 
-    let incompressible = incompressible_momentum_model();
+    let incompressible = incompressible_momentum_model().expect(\"model\");
     let keys = incompressible.named_param_keys();
     for key in ["alpha_u", "alpha_p", "nonconverged_relax"] {
         assert!(

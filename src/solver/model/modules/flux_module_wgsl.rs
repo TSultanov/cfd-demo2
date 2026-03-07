@@ -455,7 +455,7 @@ mod tests {
         use crate::solver::model::incompressible_momentum_model;
         use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
 
-        let model = incompressible_momentum_model();
+        let model = incompressible_momentum_model().expect("model");
         let schemes = SchemeRegistry::default();
         let generated =
             generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE)
@@ -479,7 +479,7 @@ mod tests {
         use crate::solver::model::compressible_model;
         use crate::solver::model::kernel::{generate_kernel_wgsl_for_model_by_id, KernelId};
 
-        let model = compressible_model();
+        let model = compressible_model().expect("model");
         let schemes = SchemeRegistry::default();
         let generated =
             generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE)

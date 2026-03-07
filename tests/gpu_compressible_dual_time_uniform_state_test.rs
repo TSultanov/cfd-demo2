@@ -25,7 +25,7 @@ fn compressible_dual_time_preserves_uniform_state() {
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model(),
+        compressible_model().expect(\"model\"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::Euler,

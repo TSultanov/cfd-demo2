@@ -3550,7 +3550,7 @@ mod tests {
 
     #[test]
     fn schur_rejects_invalid_layout_indices() {
-        let mut model = incompressible_momentum_model();
+        let mut model = incompressible_momentum_model().expect("model");
         let Some(spec) = &mut model.linear_solver else {
             panic!("missing linear_solver spec");
         };
@@ -3701,7 +3701,7 @@ mod tests {
                 top: BoundaryType::Wall,
             },
         );
-        let model = incompressible_momentum_model();
+        let model = incompressible_momentum_model().expect("model");
 
         let mut plan = pollster::block_on(crate::solver::gpu::lowering::lower_program_plan(
             &mesh,

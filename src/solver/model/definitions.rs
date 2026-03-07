@@ -596,13 +596,13 @@ pub use incompressible_momentum::{
 /// Build-time model registry.
 ///
 /// This is the single list `build.rs` iterates for WGSL emission and registry generation.
-pub fn all_models() -> Vec<ModelSpec> {
-    vec![
-        incompressible_momentum_model(),
-        compressible_model(),
-        generic_diffusion_demo_model(),
-        generic_diffusion_demo_neumann_model(),
-    ]
+pub fn all_models() -> Result<Vec<ModelSpec>, String> {
+    Ok(vec![
+        incompressible_momentum_model()?,
+        compressible_model()?,
+        generic_diffusion_demo_model()?,
+        generic_diffusion_demo_neumann_model()?,
+    ])
 }
 
 #[cfg(test)]
@@ -646,7 +646,7 @@ mod tests {
 
     #[test]
     fn incompressible_momentum_model_includes_state_layout() {
-        let model = incompressible_momentum_model();
+        let model = incompressible_momentum_model().expect("model");
         assert_eq!(model.state_layout.offset_for("U"), Some(0));
         assert_eq!(model.state_layout.offset_for("p"), Some(2));
         assert_eq!(model.state_layout.stride(), 8);
@@ -664,7 +664,7 @@ mod tests {
 
     #[test]
     fn compressible_model_routes_through_generic_coupled_pipeline() {
-        let model = compressible_model();
+        let model = compressible_model().expect("model");
         assert_eq!(model.system.equations().len(), 6);
         assert_eq!(model.system.equations()[0].target().name(), "rho");
         assert_eq!(model.system.equations()[1].target().name(), "rho_u");
@@ -697,7 +697,7 @@ mod tests {
         use crate::solver::model::flux_module::{FluxModuleGradientsSpec, FluxSchemeSpec};
         use crate::solver::model::modules::flux_module::flux_module_module;
 
-        let mut model = compressible_model();
+        let mut model = compressible_model().expect("model");
 
         // Add an invalid grad_* field: wrong shape (scalar instead of Vector2).
         let fields = CompressibleFields::new();
@@ -734,7 +734,7 @@ mod tests {
 
     #[test]
     fn boundary_spec_can_build_gpu_tables() {
-        let model = generic_diffusion_demo_model();
+        let model = generic_diffusion_demo_model().expect("model");
         let (kind, value) = model
             .boundaries
             .to_gpu_tables(&model.system)
@@ -769,7 +769,7 @@ mod tests {
     fn validate_module_manifests_reports_missing_port_manifest_field() {
         use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
 
-        let mut model = incompressible_momentum_model();
+        let mut model = incompressible_momentum_model().expect("model");
 
         // Add a module with a port_manifest referencing a non-existent field
         let bad_module = crate::solver::model::module::KernelBundleModule {
@@ -802,7 +802,7 @@ mod tests {
     fn validate_module_manifests_reports_kind_mismatch() {
         use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
 
-        let mut model = incompressible_momentum_model();
+        let mut model = incompressible_momentum_model().expect("model");
 
         // Add a module expecting 'U' to be a Scalar (but it's Vector2 in the model)
         let bad_module = crate::solver::model::module::KernelBundleModule {

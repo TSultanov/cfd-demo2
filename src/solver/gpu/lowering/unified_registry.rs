@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_build_unified_registry_for_coupled() {
-        let model = generic_diffusion_demo_model();
+        let model = generic_diffusion_demo_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
             Scheme::Upwind,

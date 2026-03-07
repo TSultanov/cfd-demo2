@@ -114,7 +114,7 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model_with_eos(eos),
+        compressible_model_with_eos(eos).expect("model"),
         SolverConfig {
             advection_scheme: Scheme::SecondOrderUpwind,
             time_scheme: TimeScheme::BDF2,

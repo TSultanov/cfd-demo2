@@ -15,7 +15,7 @@ fn low_mach_knob_changes_compressible_implicit_update() {
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model(),
+        compressible_model().expect(\"model\"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::Euler,

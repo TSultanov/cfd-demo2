@@ -478,7 +478,7 @@ fn incompressible_structured_mesh_preserves_rest_state() {
     };
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        incompressible_momentum_model(),
+        incompressible_momentum_model().expect(\"model\"),
         config,
         None,
         None,
@@ -588,7 +588,7 @@ fn compressible_acoustic_pulse_structured_1d_plot() {
             };
             let mut solver = pollster::block_on(UnifiedSolver::new(
                 &mesh,
-                compressible_model(),
+                compressible_model().expect(\"model\"),
                 config,
                 None,
                 None,
@@ -790,7 +790,7 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
 
     let mut incomp = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        incompressible_momentum_model(),
+        incompressible_momentum_model().expect(\"model\"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::BDF2,
@@ -814,7 +814,7 @@ fn low_mach_channel_incompressible_matches_compressible_profiles() {
     let base_pressure = 25.0f32;
     let mut comp = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model(),
+        compressible_model().expect(\"model\"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::BDF2,
@@ -1060,7 +1060,7 @@ fn compressible_sod_shock_tube_structured_1d_plot() {
             };
             let mut solver = pollster::block_on(UnifiedSolver::new(
                 &mesh,
-                compressible_model(),
+                compressible_model().expect(\"model\"),
                 config,
                 None,
                 None,

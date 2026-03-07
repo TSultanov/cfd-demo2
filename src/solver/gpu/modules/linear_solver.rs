@@ -56,6 +56,83 @@ fn one_submission_env_tunables() -> &'static OneSubmissionEnvTunables {
     TUNABLES.get_or_init(OneSubmissionEnvTunables::from_env)
 }
 
+/// Pre-computed FGMRES chunk layout for encoded/one-submission solves.
+struct FgmresChunkLayout {
+    params: RawFgmresParams,
+    chunk_sizes: Vec<usize>,
+}
+
+/// Compute the FGMRES iteration chunk sizes and base params for encoded solves.
+fn compute_fgmres_chunk_layout(
+    n: u32,
+    num_cells: u32,
+    dispatch_x: u32,
+    max_restart: usize,
+    max_iters: u32,
+    capacity: usize,
+) -> FgmresChunkLayout {
+    let max_iters = max_iters.max(1);
+    let restart_len = max_restart.max(1).min(capacity);
+    let tunables = one_submission_env_tunables();
+    let restart_budget = tunables.restart_budget.unwrap_or(restart_len).max(1);
+    let total_iter_budget = tunables
+        .total_iter_budget
+        .unwrap_or(max_iters as usize)
+        .max(1);
+    let iter_restart = restart_len
+        .min(max_iters as usize)
+        .min(restart_budget)
+        .max(1);
+    let total_iters_to_encode = (max_iters as usize).min(total_iter_budget).max(1);
+    let min_tail_chunk = tunables.min_tail_chunk.unwrap_or(1).max(1);
+
+    let params = RawFgmresParams {
+        n,
+        num_cells,
+        num_iters: 0,
+        omega: 1.0,
+        dispatch_x,
+        max_restart: 0,
+        column_offset: 0,
+        _pad3: 0,
+    };
+
+    let mut chunk_sizes: Vec<usize> = {
+        let mut defaults: Vec<usize> = Vec::new();
+        let mut remaining = total_iters_to_encode;
+        while remaining > 0 {
+            let chunk = iter_restart.min(remaining).max(1);
+            defaults.push(chunk);
+            remaining -= chunk;
+        }
+        defaults
+    };
+    if chunk_sizes.len() >= 2 {
+        let last_idx = chunk_sizes.len() - 1;
+        if chunk_sizes[last_idx] < min_tail_chunk {
+            let mut need = min_tail_chunk - chunk_sizes[last_idx];
+            for donor_idx in 0..last_idx {
+                if need == 0 {
+                    break;
+                }
+                let donor_can_give = chunk_sizes[donor_idx].saturating_sub(1);
+                if donor_can_give == 0 {
+                    continue;
+                }
+                let give = donor_can_give.min(need);
+                chunk_sizes[donor_idx] -= give;
+                chunk_sizes[last_idx] += give;
+                need -= give;
+            }
+        }
+    }
+
+    FgmresChunkLayout {
+        params,
+        chunk_sizes,
+    }
+}
+
 pub fn solve_fgmres<P: PreconditionerModule>(
     krylov: &mut KrylovSolveModule<P>,
     args: SolveFgmresArgs<'_>,
@@ -275,62 +352,17 @@ pub fn encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>(
     } = args;
     let start = Instant::now();
 
-    let max_iters = max_iters.max(1);
-    let capacity = krylov.fgmres.max_restart();
-    let restart_len = max_restart.max(1).min(capacity);
-    let tunables = one_submission_env_tunables();
-    let restart_budget = tunables.restart_budget.unwrap_or(restart_len).max(1);
-    let total_iter_budget = tunables
-        .total_iter_budget
-        .unwrap_or(max_iters as usize)
-        .max(1);
-    let iter_restart = restart_len
-        .min(max_iters as usize)
-        .min(restart_budget)
-        .max(1);
-    let total_iters_to_encode = (max_iters as usize).min(total_iter_budget).max(1);
-    let min_tail_chunk = tunables.min_tail_chunk.unwrap_or(1).max(1);
-
-    let mut params = RawFgmresParams {
+    let FgmresChunkLayout {
+        mut params,
+        chunk_sizes,
+    } = compute_fgmres_chunk_layout(
         n,
         num_cells,
-        num_iters: 0,
-        omega: 1.0,
-        dispatch_x: dispatch.dofs_dispatch_x_threads,
-        max_restart: 0,
-        column_offset: 0,
-        _pad3: 0,
-    };
-
-    let mut chunk_sizes: Vec<usize> = {
-        let mut defaults: Vec<usize> = Vec::new();
-        let mut remaining = total_iters_to_encode;
-        while remaining > 0 {
-            let chunk = iter_restart.min(remaining).max(1);
-            defaults.push(chunk);
-            remaining -= chunk;
-        }
-        defaults
-    };
-    if chunk_sizes.len() >= 2 {
-        let last_idx = chunk_sizes.len() - 1;
-        if chunk_sizes[last_idx] < min_tail_chunk {
-            let mut need = min_tail_chunk - chunk_sizes[last_idx];
-            for donor_idx in 0..last_idx {
-                if need == 0 {
-                    break;
-                }
-                let donor_can_give = chunk_sizes[donor_idx].saturating_sub(1);
-                if donor_can_give == 0 {
-                    continue;
-                }
-                let give = donor_can_give.min(need);
-                chunk_sizes[donor_idx] -= give;
-                chunk_sizes[last_idx] += give;
-                need -= give;
-            }
-        }
-    }
+        dispatch.dofs_dispatch_x_threads,
+        max_restart,
+        max_iters,
+        krylov.fgmres.max_restart(),
+    );
 
     let num_chunks = chunk_sizes.len();
     let mut encoded_total = 0usize;
@@ -417,62 +449,17 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
     } = args;
     let start = Instant::now();
 
-    let max_iters = max_iters.max(1);
-    let capacity = krylov.fgmres.max_restart();
-    let restart_len = max_restart.max(1).min(capacity);
-    let tunables = one_submission_env_tunables();
-    let restart_budget = tunables.restart_budget.unwrap_or(restart_len).max(1);
-    let total_iter_budget = tunables
-        .total_iter_budget
-        .unwrap_or(max_iters as usize)
-        .max(1);
-    let iter_restart = restart_len
-        .min(max_iters as usize)
-        .min(restart_budget)
-        .max(1);
-    let total_iters_to_encode = (max_iters as usize).min(total_iter_budget).max(1);
-    let min_tail_chunk = tunables.min_tail_chunk.unwrap_or(1).max(1);
-
-    let mut params = RawFgmresParams {
+    let FgmresChunkLayout {
+        mut params,
+        chunk_sizes,
+    } = compute_fgmres_chunk_layout(
         n,
         num_cells,
-        num_iters: 0,
-        omega: 1.0,
-        dispatch_x: dispatch.dofs_dispatch_x_threads,
-        max_restart: 0,
-        column_offset: 0,
-        _pad3: 0,
-    };
-
-    let mut chunk_sizes: Vec<usize> = {
-        let mut defaults: Vec<usize> = Vec::new();
-        let mut remaining = total_iters_to_encode;
-        while remaining > 0 {
-            let chunk = iter_restart.min(remaining).max(1);
-            defaults.push(chunk);
-            remaining -= chunk;
-        }
-        defaults
-    };
-    if chunk_sizes.len() >= 2 {
-        let last_idx = chunk_sizes.len() - 1;
-        if chunk_sizes[last_idx] < min_tail_chunk {
-            let mut need = min_tail_chunk - chunk_sizes[last_idx];
-            for donor_idx in 0..last_idx {
-                if need == 0 {
-                    break;
-                }
-                let donor_can_give = chunk_sizes[donor_idx].saturating_sub(1);
-                if donor_can_give == 0 {
-                    continue;
-                }
-                let give = donor_can_give.min(need);
-                chunk_sizes[donor_idx] -= give;
-                chunk_sizes[last_idx] += give;
-                need -= give;
-            }
-        }
-    }
+        dispatch.dofs_dispatch_x_threads,
+        max_restart,
+        max_iters,
+        krylov.fgmres.max_restart(),
+    );
 
     let num_chunks = chunk_sizes.len();
     let mut encoded_total = 0usize;

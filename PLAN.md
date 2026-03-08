@@ -61,11 +61,9 @@ The implementation should expose enough residual, positivity, and pseudo-time st
 ## Progress Update
 
 Status as of 2026-03-08:
-- Completed: dual-time acceptance/status plumbing, nonconverged-step retry/reject handling, and relaxation-default cleanup for the compressible path.
-- Partial: Phase 6 regression coverage now includes explicit pseudo-time acceptance-status assertions, scaled conserved-residual checks, and rejected-retry/`dt`-`dtau` backoff assertions in the UI-like backstep tests, plus focused unit coverage for retry-status classification and retry-control plumbing.
-- Completed: the required OpenFOAM pre/post comparison for the default-retry policy milestone showed unchanged reported `[openfoam]` discrepancy metrics.
-- In progress: Phase 5 positivity protection and primitive-recovery guards.
-- Not started: local pseudo-time stepping and boundary-condition changes.
+- Completed: dual-time acceptance/status plumbing, nonconverged-step retry/reject handling, relaxation-default cleanup, primitive-recovery rho guards, solver-level positivity minima/counter diagnostics, positivity-triggered rollback/retry fallback, UI surfacing of positivity stats, and explicit regression coverage for the clean-case, retry/backoff, and forced positivity-fallback paths.
+- Completed: the required OpenFOAM pre/post comparisons for both the retry-policy milestone and the first positivity-protection milestone showed unchanged reported `[openfoam]` discrepancy metrics.
+- Active remaining work: Phase 3 local pseudo-time stepping, Phase 4 boundary-condition changes, a Phase 5 follow-up decision on fallback granularity, focused local-`dtau` validation, and a low-Mach physical regression case.
 
 ## Phase 3: Add local pseudo-time stepping
 
@@ -125,23 +123,14 @@ Acceptance criteria:
 - Compressible subsonic inlet and outlet behavior are less rigid and better aligned with physical wave propagation.
 - Existing tests can be updated without changing the zero-velocity interior initialization.
 
-## Phase 5: Add positivity protection for pseudo-time updates
+## Phase 5: Positivity fallback follow-up
 
-Objective: prevent local rho or p undershoots from producing unphysical spikes during pseudo-time convergence.
+Objective: decide whether the current rollback/backoff response is the final positivity policy or whether later solver changes warrant a more local bounded fallback.
 
 Tasks:
-1. Add conservative positivity checks after update.
-   - Status: in progress. First slice will add explicit rho/p minima assertions in the UI-like regression and thread minimal diagnostics before any update backtracking logic.
-   - Detect cells with rho or p below a threshold after each pseudo-time update.
-   - Report counts and extrema in diagnostics.
-
-2. Introduce a bounded fallback for nonphysical updates.
-   - Options include update clipping, pseudo-time backtracking, or limited update scaling.
-   - Prefer reducing the update magnitude over hard clipping where practical.
-
-3. Make primitive recovery robust.
-   - Status: in progress. First slice guards primitive recovery against tiny rho values without silently mutating the conserved state.
-   - Guard `u = rho_u / rho` against tiny rho values in a way that prevents artificial visual spikes while preserving diagnostic visibility into the underlying problem.
+1. Reassess fallback granularity after the rollback path lands.
+   - Status: active follow-up. The current implementation rejects or rolls back nonphysical dual-time updates, records positivity diagnostics, and regression coverage now exercises the forced fallback path.
+   - Remaining: decide whether rollback/backoff alone is sufficient or whether a more local bounded response, such as limited update scaling, is still warranted for recoverable violations.
 
 Expected file focus:
 - [src/solver/model/primitives.rs](src/solver/model/primitives.rs)
@@ -149,8 +138,8 @@ Expected file focus:
 - diagnostics in [src/ui/app.rs](src/ui/app.rs)
 
 Acceptance criteria:
-- The solver no longer produces extreme visual velocity spikes from a local rho undershoot without surfacing a diagnostic.
-- Positivity-protection logic is only active when needed and does not materially alter converged solutions.
+- Done: the solver now surfaces rho/p minima and undershoot counts, guards primitive recovery against tiny rho values, routes nonphysical compressible dual-time outcomes through rollback/retry instead of silently advancing them, and has a dedicated regression that exercises the positivity-triggered fallback path.
+- Remaining: decide whether rollback/backoff is the final bounded response or just the first implementation stage.
 
 ## Phase 6: Validation and regression coverage
 
@@ -158,11 +147,7 @@ Objective: make the new dual-time path measurable and maintainable.
 
 Tasks:
 1. Extend existing UI-like regressions.
-      - Status: partial. The existing UI-like compressible dual-time regressions now assert explicit acceptance status, scaled conserved residuals, and rejected-retry/`dt`-`dtau` backoff behavior, and focused unit tests cover retry-status classification and retry-control plumbing.
-   - Start from [tests/ui_compressible_dual_time_backstep_regression_test.rs](tests/ui_compressible_dual_time_backstep_regression_test.rs).
-   - Add assertions on:
-     - maximum velocity bounds
-     - positivity counters or rho/p minima
+   - Status: completed. The existing UI-like compressible dual-time regressions now assert explicit acceptance status, scaled conserved residuals, rejected-retry/`dt`-`dtau` backoff behavior, maximum-velocity bounds, positivity minima/counter behavior, and the forced positivity-triggered fallback path, and focused unit tests cover retry-status classification and retry-control plumbing.
 
 2. Add focused tests for local pseudo-time stepping.
    - Verify that local pseudo-time behaves sensibly on structured and cut-cell meshes.
@@ -172,7 +157,7 @@ Tasks:
    - Verify that the solution progresses physically over repeated dual-time-corrected steps without relying on extreme damping.
 
 4. Run the OpenFOAM reference suite after major implementation milestones.
-   - Status: completed for this milestone. The required pre/post runs were executed, `[openfoam]` discrepancy metrics were emitted in both runs, and the before/after diff was empty for this default-retry-policy changeset.
+   - Status: completed for the retry-policy and first positivity-protection milestones. The required pre/post runs were executed, `[openfoam]` discrepancy metrics were emitted in both runs, and the before/after diffs were empty for both changesets.
    - Follow [AGENTS.md](AGENTS.md) requirements.
    - Treat any worse OpenFOAM discrepancy as a regression unless explicitly justified.
 
@@ -182,21 +167,20 @@ Suggested validation commands:
 
 Acceptance criteria:
 - Status: partial.
-- Done: the dual-time path has explicit regression coverage for pseudo-time acceptance status, scaled conserved residuals, rejected-retry/backoff behavior, plus focused unit coverage for retry-control plumbing and retry-status classification.
-- Done: the required OpenFOAM pre/post comparison for the previous retry-policy milestone showed unchanged reported discrepancy metrics.
-- Remaining: add positivity assertions in higher-level regressions.
+- Done: the dual-time path has explicit regression coverage for pseudo-time acceptance status, scaled conserved residuals, rejected-retry/backoff behavior, maximum-velocity bounds, rho/p minima, positivity undershoot counters, and the forced positivity-fallback path, plus focused unit coverage for retry-control plumbing and retry-status classification.
+- Done: the required OpenFOAM pre/post comparisons for the retry-policy and first positivity-protection milestones showed unchanged reported discrepancy metrics.
+- Remaining: add local-`dtau` tests and a low-Mach physical regression case.
 
 ## Recommended implementation order
 
-1. Phase 5: add positivity protection and primitive-recovery guards.
-2. Phase 3: add local pseudo-time stepping.
-3. Phase 4: improve subsonic compressible boundary treatment.
-4. Phase 6: extend regressions and rerun reference sweeps.
+1. Phase 3: add local pseudo-time stepping.
+2. Phase 4: improve subsonic compressible boundary treatment.
+3. Phase 5 follow-up: reassess whether rollback/backoff remains the desired final positivity response after the local-`dtau` and boundary changes land.
+4. Phase 6: add local-`dtau` validation, add a low-Mach physical regression case, and rerun reference sweeps.
 
 Rationale:
-- The dual-time acceptance and retry semantics are already in place, so Phase 5 is now the safest remaining slice.
-- Phase 5 addresses the visible rho-undershoot spike mode directly and improves observability before a more invasive local-`dtau` change.
-- Phase 3 improves scaling and robustness once the path exposes positivity failures cleanly.
+- The dual-time acceptance, retry, and positivity-observability slices are now implemented and regression-covered, so the remaining work shifts to local pseudo-time scaling and boundary semantics.
+- Phase 3 improves scaling and robustness now that fallback behavior is already exposed and tested.
 - Phase 4 changes BC semantics and should come after the core pseudo-time loop is trustworthy.
 
 ## Non-goal reminder

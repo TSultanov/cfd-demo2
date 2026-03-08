@@ -201,6 +201,22 @@ fn scaled_residual_for(solver: &UnifiedSolver, field_name: &str) -> f32 {
         .unwrap_or(f32::NAN)
 }
 
+fn set_nonphysical_inlet_boundary(solver: &mut UnifiedSolver) {
+    let inlet = cfd2::solver::gpu::enums::GpuBoundaryType::Inlet;
+    solver
+        .set_boundary_scalar(inlet, "rho", 0.0)
+        .expect("set inlet rho");
+    solver
+        .set_boundary_vec2(inlet, "rho_u", [0.0, 0.0])
+        .expect("set inlet rho_u");
+    solver
+        .set_boundary_scalar(inlet, "rho_e", -1.0)
+        .expect("set inlet rho_e");
+    let _ = solver.set_boundary_scalar(inlet, "p", -1.0);
+    let _ = solver.set_boundary_scalar(inlet, "T", 0.0);
+    let _ = solver.set_boundary_vec2(inlet, "u", [0.0, 0.0]);
+}
+
 #[test]
 fn ui_compressible_backstep_dual_time_does_not_blow_up() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -551,5 +567,127 @@ fn ui_compressible_backstep_dual_time_default_retry_backoff_is_visible() {
     assert!(
         scaled_rho > 0.0 || scaled_rho_u > 0.0 || scaled_rho_e > 0.0,
         "forced zero-tolerance retry case should retain a detectable nonzero scaled residual"
+    );
+}
+
+#[test]
+fn ui_compressible_backstep_dual_time_positivity_fallback_rolls_back_bad_step() {
+    std::env::set_var("CFD2_QUIET", "1");
+
+    let requested_dt = 1.0e-3f32;
+    let requested_dtau = 1.0e-5f32;
+    let dt_scale = 0.4f32;
+    let dtau_scale = 0.25f32;
+
+    let BackstepHarness {
+        mesh: _,
+        mut solver,
+        inlet_u: _,
+        h_min: _,
+        sound_speed: _,
+    } = build_backstep_harness(
+        0.05,
+        20,
+        requested_dt,
+        requested_dtau,
+        3,
+        Scheme::SecondOrderUpwind,
+        TimeScheme::BDF2,
+        GpuLowMachPrecondModel::WeissSmith,
+        1e-6,
+        -1.0,
+        Some(0.2),
+        None,
+    );
+
+    solver
+        .set_nonconverged_retry_max_attempts(0)
+        .expect("retry attempts");
+    solver
+        .set_nonconverged_dt_scale(dt_scale)
+        .expect("dt scale");
+    solver
+        .set_nonconverged_dtau_scale(dtau_scale)
+        .expect("dtau scale");
+
+    let rho_before = pollster::block_on(solver.get_rho());
+    let p_before = pollster::block_on(solver.get_p());
+    assert!(
+        rho_before.iter().all(|&rho| rho.is_finite() && rho > 0.0),
+        "expected positive density before forcing fallback"
+    );
+    assert!(
+        p_before.iter().all(|&p| p.is_finite() && p > 0.0),
+        "expected positive pressure before forcing fallback"
+    );
+
+    set_nonphysical_inlet_boundary(&mut solver);
+
+    let stats = solver.step_with_stats().expect("step with stats");
+    let step_stats = solver.step_stats();
+    let rho_after = pollster::block_on(solver.get_rho());
+    let p_after = pollster::block_on(solver.get_p());
+    let min_rho_after = rho_after.iter().copied().fold(f64::INFINITY, f64::min);
+    let min_p_after = p_after.iter().copied().fold(f64::INFINITY, f64::min);
+
+    eprintln!(
+        "[ui_dual_time_backstep_positivity] attempts={:?} retries={:?} status={:?} dt={:.3e} dtau={:?} rho_min_after={min_rho_after:.3e} p_min_after={min_p_after:.3e} linear_stats_len={}",
+        step_stats.step_attempt_count,
+        step_stats.rejected_retry_count,
+        step_stats.outer_step_status,
+        solver.dt(),
+        step_stats.current_dtau,
+        stats.len(),
+    );
+
+    assert_eq!(
+        step_stats.step_attempt_count,
+        Some(1),
+        "retry budget is disabled for this regression, so the positivity fallback should finish in one attempt"
+    );
+    assert!(
+        matches!(step_stats.rejected_retry_count, None | Some(0)),
+        "retry-disabled positivity fallback should not record rejected retries, got {:?}",
+        step_stats.rejected_retry_count
+    );
+    assert_eq!(
+        step_stats.outer_step_status,
+        Some(OuterStepStatus::AcceptedNonconverged),
+        "without retry budget, a positivity failure should surface as accepted_nonconverged with rollback"
+    );
+    assert!(
+        matches!(step_stats.positivity_rho_undershoot_count, Some(count) if count > 0)
+            || matches!(step_stats.positivity_pressure_undershoot_count, Some(count) if count > 0),
+        "expected the forced inlet corruption to trigger positivity diagnostics, got rho={:?} p={:?}",
+        step_stats.positivity_rho_undershoot_count,
+        step_stats.positivity_pressure_undershoot_count
+    );
+    assert!(
+        min_rho_after.is_finite() && min_rho_after > 0.0,
+        "rollback path should leave the physical state density positive, got min rho {min_rho_after:.3e}"
+    );
+    assert!(
+        min_p_after.is_finite() && min_p_after > 0.0,
+        "rollback path should leave the physical state pressure positive, got min p {min_p_after:.3e}"
+    );
+
+    let expected_dt = requested_dt * dt_scale;
+    let expected_dtau = requested_dtau * dtau_scale;
+    assert!(
+        (solver.dt() - expected_dt).abs() <= 1e-9,
+        "expected dt backoff after rollback-accept fallback, got {:.3e} expected {:.3e}",
+        solver.dt(),
+        expected_dt
+    );
+    assert!(
+        matches!(step_stats.current_dt, Some(current_dt) if (current_dt - expected_dt).abs() <= 1e-9),
+        "step stats should expose the backed-off dt after positivity fallback, got {:?}",
+        step_stats.current_dt
+    );
+    assert!(
+        matches!(step_stats.current_dtau, Some(current_dtau) if (current_dtau - expected_dtau).abs() <= 1e-11),
+        "expected dtau backoff after rollback-accept fallback, got {:?} expected {:.3e}",
+        step_stats.current_dtau,
+        expected_dtau
     );
 }

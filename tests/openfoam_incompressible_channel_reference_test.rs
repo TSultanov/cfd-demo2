@@ -39,7 +39,7 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        incompressible_momentum_model().expect(\"model\"),
+        incompressible_momentum_model().expect("model"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::BDF2,

@@ -364,9 +364,17 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
             );
         }
 
+        let rho = pollster::block_on(solver.get_rho());
         let u = pollster::block_on(solver.get_u());
         let p = pollster::block_on(solver.get_p());
 
+        let mut min_rho = f64::INFINITY;
+        let mut max_rho = f64::NEG_INFINITY;
+        for &rho_v in &rho {
+            assert!(rho_v.is_finite(), "step {step}: non-finite rho");
+            min_rho = min_rho.min(rho_v);
+            max_rho = max_rho.max(rho_v);
+        }
         let mut max_vel = 0.0f64;
         for (vx, vy) in &u {
             assert!(
@@ -384,11 +392,15 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
             max_p = max_p.max(pv);
         }
         eprintln!(
-            "[ui_dual_time_backstep] step={step} dt={:.3e} dtau={dtau:.3e} max|u|={max_vel:.3e} p=[{min_p:.3e},{max_p:.3e}] acoustic_cfl={:.1}",
+            "[ui_dual_time_backstep] step={step} dt={:.3e} dtau={dtau:.3e} rho=[{min_rho:.3e},{max_rho:.3e}] max|u|={max_vel:.3e} p=[{min_p:.3e},{max_p:.3e}] acoustic_cfl={:.1}",
             solver.dt(),
             sound_speed * solver.dt() as f64 / h_min.max(1e-12)
         );
 
+        assert!(
+            min_rho > 0.0,
+            "step {step}: non-positive density (min_rho={min_rho:.3e}, max_rho={max_rho:.3e})"
+        );
         assert!(
             min_p > 0.0,
             "step {step}: negative pressure (min_p={min_p:.3e}, max_p={max_p:.3e})"

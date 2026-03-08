@@ -21,6 +21,15 @@ pub struct PrimitiveDerivations {
 }
 
 impl PrimitiveDerivations {
+    const RHO_RECOVERY_FLOOR: f32 = 1.0e-8;
+
+    fn safe_rho_expr() -> Expr {
+        Expr::call_named(
+            "max",
+            vec![Expr::ident("rho"), Expr::lit_f32(Self::RHO_RECOVERY_FLOOR)],
+        )
+    }
+
     /// No derived primitives (incompressible or primitives = state).
     pub fn identity() -> Self {
         Self {
@@ -46,26 +55,28 @@ impl PrimitiveDerivations {
         // rho is conserved (identity mapping)
         derivations.insert("rho".into(), Expr::ident("rho"));
 
-        // u_x = rho_u_x / rho
+        let safe_rho = Self::safe_rho_expr();
+
+        // u_x = rho_u_x / max(rho, rho_floor)
         derivations.insert(
             "u_x".into(),
-            Expr::ident("rho_u_x") / Expr::ident("rho"),
+            Expr::ident("rho_u_x") / safe_rho.clone(),
         );
 
-        // u_y = rho_u_y / rho
+        // u_y = rho_u_y / max(rho, rho_floor)
         derivations.insert(
             "u_y".into(),
-            Expr::ident("rho_u_y") / Expr::ident("rho"),
+            Expr::ident("rho_u_y") / safe_rho.clone(),
         );
 
-        // kinetic_energy = 0.5 * (rho_u_x^2 + rho_u_y^2) / rho
+        // kinetic_energy = 0.5 * (rho_u_x^2 + rho_u_y^2) / max(rho, rho_floor)
         //
         // Important: avoid referencing derived primitives (u_x/u_y) when defining `p`.
         // Primitive recovery kernels may compute outputs in any order unless an
         // explicit dependency graph is enforced.
         let rho_u_sq = Expr::ident("rho_u_x") * Expr::ident("rho_u_x")
             + Expr::ident("rho_u_y") * Expr::ident("rho_u_y");
-        let ke = Expr::lit_f32(0.5) * (rho_u_sq / Expr::ident("rho"));
+        let ke = Expr::lit_f32(0.5) * (rho_u_sq / safe_rho.clone());
 
         // p = (gamma - 1) * (rho_e - ke)
         derivations.insert(
@@ -87,14 +98,15 @@ impl PrimitiveDerivations {
     /// - T = p / rho  (solver nondimensional units; equivalent to p / (rho * R) with R=1)
     pub fn euler_ideal_gas_pressure_t(gamma: f32) -> Self {
         let mut derivations = HashMap::new();
+        let safe_rho = Self::safe_rho_expr();
 
         // rho is conserved (identity mapping)
         derivations.insert("rho".into(), Expr::ident("rho"));
 
-        // kinetic_energy = 0.5 * (rho_u_x^2 + rho_u_y^2) / rho
+        // kinetic_energy = 0.5 * (rho_u_x^2 + rho_u_y^2) / max(rho, rho_floor)
         let rho_u_sq = Expr::ident("rho_u_x") * Expr::ident("rho_u_x")
             + Expr::ident("rho_u_y") * Expr::ident("rho_u_y");
-        let ke = Expr::lit_f32(0.5) * (rho_u_sq / Expr::ident("rho"));
+        let ke = Expr::lit_f32(0.5) * (rho_u_sq / safe_rho.clone());
 
         // p = (gamma - 1) * (rho_e - ke)
         derivations.insert(
@@ -102,10 +114,10 @@ impl PrimitiveDerivations {
             Expr::lit_f32(gamma - 1.0) * (Expr::ident("rho_e") - ke),
         );
 
-        // T = p / rho
+        // T = p / max(rho, rho_floor)
         derivations.insert(
             "T".into(),
-            Expr::ident("p") / Expr::ident("rho"),
+            Expr::ident("p") / safe_rho,
         );
 
         Self { derivations }
@@ -290,6 +302,17 @@ mod tests {
             other => panic!("expected Binary Div, got {:?}", other),
         }
 
+        match prims.get("u_x").unwrap().node() {
+            ExprNode::Binary { right, .. } => match right.node() {
+                ExprNode::Call { callee, .. } => match callee.node() {
+                    ExprNode::Ident(name) => assert_eq!(name, "max"),
+                    other => panic!("expected max callee identifier, got {:?}", other),
+                },
+                other => panic!("expected max(rho, floor) denominator, got {:?}", other),
+            },
+            other => panic!("expected Binary Div, got {:?}", other),
+        }
+
         // p should be multiplication (gamma-1) * (...)
         match prims.get("p").unwrap().node() {
             ExprNode::Binary { op, .. } => assert_eq!(*op, cfd2_ir::ast::BinaryOp::Mul),
@@ -301,6 +324,22 @@ mod tests {
     fn identity_derivations_are_empty() {
         let prims = PrimitiveDerivations::identity();
         assert!(prims.derivations.is_empty());
+    }
+
+    #[test]
+    fn pressure_temperature_recovery_uses_safe_rho() {
+        let prims = PrimitiveDerivations::euler_ideal_gas_pressure_t(1.4);
+
+        match prims.get("T").unwrap().node() {
+            ExprNode::Binary { right, .. } => match right.node() {
+                ExprNode::Call { callee, .. } => match callee.node() {
+                    ExprNode::Ident(name) => assert_eq!(name, "max"),
+                    other => panic!("expected max callee identifier, got {:?}", other),
+                },
+                other => panic!("expected safe rho denominator, got {:?}", other),
+            },
+            other => panic!("expected Binary Div, got {:?}", other),
+        }
     }
 
     #[test]

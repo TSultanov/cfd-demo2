@@ -61,33 +61,11 @@ The implementation should expose enough residual, positivity, and pseudo-time st
 ## Progress Update
 
 Status as of 2026-03-08:
-- Completed: Phase 1 observability/status plumbing for compressible dual-time acceptance.
-- Completed: Phase 2 relaxation-default cleanup for the compressible dual-time path.
-- Completed: Phase 1 nonconverged-step handling now defaults to `rejected_retry` for compressible dual-time steps, with state/time rollback, reduced `dt` and `dtau`, and a detectable `accepted_nonconverged` fallback once the retry budget is exhausted or retries are disabled.
+- Completed: dual-time acceptance/status plumbing, nonconverged-step retry/reject handling, and relaxation-default cleanup for the compressible path.
 - Partial: Phase 6 regression coverage now includes explicit pseudo-time acceptance-status assertions, scaled conserved-residual checks, and rejected-retry/`dt`-`dtau` backoff assertions in the UI-like backstep tests, plus focused unit coverage for retry-status classification and retry-control plumbing.
 - Completed: the required OpenFOAM pre/post comparison for the default-retry policy milestone showed unchanged reported `[openfoam]` discrepancy metrics.
-- Not started: local pseudo-time stepping, boundary-condition changes, and positivity protection.
-
-## Phase 1: Strengthen pseudo-time convergence control
-
-Objective: ensure the physical state is only accepted after the pseudo-time loop has sufficiently reduced the nonlinear residual.
-
-Tasks:
-1. Finish the nonconverged-step retry/reject rollout.
-   - Status: completed. Compressible dual-time now defaults to `rejected_retry`, with state/time rollback and immediate retry using reduced `dt` and `dtau`.
-   - Done: preserve a detectable `accepted_nonconverged` fallback when retries are disabled or the retry budget is exhausted.
-
-Expected file focus:
-- [src/solver/gpu/lowering/programs/generic_coupled.rs](src/solver/gpu/lowering/programs/generic_coupled.rs)
-- [src/solver/model/helpers/solver_ext.rs](src/solver/model/helpers/solver_ext.rs)
-- [src/ui/app.rs](src/ui/app.rs)
-
-Acceptance criteria:
-- Status: completed.
-- Done: compressible dual-time runs report scaled outer residuals for conserved variables.
-- Done: a pseudo-time loop that fails to converge is detectable and no longer silently indistinguishable from a converged step.
-- Done: nonconverged compressible dual-time steps now support runtime-gated rejection, rollback, retry, and `dt`/`dtau` backoff.
-- Done: existing non-dual-time paths remain unchanged.
+- In progress: Phase 5 positivity protection and primitive-recovery guards.
+- Not started: local pseudo-time stepping and boundary-condition changes.
 
 ## Phase 3: Add local pseudo-time stepping
 
@@ -153,6 +131,7 @@ Objective: prevent local rho or p undershoots from producing unphysical spikes d
 
 Tasks:
 1. Add conservative positivity checks after update.
+   - Status: in progress. First slice will add explicit rho/p minima assertions in the UI-like regression and thread minimal diagnostics before any update backtracking logic.
    - Detect cells with rho or p below a threshold after each pseudo-time update.
    - Report counts and extrema in diagnostics.
 
@@ -161,6 +140,7 @@ Tasks:
    - Prefer reducing the update magnitude over hard clipping where practical.
 
 3. Make primitive recovery robust.
+   - Status: in progress. First slice guards primitive recovery against tiny rho values without silently mutating the conserved state.
    - Guard `u = rho_u / rho` against tiny rho values in a way that prevents artificial visual spikes while preserving diagnostic visibility into the underlying problem.
 
 Expected file focus:
@@ -203,21 +183,21 @@ Suggested validation commands:
 Acceptance criteria:
 - Status: partial.
 - Done: the dual-time path has explicit regression coverage for pseudo-time acceptance status, scaled conserved residuals, rejected-retry/backoff behavior, plus focused unit coverage for retry-control plumbing and retry-status classification.
-- Done: the required OpenFOAM pre/post comparison for this milestone showed unchanged reported discrepancy metrics.
+- Done: the required OpenFOAM pre/post comparison for the previous retry-policy milestone showed unchanged reported discrepancy metrics.
 - Remaining: add positivity assertions in higher-level regressions.
 
 ## Recommended implementation order
 
-1. Phase 3: add local pseudo-time stepping.
-2. Phase 4: improve subsonic compressible boundary treatment.
-3. Phase 5: add positivity protection and primitive-recovery guards.
+1. Phase 5: add positivity protection and primitive-recovery guards.
+2. Phase 3: add local pseudo-time stepping.
+3. Phase 4: improve subsonic compressible boundary treatment.
 4. Phase 6: extend regressions and rerun reference sweeps.
 
 Rationale:
-- Phases 1 and 2 address the main physical weakness without changing initialization.
-- Phase 3 improves scaling and robustness once convergence semantics are reliable.
+- The dual-time acceptance and retry semantics are already in place, so Phase 5 is now the safest remaining slice.
+- Phase 5 addresses the visible rho-undershoot spike mode directly and improves observability before a more invasive local-`dtau` change.
+- Phase 3 improves scaling and robustness once the path exposes positivity failures cleanly.
 - Phase 4 changes BC semantics and should come after the core pseudo-time loop is trustworthy.
-- Phase 5 is essential for robustness, but it should be layered over a better-converged dual-time method rather than used to mask the underlying deficiencies.
 
 ## Non-goal reminder
 

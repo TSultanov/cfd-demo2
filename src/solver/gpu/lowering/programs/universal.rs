@@ -136,6 +136,10 @@ pub(in crate::solver::gpu::lowering) fn step_stats(plan: &GpuProgramPlan) -> Pla
             .then_some(plan.rejected_retry_count),
         current_dt: Some(plan.dt()),
         current_dtau: plan.current_dtau,
+        positivity_min_rho: plan.positivity_min_rho,
+        positivity_min_p: plan.positivity_min_p,
+        positivity_rho_undershoot_count: Some(plan.positivity_rho_undershoot_count),
+        positivity_pressure_undershoot_count: Some(plan.positivity_pressure_undershoot_count),
         linear_stats,
         ..Default::default()
     }

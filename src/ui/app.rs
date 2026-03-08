@@ -173,6 +173,10 @@ struct CachedGpuStats {
     outer_residual_p: f32,
     outer_iterations: u32,
     outer_step_status: Option<OuterStepStatus>,
+    positivity_min_rho: Option<f32>,
+    positivity_min_p: Option<f32>,
+    positivity_rho_undershoots: u32,
+    positivity_pressure_undershoots: u32,
     step_time_ms: f32,
 }
 
@@ -2476,6 +2480,15 @@ impl eframe::App for CFDApp {
                                 status_suffix,
                             ));
                         }
+                        if stats.positivity_min_rho.is_some() || stats.positivity_min_p.is_some() {
+                            ui.label(format!(
+                                "Positivity: rho_min={:.2e} (n={}) p_min={:.2e} (n={})",
+                                stats.positivity_min_rho.unwrap_or(f32::NAN),
+                                stats.positivity_rho_undershoots,
+                                stats.positivity_min_p.unwrap_or(f32::NAN),
+                                stats.positivity_pressure_undershoots,
+                            ));
+                        }
                         ui.label(format!("Step time: {:.1} ms", stats.step_time_ms));
                     }
                 });
@@ -2933,6 +2946,12 @@ fn solver_worker_main(
             stats.outer_residual_p = res_p;
         }
         stats.outer_step_status = step_stats.outer_step_status;
+        stats.positivity_min_rho = step_stats.positivity_min_rho;
+        stats.positivity_min_p = step_stats.positivity_min_p;
+        stats.positivity_rho_undershoots = step_stats.positivity_rho_undershoot_count.unwrap_or(0);
+        stats.positivity_pressure_undershoots = step_stats
+            .positivity_pressure_undershoot_count
+            .unwrap_or(0);
         let log_every_steps = params.log_every_steps.max(1) as u64;
         let should_log = params.log_convergence && (step_idx % log_every_steps == 0);
 

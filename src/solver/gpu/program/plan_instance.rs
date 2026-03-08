@@ -43,6 +43,10 @@ pub struct PlanStepStats {
     pub rejected_retry_count: Option<u32>,
     pub current_dt: Option<f32>,
     pub current_dtau: Option<f32>,
+    pub positivity_min_rho: Option<f32>,
+    pub positivity_min_p: Option<f32>,
+    pub positivity_rho_undershoot_count: Option<u32>,
+    pub positivity_pressure_undershoot_count: Option<u32>,
     pub linear_stats: Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)>,
 }
 

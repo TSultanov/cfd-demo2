@@ -339,6 +339,26 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
             "step {step}: default retry budget should allow at most one rejected-retry, got {:?}",
             step_stats.rejected_retry_count
         );
+        assert!(
+            matches!(step_stats.positivity_rho_undershoot_count, Some(0)),
+            "step {step}: expected no density positivity undershoots in the regression case, got {:?}",
+            step_stats.positivity_rho_undershoot_count
+        );
+        assert!(
+            matches!(step_stats.positivity_pressure_undershoot_count, Some(0)),
+            "step {step}: expected no pressure positivity undershoots in the regression case, got {:?}",
+            step_stats.positivity_pressure_undershoot_count
+        );
+        assert!(
+            matches!(step_stats.positivity_min_rho, Some(value) if value.is_finite() && value > 0.0),
+            "step {step}: expected a positive finite rho minimum in step stats, got {:?}",
+            step_stats.positivity_min_rho
+        );
+        assert!(
+            matches!(step_stats.positivity_min_p, Some(value) if value.is_finite() && value > 0.0),
+            "step {step}: expected a positive finite pressure minimum in step stats, got {:?}",
+            step_stats.positivity_min_p
+        );
 
         let scaled_rho = scaled_residual_for(&solver, "rho");
         let scaled_rho_u = scaled_residual_for(&solver, "rho_u");
@@ -513,6 +533,16 @@ fn ui_compressible_backstep_dual_time_default_retry_backoff_is_visible() {
         "expected dtau backoff after retry + accepted_nonconverged fallback, got {:?} expected {:.3e}",
         step_stats.current_dtau,
         expected_dtau
+    );
+    assert!(
+        matches!(step_stats.positivity_rho_undershoot_count, Some(count) if count == 0),
+        "expected retry-path regression to stay free of rho positivity undershoots, got {:?}",
+        step_stats.positivity_rho_undershoot_count
+    );
+    assert!(
+        matches!(step_stats.positivity_pressure_undershoot_count, Some(count) if count == 0),
+        "expected retry-path regression to stay free of pressure positivity undershoots, got {:?}",
+        step_stats.positivity_pressure_undershoot_count
     );
     assert!(
         scaled_rho.is_finite() && scaled_rho_u.is_finite() && scaled_rho_e.is_finite(),

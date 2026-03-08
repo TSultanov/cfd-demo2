@@ -41,6 +41,36 @@ use cfd2_codegen::solver::codegen::bc_table::{HostBcTable, BOUNDARY_TYPE_COUNT};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+const RHO_POSITIVITY_FLOOR: f32 = 1.0e-8;
+const PRESSURE_POSITIVITY_FLOOR: f32 = 0.0;
+
+#[derive(Debug, Clone, Copy, Default)]
+struct StepPositivityReport {
+    min_rho: f32,
+    min_p: f32,
+    rho_undershoot_count: u32,
+    pressure_undershoot_count: u32,
+}
+
+impl StepPositivityReport {
+    fn has_violation(self) -> bool {
+        self.rho_undershoot_count > 0 || self.pressure_undershoot_count > 0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PositivityFallbackAction {
+    None,
+    RetryReject,
+    RollbackAccept,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PositivityFieldOffsets {
+    rho: usize,
+    p: usize,
+}
+
 /// Pre-resolved mapping from unknown indices to state layout slots.
 ///
 /// This is computed once at model build time and stored in the program resources
@@ -904,6 +934,10 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     plan.outer_field_residuals.clear();
     plan.outer_field_residuals_scaled.clear();
     plan.repeat_break = false;
+    plan.positivity_min_rho = None;
+    plan.positivity_min_p = None;
+    plan.positivity_rho_undershoot_count = 0;
+    plan.positivity_pressure_undershoot_count = 0;
 
     let device = plan.context.device.clone();
     let queue = plan.context.queue.clone();
@@ -956,12 +990,34 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
 }
 
 pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
+    let positivity_action = evaluate_step_positivity(plan).map_or(PositivityFallbackAction::None, |report| {
+        plan.positivity_min_rho = Some(report.min_rho);
+        plan.positivity_min_p = Some(report.min_p);
+        plan.positivity_rho_undershoot_count = report.rho_undershoot_count;
+        plan.positivity_pressure_undershoot_count = report.pressure_undershoot_count;
+
+        if !report.has_violation() {
+            PositivityFallbackAction::None
+        } else if should_retry_nonconverged_step(plan, false) {
+            plan.outer_step_status = Some(OuterStepStatus::RejectedRetry);
+            PositivityFallbackAction::RetryReject
+        } else {
+            plan.outer_step_status = Some(OuterStepStatus::AcceptedNonconverged);
+            PositivityFallbackAction::RollbackAccept
+        }
+    });
+
     let model_id = plan.model.id;
     let outer_step_status = plan.outer_step_status;
     if outer_step_status == Some(OuterStepStatus::RejectedRetry) {
         plan.rejected_retry_count = plan.rejected_retry_count.saturating_add(1);
         rollback_rejected_dual_time_step(plan);
         plan.retry_step = true;
+        return;
+    }
+
+    if positivity_action == PositivityFallbackAction::RollbackAccept {
+        rollback_rejected_dual_time_step(plan);
         return;
     }
 
@@ -1250,6 +1306,76 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
 
 fn should_track_outer_step_status(plan: &GpuProgramPlan) -> bool {
     res(plan).fields.constants.values().dtau > 0.0
+}
+
+fn positivity_field_offsets(registry: &PortRegistry) -> Option<PositivityFieldOffsets> {
+    let rho = registry.get_field_entry_by_name("rho")?;
+    let p = registry.get_field_entry_by_name("p")?;
+    if rho.component_count() != 1 || p.component_count() != 1 {
+        return None;
+    }
+    Some(PositivityFieldOffsets {
+        rho: rho.offset() as usize,
+        p: p.offset() as usize,
+    })
+}
+
+fn evaluate_step_positivity(plan: &GpuProgramPlan) -> Option<StepPositivityReport> {
+    if plan.model.id != "compressible" || !should_track_outer_step_status(plan) {
+        return None;
+    }
+
+    let offsets = positivity_field_offsets(&plan.resources.port_registry)?;
+    let stride = plan.model.state_layout.stride() as usize;
+    let num_cells = plan.num_cells() as usize;
+    let bytes = res(plan).fields.state_size_bytes();
+    let raw = pollster::block_on(plan.read_state_bytes(bytes));
+    let expected_bytes = num_cells.checked_mul(stride)?.checked_mul(4)?;
+    if raw.len() < expected_bytes {
+        eprintln!(
+            "[cfd2][positivity] state readback too short: got {} bytes expected {}",
+            raw.len(),
+            expected_bytes
+        );
+        return None;
+    }
+
+    let mut report = StepPositivityReport {
+        min_rho: f32::INFINITY,
+        min_p: f32::INFINITY,
+        ..Default::default()
+    };
+
+    for cell in 0..num_cells {
+        let base = cell * stride;
+        let rho_idx = (base + offsets.rho) * 4;
+        let p_idx = (base + offsets.p) * 4;
+        let rho = f32::from_ne_bytes(raw[rho_idx..rho_idx + 4].try_into().ok()?);
+        let p = f32::from_ne_bytes(raw[p_idx..p_idx + 4].try_into().ok()?);
+
+        if rho.is_finite() {
+            report.min_rho = report.min_rho.min(rho);
+        }
+        if p.is_finite() {
+            report.min_p = report.min_p.min(p);
+        }
+
+        if !rho.is_finite() || rho <= RHO_POSITIVITY_FLOOR {
+            report.rho_undershoot_count = report.rho_undershoot_count.saturating_add(1);
+        }
+        if !p.is_finite() || p <= PRESSURE_POSITIVITY_FLOOR {
+            report.pressure_undershoot_count = report.pressure_undershoot_count.saturating_add(1);
+        }
+    }
+
+    if !report.min_rho.is_finite() {
+        report.min_rho = f32::NEG_INFINITY;
+    }
+    if !report.min_p.is_finite() {
+        report.min_p = f32::NEG_INFINITY;
+    }
+
+    Some(report)
 }
 
 fn should_retry_nonconverged_step(plan: &GpuProgramPlan, converged: bool) -> bool {

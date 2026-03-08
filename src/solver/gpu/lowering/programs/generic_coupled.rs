@@ -151,6 +151,8 @@ pub(crate) struct GenericCoupledProgramResources {
     nonconverged_relax: f32,
     nonconverged_dt_scale: f32,
     nonconverged_dtau_scale: f32,
+    nonconverged_retry_enabled: bool,
+    nonconverged_retry_max_attempts: usize,
     implicit_base_alpha_u: Option<f32>,
     linear_solver: crate::solver::gpu::recipe::LinearSolverSpec,
     schur: Option<GenericCoupledSchurResources>,
@@ -321,6 +323,8 @@ impl GenericCoupledProgramResources {
             nonconverged_relax: if model.id == "compressible" { 1.0 } else { 1.0 },
             nonconverged_dt_scale: if model.id == "compressible" { 0.5 } else { 1.0 },
             nonconverged_dtau_scale: if model.id == "compressible" { 0.5 } else { 1.0 },
+            nonconverged_retry_enabled: false,
+            nonconverged_retry_max_attempts: 1,
             runtime,
             fields,
             time_integration: TimeIntegrationModule::new(),
@@ -953,6 +957,12 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
 pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
     let model_id = plan.model.id;
     let outer_step_status = plan.outer_step_status;
+    if outer_step_status == Some(OuterStepStatus::RejectedRetry) {
+        rollback_rejected_dual_time_step(plan);
+        plan.retry_step = true;
+        return;
+    }
+
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
@@ -976,6 +986,54 @@ pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
             values.dtau = next_dtau;
         }
         r.fields.constants.write(&queue);
+    }
+}
+
+fn rollback_rejected_dual_time_step(plan: &mut GpuProgramPlan) {
+    let device = plan.context.device.clone();
+    let queue = plan.context.queue.clone();
+    let model_id = plan.model.id;
+
+    let (current_dt, current_dtau, dt_scale, dtau_scale, step_handle) = {
+        let r = res(plan);
+        (
+            r.time_integration.dt,
+            r.fields.constants.values().dtau,
+            r.nonconverged_dt_scale,
+            r.nonconverged_dtau_scale,
+            r.fields.step_handle(),
+        )
+    };
+
+    {
+        let r = res_mut(plan);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("generic_coupled:rollback_rejected_step"),
+        });
+        r.fields.restore_from_snapshot(&mut encoder);
+        queue.submit(Some(encoder.finish()));
+        crate::count_submission!("Generic Coupled", "rollback_rejected_step");
+
+        let previous_step_index = (step_handle.load(Ordering::Relaxed) + 2) % 3;
+        step_handle.store(previous_step_index, Ordering::Relaxed);
+        r.time_integration
+            .rollback_prepare_step(&mut r.fields.constants, &queue);
+
+        if let Some((next_dt, next_dtau)) = next_step_backoff_targets(
+            model_id,
+            Some(OuterStepStatus::RejectedRetry),
+            current_dt,
+            current_dtau,
+            dt_scale,
+            dtau_scale,
+        ) {
+            r.time_integration.set_dt(next_dt, &mut r.fields.constants, &queue);
+            {
+                let values = r.fields.constants.values_mut();
+                values.dtau = next_dtau;
+            }
+            r.fields.constants.write(&queue);
+        }
     }
 }
 
@@ -1186,6 +1244,15 @@ fn should_track_outer_step_status(plan: &GpuProgramPlan) -> bool {
     res(plan).fields.constants.values().dtau > 0.0
 }
 
+fn should_retry_nonconverged_step(plan: &GpuProgramPlan, converged: bool) -> bool {
+    if converged || plan.model.id != "compressible" || !should_track_outer_step_status(plan) {
+        return false;
+    }
+
+    let r = res(plan);
+    r.nonconverged_retry_enabled && plan.step_attempt_index < r.nonconverged_retry_max_attempts
+}
+
 fn scaled_outer_targets_converged(plan: &GpuProgramPlan) -> Option<bool> {
     if plan.outer_field_residuals.is_empty() {
         return None;
@@ -1236,6 +1303,8 @@ fn finalize_outer_step_status(plan: &mut GpuProgramPlan, fallback_converged: Opt
         .unwrap_or(false);
     plan.outer_step_status = Some(if converged {
         OuterStepStatus::AcceptedConverged
+    } else if should_retry_nonconverged_step(plan, converged) {
+        OuterStepStatus::RejectedRetry
     } else {
         OuterStepStatus::AcceptedNonconverged
     });
@@ -1920,6 +1989,28 @@ pub(crate) fn param_nonconverged_dtau_scale(
         return Err("NonconvergedDtauScale expects F32".to_string());
     };
     res_mut(plan).nonconverged_dtau_scale = scale.clamp(0.0, 1.0);
+    Ok(())
+}
+
+pub(crate) fn param_nonconverged_retry_enabled(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::Bool(enabled) = value else {
+        return Err("NonconvergedRetryEnabled expects Bool".to_string());
+    };
+    res_mut(plan).nonconverged_retry_enabled = enabled;
+    Ok(())
+}
+
+pub(crate) fn param_nonconverged_retry_max_attempts(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::Usize(attempts) = value else {
+        return Err("NonconvergedRetryMaxAttempts expects Usize".to_string());
+    };
+    res_mut(plan).nonconverged_retry_max_attempts = attempts;
     Ok(())
 }
 
@@ -2635,6 +2726,66 @@ mod tests {
                 0.5,
             ),
             None
+        );
+    }
+
+    #[test]
+    fn nonconverged_dual_time_retries_are_runtime_gated_and_bounded() {
+        let mesh = generate_structured_rect_mesh(
+            4,
+            3,
+            1.0,
+            0.4,
+            BoundarySides {
+                left: BoundaryType::Inlet,
+                right: BoundaryType::Outlet,
+                bottom: BoundaryType::Wall,
+                top: BoundaryType::Wall,
+            },
+        );
+        let model = crate::solver::model::compressible_model().expect("model");
+
+        let mut plan = pollster::block_on(crate::solver::gpu::lowering::lower_program_plan(
+            &mesh,
+            &model,
+            crate::solver::gpu::program::plan_instance::PlanInitConfig {
+                advection_scheme: crate::solver::scheme::Scheme::Upwind,
+                time_scheme: crate::solver::gpu::enums::TimeScheme::Euler,
+                preconditioner: crate::solver::gpu::structs::PreconditionerType::Jacobi,
+                stepping: crate::solver::gpu::recipe::SteppingMode::Coupled,
+            },
+            None,
+            None,
+        ))
+        .expect("build generic coupled plan");
+
+        {
+            let r = res_mut(&mut plan);
+            r.nonconverged_retry_enabled = true;
+            r.nonconverged_retry_max_attempts = 1;
+            let values = r.fields.constants.values_mut();
+            values.dtau = 1.0e-5;
+        }
+
+        plan.step_attempt_index = 0;
+        plan.outer_field_residuals = vec![
+            ("rho".to_string(), 1.0),
+            ("rho_u".to_string(), 1.0),
+            ("rho_e".to_string(), 1.0),
+        ];
+        plan.outer_field_residuals_scaled = vec![
+            ("rho".to_string(), 1.0),
+            ("rho_u".to_string(), 1.0),
+            ("rho_e".to_string(), 1.0),
+        ];
+        finalize_outer_step_status(&mut plan, Some(false));
+        assert_eq!(plan.outer_step_status, Some(OuterStepStatus::RejectedRetry));
+
+        plan.step_attempt_index = 1;
+        finalize_outer_step_status(&mut plan, Some(false));
+        assert_eq!(
+            plan.outer_step_status,
+            Some(OuterStepStatus::AcceptedNonconverged)
         );
     }
 }

@@ -45,6 +45,19 @@ impl TimeIntegrationModule {
         constants.write(queue);
     }
 
+    /// Roll back a previously prepared time step without committing history.
+    pub fn rollback_prepare_step(
+        &mut self,
+        constants: &mut ConstantsModule,
+        queue: &wgpu::Queue,
+    ) {
+        self.time -= self.dt as f64;
+
+        let values = constants.values_mut();
+        values.time = self.time as f32;
+        constants.write(queue);
+    }
+
     /// Finalize the current time step.
     /// Rotates `dt` into `dt_old` and increments step count.
     pub fn finalize_step(&mut self, constants: &mut ConstantsModule, queue: &wgpu::Queue) {

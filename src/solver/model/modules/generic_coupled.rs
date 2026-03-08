@@ -47,6 +47,8 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
         named_params.push("nonconverged_relax");
         named_params.push("nonconverged_dt_scale");
         named_params.push("nonconverged_dtau_scale");
+        named_params.push("nonconverged_retry_enabled");
+        named_params.push("nonconverged_retry_max_attempts");
     }
 
     KernelBundleModule {

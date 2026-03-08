@@ -353,6 +353,8 @@ pub(crate) struct GpuProgramPlan {
     pub outer_step_status: Option<OuterStepStatus>,
     pub outer_field_residuals: Vec<(String, f32)>,
     pub outer_field_residuals_scaled: Vec<(String, f32)>,
+    pub step_attempt_index: usize,
+    pub retry_step: bool,
     pub repeat_break: bool,
     pub skip_remaining_block: bool,
 }
@@ -383,6 +385,8 @@ impl GpuProgramPlan {
             outer_step_status: None,
             outer_field_residuals: Vec::new(),
             outer_field_residuals_scaled: Vec::new(),
+            step_attempt_index: 0,
+            retry_step: false,
             repeat_break: false,
             skip_remaining_block: false,
         }
@@ -504,7 +508,21 @@ impl GpuProgramPlan {
     }
 
     pub fn step(&mut self) {
-        self.execute_block(self.spec.program.root);
+        self.step_attempt_index = 0;
+        self.retry_step = false;
+
+        loop {
+            self.execute_block(self.spec.program.root);
+            if !self.retry_step {
+                break;
+            }
+
+            self.retry_step = false;
+            self.step_attempt_index = self.step_attempt_index.saturating_add(1);
+        }
+
+        self.step_attempt_index = 0;
+        self.retry_step = false;
     }
 
     pub fn initialize_history(&self) {

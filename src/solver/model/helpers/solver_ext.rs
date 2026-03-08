@@ -252,6 +252,10 @@ pub trait SolverRuntimeParamsExt {
     fn set_nonconverged_dt_scale(&mut self, scale: f32) -> Result<(), String>;
     /// Set the next-step pseudo-timestep scale applied after a nonconverged dual-time step.
     fn set_nonconverged_dtau_scale(&mut self, scale: f32) -> Result<(), String>;
+    /// Enable or disable in-step retries for nonconverged dual-time steps.
+    fn set_nonconverged_retry_enabled(&mut self, enabled: bool) -> Result<(), String>;
+    /// Set the maximum number of in-step retry attempts for a nonconverged dual-time step.
+    fn set_nonconverged_retry_max_attempts(&mut self, attempts: usize) -> Result<(), String>;
     /// Set the FGMRES solution-update strategy (e.g. classical vs modified Gram-Schmidt).
     fn set_linear_solver_solution_update_strategy(
         &mut self,
@@ -339,6 +343,20 @@ impl SolverRuntimeParamsExt for GpuUnifiedSolver {
 
     fn set_nonconverged_dtau_scale(&mut self, scale: f32) -> Result<(), String> {
         self.set_named_param("nonconverged_dtau_scale", PlanParamValue::F32(scale))
+    }
+
+    fn set_nonconverged_retry_enabled(&mut self, enabled: bool) -> Result<(), String> {
+        self.set_named_param(
+            "nonconverged_retry_enabled",
+            PlanParamValue::Bool(enabled),
+        )
+    }
+
+    fn set_nonconverged_retry_max_attempts(&mut self, attempts: usize) -> Result<(), String> {
+        self.set_named_param(
+            "nonconverged_retry_max_attempts",
+            PlanParamValue::Usize(attempts),
+        )
     }
 
     fn set_linear_solver_solution_update_strategy(

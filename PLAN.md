@@ -60,11 +60,11 @@ The implementation should expose enough residual, positivity, and pseudo-time st
 
 ## Progress Update
 
-Status as of 2026-03-07:
+Status as of 2026-03-08:
 - Completed: Phase 1 observability/status plumbing for compressible dual-time acceptance.
-- Completed: Phase 6 partial regression coverage for explicit pseudo-time acceptance status.
-- Partial: Phase 1 convergence classification now uses scaled pseudo-time correction norms for conserved compressible variables, and nonconverged dual-time steps now automatically reduce the next step's `dt` and `dtau`, but true retry/reject is not implemented yet.
-- Partial: Phase 2 relaxation policy now defaults the compressible dual-time path to full updates and reserves `nonconverged_relax` for explicitly nonconverged pseudo-time steps or linear-solver failures.
+- Completed: Phase 2 relaxation-default cleanup for the compressible dual-time path.
+- Partial: Phase 1 nonconverged-step handling now includes a runtime-gated `rejected_retry` path that rolls back state and physical-time preparation, reduces `dt` and `dtau`, and retries the same physical step.
+- Partial: Phase 6 regression coverage now includes explicit pseudo-time acceptance-status assertions in the UI-like backstep test plus focused unit coverage for retry-status classification and retry-control plumbing.
 - Not started: local pseudo-time stepping, boundary-condition changes, and positivity protection.
 
 ## Phase 1: Strengthen pseudo-time convergence control
@@ -72,28 +72,11 @@ Status as of 2026-03-07:
 Objective: ensure the physical state is only accepted after the pseudo-time loop has sufficiently reduced the nonlinear residual.
 
 Tasks:
-1. Promote adaptive outer-loop convergence to the default compressible dual-time mode.
-   - Status: audited. The generic coupled path already defaults to adaptive outer-loop break behavior; this changeset preserved that default and added explicit end-of-step status reporting for the dual-time path.
-   - Audit how `outer_break_enabled`, `outer_tol`, and `outer_tol_abs` are initialized and used in [src/solver/gpu/lowering/programs/generic_coupled.rs](src/solver/gpu/lowering/programs/generic_coupled.rs).
-   - Ensure compressible dual-time steps evaluate convergence every pseudo-iteration unless the user explicitly opts into fixed-iteration mode.
-
-2. Tighten what “converged” means for compressible dual-time.
-   - Status: partial. Compressible dual-time status classification now checks scaled correction norms for `rho`, `rho_u`, and `rho_e` when those targets are present, instead of relying only on linear-solver convergence.
-   - Use scaled residuals for at least `rho`, `rho_u`, and `rho_e` rather than depending only on linear solver convergence.
-   - Define convergence on the pseudo-time correction norm, not on the final Krylov residual alone.
-
-3. Add a failure path for nonconverged pseudo-time steps.
-   - Status: partial. Nonconverged dual-time steps are now surfaced explicitly as `accepted_nonconverged`, and they automatically reduce the next step's `dt` and `dtau`, but retry/reject behavior is still pending.
-   - If the outer loop hits `outer_iters` without sufficient reduction, do not silently accept the state as if it were converged.
-   - Introduce one of these behaviors:
-     - reject the physical step and retry with reduced `dt`, or
-     - keep the step but mark it as nonconverged and trigger an automatic reduction of `dt` and or `dtau` on the next attempt.
-   - Prefer the first option for correctness, but gate it behind a runtime setting if necessary to preserve existing workflows.
-
-4. Improve runtime diagnostics.
-   - Status: completed. The solver/UI/test path now reports explicit pseudo-time acceptance status (`accepted_converged` or `accepted_nonconverged`) alongside scaled and absolute outer residuals.
-   - Emit the per-step scaled pseudo-time residuals already available in the plan state.
-   - Add an explicit status such as `accepted_converged`, `accepted_nonconverged`, or `rejected_retry`.
+1. Finish the nonconverged-step retry/reject rollout.
+   - Status: partial. A runtime-gated `rejected_retry` path now exists for compressible dual-time steps, with state/time rollback and immediate retry using reduced `dt` and `dtau`.
+   - Decide whether the retry path should remain opt-in or become the default compressible dual-time behavior.
+   - Extend higher-level regressions to exercise the rejected-retry path explicitly rather than covering it only with focused unit tests.
+   - Preserve a detectable `accepted_nonconverged` fallback when retries are disabled or the retry budget is exhausted.
 
 Expected file focus:
 - [src/solver/gpu/lowering/programs/generic_coupled.rs](src/solver/gpu/lowering/programs/generic_coupled.rs)
@@ -104,40 +87,9 @@ Acceptance criteria:
 - Status: partial.
 - Done: compressible dual-time runs report scaled outer residuals for conserved variables.
 - Done: a pseudo-time loop that fails to converge is detectable and no longer silently indistinguishable from a converged step.
-- Done: nonconverged compressible dual-time steps now trigger automatic backoff of the next step's `dt` and `dtau`.
+- Done: nonconverged compressible dual-time steps now support runtime-gated rejection, rollback, retry, and `dt`/`dtau` backoff.
 - Done: existing non-dual-time paths remain unchanged.
-- Remaining: nonconverged steps are still accepted rather than retried/rejected.
-
-## Phase 2: Reduce dependence on aggressive relaxation
-
-Objective: stop using `alpha_u = 0.2` as the default mechanism holding the solver together.
-
-Tasks:
-1. Revisit compressible dual-time relaxation defaults in [src/solver/model/definitions/compressible.rs](src/solver/model/definitions/compressible.rs).
-   - Status: partial. The compressible model now defaults dual-time updates to `alpha_u = 1.0` and `alpha_p = 1.0`; further tuning still needs validation against tougher low-Mach cases.
-   - Raise the default `alpha_u` toward 1.0.
-   - Keep `alpha_p = 1.0` unless a later study shows a better physically consistent treatment.
-
-2. Use relaxation as a fallback, not the primary path.
-   - Status: partial. The generic coupled update now only applies `nonconverged_relax` when a dual-time step is explicitly classified as nonconverged, or when the linear solve itself fails before a pseudo-time status is available.
-   - Keep or extend the existing `nonconverged_relax` control so that relaxation is only strengthened when the pseudo-time loop is demonstrably struggling.
-   - Distinguish between normal pseudo-time updates and degraded fallback behavior.
-
-3. Tie relaxation policy to pseudo-time convergence state.
-   - Status: partial. Apply-time damping now keys off `accepted_converged` versus `accepted_nonconverged` status for dual-time steps, but there is still no automatic retry/backoff path.
-   - Converged or nearly converged pseudo-iterations should use minimal damping.
-   - Repeated stalled iterations may activate a fallback relaxation policy for robustness.
-
-Expected file focus:
-- [src/solver/model/definitions/compressible.rs](src/solver/model/definitions/compressible.rs)
-- [src/solver/model/kernel.rs](src/solver/model/kernel.rs)
-- [src/solver/model/modules/generic_coupled.rs](src/solver/model/modules/generic_coupled.rs)
-
-Acceptance criteria:
-- Status: partial.
-- Done: the compressible dual-time path now defaults to materially less damping than the previous `alpha_u = 0.2` baseline.
-- Done: fallback damping is keyed to pseudo-time convergence classification instead of being the default path.
-- Remaining: validate whether the higher-default path stays robust enough across broader low-Mach regression coverage.
+- Remaining: verify the retry path in higher-level regressions and settle the default-policy choice.
 
 ## Phase 3: Add local pseudo-time stepping
 
@@ -228,11 +180,12 @@ Objective: make the new dual-time path measurable and maintainable.
 
 Tasks:
 1. Extend existing UI-like regressions.
-   - Status: partial. The existing UI-like compressible dual-time regression now asserts that each dual-time step surfaces an explicit acceptance status.
+    - Status: partial. The existing UI-like compressible dual-time regression asserts explicit acceptance status, and focused unit tests now cover retry-status classification and retry-control plumbing.
    - Start from [tests/ui_compressible_dual_time_backstep_regression_test.rs](tests/ui_compressible_dual_time_backstep_regression_test.rs).
    - Add assertions on:
      - scaled outer residual reduction
-     - whether a step was accepted converged vs nonconverged
+       - whether a step was accepted converged, accepted nonconverged, or rejected and retried
+       - `dt` and `dtau` backoff when a retry is triggered
      - maximum velocity bounds
      - positivity counters or rho/p minima
 
@@ -244,7 +197,7 @@ Tasks:
    - Verify that the solution progresses physically over repeated dual-time-corrected steps without relying on extreme damping.
 
 4. Run the OpenFOAM reference suite after major implementation milestones.
-   - Status: attempted for this milestone. The required pre/post runs were executed, but the current workspace baseline fails during compilation in the OpenFOAM reference tests before any `[openfoam]` discrepancy metrics are emitted.
+   - Status: completed for this milestone. The required pre/post runs were executed, `[openfoam]` discrepancy metrics were emitted in both runs, and the before/after diff was empty for this retry-path changeset.
    - Follow [AGENTS.md](AGENTS.md) requirements.
    - Treat any worse OpenFOAM discrepancy as a regression unless explicitly justified.
 
@@ -254,19 +207,17 @@ Suggested validation commands:
 
 Acceptance criteria:
 - Status: partial.
-- Done: the dual-time path has explicit regression coverage for pseudo-time acceptance status, in addition to the existing blow-up-avoidance checks.
-- Remaining: add scaled-residual-reduction and positivity assertions.
-- Blocked by existing reference-suite compile failures: OpenFOAM discrepancy metrics are not currently available in this workspace baseline, so this milestone could only verify that the suite failure mode did not worsen.
+- Done: the dual-time path has explicit regression coverage for pseudo-time acceptance status, plus focused unit coverage for retry-control plumbing and retry-status classification.
+- Done: the required OpenFOAM pre/post comparison for this milestone showed unchanged reported discrepancy metrics.
+- Remaining: add scaled-residual-reduction, rejected-retry/backoff, and positivity assertions in higher-level regressions.
 
 ## Recommended implementation order
 
-1. Phase 1: strengthen pseudo-time convergence control.
-2. Phase 2: reduce dependence on aggressive relaxation.
-3. Phase 6 partial: add diagnostics and regression assertions for the new behavior.
-4. Phase 3: add local pseudo-time stepping.
-5. Phase 4: improve subsonic compressible boundary treatment.
-6. Phase 5: add positivity protection and primitive-recovery guards.
-7. Phase 6 full: run reference and regression sweeps.
+1. Phase 1 remaining: finish the retry/reject rollout and higher-level validation.
+2. Phase 3: add local pseudo-time stepping.
+3. Phase 4: improve subsonic compressible boundary treatment.
+4. Phase 5: add positivity protection and primitive-recovery guards.
+5. Phase 6: extend regressions and rerun reference sweeps.
 
 Rationale:
 - Phases 1 and 2 address the main physical weakness without changing initialization.

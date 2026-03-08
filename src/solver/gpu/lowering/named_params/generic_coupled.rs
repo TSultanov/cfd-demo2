@@ -23,6 +23,10 @@ pub(crate) fn handler_for_key(key: &'static str) -> Option<ProgramParamHandler> 
         "nonconverged_relax" => Some(generic_coupled::param_nonconverged_relax),
         "nonconverged_dt_scale" => Some(generic_coupled::param_nonconverged_dt_scale),
         "nonconverged_dtau_scale" => Some(generic_coupled::param_nonconverged_dtau_scale),
+        "nonconverged_retry_enabled" => Some(generic_coupled::param_nonconverged_retry_enabled),
+        "nonconverged_retry_max_attempts" => {
+            Some(generic_coupled::param_nonconverged_retry_max_attempts)
+        }
         "outer_iters" => Some(generic_coupled::param_outer_iters),
         "outer_tol" => Some(generic_coupled::param_outer_tol),
         "outer_tol_abs" => Some(generic_coupled::param_outer_tol_abs),
@@ -52,6 +56,18 @@ mod tests {
         assert!(
             handler_for_key("outer_batched_mode").is_some(),
             "missing named-param handler for outer_batched_mode"
+        );
+    }
+
+    #[test]
+    fn nonconverged_retry_controls_have_handlers() {
+        assert!(
+            handler_for_key("nonconverged_retry_enabled").is_some(),
+            "missing named-param handler for nonconverged_retry_enabled"
+        );
+        assert!(
+            handler_for_key("nonconverged_retry_max_attempts").is_some(),
+            "missing named-param handler for nonconverged_retry_max_attempts"
         );
     }
 }

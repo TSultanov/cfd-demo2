@@ -39,6 +39,10 @@ pub struct PlanStepStats {
     pub outer_residual_u: Option<f32>,
     pub outer_residual_p: Option<f32>,
     pub outer_step_status: Option<OuterStepStatus>,
+    pub step_attempt_count: Option<u32>,
+    pub rejected_retry_count: Option<u32>,
+    pub current_dt: Option<f32>,
+    pub current_dtau: Option<f32>,
     pub linear_stats: Option<(LinearSolverStats, LinearSolverStats, LinearSolverStats)>,
 }
 

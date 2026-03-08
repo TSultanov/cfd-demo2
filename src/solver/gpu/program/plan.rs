@@ -354,6 +354,9 @@ pub(crate) struct GpuProgramPlan {
     pub outer_field_residuals: Vec<(String, f32)>,
     pub outer_field_residuals_scaled: Vec<(String, f32)>,
     pub step_attempt_index: usize,
+    pub step_attempt_count: u32,
+    pub rejected_retry_count: u32,
+    pub current_dtau: Option<f32>,
     pub retry_step: bool,
     pub repeat_break: bool,
     pub skip_remaining_block: bool,
@@ -386,6 +389,9 @@ impl GpuProgramPlan {
             outer_field_residuals: Vec::new(),
             outer_field_residuals_scaled: Vec::new(),
             step_attempt_index: 0,
+            step_attempt_count: 0,
+            rejected_retry_count: 0,
+            current_dtau: None,
             retry_step: false,
             repeat_break: false,
             skip_remaining_block: false,
@@ -509,10 +515,13 @@ impl GpuProgramPlan {
 
     pub fn step(&mut self) {
         self.step_attempt_index = 0;
+        self.step_attempt_count = 0;
+        self.rejected_retry_count = 0;
         self.retry_step = false;
 
         loop {
             self.execute_block(self.spec.program.root);
+            self.step_attempt_count = self.step_attempt_count.saturating_add(1);
             if !self.retry_step {
                 break;
             }

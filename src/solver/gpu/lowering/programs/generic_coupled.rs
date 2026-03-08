@@ -323,7 +323,7 @@ impl GenericCoupledProgramResources {
             nonconverged_relax: if model.id == "compressible" { 1.0 } else { 1.0 },
             nonconverged_dt_scale: if model.id == "compressible" { 0.5 } else { 1.0 },
             nonconverged_dtau_scale: if model.id == "compressible" { 0.5 } else { 1.0 },
-            nonconverged_retry_enabled: false,
+            nonconverged_retry_enabled: model.id == "compressible",
             nonconverged_retry_max_attempts: 1,
             runtime,
             fields,
@@ -907,6 +907,7 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
 
     let device = plan.context.device.clone();
     let queue = plan.context.queue.clone();
+    plan.current_dtau = Some(res(plan).fields.constants.values().dtau);
     let r = res_mut(plan);
     if let Some(monitor) = r.outer_convergence.as_mut() {
         monitor.reset_step();
@@ -958,35 +959,40 @@ pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
     let model_id = plan.model.id;
     let outer_step_status = plan.outer_step_status;
     if outer_step_status == Some(OuterStepStatus::RejectedRetry) {
+        plan.rejected_retry_count = plan.rejected_retry_count.saturating_add(1);
         rollback_rejected_dual_time_step(plan);
         plan.retry_step = true;
         return;
     }
 
     let queue = plan.context.queue.clone();
-    let r = res_mut(plan);
-    {
-        let values = r.fields.constants.values_mut();
-        values.time_scheme = r.requested_time_scheme as u32;
-    }
-    r.time_integration
-        .finalize_step(&mut r.fields.constants, &queue);
-
-    if let Some((next_dt, next_dtau)) = next_step_backoff_targets(
-        model_id,
-        outer_step_status,
-        r.time_integration.dt,
-        r.fields.constants.values().dtau,
-        r.nonconverged_dt_scale,
-        r.nonconverged_dtau_scale,
-    ) {
-        r.time_integration.set_dt(next_dt, &mut r.fields.constants, &queue);
+    let current_dtau = {
+        let r = res_mut(plan);
         {
             let values = r.fields.constants.values_mut();
-            values.dtau = next_dtau;
+            values.time_scheme = r.requested_time_scheme as u32;
         }
-        r.fields.constants.write(&queue);
-    }
+        r.time_integration
+            .finalize_step(&mut r.fields.constants, &queue);
+
+        if let Some((next_dt, next_dtau)) = next_step_backoff_targets(
+            model_id,
+            outer_step_status,
+            r.time_integration.dt,
+            r.fields.constants.values().dtau,
+            r.nonconverged_dt_scale,
+            r.nonconverged_dtau_scale,
+        ) {
+            r.time_integration.set_dt(next_dt, &mut r.fields.constants, &queue);
+            {
+                let values = r.fields.constants.values_mut();
+                values.dtau = next_dtau;
+            }
+            r.fields.constants.write(&queue);
+        }
+        r.fields.constants.values().dtau
+    };
+    plan.current_dtau = Some(current_dtau);
 }
 
 fn rollback_rejected_dual_time_step(plan: &mut GpuProgramPlan) {
@@ -1005,7 +1011,7 @@ fn rollback_rejected_dual_time_step(plan: &mut GpuProgramPlan) {
         )
     };
 
-    {
+    let current_dtau = {
         let r = res_mut(plan);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("generic_coupled:rollback_rejected_step"),
@@ -1034,7 +1040,9 @@ fn rollback_rejected_dual_time_step(plan: &mut GpuProgramPlan) {
             }
             r.fields.constants.write(&queue);
         }
-    }
+        r.fields.constants.values().dtau
+    };
+    plan.current_dtau = Some(current_dtau);
 }
 
 pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
@@ -2730,7 +2738,7 @@ mod tests {
     }
 
     #[test]
-    fn nonconverged_dual_time_retries_are_runtime_gated_and_bounded() {
+    fn nonconverged_dual_time_retries_default_on_for_compressible_and_bounded() {
         let mesh = generate_structured_rect_mesh(
             4,
             3,
@@ -2761,7 +2769,10 @@ mod tests {
 
         {
             let r = res_mut(&mut plan);
-            r.nonconverged_retry_enabled = true;
+            assert!(
+                r.nonconverged_retry_enabled,
+                "compressible dual-time retry should be enabled by default"
+            );
             r.nonconverged_retry_max_attempts = 1;
             let values = r.fields.constants.values_mut();
             values.dtau = 1.0e-5;

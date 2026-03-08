@@ -14,6 +14,14 @@ use cfd2::solver::{
 };
 use nalgebra::Vector2;
 
+struct BackstepHarness {
+    mesh: cfd2::solver::mesh::Mesh,
+    solver: UnifiedSolver,
+    inlet_u: f32,
+    h_min: f64,
+    sound_speed: f64,
+}
+
 fn env_f64(name: &str, default: f64) -> f64 {
     std::env::var(name)
         .ok()
@@ -61,13 +69,21 @@ fn min_cell_size(mesh: &cfd2::solver::mesh::Mesh) -> f64 {
         .fold(f64::INFINITY, f64::min)
 }
 
-#[test]
-fn ui_compressible_backstep_dual_time_does_not_blow_up() {
-    std::env::set_var("CFD2_QUIET", "1");
-
-    // Match the UI geometry (BackwardsStep) and the mesh stats from the screenshot:
-    // - cell size 0.025 aligns exactly with step_x=0.5 and height_inlet=0.5 (no cut cells)
-    // - 5200 cells (5600 - 400 in the removed step region)
+#[allow(clippy::too_many_arguments)]
+fn build_backstep_harness(
+    cell: f64,
+    smooth_iters: usize,
+    requested_dt: f32,
+    dtau: f32,
+    outer_iters: usize,
+    scheme: Scheme,
+    time_scheme: TimeScheme,
+    low_mach_model: GpuLowMachPrecondModel,
+    low_mach_theta_floor: f32,
+    low_mach_pressure_coupling_alpha: f32,
+    alpha_u: Option<f32>,
+    alpha_p: Option<f32>,
+) -> BackstepHarness {
     let length = 3.5;
     let domain_size = Vector2::new(length, 1.0);
     let geo = BackwardsStep {
@@ -77,13 +93,12 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
         step_x: 0.5,
     };
 
-    let cell = env_f64("CFD2_UI_DUAL_TIME_CELL", 0.025);
     let mut mesh = generate_cut_cell_mesh(&geo, cell, cell, 1.2, domain_size);
-    let smooth_iters = env_usize("CFD2_UI_DUAL_TIME_SMOOTH_ITERS", 50);
     mesh.smooth(&geo, 0.3, smooth_iters);
     if (cell - 0.025).abs() < 1e-12 {
         assert_eq!(mesh.num_cells(), 5200, "expected UI-like 5200-cell mesh");
     }
+
     let (mut inlet_faces, mut outlet_faces, mut wall_faces, mut slip_faces) =
         (0usize, 0usize, 0usize, 0usize);
     for b in &mesh.face_boundary {
@@ -116,8 +131,8 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
         &mesh,
         compressible_model_with_eos(eos).expect("model"),
         SolverConfig {
-            advection_scheme: Scheme::SecondOrderUpwind,
-            time_scheme: TimeScheme::BDF2,
+            advection_scheme: scheme,
+            time_scheme,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Implicit { outer_iters: 1 },
         },
@@ -126,11 +141,72 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
     ))
     .expect("solver init");
 
-    // Clear full state to avoid uninitialized auxiliary fields.
     let stride = solver.model().state_layout.stride() as usize;
     solver
         .write_state_f32(&vec![0.0f32; mesh.num_cells() * stride])
         .expect("clear state");
+
+    solver.set_dt(requested_dt);
+    solver.set_density(density).unwrap();
+    solver.set_viscosity(viscosity).unwrap();
+    solver.set_eos(&eos).unwrap();
+    solver.set_precond_model(low_mach_model).expect("precond model");
+    solver
+        .set_precond_theta_floor(low_mach_theta_floor)
+        .expect("theta floor");
+    if low_mach_pressure_coupling_alpha >= 0.0 {
+        solver
+            .set_precond_pressure_coupling_alpha(low_mach_pressure_coupling_alpha)
+            .expect("pressure coupling alpha");
+    }
+    solver.set_dtau(dtau).expect("dtau");
+    solver.set_outer_iters(outer_iters).unwrap();
+    solver
+        .set_compressible_inlet_isothermal_x(density, inlet_u, &eos)
+        .unwrap();
+
+    let p_ref = eos.pressure_for_density(density as f64) as f32;
+    solver.set_uniform_state(density, [0.0, 0.0], p_ref);
+    solver.initialize_history();
+    solver.set_collect_convergence_stats(true);
+
+    if let Some(alpha_u) = alpha_u {
+        solver.set_alpha_u(alpha_u).unwrap();
+    }
+    if let Some(alpha_p) = alpha_p {
+        solver.set_alpha_p(alpha_p).unwrap();
+    }
+
+    let h_min = min_cell_size(&mesh);
+    let sound_speed = eos.sound_speed(density as f64);
+
+    BackstepHarness {
+        mesh,
+        solver,
+        inlet_u,
+        h_min,
+        sound_speed,
+    }
+}
+
+fn scaled_residual_for(solver: &UnifiedSolver, field_name: &str) -> f32 {
+    solver
+        .outer_field_residuals_scaled()
+        .and_then(|values| {
+            values
+                .iter()
+                .find(|(name, _)| name == field_name)
+                .map(|(_, value)| *value)
+        })
+        .unwrap_or(f32::NAN)
+}
+
+#[test]
+fn ui_compressible_backstep_dual_time_does_not_blow_up() {
+    std::env::set_var("CFD2_QUIET", "1");
+
+    let cell = env_f64("CFD2_UI_DUAL_TIME_CELL", 0.025);
+    let smooth_iters = env_usize("CFD2_UI_DUAL_TIME_SMOOTH_ITERS", 50);
 
     // UI-like runtime params (override via `CFD2_UI_*` env vars).
     let requested_dt = env_f64("CFD2_UI_DUAL_TIME_DT", 0.001) as f32;
@@ -162,33 +238,26 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
         .and_then(parse_time_scheme)
         .unwrap_or(TimeScheme::BDF2);
 
-    solver.set_dt(requested_dt);
-    solver.set_density(density).unwrap();
-    solver.set_viscosity(viscosity).unwrap();
-    solver.set_eos(&eos).unwrap();
-    solver
-        .set_precond_model(low_mach_model)
-        .expect("precond model");
-    solver
-        .set_precond_theta_floor(low_mach_theta_floor)
-        .expect("theta floor");
-    if low_mach_pressure_coupling_alpha >= 0.0 {
-        solver
-            .set_precond_pressure_coupling_alpha(low_mach_pressure_coupling_alpha)
-            .expect("pressure coupling alpha");
-    }
-    solver.set_dtau(dtau).expect("dtau");
-    solver.set_outer_iters(outer_iters).unwrap();
-    solver
-        .set_compressible_inlet_isothermal_x(density, inlet_u, &eos)
-        .unwrap();
-
-    let p_ref = eos.pressure_for_density(density as f64) as f32;
-    solver.set_uniform_state(density, [0.0, 0.0], p_ref);
-    solver.initialize_history();
-
-    let h_min = min_cell_size(&mesh);
-    let sound_speed = eos.sound_speed(density as f64);
+    let BackstepHarness {
+        mesh: _mesh,
+        mut solver,
+        inlet_u,
+        h_min,
+        sound_speed,
+    } = build_backstep_harness(
+        cell,
+        smooth_iters,
+        requested_dt,
+        dtau,
+        outer_iters,
+        scheme,
+        time_scheme,
+        low_mach_model,
+        low_mach_theta_floor,
+        low_mach_pressure_coupling_alpha,
+        (alpha_u >= 0.0).then_some(alpha_u as f32),
+        (alpha_p >= 0.0).then_some(alpha_p as f32),
+    );
 
     // Sanity-check initialization: uniform pressure should be present before stepping.
     {
@@ -208,15 +277,6 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
     // - dt chosen from the preconditioned wave speed (allows acoustic CFL >> 1 at low Mach)
     // - limited growth by 20% per step
     let steps = env_usize("CFD2_UI_DUAL_TIME_STEPS", 2);
-
-    solver.set_advection_scheme(scheme);
-    solver.set_time_scheme(time_scheme);
-    if alpha_u >= 0.0 {
-        solver.set_alpha_u(alpha_u as f32).unwrap();
-    }
-    if alpha_p >= 0.0 {
-        solver.set_alpha_p(alpha_p as f32).unwrap();
-    }
 
     let mut prev_max_vel = 0.0f64;
     for step in 0..steps {
@@ -268,6 +328,24 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
             ),
             "step {step}: dual-time run should surface an explicit pseudo-time acceptance status, got {:?}",
             step_stats.outer_step_status
+        );
+        assert!(
+            matches!(step_stats.step_attempt_count, Some(1 | 2)),
+            "step {step}: default compressible dual-time should take either one accepted attempt or one rejected-retry plus a final accepted attempt, got {:?}",
+            step_stats.step_attempt_count
+        );
+        assert!(
+            matches!(step_stats.rejected_retry_count, None | Some(0 | 1)),
+            "step {step}: default retry budget should allow at most one rejected-retry, got {:?}",
+            step_stats.rejected_retry_count
+        );
+
+        let scaled_rho = scaled_residual_for(&solver, "rho");
+        let scaled_rho_u = scaled_residual_for(&solver, "rho_u");
+        let scaled_rho_e = scaled_residual_for(&solver, "rho_e");
+        assert!(
+            scaled_rho.is_finite() && scaled_rho_u.is_finite() && scaled_rho_e.is_finite(),
+            "step {step}: expected finite scaled conserved residuals, got rho={scaled_rho:.3e} rho_u={scaled_rho_u:.3e} rho_e={scaled_rho_e:.3e}"
         );
 
         // Debug: if the implicit solve early-exits, `x` may remain zero and clobber state in the update pass.
@@ -322,4 +400,114 @@ fn ui_compressible_backstep_dual_time_does_not_blow_up() {
 
         prev_max_vel = max_vel;
     }
+}
+
+#[test]
+fn ui_compressible_backstep_dual_time_default_retry_backoff_is_visible() {
+    std::env::set_var("CFD2_QUIET", "1");
+
+    let requested_dt = 1.0e-3f32;
+    let requested_dtau = 1.0e-5f32;
+    let dt_scale = 0.4f32;
+    let dtau_scale = 0.25f32;
+
+    let BackstepHarness {
+        mesh: _,
+        mut solver,
+        inlet_u: _,
+        h_min: _,
+        sound_speed: _,
+    } = build_backstep_harness(
+        0.05,
+        20,
+        requested_dt,
+        requested_dtau,
+        3,
+        Scheme::SecondOrderUpwind,
+        TimeScheme::BDF2,
+        GpuLowMachPrecondModel::WeissSmith,
+        1e-6,
+        -1.0,
+        Some(0.2),
+        None,
+    );
+
+    solver.set_outer_tolerance(0.0).expect("outer tol");
+    solver
+        .set_outer_tolerance_abs(0.0)
+        .expect("outer abs tol");
+    solver
+        .set_nonconverged_retry_max_attempts(1)
+        .expect("retry attempts");
+    solver
+        .set_nonconverged_dt_scale(dt_scale)
+        .expect("dt scale");
+    solver
+        .set_nonconverged_dtau_scale(dtau_scale)
+        .expect("dtau scale");
+
+    let stats = solver.step_with_stats().expect("step with stats");
+    let step_stats = solver.step_stats();
+    let scaled_rho = scaled_residual_for(&solver, "rho");
+    let scaled_rho_u = scaled_residual_for(&solver, "rho_u");
+    let scaled_rho_e = scaled_residual_for(&solver, "rho_e");
+
+    eprintln!(
+        "[ui_dual_time_backstep_retry] attempts={:?} retries={:?} status={:?} dt={:.3e} dtau={:?} scaled=[rho={scaled_rho:.3e}, rho_u={scaled_rho_u:.3e}, rho_e={scaled_rho_e:.3e}] linear_stats_len={}",
+        step_stats.step_attempt_count,
+        step_stats.rejected_retry_count,
+        step_stats.outer_step_status,
+        solver.dt(),
+        step_stats.current_dtau,
+        stats.len(),
+    );
+
+        assert!(
+            matches!(step_stats.step_attempt_count, Some(1 | 2)),
+            "default compressible dual-time should take either one accepted attempt or one rejected-retry plus a final accepted attempt, got {:?}",
+            step_stats.step_attempt_count
+        );
+        assert!(
+            matches!(step_stats.rejected_retry_count, None | Some(0 | 1)),
+            "default retry budget should allow at most one rejected-retry, got {:?}",
+            step_stats.rejected_retry_count
+        );
+    assert_eq!(
+        step_stats.rejected_retry_count,
+        Some(1),
+        "expected exactly one internal rejected-retry event from the default retry policy"
+    );
+    assert_eq!(
+        step_stats.outer_step_status,
+        Some(OuterStepStatus::AcceptedNonconverged),
+        "after exhausting the single retry budget, the step should fall back to accepted_nonconverged"
+    );
+
+    let expected_dt = requested_dt * dt_scale * dt_scale;
+    let expected_dtau = requested_dtau * dtau_scale * dtau_scale;
+    assert!(
+        (solver.dt() - expected_dt).abs() <= 1e-9,
+        "expected dt backoff after retry + accepted_nonconverged fallback, got {:.3e} expected {:.3e}",
+        solver.dt(),
+        expected_dt
+    );
+    assert!(
+        matches!(step_stats.current_dt, Some(current_dt) if (current_dt - expected_dt).abs() <= 1e-9),
+        "step stats should expose backed-off dt, got {:?}",
+        step_stats.current_dt
+    );
+    assert!(
+        matches!(step_stats.current_dtau, Some(current_dtau) if (current_dtau - expected_dtau).abs() <= 1e-11),
+        "expected dtau backoff after retry + accepted_nonconverged fallback, got {:?} expected {:.3e}",
+        step_stats.current_dtau,
+        expected_dtau
+    );
+    assert!(
+        scaled_rho.is_finite() && scaled_rho_u.is_finite() && scaled_rho_e.is_finite(),
+        "expected finite scaled conserved residuals after retry path, got rho={scaled_rho:.3e} rho_u={scaled_rho_u:.3e} rho_e={scaled_rho_e:.3e}"
+    );
+    assert!(
+        scaled_rho > 0.0 || scaled_rho_u > 0.0 || scaled_rho_e > 0.0,
+        "forced zero-tolerance retry case should retain a detectable nonzero scaled residual"
+    );
 }

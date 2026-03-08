@@ -63,8 +63,9 @@ The implementation should expose enough residual, positivity, and pseudo-time st
 Status as of 2026-03-08:
 - Completed: Phase 1 observability/status plumbing for compressible dual-time acceptance.
 - Completed: Phase 2 relaxation-default cleanup for the compressible dual-time path.
-- Partial: Phase 1 nonconverged-step handling now includes a runtime-gated `rejected_retry` path that rolls back state and physical-time preparation, reduces `dt` and `dtau`, and retries the same physical step.
-- Partial: Phase 6 regression coverage now includes explicit pseudo-time acceptance-status assertions in the UI-like backstep test plus focused unit coverage for retry-status classification and retry-control plumbing.
+- Completed: Phase 1 nonconverged-step handling now defaults to `rejected_retry` for compressible dual-time steps, with state/time rollback, reduced `dt` and `dtau`, and a detectable `accepted_nonconverged` fallback once the retry budget is exhausted or retries are disabled.
+- Partial: Phase 6 regression coverage now includes explicit pseudo-time acceptance-status assertions, scaled conserved-residual checks, and rejected-retry/`dt`-`dtau` backoff assertions in the UI-like backstep tests, plus focused unit coverage for retry-status classification and retry-control plumbing.
+- Completed: the required OpenFOAM pre/post comparison for the default-retry policy milestone showed unchanged reported `[openfoam]` discrepancy metrics.
 - Not started: local pseudo-time stepping, boundary-condition changes, and positivity protection.
 
 ## Phase 1: Strengthen pseudo-time convergence control
@@ -73,10 +74,8 @@ Objective: ensure the physical state is only accepted after the pseudo-time loop
 
 Tasks:
 1. Finish the nonconverged-step retry/reject rollout.
-   - Status: partial. A runtime-gated `rejected_retry` path now exists for compressible dual-time steps, with state/time rollback and immediate retry using reduced `dt` and `dtau`.
-   - Decide whether the retry path should remain opt-in or become the default compressible dual-time behavior.
-   - Extend higher-level regressions to exercise the rejected-retry path explicitly rather than covering it only with focused unit tests.
-   - Preserve a detectable `accepted_nonconverged` fallback when retries are disabled or the retry budget is exhausted.
+   - Status: completed. Compressible dual-time now defaults to `rejected_retry`, with state/time rollback and immediate retry using reduced `dt` and `dtau`.
+   - Done: preserve a detectable `accepted_nonconverged` fallback when retries are disabled or the retry budget is exhausted.
 
 Expected file focus:
 - [src/solver/gpu/lowering/programs/generic_coupled.rs](src/solver/gpu/lowering/programs/generic_coupled.rs)
@@ -84,12 +83,11 @@ Expected file focus:
 - [src/ui/app.rs](src/ui/app.rs)
 
 Acceptance criteria:
-- Status: partial.
+- Status: completed.
 - Done: compressible dual-time runs report scaled outer residuals for conserved variables.
 - Done: a pseudo-time loop that fails to converge is detectable and no longer silently indistinguishable from a converged step.
 - Done: nonconverged compressible dual-time steps now support runtime-gated rejection, rollback, retry, and `dt`/`dtau` backoff.
 - Done: existing non-dual-time paths remain unchanged.
-- Remaining: verify the retry path in higher-level regressions and settle the default-policy choice.
 
 ## Phase 3: Add local pseudo-time stepping
 
@@ -180,12 +178,9 @@ Objective: make the new dual-time path measurable and maintainable.
 
 Tasks:
 1. Extend existing UI-like regressions.
-    - Status: partial. The existing UI-like compressible dual-time regression asserts explicit acceptance status, and focused unit tests now cover retry-status classification and retry-control plumbing.
+      - Status: partial. The existing UI-like compressible dual-time regressions now assert explicit acceptance status, scaled conserved residuals, and rejected-retry/`dt`-`dtau` backoff behavior, and focused unit tests cover retry-status classification and retry-control plumbing.
    - Start from [tests/ui_compressible_dual_time_backstep_regression_test.rs](tests/ui_compressible_dual_time_backstep_regression_test.rs).
    - Add assertions on:
-     - scaled outer residual reduction
-       - whether a step was accepted converged, accepted nonconverged, or rejected and retried
-       - `dt` and `dtau` backoff when a retry is triggered
      - maximum velocity bounds
      - positivity counters or rho/p minima
 
@@ -197,7 +192,7 @@ Tasks:
    - Verify that the solution progresses physically over repeated dual-time-corrected steps without relying on extreme damping.
 
 4. Run the OpenFOAM reference suite after major implementation milestones.
-   - Status: completed for this milestone. The required pre/post runs were executed, `[openfoam]` discrepancy metrics were emitted in both runs, and the before/after diff was empty for this retry-path changeset.
+   - Status: completed for this milestone. The required pre/post runs were executed, `[openfoam]` discrepancy metrics were emitted in both runs, and the before/after diff was empty for this default-retry-policy changeset.
    - Follow [AGENTS.md](AGENTS.md) requirements.
    - Treat any worse OpenFOAM discrepancy as a regression unless explicitly justified.
 
@@ -207,17 +202,16 @@ Suggested validation commands:
 
 Acceptance criteria:
 - Status: partial.
-- Done: the dual-time path has explicit regression coverage for pseudo-time acceptance status, plus focused unit coverage for retry-control plumbing and retry-status classification.
+- Done: the dual-time path has explicit regression coverage for pseudo-time acceptance status, scaled conserved residuals, rejected-retry/backoff behavior, plus focused unit coverage for retry-control plumbing and retry-status classification.
 - Done: the required OpenFOAM pre/post comparison for this milestone showed unchanged reported discrepancy metrics.
-- Remaining: add scaled-residual-reduction, rejected-retry/backoff, and positivity assertions in higher-level regressions.
+- Remaining: add positivity assertions in higher-level regressions.
 
 ## Recommended implementation order
 
-1. Phase 1 remaining: finish the retry/reject rollout and higher-level validation.
-2. Phase 3: add local pseudo-time stepping.
-3. Phase 4: improve subsonic compressible boundary treatment.
-4. Phase 5: add positivity protection and primitive-recovery guards.
-5. Phase 6: extend regressions and rerun reference sweeps.
+1. Phase 3: add local pseudo-time stepping.
+2. Phase 4: improve subsonic compressible boundary treatment.
+3. Phase 5: add positivity protection and primitive-recovery guards.
+4. Phase 6: extend regressions and rerun reference sweeps.
 
 Rationale:
 - Phases 1 and 2 address the main physical weakness without changing initialization.

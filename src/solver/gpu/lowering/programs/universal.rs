@@ -131,6 +131,11 @@ pub(in crate::solver::gpu::lowering) fn step_stats(plan: &GpuProgramPlan) -> Pla
         outer_residual_u: plan.outer_residual_u,
         outer_residual_p: plan.outer_residual_p,
         outer_step_status: plan.outer_step_status,
+        step_attempt_count: (plan.step_attempt_count > 0).then_some(plan.step_attempt_count),
+        rejected_retry_count: (plan.rejected_retry_count > 0)
+            .then_some(plan.rejected_retry_count),
+        current_dt: Some(plan.dt()),
+        current_dtau: plan.current_dtau,
         linear_stats,
         ..Default::default()
     }

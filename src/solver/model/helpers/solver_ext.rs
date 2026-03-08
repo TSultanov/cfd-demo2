@@ -253,6 +253,9 @@ pub trait SolverRuntimeParamsExt {
     /// Set the next-step pseudo-timestep scale applied after a nonconverged dual-time step.
     fn set_nonconverged_dtau_scale(&mut self, scale: f32) -> Result<(), String>;
     /// Enable or disable in-step retries for nonconverged dual-time steps.
+    ///
+    /// Compressible dual-time runs enable this by default; callers can opt out
+    /// when they need the old accepted-nonconverged behavior without an in-step retry.
     fn set_nonconverged_retry_enabled(&mut self, enabled: bool) -> Result<(), String>;
     /// Set the maximum number of in-step retry attempts for a nonconverged dual-time step.
     fn set_nonconverged_retry_max_attempts(&mut self, attempts: usize) -> Result<(), String>;

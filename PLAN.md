@@ -65,7 +65,8 @@ Status as of 2026-03-09:
 - Completed: the required OpenFOAM pre/post comparisons for both the retry-policy milestone and the first positivity-protection milestone showed unchanged reported `[openfoam]` discrepancy metrics.
 - Completed: the first Phase 3 local pseudo-time slice now uses a face-based geometric local scaling in the generated dual-time operator, normalized so regular square cells keep the baseline global scale while more distorted cells receive stronger pseudo-time damping.
 - Completed: the Phase 3 face-metric slice passed targeted codegen tests, the UI-like compressible dual-time backstep regression, and a required OpenFOAM pre/post comparison without worsening tracked `[openfoam]` discrepancy metrics; the worst reported tracked discrepancy improved slightly versus the fresh baseline.
-- Active remaining work: Phase 3 refinement and dedicated local-`dtau` validation, Phase 4 boundary-condition changes, a Phase 5 follow-up decision on fallback granularity, and a low-Mach physical regression case.
+- Completed: the dedicated structured local-`dtau` regression now verifies that regular square cells keep the unit face-metric scale and that a structured compressible dual-time channel step remains bounded while surfacing explicit pseudo-time acceptance statistics.
+- Active remaining work: decide whether the current face metric is final or should evolve toward a spectral-radius form, implement Phase 4 boundary-condition changes, complete the Phase 5 fallback-granularity follow-up, and add a low-Mach physical regression case.
 
 ## Phase 3: Add local pseudo-time stepping
 
@@ -73,25 +74,18 @@ Objective: replace the single global `dtau` with a more physical per-cell or loc
 
 Status:
 - Partially completed. The first implementation slice now scales the dual-time diagonal and RHS by a per-cell face-based geometric metric derived from `perimeter_sum^2 / (16 * vol)`, with the existing global `dtau` retained as the user-facing scaling knob.
-- Remaining work is to decide whether this face-based metric is the final representation or an intermediate approximation toward a fuller spectral-radius form, and to add direct regression coverage for local-`dtau` behavior on structured and cut-cell meshes.
+- Remaining work is to decide whether this face-based metric is the final representation or an intermediate approximation toward a fuller spectral-radius form.
 
 Tasks:
-1. Refine the local pseudo-time formula.
+1. Decide whether the current face metric is the final production formulation.
+   - Done for validation coverage: cut-cell behavior is covered indirectly by the UI-like compressible dual-time backstep regression, and the structured-grid regression now verifies unit local scale on regular square cells while recording bounded structured-channel dual-time behavior.
    - Done for the first slice: the generated assembly now uses a local face-based geometric scale built from cell face areas and normalized to equal `1` on square cells.
    - Remaining: decide whether to keep the face-based metric as the production formulation or replace/augment it with a spectral-radius form such as `dtau_i = CFL_tau * V_i / sum_f(|lambda_f| A_f)`.
    - Ensure any later spectral form includes acoustic and advective contributions consistently with the low-Mach preconditioned pseudo-time operator.
 
-2. Reassess representation.
+2. Reassess whether the transient representation is sufficient.
    - Done for the first slice: the local scale is derived transiently in the generated assembly kernels rather than stored in a dedicated field.
-   - Remaining: decide whether a persistent `dtau_local` field is worthwhile for diagnostics, reuse, or future spectral-radius variants.
-
-3. Thread local pseudo-time through assembly and update.
-   - Done for the first slice: the generated assembly now replaces the old `vol/dtau` contribution with a per-cell local dual-time scale derived inside the kernels.
-   - Remaining: confirm whether any non-generated update or diagnostic paths should expose the local scale explicitly.
-
-4. Preserve the existing global `dtau` UI control as a scaling knob.
-   - Done for the first slice: the current scalar `dtau` remains the global user-facing scale and multiplies the new local face-based factor.
-   - Avoid breaking the current UI contract abruptly.
+   - Remaining: only revisit a persistent `dtau_local` field if later diagnostics or a spectral-radius variant clearly require it.
 
 Expected file focus:
 - [src/solver/gpu/lowering/programs/generic_coupled.rs](src/solver/gpu/lowering/programs/generic_coupled.rs)
@@ -100,9 +94,9 @@ Expected file focus:
 - [src/ui/app.rs](src/ui/app.rs)
 
 Acceptance criteria:
-- Status: partial.
-- Done: the pseudo-time operator now uses a locally varying per-cell scale in generated assembly.
-- Remaining: add focused local-`dtau` regressions and decide whether the face-based metric is sufficient or should evolve toward a fuller spectral-radius formulation.
+- Status: mostly completed.
+- Done: the pseudo-time operator now uses a locally varying per-cell scale in generated assembly, cut-cell behavior is exercised by the UI-like backstep regression, and the dedicated structured-grid regression verifies unit local scaling on regular square cells.
+- Remaining: decide whether the face-based metric is sufficient or should evolve toward a fuller spectral-radius formulation.
 
 ## Phase 4: Improve subsonic compressible boundary treatment
 
@@ -174,8 +168,9 @@ Suggested validation commands:
 Acceptance criteria:
 - Status: partial.
 - Done: the dual-time path has explicit regression coverage for pseudo-time acceptance status, scaled conserved residuals, rejected-retry/backoff behavior, maximum-velocity bounds, rho/p minima, positivity undershoot counters, and the forced positivity-fallback path, plus focused unit coverage for retry-control plumbing and retry-status classification.
+- Done: focused local-`dtau` validation now covers both the structured square-cell case and the cut-cell/backstep path.
 - Done: the required OpenFOAM pre/post comparisons for the retry-policy and first positivity-protection milestones showed unchanged reported discrepancy metrics.
-- Remaining: add local-`dtau` tests and a low-Mach physical regression case.
+- Remaining: add a low-Mach physical regression case.
 
 ## Recommended implementation order
 

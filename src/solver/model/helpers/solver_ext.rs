@@ -446,6 +446,7 @@ impl SolverCompressibleInletExt for GpuUnifiedSolver {
         self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_RHO_E, rho_e)?;
         let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_P, p0);
         let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_T, t0);
+        let _ = self.set_boundary_scalar(GpuBoundaryType::Outlet, FIELD_P, p0);
         Ok(())
     }
 }

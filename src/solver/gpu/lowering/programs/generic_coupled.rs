@@ -169,6 +169,7 @@ pub(crate) struct GenericCoupledProgramResources {
     init_prepare_graph: ModuleGraph<GeneratedKernelsModule>,
     dp_init_enabled: bool,
     dp_init_needed: AtomicBool,
+    recurring_prepare_enabled: bool,
     assembly_graph: ModuleGraph<GeneratedKernelsModule>,
     apply_graph: ModuleGraph<GeneratedKernelsModule>,
     update_graph: ModuleGraph<GeneratedKernelsModule>,
@@ -248,6 +249,10 @@ impl GenericCoupledProgramResources {
             .kernels
             .iter()
             .any(|k| k.phase == KernelPhase::Preparation);
+        let recurring_prepare_enabled = recipe
+            .kernels
+            .iter()
+            .any(|k| k.id == crate::solver::model::KernelId::COMPRESSIBLE_RUNTIME_BC_UPDATE);
 
         let assembly_graph = build_graph_for_phases(
             recipe,
@@ -363,6 +368,7 @@ impl GenericCoupledProgramResources {
             init_prepare_graph,
             dp_init_enabled,
             dp_init_needed: AtomicBool::new(dp_init_enabled),
+            recurring_prepare_enabled,
             assembly_graph,
             apply_graph,
             update_graph,
@@ -1926,7 +1932,10 @@ pub(crate) fn init_prepare_graph_run(
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     let r = res(plan);
-    if !r.dp_init_enabled || !r.dp_init_needed.load(Ordering::Relaxed) {
+    if !r.dp_init_enabled {
+        return (0.0, None);
+    }
+    if !r.recurring_prepare_enabled && !r.dp_init_needed.load(Ordering::Relaxed) {
         return (0.0, None);
     }
     run_module_graph(

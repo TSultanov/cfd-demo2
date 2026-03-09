@@ -17,6 +17,8 @@ impl KernelId {
     pub const FLUX_MODULE_GRADIENTS: KernelId = KernelId("flux_module_gradients");
     pub const FLUX_MODULE: KernelId = KernelId("flux_module");
 
+    pub const COMPRESSIBLE_RUNTIME_BC_UPDATE: KernelId =
+        KernelId("compressible/runtime_bc_update");
     pub const COMPRESSIBLE_VISCOUS_P_DIV_U: KernelId = KernelId("compressible/viscous_p_div_u");
 
     pub const GENERIC_COUPLED_ASSEMBLY: KernelId = KernelId("generic_coupled_assembly");

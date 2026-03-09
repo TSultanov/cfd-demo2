@@ -402,7 +402,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 1,
-                BoundaryCondition::zero_gradient_dim::<PressureGradient>(),
+                BoundaryCondition::dirichlet_dim::<Pressure>(0.0),
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
@@ -489,6 +489,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
         modules: vec![
             crate::solver::model::modules::eos::eos_module(eos),
             flux_module_module,
+            crate::solver::model::modules::compressible_runtime_bc::compressible_runtime_bc_module(),
             {
                 let mut m =
                     crate::solver::model::modules::generic_coupled::generic_coupled_module(method);

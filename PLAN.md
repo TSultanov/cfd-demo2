@@ -67,26 +67,25 @@ Status as of 2026-03-09:
 - Completed: the Phase 3 face-metric slice passed targeted codegen tests, the UI-like compressible dual-time backstep regression, and a required OpenFOAM pre/post comparison without worsening tracked `[openfoam]` discrepancy metrics; the worst reported tracked discrepancy improved slightly versus the fresh baseline.
 - Completed: the dedicated structured local-`dtau` regression now verifies that regular square cells keep the unit face-metric scale and that a structured compressible dual-time channel step remains bounded while surfacing explicit pseudo-time acceptance statistics.
 - Investigation note: the structured-channel regression still consumes one retry/backoff under the default compressible dual-time policy, but the observed scaled residuals are O(1) in `rho`, `rho_e`, `p`, and `T` while momentum residuals stay small, which points to the current fully specified isothermal inlet treatment as the likely remaining driver rather than the local face-metric `dtau` scaling itself.
-- Active remaining work: decide whether the current face metric is final or should evolve toward a spectral-radius form, implement Phase 4 boundary-condition changes, complete the Phase 5 fallback-granularity follow-up, and add a low-Mach physical regression case.
+- In progress: the current Phase 4 runtime boundary work now covers both the inlet thermodynamic refresh slice and an explicit outlet static-pressure slice, with the outlet pressure now carried as a Dirichlet BC seeded through the existing helper path. Validation for these slices includes dedicated module/unit regressions, the UI-like compressible dual-time backstep regression, and a required OpenFOAM pre/post comparison with unchanged extracted `[openfoam]` metrics.
+- Active remaining work: decide whether the current face metric is final or should evolve toward a spectral-radius form, finish the remaining Phase 4 low-Mach and final-outlet-policy follow-up, complete the Phase 5 fallback-granularity follow-up, and add a low-Mach physical regression case.
+
+## Completed Work
+
+- Dual-time acceptance, retry, rollback, and positivity-observability milestones are complete and no longer drive the active execution order.
+- The first local-`dtau` implementation and its structured/cut-cell validation are complete; only the deferred spectral-radius decision remains open.
+- The retry-policy and first positivity-protection OpenFOAM comparison milestones are complete; future OpenFOAM reruns are now tied to subsequent major Phase 4 or later changesets.
 
 ## Phase 3: Add local pseudo-time stepping
 
 Objective: replace the single global `dtau` with a more physical per-cell or locally varying pseudo-time scale.
 
 Status:
-- Partially completed. The first implementation slice now scales the dual-time diagonal and RHS by a per-cell face-based geometric metric derived from `perimeter_sum^2 / (16 * vol)`, with the existing global `dtau` retained as the user-facing scaling knob.
-- Remaining work is to decide whether this face-based metric is the final representation or an intermediate approximation toward a fuller spectral-radius form.
+- Implementation and validation are completed for the current face-based local scaling slice. The remaining open item is only the deferred decision on whether this geometric metric stays as the production formulation or evolves toward a fuller spectral-radius form.
 
-Tasks:
-1. Decide whether the current face metric is the final production formulation.
-   - Done for validation coverage: cut-cell behavior is covered indirectly by the UI-like compressible dual-time backstep regression, and the structured-grid regression now verifies unit local scale on regular square cells while recording bounded structured-channel dual-time behavior.
-   - Done for the first slice: the generated assembly now uses a local face-based geometric scale built from cell face areas and normalized to equal `1` on square cells.
-   - Remaining: decide whether to keep the face-based metric as the production formulation or replace/augment it with a spectral-radius form such as `dtau_i = CFL_tau * V_i / sum_f(|lambda_f| A_f)`.
-   - Ensure any later spectral form includes acoustic and advective contributions consistently with the low-Mach preconditioned pseudo-time operator.
-
-2. Reassess whether the transient representation is sufficient.
-   - Done for the first slice: the local scale is derived transiently in the generated assembly kernels rather than stored in a dedicated field.
-   - Remaining: only revisit a persistent `dtau_local` field if later diagnostics or a spectral-radius variant clearly require it.
+Remaining item:
+1. Decide whether to keep the current face-based metric as the production formulation or replace or augment it with a spectral-radius form such as `dtau_i = CFL_tau * V_i / sum_f(|lambda_f| A_f)`.
+   - Any later spectral form must include acoustic and advective contributions consistently with the low-Mach preconditioned pseudo-time operator.
 
 Expected file focus:
 - [src/solver/gpu/lowering/programs/generic_coupled.rs](src/solver/gpu/lowering/programs/generic_coupled.rs)
@@ -95,7 +94,7 @@ Expected file focus:
 - [src/ui/app.rs](src/ui/app.rs)
 
 Acceptance criteria:
-- Status: mostly completed.
+- Status: implementation complete, decision follow-up deferred.
 - Done: the pseudo-time operator now uses a locally varying per-cell scale in generated assembly, cut-cell behavior is exercised by the UI-like backstep regression, and the dedicated structured-grid regression verifies unit local scaling on regular square cells.
 - Remaining: decide whether the face-based metric is sufficient or should evolve toward a fuller spectral-radius formulation.
 
@@ -103,17 +102,22 @@ Acceptance criteria:
 
 Objective: make the inlet and outlet behavior more physically appropriate for low-Mach subsonic flow.
 
+Status:
+- In progress. The current implementation slices route compressible inlet thermodynamic boundary refresh through a recurring Preparation-phase runtime kernel and now treat outlet pressure as an explicit static-pressure boundary seeded through the existing helper path.
+- Remaining work is to validate low-Mach physical behavior, decide the final outlet policy beyond the current static-pressure slice, and then determine whether per-step refresh is sufficient or should extend to per-outer-iteration updates.
+
 Tasks:
 1. Define a characteristic-style subsonic inlet policy.
-   - Prefer specifying inflow through thermodynamic totals and flow direction, or another characteristic-consistent reduced set, instead of fully forcing all primitive quantities.
-   - Preserve a compatibility wrapper so existing callers can still request `set_compressible_inlet_isothermal_x(...)` while internally mapping to the improved treatment.
+   - In progress for the current runtime slice: inlet thermodynamic values are no longer intended to remain host-fixed for the full step; instead they are refreshed before assembly from the current interior state while the existing host helper still supplies the compatibility inputs.
+   - Remaining: decide whether the current pressure-following reduced inlet set is sufficient or whether the next slice should move further toward a fuller characteristic-total-state form.
 
 2. Reassess outlet pressure treatment.
-   - Ensure the outlet primarily constrains the appropriate outgoing characteristic or static pressure, rather than overconstraining the thermodynamic state.
+   - Done for the current slice: outlet pressure is now carried as an explicit Dirichlet static-pressure boundary instead of remaining zero-gradient, and the compatibility helper seeds that reference pressure alongside the inlet setup path.
+   - Remaining: ensure the final outlet policy constrains the appropriate outgoing characteristic or static pressure without overconstraining the thermodynamic state.
 
 3. Verify compatibility with the current generic BC table mechanism.
-   - The current GPU path expands BCs per face and per component in the generic coupled backend.
-   - Confirm the new inlet treatment can be expressed cleanly in that structure or introduce a specialized compressible boundary update path if needed.
+   - Done for the first slice: the runtime inlet refresh is expressed cleanly through the existing per-face BC value table and a recurring Preparation-phase generated kernel in the generic coupled backend.
+   - Remaining: only add deeper specialized runtime behavior if outlet treatment or per-outer-iteration refresh requires it.
 
 Expected file focus:
 - [src/solver/model/helpers/solver_ext.rs](src/solver/model/helpers/solver_ext.rs)
@@ -121,8 +125,9 @@ Expected file focus:
 - [src/solver/gpu/program/generic_coupled_backend.rs](src/solver/gpu/program/generic_coupled_backend.rs)
 
 Acceptance criteria:
-- Compressible subsonic inlet and outlet behavior are less rigid and better aligned with physical wave propagation.
-- Existing tests can be updated without changing the zero-velocity interior initialization.
+- Status: partial.
+- Done for the current slices: compressible inlet thermodynamic values are no longer purely host-fixed for the entire physical step, outlet pressure now has an explicit static-pressure boundary path, and the existing inlet helper remains compatible with current tests and UI-like flows.
+- Remaining: demonstrate improved low-Mach physical behavior, decide the final outlet policy, and confirm whether per-step refresh is enough or per-outer-iteration refresh is still needed.
 
 ## Phase 5: Positivity fallback follow-up
 
@@ -175,15 +180,14 @@ Acceptance criteria:
 
 ## Recommended implementation order
 
-1. Phase 3: add local pseudo-time stepping.
-2. Phase 4: improve subsonic compressible boundary treatment.
-3. Phase 5 follow-up: reassess whether rollback/backoff remains the desired final positivity response after the local-`dtau` and boundary changes land.
-4. Phase 6: add local-`dtau` validation, add a low-Mach physical regression case, and rerun reference sweeps.
+1. Phase 4: continue the runtime subsonic compressible boundary work, starting from the new recurring inlet thermodynamic refresh slice.
+2. Phase 3 follow-up: decide whether the current local face metric remains final or should evolve toward a spectral-radius form.
+3. Phase 5 follow-up: reassess whether rollback/backoff remains the desired final positivity response after the boundary work settles.
+4. Phase 6: add a low-Mach physical regression case and rerun reference sweeps.
 
 Rationale:
-- The dual-time acceptance, retry, and positivity-observability slices are now implemented and regression-covered, so the remaining work shifts to local pseudo-time scaling and boundary semantics.
-- Phase 3 improves scaling and robustness now that fallback behavior is already exposed and tested.
-- Phase 4 changes BC semantics and should come after the core pseudo-time loop is trustworthy.
+- The dual-time acceptance, retry, positivity-observability, and first local-`dtau` slices are already implemented and regression-covered, so the active execution path now centers on boundary semantics and the remaining validation gaps.
+- The first runtime inlet boundary slice is now in place and needs to be validated and potentially extended before revisiting the deferred spectral-radius question.
 
 ## Non-goal reminder
 

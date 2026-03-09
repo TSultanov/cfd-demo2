@@ -49,6 +49,7 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
                 finalize: Some(host_coupled_finalize_step),
                 solve: Some(host_coupled_solve),
                 coupled_init_prepare_graph: Some(coupled_graph_init_prepare_run),
+                coupled_iter_prepare_graph: Some(coupled_graph_iter_prepare_run),
                 coupled_before_iter: Some(host_coupled_before_iter),
                 coupled_outer_iters: Some(coupled_outer_iters),
 
@@ -241,6 +242,14 @@ fn coupled_graph_init_prepare_run(
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     generic_coupled_program::init_prepare_graph_run(plan, context, mode)
+}
+
+fn coupled_graph_iter_prepare_run(
+    plan: &GpuProgramPlan,
+    context: &crate::solver::gpu::context::GpuContext,
+    mode: GraphExecMode,
+) -> (f64, Option<GraphDetail>) {
+    generic_coupled_program::iter_prepare_graph_run(plan, context, mode)
 }
 
 fn coupled_outer_iters(plan: &GpuProgramPlan) -> usize {

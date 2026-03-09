@@ -1954,6 +1954,28 @@ pub(crate) fn clear_dp_init_needed(plan: &mut GpuProgramPlan) {
     }
 }
 
+/// Runs the Preparation-phase graph once per outer iteration when
+/// `recurring_prepare_enabled` is true (e.g. the compressible runtime BC
+/// update kernel is present).  This keeps inlet/outlet BC values synchronized
+/// with the evolving interior state within the outer corrector loop.
+pub(crate) fn iter_prepare_graph_run(
+    plan: &GpuProgramPlan,
+    context: &crate::solver::gpu::context::GpuContext,
+    mode: GraphExecMode,
+) -> (f64, Option<GraphDetail>) {
+    let r = res(plan);
+    if !r.recurring_prepare_enabled {
+        return (0.0, None);
+    }
+    run_module_graph(
+        &r.init_prepare_graph,
+        context,
+        &r.kernels,
+        r.runtime_dims(),
+        mode,
+    )
+}
+
 pub(crate) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
     // After the first iteration begins, we can stop running one-time preparation
     // kernels (e.g. `dp_init`) on subsequent steps unless a parameter change

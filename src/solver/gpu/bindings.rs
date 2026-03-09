@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 4257e536cb6cce595aefcd5b3c7a3710d974a535f6218b80a753dc2ab9f5b3d9
+// SourceHash: 30084637404d6905560c7f30f27d2dcf8d363604bf7818e04d3715fc0bbbb59d
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -5031,42 +5031,80 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
     let face_boundary_type = face_boundary[idx];
-    if (face_boundary_type != 1u) {
+    let is_inlet = (face_boundary_type == 1u);
+    let is_outlet = (face_boundary_type == 2u);
+    if (!(is_inlet) && !(is_outlet)) {
         return;
     }
     let owner = face_owner[idx];
     let base = (owner * 22u);
-    let _e31 = state[(base + 8u)];
-    bc_value[((idx * 8u) + 6u)] = max(_e31, 0.000001f);
-    let _e44 = state[(base + 8u)];
-    let _e53 = bc_value[((idx * 8u) + 0u)];
-    let _e58 = constants.eos_r;
-    bc_value[((idx * 8u) + 7u)] = (max(_e44, 0.000001f) / (max(_e53, 0.000001f) * max(_e58, 0.000000000001f)));
-    let _e75 = bc_value[((idx * 8u) + 0u)];
-    let _e84 = bc_value[((idx * 8u) + 4u)];
-    let _e91 = bc_value[((idx * 8u) + 4u)];
-    let _e99 = bc_value[((idx * 8u) + 5u)];
-    let _e106 = bc_value[((idx * 8u) + 5u)];
-    let _e114 = state[(base + 8u)];
-    let _e119 = constants.eos_gm1_;
-    let _e129 = bc_value[((idx * 8u) + 0u)];
-    let _e138 = bc_value[((idx * 8u) + 4u)];
-    let _e145 = bc_value[((idx * 8u) + 4u)];
-    let _e153 = bc_value[((idx * 8u) + 5u)];
-    let _e160 = bc_value[((idx * 8u) + 5u)];
-    let _e167 = constants.eos_gm1_;
-    bc_value[((idx * 8u) + 3u)] = select(((0.5f * _e75) * ((_e84 * _e91) + (_e99 * _e106))), ((max(_e114, 0.000001f) / max(_e119, 0.000001f)) + ((0.5f * _e129) * ((_e138 * _e145) + (_e153 * _e160)))), (_e167 > 0f));
-    let _e183 = bc_value[((idx * 8u) + 0u)];
-    let _e190 = bc_value[((idx * 8u) + 4u)];
-    bc_value[((idx * 8u) + 1u)] = (_e183 * _e190);
-    let _e204 = bc_value[((idx * 8u) + 0u)];
-    let _e211 = bc_value[((idx * 8u) + 5u)];
-    bc_value[((idx * 8u) + 2u)] = (_e204 * _e211);
-    let _e225 = bc_value[((idx * 8u) + 4u)];
-    bc_value[((idx * 8u) + 4u)] = _e225;
-    let _e238 = bc_value[((idx * 8u) + 5u)];
-    bc_value[((idx * 8u) + 5u)] = _e238;
-    return;
+    if is_inlet {
+        let _e36 = state[(base + 8u)];
+        bc_value[((idx * 8u) + 6u)] = max(_e36, 0.000001f);
+        let _e49 = state[(base + 8u)];
+        let _e58 = bc_value[((idx * 8u) + 0u)];
+        let _e63 = constants.eos_r;
+        bc_value[((idx * 8u) + 7u)] = (max(_e49, 0.000001f) / (max(_e58, 0.000001f) * max(_e63, 0.000000000001f)));
+        let _e80 = bc_value[((idx * 8u) + 0u)];
+        let _e89 = bc_value[((idx * 8u) + 4u)];
+        let _e96 = bc_value[((idx * 8u) + 4u)];
+        let _e104 = bc_value[((idx * 8u) + 5u)];
+        let _e111 = bc_value[((idx * 8u) + 5u)];
+        let _e119 = state[(base + 8u)];
+        let _e124 = constants.eos_gm1_;
+        let _e134 = bc_value[((idx * 8u) + 0u)];
+        let _e143 = bc_value[((idx * 8u) + 4u)];
+        let _e150 = bc_value[((idx * 8u) + 4u)];
+        let _e158 = bc_value[((idx * 8u) + 5u)];
+        let _e165 = bc_value[((idx * 8u) + 5u)];
+        let _e172 = constants.eos_gm1_;
+        bc_value[((idx * 8u) + 3u)] = select(((0.5f * _e80) * ((_e89 * _e96) + (_e104 * _e111))), ((max(_e119, 0.000001f) / max(_e124, 0.000001f)) + ((0.5f * _e134) * ((_e143 * _e150) + (_e158 * _e165)))), (_e172 > 0f));
+        let _e188 = bc_value[((idx * 8u) + 0u)];
+        let _e195 = bc_value[((idx * 8u) + 4u)];
+        bc_value[((idx * 8u) + 1u)] = (_e188 * _e195);
+        let _e209 = bc_value[((idx * 8u) + 0u)];
+        let _e216 = bc_value[((idx * 8u) + 5u)];
+        bc_value[((idx * 8u) + 2u)] = (_e209 * _e216);
+        let _e230 = bc_value[((idx * 8u) + 4u)];
+        bc_value[((idx * 8u) + 4u)] = _e230;
+        let _e243 = bc_value[((idx * 8u) + 5u)];
+        bc_value[((idx * 8u) + 5u)] = _e243;
+    }
+    if is_outlet {
+        let _e254 = state[(base + 0u)];
+        bc_value[((idx * 8u) + 0u)] = max(_e254, 0.000001f);
+        let _e267 = state[(base + 10u)];
+        bc_value[((idx * 8u) + 4u)] = _e267;
+        let _e280 = state[((base + 10u) + 1u)];
+        bc_value[((idx * 8u) + 5u)] = _e280;
+        let _e291 = state[(base + 0u)];
+        let _e298 = state[(base + 10u)];
+        bc_value[((idx * 8u) + 1u)] = (max(_e291, 0.000001f) * _e298);
+        let _e310 = state[(base + 0u)];
+        let _e319 = state[((base + 10u) + 1u)];
+        bc_value[((idx * 8u) + 2u)] = (max(_e310, 0.000001f) * _e319);
+        let _e333 = bc_value[((idx * 8u) + 6u)];
+        let _e338 = state[(base + 0u)];
+        let _e343 = constants.eos_r;
+        bc_value[((idx * 8u) + 7u)] = (_e333 / (max(_e338, 0.000001f) * max(_e343, 0.000000000001f)));
+        let _e358 = state[(base + 0u)];
+        let _e367 = state[(base + 10u)];
+        let _e372 = state[(base + 10u)];
+        let _e380 = state[((base + 10u) + 1u)];
+        let _e387 = state[((base + 10u) + 1u)];
+        let _e397 = bc_value[((idx * 8u) + 6u)];
+        let _e400 = constants.eos_gm1_;
+        let _e408 = state[(base + 0u)];
+        let _e417 = state[(base + 10u)];
+        let _e422 = state[(base + 10u)];
+        let _e430 = state[((base + 10u) + 1u)];
+        let _e437 = state[((base + 10u) + 1u)];
+        let _e444 = constants.eos_gm1_;
+        bc_value[((idx * 8u) + 3u)] = select(((0.5f * max(_e358, 0.000001f)) * ((_e367 * _e372) + (_e380 * _e387))), ((_e397 / max(_e400, 0.000001f)) + ((0.5f * max(_e408, 0.000001f)) * ((_e417 * _e422) + (_e430 * _e437)))), (_e444 > 0f));
+        return;
+    } else {
+        return;
+    }
 }
 "#;
     }

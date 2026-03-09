@@ -30,16 +30,29 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
     if (idx >= arrayLength(&face_boundary)) { return; }
     let face_boundary_type = face_boundary[idx];
-    if (face_boundary_type != 1u) {
+    let is_inlet = face_boundary_type == 1u;
+    let is_outlet = face_boundary_type == 2u;
+    if (!is_inlet && !is_outlet) {
         return;
     }
     let owner = face_owner[idx];
     let base = owner * 22u;
-    bc_value[idx * 8u + 6u] = max(state[base + 8u], 0.000001);
-    bc_value[idx * 8u + 7u] = max(state[base + 8u], 0.000001) / (max(bc_value[idx * 8u + 0u], 0.000001) * max(constants.eos_r, 0.000000000001));
-    bc_value[idx * 8u + 3u] = select(0.5 * bc_value[idx * 8u + 0u] * (bc_value[idx * 8u + 4u] * bc_value[idx * 8u + 4u] + bc_value[idx * 8u + 5u] * bc_value[idx * 8u + 5u]), max(state[base + 8u], 0.000001) / max(constants.eos_gm1, 0.000001) + 0.5 * bc_value[idx * 8u + 0u] * (bc_value[idx * 8u + 4u] * bc_value[idx * 8u + 4u] + bc_value[idx * 8u + 5u] * bc_value[idx * 8u + 5u]), constants.eos_gm1 > 0.0);
-    bc_value[idx * 8u + 1u] = bc_value[idx * 8u + 0u] * bc_value[idx * 8u + 4u];
-    bc_value[idx * 8u + 2u] = bc_value[idx * 8u + 0u] * bc_value[idx * 8u + 5u];
-    bc_value[idx * 8u + 4u] = bc_value[idx * 8u + 4u];
-    bc_value[idx * 8u + 5u] = bc_value[idx * 8u + 5u];
+    if (is_inlet) {
+        bc_value[idx * 8u + 6u] = max(state[base + 8u], 0.000001);
+        bc_value[idx * 8u + 7u] = max(state[base + 8u], 0.000001) / (max(bc_value[idx * 8u + 0u], 0.000001) * max(constants.eos_r, 0.000000000001));
+        bc_value[idx * 8u + 3u] = select(0.5 * bc_value[idx * 8u + 0u] * (bc_value[idx * 8u + 4u] * bc_value[idx * 8u + 4u] + bc_value[idx * 8u + 5u] * bc_value[idx * 8u + 5u]), max(state[base + 8u], 0.000001) / max(constants.eos_gm1, 0.000001) + 0.5 * bc_value[idx * 8u + 0u] * (bc_value[idx * 8u + 4u] * bc_value[idx * 8u + 4u] + bc_value[idx * 8u + 5u] * bc_value[idx * 8u + 5u]), constants.eos_gm1 > 0.0);
+        bc_value[idx * 8u + 1u] = bc_value[idx * 8u + 0u] * bc_value[idx * 8u + 4u];
+        bc_value[idx * 8u + 2u] = bc_value[idx * 8u + 0u] * bc_value[idx * 8u + 5u];
+        bc_value[idx * 8u + 4u] = bc_value[idx * 8u + 4u];
+        bc_value[idx * 8u + 5u] = bc_value[idx * 8u + 5u];
+    }
+    if (is_outlet) {
+        bc_value[idx * 8u + 0u] = max(state[base + 0u], 0.000001);
+        bc_value[idx * 8u + 4u] = state[base + 10u];
+        bc_value[idx * 8u + 5u] = state[base + 10u + 1u];
+        bc_value[idx * 8u + 1u] = max(state[base + 0u], 0.000001) * state[base + 10u];
+        bc_value[idx * 8u + 2u] = max(state[base + 0u], 0.000001) * state[base + 10u + 1u];
+        bc_value[idx * 8u + 7u] = bc_value[idx * 8u + 6u] / (max(state[base + 0u], 0.000001) * max(constants.eos_r, 0.000000000001));
+        bc_value[idx * 8u + 3u] = select(0.5 * max(state[base + 0u], 0.000001) * (state[base + 10u] * state[base + 10u] + state[base + 10u + 1u] * state[base + 10u + 1u]), bc_value[idx * 8u + 6u] / max(constants.eos_gm1, 0.000001) + 0.5 * max(state[base + 0u], 0.000001) * (state[base + 10u] * state[base + 10u] + state[base + 10u + 1u] * state[base + 10u + 1u]), constants.eos_gm1 > 0.0);
+    }
 }

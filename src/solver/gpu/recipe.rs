@@ -647,6 +647,11 @@ impl SolverRecipe {
                         kind: HostOpKind("coupled:before_iter"),
                     },
                     ProgramSpecNode::Graph {
+                        label: "coupled:iter_prepare",
+                        kind: GraphOpKind("coupled:iter_prepare"),
+                        mode: GraphExecMode::SingleSubmit,
+                    },
+                    ProgramSpecNode::Graph {
                         label: "coupled:assembly",
                         kind: GraphOpKind("coupled:assembly"),
                         mode: GraphExecMode::SingleSubmit,

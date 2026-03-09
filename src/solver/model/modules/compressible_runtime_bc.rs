@@ -19,6 +19,7 @@ const FIELD_T: &str = "T";
 const FIELD_U: &str = "u";
 
 const BOUNDARY_INLET: u32 = 1;
+const BOUNDARY_OUTLET: u32 = 2;
 
 pub fn compressible_runtime_bc_module() -> KernelBundleModule {
     KernelBundleModule {
@@ -135,25 +136,68 @@ fn generate_compressible_runtime_bc_kernel_program(
     let bc = BcTable::new(Expr::ident("idx"), coupled_stride);
     let base = Expr::ident("base");
     let owner = Expr::ident("owner");
-    let rho_target = bc.value(rho_bc_offset);
-    let u_x_target = bc.value(u_x_bc_offset);
-    let u_y_target = bc.value(u_y_bc_offset);
-    let rho_safe = dsl::max(rho_target.clone(), Expr::lit_f32(1.0e-6));
+    let r_safe = dsl::max(Expr::ident("constants").field("eos_r"), Expr::lit_f32(1.0e-12));
+    let gm1 = Expr::ident("constants").field("eos_gm1");
+    let gm1_safe = dsl::max(gm1.clone(), Expr::lit_f32(1.0e-6));
+
+    // --- Shared: read interior owner-cell pressure ---
     let p_owner = dsl::max(
         dsl::array_access("state", base.clone() + p.offset()),
         Expr::lit_f32(1.0e-6),
     );
-    let r_safe = dsl::max(Expr::ident("constants").field("eos_r"), Expr::lit_f32(1.0e-12));
-    let kinetic_energy = Expr::lit_f32(0.5)
+
+    // --- Inlet branch: refresh p, T, rho_e from interior pressure; keep prescribed rho, u ---
+    let rho_target = bc.value(rho_bc_offset);
+    let u_x_target = bc.value(u_x_bc_offset);
+    let u_y_target = bc.value(u_y_bc_offset);
+    let rho_safe_inlet = dsl::max(rho_target.clone(), Expr::lit_f32(1.0e-6));
+    let ke_inlet = Expr::lit_f32(0.5)
         * rho_target.clone()
         * (u_x_target.clone() * u_x_target.clone() + u_y_target.clone() * u_y_target.clone());
-    let rho_e_target = dsl::select(
-        kinetic_energy.clone(),
-        p_owner.clone() / dsl::max(Expr::ident("constants").field("eos_gm1"), Expr::lit_f32(1.0e-6))
-            + kinetic_energy.clone(),
-        Expr::ident("constants").field("eos_gm1").gt(Expr::lit_f32(0.0)),
+    let rho_e_inlet = dsl::select(
+        ke_inlet.clone(),
+        p_owner.clone() / gm1_safe.clone() + ke_inlet.clone(),
+        gm1.clone().gt(Expr::lit_f32(0.0)),
     );
-    let t_target = p_owner.clone() / (rho_safe * r_safe);
+    let t_inlet = p_owner.clone() / (rho_safe_inlet * r_safe.clone());
+
+    let inlet_body = dsl::block(vec![
+        dsl::assign_expr(bc.value(p_bc_offset), p_owner.clone()),
+        dsl::assign_expr(bc.value(t_bc_offset), t_inlet),
+        dsl::assign_expr(bc.value(rho_e_bc_offset), rho_e_inlet),
+        dsl::assign_expr(bc.value(rho_u_x_bc_offset), rho_target.clone() * u_x_target.clone()),
+        dsl::assign_expr(bc.value(rho_u_y_bc_offset), rho_target.clone() * u_y_target.clone()),
+        dsl::assign_expr(bc.value(u_x_bc_offset), u_x_target),
+        dsl::assign_expr(bc.value(u_y_bc_offset), u_y_target),
+    ]);
+
+    // --- Outlet branch: extrapolate non-pressure state from interior; keep Dirichlet pressure ---
+    let rho_owner = dsl::max(
+        dsl::array_access("state", base.clone() + rho.offset()),
+        Expr::lit_f32(1.0e-6),
+    );
+    let u_x_owner = dsl::array_access("state", base.clone() + u.offset());
+    let u_y_owner = dsl::array_access("state", base.clone() + u.offset() + 1u32);
+    let p_outlet = bc.value(p_bc_offset);
+    let ke_outlet = Expr::lit_f32(0.5)
+        * rho_owner.clone()
+        * (u_x_owner.clone() * u_x_owner.clone() + u_y_owner.clone() * u_y_owner.clone());
+    let rho_e_outlet = dsl::select(
+        ke_outlet.clone(),
+        p_outlet.clone() / gm1_safe + ke_outlet.clone(),
+        gm1.gt(Expr::lit_f32(0.0)),
+    );
+    let t_outlet = p_outlet / (rho_owner.clone() * r_safe);
+
+    let outlet_body = dsl::block(vec![
+        dsl::assign_expr(bc.value(rho_bc_offset), rho_owner.clone()),
+        dsl::assign_expr(bc.value(u_x_bc_offset), u_x_owner.clone()),
+        dsl::assign_expr(bc.value(u_y_bc_offset), u_y_owner.clone()),
+        dsl::assign_expr(bc.value(rho_u_x_bc_offset), rho_owner.clone() * u_x_owner),
+        dsl::assign_expr(bc.value(rho_u_y_bc_offset), rho_owner.clone() * u_y_owner),
+        dsl::assign_expr(bc.value(t_bc_offset), t_outlet),
+        dsl::assign_expr(bc.value(rho_e_bc_offset), rho_e_outlet),
+    ]);
 
     let mut program = KernelProgram::new(
         KernelId::COMPRESSIBLE_RUNTIME_BC_UPDATE.as_str(),
@@ -163,8 +207,10 @@ fn generate_compressible_runtime_bc_kernel_program(
     );
     program.indexing = vec![
         dsl::let_expr("face_boundary_type", dsl::array_access("face_boundary", Expr::ident("idx"))),
+        dsl::let_expr("is_inlet", Expr::ident("face_boundary_type").eq(Expr::from(BOUNDARY_INLET))),
+        dsl::let_expr("is_outlet", Expr::ident("face_boundary_type").eq(Expr::from(BOUNDARY_OUTLET))),
         dsl::if_block_expr(
-            Expr::ident("face_boundary_type").ne(Expr::from(BOUNDARY_INLET)),
+            !Expr::ident("is_inlet") & !Expr::ident("is_outlet"),
             dsl::block(vec![dsl::return_void()]),
             None,
         ),
@@ -172,13 +218,8 @@ fn generate_compressible_runtime_bc_kernel_program(
         dsl::let_expr("base", owner.clone() * state_stride),
     ];
     program.body = vec![
-        dsl::assign_expr(bc.value(p_bc_offset), p_owner.clone()),
-        dsl::assign_expr(bc.value(t_bc_offset), t_target),
-        dsl::assign_expr(bc.value(rho_e_bc_offset), rho_e_target),
-        dsl::assign_expr(bc.value(rho_u_x_bc_offset), rho_target.clone() * u_x_target.clone()),
-        dsl::assign_expr(bc.value(rho_u_y_bc_offset), rho_target.clone() * u_y_target.clone()),
-        dsl::assign_expr(bc.value(u_x_bc_offset), u_x_target),
-        dsl::assign_expr(bc.value(u_y_bc_offset), u_y_target),
+        dsl::if_block_expr(Expr::ident("is_inlet"), inlet_body, None),
+        dsl::if_block_expr(Expr::ident("is_outlet"), outlet_body, None),
     ];
     program
         .side_effects
@@ -224,8 +265,6 @@ mod tests {
 
     #[test]
     fn compressible_model_sets_outlet_pressure_dirichlet() {
-        const BOUNDARY_OUTLET: usize = 2;
-
         let model = crate::solver::model::compressible_model().expect("model");
         let (kind, _value) = model
             .boundaries
@@ -234,10 +273,26 @@ mod tests {
         let flux_layout = crate::solver::model::FluxLayout::from_system(&model.system);
         let p_offset = flux_layout.offset_for(FIELD_P).expect("pressure offset") as usize;
         let stride = model.system.unknowns_per_cell() as usize;
-        let outlet_index = BOUNDARY_OUTLET * stride + p_offset;
+        let outlet_index = BOUNDARY_OUTLET as usize * stride + p_offset;
         assert_eq!(
             kind[outlet_index],
             cfd2_ir::gpu_enums::GpuBcKind::Dirichlet as u32
+        );
+    }
+
+    #[test]
+    fn compressible_runtime_bc_kernel_handles_inlet_and_outlet() {
+        let model = crate::solver::model::compressible_model().expect("model");
+        let program = generate_compressible_runtime_bc_kernel_program(
+            &model,
+            &crate::solver::ir::SchemeRegistry::default(),
+        )
+        .expect("runtime bc kernel");
+        // The kernel body should contain two conditional blocks (inlet and outlet).
+        assert_eq!(
+            program.body.len(),
+            2,
+            "expected exactly two conditional blocks in the runtime BC kernel body (inlet + outlet)"
         );
     }
 }

@@ -280,7 +280,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 
     // Time derivative contributions (implicit only).
     stmts.extend(super::coupled_common::emit_ddt_contributions(
-        system, slots, &offsets, &acc,
+           system, slots, &offsets, &acc,
     ));
 
     // Source terms.

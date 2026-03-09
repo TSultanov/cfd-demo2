@@ -118,6 +118,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     var k1_diag_0: f32 = 0.0;
     var k1_rhs_0: f32 = 0.0;
+    let k1_dtau_safe = max(constants.dtau, 0.000000000001);
+    let k1_global_dual_time_scale = k1_vol / max(constants.dtau, 0.000000000001);
+    var k1_perimeter_sum: f32 = 0.0;
+    for (var k1_k = k1_start; k1_k < k1_end; k1_k++) {
+        let k1_area = face_areas[cell_faces[k1_k]];
+        k1_perimeter_sum = k1_perimeter_sum + k1_area;
+    }
+    let k1_face_metric_scale = max(1.0, k1_perimeter_sum * k1_perimeter_sum / max(16.0 * k1_vol, 0.000000000001));
+    let k1_dual_time_scale = k1_global_dual_time_scale * k1_face_metric_scale;
     k1_diag_0 += k1_vol / constants.dt;
     k1_rhs_0 += k1_vol / constants.dt * state_old[idx * 1u + 0u];
     if (constants.time_scheme == 1u) {
@@ -129,8 +138,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         k1_rhs_0 = k1_rhs_0 - k1_vol / constants.dt * state_old[idx * 1u + 0u] + k1_vol / constants.dt * (k1_factor_n * state_old[idx * 1u + 0u] - k1_factor_nm1 * state_old_old[idx * 1u + 0u]);
     }
     if (constants.dtau > 0.0) {
-        k1_diag_0 += k1_vol / constants.dtau;
-        k1_rhs_0 += k1_vol / constants.dtau * state_iter[idx * 1u + 0u];
+        k1_diag_0 += k1_dual_time_scale;
+        k1_rhs_0 += k1_dual_time_scale * state_iter[idx * 1u + 0u];
     }
     for (var k1_k = k1_start; k1_k < k1_end; k1_k++) {
         let k1_face_idx = cell_faces[k1_k];

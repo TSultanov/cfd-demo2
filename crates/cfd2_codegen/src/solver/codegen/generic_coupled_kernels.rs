@@ -369,7 +369,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 
     // Time derivative contributions (implicit only).
     stmts.extend(super::coupled_common::emit_ddt_contributions(
-        system, slots, &offsets, &acc,
+           system, slots, &offsets, &acc,
     ));
 
     // Face loop for diffusion contributions (implicit only).
@@ -841,10 +841,36 @@ mod tests {
             "expected assembly WGSL to gate dual-time term on constants.dtau"
         );
         assert!(
-            wgsl.contains("/ constants.dtau"),
-            "expected assembly WGSL to include a 1/dtau diagonal contribution"
+            wgsl.contains("perimeter_sum") && wgsl.contains("face_metric_scale"),
+            "expected assembly WGSL to include the face-based local dtau metric"
         );
     }
+
+        #[test]
+    fn generic_coupled_ddt_face_metric_uses_square_cell_normalization() {
+        let u = vol_scalar_dim::<cfd2_ir::dimensions::Velocity>("u");
+
+        let mut eqn = Equation::new(u);
+        eqn.add_term(fvm::ddt(u));
+
+            let mut system = EquationSystem::new();
+            system.add_equation(eqn);
+
+        let layout = crate::solver::ir::StateLayout::new(vec![u]);
+            let slots = slots_from_layout(&layout);
+            let schemes = SchemeRegistry::new(Scheme::Upwind);
+            let discrete = lower_system(&system, &schemes).expect("lower_system");
+        let wgsl = generate_generic_coupled_assembly_wgsl(&discrete, &slots, false, &[]).to_wgsl();
+
+            assert!(
+            wgsl.contains("perimeter_sum * perimeter_sum"),
+            "expected assembly WGSL to build the face-based perimeter metric"
+            );
+            assert!(
+            wgsl.contains("16.0 * vol") || wgsl.contains("16f * vol"),
+            "expected assembly WGSL to normalize the face metric against a square-cell reference"
+            );
+        }
 
     #[test]
     fn generic_coupled_update_program_extracts_launch_and_body_from_dsl() {

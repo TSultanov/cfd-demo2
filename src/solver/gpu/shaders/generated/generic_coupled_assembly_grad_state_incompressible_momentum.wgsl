@@ -84,6 +84,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rhs_1: f32 = 0.0;
     var diag_2: f32 = 0.0;
     var rhs_2: f32 = 0.0;
+    let dtau_safe = max(constants.dtau, 0.000000000001);
+    let global_dual_time_scale = vol / max(constants.dtau, 0.000000000001);
+    var perimeter_sum: f32 = 0.0;
+    for (var k = start; k < end; k++) {
+        let area = face_areas[cell_faces[k]];
+        perimeter_sum = perimeter_sum + area;
+    }
+    let face_metric_scale = max(1.0, perimeter_sum * perimeter_sum / max(16.0 * vol, 0.000000000001));
+    let dual_time_scale = global_dual_time_scale * face_metric_scale;
     diag_0 += vol * constants.density / constants.dt;
     rhs_0 += vol * constants.density / constants.dt * state_old[idx * 8u + 0u];
     if (constants.time_scheme == 1u) {
@@ -95,8 +104,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         rhs_0 = rhs_0 - vol * constants.density / constants.dt * state_old[idx * 8u + 0u] + vol * constants.density / constants.dt * (factor_n * state_old[idx * 8u + 0u] - factor_nm1 * state_old_old[idx * 8u + 0u]);
     }
     if (constants.dtau > 0.0) {
-        diag_0 += vol * constants.density / constants.dtau;
-        rhs_0 += vol * constants.density / constants.dtau * state_iter[idx * 8u + 0u];
+        diag_0 += constants.density * dual_time_scale;
+        rhs_0 += constants.density * dual_time_scale * state_iter[idx * 8u + 0u];
     }
     diag_1 += vol * constants.density / constants.dt;
     rhs_1 += vol * constants.density / constants.dt * state_old[idx * 8u + 1u];
@@ -109,8 +118,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         rhs_1 = rhs_1 - vol * constants.density / constants.dt * state_old[idx * 8u + 1u] + vol * constants.density / constants.dt * (factor_n * state_old[idx * 8u + 1u] - factor_nm1 * state_old_old[idx * 8u + 1u]);
     }
     if (constants.dtau > 0.0) {
-        diag_1 += vol * constants.density / constants.dtau;
-        rhs_1 += vol * constants.density / constants.dtau * state_iter[idx * 8u + 1u];
+        diag_1 += constants.density * dual_time_scale;
+        rhs_1 += constants.density * dual_time_scale * state_iter[idx * 8u + 1u];
     }
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];

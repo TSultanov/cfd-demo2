@@ -11,9 +11,63 @@ use super::state_access::state_component_slot;
 use super::wgsl_ast::{Expr, Stmt};
 use super::wgsl_dsl as dsl;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
-use crate::solver::ir::ports::ResolvedStateSlotsSpec;
 use crate::solver::ir::Discretization;
+use crate::solver::ir::ports::ResolvedStateSlotsSpec;
 use std::collections::HashMap;
+
+fn local_dual_time_scale_setup() -> Vec<Stmt> {
+    let dtau_safe = Expr::call_named(
+        "max",
+        vec![Expr::ident("constants").field("dtau"), Expr::from(1e-12)],
+    );
+
+    let mut stmts = vec![
+        dsl::let_expr("dtau_safe", dtau_safe.clone()),
+        dsl::let_expr("global_dual_time_scale", Expr::ident("vol") / dtau_safe),
+        dsl::var_typed_expr(
+            "perimeter_sum",
+            super::wgsl_ast::Type::F32,
+            Some(Expr::from(0.0)),
+        ),
+    ];
+
+    stmts.push(dsl::for_loop_expr(
+        dsl::for_init_var_expr("k", Expr::ident("start")),
+        Expr::ident("k").lt(Expr::ident("end")),
+        dsl::for_step_increment_expr(Expr::ident("k")),
+        dsl::block(vec![
+            dsl::let_expr(
+                "area",
+                dsl::array_access("face_areas", dsl::array_access("cell_faces", Expr::ident("k"))),
+            ),
+            dsl::assign_expr(
+                Expr::ident("perimeter_sum"),
+                Expr::ident("perimeter_sum") + Expr::ident("area"),
+            ),
+        ]),
+    ));
+
+    stmts.push(dsl::let_expr(
+        "face_metric_scale",
+        Expr::call_named(
+            "max",
+            vec![
+                Expr::from(1.0),
+                (Expr::ident("perimeter_sum") * Expr::ident("perimeter_sum"))
+                    / Expr::call_named(
+                        "max",
+                        vec![Expr::from(16.0) * Expr::ident("vol"), Expr::from(1e-12)],
+                    ),
+            ],
+        ),
+    ));
+    stmts.push(dsl::let_expr(
+        "dual_time_scale",
+        Expr::ident("global_dual_time_scale") * Expr::ident("face_metric_scale"),
+    ));
+
+    stmts
+}
 
 // ---------------------------------------------------------------------------
 // TimeIntegrator trait
@@ -144,7 +198,7 @@ pub fn emit_ddt_contributions(
     acc: &CoupledAccumulators,
     integrator: &dyn TimeIntegrator,
 ) -> Vec<Stmt> {
-    let mut stmts = Vec::new();
+    let mut stmts = local_dual_time_scale_setup();
 
     for equation in &system.equations {
         let Some(ddt_op) = equation.ops.iter().find(|op| {
@@ -160,8 +214,7 @@ pub fn emit_ddt_contributions(
         let rho_expr = coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
         let base_coeff =
             Expr::ident("vol") * rho_expr.clone() / Expr::ident("constants").field("dt");
-        let dual_time_coeff =
-            Expr::ident("vol") * rho_expr / Expr::ident("constants").field("dtau");
+        let dual_time_coeff = rho_expr * Expr::ident("dual_time_scale");
 
         for component in 0..equation.target.kind().component_count() as u32 {
             let u_idx = base_offset + component;

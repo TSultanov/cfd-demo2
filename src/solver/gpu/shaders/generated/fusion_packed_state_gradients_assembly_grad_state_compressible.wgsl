@@ -238,6 +238,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var k1_rhs_6: f32 = 0.0;
     var k1_diag_7: f32 = 0.0;
     var k1_rhs_7: f32 = 0.0;
+    let k1_dtau_safe = max(constants.dtau, 0.000000000001);
+    let k1_global_dual_time_scale = k1_vol / max(constants.dtau, 0.000000000001);
+    var k1_perimeter_sum: f32 = 0.0;
+    for (var k1_k = k1_start; k1_k < k1_end; k1_k++) {
+        let k1_area = face_areas[cell_faces[k1_k]];
+        k1_perimeter_sum = k1_perimeter_sum + k1_area;
+    }
+    let k1_face_metric_scale = max(1.0, k1_perimeter_sum * k1_perimeter_sum / max(16.0 * k1_vol, 0.000000000001));
+    let k1_dual_time_scale = k1_global_dual_time_scale * k1_face_metric_scale;
     k1_diag_0 += k1_vol / constants.dt;
     k1_rhs_0 += k1_vol / constants.dt * state_old[idx * 22u + 0u];
     if (constants.time_scheme == 1u) {
@@ -249,8 +258,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         k1_rhs_0 = k1_rhs_0 - k1_vol / constants.dt * state_old[idx * 22u + 0u] + k1_vol / constants.dt * (k1_factor_n * state_old[idx * 22u + 0u] - k1_factor_nm1 * state_old_old[idx * 22u + 0u]);
     }
     if (constants.dtau > 0.0) {
-        k1_diag_0 += k1_vol / constants.dtau;
-        k1_rhs_0 += k1_vol / constants.dtau * state_iter[idx * 22u + 0u];
+        k1_diag_0 += k1_dual_time_scale;
+        k1_rhs_0 += k1_dual_time_scale * state_iter[idx * 22u + 0u];
     }
     k1_diag_1 += k1_vol / constants.dt;
     k1_rhs_1 += k1_vol / constants.dt * state_old[idx * 22u + 1u];
@@ -263,8 +272,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         k1_rhs_1 = k1_rhs_1 - k1_vol / constants.dt * state_old[idx * 22u + 1u] + k1_vol / constants.dt * (k1_factor_n * state_old[idx * 22u + 1u] - k1_factor_nm1 * state_old_old[idx * 22u + 1u]);
     }
     if (constants.dtau > 0.0) {
-        k1_diag_1 += k1_vol / constants.dtau;
-        k1_rhs_1 += k1_vol / constants.dtau * state_iter[idx * 22u + 1u];
+        k1_diag_1 += k1_dual_time_scale;
+        k1_rhs_1 += k1_dual_time_scale * state_iter[idx * 22u + 1u];
     }
     k1_diag_2 += k1_vol / constants.dt;
     k1_rhs_2 += k1_vol / constants.dt * state_old[idx * 22u + 2u];
@@ -277,8 +286,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         k1_rhs_2 = k1_rhs_2 - k1_vol / constants.dt * state_old[idx * 22u + 2u] + k1_vol / constants.dt * (k1_factor_n * state_old[idx * 22u + 2u] - k1_factor_nm1 * state_old_old[idx * 22u + 2u]);
     }
     if (constants.dtau > 0.0) {
-        k1_diag_2 += k1_vol / constants.dtau;
-        k1_rhs_2 += k1_vol / constants.dtau * state_iter[idx * 22u + 2u];
+        k1_diag_2 += k1_dual_time_scale;
+        k1_rhs_2 += k1_dual_time_scale * state_iter[idx * 22u + 2u];
     }
     k1_diag_3 += k1_vol / constants.dt;
     k1_rhs_3 += k1_vol / constants.dt * state_old[idx * 22u + 7u];
@@ -291,8 +300,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         k1_rhs_3 = k1_rhs_3 - k1_vol / constants.dt * state_old[idx * 22u + 7u] + k1_vol / constants.dt * (k1_factor_n * state_old[idx * 22u + 7u] - k1_factor_nm1 * state_old_old[idx * 22u + 7u]);
     }
     if (constants.dtau > 0.0) {
-        k1_diag_3 += k1_vol / constants.dtau;
-        k1_rhs_3 += k1_vol / constants.dtau * state_iter[idx * 22u + 7u];
+        k1_diag_3 += k1_dual_time_scale;
+        k1_rhs_3 += k1_dual_time_scale * state_iter[idx * 22u + 7u];
     }
     k1_diag_4 -= -(state[idx * 22u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
     k1_diag_5 -= -(state[idx * 22u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;

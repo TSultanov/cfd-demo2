@@ -153,6 +153,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rhs_6: f32 = 0.0;
     var diag_7: f32 = 0.0;
     var rhs_7: f32 = 0.0;
+    let dtau_safe = max(constants.dtau, 0.000000000001);
+    let global_dual_time_scale = vol / max(constants.dtau, 0.000000000001);
+    var perimeter_sum: f32 = 0.0;
+    for (var k = start; k < end; k++) {
+        let area = face_areas[cell_faces[k]];
+        perimeter_sum = perimeter_sum + area;
+    }
+    let face_metric_scale = max(1.0, perimeter_sum * perimeter_sum / max(16.0 * vol, 0.000000000001));
+    let dual_time_scale = global_dual_time_scale * face_metric_scale;
     diag_0 += vol / constants.dt;
     rhs_0 += vol / constants.dt * state_old[idx * 22u + 0u];
     if (constants.time_scheme == 1u) {
@@ -164,8 +173,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         rhs_0 = rhs_0 - vol / constants.dt * state_old[idx * 22u + 0u] + vol / constants.dt * (factor_n * state_old[idx * 22u + 0u] - factor_nm1 * state_old_old[idx * 22u + 0u]);
     }
     if (constants.dtau > 0.0) {
-        diag_0 += vol / constants.dtau;
-        rhs_0 += vol / constants.dtau * state_iter[idx * 22u + 0u];
+        diag_0 += dual_time_scale;
+        rhs_0 += dual_time_scale * state_iter[idx * 22u + 0u];
     }
     diag_1 += vol / constants.dt;
     rhs_1 += vol / constants.dt * state_old[idx * 22u + 1u];
@@ -178,8 +187,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         rhs_1 = rhs_1 - vol / constants.dt * state_old[idx * 22u + 1u] + vol / constants.dt * (factor_n * state_old[idx * 22u + 1u] - factor_nm1 * state_old_old[idx * 22u + 1u]);
     }
     if (constants.dtau > 0.0) {
-        diag_1 += vol / constants.dtau;
-        rhs_1 += vol / constants.dtau * state_iter[idx * 22u + 1u];
+        diag_1 += dual_time_scale;
+        rhs_1 += dual_time_scale * state_iter[idx * 22u + 1u];
     }
     diag_2 += vol / constants.dt;
     rhs_2 += vol / constants.dt * state_old[idx * 22u + 2u];
@@ -192,8 +201,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         rhs_2 = rhs_2 - vol / constants.dt * state_old[idx * 22u + 2u] + vol / constants.dt * (factor_n * state_old[idx * 22u + 2u] - factor_nm1 * state_old_old[idx * 22u + 2u]);
     }
     if (constants.dtau > 0.0) {
-        diag_2 += vol / constants.dtau;
-        rhs_2 += vol / constants.dtau * state_iter[idx * 22u + 2u];
+        diag_2 += dual_time_scale;
+        rhs_2 += dual_time_scale * state_iter[idx * 22u + 2u];
     }
     diag_3 += vol / constants.dt;
     rhs_3 += vol / constants.dt * state_old[idx * 22u + 7u];
@@ -206,8 +215,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         rhs_3 = rhs_3 - vol / constants.dt * state_old[idx * 22u + 7u] + vol / constants.dt * (factor_n * state_old[idx * 22u + 7u] - factor_nm1 * state_old_old[idx * 22u + 7u]);
     }
     if (constants.dtau > 0.0) {
-        diag_3 += vol / constants.dtau;
-        rhs_3 += vol / constants.dtau * state_iter[idx * 22u + 7u];
+        diag_3 += dual_time_scale;
+        rhs_3 += dual_time_scale * state_iter[idx * 22u + 7u];
     }
     diag_4 -= -(state[idx * 22u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
     diag_5 -= -(state[idx * 22u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;

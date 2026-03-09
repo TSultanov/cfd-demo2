@@ -60,32 +60,37 @@ The implementation should expose enough residual, positivity, and pseudo-time st
 
 ## Progress Update
 
-Status as of 2026-03-08:
+Status as of 2026-03-09:
 - Completed: dual-time acceptance/status plumbing, nonconverged-step retry/reject handling, relaxation-default cleanup, primitive-recovery rho guards, solver-level positivity minima/counter diagnostics, positivity-triggered rollback/retry fallback, UI surfacing of positivity stats, and explicit regression coverage for the clean-case, retry/backoff, and forced positivity-fallback paths.
 - Completed: the required OpenFOAM pre/post comparisons for both the retry-policy milestone and the first positivity-protection milestone showed unchanged reported `[openfoam]` discrepancy metrics.
-- Active remaining work: Phase 3 local pseudo-time stepping, Phase 4 boundary-condition changes, a Phase 5 follow-up decision on fallback granularity, focused local-`dtau` validation, and a low-Mach physical regression case.
+- Completed: the first Phase 3 local pseudo-time slice now uses a face-based geometric local scaling in the generated dual-time operator, normalized so regular square cells keep the baseline global scale while more distorted cells receive stronger pseudo-time damping.
+- Completed: the Phase 3 face-metric slice passed targeted codegen tests, the UI-like compressible dual-time backstep regression, and a required OpenFOAM pre/post comparison without worsening tracked `[openfoam]` discrepancy metrics; the worst reported tracked discrepancy improved slightly versus the fresh baseline.
+- Active remaining work: Phase 3 refinement and dedicated local-`dtau` validation, Phase 4 boundary-condition changes, a Phase 5 follow-up decision on fallback granularity, and a low-Mach physical regression case.
 
 ## Phase 3: Add local pseudo-time stepping
 
 Objective: replace the single global `dtau` with a more physical per-cell or locally varying pseudo-time scale.
 
-Tasks:
-1. Define the local pseudo-time formula.
-   - Base it on local control-volume size and local spectral radius.
-   - Candidate form:
-     - `dtau_i = CFL_tau * V_i / sum_f(|lambda_f| A_f)`
-   - Ensure acoustic and advective contributions are included consistently with the low-Mach preconditioned pseudo-time operator.
+Status:
+- Partially completed. The first implementation slice now scales the dual-time diagonal and RHS by a per-cell face-based geometric metric derived from `perimeter_sum^2 / (16 * vol)`, with the existing global `dtau` retained as the user-facing scaling knob.
+- Remaining work is to decide whether this face-based metric is the final representation or an intermediate approximation toward a fuller spectral-radius form, and to add direct regression coverage for local-`dtau` behavior on structured and cut-cell meshes.
 
-2. Decide representation.
-   - Either add a new per-cell state or field buffer for `dtau_local`, or derive it transiently in the relevant kernels.
-   - Prefer a runtime field if it improves diagnostics and avoids redundant recomputation.
+Tasks:
+1. Refine the local pseudo-time formula.
+   - Done for the first slice: the generated assembly now uses a local face-based geometric scale built from cell face areas and normalized to equal `1` on square cells.
+   - Remaining: decide whether to keep the face-based metric as the production formulation or replace/augment it with a spectral-radius form such as `dtau_i = CFL_tau * V_i / sum_f(|lambda_f| A_f)`.
+   - Ensure any later spectral form includes acoustic and advective contributions consistently with the low-Mach preconditioned pseudo-time operator.
+
+2. Reassess representation.
+   - Done for the first slice: the local scale is derived transiently in the generated assembly kernels rather than stored in a dedicated field.
+   - Remaining: decide whether a persistent `dtau_local` field is worthwhile for diagnostics, reuse, or future spectral-radius variants.
 
 3. Thread local pseudo-time through assembly and update.
-   - The current assembly adds `vol/dtau` style diagonal terms.
-   - Replace or augment this with `vol/dtau_i` on a per-cell basis.
+   - Done for the first slice: the generated assembly now replaces the old `vol/dtau` contribution with a per-cell local dual-time scale derived inside the kernels.
+   - Remaining: confirm whether any non-generated update or diagnostic paths should expose the local scale explicitly.
 
 4. Preserve the existing global `dtau` UI control as a scaling knob.
-   - Reinterpret the current scalar `dtau` as a target pseudo-CFL or global multiplier for local pseudo-time.
+   - Done for the first slice: the current scalar `dtau` remains the global user-facing scale and multiplies the new local face-based factor.
    - Avoid breaking the current UI contract abruptly.
 
 Expected file focus:
@@ -95,8 +100,9 @@ Expected file focus:
 - [src/ui/app.rs](src/ui/app.rs)
 
 Acceptance criteria:
-- The pseudo-time operator uses a locally varying scale or an equivalent local spectral-radius formulation.
-- Dual-time convergence becomes less sensitive to the smallest or stiffest cells controlling the whole domain.
+- Status: partial.
+- Done: the pseudo-time operator now uses a locally varying per-cell scale in generated assembly.
+- Remaining: add focused local-`dtau` regressions and decide whether the face-based metric is sufficient or should evolve toward a fuller spectral-radius formulation.
 
 ## Phase 4: Improve subsonic compressible boundary treatment
 

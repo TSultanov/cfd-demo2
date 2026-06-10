@@ -271,7 +271,7 @@ fn solve_system(mesh: &Mesh, matrix: &[f32], rhs: &[f32]) -> (Vec<f64>, f32) {
     };
     let mut solver = pollster::block_on(UnifiedSolver::new(
         mesh,
-        generic_diffusion_demo_model(),
+        generic_diffusion_demo_model().expect("model"),
         config,
         None,
         None,

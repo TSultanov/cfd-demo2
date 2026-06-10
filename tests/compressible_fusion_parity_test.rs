@@ -57,8 +57,8 @@ fn run_compressible_with_policy(
         .lock()
         .expect("solver test lock poisoned");
 
-    let mut model = compressible_model().expect(\"model\");
-    // compressible_model().expect(\"model\") defaults to linear_solver = None. We set it to
+    let mut model = compressible_model().expect("model");
+    // compressible_model().expect("model") defaults to linear_solver = None. We set it to
     // control the fusion policy.
     let mut spec = ModelLinearSolverSpec::default();
     spec.solver.kernel_fusion_policy = policy;
@@ -110,7 +110,7 @@ fn run_compressible_dispatch_count(mesh: &Mesh, policy: KernelFusionPolicy, step
         .lock()
         .expect("solver test lock poisoned");
 
-    let mut model = compressible_model().expect(\"model\");
+    let mut model = compressible_model().expect("model");
     let mut spec = ModelLinearSolverSpec::default();
     spec.solver.kernel_fusion_policy = policy;
     model.linear_solver = Some(spec);

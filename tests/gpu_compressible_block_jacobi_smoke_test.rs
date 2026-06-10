@@ -26,7 +26,7 @@ fn gpu_compressible_block_jacobi_smoke() {
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model().expect(\"model\"),
+        compressible_model().expect("model"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::BDF2,

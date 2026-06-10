@@ -27,7 +27,7 @@ fn test_amg_preconditioner() {
     pollster::block_on(async {
         let mut solver = UnifiedSolver::new(
             &mesh,
-            compressible_model().expect(\"model\"),
+            compressible_model().expect("model"),
             SolverConfig {
                 advection_scheme: Scheme::Upwind,
                 time_scheme: TimeScheme::BDF2,
@@ -59,7 +59,7 @@ fn test_amg_preconditioner() {
         // Reset solver (or create new one)
         let mut solver_amg = UnifiedSolver::new(
             &mesh,
-            compressible_model().expect(\"model\"),
+            compressible_model().expect("model"),
             SolverConfig {
                 advection_scheme: Scheme::Upwind,
                 time_scheme: TimeScheme::BDF2,

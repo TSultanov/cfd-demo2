@@ -166,7 +166,7 @@ fn encoded_fgmres_matches_host_fgmres_on_small_system() {
     let (row_offsets, col_indices, values, rhs) = build_tridiag_csr(n as usize);
     let x_init = vec![0.0f32; n as usize];
 
-    let ctx = pollster::block_on(GpuContext::new(None, None));
+    let ctx = pollster::block_on(GpuContext::new(None, None)).expect("gpu context");
 
     // --- Build the linear system on GPU ---
     let (port_space, ports) = create_gpu_linear_system(
@@ -208,11 +208,11 @@ fn encoded_fgmres_matches_host_fgmres_on_small_system() {
         max_restart,
         FgmresSolutionUpdateStrategy::FusedContiguous,
         system,
-        precond_bg,
+        precond_bg.expect("precond bind group"),
         "test",
     );
 
-    let mut krylov = KrylovSolveModule::new(fgmres, IdentityPreconditioner::new());
+    let mut krylov = KrylovSolveModule::new(fgmres.expect("fgmres workspace"), IdentityPreconditioner::new());
     let dispatch = DispatchGrids::for_sizes(n, n);
 
     // ====== Host-driven path ======

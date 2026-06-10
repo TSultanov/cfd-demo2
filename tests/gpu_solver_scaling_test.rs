@@ -181,7 +181,7 @@ fn gpu_solvers_scale_with_mesh_size() {
         };
         let mut solver = pollster::block_on(UnifiedSolver::new(
             &mesh,
-            incompressible_momentum_model().expect(\"model\"),
+            incompressible_momentum_model().expect("model"),
             config,
             None,
             None,

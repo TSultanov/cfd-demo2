@@ -21,7 +21,7 @@ fn main() {
     pollster::block_on(async {
         let mut solver = UnifiedSolver::new(
             &mesh,
-            incompressible_momentum_model(),
+            incompressible_momentum_model().expect("model"),
             SolverConfig {
                 advection_scheme: Scheme::Upwind,
                 time_scheme: TimeScheme::Euler,

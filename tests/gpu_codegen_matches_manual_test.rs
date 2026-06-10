@@ -26,7 +26,7 @@ fn build_mesh() -> Mesh {
 fn run_solver(mesh: &Mesh, steps: usize) -> (Vec<(f64, f64)>, Vec<f64>) {
     let mut solver = pollster::block_on(UnifiedSolver::new(
         mesh,
-        incompressible_momentum_model().expect(\"model\"),
+        incompressible_momentum_model().expect("model"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::BDF2,

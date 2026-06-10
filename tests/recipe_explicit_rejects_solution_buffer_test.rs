@@ -5,7 +5,7 @@ use cfd2::solver::{PreconditionerType, SteppingMode, TimeScheme};
 
 #[test]
 fn explicit_recipes_reject_models_that_bind_solution_x() {
-    let model = compressible_model().expect(\"model\");
+    let model = compressible_model().expect("model");
     let err = SolverRecipe::from_model(
         &model,
         Scheme::Upwind,

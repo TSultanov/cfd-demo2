@@ -27,7 +27,7 @@ fn setup_solver(cell_size: f64, preconditioner: PreconditionerType) -> (GpuUnifi
 
     let num_cells = mesh.num_cells();
 
-    let model = incompressible_momentum_model();
+    let model = incompressible_momentum_model().expect("model");
     let config = SolverConfig::default();
     let mut solver = pollster::block_on(GpuUnifiedSolver::new(&mesh, model, config, None, None))
         .expect("should create solver");

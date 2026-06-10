@@ -33,7 +33,7 @@ fn test_gpu_fine_mesh_obstacle() {
         println!("Initializing GPU Solver...");
         let mut solver = UnifiedSolver::new(
             &mesh,
-            incompressible_momentum_model().expect(\"model\"),
+            incompressible_momentum_model().expect("model"),
             SolverConfig {
                 advection_scheme: Scheme::Upwind,
                 time_scheme: TimeScheme::BDF2,

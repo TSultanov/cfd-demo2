@@ -60,7 +60,7 @@ fn build_rect_mesh(cell_size: f64) -> Mesh {
 fn gpu_unified_solver_runs_generic_heat_step() {
     let mesh = build_rect_mesh(0.05);
     let dt = 1e-2;
-    let model = generic_diffusion_demo_model();
+    let model = generic_diffusion_demo_model().expect("model");
     let config = SolverConfig {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::BDF2,
@@ -113,7 +113,7 @@ fn gpu_unified_solver_runs_generic_heat_step() {
 fn gpu_unified_solver_runs_generic_heat_step_neumann() {
     let mesh = build_rect_mesh(0.05);
     let dt = 1e-2;
-    let model = generic_diffusion_demo_neumann_model();
+    let model = generic_diffusion_demo_neumann_model().expect("model");
     let config = SolverConfig {
         advection_scheme: Scheme::Upwind,
         time_scheme: TimeScheme::BDF2,

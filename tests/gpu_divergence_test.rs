@@ -48,7 +48,7 @@ fn test_gpu_divergence_channel_obstacle() {
     };
     let mut gpu_solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        incompressible_momentum_model().expect(\"model\"),
+        incompressible_momentum_model().expect("model"),
         config,
         None,
         None,

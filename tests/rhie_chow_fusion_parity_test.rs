@@ -62,7 +62,7 @@ fn run_with_policy(mesh: &Mesh, policy: KernelFusionPolicy) -> RhieChowSnapshot 
         .lock()
         .expect("solver test lock poisoned");
 
-    let mut model = incompressible_momentum_model().expect(\"model\");
+    let mut model = incompressible_momentum_model().expect("model");
     let mut linear_solver = model
         .linear_solver
         .expect("incompressible model missing linear solver");
@@ -133,7 +133,7 @@ fn run_with_policy_snapshot_fixed_outer_no_lock(
     outer_iters: usize,
     outer_batched_mode: bool,
 ) -> RhieChowSnapshot {
-    let mut model = incompressible_momentum_model().expect(\"model\");
+    let mut model = incompressible_momentum_model().expect("model");
     let mut linear_solver = model
         .linear_solver
         .expect("incompressible model missing linear solver");
@@ -203,7 +203,7 @@ fn run_with_policy_kernel_graph_dispatches(
         .lock()
         .expect("dispatch counter test lock poisoned");
 
-    let mut model = incompressible_momentum_model().expect(\"model\");
+    let mut model = incompressible_momentum_model().expect("model");
     let mut linear_solver = model
         .linear_solver
         .expect("incompressible model missing linear solver");
@@ -266,7 +266,7 @@ fn run_with_policy_outer_iterations(
         .lock()
         .expect("solver test lock poisoned");
 
-    let mut model = incompressible_momentum_model().expect(\"model\");
+    let mut model = incompressible_momentum_model().expect("model");
     let mut linear_solver = model
         .linear_solver
         .expect("incompressible model missing linear solver");
@@ -344,7 +344,7 @@ fn run_with_policy_submission_stats_no_lock(
     fixed_outer_iterations_mode: bool,
     outer_batched_mode: bool,
 ) -> SubmissionStats {
-    let mut model = incompressible_momentum_model().expect(\"model\");
+    let mut model = incompressible_momentum_model().expect("model");
     let mut linear_solver = model
         .linear_solver
         .expect("incompressible model missing linear solver");
@@ -534,7 +534,7 @@ fn run_with_convergence_diagnostics(
         .lock()
         .expect("solver test lock poisoned");
 
-    let mut model = incompressible_momentum_model().expect(\"model\");
+    let mut model = incompressible_momentum_model().expect("model");
     let mut linear_solver = model
         .linear_solver
         .expect("incompressible model missing linear solver");
@@ -1468,7 +1468,7 @@ fn gpu_outer_loop_primitive_falls_back_when_convergence_stats_enabled() {
         "expected one-submission chunks when gpu outer-loop primitive is enabled without convergence stats"
     );
 
-    let mut model = incompressible_momentum_model().expect(\"model\");
+    let mut model = incompressible_momentum_model().expect("model");
     let mut linear_solver = model
         .linear_solver
         .expect("incompressible model missing linear solver");
@@ -1540,7 +1540,7 @@ fn run_with_policy_implicit(
         .lock()
         .expect("solver test lock poisoned");
 
-    let mut model = incompressible_momentum_model().expect(\"model\");
+    let mut model = incompressible_momentum_model().expect("model");
     let mut linear_solver = model
         .linear_solver
         .expect("incompressible model missing linear solver");

@@ -52,7 +52,7 @@ fn make_mesh() -> Mesh {
 
 fn run_diffusion_with_policy(
     mesh: &Mesh,
-    model_fn: fn() -> ModelSpec,
+    model_fn: fn() -> Result<ModelSpec, String>,
     policy: KernelFusionPolicy,
     steps: usize,
 ) -> DiffusionSnapshot {
@@ -60,7 +60,7 @@ fn run_diffusion_with_policy(
         .lock()
         .expect("solver test lock poisoned");
 
-    let mut model = model_fn();
+    let mut model = model_fn().expect("model");
     // generic_diffusion_demo has linear_solver = None. Set it to control fusion policy.
     let mut spec = ModelLinearSolverSpec::default();
     spec.solver.kernel_fusion_policy = policy;
@@ -100,7 +100,7 @@ fn run_diffusion_with_policy(
 
 fn run_diffusion_dispatch_count(
     mesh: &Mesh,
-    model_fn: fn() -> ModelSpec,
+    model_fn: fn() -> Result<ModelSpec, String>,
     policy: KernelFusionPolicy,
     steps: usize,
 ) -> u64 {
@@ -108,7 +108,7 @@ fn run_diffusion_dispatch_count(
         .lock()
         .expect("solver test lock poisoned");
 
-    let mut model = model_fn();
+    let mut model = model_fn().expect("model");
     let mut spec = ModelLinearSolverSpec::default();
     spec.solver.kernel_fusion_policy = policy;
     model.linear_solver = Some(spec);

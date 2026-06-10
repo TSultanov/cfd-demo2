@@ -113,7 +113,7 @@ fn compressible_low_mach_convergence_smoke() {
 
     let mut comp = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model().expect(\"model\"),
+        compressible_model().expect("model"),
         SolverConfig {
             advection_scheme: Scheme::QUICK,
             time_scheme: TimeScheme::BDF2,

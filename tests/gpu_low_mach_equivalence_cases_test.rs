@@ -215,7 +215,7 @@ fn run_low_mach_equivalence_case(case_name: &str, mesh: &Mesh, y_sample: f64) {
 
     let mut incomp = pollster::block_on(UnifiedSolver::new(
         mesh,
-        incompressible_momentum_model().expect(\"model\"),
+        incompressible_momentum_model().expect("model"),
         SolverConfig {
             advection_scheme: Scheme::SecondOrderUpwind,
             time_scheme: TimeScheme::Euler,

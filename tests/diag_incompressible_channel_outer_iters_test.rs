@@ -30,7 +30,7 @@ fn diag_incompressible_channel_outer_iters_per_step() {
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        incompressible_momentum_model().expect(\"model\"),
+        incompressible_momentum_model().expect("model"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::BDF2,

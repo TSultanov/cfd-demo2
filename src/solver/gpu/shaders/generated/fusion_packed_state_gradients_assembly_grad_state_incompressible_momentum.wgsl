@@ -231,7 +231,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     k1_rhs_0 += k1_diff_coeff_U * bc_value[k1_face_idx * 3u + 0u];
                 } else {
                     if (bc_kind[k1_face_idx * 3u + 0u] == 2u) {
-                        k1_rhs_0 += -(select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 3u + 0u]);
+                        k1_rhs_0 += select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 3u + 0u];
                     }
                 }
             }
@@ -249,7 +249,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     k1_rhs_1 += k1_diff_coeff_U * bc_value[k1_face_idx * 3u + 1u];
                 } else {
                     if (bc_kind[k1_face_idx * 3u + 1u] == 2u) {
-                        k1_rhs_1 += -(select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 3u + 1u]);
+                        k1_rhs_1 += select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 3u + 1u];
                     }
                 }
             }
@@ -298,7 +298,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 k1_rhs_2 += k1_diff_coeff_p * bc_value[k1_face_idx * 3u + 2u];
             } else {
                 if (bc_kind[k1_face_idx * 3u + 2u] == 2u) {
-                    k1_rhs_2 += -(select(constants.density * state[idx * 8u + 3u], (constants.density * state[idx * 8u + 3u] + constants.density * state[k1_other_idx * 8u + 3u]) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 3u + 2u]);
+                    k1_rhs_2 += select(constants.density * state[idx * 8u + 3u], (constants.density * state[idx * 8u + 3u] + constants.density * state[k1_other_idx * 8u + 3u]) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 3u + 2u];
                 }
             }
         }

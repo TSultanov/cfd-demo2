@@ -563,7 +563,10 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         ),
                     ]);
 
-                    let neumann_rhs = -(kappa.clone() * Expr::ident("area") * bc_value_expr.clone());
+                    // Neumann value is the outward normal gradient g = dphi/dn. The implicit
+                    // diffusion operator on the LHS is -div(kappa grad phi); its known boundary
+                    // face contribution -kappa*g*A moves to the RHS as +kappa*g*A.
+                    let neumann_rhs = kappa.clone() * Expr::ident("area") * bc_value_expr.clone();
                     let boundary_contrib = {
                         let is_velocity_field = matches!(field_name, "u" | "U" | "rho_u" | "rhoU");
                         let is_slipwall = Expr::ident("boundary_type").eq(Expr::from(4u32));
@@ -725,7 +728,11 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         let bc = BcTable::new(Expr::ident("face_idx"), coupled_stride);
                         let (bc_kind_expr, bc_value_expr) = bc.lookup(field_u_idx);
 
-                        let neumann_rhs = -(kappa_own.clone() * Expr::ident("area") * bc_value_expr.clone());
+                        // Outward-gradient Neumann: explicit +div(kappa grad phi) on the RHS
+                        // gains +kappa*g*A at the boundary face (same convention as the
+                        // implicit path above).
+                        let neumann_rhs =
+                            kappa_own.clone() * Expr::ident("area") * bc_value_expr.clone();
 
                         dsl::block(vec![dsl::if_block_expr(
                             bc_kind_expr.eq(GpuBcKind::Dirichlet),

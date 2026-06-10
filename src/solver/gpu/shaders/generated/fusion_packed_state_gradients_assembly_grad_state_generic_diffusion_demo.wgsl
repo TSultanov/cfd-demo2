@@ -188,7 +188,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 k1_rhs_0 += k1_diff_coeff_phi * bc_value[k1_face_idx * 1u + 0u];
             } else {
                 if (bc_kind[k1_face_idx * 1u + 0u] == 2u) {
-                    k1_rhs_0 += -(select(1.0, (1.0 + 1.0) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 1u + 0u]);
+                    k1_rhs_0 += select(1.0, (1.0 + 1.0) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 1u + 0u];
                 }
             }
         }

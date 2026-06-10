@@ -286,7 +286,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     rhs_1 += diff_coeff_rho_u * bc_value[face_idx * 8u + 4u];
                 } else {
                     if (bc_kind[face_idx * 8u + 4u] == 2u) {
-                        rhs_1 += -(select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area * bc_value[face_idx * 8u + 4u]);
+                        rhs_1 += select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area * bc_value[face_idx * 8u + 4u];
                     }
                 }
             }
@@ -304,7 +304,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     rhs_2 += diff_coeff_rho_u * bc_value[face_idx * 8u + 5u];
                 } else {
                     if (bc_kind[face_idx * 8u + 5u] == 2u) {
-                        rhs_2 += -(select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area * bc_value[face_idx * 8u + 5u]);
+                        rhs_2 += select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary) * area * bc_value[face_idx * 8u + 5u];
                     }
                 }
             }
@@ -329,7 +329,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 rhs_3 += diff_coeff_rho_e * bc_value[face_idx * 8u + 7u];
             } else {
                 if (bc_kind[face_idx * 8u + 7u] == 2u) {
-                    rhs_3 += -(select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, (constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71) * 0.5, !is_boundary) * area * bc_value[face_idx * 8u + 7u]);
+                    rhs_3 += select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, (constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71) * 0.5, !is_boundary) * area * bc_value[face_idx * 8u + 7u];
                 }
             }
         }

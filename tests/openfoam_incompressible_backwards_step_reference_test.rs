@@ -11,6 +11,16 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 
 /// Test incompressible backwards step against OpenFOAM reference.
 ///
+/// # Mismatch classification (June 2026)
+/// Same class as the incompressible lid (see the detailed measured
+/// decomposition in that test): the max-cell u error (8.2%) sits in the
+/// first cell at the re-entrant step corner (x=1.05, y=0.45; corner at
+/// (1.0, 0.5)) and the p max just downstream in the recirculation shear
+/// layer — singular-corner-adjacent formulation differences vs pimpleFoam
+/// (RC d_p coefficient, missing dev2 transpose term), not a solver defect
+/// reachable by any single fix. The d_p-from-diagonal path (plan 3.2b) is
+/// the recorded lever.
+///
 /// # Timeout
 /// This test requires extended timeout (~60-120s) due to GPU compute.
 /// Run with: `cargo test --test openfoam_incompressible_backwards_step_reference_test -- --ignored --timeout 120`

@@ -10,6 +10,34 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 
 /// Test incompressible lid-driven cavity against OpenFOAM reference.
 ///
+/// # Mismatch classification (June 2026, measured — no longer "unexplained")
+/// The ~14.9% max-cell u mismatch decomposes into quantified formulation
+/// differences vs pimpleFoam (PISO mode), all concentrated at / radiating
+/// from the two singular lid corners (max always in the corner-radiated
+/// region along the lid and right wall; smooth-field rel_l2 is ~1.2-1.9%):
+///
+/// - Time scheme (Euler reference vs BDF2 here): REFUTED — switching this
+///   test to Euler moves max-cell u by 3.5e-5; the t=1.6 field is nearly
+///   steady, so the mismatch is spatial.
+/// - Missing dev2 transpose stress (pimpleFoam assembles
+///   `div(nu dev2(T(grad U)))`, cfd2 does not): MINOR — host-computed on
+///   the reference field it is 2-6% of the local viscous term, co-located
+///   with the error maxima (see the diag probe below).
+/// - Rhie-Chow coupling coefficient (cfd2: uniform d_p = alpha_u dt/rho;
+///   OpenFOAM: spatially varying rAU = 1/a_P, unrelaxed in PISO mode):
+///   the DOMINANT measured lever — max-cell u is 0.209 / 0.149 / 0.134 at
+///   d_p = 0.007 / 0.014 / 0.020 (CFD2_LID_ALPHA_U = 0.35 / 0.7 / 1.0),
+///   with the curve flattening near ~0.13. The d_p-from-assembled-diagonal
+///   fix path is the plan's 3.2b (needs OpenFOAM-style relaxation
+///   placement; a naive version diverges — see the plan log).
+///
+/// Even at the favorable end of the d_p range ~13% max-cell remains: the
+/// corner-singular region is a sum of small formulation differences
+/// (dev2, upwind/RC details) that two codes cannot be expected to agree on
+/// cell-by-cell at O(1) gradients. The band stays at the measured
+/// all-cells value; the corner-exclusion diag lines report the smooth-field
+/// agreement.
+///
 /// # Timeout
 /// This test requires extended timeout (~60-120s) due to GPU compute.
 /// Run with: `cargo test --test openfoam_incompressible_lid_driven_cavity_reference_test -- --ignored --timeout 120`
@@ -43,6 +71,11 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
         incompressible_momentum_model().expect("model"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
+            // BDF2 vs the reference's Euler ddt is immaterial here: probed
+            // June 2026, switching to Euler moves max-cell u by 3.5e-5
+            // (0.148580 -> 0.148615) and p by 0.5% relative -- both
+            // schemes' temporal error is far below the corner-driven
+            // mismatch, and the t=1.6 field is nearly steady.
             time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Coupled,
@@ -60,7 +93,15 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     solver
         .set_boundary_vec2(GpuBoundaryType::MovingWall, "U", [1.0, 0.0])
         .unwrap();
-    solver.set_alpha_u(0.7).unwrap();
+    // d_p sensitivity probe knob (diagnostic only; default matches the
+    // reference relaxation): d_p = alpha_u*dt/rho scales linearly with
+    // alpha_u. Measured max-cell u: 0.209 @ 0.35, 0.149 @ 0.7, 0.134 @ 1.0
+    // — see the classification comment at the top.
+    let alpha_u_probe: f32 = std::env::var("CFD2_LID_ALPHA_U")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.7);
+    solver.set_alpha_u(alpha_u_probe).unwrap();
     solver.set_alpha_p(0.3).unwrap();
     solver.set_outer_iters(50).unwrap();
     solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
@@ -187,6 +228,125 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
             u_scale,
             p_scale,
         );
+        // Spatial structure: how much of the mismatch is the two singular
+        // lid corners (velocity-discontinuous BC junctions at (0,1)/(1,1))?
+        // Report the max over cells at least r cells away from both corners
+        // (Chebyshev distance in cell units, h=0.05), plus the rel_l2 of
+        // that exterior, for increasing exclusion radii.
+        let h = length / nx as f64;
+        for r in [1usize, 2, 3, 4] {
+            let rad = r as f64 * h + 1e-9;
+            let mut max_rel = 0.0f64;
+            let mut max_xy = (0.0, 0.0);
+            let mut sum_sq = 0.0f64;
+            let mut count = 0usize;
+            for (i, row) in sol_rows.iter().enumerate() {
+                let (x, y) = (row.0, row.1);
+                let d1 = (x - 0.0).abs().max((y - height).abs());
+                let d2 = (x - length).abs().max((y - height).abs());
+                if d1 < rad || d2 < rad {
+                    continue;
+                }
+                let dx = u_sol[i].0 - u_ref[i].0;
+                let dy = u_sol[i].1 - u_ref[i].1;
+                let e = (dx * dx + dy * dy).sqrt() / u_scale;
+                if e > max_rel {
+                    max_rel = e;
+                    max_xy = (x, y);
+                }
+                sum_sq += e * e;
+                count += 1;
+            }
+            eprintln!(
+                "[openfoam][incompressible_lid] corner-excl r={r}: max rel u={max_rel:.6} at (x={:.4}, y={:.4}) rel_l2={:.6} over {count} cells",
+                max_xy.0,
+                max_xy.1,
+                (sum_sq / count as f64).sqrt(),
+            );
+        }
+        // dev2-hypothesis probe: pimpleFoam's momentum equation carries
+        // div(nu*dev2(T(grad U))) (see the reference fvSchemes); cfd2's
+        // incompressible momentum has only the laplacian. The term vanishes
+        // analytically for div-free u but not discretely. Compute it on the
+        // 20x20 grid from the REFERENCE field (host Gauss: one-sided at
+        // boundaries with no-slip/lid values) and compare its local size
+        // against the viscous laplacian term and its pattern against the
+        // observed error.
+        let nu = 0.01f64;
+        let n = nx;
+        let h = length / nx as f64;
+        let at = |i: isize, j: isize| -> (f64, f64) {
+            // Ghost values from BCs: walls no-slip, lid (j==n) u=(1,0).
+            if j >= n as isize {
+                return (2.0 * 1.0 - u_ref[(n - 1) * n + i.clamp(0, n as isize - 1) as usize].0,
+                        -u_ref[(n - 1) * n + i.clamp(0, n as isize - 1) as usize].1);
+            }
+            if i < 0 || i >= n as isize || j < 0 {
+                let ii = i.clamp(0, n as isize - 1) as usize;
+                let jj = j.clamp(0, n as isize - 1) as usize;
+                let v = u_ref[jj * n + ii];
+                return (-v.0, -v.1); // mirror for no-slip wall ghost
+            }
+            u_ref[j as usize * n + i as usize]
+        };
+        // Cell-centered gradients via central differences over ghosts.
+        let grad = |i: usize, j: usize| -> [[f64; 2]; 2] {
+            let (i, j) = (i as isize, j as isize);
+            let (uxe, uye) = at(i + 1, j);
+            let (uxw, uyw) = at(i - 1, j);
+            let (uxn, uyn) = at(i, j + 1);
+            let (uxs, uys) = at(i, j - 1);
+            [
+                [(uxe - uxw) / (2.0 * h), (uxn - uxs) / (2.0 * h)],
+                [(uye - uyw) / (2.0 * h), (uyn - uys) / (2.0 * h)],
+            ]
+        };
+        // dev2(T(grad U))_ij = dU_j/dx_i - 2/3 delta_ij div  (transpose part);
+        // D = nu * div_h of that tensor; LAP = nu * lap(u) for scale.
+        let mut top: Vec<(f64, usize, f64)> = Vec::new(); // (|D|, idx, |D|/|lap|)
+        for j in 1..n - 1 {
+            for i in 1..n - 1 {
+                let gxp = grad(i + 1, j);
+                let gxm = grad(i - 1, j);
+                let gyp = grad(i, j + 1);
+                let gym = grad(i, j - 1);
+                let divv = |g: [[f64; 2]; 2]| g[0][0] + g[1][1];
+                // T row k = (dU_k/dx - (2/3)div*delta.., ...) transpose form:
+                // T[k][l] = g[l][k] - 2/3 div delta_kl
+                let t = |g: [[f64; 2]; 2], k: usize, l: usize| {
+                    g[l][k] - if k == l { 2.0 / 3.0 * divv(g) } else { 0.0 }
+                };
+                let dx_x = (t(gxp, 0, 0) - t(gxm, 0, 0)) / (2.0 * h);
+                let dy_x = (t(gyp, 0, 1) - t(gym, 0, 1)) / (2.0 * h);
+                let dx_y = (t(gxp, 1, 0) - t(gxm, 1, 0)) / (2.0 * h);
+                let dy_y = (t(gyp, 1, 1) - t(gym, 1, 1)) / (2.0 * h);
+                let dvec = (nu * (dx_x + dy_x), nu * (dx_y + dy_y));
+                let dmag = (dvec.0 * dvec.0 + dvec.1 * dvec.1).sqrt();
+                // laplacian via 5-point on u
+                let (uc_x, uc_y) = at(i as isize, j as isize);
+                let (ue, ve) = at(i as isize + 1, j as isize);
+                let (uw, vw) = at(i as isize - 1, j as isize);
+                let (un, vn) = at(i as isize, j as isize + 1);
+                let (us, vs) = at(i as isize, j as isize - 1);
+                let lap = (
+                    nu * (ue + uw + un + us - 4.0 * uc_x) / (h * h),
+                    nu * (ve + vw + vn + vs - 4.0 * uc_y) / (h * h),
+                );
+                let lmag = (lap.0 * lap.0 + lap.1 * lap.1).sqrt();
+                top.push((dmag, j * n + i, dmag / lmag.max(1e-12)));
+            }
+        }
+        top.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        for (dmag, idx, ratio) in top.iter().take(5) {
+            let (x, y) = (sol_rows[*idx].0, sol_rows[*idx].1);
+            let du = ((u_sol[*idx].0 - u_ref[*idx].0).powi(2)
+                + (u_sol[*idx].1 - u_ref[*idx].1).powi(2))
+            .sqrt()
+                / u_scale;
+            eprintln!(
+                "[openfoam][incompressible_lid] dev2 probe: |D|={dmag:.4} at (x={x:.4}, y={y:.4}) |D|/|nu lap u|={ratio:.3} local rel err={du:.4}"
+            );
+        }
     }
 
     assert!(

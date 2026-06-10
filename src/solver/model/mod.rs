@@ -2,6 +2,7 @@
 pub mod backend;
 mod definitions;
 pub mod eos;
+pub mod flux_derivation;
 pub mod flux_layout;
 pub mod flux_module;
 pub mod flux_schemes;
@@ -22,9 +23,10 @@ pub use definitions::{
     generic_diffusion_demo_mms_dirichlet_model, generic_diffusion_demo_mms_model,
     generic_diffusion_demo_mms_neumann_model, generic_diffusion_demo_model,
     generic_diffusion_demo_neumann_model, incompressible_momentum_model,
-    incompressible_momentum_system, BoundaryCondition, BoundarySpec, CompressibleFields,
-    FieldBoundarySpec, GenericCoupledFields, IncompressibleMomentumFields, ModelSpec,
-    MMS_SOURCE_FIELD,
+    incompressible_momentum_system, scalar_transport_model, scalar_transport_sou_model,
+    BoundaryCondition, BoundarySpec, CompressibleFields, FieldBoundarySpec, GenericCoupledFields,
+    IncompressibleMomentumFields, ModelSpec, ADVECTING_VELOCITY_FIELD, MMS_SOURCE_FIELD,
+    SCALAR_TRANSPORT_FIELD, SCALAR_TRANSPORT_KAPPA, SCALAR_TRANSPORT_MMS_SOURCE_FIELD,
 };
 pub use eos::EosSpec;
 pub use flux_layout::{FluxComponent, FluxLayout};

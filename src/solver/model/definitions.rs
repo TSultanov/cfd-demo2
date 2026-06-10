@@ -581,6 +581,8 @@ mod compressible;
 mod generic_diffusion_demo;
 #[path = "definitions/incompressible_momentum.rs"]
 mod incompressible_momentum;
+#[path = "definitions/scalar_transport.rs"]
+mod scalar_transport;
 
 #[allow(unused_imports)]
 pub use compressible::{
@@ -595,6 +597,12 @@ pub use generic_diffusion_demo::{
 pub use incompressible_momentum::{
     incompressible_momentum_model, incompressible_momentum_system, IncompressibleMomentumFields,
 };
+#[allow(unused_imports)]
+pub use scalar_transport::{
+    scalar_transport_model, scalar_transport_sou_model, ADVECTING_VELOCITY_FIELD,
+    KAPPA as SCALAR_TRANSPORT_KAPPA, MMS_SOURCE_FIELD as SCALAR_TRANSPORT_MMS_SOURCE_FIELD,
+    SCALAR_FIELD as SCALAR_TRANSPORT_FIELD,
+};
 
 /// Build-time model registry.
 ///
@@ -608,6 +616,8 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
         generic_diffusion_demo_mms_model()?,
         generic_diffusion_demo_mms_dirichlet_model()?,
         generic_diffusion_demo_mms_neumann_model()?,
+        scalar_transport_model()?,
+        scalar_transport_sou_model()?,
     ])
 }
 

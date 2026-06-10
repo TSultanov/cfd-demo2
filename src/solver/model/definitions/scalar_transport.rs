@@ -13,13 +13,10 @@ use crate::solver::model::backend::typed_ast::{
 use crate::solver::model::flux_derivation::{derive_flux_module_kernel, FluxExprSpec};
 use crate::solver::model::ports::PortRegistry;
 use crate::solver::scheme::Scheme;
-use cfd2_ir::dimensions::{
-    Area, Dimensionless, DivDim, InvTime, Length, Time, Velocity, Volume,
-};
+use cfd2_ir::dimensions::{Area, Dimensionless, DivDim, InvTime, Time, Velocity, Volume};
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
-type DimensionlessGradient = DivDim<Dimensionless, Length>;
 type VolumetricFlux = DivDim<Volume, Time>;
 /// Integrated unit of every term in the transport equation: Volume / Time.
 type TransportIntegratedUnit = DivDim<Volume, Time>;

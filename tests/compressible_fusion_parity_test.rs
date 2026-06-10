@@ -55,7 +55,7 @@ fn run_compressible_with_policy(
 ) -> CompressibleSnapshot {
     let _lock = solver_test_lock()
         .lock()
-        .expect("solver test lock poisoned");
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let mut model = compressible_model().expect("model");
     // compressible_model().expect("model") defaults to linear_solver = None. We set it to
@@ -108,7 +108,7 @@ fn run_compressible_with_policy(
 fn run_compressible_dispatch_count(mesh: &Mesh, policy: KernelFusionPolicy, steps: usize) -> u64 {
     let _lock = solver_test_lock()
         .lock()
-        .expect("solver test lock poisoned");
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let mut model = compressible_model().expect("model");
     let mut spec = ModelLinearSolverSpec::default();

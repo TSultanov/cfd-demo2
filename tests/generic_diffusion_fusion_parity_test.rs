@@ -58,7 +58,7 @@ fn run_diffusion_with_policy(
 ) -> DiffusionSnapshot {
     let _lock = solver_test_lock()
         .lock()
-        .expect("solver test lock poisoned");
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let mut model = model_fn().expect("model");
     // generic_diffusion_demo has linear_solver = None. Set it to control fusion policy.
@@ -106,7 +106,7 @@ fn run_diffusion_dispatch_count(
 ) -> u64 {
     let _lock = solver_test_lock()
         .lock()
-        .expect("solver test lock poisoned");
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let mut model = model_fn().expect("model");
     let mut spec = ModelLinearSolverSpec::default();

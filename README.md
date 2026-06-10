@@ -1,9 +1,30 @@
 # 2D CFD Solver
 
-2D CFD solver for incompressible laminar flow implemented in Rust and WGPU.
+Math-driven 2D CFD solver in Rust and WGPU: physics is declared as typed,
+unit-checked equations (plus flux, EOS, and boundary-condition declarations),
+and all GPU numerics — assembly, flux modules, auxiliary kernels, boundary
+refresh — are generated from those declarations at build time.
+
+## Authoring a model
+
+A model is one file under `src/solver/model/definitions/` plus a registry
+entry in `all_models()`: equations built with `typed_fvm`/`typed_fvc`
+(per-term `.scheme(..)` and `.bounded()` available), algebraic relations via
+`typed_alg`, a derived or declared flux (`derive_rhie_chow`,
+`FluxSchemeSpec::CentralUpwind(decl)`, `FluxExprSpec`), boundary conditions
+(constants or `BoundaryExpr` expressions over interior/prescribed/param
+values), and solver policy structs. No hand-written WGSL, no per-model
+kernels. See `docs/math-surface.md` for the normative math/engine boundary
+and `definitions/buoyant_incompressible.rs` for a complete worked example
+(coupled momentum + pressure + temperature with Boussinesq buoyancy).
+
+Correctness is gated by MMS convergence-order suites (`tests/mms_*`, the
+primary oracle) and the OpenFOAM reference suite (secondary, no-growth
+policy) — see `AGENTS.md`.
 
 ## Docs
 
+- Math/engine boundary (model authoring): `docs/math-surface.md`
 - Codegen + solver unification plan: `CODEGEN_PLAN.md`
 - Generated WGSL policy: `GENERATED_WGSL_POLICY.md`
 - Port refactor plan: `PORT_REFACTOR_PLAN.md`

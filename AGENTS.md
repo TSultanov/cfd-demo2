@@ -21,6 +21,19 @@ For every **major** changeset, run the OpenFOAM reference suite both **before** 
 - The key rule is: **error values must not grow** vs baseline, and bands only ratchet down.
 - If any tracked error grows, treat it as a regression and call it out explicitly.
 
+Runtime note / skip policy:
+
+- The full suite takes ~13–15 minutes wall clock (the incompressible backstep,
+  channel, and lid cases are the long poles at several minutes each).
+  **TODO: investigate suite performance** — per-case step counts/convergence
+  policies look like the dominant cost, not the comparison machinery; profile
+  and trim before adding more reference cases.
+- For changesets that are **provably numerics-neutral** — generated WGSL
+  byte-identical (zero diffs under `shaders/generated/`, clean
+  `check_generated_wgsl.sh`) AND no runtime/host solver-path changes — the
+  full before/after run may be skipped; say so explicitly in the changeset
+  report. Numerics-affecting changesets still require the before/after run.
+
 Recommended workflow:
 
 ```bash

@@ -220,9 +220,15 @@ impl UnifiedFieldResources {
         !self.gradients.is_empty()
     }
 
-    /// Write state data to all ping-pong buffers.
+    /// Write state data to all ping-pong buffers (initial-condition semantics:
+    /// resets the time history; see `PingPongState::write_all`).
     pub fn write_state_bytes(&self, queue: &wgpu::Queue, bytes: &[u8]) {
         self.state.write_all(queue, bytes);
+    }
+
+    /// Write the current state buffer only, preserving the time history.
+    pub fn write_state_bytes_current(&self, queue: &wgpu::Queue, bytes: &[u8]) {
+        self.state.write_current(queue, bytes);
     }
 
     /// Advance the ping-pong state to the next step.

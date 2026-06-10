@@ -21,6 +21,12 @@ pub(crate) type ProgramStateBufferFn = for<'a> fn(&'a GpuProgramPlan) -> &'a wgp
 pub(crate) type ProgramWriteStateFn = fn(&GpuProgramPlan, bytes: &[u8]) -> Result<(), String>;
 pub(crate) type ProgramSetBcValueFn =
     fn(&GpuProgramPlan, crate::solver::gpu::enums::GpuBoundaryType, u32, f32) -> Result<(), String>;
+pub(crate) type ProgramSetBcValuesPerFaceFn = fn(
+    &GpuProgramPlan,
+    crate::solver::gpu::enums::GpuBoundaryType,
+    u32,
+    &dyn Fn(u32) -> f32,
+) -> Result<(), String>;
 pub(crate) type ProgramStepStatsFn = fn(&GpuProgramPlan) -> PlanStepStats;
 pub(crate) type ProgramStepWithStatsFn =
     fn(&mut GpuProgramPlan) -> Result<Vec<LinearSolverStats>, String>;
@@ -325,7 +331,9 @@ pub(crate) struct ModelGpuProgramSpec {
     pub dt: ProgramF32Fn,
     pub state_buffer: ProgramStateBufferFn,
     pub write_state_bytes: ProgramWriteStateFn,
+    pub write_state_bytes_current: Option<ProgramWriteStateFn>,
     pub set_bc_value: Option<ProgramSetBcValueFn>,
+    pub set_bc_values_per_face: Option<ProgramSetBcValuesPerFaceFn>,
     pub program: ProgramSpec,
     pub initialize_history: Option<ProgramInitRun>,
     pub named_params: HashMap<&'static str, ProgramParamHandler>,
@@ -457,6 +465,15 @@ impl GpuProgramPlan {
         (self.spec.write_state_bytes)(self, bytes)
     }
 
+    /// Write the current state only, preserving the `old`/`old_old` time history
+    /// (unlike `write_state_bytes`, which has initial-condition semantics).
+    pub fn write_state_bytes_current(&self, bytes: &[u8]) -> Result<(), String> {
+        let Some(write_current) = self.spec.write_state_bytes_current else {
+            return Err("plan does not support history-preserving state writes".into());
+        };
+        write_current(self, bytes)
+    }
+
     pub fn set_bc_value(
         &self,
         boundary: crate::solver::gpu::enums::GpuBoundaryType,
@@ -467,6 +484,20 @@ impl GpuProgramPlan {
             return Err("plan does not support bc_value updates".into());
         };
         set_bc_value(self, boundary, unknown_component, value)
+    }
+
+    /// Write spatially varying boundary values: `value_for_face` is evaluated once per
+    /// boundary face (mesh face index) of the given boundary type.
+    pub fn set_bc_values_per_face(
+        &self,
+        boundary: crate::solver::gpu::enums::GpuBoundaryType,
+        unknown_component: u32,
+        value_for_face: &dyn Fn(u32) -> f32,
+    ) -> Result<(), String> {
+        let Some(set_per_face) = self.spec.set_bc_values_per_face else {
+            return Err("plan does not support per-face bc_value updates".into());
+        };
+        set_per_face(self, boundary, unknown_component, value_for_face)
     }
 
     pub fn step_stats(&self) -> PlanStepStats {

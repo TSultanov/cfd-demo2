@@ -56,10 +56,20 @@ impl PingPongState {
         &self.buffers[idx_old_old]
     }
 
+    /// Write `bytes` into every ping-pong buffer, resetting the time history.
+    ///
+    /// This is initial-condition semantics: after this call the `old`/`old_old`
+    /// states equal the current state. For mid-run field updates that must not
+    /// disturb multi-step time schemes (e.g. BDF2), use [`Self::write_current`].
     pub fn write_all(&self, queue: &wgpu::Queue, bytes: &[u8]) {
         for buf in &self.buffers {
             queue.write_buffer(buf, 0, bytes);
         }
+    }
+
+    /// Write `bytes` into the current state buffer only, preserving time history.
+    pub fn write_current(&self, queue: &wgpu::Queue, bytes: &[u8]) {
+        queue.write_buffer(self.state(), 0, bytes);
     }
 }
 

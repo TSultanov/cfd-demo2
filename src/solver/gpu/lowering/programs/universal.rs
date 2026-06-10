@@ -90,6 +90,13 @@ pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes(
     generic_coupled_program::spec_write_state_bytes(plan, bytes)
 }
 
+pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes_current(
+    plan: &GpuProgramPlan,
+    bytes: &[u8],
+) -> Result<(), String> {
+    generic_coupled_program::spec_write_state_bytes_current(plan, bytes)
+}
+
 pub(in crate::solver::gpu::lowering) fn spec_set_bc_value(
     plan: &GpuProgramPlan,
     boundary: crate::solver::gpu::enums::GpuBoundaryType,
@@ -97,6 +104,20 @@ pub(in crate::solver::gpu::lowering) fn spec_set_bc_value(
     value: f32,
 ) -> Result<(), String> {
     generic_coupled_program::spec_set_bc_value(plan, boundary, unknown_component, value)
+}
+
+pub(in crate::solver::gpu::lowering) fn spec_set_bc_values_per_face(
+    plan: &GpuProgramPlan,
+    boundary: crate::solver::gpu::enums::GpuBoundaryType,
+    unknown_component: u32,
+    value_for_face: &dyn Fn(u32) -> f32,
+) -> Result<(), String> {
+    generic_coupled_program::spec_set_bc_values_per_face(
+        plan,
+        boundary,
+        unknown_component,
+        value_for_face,
+    )
 }
 
 pub(in crate::solver::gpu::lowering) fn step_stats(plan: &GpuProgramPlan) -> PlanStepStats {

@@ -892,11 +892,30 @@ pub(crate) fn spec_write_state_bytes(plan: &GpuProgramPlan, bytes: &[u8]) -> Res
     Ok(())
 }
 
+pub(crate) fn spec_write_state_bytes_current(
+    plan: &GpuProgramPlan,
+    bytes: &[u8],
+) -> Result<(), String> {
+    res(plan)
+        .fields
+        .write_state_bytes_current(&plan.context.queue, bytes);
+    Ok(())
+}
+
 pub(crate) fn spec_set_bc_value(
     plan: &GpuProgramPlan,
     boundary: crate::solver::gpu::enums::GpuBoundaryType,
     unknown_component: u32,
     value: f32,
+) -> Result<(), String> {
+    spec_set_bc_values_per_face(plan, boundary, unknown_component, &|_face_idx| value)
+}
+
+pub(crate) fn spec_set_bc_values_per_face(
+    plan: &GpuProgramPlan,
+    boundary: crate::solver::gpu::enums::GpuBoundaryType,
+    unknown_component: u32,
+    value_for_face: &dyn Fn(u32) -> f32,
 ) -> Result<(), String> {
     let coupled_stride = plan.model.system.unknowns_per_cell();
     if coupled_stride == 0 {
@@ -922,6 +941,7 @@ pub(crate) fn spec_set_bc_value(
         .get(boundary_idx as usize)
         .ok_or_else(|| format!("missing boundary_faces[{boundary_idx}]"))?;
     for &face_idx in faces {
+        let value = value_for_face(face_idx);
         let offset_bytes = table.byte_offset(face_idx as usize, unknown_component as usize);
         plan.context
             .queue

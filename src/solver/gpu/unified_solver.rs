@@ -311,6 +311,29 @@ impl GpuUnifiedSolver {
         self.set_boundary_values(boundary, field, &[value])
     }
 
+    /// Write spatially varying boundary values for one component of `field`:
+    /// `value_for_face(face_idx)` is evaluated per boundary face (mesh face index) of the
+    /// given boundary type. Geometry lookups (e.g. face centers) are the caller's
+    /// responsibility via the mesh used to build this solver.
+    pub fn set_boundary_values_per_face(
+        &mut self,
+        boundary: GpuBoundaryType,
+        field: &str,
+        component: u32,
+        value_for_face: &dyn Fn(u32) -> f32,
+    ) -> Result<(), String> {
+        let Some((base, comps)) = self.coupled_unknown_base_for_field(field) else {
+            return Err(format!("field '{field}' is not a coupled unknown"));
+        };
+        if component >= comps {
+            return Err(format!(
+                "component {component} out of range for field '{field}' ({comps} component(s))"
+            ));
+        }
+        self.plan
+            .set_bc_values_per_face(boundary, base + component, value_for_face)
+    }
+
     pub fn set_boundary_vec2(
         &mut self,
         boundary: GpuBoundaryType,
@@ -408,7 +431,25 @@ impl GpuUnifiedSolver {
         self.plan.write_state_bytes(bytemuck::cast_slice(state))
     }
 
+    /// Set a scalar field with initial-condition semantics: the write propagates to all
+    /// time-history buffers (`old`, `old_old`), as if the simulation (re)starts from this
+    /// state. For mid-run updates that must not disturb multi-step time schemes (BDF2),
+    /// use [`Self::set_field_scalar_current`].
     pub fn set_field_scalar(&mut self, field: &str, values: &[f64]) -> Result<(), String> {
+        let state = self.state_with_scalar_field(field, values)?;
+        self.plan.write_state_bytes(bytemuck::cast_slice(&state))
+    }
+
+    /// Set a scalar field in the current state only, preserving the time history.
+    /// Use for mid-run updates of non-solved fields (e.g. time-varying source terms).
+    pub fn set_field_scalar_current(&mut self, field: &str, values: &[f64]) -> Result<(), String> {
+        let state = self.state_with_scalar_field(field, values)?;
+        self.plan
+            .write_state_bytes_current(bytemuck::cast_slice(&state))
+    }
+
+    /// Read back the current state and overwrite one scalar field's slots with `values`.
+    fn state_with_scalar_field(&self, field: &str, values: &[f64]) -> Result<Vec<f32>, String> {
         let stride = self.model.state_layout.stride() as usize;
         let state_field = self
             .model
@@ -437,7 +478,7 @@ impl GpuUnifiedSolver {
         for (i, &v) in values.iter().enumerate() {
             state[i * stride + offset] = v as f32;
         }
-        self.plan.write_state_bytes(bytemuck::cast_slice(&state))
+        Ok(state)
     }
 
     pub async fn get_field_scalar(&self, field: &str) -> Result<Vec<f64>, String> {

@@ -586,8 +586,11 @@ mod incompressible_momentum;
 pub use compressible::{
     compressible_model, compressible_model_with_eos, compressible_system, CompressibleFields,
 };
+#[allow(unused_imports)]
 pub use generic_diffusion_demo::{
-    generic_diffusion_demo_model, generic_diffusion_demo_neumann_model,
+    generic_diffusion_demo_mms_dirichlet_model, generic_diffusion_demo_mms_model,
+    generic_diffusion_demo_mms_neumann_model, generic_diffusion_demo_model,
+    generic_diffusion_demo_neumann_model, MMS_SOURCE_FIELD,
 };
 pub use incompressible_momentum::{
     incompressible_momentum_model, incompressible_momentum_system, IncompressibleMomentumFields,
@@ -602,6 +605,9 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
         compressible_model()?,
         generic_diffusion_demo_model()?,
         generic_diffusion_demo_neumann_model()?,
+        generic_diffusion_demo_mms_model()?,
+        generic_diffusion_demo_mms_dirichlet_model()?,
+        generic_diffusion_demo_mms_neumann_model()?,
     ])
 }
 

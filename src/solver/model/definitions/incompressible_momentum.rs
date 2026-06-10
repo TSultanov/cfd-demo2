@@ -5,7 +5,6 @@ use crate::solver::model::backend::ast::{
 use crate::solver::model::backend::typed_ast::{
     typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
-use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::ports::PortRegistry;
 // si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_codegen::solver::codegen::dsl::XY;
@@ -130,8 +129,9 @@ pub fn incompressible_momentum_model() -> Result<ModelSpec, String> {
         fields.grad_p,
         fields.grad_p_old,
     ]).into_state_layout();
-    let flux_kernel = rhie_chow_flux_module_kernel(&system, &layout)
-        .map_err(|e| format!("failed to derive Rhie–Chow flux formula: {e}"))?;
+    let derived_rhie_chow =
+        crate::solver::model::flux_derivation::derive_rhie_chow(&system, &layout)
+            .map_err(|e| format!("failed to derive Rhie–Chow flux: {e}"))?;
 
     // Port-based validation and offset resolution (replaces ad-hoc StateLayout lookups)
     let (u0, u1, p) = {
@@ -247,7 +247,7 @@ pub fn incompressible_momentum_model() -> Result<ModelSpec, String> {
         gradients: Some(
             crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout,
         ),
-        kernel: flux_kernel,
+        kernel: derived_rhie_chow.flux_kernel,
     };
     let primitives = crate::solver::model::primitives::PrimitiveDerivations::identity();
 
@@ -261,11 +261,6 @@ pub fn incompressible_momentum_model() -> Result<ModelSpec, String> {
     )
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
-    // Build rhie_chow module before system is moved into ModelSpec
-    let rhie_chow_module =
-        crate::solver::model::modules::rhie_chow::rhie_chow_aux_module(&system, "d_p", true, true)
-            .map_err(|e| format!("failed to create rhie_chow_aux_module: {e}"))?;
-
     Ok(ModelSpec {
         id: "incompressible_momentum",
         system,
@@ -278,7 +273,7 @@ pub fn incompressible_momentum_model() -> Result<ModelSpec, String> {
             ),
             flux_module_module,
             crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
-            rhie_chow_module,
+            derived_rhie_chow.aux_module,
         ],
         // The generic coupled path needs a saddle-point-capable preconditioner.
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
@@ -296,255 +291,3 @@ pub fn incompressible_momentum_model() -> Result<ModelSpec, String> {
     })
 }
 
-#[derive(Debug, Clone)]
-struct RhieChowFields {
-    momentum: String,
-    pressure: String,
-    d_p: String,
-}
-
-fn rhie_chow_flux_module_kernel(
-    system: &EquationSystem,
-    layout: &StateLayout,
-) -> Result<crate::solver::ir::FluxModuleKernelSpec, String> {
-    use crate::solver::ir::{
-        FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxModuleKernelSpec,
-    };
-    use crate::solver::model::backend::{Coefficient as BackendCoeff, FieldKind, FieldRef, TermOp};
-    use std::collections::{HashMap, HashSet};
-
-    fn collect_coeff_fields(coeff: &BackendCoeff, out: &mut Vec<FieldRef>) {
-        match coeff {
-            BackendCoeff::Constant { .. } => {}
-            BackendCoeff::Field(field) => out.push(*field),
-            BackendCoeff::MagSqr(field) => out.push(*field),
-            BackendCoeff::Product(lhs, rhs) => {
-                collect_coeff_fields(lhs, out);
-                collect_coeff_fields(rhs, out);
-            }
-        }
-    }
-
-    // Create a PortRegistry for runtime validation of fields
-    let registry = PortRegistry::new(layout.clone());
-
-    fn density_face_expr(registry: &PortRegistry) -> Result<S, String> {
-        // Prefer a state-layout density when present (variable-density extension);
-        // otherwise fall back to the global constant density uniform.
-        // Use PortRegistry validation to check for existence, kind, and dimension.
-        match registry.validate_scalar_field::<Density>("rhie_chow_flux_module_kernel", "rho") {
-            Ok(()) => Ok(S::Lerp(
-                Box::new(S::state(FaceSide::Owner, "rho")),
-                Box::new(S::state(FaceSide::Neighbor, "rho")),
-            )),
-            Err(crate::solver::model::ports::PortValidationError::MissingField { .. }) => {
-                // rho is not in state layout; fall back to uniform density
-                Ok(S::constant("density"))
-            }
-            Err(e) => Err(format!(
-                "rho field exists but has wrong kind or unit: {}",
-                e
-            )),
-        }
-    }
-
-    // Infer (momentum, pressure) coupling from the declared equation system.
-    let equations = system.equations();
-    let mut eq_by_target: HashMap<FieldRef, usize> = HashMap::new();
-    for (idx, eq) in equations.iter().enumerate() {
-        eq_by_target.insert(*eq.target(), idx);
-    }
-
-    let mut candidates = Vec::new();
-    for eq in equations {
-        if !matches!(eq.target().kind(), FieldKind::Vector2 | FieldKind::Vector3) {
-            continue;
-        }
-
-        let has_transport = eq
-            .terms()
-            .iter()
-            .any(|t| matches!(t.op, TermOp::Div | TermOp::Laplacian));
-        if !has_transport {
-            continue;
-        }
-
-        let mut grad_scalars: HashSet<FieldRef> = HashSet::new();
-        for term in eq.terms() {
-            if term.op == TermOp::Grad && term.field.kind() == FieldKind::Scalar {
-                grad_scalars.insert(term.field);
-            }
-        }
-
-        for pressure in grad_scalars {
-            let Some(&p_eq_idx) = eq_by_target.get(&pressure) else {
-                continue;
-            };
-            let p_eq = &equations[p_eq_idx];
-            let p_has_laplacian = p_eq.terms().iter().any(|t| t.op == TermOp::Laplacian);
-            if p_has_laplacian {
-                candidates.push((eq.target().name().to_string(), pressure.name().to_string()));
-            }
-        }
-    }
-
-    let (momentum, pressure) = match candidates.as_slice() {
-        [(m, p)] => (m.clone(), p.clone()),
-        [] => return Err("no unique momentum-pressure coupling found for Rhie–Chow".to_string()),
-        many => {
-            return Err(format!(
-                "Rhie–Chow requires a unique momentum-pressure coupling, found {} candidates: [{}]",
-                many.len(),
-                many.iter()
-                    .map(|(m, p)| format!("{m}↔{p}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-    };
-
-    // Infer d_p from the pressure equation laplacian coefficient: pick the unique scalar field
-    // referenced by that coefficient that is present in the model's state layout.
-    let pressure_eq = equations
-        .iter()
-        .find(|eq| eq.target().name() == pressure)
-        .ok_or_else(|| {
-            format!("missing pressure equation for inferred pressure field '{pressure}'")
-        })?;
-    let pressure_laplacian = pressure_eq
-        .terms()
-        .iter()
-        .find(|t| t.op == TermOp::Laplacian)
-        .ok_or_else(|| {
-            format!("pressure equation for '{pressure}' must include a laplacian term")
-        })?;
-    let Some(coeff) = &pressure_laplacian.coeff else {
-        return Err(format!(
-            "pressure laplacian coefficient for '{pressure}' is missing"
-        ));
-    };
-    let mut coeff_fields = Vec::new();
-    collect_coeff_fields(coeff, &mut coeff_fields);
-    // Use PortRegistry validation to filter for scalar fields with D_P dimension
-    let mut d_p_candidates: Vec<String> = Vec::new();
-    for f in &coeff_fields {
-        match registry.validate_scalar_field::<cfd2_ir::dimensions::D_P>(
-            "rhie_chow_flux_module_kernel",
-            f.name(),
-        ) {
-            Ok(()) => d_p_candidates.push(f.name().to_string()),
-            Err(crate::solver::model::ports::PortValidationError::MissingField { .. }) => {
-                // Field is not in state layout; not a candidate
-            }
-            Err(_) => {
-                // Field exists but has wrong kind or unit; not a candidate
-            }
-        }
-    }
-    let d_p = match d_p_candidates.as_slice() {
-        [only] => only.clone(),
-        [] => {
-            return Err(format!(
-                "pressure laplacian coefficient for '{pressure}' does not reference any state-layout scalar fields with D_P units"
-            ));
-        }
-        many => {
-            return Err(format!(
-                "pressure laplacian coefficient for '{pressure}' references multiple state-layout fields with D_P units; cannot derive unique d_p: [{}]",
-                many.join(", ")
-            ));
-        }
-    };
-
-    let fields = RhieChowFields {
-        momentum,
-        pressure,
-        d_p,
-    };
-
-    // Rhie–Chow-style mass flux:
-    //   phi = rho * (u_f · n) * area  -  rho * d_p_f * ((p_N - p_O) / dist) * area
-    //
-    // Notes:
-    // - `d_p` is inferred from the pressure equation Laplacian coefficient and is expected to be
-    //   updated by the coupled pressure/momentum preconditioner (and seeded by `dp_init`).
-    // - The pressure gradient term uses the same face-normal distance projection (`dist`) as the
-    //   Laplacian discretization, so the pressure equation's Laplacian term and this correction
-    //   term stay numerically consistent.
-    //
-    // This definition is intentionally "general": it only relies on the model-declared
-    // momentum/pressure coupling and the presence of `(d_p, grad_p)` in the state layout.
-    let rho_face = density_face_expr(&registry)?;
-
-    let d_p_face = S::Lerp(
-        Box::new(S::state(FaceSide::Owner, fields.d_p.clone())),
-        Box::new(S::state(FaceSide::Neighbor, fields.d_p.clone())),
-    );
-
-    // Rhie–Chow uses the momentum predictor `HbyA` for the "predicted" mass flux on the RHS
-    // of the pressure equation, then subtracts an explicit pressure correction flux.
-    //
-    // Approximate `HbyA` from the current cell-centered velocity and pressure gradient:
-    //   HbyA ≈ U + d_p * grad(p)
-    let grad_p_field = format!("grad_{}", fields.pressure);
-    let u_face = V::Lerp(
-        Box::new(V::state_vec2(FaceSide::Owner, fields.momentum.clone())),
-        Box::new(V::state_vec2(FaceSide::Neighbor, fields.momentum.clone())),
-    );
-    let grad_p_face = V::Lerp(
-        Box::new(V::state_vec2(FaceSide::Owner, grad_p_field.clone())),
-        Box::new(V::state_vec2(FaceSide::Neighbor, grad_p_field)),
-    );
-    let hby_a_face = V::Add(
-        Box::new(u_face),
-        Box::new(V::MulScalar(
-            Box::new(grad_p_face),
-            Box::new(d_p_face.clone()),
-        )),
-    );
-    let u_n = S::Dot(Box::new(hby_a_face), Box::new(V::normal()));
-    let phi_pred = S::Mul(
-        Box::new(S::Mul(Box::new(rho_face.clone()), Box::new(u_n))),
-        Box::new(S::area()),
-    );
-    let dp = S::Sub(
-        Box::new(S::state(FaceSide::Neighbor, fields.pressure.clone())),
-        Box::new(S::state(FaceSide::Owner, fields.pressure.clone())),
-    );
-    let dp_over_dist = S::Div(Box::new(dp), Box::new(S::dist()));
-    let phi_p = S::Mul(
-        Box::new(S::Mul(
-            Box::new(S::Mul(Box::new(rho_face), Box::new(d_p_face))),
-            Box::new(dp_over_dist),
-        )),
-        Box::new(S::area()),
-    );
-    let phi_corr = S::Sub(Box::new(phi_pred.clone()), Box::new(phi_p));
-
-    // Pressure equation needs the *predicted* mass flux (phi_pred) on the RHS:
-    //   -div(rho*d_p*grad(p)) + div(phi_pred) = 0
-    //
-    // Momentum equation convection uses the corrected mass flux (phi_corr) to reduce
-    // pressure–velocity decoupling on collocated grids (Rhie–Chow).
-    //
-    // The flux buffer is indexed by coupled unknown component, so we can provide different
-    // values for `p` vs `U` while still using a single scalar flux module kernel.
-    let flux_layout = crate::solver::ir::FluxLayout::from_system(system);
-    let components: Vec<String> = flux_layout
-        .components
-        .iter()
-        .map(|c| c.name.clone())
-        .collect();
-    let flux: Vec<S> = components
-        .iter()
-        .map(|name| {
-            if name == &fields.pressure {
-                phi_pred.clone()
-            } else {
-                phi_corr.clone()
-            }
-        })
-        .collect();
-
-    Ok(FluxModuleKernelSpec::ScalarPerComponent { components, flux })
-}

@@ -19,8 +19,8 @@ pub mod generic_coupled {
     include!("generic_coupled.rs");
 }
 
-pub mod compressible_runtime_bc {
-    include!("compressible_runtime_bc.rs");
+pub mod bc_expr {
+    include!("bc_expr.rs");
 }
 
 // generic_coupled_ports is defined separately to avoid build script issues with proc macros

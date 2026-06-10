@@ -418,37 +418,132 @@ impl SolverCompressibleInletExt for GpuUnifiedSolver {
         eos: &EosSpec,
     ) -> Result<(), String> {
         let eos_params = eos.runtime_params();
-        let gm1 = eos_params.gm1;
-        let dp_drho = eos_params.dp_drho;
-        let p_offset = eos_params.p_offset;
-        let theta_ref = eos_params.theta_ref;
-        let r_gas = eos_params.r;
 
-        let p0 = if gm1 > 0.0 {
-            rho * theta_ref
+        // Inlet pressure policy: the thermodynamically consistent reference
+        // pressure for the prescribed (rho, theta_ref) state. This stands in
+        // for the interior pressure when seeding the dependent entries (the
+        // runtime bc_expr kernel then keeps them synchronized with the real
+        // interior).
+        let p0 = if eos_params.gm1 > 0.0 {
+            rho * eos_params.theta_ref
         } else {
-            dp_drho * rho - p_offset
-        };
-        let t0 = if r_gas.abs() > 1e-12 {
-            p0 / (rho.max(1e-12) * r_gas)
-        } else {
-            0.0
+            eos_params.dp_drho * rho - eos_params.p_offset
         };
 
         let u = [u_x, 0.0f32];
-        let rho_u = [rho * u_x, 0.0f32];
-        let ke = 0.5 * rho * (u_x * u_x);
-        let rho_e = if gm1 > 0.0 { p0 / gm1 + ke } else { ke };
+
+        // Seed the dependent entries (rho_u, rho_e, T) by evaluating the
+        // model's DECLARED inlet expressions, so this helper cannot drift
+        // from the GPU-side boundary math.
+        let seeded = evaluate_inlet_declarations(self.model(), rho, u, p0, &eos_params)?;
 
         self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_RHO, rho)?;
         self.set_boundary_vec2(GpuBoundaryType::Inlet, FIELD_U_LOWER, u)?;
-        self.set_boundary_vec2(GpuBoundaryType::Inlet, FIELD_RHO_U, rho_u)?;
-        self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_RHO_E, rho_e)?;
+        self.set_boundary_vec2(GpuBoundaryType::Inlet, FIELD_RHO_U, seeded.rho_u)?;
+        self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_RHO_E, seeded.rho_e)?;
         let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_P, p0);
-        let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_T, t0);
+        if let Some(t0) = seeded.t {
+            let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_T, t0);
+        }
         let _ = self.set_boundary_scalar(GpuBoundaryType::Outlet, FIELD_P, p0);
         Ok(())
     }
+}
+
+/// Inlet entries seeded from the model's declared boundary expressions.
+struct SeededInletValues {
+    rho_u: [f32; 2],
+    rho_e: f32,
+    t: Option<f32>,
+}
+
+/// Evaluate the model's declared inlet expressions for `rho_u`, `rho_e`,
+/// and `T` against a prescribed `(rho, u)` state and a reference pressure
+/// standing in for the interior pressure.
+///
+/// Falls back to the historical closed forms for entries a model does not
+/// declare (kept so the helper still works on hand-rolled model variants);
+/// the stock compressible model declares all three, and
+/// `inlet_seeding_matches_declared_expressions` pins the equivalence.
+fn evaluate_inlet_declarations(
+    model: &crate::solver::model::ModelSpec,
+    rho: f32,
+    u: [f32; 2],
+    p0: f32,
+    eos_params: &crate::solver::model::eos::EosRuntimeParams,
+) -> Result<SeededInletValues, String> {
+    use crate::solver::model::backend::ast::FieldRef;
+    use crate::solver::model::backend::boundary::eval_boundary_expr_f32;
+
+    let interior = move |f: &FieldRef, _c: u32| -> Result<f32, String> {
+        match f.name() {
+            // The reference pressure stands in for the interior pressure.
+            "p" => Ok(p0),
+            other => Err(format!(
+                "inlet seeding: interior({other}) is not available host-side"
+            )),
+        }
+    };
+    let bc = move |f: &FieldRef, c: u32| -> Result<f32, String> {
+        match (f.name(), c) {
+            (FIELD_RHO, 0) => Ok(rho),
+            (FIELD_U_LOWER, 0 | 1) => Ok(u[c as usize]),
+            other => Err(format!("inlet seeding: bc({other:?}) is not prescribed")),
+        }
+    };
+    let eos = *eos_params;
+    let param = move |p: &crate::solver::model::backend::algebraic::ParamRef| -> Result<f32, String> {
+        Ok(match p.name() {
+            "eos_gamma" => eos.gamma,
+            "eos_gm1" => eos.gm1,
+            "eos_r" => eos.r,
+            "eos_dp_drho" => eos.dp_drho,
+            "eos_p_offset" => eos.p_offset,
+            "eos_theta_ref" => eos.theta_ref,
+            other => return Err(format!("inlet seeding: unknown param '{other}'")),
+        })
+    };
+
+    let declared = |field: &str, component: usize| -> Result<Option<f32>, String> {
+        let Some(spec) = model.boundaries.field(field) else {
+            return Ok(None);
+        };
+        let Some(conditions) = spec.by_boundary.get(&GpuBoundaryType::Inlet) else {
+            return Ok(None);
+        };
+        let Some(condition) = conditions.get(component) else {
+            return Ok(None);
+        };
+        let Some(expr) = condition.expr_value() else {
+            return Ok(None);
+        };
+        eval_boundary_expr_f32(expr, &interior, &bc, &param).map(Some)
+    };
+
+    // Historical closed forms (fallback for undeclared entries).
+    let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
+    let legacy_rho_e = if eos_params.gm1 > 0.0 {
+        p0 / eos_params.gm1 + ke
+    } else {
+        ke
+    };
+    let legacy_t = if eos_params.r.abs() > 1e-12 {
+        Some(p0 / (rho.max(1e-12) * eos_params.r))
+    } else {
+        None
+    };
+
+    let rho_u = [
+        declared(FIELD_RHO_U, 0)?.unwrap_or(rho * u[0]),
+        declared(FIELD_RHO_U, 1)?.unwrap_or(rho * u[1]),
+    ];
+    let rho_e = declared(FIELD_RHO_E, 0)?.unwrap_or(legacy_rho_e);
+    let t = match declared(FIELD_T, 0)? {
+        Some(v) => Some(v),
+        None => legacy_t,
+    };
+
+    Ok(SeededInletValues { rho_u, rho_e, t })
 }
 
 /// Initial-condition seeding for compressible ideal-gas models.
@@ -630,5 +725,65 @@ impl SolverIncompressibleControlsExt for GpuUnifiedSolver {
 
     fn incompressible_set_should_stop(&mut self, value: bool) {
         let _ = value;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The declared inlet expressions must reproduce the historical
+    /// closed-form seeding math bit-for-bit (f32 evaluation matches both the
+    /// legacy host formulas and the GPU kernel arithmetic).
+    #[test]
+    fn inlet_seeding_matches_declared_expressions() {
+        // Physically sensible prescribed states per EOS (the declared
+        // expressions apply the GPU kernel's pressure floor, so a state
+        // with negative reference pressure would intentionally diverge
+        // from the unfloored legacy formula).
+        let cases = [
+            (
+                EosSpec::IdealGas {
+                    gamma: 1.4,
+                    gas_constant: 287.0,
+                    temperature: 300.0,
+                },
+                1.2f32,
+                [30.0f32, 0.0],
+            ),
+            (
+                EosSpec::LinearCompressibility {
+                    bulk_modulus: 2.2e9,
+                    rho_ref: 1000.0,
+                    p_ref: 1.0e5,
+                },
+                1000.5f32,
+                [2.0f32, 0.0],
+            ),
+        ];
+        for (eos, rho, u) in cases {
+            let model = crate::solver::model::compressible_model_with_eos(eos).expect("model");
+            let params = eos.runtime_params();
+            let p0 = if params.gm1 > 0.0 {
+                rho * params.theta_ref
+            } else {
+                params.dp_drho * rho - params.p_offset
+            };
+
+            let seeded =
+                evaluate_inlet_declarations(&model, rho, u, p0, &params).expect("seeding");
+
+            let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
+            let expected_rho_e = if params.gm1 > 0.0 {
+                p0 / params.gm1 + ke
+            } else {
+                ke
+            };
+            let expected_t = p0 / (rho.max(1e-12) * params.r);
+
+            assert_eq!(seeded.rho_u, [rho * u[0], rho * u[1]], "{eos:?}");
+            assert_eq!(seeded.rho_e, expected_rho_e, "{eos:?}");
+            assert_eq!(seeded.t, Some(expected_t), "{eos:?}");
+        }
     }
 }

@@ -25,7 +25,8 @@ pub use definitions::{
     generic_diffusion_demo_mms_neumann_model, generic_diffusion_demo_model,
     generic_diffusion_demo_neumann_model, incompressible_momentum_model,
     incompressible_momentum_system, scalar_transport_model, scalar_transport_sou_model,
-    BoundaryCondition, BoundarySpec, CompressibleFields, FieldBoundarySpec, GenericCoupledFields,
+    BcValue, BoundaryCondition, BoundarySpec, CompressibleFields, FieldBoundarySpec,
+    GenericCoupledFields,
     IncompressibleMomentumFields, ModelSpec, ADVECTING_VELOCITY_FIELD, MMS_SOURCE_FIELD,
     SCALAR_TRANSPORT_FIELD, SCALAR_TRANSPORT_KAPPA, SCALAR_TRANSPORT_MMS_SOURCE_FIELD,
 };

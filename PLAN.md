@@ -35,7 +35,7 @@ Key files: [generic_coupled.rs](src/solver/gpu/lowering/programs/generic_coupled
 
 2. **Outlet policy evolution**: The current outlet extrapolates non-pressure state from interior and keeps the host-seeded Dirichlet pressure. Decide whether this should evolve toward a characteristic-based treatment (e.g., wave-transmissive outlet) or remain as-is.
 
-Key files: [solver_ext.rs](src/solver/model/helpers/solver_ext.rs), [compressible.rs](src/solver/model/definitions/compressible.rs), [compressible_runtime_bc.rs](src/solver/model/modules/compressible_runtime_bc.rs)
+Key files: [solver_ext.rs](src/solver/model/helpers/solver_ext.rs), [compressible.rs](src/solver/model/definitions/compressible.rs) (inlet/outlet are declared `BoundaryExpr` sets lowered by [bc_expr.rs](src/solver/model/modules/bc_expr.rs))
 
 ## Phase 5: Positivity fallback — remaining decision
 

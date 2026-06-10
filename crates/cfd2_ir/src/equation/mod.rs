@@ -1,5 +1,6 @@
 pub mod algebraic;
 pub mod ast;
+pub mod boundary;
 pub mod scheme;
 pub mod scheme_expansion;
 pub mod state_layout;
@@ -13,6 +14,7 @@ pub use ast::{
     fvc, fvm, Coefficient, Discretization, Equation, EquationSystem, FieldKind, FieldRef, FluxRef,
     Term, TermOp,
 };
+pub use boundary::{eval_boundary_expr, BoundaryExpr};
 pub use scheme::{SchemeRegistry, TermKey};
 pub use scheme_expansion::{expand_schemes, expand_schemes_unchecked, SchemeExpansion};
 pub use state_layout::{StateField, StateLayout};

@@ -452,11 +452,14 @@ impl BoundarySpec {
                     None
                 };
 
-                let expected_unit = match entry.as_ref().map(|c| c.kind) {
-                    Some(GpuBcKind::Dirichlet) => field.unit(),
-                    Some(GpuBcKind::Neumann) | Some(GpuBcKind::ZeroGradient) | None => {
-                        field.unit() / Length::UNIT
-                    }
+                let expected_unit = match entry.as_ref() {
+                    // Expression-refreshed entries hold boundary-face STATE
+                    // values regardless of kind (a ZeroGradient unknown's
+                    // refreshed value feeds flux/reconstruction consumers,
+                    // not the assembly gradient).
+                    Some(c) if c.expr_value().is_some() => field.unit(),
+                    Some(c) if c.kind == GpuBcKind::Dirichlet => field.unit(),
+                    _ => field.unit() / Length::UNIT,
                 };
 
                 if let Some(cond) = entry {
@@ -470,7 +473,7 @@ impl BoundarySpec {
                         ));
                     }
                     kind[table.offset(b_i, u_idx)] = cond.kind as u32;
-                    value[table.offset(b_i, u_idx)] = cond.value as f32;
+                    value[table.offset(b_i, u_idx)] = cond.seed_value() as f32;
                 } else {
                     // Default: ZeroGradient (Neumann=0), with expected unit field.unit()/L.
                     kind[table.offset(b_i, u_idx)] = GpuBcKind::ZeroGradient as u32;
@@ -506,6 +509,17 @@ impl FieldBoundarySpec {
             .insert(boundary, vec![condition; components]);
         self
     }
+
+    /// Set distinct per-component conditions (needed when components carry
+    /// different expression values, e.g. a vector unknown's x/y entries).
+    pub fn set_components(
+        mut self,
+        boundary: GpuBoundaryType,
+        conditions: Vec<BoundaryCondition>,
+    ) -> Self {
+        self.by_boundary.insert(boundary, conditions);
+        self
+    }
 }
 
 impl Default for FieldBoundarySpec {
@@ -514,10 +528,19 @@ impl Default for FieldBoundarySpec {
     }
 }
 
+/// The value of a boundary-table entry: a host-prescribed constant, or a
+/// declared expression a generic Preparation-phase kernel refreshes per
+/// boundary face every outer iteration (see `backend::boundary`).
+#[derive(Debug, Clone)]
+pub enum BcValue {
+    Const(f64),
+    Expr(crate::solver::model::backend::boundary::BoundaryExpr),
+}
+
 #[derive(Debug, Clone)]
 pub struct BoundaryCondition {
     pub kind: GpuBcKind,
-    pub value: f64,
+    pub value: BcValue,
     pub unit: UnitDim,
 }
 
@@ -525,7 +548,7 @@ impl BoundaryCondition {
     pub fn zero_gradient(unit: UnitDim) -> Self {
         Self {
             kind: GpuBcKind::ZeroGradient,
-            value: 0.0,
+            value: BcValue::Const(0.0),
             unit,
         }
     }
@@ -533,7 +556,7 @@ impl BoundaryCondition {
     pub fn dirichlet(value: f64, unit: UnitDim) -> Self {
         Self {
             kind: GpuBcKind::Dirichlet,
-            value,
+            value: BcValue::Const(value),
             unit,
         }
     }
@@ -542,7 +565,7 @@ impl BoundaryCondition {
     pub fn neumann(dphi_dn: f64, unit: UnitDim) -> Self {
         Self {
             kind: GpuBcKind::Neumann,
-            value: dphi_dn,
+            value: BcValue::Const(dphi_dn),
             unit,
         }
     }
@@ -561,6 +584,49 @@ impl BoundaryCondition {
     /// Value is `dphi/dn` (outward normal gradient).
     pub fn neumann_dim<D: UnitDimension>(dphi_dn: f64) -> Self {
         Self::neumann(dphi_dn, D::UNIT)
+    }
+
+    /// Boundary condition whose table value is refreshed per face from a
+    /// declared expression (the static table seeds the constructor-supplied
+    /// `seed` until the first refresh). `kind` stays as declared: a
+    /// Dirichlet entry constrains assembly with the refreshed value, while
+    /// a ZeroGradient entry's refreshed value only feeds consumers that
+    /// read boundary-face state (e.g. flux reconstruction).
+    pub fn with_expr_value_dim<D: UnitDimension>(
+        kind: GpuBcKind,
+        expr: crate::solver::model::backend::boundary::BoundaryExpr,
+    ) -> Result<Self, String> {
+        if let Some(unit) = expr.unit()? {
+            if unit != D::UNIT {
+                return Err(format!(
+                    "boundary expression unit {} does not match declared unit {}",
+                    unit,
+                    D::UNIT
+                ));
+            }
+        }
+        Ok(Self {
+            kind,
+            value: BcValue::Expr(expr),
+            unit: D::UNIT,
+        })
+    }
+
+    /// The constant table value: `Const` as-is; expression-valued entries
+    /// seed 0.0 (the refresh kernel overwrites before first use).
+    pub fn seed_value(&self) -> f64 {
+        match &self.value {
+            BcValue::Const(v) => *v,
+            BcValue::Expr(_) => 0.0,
+        }
+    }
+
+    /// The declared expression, if this entry is expression-valued.
+    pub fn expr_value(&self) -> Option<&crate::solver::model::backend::boundary::BoundaryExpr> {
+        match &self.value {
+            BcValue::Const(_) => None,
+            BcValue::Expr(expr) => Some(expr),
+        }
     }
 }
 

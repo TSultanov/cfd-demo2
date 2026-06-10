@@ -33,3 +33,8 @@ pub mod typed_ast {
 pub mod algebraic {
     pub use cfd2_ir::equation::algebraic::*;
 }
+
+// Declarative boundary-value expressions (dual-context like algebraic).
+pub mod boundary {
+    pub use cfd2_ir::equation::boundary::*;
+}

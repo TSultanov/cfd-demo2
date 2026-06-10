@@ -145,6 +145,14 @@ mod solver {
                     "/crates/cfd2_ir/src/equation/algebraic.rs"
                 ));
             }
+            // Boundary expressions are dual-context for the same reason
+            // (they carry algebraic::ParamRef).
+            pub mod boundary {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/crates/cfd2_ir/src/equation/boundary.rs"
+                ));
+            }
             #[allow(unused_imports)]
             pub use ast::{
                 fvc, fvm, Coefficient, Discretization, Equation, EquationSystem, FieldKind,

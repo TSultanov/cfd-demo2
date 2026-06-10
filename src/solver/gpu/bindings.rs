@@ -2,14 +2,14 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 66e5e2fdcf410d5fe3383663aadc4ef7a060b7d4e5b9f133803be1f00dc8f249
+// SourceHash: f7d437d4f2da5ec19e8d74ba2f400b7e692771a3d02263f06444240973d936d2
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShaderEntry {
     GeneratedAmg,
+    GeneratedBcExprUpdateCompressible,
     GeneratedBlockPrecond,
-    GeneratedCompressibleRuntimeBcUpdateCompressible,
     GeneratedDotProduct,
     GeneratedDotProductPair,
     GeneratedDpInitIncompressibleMomentum,
@@ -92,10 +92,10 @@ pub enum ShaderEntry {
 }
 impl ShaderEntry {
     pub fn create_pipeline_layout(&self, device: &wgpu::Device) -> wgpu::PipelineLayout {
-        match self { Self :: GeneratedAmg => generated :: amg :: create_pipeline_layout (device) , Self :: GeneratedBlockPrecond => generated :: block_precond :: create_pipeline_layout (device) , Self :: GeneratedCompressibleRuntimeBcUpdateCompressible => generated :: compressible_runtime_bc_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedDotProduct => generated :: dot_product :: create_pipeline_layout (device) , Self :: GeneratedDotProductPair => generated :: dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressible => generated :: flux_module_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleScalarTransport => generated :: flux_module_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleScalarTransportSou => generated :: flux_module_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressible => generated :: fusion_packed_state_gradients_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemo => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMms => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsDirichlet => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsNeumann => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoNeumann => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentum => generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransport => generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransportSou => generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMms => generated :: generic_coupled_assembly_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_assembly_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMms => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransport => generated :: generic_coupled_assembly_grad_state_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransportSou => generated :: generic_coupled_assembly_grad_state_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyScalarTransport => generated :: generic_coupled_assembly_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyScalarTransportSou => generated :: generic_coupled_assembly_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledSchurSetup => generated :: generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum => generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMms => generated :: generic_coupled_update_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_update_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_update_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateScalarTransport => generated :: generic_coupled_update_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateScalarTransportSou => generated :: generic_coupled_update_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGmresCgs => generated :: gmres_cgs :: create_pipeline_layout (device) , Self :: GeneratedGmresLogic => generated :: gmres_logic :: create_pipeline_layout (device) , Self :: GeneratedGmresOps => generated :: gmres_ops :: create_pipeline_layout (device) , Self :: GeneratedGmresUpdateFused => generated :: gmres_update_fused :: create_pipeline_layout (device) , Self :: GeneratedLinearSolver => generated :: linear_solver :: create_pipeline_layout (device) , Self :: GeneratedOuterConvergence => generated :: outer_convergence :: create_pipeline_layout (device) , Self :: GeneratedOuterConvergenceBreak => generated :: outer_convergence_break :: create_pipeline_layout (device) , Self :: GeneratedOuterGate => generated :: outer_gate :: create_pipeline_layout (device) , Self :: GeneratedOuterStopInjectCg => generated :: outer_stop_inject_cg :: create_pipeline_layout (device) , Self :: GeneratedOuterStopInjectFgmres => generated :: outer_stop_inject_fgmres :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMms => generated :: packed_state_gradients_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsDirichlet => generated :: packed_state_gradients_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsNeumann => generated :: packed_state_gradients_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsScalarTransport => generated :: packed_state_gradients_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsScalarTransportSou => generated :: packed_state_gradients_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedScalars => generated :: scalars :: create_pipeline_layout (device) , Self :: GeneratedSchurPrecondGeneric => generated :: schur_precond_generic :: create_pipeline_layout (device) , }
+        match self { Self :: GeneratedAmg => generated :: amg :: create_pipeline_layout (device) , Self :: GeneratedBcExprUpdateCompressible => generated :: bc_expr_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedBlockPrecond => generated :: block_precond :: create_pipeline_layout (device) , Self :: GeneratedDotProduct => generated :: dot_product :: create_pipeline_layout (device) , Self :: GeneratedDotProductPair => generated :: dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressible => generated :: flux_module_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleScalarTransport => generated :: flux_module_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleScalarTransportSou => generated :: flux_module_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressible => generated :: fusion_packed_state_gradients_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemo => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMms => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsDirichlet => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsNeumann => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoNeumann => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentum => generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransport => generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransportSou => generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMms => generated :: generic_coupled_assembly_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_assembly_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMms => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransport => generated :: generic_coupled_assembly_grad_state_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransportSou => generated :: generic_coupled_assembly_grad_state_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyScalarTransport => generated :: generic_coupled_assembly_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyScalarTransportSou => generated :: generic_coupled_assembly_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledSchurSetup => generated :: generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum => generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMms => generated :: generic_coupled_update_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_update_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_update_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateScalarTransport => generated :: generic_coupled_update_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateScalarTransportSou => generated :: generic_coupled_update_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGmresCgs => generated :: gmres_cgs :: create_pipeline_layout (device) , Self :: GeneratedGmresLogic => generated :: gmres_logic :: create_pipeline_layout (device) , Self :: GeneratedGmresOps => generated :: gmres_ops :: create_pipeline_layout (device) , Self :: GeneratedGmresUpdateFused => generated :: gmres_update_fused :: create_pipeline_layout (device) , Self :: GeneratedLinearSolver => generated :: linear_solver :: create_pipeline_layout (device) , Self :: GeneratedOuterConvergence => generated :: outer_convergence :: create_pipeline_layout (device) , Self :: GeneratedOuterConvergenceBreak => generated :: outer_convergence_break :: create_pipeline_layout (device) , Self :: GeneratedOuterGate => generated :: outer_gate :: create_pipeline_layout (device) , Self :: GeneratedOuterStopInjectCg => generated :: outer_stop_inject_cg :: create_pipeline_layout (device) , Self :: GeneratedOuterStopInjectFgmres => generated :: outer_stop_inject_fgmres :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMms => generated :: packed_state_gradients_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsDirichlet => generated :: packed_state_gradients_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsNeumann => generated :: packed_state_gradients_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsScalarTransport => generated :: packed_state_gradients_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsScalarTransportSou => generated :: packed_state_gradients_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedScalars => generated :: scalars :: create_pipeline_layout (device) , Self :: GeneratedSchurPrecondGeneric => generated :: schur_precond_generic :: create_pipeline_layout (device) , }
     }
     pub fn create_shader_module_embed_source(&self, device: &wgpu::Device) -> wgpu::ShaderModule {
-        match self { Self :: GeneratedAmg => { generated :: amg :: create_shader_module_embed_source (device) } , Self :: GeneratedBlockPrecond => { generated :: block_precond :: create_shader_module_embed_source (device) } , Self :: GeneratedCompressibleRuntimeBcUpdateCompressible => { generated :: compressible_runtime_bc_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedDotProduct => { generated :: dot_product :: create_shader_module_embed_source (device) } , Self :: GeneratedDotProductPair => { generated :: dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressible => { generated :: flux_module_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleScalarTransport => { generated :: flux_module_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleScalarTransportSou => { generated :: flux_module_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressible => { generated :: fusion_packed_state_gradients_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemo => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsDirichlet => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsNeumann => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentum => { generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransport => { generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransportSou => { generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMms => { generated :: generic_coupled_assembly_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_assembly_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMms => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransport => { generated :: generic_coupled_assembly_grad_state_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransportSou => { generated :: generic_coupled_assembly_grad_state_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyScalarTransport => { generated :: generic_coupled_assembly_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyScalarTransportSou => { generated :: generic_coupled_assembly_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledSchurSetup => { generated :: generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum => { generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMms => { generated :: generic_coupled_update_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_update_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateScalarTransport => { generated :: generic_coupled_update_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateScalarTransportSou => { generated :: generic_coupled_update_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresCgs => { generated :: gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresLogic => { generated :: gmres_logic :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresOps => { generated :: gmres_ops :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresUpdateFused => { generated :: gmres_update_fused :: create_shader_module_embed_source (device) } , Self :: GeneratedLinearSolver => { generated :: linear_solver :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterConvergence => { generated :: outer_convergence :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterConvergenceBreak => { generated :: outer_convergence_break :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterGate => { generated :: outer_gate :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterStopInjectCg => { generated :: outer_stop_inject_cg :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterStopInjectFgmres => { generated :: outer_stop_inject_fgmres :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMms => { generated :: packed_state_gradients_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsDirichlet => { generated :: packed_state_gradients_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsScalarTransport => { generated :: packed_state_gradients_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsScalarTransportSou => { generated :: packed_state_gradients_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedScalars => { generated :: scalars :: create_shader_module_embed_source (device) } , Self :: GeneratedSchurPrecondGeneric => { generated :: schur_precond_generic :: create_shader_module_embed_source (device) } , }
+        match self { Self :: GeneratedAmg => { generated :: amg :: create_shader_module_embed_source (device) } , Self :: GeneratedBcExprUpdateCompressible => { generated :: bc_expr_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedBlockPrecond => { generated :: block_precond :: create_shader_module_embed_source (device) } , Self :: GeneratedDotProduct => { generated :: dot_product :: create_shader_module_embed_source (device) } , Self :: GeneratedDotProductPair => { generated :: dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressible => { generated :: flux_module_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleScalarTransport => { generated :: flux_module_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleScalarTransportSou => { generated :: flux_module_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressible => { generated :: fusion_packed_state_gradients_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemo => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsDirichlet => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsNeumann => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentum => { generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransport => { generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransportSou => { generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMms => { generated :: generic_coupled_assembly_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_assembly_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMms => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransport => { generated :: generic_coupled_assembly_grad_state_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransportSou => { generated :: generic_coupled_assembly_grad_state_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyScalarTransport => { generated :: generic_coupled_assembly_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyScalarTransportSou => { generated :: generic_coupled_assembly_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledSchurSetup => { generated :: generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum => { generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMms => { generated :: generic_coupled_update_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_update_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateScalarTransport => { generated :: generic_coupled_update_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateScalarTransportSou => { generated :: generic_coupled_update_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresCgs => { generated :: gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresLogic => { generated :: gmres_logic :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresOps => { generated :: gmres_ops :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresUpdateFused => { generated :: gmres_update_fused :: create_shader_module_embed_source (device) } , Self :: GeneratedLinearSolver => { generated :: linear_solver :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterConvergence => { generated :: outer_convergence :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterConvergenceBreak => { generated :: outer_convergence_break :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterGate => { generated :: outer_gate :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterStopInjectCg => { generated :: outer_stop_inject_cg :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterStopInjectFgmres => { generated :: outer_stop_inject_fgmres :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMms => { generated :: packed_state_gradients_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsDirichlet => { generated :: packed_state_gradients_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsScalarTransport => { generated :: packed_state_gradients_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsScalarTransportSou => { generated :: packed_state_gradients_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedScalars => { generated :: scalars :: create_shader_module_embed_source (device) } , Self :: GeneratedSchurPrecondGeneric => { generated :: schur_precond_generic :: create_shader_module_embed_source (device) } , }
     }
 }
 mod _root {
@@ -128,6 +128,52 @@ pub mod layout_asserts {
         assert!(std::mem::offset_of!(generated::amg::AmgParams, padding) == 8);
         assert!(std::mem::size_of::<generated::amg::AmgParams>() == 16);
     };
+    const GENERATED_BC_EXPR_UPDATE_COMPRESSIBLE_CONSTANTS_ASSERTS: () = {
+        assert!(std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, dt) == 0);
+        assert!(
+            std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, dt_old) == 4
+        );
+        assert!(std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, dtau) == 8);
+        assert!(
+            std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, time) == 12
+        );
+        assert!(
+            std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, viscosity)
+                == 16
+        );
+        assert!(
+            std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, density) == 20
+        );
+        assert!(
+            std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, component)
+                == 24
+        );
+        assert!(
+            std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, alpha_p) == 28
+        );
+        assert!(
+            std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, scheme) == 32
+        );
+        assert!(
+            std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, alpha_u) == 36
+        );
+        assert!(
+            std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, stride_x) == 40
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::bc_expr_update_compressible::Constants,
+                time_scheme
+            ) == 44
+        );
+        assert!(
+            std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, eos_gm1) == 48
+        );
+        assert!(
+            std::mem::offset_of!(generated::bc_expr_update_compressible::Constants, eos_r) == 52
+        );
+        assert!(std::mem::size_of::<generated::bc_expr_update_compressible::Constants>() == 56);
+    };
     const GENERATED_BLOCK_PRECOND_GMRES_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(generated::block_precond::GmresParams, n) == 0);
         assert!(std::mem::offset_of!(generated::block_precond::GmresParams, num_cells) == 4);
@@ -145,96 +191,6 @@ pub mod layout_asserts {
         assert!(std::mem::offset_of!(generated::block_precond::IterParams, _pad1) == 8);
         assert!(std::mem::offset_of!(generated::block_precond::IterParams, _pad2) == 12);
         assert!(std::mem::size_of::<generated::block_precond::IterParams>() == 16);
-    };
-    const GENERATED_COMPRESSIBLE_RUNTIME_BC_UPDATE_COMPRESSIBLE_CONSTANTS_ASSERTS: () = {
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                dt
-            ) == 0
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                dt_old
-            ) == 4
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                dtau
-            ) == 8
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                time
-            ) == 12
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                viscosity
-            ) == 16
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                density
-            ) == 20
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                component
-            ) == 24
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                alpha_p
-            ) == 28
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                scheme
-            ) == 32
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                alpha_u
-            ) == 36
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                stride_x
-            ) == 40
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                time_scheme
-            ) == 44
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                eos_gm1
-            ) == 48
-        );
-        assert!(
-            std::mem::offset_of!(
-                generated::compressible_runtime_bc_update_compressible::Constants,
-                eos_r
-            ) == 52
-        );
-        assert!(
-            std::mem::size_of::<generated::compressible_runtime_bc_update_compressible::Constants>(
-            ) == 56
-        );
     };
     const GENERATED_DOT_PRODUCT_SOLVER_PARAMS_ASSERTS: () = {
         assert!(std::mem::offset_of!(generated::dot_product::SolverParams, n) == 0);
@@ -5660,6 +5616,389 @@ fn clear(@builtin(global_invocation_id) global_id_3: vec3<u32>, @builtin(num_wor
 }
 "#;
     }
+    pub mod bc_expr_update_compressible {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+            #[doc = "offset: 48, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 52, size: 4, type: `f32`"]
+            pub eos_r: f32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+                eos_gm1: f32,
+                eos_r: f32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                    eos_gm1,
+                    eos_r,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
+                [self.state, self.constants, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+                wgpu::BindGroupLayoutDescriptor {
+                    label: Some("GeneratedBcExprUpdateCompressible::BindGroup0::LayoutDescriptor"),
+                    entries: &[
+                        #[doc = " @binding(0): \"state\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(1): \"constants\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: std::num::NonZeroU64::new(std::mem::size_of::<
+                                    _root::generated::bc_expr_update_compressible::Constants,
+                                >(
+                                )
+                                    as _),
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(2): \"bc_value\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                };
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedBcExprUpdateCompressible::BindGroup0"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub face_owner: wgpu::BufferBinding<'a>,
+            pub face_boundary: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub face_owner: wgpu::BindGroupEntry<'a>,
+            pub face_boundary: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    face_owner: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.face_owner),
+                    },
+                    face_boundary: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.face_owner, self.face_boundary]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR: wgpu::BindGroupLayoutDescriptor<'static> =
+                wgpu::BindGroupLayoutDescriptor {
+                    label: Some("GeneratedBcExprUpdateCompressible::BindGroup1::LayoutDescriptor"),
+                    entries: &[
+                        #[doc = " @binding(0): \"face_owner\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(1): \"face_boundary\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                };
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedBcExprUpdateCompressible::BindGroup1"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 2],
+            ) -> [wgpu::BindGroupLayout; 2] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("GeneratedBcExprUpdateCompressible::PipelineLayout"),
+                bind_group_layouts: &[
+                    &WgpuBindGroup0::get_bind_group_layout(device),
+                    &WgpuBindGroup1::get_bind_group_layout(device),
+                ],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("bc_expr_update_compressible.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    eos_gm1_: f32,
+    eos_r: f32,
+}
+
+@group(0) @binding(0) 
+var<storage> state: array<f32>;
+@group(0) @binding(1) 
+var<uniform> constants: Constants;
+@group(0) @binding(2) 
+var<storage, read_write> bc_value: array<f32>;
+@group(1) @binding(0) 
+var<storage> face_owner: array<u32>;
+@group(1) @binding(1) 
+var<storage> face_boundary: array<u32>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let _e4 = constants.stride_x;
+    let idx = ((global_id.y * _e4) + global_id.x);
+    if (idx >= arrayLength((&face_boundary))) {
+        return;
+    }
+    let face_boundary_type = face_boundary[idx];
+    let owner = face_owner[idx];
+    let base = (owner * 22u);
+    if (face_boundary_type == 1u) {
+        let in_p_c0_ = state[(base + 8u)];
+        let bcv_rho_c0_ = bc_value[((idx * 8u) + 0u)];
+        let bcv_u_c0_ = bc_value[((idx * 8u) + 4u)];
+        let bcv_u_c1_ = bc_value[((idx * 8u) + 5u)];
+        bc_value[((idx * 8u) + 1u)] = (bcv_rho_c0_ * bcv_u_c0_);
+        bc_value[((idx * 8u) + 2u)] = (bcv_rho_c0_ * bcv_u_c1_);
+        let _e77 = constants.eos_gm1_;
+        let _e90 = constants.eos_gm1_;
+        bc_value[((idx * 8u) + 3u)] = select(((0.5f * bcv_rho_c0_) * ((bcv_u_c0_ * bcv_u_c0_) + (bcv_u_c1_ * bcv_u_c1_))), ((max(in_p_c0_, 0.000001f) / max(_e77, 0.000001f)) + ((0.5f * bcv_rho_c0_) * ((bcv_u_c0_ * bcv_u_c0_) + (bcv_u_c1_ * bcv_u_c1_)))), (_e90 > 0f));
+        bc_value[((idx * 8u) + 6u)] = max(in_p_c0_, 0.000001f);
+        let _e114 = constants.eos_r;
+        bc_value[((idx * 8u) + 7u)] = (max(in_p_c0_, 0.000001f) / (max(bcv_rho_c0_, 0.000001f) * max(_e114, 0.000000000001f)));
+    }
+    if (face_boundary_type == 2u) {
+        let in_rho_c0_ = state[(base + 0u)];
+        let in_u_c0_ = state[(base + 10u)];
+        let in_u_c1_ = state[(base + 11u)];
+        let bcv_p_c0_ = bc_value[((idx * 8u) + 6u)];
+        bc_value[((idx * 8u) + 0u)] = max(in_rho_c0_, 0.000001f);
+        bc_value[((idx * 8u) + 1u)] = (max(in_rho_c0_, 0.000001f) * in_u_c0_);
+        bc_value[((idx * 8u) + 2u)] = (max(in_rho_c0_, 0.000001f) * in_u_c1_);
+        let _e185 = constants.eos_gm1_;
+        let _e200 = constants.eos_gm1_;
+        bc_value[((idx * 8u) + 3u)] = select(((0.5f * max(in_rho_c0_, 0.000001f)) * ((in_u_c0_ * in_u_c0_) + (in_u_c1_ * in_u_c1_))), ((bcv_p_c0_ / max(_e185, 0.000001f)) + ((0.5f * max(in_rho_c0_, 0.000001f)) * ((in_u_c0_ * in_u_c0_) + (in_u_c1_ * in_u_c1_)))), (_e200 > 0f));
+        bc_value[((idx * 8u) + 4u)] = in_u_c0_;
+        bc_value[((idx * 8u) + 5u)] = in_u_c1_;
+        let _e226 = constants.eos_r;
+        bc_value[((idx * 8u) + 7u)] = (bcv_p_c0_ / (max(in_rho_c0_, 0.000001f) * max(_e226, 0.000000000001f)));
+        return;
+    } else {
+        return;
+    }
+}
+"#;
+    }
     pub mod block_precond {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
@@ -6689,359 +7028,6 @@ fn apply_block_precond(@builtin(global_invocation_id) global_id_1: vec3<u32>, @b
         }
     }
     return;
-}
-"#;
-    }
-    pub mod compressible_runtime_bc_update_compressible {
-        use super::{_root, _root::*};
-        #[repr(C, align(4))]
-        #[derive(Debug, PartialEq, Clone, Copy)]
-        pub struct Constants {
-            #[doc = "offset: 0, size: 4, type: `f32`"]
-            pub dt: f32,
-            #[doc = "offset: 4, size: 4, type: `f32`"]
-            pub dt_old: f32,
-            #[doc = "offset: 8, size: 4, type: `f32`"]
-            pub dtau: f32,
-            #[doc = "offset: 12, size: 4, type: `f32`"]
-            pub time: f32,
-            #[doc = "offset: 16, size: 4, type: `f32`"]
-            pub viscosity: f32,
-            #[doc = "offset: 20, size: 4, type: `f32`"]
-            pub density: f32,
-            #[doc = "offset: 24, size: 4, type: `u32`"]
-            pub component: u32,
-            #[doc = "offset: 28, size: 4, type: `f32`"]
-            pub alpha_p: f32,
-            #[doc = "offset: 32, size: 4, type: `u32`"]
-            pub scheme: u32,
-            #[doc = "offset: 36, size: 4, type: `f32`"]
-            pub alpha_u: f32,
-            #[doc = "offset: 40, size: 4, type: `u32`"]
-            pub stride_x: u32,
-            #[doc = "offset: 44, size: 4, type: `u32`"]
-            pub time_scheme: u32,
-            #[doc = "offset: 48, size: 4, type: `f32`"]
-            pub eos_gm1: f32,
-            #[doc = "offset: 52, size: 4, type: `f32`"]
-            pub eos_r: f32,
-        }
-        impl Constants {
-            pub const fn new(
-                dt: f32,
-                dt_old: f32,
-                dtau: f32,
-                time: f32,
-                viscosity: f32,
-                density: f32,
-                component: u32,
-                alpha_p: f32,
-                scheme: u32,
-                alpha_u: f32,
-                stride_x: u32,
-                time_scheme: u32,
-                eos_gm1: f32,
-                eos_r: f32,
-            ) -> Self {
-                Self {
-                    dt,
-                    dt_old,
-                    dtau,
-                    time,
-                    viscosity,
-                    density,
-                    component,
-                    alpha_p,
-                    scheme,
-                    alpha_u,
-                    stride_x,
-                    time_scheme,
-                    eos_gm1,
-                    eos_r,
-                }
-            }
-        }
-        pub mod compute {
-            use super::{_root, _root::*};
-            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
-            pub fn create_main_pipeline_embed_source(
-                device: &wgpu::Device,
-            ) -> wgpu::ComputePipeline {
-                let module = super::create_shader_module_embed_source(device);
-                let layout = super::create_pipeline_layout(device);
-                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    label: Some("Compute Pipeline main"),
-                    layout: Some(&layout),
-                    module: &module,
-                    entry_point: Some("main"),
-                    compilation_options: Default::default(),
-                    cache: None,
-                })
-            }
-        }
-        pub const ENTRY_MAIN: &str = "main";
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub state: wgpu::BufferBinding<'a>,
-            pub constants: wgpu::BufferBinding<'a>,
-            pub bc_value: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup0Entries<'a> {
-            pub state: wgpu::BindGroupEntry<'a>,
-            pub constants: wgpu::BindGroupEntry<'a>,
-            pub bc_value: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup0Entries<'a> {
-            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
-                Self {
-                    state: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.state),
-                    },
-                    constants: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.constants),
-                    },
-                    bc_value: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.bc_value),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
-                [self.state, self.constants, self.bc_value]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup0(wgpu::BindGroup);
-        impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedCompressibleRuntimeBcUpdateCompressible::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: compressible_runtime_bc_update_compressible :: Constants > () as _) , } , count : None , } , # [doc = " @binding(2): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedCompressibleRuntimeBcUpdateCompressible::BindGroup0"),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(0, &self.0, &[]);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1EntriesParams<'a> {
-            pub face_owner: wgpu::BufferBinding<'a>,
-            pub face_boundary: wgpu::BufferBinding<'a>,
-        }
-        #[derive(Clone, Debug)]
-        pub struct WgpuBindGroup1Entries<'a> {
-            pub face_owner: wgpu::BindGroupEntry<'a>,
-            pub face_boundary: wgpu::BindGroupEntry<'a>,
-        }
-        impl<'a> WgpuBindGroup1Entries<'a> {
-            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
-                Self {
-                    face_owner: wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.face_owner),
-                    },
-                    face_boundary: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
-                    },
-                }
-            }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
-                [self.face_owner, self.face_boundary]
-            }
-            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
-                self.into_array().into_iter().collect()
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuBindGroup1(wgpu::BindGroup);
-        impl WgpuBindGroup1 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedCompressibleRuntimeBcUpdateCompressible::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
-            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
-            }
-            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
-                let bind_group_layout = Self::get_bind_group_layout(device);
-                let entries = bindings.into_array();
-                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("GeneratedCompressibleRuntimeBcUpdateCompressible::BindGroup1"),
-                    layout: &bind_group_layout,
-                    entries: &entries,
-                });
-                Self(bind_group)
-            }
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                pass.set_bind_group(1, &self.0, &[]);
-            }
-        }
-        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
-        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
-        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
-        #[doc = "   - Bind group 1: More frequent updates"]
-        #[doc = "   - Bind group 2: More frequent updates"]
-        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
-        #[derive(Debug, Copy, Clone)]
-        pub struct WgpuBindGroups<'a> {
-            pub bind_group0: &'a WgpuBindGroup0,
-            pub bind_group1: &'a WgpuBindGroup1,
-        }
-        impl<'a> WgpuBindGroups<'a> {
-            pub fn set(&self, pass: &mut impl SetBindGroup) {
-                self.bind_group0.set(pass);
-                self.bind_group1.set(pass);
-            }
-        }
-        #[derive(Debug)]
-        pub struct WgpuPipelineLayout;
-        impl WgpuPipelineLayout {
-            pub fn bind_group_layout_entries(
-                entries: [wgpu::BindGroupLayout; 2],
-            ) -> [wgpu::BindGroupLayout; 2] {
-                entries
-            }
-        }
-        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("GeneratedCompressibleRuntimeBcUpdateCompressible::PipelineLayout"),
-                bind_group_layouts: &[
-                    &WgpuBindGroup0::get_bind_group_layout(device),
-                    &WgpuBindGroup1::get_bind_group_layout(device),
-                ],
-                push_constant_ranges: &[],
-            })
-        }
-        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
-            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("compressible_runtime_bc_update_compressible.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(source),
-            })
-        }
-        pub const SHADER_STRING: &str = r#"
-struct Constants {
-    dt: f32,
-    dt_old: f32,
-    dtau: f32,
-    time: f32,
-    viscosity: f32,
-    density: f32,
-    component: u32,
-    alpha_p: f32,
-    scheme: u32,
-    alpha_u: f32,
-    stride_x: u32,
-    time_scheme: u32,
-    eos_gm1_: f32,
-    eos_r: f32,
-}
-
-@group(0) @binding(0) 
-var<storage> state: array<f32>;
-@group(0) @binding(1) 
-var<uniform> constants: Constants;
-@group(0) @binding(2) 
-var<storage, read_write> bc_value: array<f32>;
-@group(1) @binding(0) 
-var<storage> face_owner: array<u32>;
-@group(1) @binding(1) 
-var<storage> face_boundary: array<u32>;
-
-@compute @workgroup_size(64, 1, 1) 
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let _e4 = constants.stride_x;
-    let idx = ((global_id.y * _e4) + global_id.x);
-    if (idx >= arrayLength((&face_boundary))) {
-        return;
-    }
-    let face_boundary_type = face_boundary[idx];
-    let is_inlet = (face_boundary_type == 1u);
-    let is_outlet = (face_boundary_type == 2u);
-    if (!(is_inlet) && !(is_outlet)) {
-        return;
-    }
-    let owner = face_owner[idx];
-    let base = (owner * 22u);
-    if is_inlet {
-        let _e36 = state[(base + 8u)];
-        bc_value[((idx * 8u) + 6u)] = max(_e36, 0.000001f);
-        let _e49 = state[(base + 8u)];
-        let _e58 = bc_value[((idx * 8u) + 0u)];
-        let _e63 = constants.eos_r;
-        bc_value[((idx * 8u) + 7u)] = (max(_e49, 0.000001f) / (max(_e58, 0.000001f) * max(_e63, 0.000000000001f)));
-        let _e80 = bc_value[((idx * 8u) + 0u)];
-        let _e89 = bc_value[((idx * 8u) + 4u)];
-        let _e96 = bc_value[((idx * 8u) + 4u)];
-        let _e104 = bc_value[((idx * 8u) + 5u)];
-        let _e111 = bc_value[((idx * 8u) + 5u)];
-        let _e119 = state[(base + 8u)];
-        let _e124 = constants.eos_gm1_;
-        let _e134 = bc_value[((idx * 8u) + 0u)];
-        let _e143 = bc_value[((idx * 8u) + 4u)];
-        let _e150 = bc_value[((idx * 8u) + 4u)];
-        let _e158 = bc_value[((idx * 8u) + 5u)];
-        let _e165 = bc_value[((idx * 8u) + 5u)];
-        let _e172 = constants.eos_gm1_;
-        bc_value[((idx * 8u) + 3u)] = select(((0.5f * _e80) * ((_e89 * _e96) + (_e104 * _e111))), ((max(_e119, 0.000001f) / max(_e124, 0.000001f)) + ((0.5f * _e134) * ((_e143 * _e150) + (_e158 * _e165)))), (_e172 > 0f));
-        let _e188 = bc_value[((idx * 8u) + 0u)];
-        let _e195 = bc_value[((idx * 8u) + 4u)];
-        bc_value[((idx * 8u) + 1u)] = (_e188 * _e195);
-        let _e209 = bc_value[((idx * 8u) + 0u)];
-        let _e216 = bc_value[((idx * 8u) + 5u)];
-        bc_value[((idx * 8u) + 2u)] = (_e209 * _e216);
-        let _e230 = bc_value[((idx * 8u) + 4u)];
-        bc_value[((idx * 8u) + 4u)] = _e230;
-        let _e243 = bc_value[((idx * 8u) + 5u)];
-        bc_value[((idx * 8u) + 5u)] = _e243;
-    }
-    if is_outlet {
-        let _e254 = state[(base + 0u)];
-        bc_value[((idx * 8u) + 0u)] = max(_e254, 0.000001f);
-        let _e267 = state[(base + 10u)];
-        bc_value[((idx * 8u) + 4u)] = _e267;
-        let _e280 = state[((base + 10u) + 1u)];
-        bc_value[((idx * 8u) + 5u)] = _e280;
-        let _e291 = state[(base + 0u)];
-        let _e298 = state[(base + 10u)];
-        bc_value[((idx * 8u) + 1u)] = (max(_e291, 0.000001f) * _e298);
-        let _e310 = state[(base + 0u)];
-        let _e319 = state[((base + 10u) + 1u)];
-        bc_value[((idx * 8u) + 2u)] = (max(_e310, 0.000001f) * _e319);
-        let _e333 = bc_value[((idx * 8u) + 6u)];
-        let _e338 = state[(base + 0u)];
-        let _e343 = constants.eos_r;
-        bc_value[((idx * 8u) + 7u)] = (_e333 / (max(_e338, 0.000001f) * max(_e343, 0.000000000001f)));
-        let _e358 = state[(base + 0u)];
-        let _e367 = state[(base + 10u)];
-        let _e372 = state[(base + 10u)];
-        let _e380 = state[((base + 10u) + 1u)];
-        let _e387 = state[((base + 10u) + 1u)];
-        let _e397 = bc_value[((idx * 8u) + 6u)];
-        let _e400 = constants.eos_gm1_;
-        let _e408 = state[(base + 0u)];
-        let _e417 = state[(base + 10u)];
-        let _e422 = state[(base + 10u)];
-        let _e430 = state[((base + 10u) + 1u)];
-        let _e437 = state[((base + 10u) + 1u)];
-        let _e444 = constants.eos_gm1_;
-        bc_value[((idx * 8u) + 3u)] = select(((0.5f * max(_e358, 0.000001f)) * ((_e367 * _e372) + (_e380 * _e387))), ((_e397 / max(_e400, 0.000001f)) + ((0.5f * max(_e408, 0.000001f)) * ((_e417 * _e422) + (_e430 * _e437)))), (_e444 > 0f));
-        return;
-    } else {
-        return;
-    }
 }
 "#;
     }
@@ -60202,15 +60188,12 @@ pub mod bytemuck_impls {
     use super::{_root, _root::*};
     unsafe impl bytemuck::Zeroable for generated::amg::AmgParams {}
     unsafe impl bytemuck::Pod for generated::amg::AmgParams {}
+    unsafe impl bytemuck::Zeroable for generated::bc_expr_update_compressible::Constants {}
+    unsafe impl bytemuck::Pod for generated::bc_expr_update_compressible::Constants {}
     unsafe impl bytemuck::Zeroable for generated::block_precond::GmresParams {}
     unsafe impl bytemuck::Pod for generated::block_precond::GmresParams {}
     unsafe impl bytemuck::Zeroable for generated::block_precond::IterParams {}
     unsafe impl bytemuck::Pod for generated::block_precond::IterParams {}
-    unsafe impl bytemuck::Zeroable
-        for generated::compressible_runtime_bc_update_compressible::Constants
-    {
-    }
-    unsafe impl bytemuck::Pod for generated::compressible_runtime_bc_update_compressible::Constants {}
     unsafe impl bytemuck::Zeroable for generated::dot_product::SolverParams {}
     unsafe impl bytemuck::Pod for generated::dot_product::SolverParams {}
     unsafe impl bytemuck::Zeroable for generated::dot_product_pair::SolverParams {}

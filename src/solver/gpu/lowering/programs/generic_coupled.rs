@@ -249,10 +249,13 @@ impl GenericCoupledProgramResources {
             .kernels
             .iter()
             .any(|k| k.phase == KernelPhase::Preparation);
+        // Expression-valued boundary conditions read interior state, so
+        // their refresh kernel must re-run every outer iteration (not just
+        // at step start).
         let recurring_prepare_enabled = recipe
             .kernels
             .iter()
-            .any(|k| k.id == crate::solver::model::KernelId::COMPRESSIBLE_RUNTIME_BC_UPDATE);
+            .any(|k| k.id == crate::solver::model::KernelId::BC_EXPR_UPDATE);
 
         let assembly_graph = build_graph_for_phases(
             recipe,
@@ -1975,8 +1978,9 @@ pub(crate) fn clear_dp_init_needed(plan: &mut GpuProgramPlan) {
 }
 
 /// Runs the Preparation-phase graph once per outer iteration when
-/// `recurring_prepare_enabled` is true (e.g. the compressible runtime BC
-/// update kernel is present).  This keeps inlet/outlet BC values synchronized
+/// `recurring_prepare_enabled` is true (i.e. the model declares
+/// expression-valued boundary conditions, lowered to the generic
+/// `bc_expr_update` kernel).  This keeps boundary-table values synchronized
 /// with the evolving interior state within the outer corrector loop.
 pub(crate) fn iter_prepare_graph_run(
     plan: &GpuProgramPlan,

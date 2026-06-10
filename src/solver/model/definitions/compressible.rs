@@ -249,6 +249,57 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
         grad_u_y,
     ]).into_state_layout();
 
+    // ========================================
+    // Boundary conditions.
+    //
+    // Inlet: rho and u are prescribed (placeholder Dirichlet values; set via
+    // the solver's boundary table API). The dependent inlet entries
+    // (p/T/rho_e/rho_u) are declared expressions that keep the prescribed
+    // state thermodynamically consistent with the interior pressure every
+    // outer iteration. Outlet: p is prescribed; everything else
+    // extrapolates from the interior. The expressions reproduce the retired
+    // hand-written compressible_runtime_bc kernel (including its safety
+    // floors); the generic bc_expr module lowers them to one Faces kernel.
+    // ========================================
+    use crate::solver::gpu::enums::GpuBcKind;
+    use crate::solver::model::backend::boundary::BoundaryExpr as B;
+
+    let p_owner = || B::interior(fields.p).max(B::lit(1.0e-6));
+    let gm1 = || B::param(EOS_GM1.to_untyped());
+    let gm1_safe = || gm1().max(B::lit(1.0e-6));
+    let r_safe = || B::param(EOS_R.to_untyped()).max(B::lit(1.0e-12));
+
+    // Inlet: kinetic energy of the prescribed state; total energy follows
+    // the interior pressure (ideal gas) or is purely kinetic (barotropic).
+    let inlet_ke = || {
+        B::lit(0.5)
+            * B::bc(fields.rho)
+            * (B::bc_comp(fields.u, 0) * B::bc_comp(fields.u, 0)
+                + B::bc_comp(fields.u, 1) * B::bc_comp(fields.u, 1))
+    };
+    let inlet_p = p_owner();
+    let inlet_t = p_owner() / (B::bc(fields.rho).max(B::lit(1.0e-6)) * r_safe());
+    let inlet_rho_e = gm1().select_gt(
+        B::lit(0.0),
+        p_owner() / gm1_safe() + inlet_ke(),
+        inlet_ke(),
+    );
+    let inlet_rho_u = |component: u32| B::bc(fields.rho) * B::bc_comp(fields.u, component);
+
+    // Outlet: extrapolate the non-pressure state from the interior.
+    let outlet_rho = || B::interior(fields.rho).max(B::lit(1.0e-6));
+    let outlet_u = |component: u32| B::interior_comp(fields.u, component);
+    let outlet_ke =
+        || B::lit(0.5) * outlet_rho() * (outlet_u(0) * outlet_u(0) + outlet_u(1) * outlet_u(1));
+    let outlet_p = || B::bc(fields.p);
+    let outlet_t = outlet_p() / (outlet_rho() * r_safe());
+    let outlet_rho_e = gm1().select_gt(
+        B::lit(0.0),
+        outlet_p() / gm1_safe() + outlet_ke(),
+        outlet_ke(),
+    );
+    let outlet_rho_u = |component: u32| outlet_rho() * outlet_u(component);
+
     let mut boundaries = BoundarySpec::default();
     boundaries.set_field(
         "rho",
@@ -263,7 +314,10 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 1,
-                BoundaryCondition::zero_gradient_dim::<DensityGradient>(),
+                BoundaryCondition::with_expr_value_dim::<Density>(
+                    GpuBcKind::ZeroGradient,
+                    outlet_rho(),
+                )?,
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
@@ -284,17 +338,32 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
     boundaries.set_field(
         "rho_u",
         FieldBoundarySpec::new()
-            // Inlet momentum density is Dirichlet (placeholder value); update via the solver's
-            // boundary table API (typically derived from `rho` and inlet `u`).
-            .set_uniform(
+            // Inlet momentum density follows the prescribed rho and u.
+            .set_components(
                 GpuBoundaryType::Inlet,
-                2,
-                BoundaryCondition::dirichlet_dim::<MomentumDensity>(0.0),
+                vec![
+                    BoundaryCondition::with_expr_value_dim::<MomentumDensity>(
+                        GpuBcKind::Dirichlet,
+                        inlet_rho_u(0),
+                    )?,
+                    BoundaryCondition::with_expr_value_dim::<MomentumDensity>(
+                        GpuBcKind::Dirichlet,
+                        inlet_rho_u(1),
+                    )?,
+                ],
             )
-            .set_uniform(
+            .set_components(
                 GpuBoundaryType::Outlet,
-                2,
-                BoundaryCondition::zero_gradient_dim::<MomentumDensityGradient>(),
+                vec![
+                    BoundaryCondition::with_expr_value_dim::<MomentumDensity>(
+                        GpuBcKind::ZeroGradient,
+                        outlet_rho_u(0),
+                    )?,
+                    BoundaryCondition::with_expr_value_dim::<MomentumDensity>(
+                        GpuBcKind::ZeroGradient,
+                        outlet_rho_u(1),
+                    )?,
+                ],
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
@@ -322,10 +391,18 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
                 2,
                 BoundaryCondition::dirichlet_dim::<Velocity>(0.0),
             )
-            .set_uniform(
+            .set_components(
                 GpuBoundaryType::Outlet,
-                2,
-                BoundaryCondition::zero_gradient_dim::<InvTime>(),
+                vec![
+                    BoundaryCondition::with_expr_value_dim::<Velocity>(
+                        GpuBcKind::ZeroGradient,
+                        outlet_u(0),
+                    )?,
+                    BoundaryCondition::with_expr_value_dim::<Velocity>(
+                        GpuBcKind::ZeroGradient,
+                        outlet_u(1),
+                    )?,
+                ],
             )
             // Walls: no-slip (matches `rho_u` Dirichlet=0).
             .set_uniform(
@@ -347,17 +424,22 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
     boundaries.set_field(
         "rho_e",
         FieldBoundarySpec::new()
-            // Inlet energy is Dirichlet (placeholder value); update via the solver's boundary
-            // table API, typically derived from inlet `rho`, `u`, and EOS params.
+            // Inlet energy follows the prescribed rho/u and the interior pressure.
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::dirichlet_dim::<EnergyDensity>(0.0),
+                BoundaryCondition::with_expr_value_dim::<EnergyDensity>(
+                    GpuBcKind::Dirichlet,
+                    inlet_rho_e,
+                )?,
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 1,
-                BoundaryCondition::zero_gradient_dim::<EnergyDensityGradient>(),
+                BoundaryCondition::with_expr_value_dim::<EnergyDensity>(
+                    GpuBcKind::ZeroGradient,
+                    outlet_rho_e,
+                )?,
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
@@ -378,12 +460,14 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
     boundaries.set_field(
         "p",
         FieldBoundarySpec::new()
-            // Inlet pressure is Dirichlet (placeholder value); update via the solver's boundary
-            // table API to match the chosen inlet thermodynamic state.
+            // Inlet pressure floats with the interior (subsonic inflow).
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::dirichlet_dim::<Pressure>(0.0),
+                BoundaryCondition::with_expr_value_dim::<Pressure>(
+                    GpuBcKind::Dirichlet,
+                    inlet_p,
+                )?,
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
@@ -409,16 +493,22 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
     boundaries.set_field(
         "T",
         FieldBoundarySpec::new()
-            // Isothermal inlet temperature (placeholder value); update via boundary table API.
+            // Inlet temperature follows the prescribed rho and interior pressure.
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::dirichlet_dim::<Temperature>(0.0),
+                BoundaryCondition::with_expr_value_dim::<Temperature>(
+                    GpuBcKind::Dirichlet,
+                    inlet_t,
+                )?,
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
                 1,
-                BoundaryCondition::zero_gradient_dim::<TemperatureGradient>(),
+                BoundaryCondition::with_expr_value_dim::<Temperature>(
+                    GpuBcKind::ZeroGradient,
+                    outlet_t,
+                )?,
             )
             .set_uniform(
                 GpuBoundaryType::Wall,
@@ -475,7 +565,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
         modules: vec![
             crate::solver::model::modules::eos::eos_module(eos),
             flux_module_module,
-            crate::solver::model::modules::compressible_runtime_bc::compressible_runtime_bc_module(),
+            crate::solver::model::modules::bc_expr::bc_expr_module(),
             {
                 let mut m =
                     crate::solver::model::modules::generic_coupled::generic_coupled_module(method);

@@ -662,8 +662,11 @@ pub use generic_diffusion_demo::{
     generic_diffusion_demo_mms_neumann_model, generic_diffusion_demo_model,
     generic_diffusion_demo_neumann_model, MMS_SOURCE_FIELD,
 };
+#[allow(unused_imports)]
 pub use incompressible_momentum::{
-    incompressible_momentum_model, incompressible_momentum_system, IncompressibleMomentumFields,
+    incompressible_momentum_mms_model, incompressible_momentum_model,
+    incompressible_momentum_system, IncompressibleMomentumFields,
+    INCOMPRESSIBLE_MMS_SOURCE_FIELD,
 };
 #[allow(unused_imports)]
 pub use scalar_transport::{
@@ -678,6 +681,7 @@ pub use scalar_transport::{
 pub fn all_models() -> Result<Vec<ModelSpec>, String> {
     Ok(vec![
         incompressible_momentum_model()?,
+        incompressible_momentum_mms_model()?,
         compressible_model()?,
         generic_diffusion_demo_model()?,
         generic_diffusion_demo_neumann_model()?,

@@ -7,11 +7,16 @@ integration, run the MMS convergence-order suite and require it green:
 
 ```bash
 cargo test --features dev-tests --test mms_diffusion_order_test -- --test-threads 1
+cargo test --features dev-tests --test mms_scalar_transport_order_test -- --test-threads 1
+cargo test --features dev-tests --test mms_incompressible_order_test -- --test-threads 1
 ```
 
 (Glob any additional `tests/mms_*` suites as they are added.) These tests verify the
 discrete operators converge at design order against manufactured exact solutions; an order
-drop or a blown error cap is a hard regression regardless of OpenFOAM metrics.
+drop or a blown error cap is a hard regression regardless of OpenFOAM metrics. The
+incompressible (saddle-point) suite is the slowest (~3 min, dominated by the SOU n=64
+level); keep new MMS cases lean — steady cases here settle in ~13 steps, so cost is
+per-step outer iterations, not step count.
 
 ## Mandatory OpenFOAM drift check (before/after each major changeset)
 

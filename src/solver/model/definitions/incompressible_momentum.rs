@@ -47,7 +47,14 @@ impl Default for IncompressibleMomentumFields {
     }
 }
 
-fn build_incompressible_momentum_system(_fields: &IncompressibleMomentumFields) -> EquationSystem {
+/// Name of the manufactured momentum source field on the `_mms` model
+/// variant (Vector2, unit Force/Volume; uploaded host-side per cell).
+pub const INCOMPRESSIBLE_MMS_SOURCE_FIELD: &str = "mms_src_U";
+
+fn build_incompressible_momentum_system(
+    _fields: &IncompressibleMomentumFields,
+    with_mms_source: bool,
+) -> EquationSystem {
     // NOTE: This model uses typed builder APIs with explicit cast_to() calls to align
     // terms to canonical dimension types. The type-level dimension expressions are not
     // normalized, so semantically equivalent dimensions (e.g., MassFlux * Velocity vs
@@ -81,11 +88,20 @@ fn build_incompressible_momentum_system(_fields: &IncompressibleMomentumFields) 
     let grad_term = typed_fvc::grad(p_typed);
 
     // Cast all terms to Force and add
-    let momentum_eqn = (ddt_term.cast_to::<Force>()
+    let mut momentum_sum = ddt_term.cast_to::<Force>()
         + div_term.cast_to::<Force>()
         + laplacian_term.cast_to::<Force>()
-        + grad_term.cast_to::<Force>())
-    .eqn(u_typed);
+        + grad_term.cast_to::<Force>();
+    if with_mms_source {
+        // Manufactured per-component momentum source (MMS): one more
+        // declared equation term, exactly like the scalar MMS variants.
+        let mms_src_typed = TypedFieldRef::<DivDim<Force, cfd2_ir::dimensions::Volume>, Vector2>::new(
+            INCOMPRESSIBLE_MMS_SOURCE_FIELD,
+        );
+        momentum_sum =
+            momentum_sum + typed_fvc::source_vector(mms_src_typed, u_typed).cast_to::<Force>();
+    }
+    let momentum_eqn = momentum_sum.eqn(u_typed);
 
     // Build pressure equation terms
     // laplacian(rho*d_p, p): integrated unit is (rho*d_p) * Pressure * Area / Length = MassFlux
@@ -116,19 +132,35 @@ fn build_incompressible_momentum_system(_fields: &IncompressibleMomentumFields) 
 
 pub fn incompressible_momentum_system() -> EquationSystem {
     let fields = IncompressibleMomentumFields::new();
-    build_incompressible_momentum_system(&fields)
+    build_incompressible_momentum_system(&fields, false)
 }
 
 pub fn incompressible_momentum_model() -> Result<ModelSpec, String> {
+    incompressible_momentum_model_impl(false)
+}
+
+/// `incompressible_momentum` plus a manufactured per-component momentum
+/// source field (`INCOMPRESSIBLE_MMS_SOURCE_FIELD`) for MMS order tests.
+pub fn incompressible_momentum_mms_model() -> Result<ModelSpec, String> {
+    incompressible_momentum_model_impl(true)
+}
+
+fn incompressible_momentum_model_impl(with_mms_source: bool) -> Result<ModelSpec, String> {
     let fields = IncompressibleMomentumFields::new();
-    let system = build_incompressible_momentum_system(&fields);
-    let layout = PortRegistry::from_fields(vec![
+    let system = build_incompressible_momentum_system(&fields, with_mms_source);
+    let mut layout_fields = vec![
         fields.u,
         fields.p,
         fields.d_p,
         fields.grad_p,
         fields.grad_p_old,
-    ]).into_state_layout();
+    ];
+    if with_mms_source {
+        layout_fields.push(vol_vector_dim::<DivDim<Force, cfd2_ir::dimensions::Volume>>(
+            INCOMPRESSIBLE_MMS_SOURCE_FIELD,
+        ));
+    }
+    let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
     let derived_rhie_chow =
         crate::solver::model::flux_derivation::derive_rhie_chow(&system, &layout)
             .map_err(|e| format!("failed to derive Rhie–Chow flux: {e}"))?;
@@ -262,7 +294,11 @@ pub fn incompressible_momentum_model() -> Result<ModelSpec, String> {
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
     Ok(ModelSpec {
-        id: "incompressible_momentum",
+        id: if with_mms_source {
+            "incompressible_momentum_mms"
+        } else {
+            "incompressible_momentum"
+        },
         system,
         state_layout: layout,
         boundaries,

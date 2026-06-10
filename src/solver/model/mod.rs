@@ -24,12 +24,14 @@ pub use definitions::{
     compressible_wave_speed_sq, generic_diffusion_demo_mms_dirichlet_model,
     generic_diffusion_demo_mms_model,
     generic_diffusion_demo_mms_neumann_model, generic_diffusion_demo_model,
-    generic_diffusion_demo_neumann_model, incompressible_momentum_model,
-    incompressible_momentum_system, scalar_transport_model, scalar_transport_sou_model,
+    generic_diffusion_demo_neumann_model, incompressible_momentum_mms_model,
+    incompressible_momentum_model, incompressible_momentum_system, scalar_transport_model,
+    scalar_transport_sou_model,
     BcValue, BoundaryCondition, BoundarySpec, CompressibleFields, FieldBoundarySpec,
     GenericCoupledFields,
-    IncompressibleMomentumFields, ModelSpec, ADVECTING_VELOCITY_FIELD, MMS_SOURCE_FIELD,
-    SCALAR_TRANSPORT_FIELD, SCALAR_TRANSPORT_KAPPA, SCALAR_TRANSPORT_MMS_SOURCE_FIELD,
+    IncompressibleMomentumFields, ModelSpec, ADVECTING_VELOCITY_FIELD,
+    INCOMPRESSIBLE_MMS_SOURCE_FIELD, MMS_SOURCE_FIELD, SCALAR_TRANSPORT_FIELD,
+    SCALAR_TRANSPORT_KAPPA, SCALAR_TRANSPORT_MMS_SOURCE_FIELD,
 };
 pub use eos::EosSpec;
 pub use flux_layout::{FluxComponent, FluxLayout};

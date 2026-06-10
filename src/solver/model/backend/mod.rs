@@ -26,3 +26,10 @@ pub mod state_layout {
 pub mod typed_ast {
     pub use cfd2_ir::equation::typed_ast::*;
 }
+
+// Algebraic equations (lowered to coupled source rows); in the build.rs
+// context this module is include!'d instead so its typed wrappers take the
+// include!'d TypedFieldRef types.
+pub mod algebraic {
+    pub use cfd2_ir::equation::algebraic::*;
+}

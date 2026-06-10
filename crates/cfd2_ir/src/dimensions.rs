@@ -22,7 +22,10 @@
 //! let runtime: UnitDim = MyDim::to_runtime();
 //! ```
 
-use crate::units::UnitDim;
+// Re-exported so dual-context files (compiled both in this crate and via
+// include! in build.rs, where only a `dimensions` alias module exists) can
+// name the runtime unit type as `crate::dimensions::UnitDim`.
+pub use crate::units::UnitDim;
 
 /// Trait for type-level physical dimensions with rational exponents.
 ///

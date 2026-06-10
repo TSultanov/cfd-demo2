@@ -20,7 +20,8 @@ pub mod primitives;
 pub use crate::solver::ir::LimiterSpec;
 pub use definitions::{
     all_models, compressible_model, compressible_model_with_eos, compressible_system,
-    generic_diffusion_demo_mms_dirichlet_model, generic_diffusion_demo_mms_model,
+    compressible_wave_speed_sq, generic_diffusion_demo_mms_dirichlet_model,
+    generic_diffusion_demo_mms_model,
     generic_diffusion_demo_mms_neumann_model, generic_diffusion_demo_model,
     generic_diffusion_demo_neumann_model, incompressible_momentum_model,
     incompressible_momentum_system, scalar_transport_model, scalar_transport_sou_model,

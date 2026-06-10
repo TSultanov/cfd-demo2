@@ -1,10 +1,13 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
+use crate::solver::model::backend::algebraic::{
+    add_algebraic_equation, typed_alg, TypedAlgExpr, TypedParamRef,
+};
 use crate::solver::model::backend::ast::{
     surface_scalar_dim, surface_vector_dim, vol_scalar_dim, vol_vector_dim, EquationSystem,
     FieldRef, FluxRef,
 };
 use crate::solver::model::backend::typed_ast::{
-    typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
+    typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
 use crate::solver::model::ports::PortRegistry;
 // si module no longer needed for boundary conditions - using type-level dimensions
@@ -56,6 +59,27 @@ impl Default for CompressibleFields {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// EOS uniform parameters. The names and units must match the port manifest in
+// modules/eos_ports.rs (asserted by `eos_params_match_uniform_port_manifest`);
+// host-side values come from `EosSpec`.
+const EOS_GAMMA: TypedParamRef<Dimensionless> = TypedParamRef::new("eos_gamma");
+const EOS_GM1: TypedParamRef<Dimensionless> = TypedParamRef::new("eos_gm1");
+const EOS_R: TypedParamRef<DivDim<Pressure, MulDim<Density, Temperature>>> =
+    TypedParamRef::new("eos_r");
+const EOS_DP_DRHO: TypedParamRef<DivDim<Pressure, Density>> = TypedParamRef::new("eos_dp_drho");
+const EOS_P_OFFSET: TypedParamRef<Pressure> = TypedParamRef::new("eos_p_offset");
+
+/// Declared squared sound speed of the linearized EOS: `c^2 = gamma * R * T`.
+///
+/// This is the wave-speed bound the central-upwind flux uses (the generated
+/// flux module computes `sqrt(eos_gamma * eos_r * T)`); the derived-flux work
+/// (Phase 2C) consumes this declaration instead of hardcoding the formula.
+pub fn compressible_wave_speed_sq() -> TypedAlgExpr<MulDim<Velocity, Velocity>, Scalar> {
+    let t_typed = TypedFieldRef::<Temperature, Scalar>::new("T");
+    (typed_alg::param(EOS_GAMMA) * typed_alg::param(EOS_R) * typed_alg::field(t_typed))
+        .cast_to::<MulDim<Velocity, Velocity>>()
 }
 
 fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
@@ -121,86 +145,45 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     .eqn(rho_e_typed);
 
     // ========================================
-    // Primitive velocity recovery: u = rho_u / rho
-    // Implemented as: (rho/dt) * u = (1/dt) * rho_u
+    // Primitive recovery, declared as algebraic relations.
+    //
+    // These lower mechanically to the inv_dt-scaled coupled source rows
+    // (see cfd2_ir::equation::algebraic). Fields multiplying the linear
+    // unknown of each product (e.g. rho in `rho * u`) are frozen at the
+    // current state (Picard linearization).
     // ========================================
-    // Field-based coefficients (preserving original semantics)
-    let inv_dt_typed = TypedFieldRef::<InvTime, Scalar>::new("inv_dt");
-    let inv_dt_coeff = TypedCoeff::from_field(inv_dt_typed);
-    let rho_coeff = TypedCoeff::from_field(rho_typed);
-    let minus_one_coeff: TypedCoeff<Dimensionless> = TypedCoeff::constant(-1.0);
 
-    // Coefficients for u recovery
-    let rho_over_dt = rho_coeff.clone().multiply(inv_dt_coeff.clone());
-    let minus_rho_over_dt = minus_one_coeff.clone().multiply(rho_over_dt);
+    // Velocity recovery: rho * u = rho_u.
+    let u_recovery = typed_alg::equation(
+        u_typed,
+        typed_alg::field(rho_u_typed),
+        (typed_alg::field(rho_typed) * typed_alg::field(u_typed)).cast_to::<MomentumDensity>(),
+    );
 
-    let u_source_1 = typed_fvm::source_coeff(minus_rho_over_dt, u_typed);
-    let u_source_2 = typed_fvm::source_coeff(inv_dt_coeff.clone(), rho_u_typed);
+    // Linearized EOS: p = (gamma-1)*rho_e - (gamma-1)/2*|u|^2*rho
+    //                     + dp_drho*rho + p_offset.
+    // Ideal gas sets dp_drho = p_offset = 0; linear compressibility sets
+    // gamma-1 = 0 (the uniform params absorb the EOS variant).
+    let pressure_eos = typed_alg::equation(
+        p_typed,
+        typed_alg::field(p_typed),
+        (typed_alg::param(EOS_GM1) * typed_alg::field(rho_e_typed)).cast_to::<Pressure>()
+            - (typed_alg::constant(0.5)
+                * typed_alg::param(EOS_GM1)
+                * typed_alg::mag_sqr(u_typed)
+                * typed_alg::field(rho_typed))
+            .cast_to::<Pressure>()
+            + (typed_alg::param(EOS_DP_DRHO) * typed_alg::field(rho_typed)).cast_to::<Pressure>()
+            + typed_alg::param(EOS_P_OFFSET),
+    );
 
-    let u_eqn = (u_source_1.cast_to::<Force>() + u_source_2.cast_to::<Force>()).eqn(u_typed);
-
-    // ========================================
-    // Primitive pressure recovery (algebraic constraint)
-    // ========================================
-    // EOS field-based coefficients (preserving original semantics)
-    let gm1_typed = TypedCoeff::from_field(TypedFieldRef::<Dimensionless, Scalar>::new("eos_gm1"));
-    let dp_drho_typed = TypedCoeff::from_field(TypedFieldRef::<
-        cfd2_ir::dimensions::DivDim<Pressure, Density>,
-        Scalar,
-    >::new("eos_dp_drho"));
-    let p_offset_typed =
-        TypedCoeff::from_field(TypedFieldRef::<Pressure, Scalar>::new("eos_p_offset"));
-    let half_coeff: TypedCoeff<Dimensionless> = TypedCoeff::constant(0.5);
-
-    // minus_gm1/dt
-    let minus_gm1 = minus_one_coeff.clone().multiply(gm1_typed.clone());
-    let minus_gm1_over_dt = minus_gm1.multiply(inv_dt_coeff.clone());
-
-    // 0.5 * gm1 / dt * |u|^2
-    let u2 = TypedCoeff::mag_sqr(u_typed);
-    let half_gm1_over_dt = half_coeff
-        .multiply(gm1_typed)
-        .multiply(inv_dt_coeff.clone());
-    let rho_coeff_term = half_gm1_over_dt.multiply(u2);
-
-    // minus_dp_drho/dt
-    let minus_dp_drho = minus_one_coeff.clone().multiply(dp_drho_typed);
-    let minus_dp_drho_over_dt = minus_dp_drho.multiply(inv_dt_coeff.clone());
-
-    // minus_p_offset/dt
-    let minus_p_offset = minus_one_coeff.clone().multiply(p_offset_typed);
-    let minus_p_offset_over_dt = minus_p_offset.multiply(inv_dt_coeff.clone());
-
-    let p_source_1 = typed_fvm::source_coeff(inv_dt_coeff.clone(), p_typed);
-    let p_source_2 = typed_fvm::source_coeff(minus_gm1_over_dt, rho_e_typed);
-    let p_source_3 = typed_fvm::source_coeff(rho_coeff_term, rho_typed);
-    let p_source_4 = typed_fvm::source_coeff(minus_dp_drho_over_dt, rho_typed);
-    let p_source_5 = typed_fvc::source_coeff(minus_p_offset_over_dt, p_typed);
-
-    let p_eqn = (p_source_1.cast_to::<Power>()
-        + p_source_2.cast_to::<Power>()
-        + p_source_3.cast_to::<Power>()
-        + p_source_4.cast_to::<Power>()
-        + p_source_5.cast_to::<Power>())
-    .eqn(p_typed);
-
-    // ========================================
-    // Temperature recovery: T = p / (rho * R)
-    // Implemented as: (rho*R/dt) * T = (1/dt) * p
-    // ========================================
-    // EOS gas constant field coefficient (preserving original semantics)
-    let r_typed = TypedCoeff::from_field(TypedFieldRef::<
-        cfd2_ir::dimensions::DivDim<Pressure, MulDim<Density, Temperature>>,
-        Scalar,
-    >::new("eos_r"));
-
-    let rho_r_over_dt = rho_coeff.multiply(r_typed).multiply(inv_dt_coeff.clone());
-    let minus_inv_dt = minus_one_coeff.multiply(inv_dt_coeff);
-
-    let t_source_1 = typed_fvm::source_coeff(rho_r_over_dt, t_typed);
-    let t_source_2 = typed_fvm::source_coeff(minus_inv_dt, p_typed);
-
-    let t_eqn = (t_source_1.cast_to::<Power>() + t_source_2.cast_to::<Power>()).eqn(t_typed);
+    // Temperature recovery: rho * R * T = p.
+    let temperature_recovery = typed_alg::equation(
+        t_typed,
+        (typed_alg::field(rho_typed) * typed_alg::param(EOS_R) * typed_alg::field(t_typed))
+            .cast_to::<Pressure>(),
+        typed_alg::field(p_typed),
+    );
 
     // ========================================
     // Assemble equation system
@@ -209,9 +192,12 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     system.add_equation(rho_eqn);
     system.add_equation(rho_u_eqn);
     system.add_equation(rho_e_eqn);
-    system.add_equation(u_eqn);
-    system.add_equation(p_eqn);
-    system.add_equation(t_eqn);
+    add_algebraic_equation(&mut system, &u_recovery)
+        .expect("compressible velocity recovery failed algebraic lowering");
+    add_algebraic_equation(&mut system, &pressure_eos)
+        .expect("compressible EOS pressure equation failed algebraic lowering");
+    add_algebraic_equation(&mut system, &temperature_recovery)
+        .expect("compressible temperature recovery failed algebraic lowering");
 
     // Validate units to ensure the system is consistent
     system
@@ -508,4 +494,154 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
         linear_solver: None,
         primitives,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::model::backend::algebraic::{AlgExpr, ParamRef};
+    use crate::solver::model::backend::ast::Equation;
+    use crate::solver::model::backend::typed_ast::typed_fvc;
+    use cfd2_ir::dimensions::UnitDimension;
+
+    /// The hand-written pseudo-source recovery rows exactly as they were
+    /// declared before algebraic-equation lowering replaced them. This is the
+    /// golden reference: the lowering must reproduce these terms bit-for-bit
+    /// (same ops, same fields, same coefficient trees, same order), which is
+    /// what guarantees byte-identical generated WGSL.
+    fn handwritten_recovery_equations() -> Vec<Equation> {
+        let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
+        let rho_u_typed = TypedFieldRef::<MomentumDensity, Vector2>::new("rho_u");
+        let rho_e_typed = TypedFieldRef::<EnergyDensity, Scalar>::new("rho_e");
+        let u_typed = TypedFieldRef::<Velocity, Vector2>::new("u");
+        let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
+        let t_typed = TypedFieldRef::<Temperature, Scalar>::new("T");
+
+        // Primitive velocity recovery: u = rho_u / rho
+        // Implemented as: (rho/dt) * u = (1/dt) * rho_u
+        let inv_dt_typed = TypedFieldRef::<InvTime, Scalar>::new("inv_dt");
+        let inv_dt_coeff = TypedCoeff::from_field(inv_dt_typed);
+        let rho_coeff = TypedCoeff::from_field(rho_typed);
+        let minus_one_coeff: TypedCoeff<Dimensionless> = TypedCoeff::constant(-1.0);
+
+        let rho_over_dt = rho_coeff.clone().multiply(inv_dt_coeff.clone());
+        let minus_rho_over_dt = minus_one_coeff.clone().multiply(rho_over_dt);
+
+        let u_source_1 = typed_fvm::source_coeff(minus_rho_over_dt, u_typed);
+        let u_source_2 = typed_fvm::source_coeff(inv_dt_coeff.clone(), rho_u_typed);
+
+        let u_eqn = (u_source_1.cast_to::<Force>() + u_source_2.cast_to::<Force>()).eqn(u_typed);
+
+        // Primitive pressure recovery (algebraic constraint)
+        let gm1_typed =
+            TypedCoeff::from_field(TypedFieldRef::<Dimensionless, Scalar>::new("eos_gm1"));
+        let dp_drho_typed = TypedCoeff::from_field(TypedFieldRef::<
+            cfd2_ir::dimensions::DivDim<Pressure, Density>,
+            Scalar,
+        >::new("eos_dp_drho"));
+        let p_offset_typed =
+            TypedCoeff::from_field(TypedFieldRef::<Pressure, Scalar>::new("eos_p_offset"));
+        let half_coeff: TypedCoeff<Dimensionless> = TypedCoeff::constant(0.5);
+
+        let minus_gm1 = minus_one_coeff.clone().multiply(gm1_typed.clone());
+        let minus_gm1_over_dt = minus_gm1.multiply(inv_dt_coeff.clone());
+
+        let u2 = TypedCoeff::mag_sqr(u_typed);
+        let half_gm1_over_dt = half_coeff
+            .multiply(gm1_typed)
+            .multiply(inv_dt_coeff.clone());
+        let rho_coeff_term = half_gm1_over_dt.multiply(u2);
+
+        let minus_dp_drho = minus_one_coeff.clone().multiply(dp_drho_typed);
+        let minus_dp_drho_over_dt = minus_dp_drho.multiply(inv_dt_coeff.clone());
+
+        let minus_p_offset = minus_one_coeff.clone().multiply(p_offset_typed);
+        let minus_p_offset_over_dt = minus_p_offset.multiply(inv_dt_coeff.clone());
+
+        let p_source_1 = typed_fvm::source_coeff(inv_dt_coeff.clone(), p_typed);
+        let p_source_2 = typed_fvm::source_coeff(minus_gm1_over_dt, rho_e_typed);
+        let p_source_3 = typed_fvm::source_coeff(rho_coeff_term, rho_typed);
+        let p_source_4 = typed_fvm::source_coeff(minus_dp_drho_over_dt, rho_typed);
+        let p_source_5 = typed_fvc::source_coeff(minus_p_offset_over_dt, p_typed);
+
+        let p_eqn = (p_source_1.cast_to::<Power>()
+            + p_source_2.cast_to::<Power>()
+            + p_source_3.cast_to::<Power>()
+            + p_source_4.cast_to::<Power>()
+            + p_source_5.cast_to::<Power>())
+        .eqn(p_typed);
+
+        // Temperature recovery: T = p / (rho * R)
+        // Implemented as: (rho*R/dt) * T = (1/dt) * p
+        let r_typed = TypedCoeff::from_field(TypedFieldRef::<
+            cfd2_ir::dimensions::DivDim<Pressure, MulDim<Density, Temperature>>,
+            Scalar,
+        >::new("eos_r"));
+
+        let rho_r_over_dt = rho_coeff.multiply(r_typed).multiply(inv_dt_coeff.clone());
+        let minus_inv_dt = minus_one_coeff.multiply(inv_dt_coeff);
+
+        let t_source_1 = typed_fvm::source_coeff(rho_r_over_dt, t_typed);
+        let t_source_2 = typed_fvm::source_coeff(minus_inv_dt, p_typed);
+
+        let t_eqn = (t_source_1.cast_to::<Power>() + t_source_2.cast_to::<Power>()).eqn(t_typed);
+
+        vec![u_eqn, p_eqn, t_eqn]
+    }
+
+    #[test]
+    fn algebraic_recovery_rows_match_handwritten_golden() {
+        let system = compressible_system();
+        let eqs = system.equations();
+        assert_eq!(eqs.len(), 6, "3 conservation + 3 recovery rows");
+
+        let golden = handwritten_recovery_equations();
+        assert_eq!(eqs[3], golden[0], "u recovery row");
+        assert_eq!(eqs[4], golden[1], "p EOS row");
+        assert_eq!(eqs[5], golden[2], "T recovery row");
+    }
+
+    #[test]
+    fn eos_params_match_uniform_port_manifest() {
+        let manifest = crate::solver::model::modules::eos_ports::eos_uniform_port_manifest();
+        let declared = [
+            (EOS_GAMMA.name(), Dimensionless::UNIT),
+            (EOS_GM1.name(), Dimensionless::UNIT),
+            (
+                EOS_R.name(),
+                DivDim::<Pressure, MulDim<Density, Temperature>>::UNIT,
+            ),
+            (EOS_DP_DRHO.name(), DivDim::<Pressure, Density>::UNIT),
+            (EOS_P_OFFSET.name(), Pressure::UNIT),
+        ];
+        for (name, unit) in declared {
+            let spec = manifest
+                .params
+                .iter()
+                .find(|p| p.wgsl_field == name)
+                .unwrap_or_else(|| panic!("param '{name}' missing from EOS port manifest"));
+            assert_eq!(spec.unit, unit, "unit mismatch for param '{name}'");
+        }
+    }
+
+    #[test]
+    fn wave_speed_sq_declares_gamma_r_t() {
+        // cast_to inside the constructor already asserts the runtime unit is
+        // Velocity^2; here we pin the declared structure.
+        let expr = compressible_wave_speed_sq().to_untyped();
+        let expected = AlgExpr::Mul(
+            Box::new(AlgExpr::Mul(
+                Box::new(AlgExpr::Param(ParamRef::new(
+                    "eos_gamma",
+                    Dimensionless::UNIT,
+                ))),
+                Box::new(AlgExpr::Param(ParamRef::new(
+                    "eos_r",
+                    DivDim::<Pressure, MulDim<Density, Temperature>>::UNIT,
+                ))),
+            )),
+            Box::new(AlgExpr::Field(vol_scalar_dim::<Temperature>("T"))),
+        );
+        assert_eq!(expr, expected);
+    }
 }

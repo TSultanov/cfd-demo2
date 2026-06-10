@@ -1,9 +1,14 @@
+pub mod algebraic;
 pub mod ast;
 pub mod scheme;
 pub mod scheme_expansion;
 pub mod state_layout;
 pub mod typed_ast;
 
+pub use algebraic::{
+    add_algebraic_equation, lower_algebraic_equation, typed_alg, AlgExpr, AlgebraicEquation,
+    ParamRef, TypedAlgExpr, TypedParamRef,
+};
 pub use ast::{
     fvc, fvm, Coefficient, Discretization, Equation, EquationSystem, FieldKind, FieldRef, FluxRef,
     Term, TermOp,

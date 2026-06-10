@@ -136,6 +136,15 @@ mod solver {
                     "/crates/cfd2_ir/src/equation/typed_ast.rs"
                 ));
             }
+            // Algebraic equations are dual-context like typed_ast (they take
+            // the include!'d TypedFieldRef types as arguments, so a crate
+            // re-export would not typecheck against include!'d model files).
+            pub mod algebraic {
+                include!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/crates/cfd2_ir/src/equation/algebraic.rs"
+                ));
+            }
             #[allow(unused_imports)]
             pub use ast::{
                 fvc, fvm, Coefficient, Discretization, Equation, EquationSystem, FieldKind,

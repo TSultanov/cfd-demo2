@@ -586,7 +586,8 @@ mod scalar_transport;
 
 #[allow(unused_imports)]
 pub use compressible::{
-    compressible_model, compressible_model_with_eos, compressible_system, CompressibleFields,
+    compressible_model, compressible_model_with_eos, compressible_system,
+    compressible_wave_speed_sq, CompressibleFields,
 };
 #[allow(unused_imports)]
 pub use generic_diffusion_demo::{

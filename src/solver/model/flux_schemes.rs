@@ -600,11 +600,26 @@ fn derive_central_upwind(
     //   - fvm::laplacian(muEff, U)
     //   - fvc::div(tauMC)
     //
-    // `dev2(T(grad(U)))` corresponds to the full deviatoric Newtonian stress:
+    // dev2(A) = A - 2/3 tr(A) I, so tauMC contains ONE velocity-gradient
+    // tensor (the transpose part); the full deviatoric Newtonian stress
     //   tau = mu * (grad(U) + grad(U)^T - 2/3 I div(U))
+    // only arises as the SUM laplacian + tauMC. Since this model also
+    // assembles the implicit `laplacian(mu, u)` (traction mu * (grad u_i).n
+    // per component), the traction built here must be exactly the remainder
+    //   tauMC . n = mu * ((J^T - 2/3 I div u) . n),   J_ij = du_i/dx_j
+    // i.e. traction_x = mu*((dux_dx - 2/3 div)*n_x + duy_dx*n_y).
+    //
+    // HISTORY: this closure previously built the FULL stress tau (factor 2
+    // on the diagonal, symmetric dux_dy + duy_dx off-diagonal), so combined
+    // with the assembled laplacian the effective momentum viscous operator
+    // was div(tau) + mu lap(u) - shear viscosity DOUBLED vs physical NS -
+    // and the energy work flux carried an extra (mu/2) grad(|u|^2). Proved
+    // by the compressible MMS in both directions (as-coded sources converged
+    // at order 2, physical-NS sources saturated 30-70x higher); see
+    // tests/mms_compressible_order_test.rs.
     //
     // The Gauss div scheme forms the face traction via `Sf & tauMC` (units: force).
-    // Here we build the equivalent traction per unit area (tau · n) from face gradients,
+    // Here we build the equivalent traction per unit area (tauMC · n) from face gradients,
     // then multiply by area when assembling integrated fluxes.
     // OpenFOAM's `dotInterpolate(Sf, tauMC)` interpolates the *cell-centered* tauMC tensor to
     // faces and then contracts with Sf. Mirror that by building tauMC from each side's stored
@@ -619,30 +634,30 @@ fn derive_central_upwind(
         let duy_dy_s = S::Dot(Box::new(grad_u_y_side), Box::new(ey.clone()));
 
         let div_u_s = S::Add(Box::new(dux_dx_s.clone()), Box::new(duy_dy_s.clone()));
-        let tau_xy_s = S::Add(Box::new(dux_dy_s), Box::new(duy_dx_s));
+        // tauMC row x: (dux_dx - 2/3 div, duy_dx); row y: (dux_dy, duy_dy - 2/3 div).
         let tau_xx_s = S::Sub(
-            Box::new(S::Mul(Box::new(S::lit(2.0)), Box::new(dux_dx_s))),
+            Box::new(dux_dx_s),
             Box::new(S::Mul(
                 Box::new(two_thirds.clone()),
                 Box::new(div_u_s.clone()),
             )),
         );
         let tau_yy_s = S::Sub(
-            Box::new(S::Mul(Box::new(S::lit(2.0)), Box::new(duy_dy_s))),
+            Box::new(duy_dy_s),
             Box::new(S::Mul(Box::new(two_thirds.clone()), Box::new(div_u_s))),
         );
 
         let traction_x = S::Mul(
             Box::new(visc_mu.clone()),
             Box::new(S::Add(
-                Box::new(S::Mul(Box::new(tau_xx_s.clone()), Box::new(n_x.clone()))),
-                Box::new(S::Mul(Box::new(tau_xy_s.clone()), Box::new(n_y.clone()))),
+                Box::new(S::Mul(Box::new(tau_xx_s), Box::new(n_x.clone()))),
+                Box::new(S::Mul(Box::new(duy_dx_s), Box::new(n_y.clone()))),
             )),
         );
         let traction_y = S::Mul(
             Box::new(visc_mu.clone()),
             Box::new(S::Add(
-                Box::new(S::Mul(Box::new(tau_xy_s), Box::new(n_x.clone()))),
+                Box::new(S::Mul(Box::new(dux_dy_s), Box::new(n_x.clone()))),
                 Box::new(S::Mul(Box::new(tau_yy_s), Box::new(n_y.clone()))),
             )),
         );

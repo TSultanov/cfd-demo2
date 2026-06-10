@@ -17,9 +17,12 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 /// This test requires extended timeout (~120-300s) due to GPU compute and 300 timesteps.
 /// Run with: `cargo test --test openfoam_compressible_lid_driven_cavity_reference_test -- --ignored --timeout 300`
 ///
-/// # Known Limitations
-/// This test shows ~60% velocity error at t=0.003s due to solver formulation differences
-/// at early transient times. See `OPENFOAM_DISCREPANCY_PLAN.md` for details.
+/// # History
+/// This test showed ~60% velocity error at t=0.003s for as long as the
+/// solver doubled the effective shear viscosity (the flux's tauMC carried
+/// the full deviatoric stress on top of the assembled laplacian, thickening
+/// the developing lid boundary layer by ~sqrt(2)). After the June 2026
+/// tauMC fix — proved by the compressible MMS — the error is ~2.5%.
 #[test]
 #[ignore]
 fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
@@ -107,13 +110,16 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     // Match OpenFOAM reference: 300 steps to reach t=0.003s
     // Time classification (numerics-honesty record): this case is compared
     // TIME-ACCURATELY (dtau=0, BDF2, dt=1e-5) at t=0.003s against explicit
-    // rhoCentralFoam during the impulsive-lid startup transient. The ~60%
-    // max-cell u mismatch (near the lid corner, u_scale ~0.137 m/s) is a
-    // formulation difference in the startup acoustics, not convergence
-    // sloppiness: re-running with outer_iters=4 (fully converging each BDF2
-    // step) moves it 59.8% -> 60.3% at the same cell. Tightening this band
-    // requires a later, less formulation-sensitive reference time (needs
-    // regenerated OpenFOAM data), not solver work.
+    // rhoCentralFoam during the impulsive-lid startup transient. The
+    // historical ~60% max-cell u mismatch (near the lid, u_scale ~0.137 m/s)
+    // was NOT convergence sloppiness (outer_iters=4 probe: 59.8% -> 60.3%,
+    // same cell) — it was the doubled-shear viscous operator (tauMC built as
+    // the full stress on top of the assembled laplacian; the developing
+    // boundary layer was ~sqrt(2) too thick, sol u 0.219 vs ref 0.137 at the
+    // max cell). The compressible MMS proved the operator both ways and the
+    // tauMC fix dropped this case to u=2.5% / p=1e-5. This is the one
+    // viscous-dominated compressible reference case — it guards the stress
+    // split specifically.
     let mut scorecard = common::CrutchScorecard::new("compressible_lid", &solver);
     for _ in 0..300 {
         solver.step();

@@ -20,9 +20,10 @@ incompressible (saddle-point) suite is the slowest (~3 min, dominated by the SOU
 level); the compressible suite (~3 min) marches each level a fixed minimum t=6 to pass
 the slow thermal transient. Keep new MMS cases lean — steady cases settle in ~13 steps
 for the incompressible models, so cost is per-step outer iterations, not step count.
-NOTE: the compressible suite's sources pin the AS-CODED viscous operator (doubled shear,
-see the header of `tests/mms_compressible_order_test.rs`); when the tauMC fix lands,
-flip `EXTRA_SHEAR` to 0 in the same changeset.
+NOTE: the compressible suite asserts the physical-NS viscous operator (EXTRA_SHEAR = 0);
+its `#[ignore]` probe (doubled-shear sources) must SATURATE — order-2 convergence there
+means the pre-June-2026 double-counted laplacian came back (see the header of
+`tests/mms_compressible_order_test.rs`).
 
 ## Mandatory OpenFOAM drift check (before/after each major changeset)
 

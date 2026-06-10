@@ -44,6 +44,18 @@ plus a registry entry, with every kernel derived.
 - **Units close at compile time** (type-level dimensions with `cast_to`
   escape hatches) and are re-validated at runtime (`validate_units`).
   Boundary-expression literals are unit wildcards (epsilon floors).
+- **Compressible viscous split (rhoCentralFoam-style)**: the momentum
+  equation declares the implicit `laplacian(mu, u)`; the central-upwind flux
+  derivation adds the explicit transpose-only `tauMC = mu (∇u)ᵀ − ⅔ mu (∇·u) I`
+  traction, so the effective operator is the full Newtonian
+  `∇·(mu(∇u + ∇uᵀ − ⅔ I ∇·u))`; the energy work flux is `τ·u` and conduction
+  lowers `laplacian(kappa, T)` to `mu·cp/0.71` (hardcoded Prandtl). HISTORY:
+  tauMC was originally the FULL stress (a misreading of OpenFOAM's `dev2`),
+  silently doubling the shear viscosity — found and fixed via the
+  compressible MMS (June 2026); `mms_compressible_order_test` asserts the
+  physical operator and its probe saturates if the double-count returns. The
+  compressible lid reference case (the one viscous-dominated case) dropped
+  from 59.8% to 2.5% max-cell u with the fix.
 
 ## Engine layer (never DSL-ified)
 

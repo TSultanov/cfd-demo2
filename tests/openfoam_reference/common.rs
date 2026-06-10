@@ -135,9 +135,12 @@ pub fn reference_bands(case: &str) -> ReferenceBands {
         "incompressible_channel" => (0.095, 0.16),
         // measured: u=0.0824, p=0.1469
         "incompressible_backstep" => (0.10, 0.18),
-        // measured: u=0.5983 (early-transient formulation mismatch vs rhoCentralFoam,
-        // see OPENFOAM_DISCREPANCY_PLAN.md), p=0.000301
-        "compressible_lid" => (0.72, 0.0005),
+        // measured: u=0.0247, p=1.0e-5 (June 2026, after the tauMC
+        // doubled-shear fix: was u=0.5983 — the long-standing ~60% mismatch
+        // was the doubled effective shear viscosity thickening the developing
+        // lid boundary layer, proved by the compressible MMS; this is the one
+        // viscous-dominated compressible reference case).
+        "compressible_lid" => (0.035, 1e-4),
         // measured: u=0.00352, p=0.001776
         "compressible_backstep" => (0.0045, 0.0023),
         // measured: u_x=0.0080, p=5e-6 (p band kept above run-to-run noise)

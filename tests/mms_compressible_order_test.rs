@@ -11,36 +11,29 @@
 //! pressure has zero normal derivative on all boundaries, so the inlet
 //! "p follows interior" closure is second-order consistent.
 //!
-//! THE OPERATOR CONTRACT THIS TEST PINS (deliberately, as-coded):
-//! the flux module's `tauMC` traction is built from the FULL deviatoric
-//! Newtonian stress `tau = mu (grad u + grad u^T - 2/3 I div u)` (see
-//! `tau_mc_dot_n_components` in flux_schemes.rs), while the momentum
-//! equation ALSO assembles the implicit `laplacian(mu, u)`. The effective
-//! momentum viscous operator is therefore
+//! THE OPERATOR CONTRACT THIS TEST PINS: physical Navier-Stokes. The
+//! momentum viscous operator is `div(tau)` with
+//! `tau = mu (grad u + grad u^T - 2/3 I div u)`, split rhoCentralFoam-style
+//! between the implicit `laplacian(mu, u)` and the explicit transpose-only
+//! `tauMC` traction in the flux (`tau_mc_dot_n_components` in
+//! flux_schemes.rs); the energy viscous work flux is `tau . u`. The
+//! conduction coefficient lowers to `mu cp / 0.71` (hardcoded Prandtl).
+//! Sources are derived for that operator (`EXTRA_SHEAR = 0`).
 //!
-//!     div(tau) + mu lap(u)        ("EXTRA_SHEAR = 1")
-//!
-//! i.e. the shear viscosity is doubled relative to physical NS (OpenFOAM's
-//! rhoCentralFoam splits `tau = laplacian(mu,U) + div(tauMC)` with tauMC
-//! containing only the transpose gradient: `dev2(T(grad U))` has ONE
-//! gradient term; the flux_schemes.rs comment misreads it as the full
-//! stress). Likewise the energy viscous work uses the traction
-//! `mu (grad u) n + tau n`, adding `(mu/2) grad(|u|^2)` to the physical
-//! `tau . u` work flux. The conduction coefficient lowers to `mu cp / 0.71`
-//! (hardcoded Prandtl).
-//!
-//! MEASURED OPERATOR IDENTIFICATION (June 2026, MU = 0.05, Re ~ 8): with
-//! as-coded sources (`EXTRA_SHEAR = 1`) every field converges at design
-//! order (rho 1.94 / u 2.19 / p 1.86 / T 1.79; finest errors 2.7e-4..6.6e-4
-//! at n=48). With physical-NS sources (the `#[ignore]` probe,
-//! `EXTRA_SHEAR = 0`) the errors SATURATE h-independently at 30-70x that
-//! level (rho 4.6e-2, u 1.5e-2, T ~1e-2 at both n=16 and n=32): the
-//! discrete operator is the doubled-shear one, NOT physical NS. The one
-//! viscous-dominated OpenFOAM reference case (compressible lid, 59.8%
-//! mismatch near the moving lid) is exactly where a doubled mu would show;
-//! the convection-dominated cases (backstep/wedge/acoustic, 0.1-1%) are
-//! insensitive. See the FD cross-check test for source verification
-//! independent of the hand-derived partials.
+//! HISTORY (June 2026): tauMC was originally built as the FULL stress (its
+//! comment misread OpenFOAM's `dev2(T(grad U))`, which has only ONE
+//! gradient term), so combined with the assembled laplacian the effective
+//! operator was `div(tau) + mu lap(u)` - shear viscosity DOUBLED - with an
+//! extra `(mu/2) grad(|u|^2)` in the energy work flux. This oracle proved
+//! it in both directions at MU = 0.05, Re ~ 8: doubled-shear sources
+//! converged at design order (rho 1.94 / u 2.19 / p 1.86 / T 1.79) while
+//! physical-NS sources saturated h-independently at 30-70x (rho 4.6e-2,
+//! u 1.5e-2 at both n=16 and n=32). After the tauMC fix the roles swap:
+//! this test asserts order-2 convergence with physical-NS sources, and the
+//! `#[ignore]` probe (doubled-shear sources, `EXTRA_SHEAR = 1`) saturates -
+//! it guards against reintroducing the double-counted laplacian. See the FD
+//! cross-check test for source verification independent of the
+//! hand-derived partials.
 
 #![cfg(feature = "dev-tests")]
 
@@ -70,9 +63,10 @@ const PRANDTL: f64 = 0.71;
 const MU: f64 = 0.05;
 const K_COND: f64 = MU * GAMMA * R_GAS / (GAMMA - 1.0) / PRANDTL;
 
-/// 1.0 = sources for the as-coded operator (full-stress tauMC + assembly
-/// laplacian: doubled shear). 0.0 = sources for physical NS.
-const EXTRA_SHEAR: f64 = 1.0;
+/// 0.0 = sources for physical NS (the operator since the tauMC fix).
+/// 1.0 = sources for the pre-fix doubled-shear operator (full-stress tauMC
+/// + assembly laplacian) - used by the regression probe.
+const EXTRA_SHEAR: f64 = 0.0;
 
 const U0: f64 = 0.4;
 const V0: f64 = 0.3;
@@ -107,6 +101,13 @@ const PLATEAU_WINDOW: usize = 80;
 /// settle. Measured: at n=48 the absolute tol alone fired at t=0.73 with the
 /// rho error still drifting 22% per +1 time unit.
 const MIN_STEPS: usize = 600;
+/// Accept the state unconditionally after this many steps (t = 12, ~8x the
+/// slowest physical mode). Needed by the mismatched-sources probe: at an
+/// O(1)-displaced solution the limiter wander occasionally sets a new best
+/// delta and starves the plateau detector forever; the wander amplitude
+/// (~2e-5/step) is irrelevant against the saturated error level it
+/// measures.
+const LONG_MARCH_ACCEPT_STEPS: usize = 1200;
 
 // ---------------------------------------------------------------------------
 // Exact solution.
@@ -672,6 +673,13 @@ fn march_to_plateau(solver: &mut UnifiedSolver) {
             );
             return;
         }
+        if step >= LONG_MARCH_ACCEPT_STEPS {
+            println!(
+                "[mms] long-march acceptance after {} steps (max_delta={max_delta:.3e}, best={best:.3e})",
+                step + 1
+            );
+            return;
+        }
         if step % 20 == 0 {
             println!("[mms] step {step}: max_delta={max_delta:.3e}");
         }
@@ -730,32 +738,37 @@ fn order_study(extra: f64, levels: &[usize], label: &str) -> (Vec<f64>, [Vec<f64
 fn steady_compressible_vanleer_order() {
     let (hs, [rho_errs, u_errs, p_errs, t_errs]) =
         order_study(EXTRA_SHEAR, &[16, 24, 32, 48], "compressible");
-    // Measured at the ratchet (June 2026): rho 1.937 / u 2.186 / p 1.859 /
-    // T 1.791, finest errors 6.6e-4 / 2.7e-4 / 5.1e-4 / 5.1e-4.
+    // Measured at the ratchet (June 2026, post-tauMC-fix, physical-NS
+    // sources): rho 1.956 / u 2.153 / p 1.831 / T 1.858, finest errors
+    // 5.6e-4 / 2.7e-4 / 5.2e-4 / 5.8e-4. (Pre-fix, with doubled-shear
+    // sources matching the pre-fix operator: 1.937 / 2.186 / 1.859 / 1.791.)
     assert_convergence_order("compressible_rho", &hs, &rho_errs, 2.0, 0.35, 1.5e-3);
     assert_convergence_order("compressible_u", &hs, &u_errs, 2.0, 0.35, 7.0e-4);
     assert_convergence_order("compressible_p", &hs, &p_errs, 2.0, 0.35, 1.2e-3);
     assert_convergence_order("compressible_T", &hs, &t_errs, 2.0, 0.40, 1.2e-3);
 }
 
-/// Probe: the same study with PHYSICAL Navier–Stokes sources (no doubled
-/// shear, work flux = tau . u). Run manually:
+/// Probe: the same study with sources for the PRE-FIX doubled-shear
+/// operator (`extra = 1`). After the tauMC fix these must SATURATE
+/// h-independently instead of converging — if this probe ever shows order-2
+/// convergence again, the double-counted laplacian has been reintroduced.
+/// Run manually:
 /// `cargo test --features dev-tests --test mms_compressible_order_test -- --ignored probe_ --nocapture`
 ///
-/// Measured (June 2026): errors saturate h-independently — rho 4.62e-2 ->
-/// 4.73e-2, u 1.58e-2 -> 1.52e-2, T 7.3e-3 -> 1.08e-2 from n=16 to n=32,
-/// vs the as-coded study's order-2 decay (rho 1.5e-3 at n=32). Together
-/// with the converging as-coded study this PROVES the discrete viscous
-/// operator is `div(tau_full) + mu lap(u)` (doubled shear), not physical
-/// NS. (The drift guard passes here too: the saturated solution is a
+/// Measured post-fix (June 2026): rho 5.60e-2 -> 5.28e-2, u 2.49e-2 ->
+/// 2.31e-2, T 1.39e-2 -> 1.20e-2 from n=16 to n=32 — saturated, ~100x the
+/// converging study's n=32 errors. Pre-fix the roles were reversed
+/// (doubled-shear operator in the solver, physical-NS sources saturating at
+/// rho 4.6e-2 / u 1.5e-2), completing the two-direction operator
+/// identification. (The drift guard passes on a saturated run too: it is a
 /// genuine steady state — of the wrong continuous problem.)
 #[test]
 #[ignore]
-fn probe_physical_ns_sources() {
+fn probe_doubled_shear_sources_saturate() {
     let (hs, [rho_errs, u_errs, p_errs, t_errs]) =
-        order_study(0.0, &[16, 32], "compressible-physical-ns");
+        order_study(1.0, &[16, 32], "compressible-doubled-shear");
     let _ = (&hs, &p_errs);
     println!(
-        "[mms][compressible-physical-ns] rho={rho_errs:?} u={u_errs:?} T={t_errs:?} (compare against the as-coded study)"
+        "[mms][compressible-doubled-shear] rho={rho_errs:?} u={u_errs:?} T={t_errs:?} (must NOT converge; compare against the physical-NS study)"
     );
 }

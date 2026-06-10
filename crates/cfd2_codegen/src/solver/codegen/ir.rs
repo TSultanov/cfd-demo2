@@ -38,6 +38,10 @@ pub struct DiscreteOp {
     /// schemes are baked as literals in the generated WGSL and are not
     /// affected by the runtime `constants.scheme` knob.
     pub scheme_declared: bool,
+    /// Bounded convection form: subtract the continuity defect
+    /// `(div phi) * phi_P` from the diagonal (only meaningful on implicit
+    /// `Div` convection ops).
+    pub bounded: bool,
     pub field: FieldRef,
     pub flux: Option<FluxRef>,
     pub coeff: Option<Coefficient>,
@@ -102,6 +106,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
         discretization: term.discretization,
         scheme: term.scheme.unwrap_or_else(|| schemes.scheme_for(term)),
         scheme_declared: term.scheme.is_some(),
+        bounded: term.bounded,
         field: term.field,
         flux: term.flux,
         coeff: term.coeff.clone(),

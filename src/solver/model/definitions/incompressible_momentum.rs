@@ -78,8 +78,12 @@ fn build_incompressible_momentum_system(
     // ddt(rho, U): integrated unit is MomentumDensity * Volume / Time = Force
     let ddt_term = typed_fvm::ddt_coeff(rho_coeff, u_typed);
 
-    // div(phi, U): integrated unit is MassFlux * Velocity = Force
-    let div_term = typed_fvm::div(phi_typed, u_typed);
+    // div(phi, U): integrated unit is MassFlux * Velocity = Force.
+    // Declared bounded (OpenFOAM `bounded Gauss`): assembly subtracts the
+    // continuity defect (div phi) * U_P from the diagonal, matching the
+    // reference solver's convection form while the flux is not exactly
+    // divergence-free.
+    let div_term = typed_fvm::div(phi_typed, u_typed).bounded();
 
     // laplacian(mu, U): integrated unit is DynamicViscosity * Velocity * Area / Length = Force
     let laplacian_term = typed_fvm::laplacian(mu_coeff, u_typed);

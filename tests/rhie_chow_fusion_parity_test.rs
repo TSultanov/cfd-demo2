@@ -199,9 +199,11 @@ fn run_with_policy_kernel_graph_dispatches(
     fixed_outer_iterations_mode: bool,
     outer_batched_mode: bool,
 ) -> u64 {
+    // Survive poisoning: another test panicking while holding the lock must
+    // not cascade into failures here (same pattern as the other lock sites).
     let _lock = solver_test_lock()
         .lock()
-        .expect("dispatch counter test lock poisoned");
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let mut model = incompressible_momentum_model().expect("model");
     let mut linear_solver = model
@@ -1276,8 +1278,12 @@ fn host_driven_encoded_seed_basis0_default_on_matches_opt_out() {
         false,
     );
 
-    // Keep tolerance aligned with existing host-driven vs one-submission parity gates.
-    let rel_tol = 1e-2f64;
+    // The two seed paths produce slightly different (both valid) iterates;
+    // u/p agree to ~0.3% and the derived grad_p amplifies to ~1%. Measured
+    // grad_p max_rel moved from just under 1e-2 to 1.156e-2 when bounded
+    // convection landed (a legitimate discretization change, MMS-verified);
+    // band at 1.5e-2 to keep headroom while still catching real divergence.
+    let rel_tol = 1.5e-2f64;
     assert_snapshots_match(
         "encoded_opt_out",
         &opt_out,

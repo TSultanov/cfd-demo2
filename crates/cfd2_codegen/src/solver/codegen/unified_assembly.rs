@@ -395,6 +395,40 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
         }
     }
 
+    // Bounded convection (OpenFOAM's `bounded Gauss`): accumulate the cell's
+    // net outflow sum_f(phi_f) during the face loop and subtract it from the
+    // diagonal afterwards — fvm::div(phi, u) - Sp(div(phi), u). This keeps
+    // convection bounded while the flux field is not exactly divergence-free
+    // (outer iterations, imperfectly converged steady states).
+    let bounded_unknowns: Vec<u32> = system
+        .equations
+        .iter()
+        .flat_map(|equation| {
+            let base_offset = *offsets
+                .get(equation.target.name())
+                .expect("missing target offset");
+            let components = equation.target.kind().component_count() as u32;
+            equation
+                .ops
+                .iter()
+                .filter(|op| {
+                    op.kind == DiscreteOpKind::Convection
+                        && op.discretization == Discretization::Implicit
+                        && op.term_op == TermOp::Div
+                        && op.bounded
+                })
+                .flat_map(move |_| (0..components).map(move |c| base_offset + c))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for &u_idx in &bounded_unknowns {
+        stmts.push(dsl::var_typed_expr(
+            &format!("bounded_sum_phi_{u_idx}"),
+            Type::F32,
+            Some(0.0.into()),
+        ));
+    }
+
     // Face loop for diffusion contributions (implicit only).
     let face_loop_body = {
         let mut body = vec![
@@ -899,6 +933,14 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             None,
                         ));
 
+                        if conv_op.bounded {
+                            body.push(dsl::assign_op_expr(
+                                AssignOp::Add,
+                                Expr::ident(format!("bounded_sum_phi_{u_idx}")),
+                                acc.phi(u_idx),
+                            ));
+                        }
+
                         let field_slot = slots
                             .slots
                             .iter()
@@ -1115,6 +1157,12 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
         dsl::for_step_increment_expr(Expr::ident("k")),
         dsl::block(face_loop_body),
     ));
+
+    // Bounded convection: subtract the accumulated continuity defect from
+    // the diagonal (LHS gains -(sum_f phi_f) * u_P).
+    for &u_idx in &bounded_unknowns {
+        stmts.push(acc.sub_diag(u_idx, Expr::ident(format!("bounded_sum_phi_{u_idx}"))));
+    }
 
     // Write diagonal block and RHS.
     let diag_entry = block_matrix.row_entry(&Expr::ident("diag_rank"));

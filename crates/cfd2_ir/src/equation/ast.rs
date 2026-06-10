@@ -212,6 +212,12 @@ pub struct Term {
     /// declared scheme as a literal for this term. `None` keeps the term on
     /// the registry default / runtime knob.
     pub scheme: Option<crate::scheme::Scheme>,
+    /// Bounded convection form (OpenFOAM's `bounded Gauss`): assembly
+    /// subtracts the continuity defect `(div phi) * phi_P` from the
+    /// diagonal, keeping convection bounded while the flux field is not
+    /// exactly divergence-free (e.g. during outer iterations). Only
+    /// meaningful on implicit `Div` terms.
+    pub bounded: bool,
 }
 
 impl Term {
@@ -229,12 +235,19 @@ impl Term {
             flux,
             coeff,
             scheme: None,
+            bounded: false,
         }
     }
 
     /// Declare the discretization scheme for this term (see `scheme` field docs).
     pub fn with_scheme(mut self, scheme: crate::scheme::Scheme) -> Self {
         self.scheme = Some(scheme);
+        self
+    }
+
+    /// Declare the bounded convection form (see `bounded` field docs).
+    pub fn with_bounded(mut self) -> Self {
+        self.bounded = true;
         self
     }
 

@@ -228,6 +228,15 @@ impl<D: UnitDimension> TypedTerm<D> {
         self
     }
 
+    /// Declare the bounded convection form: assembly subtracts the
+    /// continuity defect `(div phi) * phi_P` from the diagonal so convection
+    /// stays bounded while the flux is not exactly divergence-free
+    /// (OpenFOAM's `bounded Gauss`). Only meaningful on implicit div terms.
+    pub fn bounded(mut self) -> Self {
+        self.inner = self.inner.with_bounded();
+        self
+    }
+
     /// Create an equation from this single term.
     ///
     /// The target field is the unknown being solved for. Its dimension can be

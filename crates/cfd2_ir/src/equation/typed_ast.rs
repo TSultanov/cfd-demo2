@@ -754,6 +754,31 @@ pub mod typed_fvc {
         }
     }
 
+    /// Explicit directional source on a vector target: component `c` of the
+    /// target receives `coeff * direction[c] * V`. The scalar coefficient
+    /// tree is evaluated at the current state (so it may reference solved
+    /// fields, Picard-style), and `direction` carries the constant
+    /// per-component multipliers (e.g. gravity direction). The declared
+    /// coefficient dimension must therefore account for the direction's
+    /// physical magnitude (treat `direction` as dimensionless).
+    pub fn source_directional<TargetD: UnitDimension, CoeffD: UnitDimension>(
+        coeff: TypedCoeff<CoeffD>,
+        direction: [f64; 2],
+        target: TypedFieldRef<TargetD, Vector2>,
+    ) -> TypedTerm<SourceExplicitUnit<CoeffD>> {
+        TypedTerm {
+            inner: Term::new(
+                TermOp::Source,
+                Discretization::Explicit,
+                target.to_untyped(),
+                None,
+                Some(coeff.to_untyped()),
+            )
+            .with_direction(direction.to_vec()),
+            _dim: PhantomData,
+        }
+    }
+
     /// Explicit per-component source from a vector field.
     ///
     /// Each component of `source` contributes `source_c * V` to the matching

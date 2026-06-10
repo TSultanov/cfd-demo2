@@ -9,6 +9,7 @@ integration, run the MMS convergence-order suite and require it green:
 cargo test --features dev-tests --test mms_diffusion_order_test -- --test-threads 1
 cargo test --features dev-tests --test mms_scalar_transport_order_test -- --test-threads 1
 cargo test --features dev-tests --test mms_incompressible_order_test -- --test-threads 1
+cargo test --features dev-tests --test mms_buoyant_order_test -- --test-threads 1
 ```
 
 (Glob any additional `tests/mms_*` suites as they are added.) These tests verify the

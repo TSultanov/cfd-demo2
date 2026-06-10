@@ -647,6 +647,8 @@ mod compressible;
 mod generic_diffusion_demo;
 #[path = "definitions/incompressible_momentum.rs"]
 mod incompressible_momentum;
+#[path = "definitions/buoyant_incompressible.rs"]
+mod buoyant_incompressible;
 #[path = "definitions/scalar_transport.rs"]
 mod scalar_transport;
 
@@ -661,6 +663,12 @@ pub use generic_diffusion_demo::{
     generic_diffusion_demo_mms_dirichlet_model, generic_diffusion_demo_mms_model,
     generic_diffusion_demo_mms_neumann_model, generic_diffusion_demo_model,
     generic_diffusion_demo_neumann_model, MMS_SOURCE_FIELD,
+};
+#[allow(unused_imports)]
+pub use buoyant_incompressible::{
+    buoyant_incompressible_mms_model, buoyant_incompressible_model, BUOYANT_BETA_G,
+    BUOYANT_K_OVER_CP, BUOYANT_MMS_SOURCE_T_FIELD, BUOYANT_MMS_SOURCE_U_FIELD,
+    BUOYANT_T0, BUOYANT_TEMPERATURE_FIELD,
 };
 #[allow(unused_imports)]
 pub use incompressible_momentum::{
@@ -682,6 +690,8 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
     Ok(vec![
         incompressible_momentum_model()?,
         incompressible_momentum_mms_model()?,
+        buoyant_incompressible_model()?,
+        buoyant_incompressible_mms_model()?,
         compressible_model()?,
         generic_diffusion_demo_model()?,
         generic_diffusion_demo_neumann_model()?,

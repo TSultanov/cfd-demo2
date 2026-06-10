@@ -425,30 +425,39 @@ fn validate_schur_model(
     // For the current Schur bridge, the linear system is assumed to consist only of a
     // velocity-like block and a single pressure-like scalar.
     //
-    // Use the pre-resolved unknown_mapping instead of querying StateLayout directly.
+    // The layout indexes the packed coupled x-vector (0..unknowns_per_cell),
+    // so targets must be resolved through the coupled FluxLayout — NOT the
+    // state layout. The two coincide for models whose solved unknowns form a
+    // prefix of the state layout (e.g. incompressible_momentum), which
+    // masked this distinction until a model interleaved auxiliary state
+    // fields before a solved unknown.
+    let _ = unknown_mapping;
+    let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
     let mut target_indices = std::collections::BTreeSet::new();
     let mut scalar_targets = std::collections::BTreeSet::new();
-    for (eq_idx, eq) in model.system.equations().iter().enumerate() {
+    for eq in model.system.equations() {
         let target = eq.target();
         let comps = target.kind().component_count();
 
         match target.kind() {
             crate::solver::model::backend::ast::FieldKind::Scalar => {
-                let idx = unknown_mapping
-                    .get_offset(eq_idx, 0)
-                    .ok_or_else(|| format!("missing '{}' in unknown mapping", target.name()))?;
+                let idx = flux_layout
+                    .offset_for_field_component(*target, 0)
+                    .ok_or_else(|| format!("missing '{}' in coupled layout", target.name()))?;
                 target_indices.insert(idx);
                 scalar_targets.insert(idx);
             }
             _ => {
                 for comp in 0..comps {
-                    let idx = unknown_mapping.get_offset(eq_idx, comp).ok_or_else(|| {
-                        format!(
-                            "missing '{}' component {} in unknown mapping",
-                            target.name(),
-                            comp
-                        )
-                    })?;
+                    let idx = flux_layout
+                        .offset_for_field_component(*target, comp as u32)
+                        .ok_or_else(|| {
+                            format!(
+                                "missing '{}' component {} in coupled layout",
+                                target.name(),
+                                comp
+                            )
+                        })?;
                     target_indices.insert(idx);
                 }
             }

@@ -42,6 +42,9 @@ pub struct DiscreteOp {
     /// `(div phi) * phi_P` from the diagonal (only meaningful on implicit
     /// `Div` convection ops).
     pub bounded: bool,
+    /// Per-component direction multipliers for explicit sources on vector
+    /// targets (`coeff * direction[c] * V` per component).
+    pub direction: Option<Vec<f64>>,
     pub field: FieldRef,
     pub flux: Option<FluxRef>,
     pub coeff: Option<Coefficient>,
@@ -107,6 +110,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
         scheme: term.scheme.unwrap_or_else(|| schemes.scheme_for(term)),
         scheme_declared: term.scheme.is_some(),
         bounded: term.bounded,
+        direction: term.direction.clone(),
         field: term.field,
         flux: term.flux,
         coeff: term.coeff.clone(),

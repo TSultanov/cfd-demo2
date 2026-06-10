@@ -356,7 +356,34 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     }
                     _ => None,
                 };
-                if let Some(source_field) = vector_source {
+                if let Some(direction) = source_op.direction.as_ref() {
+                    // Directional source: scalar coefficient tree times a
+                    // constant per-component direction multiplier.
+                    assert_eq!(
+                        direction.len(),
+                        target_kind.component_count(),
+                        "directional source on '{}' has {} direction components, target has {}",
+                        equation.target.name(),
+                        direction.len(),
+                        target_kind.component_count()
+                    );
+                    let val = coefficient_value_expr(
+                        slots,
+                        source_op.coeff.as_ref(),
+                        "idx",
+                        0.0.into(),
+                    );
+                    for (component, dir) in direction.iter().enumerate() {
+                        if *dir == 0.0 {
+                            continue;
+                        }
+                        let u_idx = base_offset + component as u32;
+                        stmts.push(acc.add_rhs(
+                            u_idx,
+                            val.clone() * Expr::lit_f32(*dir as f32) * Expr::ident("vol"),
+                        ));
+                    }
+                } else if let Some(source_field) = vector_source {
                     let slot =
                         find_slot(slots, source_field.name()).unwrap_or_else(|| {
                             panic!(

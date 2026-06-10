@@ -218,6 +218,12 @@ pub struct Term {
     /// exactly divergence-free (e.g. during outer iterations). Only
     /// meaningful on implicit `Div` terms.
     pub bounded: bool,
+    /// Per-component direction multipliers for explicit sources on vector
+    /// targets: component `c` of the target's RHS receives
+    /// `coeff * direction[c] * V`. This expresses directional body forces
+    /// (e.g. Boussinesq buoyancy `-rho*beta*(T-T0)*g`) with a scalar
+    /// coefficient tree, without materializing a vector source field.
+    pub direction: Option<Vec<f64>>,
 }
 
 impl Term {
@@ -236,7 +242,14 @@ impl Term {
             coeff,
             scheme: None,
             bounded: false,
+            direction: None,
         }
+    }
+
+    /// Declare per-component direction multipliers (see `direction` docs).
+    pub fn with_direction(mut self, direction: Vec<f64>) -> Self {
+        self.direction = Some(direction);
+        self
     }
 
     /// Declare the discretization scheme for this term (see `scheme` field docs).

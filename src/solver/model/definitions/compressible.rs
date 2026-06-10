@@ -7,13 +7,13 @@ use crate::solver::model::backend::ast::{
     FieldRef, FluxRef,
 };
 use crate::solver::model::backend::typed_ast::{
-    typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
+    typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
 use crate::solver::model::ports::PortRegistry;
 // si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_ir::dimensions::{
     Density, Dimensionless, DivDim, DynamicViscosity, EnergyDensity, Force, InvTime, Length,
-    MassFlux, MomentumDensity, MulDim, Power, Pressure, Temperature, Velocity,
+    MassFlux, MomentumDensity, MulDim, Power, Pressure, Temperature, Velocity, Volume,
 };
 // Type-level dimensions for boundary conditions (re-exported for convenience)
 type DensityGradient = DivDim<Density, Length>;
@@ -23,6 +23,18 @@ type PressureGradient = DivDim<Pressure, Length>;
 type TemperatureGradient = DivDim<Temperature, Length>;
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
+
+/// Manufactured continuity source field on the `compressible_mms` variant (scalar).
+pub const COMPRESSIBLE_MMS_SOURCE_RHO_FIELD: &str = "mms_src_rho";
+/// Manufactured momentum source field on the `compressible_mms` variant (Vector2).
+pub const COMPRESSIBLE_MMS_SOURCE_RHO_U_FIELD: &str = "mms_src_rho_u";
+/// Manufactured energy source field on the `compressible_mms` variant (scalar).
+pub const COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD: &str = "mms_src_rho_e";
+
+// Per-volume source units of each conservation equation (equation unit / Volume).
+type RhoSourceUnit = DivDim<MassFlux, Volume>;
+type RhoUSourceUnit = DivDim<Force, Volume>;
+type RhoESourceUnit = DivDim<Power, Volume>;
 
 #[derive(Debug, Clone)]
 pub struct CompressibleFields {
@@ -120,7 +132,14 @@ pub fn compressible_central_upwind_decl() -> crate::solver::model::flux_schemes:
     }
 }
 
-fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
+fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
+    build_compressible_system_impl(fields, false)
+}
+
+fn build_compressible_system_impl(
+    _fields: &CompressibleFields,
+    with_mms_sources: bool,
+) -> EquationSystem {
     // NOTE: This model uses typed builder APIs with explicit cast_to() calls to align
     // terms to canonical dimension types. Type-level dimension expressions are not normalized,
     // so semantically equivalent dimensions are different types; cast_to() unifies them.
@@ -150,7 +169,14 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     let rho_ddt = typed_fvm::ddt(rho_typed);
     let rho_div = typed_fvm::div_flux(phi_rho_typed, rho_typed);
 
-    let rho_eqn = (rho_ddt.cast_to::<MassFlux>() + rho_div.cast_to::<MassFlux>()).eqn(rho_typed);
+    let mut rho_sum = rho_ddt.cast_to::<MassFlux>() + rho_div.cast_to::<MassFlux>();
+    if with_mms_sources {
+        let mms_rho = TypedCoeff::from_field(TypedFieldRef::<RhoSourceUnit, Scalar>::new(
+            COMPRESSIBLE_MMS_SOURCE_RHO_FIELD,
+        ));
+        rho_sum = rho_sum + typed_fvc::source_coeff(mms_rho, rho_typed).cast_to::<MassFlux>();
+    }
+    let rho_eqn = rho_sum.eqn(rho_typed);
 
     // ========================================
     // Momentum equation: ddt(rho_u) + div(phi_rho_u, rho_u) - laplacian(mu, u) = 0
@@ -159,10 +185,17 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     let rho_u_div = typed_fvm::div_flux(phi_rho_u_typed, rho_u_typed);
     let viscous_term = typed_fvm::laplacian(mu_coeff, u_typed);
 
-    let rho_u_eqn = (rho_u_ddt.cast_to::<Force>()
+    let mut rho_u_sum = rho_u_ddt.cast_to::<Force>()
         + rho_u_div.cast_to::<Force>()
-        + viscous_term.cast_to::<Force>())
-    .eqn(rho_u_typed);
+        + viscous_term.cast_to::<Force>();
+    if with_mms_sources {
+        let mms_rho_u = TypedFieldRef::<RhoUSourceUnit, Vector2>::new(
+            COMPRESSIBLE_MMS_SOURCE_RHO_U_FIELD,
+        );
+        rho_u_sum =
+            rho_u_sum + typed_fvc::source_vector(mms_rho_u, rho_u_typed).cast_to::<Force>();
+    }
+    let rho_u_eqn = rho_u_sum.eqn(rho_u_typed);
 
     // ========================================
     // Energy equation: ddt(rho_e) + div(phi_rho_e, rho_e) - laplacian(kappa, T) = 0
@@ -177,10 +210,17 @@ fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
     let rho_e_div = typed_fvm::div_flux(phi_rho_e_typed, rho_e_typed);
     let heat_flux = typed_fvm::laplacian(kappa_typed, t_typed);
 
-    let rho_e_eqn = (rho_e_ddt.cast_to::<Power>()
+    let mut rho_e_sum = rho_e_ddt.cast_to::<Power>()
         + rho_e_div.cast_to::<Power>()
-        + heat_flux.cast_to::<Power>())
-    .eqn(rho_e_typed);
+        + heat_flux.cast_to::<Power>();
+    if with_mms_sources {
+        let mms_rho_e = TypedCoeff::from_field(TypedFieldRef::<RhoESourceUnit, Scalar>::new(
+            COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD,
+        ));
+        rho_e_sum =
+            rho_e_sum + typed_fvc::source_coeff(mms_rho_e, rho_e_typed).cast_to::<Power>();
+    }
+    let rho_e_eqn = rho_e_sum.eqn(rho_e_typed);
 
     // ========================================
     // Primitive recovery, declared as algebraic relations.
@@ -260,8 +300,30 @@ pub fn compressible_model() -> Result<ModelSpec, String> {
 }
 
 pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> Result<ModelSpec, String> {
+    compressible_model_impl(eos, false)
+}
+
+/// `compressible` plus manufactured source fields on the three conservation
+/// equations, for MMS convergence studies (the EOS/recovery rows are exact
+/// algebraic constraints and need no sources). Uses the nondimensional
+/// default EOS (gamma = 1.4, R = 1, theta_ref = 1).
+pub fn compressible_mms_model() -> Result<ModelSpec, String> {
+    compressible_model_impl(
+        crate::solver::model::eos::EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 1.0,
+            temperature: 1.0,
+        },
+        true,
+    )
+}
+
+fn compressible_model_impl(
+    eos: crate::solver::model::eos::EosSpec,
+    with_mms_sources: bool,
+) -> Result<ModelSpec, String> {
     let fields = CompressibleFields::new();
-    let system = build_compressible_system(&fields);
+    let system = build_compressible_system_impl(&fields, with_mms_sources);
     // Flux module reconstruction uses gradient fields in the state layout when enabled.
     // These are computed by the optional `flux_module_gradients` stage (Gauss gradients).
     let grad_rho = vol_vector_dim::<DivDim<Density, Length>>("grad_rho");
@@ -271,7 +333,7 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
     let grad_t = vol_vector_dim::<DivDim<Temperature, Length>>("grad_T");
     let grad_u_x = vol_vector_dim::<DivDim<Velocity, Length>>("grad_u_x");
     let grad_u_y = vol_vector_dim::<DivDim<Velocity, Length>>("grad_u_y");
-    let layout = PortRegistry::from_fields(vec![
+    let mut layout_fields = vec![
         fields.rho,
         fields.rho_u,
         grad_rho_u_x,
@@ -285,7 +347,19 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
         grad_t,
         grad_u_x,
         grad_u_y,
-    ]).into_state_layout();
+    ];
+    if with_mms_sources {
+        layout_fields.push(vol_scalar_dim::<RhoSourceUnit>(
+            COMPRESSIBLE_MMS_SOURCE_RHO_FIELD,
+        ));
+        layout_fields.push(vol_vector_dim::<RhoUSourceUnit>(
+            COMPRESSIBLE_MMS_SOURCE_RHO_U_FIELD,
+        ));
+        layout_fields.push(vol_scalar_dim::<RhoESourceUnit>(
+            COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD,
+        ));
+    }
+    let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
 
     // ========================================
     // Boundary conditions.
@@ -596,7 +670,11 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
     Ok(ModelSpec {
-        id: "compressible",
+        id: if with_mms_sources {
+            "compressible_mms"
+        } else {
+            "compressible"
+        },
         // Route compressible through the generic coupled pipeline.
         system,
         state_layout: layout,

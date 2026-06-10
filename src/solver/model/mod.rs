@@ -21,7 +21,7 @@ pub use crate::solver::ir::LimiterSpec;
 pub use definitions::{
     all_models, buoyant_incompressible_mms_model, buoyant_incompressible_model,
     compressible_central_upwind_decl, compressible_generalized_wave_speed_sq,
-    compressible_model, compressible_model_with_eos, compressible_system,
+    compressible_mms_model, compressible_model, compressible_model_with_eos, compressible_system,
     compressible_wave_speed_sq, generic_diffusion_demo_mms_dirichlet_model,
     generic_diffusion_demo_mms_model,
     generic_diffusion_demo_mms_neumann_model, generic_diffusion_demo_model,
@@ -32,7 +32,9 @@ pub use definitions::{
     GenericCoupledFields,
     IncompressibleMomentumFields, ModelSpec, ADVECTING_VELOCITY_FIELD, BUOYANT_BETA_G,
     BUOYANT_K_OVER_CP, BUOYANT_MMS_SOURCE_T_FIELD, BUOYANT_MMS_SOURCE_U_FIELD, BUOYANT_T0,
-    BUOYANT_TEMPERATURE_FIELD, INCOMPRESSIBLE_MMS_SOURCE_FIELD, MMS_SOURCE_FIELD,
+    BUOYANT_TEMPERATURE_FIELD, COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD,
+    COMPRESSIBLE_MMS_SOURCE_RHO_FIELD, COMPRESSIBLE_MMS_SOURCE_RHO_U_FIELD,
+    INCOMPRESSIBLE_MMS_SOURCE_FIELD, MMS_SOURCE_FIELD,
     SCALAR_TRANSPORT_FIELD, SCALAR_TRANSPORT_KAPPA, SCALAR_TRANSPORT_MMS_SOURCE_FIELD,
 };
 pub use eos::EosSpec;

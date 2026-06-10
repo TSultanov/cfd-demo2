@@ -103,7 +103,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             grad_acc_0 += normal_vec * (state[idx * 9u + 0u] * lambda + select(state[other_idx * 9u + 0u], select(select(state[idx * 9u + 0u], bc_value[face_idx * 4u + 0u], bc_kind[face_idx * 4u + 0u] == 1u), state[idx * 9u + 0u] + bc_value[face_idx * 4u + 0u] * d_own, bc_kind[face_idx * 4u + 0u] == 2u), is_boundary) * lambda_other) * area;
             grad_acc_1 += normal_vec * (state[idx * 9u + 1u] * lambda + select(state[other_idx * 9u + 1u], select(select(state[idx * 9u + 1u], bc_value[face_idx * 4u + 1u], bc_kind[face_idx * 4u + 1u] == 1u), state[idx * 9u + 1u] + bc_value[face_idx * 4u + 1u] * d_own, bc_kind[face_idx * 4u + 1u] == 2u), is_boundary) * lambda_other) * area;
             grad_acc_2 += normal_vec * (state[idx * 9u + 2u] * lambda + select(state[other_idx * 9u + 2u], select(select(state[idx * 9u + 2u], bc_value[face_idx * 4u + 2u], bc_kind[face_idx * 4u + 2u] == 1u), state[idx * 9u + 2u] + bc_value[face_idx * 4u + 2u] * d_own, bc_kind[face_idx * 4u + 2u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_3 += normal_vec * (state[idx * 9u + 3u] * lambda + select(state[other_idx * 9u + 3u], select(select(state[idx * 9u + 3u], bc_value[face_idx * 4u + 3u], bc_kind[face_idx * 4u + 3u] == 1u), state[idx * 9u + 3u] + bc_value[face_idx * 4u + 3u] * d_own, bc_kind[face_idx * 4u + 3u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_3 += normal_vec * (state[idx * 9u + 8u] * lambda + select(state[other_idx * 9u + 8u], select(select(state[idx * 9u + 8u], bc_value[face_idx * 4u + 3u], bc_kind[face_idx * 4u + 3u] == 1u), state[idx * 9u + 8u] + bc_value[face_idx * 4u + 3u] * d_own, bc_kind[face_idx * 4u + 3u] == 2u), is_boundary) * lambda_other) * area;
         }
         let grad_out_0: vec2<f32> = grad_acc_0 * 1.0 / max(vol, 0.000000000001);
         grad_state[idx * 9u + 0u].x = grad_out_0.x;
@@ -115,8 +115,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         grad_state[idx * 9u + 2u].x = grad_out_2.x;
         grad_state[idx * 9u + 2u].y = grad_out_2.y;
         let grad_out_3: vec2<f32> = grad_acc_3 * 1.0 / max(vol, 0.000000000001);
-        grad_state[idx * 9u + 3u].x = grad_out_3.x;
-        grad_state[idx * 9u + 3u].y = grad_out_3.y;
+        grad_state[idx * 9u + 8u].x = grad_out_3.x;
+        grad_state[idx * 9u + 8u].y = grad_out_3.y;
     }
     // end fused segment: packed_state_gradients
     // begin fused segment: generic_coupled_assembly_grad_state

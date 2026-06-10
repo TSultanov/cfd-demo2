@@ -59,9 +59,19 @@ Known engine limits (tracked in the plan):
 - The generic Schur preconditioner assumes the non-pressure block is exactly
   the velocity pair; models with extra scalar unknowns (e.g. temperature)
   currently use the default preconditioner.
-- Passive scalars advected by the derived Rhie–Chow flux currently converge
-  at reduced order near boundaries (see `mms_buoyant_order_test`); the
-  near-boundary flux-consistency work will lift this.
+- At pressure-Dirichlet (outlet) boundary faces, the derived Rhie–Chow
+  flux's correction bracket compares the cell-centered `grad_p` against a
+  one-sided compact difference centered half a cell away — an O(h) mismatch
+  on faces where the normal second derivative of p is nonzero. Measured
+  cost: pressure converges at ~1.36 with an outlet vs ~1.64 all-Neumann in
+  the buoyant MMS; velocity and advected scalars are unaffected (order 2).
+
+A contract worth knowing when extending codegen: the packed `grad_state`
+buffer is keyed by STATE OFFSET (stride = state stride), matching the
+assembly's reconstruction reads; boundary tables are keyed by unknown RANK.
+The two coincide only while solved unknowns are a prefix of the state
+layout — `mms_buoyant_order_test` guards the non-prefix case (its
+temperature sits behind aux fields).
 
 ## Validation contract
 

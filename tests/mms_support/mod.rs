@@ -65,6 +65,62 @@ pub fn field_errors_vec2(
     }
 }
 
+/// March to steady state watching a Vector2 field AND additional scalar
+/// fields: the criterion fires only when every watched field's per-step max
+/// delta is below `steady_tol`. Watching only the fast field (e.g. velocity)
+/// stops the run while slower fields (e.g. an advected temperature) are
+/// still mid-transient, and the leftover transient masquerades as
+/// first-order discretization error in convergence studies.
+#[allow(dead_code)]
+pub fn run_to_steady_vec2_with_scalars(
+    solver: &mut UnifiedSolver,
+    field: &str,
+    scalar_fields: &[&str],
+    max_steps: usize,
+    steady_tol: f64,
+) -> Vec<(f64, f64)> {
+    let read_scalars = |solver: &UnifiedSolver| -> Vec<Vec<f64>> {
+        scalar_fields
+            .iter()
+            .map(|f| pollster::block_on(solver.get_field_scalar(f)).expect("read scalar field"))
+            .collect()
+    };
+    let mut prev = pollster::block_on(solver.get_field_vec2(field)).expect("read field");
+    let mut prev_scalars = read_scalars(solver);
+    let mut last_delta = f64::INFINITY;
+    for step in 0..max_steps {
+        solver.step();
+        let cur = pollster::block_on(solver.get_field_vec2(field)).expect("read field");
+        let cur_scalars = read_scalars(solver);
+        let mut max_delta = cur
+            .iter()
+            .zip(prev.iter())
+            .map(|(a, b)| (a.0 - b.0).abs().max((a.1 - b.1).abs()))
+            .fold(0.0f64, f64::max);
+        for (c, p) in cur_scalars.iter().zip(prev_scalars.iter()) {
+            max_delta = c
+                .iter()
+                .zip(p.iter())
+                .map(|(a, b)| (a - b).abs())
+                .fold(max_delta, f64::max);
+        }
+        if max_delta < steady_tol {
+            println!(
+                "[mms] steady after {} steps (max_delta={max_delta:.3e})",
+                step + 1
+            );
+            return cur;
+        }
+        if step % 10 == 0 {
+            println!("[mms] step {step}: max_delta={max_delta:.3e}");
+        }
+        last_delta = max_delta;
+        prev = cur;
+        prev_scalars = cur_scalars;
+    }
+    panic!("did not reach steady state within {max_steps} steps (tol {steady_tol:.1e}, last max_delta={last_delta:.3e})");
+}
+
 /// Like `run_to_steady`, for a Vector2 field.
 #[allow(dead_code)]
 pub fn run_to_steady_vec2(

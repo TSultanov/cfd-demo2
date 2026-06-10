@@ -35,12 +35,14 @@ use cfd2::solver::model::{
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 
-use mms_support::{assert_convergence_order, field_errors, field_errors_vec2, run_to_steady_vec2};
+use mms_support::{
+    assert_convergence_order, field_errors, field_errors_vec2, run_to_steady_vec2_with_scalars,
+};
 
 const MU: f64 = 1.0;
 const RHO: f64 = 1.0;
 const STEADY_TOL: f64 = 5e-6;
-const STEADY_MAX_STEPS: usize = 120;
+const STEADY_MAX_STEPS: usize = 400;
 
 fn exact_u(x: f64, y: f64) -> (f64, f64) {
     ((PI * x).sin() * (PI * y).cos(), -(PI * x).cos() * (PI * y).sin())
@@ -69,7 +71,21 @@ fn source_t(x: f64, y: f64) -> f64 {
     RHO * (ux * dtdx + uy * dtdy) + BUOYANT_K_OVER_CP * 2.0 * PI * PI * exact_t(x, y)
 }
 
+struct SteadySolution {
+    mesh: Mesh,
+    u: Vec<(f64, f64)>,
+    p: Vec<f64>,
+    t: Vec<f64>,
+    grad_p: Vec<(f64, f64)>,
+    d_p: Vec<f64>,
+}
+
 fn solve_steady(n: usize, scheme: Scheme) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, Vec<f64>) {
+    let s = solve_steady_with_right(n, scheme, BoundaryType::Outlet);
+    (s.mesh, s.u, s.p, s.t)
+}
+
+fn solve_steady_with_right(n: usize, scheme: Scheme, right: BoundaryType) -> SteadySolution {
     // Left = hot isothermal (Inlet type), right = cold isothermal (Outlet
     // type), top/bottom = adiabatic walls; all four sides are no-slip for U.
     let mesh = generate_structured_rect_mesh(
@@ -79,7 +95,7 @@ fn solve_steady(n: usize, scheme: Scheme) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, V
         1.0,
         BoundarySides {
             left: BoundaryType::Inlet,
-            right: BoundaryType::Outlet,
+            right,
             bottom: BoundaryType::Wall,
             top: BoundaryType::Wall,
         },
@@ -145,18 +161,23 @@ fn solve_steady(n: usize, scheme: Scheme) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, V
             .expect("T bc");
     }
 
-    // Outlet pressure pins the gauge: per-face exact Dirichlet p*.
-    let p_face = {
-        let fx = fx.clone();
-        let fy = fy.clone();
-        move |face_idx: u32| {
-            let i = face_idx as usize;
-            exact_p(fx[i], fy[i]) as f32
-        }
-    };
-    solver
-        .set_boundary_values_per_face(GpuBoundaryType::Outlet, "p", 0, &p_face)
-        .expect("p bc");
+    // Outlet pressure pins the gauge: per-face exact Dirichlet p*. (With no
+    // outlet faces in play the pressure system is pure-Neumann, the same
+    // regime the all-wall momentum MMS exercises; the gauge is handled by
+    // the de-meaned error metric.)
+    if right == BoundaryType::Outlet {
+        let p_face = {
+            let fx = fx.clone();
+            let fy = fy.clone();
+            move |face_idx: u32| {
+                let i = face_idx as usize;
+                exact_p(fx[i], fy[i]) as f32
+            }
+        };
+        solver
+            .set_boundary_values_per_face(GpuBoundaryType::Outlet, "p", 0, &p_face)
+            .expect("p bc");
+    }
 
     // Manufactured sources.
     let src_u: Vec<(f64, f64)> = (0..mesh.num_cells())
@@ -179,10 +200,28 @@ fn solve_steady(n: usize, scheme: Scheme) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, V
         .expect("init T");
     solver.initialize_history();
 
-    let u = run_to_steady_vec2(&mut solver, "U", STEADY_MAX_STEPS, STEADY_TOL);
+    // Watch BOTH U and T: T's transient is much slower than momentum's, and
+    // a U-only criterion stops while T is still converging (the leftover
+    // transient then reads as first-order error in the order study).
+    let u = run_to_steady_vec2_with_scalars(
+        &mut solver,
+        "U",
+        &[BUOYANT_TEMPERATURE_FIELD],
+        STEADY_MAX_STEPS,
+        STEADY_TOL,
+    );
     let p = pollster::block_on(solver.get_p());
     let t = pollster::block_on(solver.get_field_scalar(BUOYANT_TEMPERATURE_FIELD)).expect("read T");
-    (mesh, u, p, t)
+    let grad_p = pollster::block_on(solver.get_field_vec2("grad_p")).expect("read grad_p");
+    let d_p = pollster::block_on(solver.get_field_scalar("d_p")).expect("read d_p");
+    SteadySolution {
+        mesh,
+        u,
+        p,
+        t,
+        grad_p,
+        d_p,
+    }
 }
 
 fn volume_mean(mesh: &Mesh, f: &[f64]) -> f64 {
@@ -225,19 +264,144 @@ fn steady_buoyant_coupled_second_order() {
         p_errs.push(p_err);
     }
     assert_convergence_order("buoyant_u", &hs, &u_errs, 2.0, 0.35, 1.0e-3);
-    // Temperature currently converges at reduced order (~0.75 observed):
-    // T is advected by the derived Rhie-Chow mass flux, whose near-boundary
-    // correction carries a first-order component that the pure-diffusion and
-    // prescribed-flux MMS cases do not see. This is the same near-boundary
-    // flux-consistency mechanism suspected behind the boundary-concentrated
-    // OpenFOAM reference errors (plan Phase 3.2c); ratchet this assertion to
-    // 2.0 when that lands. The pin below catches regressions from the
-    // observed state (order 0.745, finest err 1.001e-3 at n=64).
-    assert_convergence_order("buoyant_T", &hs, &t_errs, 0.7, 0.1, 1.5e-3);
+    // T converges at second order (observed 2.04, finest err 1.12e-4 at
+    // n=64). It briefly measured 0.75 because the packed-state gradients
+    // kernel keyed grad_state by unknown RANK while the assembly reads by
+    // STATE OFFSET: T (the first solved unknown placed behind aux fields in
+    // the state layout) had its gradient slot never written, silently
+    // degrading its SOU reconstruction to first-order upwind. This test is
+    // the regression guard for that slot-mapping contract.
+    assert_convergence_order("buoyant_T", &hs, &t_errs, 2.0, 0.35, 3.0e-4);
     let p_order = mms_support::fit_order(&hs, &p_errs);
     println!("[mms][buoyant] pressure order {p_order:.3}");
     assert!(
         p_order > 0.9,
         "pressure order regressed: {p_order:.3} (errors {p_errs:?})"
+    );
+}
+
+/// Diagnostic probe: same manufactured problem with NO outlet faces (right
+/// boundary is Inlet type, pressure all-Neumann), plus ring-binned errors
+/// and a host replication of the derived face flux split into its
+/// face-averaged-velocity and Rhie-Chow bracket pieces. Built while chasing
+/// T's first-order regression (root cause: grad_state slot-mapping bug, see
+/// the main test); kept because the flux/ring diagnostics are reusable and
+/// it documents a real secondary observation: the outlet-face Rhie-Chow
+/// closure costs pressure ~0.3 orders (p order 1.36 with an outlet vs 1.64
+/// all-Neumann; the cell-centered grad_p vs one-sided compact difference
+/// mismatch at outlet faces is O(h) on faces where p'' is nonzero).
+#[test]
+#[ignore]
+fn probe_buoyant_no_outlet_t_order() {
+    let mut hs = Vec::new();
+    let mut u_errs = Vec::new();
+    let mut t_errs = Vec::new();
+    let mut p_errs = Vec::new();
+    for n in [8usize, 16, 32, 64] {
+        let sol = solve_steady_with_right(n, Scheme::SecondOrderUpwind, BoundaryType::Inlet);
+        let (mesh, u, p, t) = (&sol.mesh, &sol.u, &sol.p, &sol.t);
+        let u_err = field_errors_vec2(mesh, u, exact_u).l2;
+        let t_err = field_errors(mesh, t, exact_t).l2;
+
+        // Host replication of the derived flux kernel on interior faces,
+        // split into the face-averaged-velocity piece and the Rhie-Chow
+        // pressure bracket, each compared against the exact mass flux.
+        let mut sq_avg = 0.0f64;
+        let mut sq_rc = 0.0f64;
+        let mut sq_gp = 0.0f64;
+        let mut n_int = 0usize;
+        for f in 0..mesh.num_faces() {
+            let Some(nb) = mesh.face_neighbor[f] else {
+                continue;
+            };
+            let o = mesh.face_owner[f];
+            let (mut nx, mut ny) = (mesh.face_nx[f], mesh.face_ny[f]);
+            let (fcx, fcy) = (mesh.face_cx[f], mesh.face_cy[f]);
+            let (ocx, ocy) = (mesh.cell_cx[o], mesh.cell_cy[o]);
+            let (ncx, ncy) = (mesh.cell_cx[nb], mesh.cell_cy[nb]);
+            if (fcx - ocx) * nx + (fcy - ocy) * ny < 0.0 {
+                nx = -nx;
+                ny = -ny;
+            }
+            let d_own = ((fcx - ocx) * nx + (fcy - ocy) * ny).abs();
+            let d_nb = ((ncx - fcx) * nx + (ncy - fcy) * ny).abs();
+            let lam = d_nb / (d_own + d_nb);
+            let lam_o = 1.0 - lam;
+            let dist = ((ncx - ocx) * nx + (ncy - ocy) * ny).abs();
+            let area = mesh.face_area[f];
+            let ubar_n = (lam * u[o].0 + lam_o * u[nb].0) * nx
+                + (lam * u[o].1 + lam_o * u[nb].1) * ny;
+            let gbar_n = (lam * sol.grad_p[o].0 + lam_o * sol.grad_p[nb].0) * nx
+                + (lam * sol.grad_p[o].1 + lam_o * sol.grad_p[nb].1) * ny;
+            let dbar = lam * sol.d_p[o] + lam_o * sol.d_p[nb];
+            let phi_avg = RHO * ubar_n * area;
+            let phi_rc = RHO * dbar * (gbar_n - (p[nb] - p[o]) / dist) * area;
+            let (uex, uey) = exact_u(fcx, fcy);
+            let phi_exact = RHO * (uex * nx + uey * ny) * area;
+            sq_avg += (phi_avg - phi_exact).powi(2);
+            sq_rc += phi_rc * phi_rc;
+            // High-frequency content of the pressure ERROR: face-difference
+            // of e_p over dist (a smooth e_p gives O(e_p); checkerboard
+            // content gives O(e_p / h)).
+            let e_diff = ((p[nb] - exact_p(ncx, ncy)) - (p[o] - exact_p(ocx, ocy))) / dist;
+            sq_gp += e_diff * e_diff;
+            n_int += 1;
+        }
+        let ni = n_int as f64;
+        println!(
+            "[mms][buoyant-no-outlet] n={n} flux_err_avg={:.3e} flux_rc={:.3e} ep_facediff={:.3e}",
+            (sq_avg / ni).sqrt(),
+            (sq_rc / ni).sqrt(),
+            (sq_gp / ni).sqrt()
+        );
+        let p_mean = volume_mean(&mesh, &p);
+        let exact_mean = {
+            let exact: Vec<f64> = (0..mesh.num_cells())
+                .map(|i| exact_p(mesh.cell_cx[i], mesh.cell_cy[i]))
+                .collect();
+            volume_mean(&mesh, &exact)
+        };
+        let p_err = field_errors(&mesh, &p, |x, y| exact_p(x, y) - exact_mean + p_mean).l2;
+        println!("[mms][buoyant-no-outlet] n={n} u_l2={u_err:.4e} t_l2={t_err:.4e} p_l2={p_err:.4e}");
+        let u_linf = field_errors_vec2(&mesh, &u, exact_u).linf;
+        let t_linf = field_errors(&mesh, &t, exact_t).linf;
+        println!("[mms][buoyant-no-outlet] n={n} u_linf={u_linf:.4e} t_linf={t_linf:.4e}");
+        // Ring-binned L2: distance to the nearest boundary in cells.
+        let h = 1.0 / n as f64;
+        let mut ring_t = vec![(0.0f64, 0.0f64); 4];
+        let mut ring_u = vec![(0.0f64, 0.0f64); 4];
+        for i in 0..mesh.num_cells() {
+            let (x, y) = (mesh.cell_cx[i], mesh.cell_cy[i]);
+            let d = x.min(1.0 - x).min(y).min(1.0 - y);
+            let ring = ((d / h - 0.5).round() as usize).min(3);
+            let te = t[i] - exact_t(x, y);
+            let (uex, uey) = exact_u(x, y);
+            let ue2 = (u[i].0 - uex).powi(2) + (u[i].1 - uey).powi(2);
+            ring_t[ring].0 += mesh.cell_vol[i] * te * te;
+            ring_t[ring].1 += mesh.cell_vol[i];
+            ring_u[ring].0 += mesh.cell_vol[i] * ue2;
+            ring_u[ring].1 += mesh.cell_vol[i];
+        }
+        let fmt = |r: &[(f64, f64)]| {
+            r.iter()
+                .map(|(s, v)| format!("{:.3e}", (s / v.max(1e-300)).sqrt()))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        println!(
+            "[mms][buoyant-no-outlet] n={n} t_rings=[{}] u_rings=[{}]",
+            fmt(&ring_t),
+            fmt(&ring_u)
+        );
+        hs.push(1.0 / n as f64);
+        u_errs.push(u_err);
+        t_errs.push(t_err);
+        p_errs.push(p_err);
+    }
+    println!(
+        "[mms][buoyant-no-outlet] orders: u={:.3} T={:.3} p={:.3}",
+        mms_support::fit_order(&hs, &u_errs),
+        mms_support::fit_order(&hs, &t_errs),
+        mms_support::fit_order(&hs, &p_errs)
     );
 }

@@ -649,10 +649,30 @@ pub(crate) fn generate_packed_state_gradients_kernel_program(
                 .map_or(false, |s| s != crate::solver::scheme::Scheme::Upwind)
         })
     });
+    // grad_state is keyed by STATE OFFSET (matching the assembly's
+    // reconstruction reads), so the generator needs each solved unknown's
+    // state offset in equation-declaration (boundary-table rank) order.
+    // Unknown rank == state offset only for models whose unknowns are a
+    // prefix of the state layout; the buoyant model's temperature (behind
+    // d_p/grad_p aux fields) is the counterexample that exposed this.
+    let slots = resolved_slots_from_layout(&model.state_layout);
+    let mut unknown_state_offsets: Vec<u32> = Vec::new();
+    for eq in model.system.equations() {
+        let target = eq.target();
+        let base = resolve_offset_from_slots(&slots, target.name()).ok_or_else(|| {
+            format!(
+                "packed_state_gradients: no state slot for unknown '{}'",
+                target.name()
+            )
+        })?;
+        for comp in 0..target.kind().component_count() {
+            unknown_state_offsets.push(base + comp as u32);
+        }
+    }
     cfd2_codegen::solver::codegen::generate_packed_state_gradients_kernel_program(
         "packed_state_gradients",
         &model.state_layout,
-        model.system.unknowns_per_cell(),
+        &unknown_state_offsets,
         &eos_params,
         !has_declared_high_order,
     )

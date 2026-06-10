@@ -17,19 +17,11 @@ use crate::solver::ir::{
 
 pub fn generate_packed_state_gradients_wgsl(
     layout: &StateLayout,
-    unknown_stride: u32,
+    unknown_state_offsets: &[u32],
     eos_params: &[ParamSpec],
     knob_gated: bool,
 ) -> Result<KernelWgsl, String> {
-    let stride = layout.stride();
-    if unknown_stride == 0 {
-        return Err("packed_state_gradients requires unknown_stride > 0".to_string());
-    }
-    if unknown_stride > stride {
-        return Err(format!(
-            "packed_state_gradients requires unknown_stride ({unknown_stride}) <= state stride ({stride})"
-        ));
-    }
+    validate_unknown_offsets(layout, unknown_state_offsets)?;
 
     let mut module = Module::new();
     module.push(Item::Comment(
@@ -37,8 +29,38 @@ pub fn generate_packed_state_gradients_wgsl(
     ));
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_items(eos_params));
-    module.push(Item::Function(main_fn(layout, unknown_stride, knob_gated)));
+    module.push(Item::Function(main_fn(
+        layout,
+        unknown_state_offsets,
+        knob_gated,
+    )));
     Ok(KernelWgsl::from(module))
+}
+
+/// The `grad_state` buffer is keyed by STATE OFFSET (stride = state stride):
+/// the assembly's reconstruction reads the gradient of unknown `k` at
+/// `cell * stride + state_offset(k)`. The writer must use the same key — and
+/// must read the unknown's VALUES from the same state offset. Boundary
+/// tables, by contrast, are indexed by unknown RANK. For models whose solved
+/// unknowns are a prefix of the state layout the two keys coincide; the
+/// first model with an unknown placed after auxiliary fields (buoyant
+/// temperature at offset 8 behind d_p/grad_p) exposed the writer using rank
+/// where offset was required — its gradient slot was never written and the
+/// reconstruction silently degraded to first-order upwind.
+fn validate_unknown_offsets(
+    layout: &StateLayout,
+    unknown_state_offsets: &[u32],
+) -> Result<(), String> {
+    let stride = layout.stride();
+    if unknown_state_offsets.is_empty() {
+        return Err("packed_state_gradients requires at least one unknown".to_string());
+    }
+    if let Some(&bad) = unknown_state_offsets.iter().find(|&&o| o >= stride) {
+        return Err(format!(
+            "packed_state_gradients: unknown state offset {bad} out of range for state stride {stride}"
+        ));
+    }
+    Ok(())
 }
 
 fn base_items(eos_params: &[ParamSpec]) -> Vec<Item> {
@@ -114,7 +136,7 @@ fn state_bindings() -> Vec<Item> {
     ]
 }
 
-fn main_fn(layout: &StateLayout, unknown_stride: u32, knob_gated: bool) -> Function {
+fn main_fn(layout: &StateLayout, unknown_state_offsets: &[u32], knob_gated: bool) -> Function {
     let params = vec![Param::new(
         "global_id",
         Type::vec3_u32(),
@@ -126,12 +148,12 @@ fn main_fn(layout: &StateLayout, unknown_stride: u32, knob_gated: bool) -> Funct
         params,
         None,
         vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
-        main_body(layout, unknown_stride, knob_gated),
+        main_body(layout, unknown_state_offsets, knob_gated),
     )
 }
 
-fn main_body(layout: &StateLayout, unknown_stride: u32, knob_gated: bool) -> Block {
-    let gradient_stmts = gradient_body_statements(layout, unknown_stride);
+fn main_body(layout: &StateLayout, unknown_state_offsets: &[u32], knob_gated: bool) -> Block {
+    let gradient_stmts = gradient_body_statements(layout, unknown_state_offsets);
 
     let mut stmts = vec![
         dsl::let_expr(
@@ -173,8 +195,9 @@ fn main_body(layout: &StateLayout, unknown_stride: u32, knob_gated: bool) -> Blo
     Block::new(stmts)
 }
 
-fn gradient_body_statements(layout: &StateLayout, unknown_stride: u32) -> Vec<Stmt> {
+fn gradient_body_statements(layout: &StateLayout, unknown_state_offsets: &[u32]) -> Vec<Stmt> {
     let stride = layout.stride();
+    let unknown_stride = unknown_state_offsets.len() as u32;
 
     let mut stmts = vec![
         dsl::let_expr(
@@ -197,7 +220,7 @@ fn gradient_body_statements(layout: &StateLayout, unknown_stride: u32) -> Vec<St
         ),
     ];
 
-    // Accumulators: one vec2 per coupled unknown component.
+    // Accumulators: one vec2 per coupled unknown component (named by rank).
     for component in 0..unknown_stride {
         let var_name = format!("grad_acc_{component}");
         stmts.push(dsl::var_typed_expr(
@@ -333,11 +356,14 @@ fn gradient_body_statements(layout: &StateLayout, unknown_stride: u32) -> Vec<St
             Expr::from(1.0) - Expr::ident("lambda"),
         ));
 
-        for component in 0..unknown_stride {
+        // Values are read at the unknown's STATE OFFSET; boundary tables are
+        // indexed by unknown RANK (`component`).
+        for (component, &state_offset) in unknown_state_offsets.iter().enumerate() {
+            let component = component as u32;
             let cell_val =
-                Expr::ident("state").index(Expr::ident("idx") * stride + Expr::from(component));
+                Expr::ident("state").index(Expr::ident("idx") * stride + Expr::from(state_offset));
             let interior_other = Expr::ident("state")
-                .index(Expr::ident("other_idx") * stride + Expr::from(component));
+                .index(Expr::ident("other_idx") * stride + Expr::from(state_offset));
 
             let bc = BcTable::new(Expr::ident("face_idx"), Expr::from(unknown_stride));
             let from_bc = bc.ghost_value(Expr::from(component), cell_val.clone(), Expr::ident("d_own"));
@@ -367,8 +393,10 @@ fn gradient_body_statements(layout: &StateLayout, unknown_stride: u32) -> Vec<St
         face_loop_body,
     ));
 
-    // Write out gradients (divide by volume) into the packed `grad_state` buffer.
-    for component in 0..unknown_stride {
+    // Write out gradients (divide by volume) into the packed `grad_state`
+    // buffer, keyed by the unknown's STATE OFFSET (the assembly reads the
+    // gradient for unknown k at `cell * stride + state_offset(k)`).
+    for (component, &state_offset) in unknown_state_offsets.iter().enumerate() {
         let acc_name = format!("grad_acc_{component}");
         let grad_vec = typed::VecExpr::<2>::from_expr(Expr::ident(acc_name))
             .mul_scalar(Expr::from(1.0) / dsl::max(Expr::ident("vol"), 1e-12))
@@ -380,7 +408,7 @@ fn gradient_body_statements(layout: &StateLayout, unknown_stride: u32) -> Vec<St
         ));
 
         let out = Expr::ident(format!("grad_out_{component}"));
-        let out_idx = Expr::ident("idx") * stride + Expr::from(component);
+        let out_idx = Expr::ident("idx") * stride + Expr::from(state_offset);
         stmts.push(dsl::assign_expr(
             Expr::ident("grad_state").index(out_idx.clone()).field("x"),
             out.clone().field("x"),
@@ -454,23 +482,15 @@ fn launch_from_gradient_statements(stmts: &[Stmt]) -> Result<(LaunchSemantics, u
 pub fn generate_packed_state_gradients_kernel_program(
     id: &str,
     layout: &StateLayout,
-    unknown_stride: u32,
+    unknown_state_offsets: &[u32],
     eos_params: &[ParamSpec],
     knob_gated: bool,
 ) -> Result<KernelProgram, String> {
-    let stride = layout.stride();
-    if unknown_stride == 0 {
-        return Err("packed_state_gradients requires unknown_stride > 0".to_string());
-    }
-    if unknown_stride > stride {
-        return Err(format!(
-            "packed_state_gradients requires unknown_stride ({unknown_stride}) <= state stride ({stride})"
-        ));
-    }
+    validate_unknown_offsets(layout, unknown_state_offsets)?;
 
     let items = base_items(eos_params);
     let bindings = kernel_bindings_from_items(&items)?;
-    let main = main_fn(layout, unknown_stride, knob_gated);
+    let main = main_fn(layout, unknown_state_offsets, knob_gated);
     let (launch, consumed_stmts) = launch_from_gradient_statements(&main.body.stmts)?;
     let kernel_stmts = &main.body.stmts[consumed_stmts..];
 

@@ -4,7 +4,7 @@ use super::coupled_common::{
     kernel_bindings_from_items,
 };
 use super::dsl as typed;
-use super::state_access::state_component_slot;
+use super::state_access::{find_slot, state_component_slot};
 use super::wgsl_ast::{
     AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt, Type,
 };
@@ -14,7 +14,9 @@ use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
 use crate::solver::codegen::reconstruction::scalar_reconstruction;
 use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::ir::ports::{ParamSpec, ResolvedStateSlotsSpec};
-use crate::solver::ir::{Discretization, DispatchDomain, KernelProgram, LaunchSemantics, TermOp};
+use crate::solver::ir::{
+    Coefficient, Discretization, DispatchDomain, FieldKind, KernelProgram, LaunchSemantics, TermOp,
+};
 use crate::solver::scheme::Scheme;
 
 const UNIFIED_ASSEMBLY_WORKGROUP_SIZE: u32 = 64;
@@ -294,12 +296,12 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                 .get(equation.target.name())
                 .expect("missing target offset");
 
-            let val = coefficient_value_expr(slots, source_op.coeff.as_ref(), "idx", 0.0.into());
-            let term = val * Expr::ident("vol");
-
             let field_name = source_op.field.name();
             let field_offset_opt = offsets.get(field_name).copied();
             if source_op.discretization == Discretization::Implicit {
+                let val =
+                    coefficient_value_expr(slots, source_op.coeff.as_ref(), "idx", 0.0.into());
+                let term = val * Expr::ident("vol");
                 if source_op.field.kind() != equation.target.kind() {
                     panic!(
                         "implicit source currently requires field.kind == target.kind (target={}, field={})",
@@ -338,10 +340,56 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     }
                 }
             } else {
-                // RHS += term.
-                for component in 0..equation.target.kind().component_count() as u32 {
-                    let u_idx = base_offset + component;
-                    stmts.push(acc.add_rhs(u_idx, term.clone()));
+                // Explicit source: RHS += value * vol, per target component.
+                //
+                // Vector targets need per-component source values: a plain
+                // vector-field coefficient of the target's kind is read
+                // component-wise. Broadcasting one scalar into every
+                // component is almost always a declaration bug (it produced
+                // identical x/y sources), so it is rejected.
+                let target_kind = equation.target.kind();
+                let vector_source = match source_op.coeff.as_ref() {
+                    Some(Coefficient::Field(f))
+                        if f.kind() == target_kind && f.kind() != FieldKind::Scalar =>
+                    {
+                        Some(*f)
+                    }
+                    _ => None,
+                };
+                if let Some(source_field) = vector_source {
+                    let slot =
+                        find_slot(slots, source_field.name()).unwrap_or_else(|| {
+                            panic!(
+                                "explicit vector source '{}' is not in the state layout",
+                                source_field.name()
+                            )
+                        });
+                    for component in 0..target_kind.component_count() as u32 {
+                        let u_idx = base_offset + component;
+                        let value = state_component_slot(
+                            slots.stride,
+                            "state",
+                            "idx",
+                            slot,
+                            component,
+                        );
+                        stmts.push(acc.add_rhs(u_idx, value * Expr::ident("vol")));
+                    }
+                } else if target_kind.component_count() > 1 {
+                    panic!(
+                        "explicit source on vector target '{}' requires a vector-field \
+                         coefficient of matching kind (per-component values); scalar \
+                         broadcast is not supported",
+                        equation.target.name()
+                    );
+                } else {
+                    let val = coefficient_value_expr(
+                        slots,
+                        source_op.coeff.as_ref(),
+                        "idx",
+                        0.0.into(),
+                    );
+                    stmts.push(acc.add_rhs(base_offset, val * Expr::ident("vol")));
                 }
             }
         }

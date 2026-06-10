@@ -744,6 +744,29 @@ pub mod typed_fvc {
             _dim: PhantomData,
         }
     }
+
+    /// Explicit per-component source from a vector field.
+    ///
+    /// Each component of `source` contributes `source_c * V` to the matching
+    /// component of `target`'s RHS (the kinds must match; assembly reads the
+    /// source field component-wise). This is the vector-equation counterpart
+    /// of `source_coeff` with a field coefficient — a scalar coefficient on a
+    /// vector target would otherwise be broadcast, which assembly rejects.
+    pub fn source_vector<SourceD: UnitDimension, TargetD: UnitDimension, K: Kind>(
+        source: TypedFieldRef<SourceD, K>,
+        target: TypedFieldRef<TargetD, K>,
+    ) -> TypedTerm<SourceExplicitUnit<SourceD>> {
+        TypedTerm {
+            inner: Term::new(
+                TermOp::Source,
+                Discretization::Explicit,
+                target.to_untyped(),
+                None,
+                Some(Coefficient::Field(source.to_untyped())),
+            ),
+            _dim: PhantomData,
+        }
+    }
 }
 
 // ============================================================================
@@ -774,6 +797,24 @@ mod tests {
         assert_eq!(untyped.name(), "phi");
         assert_eq!(untyped.kind(), FieldKind::Scalar);
         assert_eq!(untyped.unit(), si::MASS_FLUX);
+    }
+
+    #[test]
+    fn source_vector_builds_explicit_term_with_vector_field_coefficient() {
+        // Per-component explicit source: the coefficient carries the vector
+        // source field; assembly reads it component-wise.
+        let src = TypedFieldRef::<Force, Vector2>::new("mms_src_U");
+        let u = TypedFieldRef::<Velocity, Vector2>::new("U");
+        let term = typed_fvc::source_vector(src, u).to_untyped();
+
+        assert_eq!(term.op, TermOp::Source);
+        assert_eq!(term.discretization, Discretization::Explicit);
+        assert_eq!(term.field.name(), "U");
+        let Some(Coefficient::Field(f)) = term.coeff else {
+            panic!("expected vector-field coefficient");
+        };
+        assert_eq!(f.name(), "mms_src_U");
+        assert_eq!(f.kind(), FieldKind::Vector2);
     }
 
     #[test]

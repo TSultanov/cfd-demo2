@@ -48,7 +48,7 @@ use super::ast::{
     Coefficient, Discretization, Equation, EquationSystem, FieldKind, FieldRef, Term, TermOp,
 };
 use super::typed_ast::{Kind, Scalar, TypedFieldRef};
-use crate::dimensions::{Dimensionless, InvTime, MulDim, UnitDimension};
+use crate::dimensions::{Dimensionless, DivDim, InvTime, MulDim, UnitDimension};
 
 // `UnitDim` is the runtime unit representation; reachable in both compilation
 // contexts through the `dimensions` re-export.
@@ -99,6 +99,11 @@ pub enum AlgExpr {
     /// evaluated from the current state (frozen), like `Coefficient::MagSqr`.
     MagSqr(FieldRef),
     Mul(Box<AlgExpr>, Box<AlgExpr>),
+    /// Division. Supported by face-expression lowering (e.g. wave-speed
+    /// declarations consumed by flux derivation); REJECTED by the affine
+    /// coupled-row lowering (`lower_algebraic_equation`), which requires
+    /// clearing denominators in the declaration instead.
+    Div(Box<AlgExpr>, Box<AlgExpr>),
     Add(Box<AlgExpr>, Box<AlgExpr>),
     Sub(Box<AlgExpr>, Box<AlgExpr>),
     Neg(Box<AlgExpr>),
@@ -209,6 +214,12 @@ fn flatten_product(
         AlgExpr::Add(..) | AlgExpr::Sub(..) => Err(
             "non-affine algebraic expression: sum nested inside a product; \
              distribute the product over the sum in the declaration"
+                .to_string(),
+        ),
+        AlgExpr::Div(..) => Err(
+            "non-affine algebraic expression: division is not supported in coupled-row \
+             lowering; clear the denominator in the declaration (e.g. declare rho*u = rho_u \
+             instead of u = rho_u/rho)"
                 .to_string(),
         ),
     }
@@ -566,6 +577,19 @@ where
     }
 }
 
+impl<D1, D2, K> std::ops::Div<TypedAlgExpr<D2, Scalar>> for TypedAlgExpr<D1, K>
+where
+    D1: UnitDimension,
+    D2: UnitDimension,
+    K: Kind,
+{
+    type Output = TypedAlgExpr<DivDim<D1, D2>, K>;
+
+    fn div(self, rhs: TypedAlgExpr<D2, Scalar>) -> Self::Output {
+        TypedAlgExpr::wrap(AlgExpr::Div(Box::new(self.inner), Box::new(rhs.inner)))
+    }
+}
+
 impl<D: UnitDimension, K: Kind> std::ops::Add for TypedAlgExpr<D, K> {
     type Output = TypedAlgExpr<D, K>;
 
@@ -774,6 +798,25 @@ mod tests {
             Box::new(Coefficient::Field(inv_dt_field())),
         );
         assert_eq!(terms[1].coeff.as_ref(), Some(&expected));
+    }
+
+    #[test]
+    fn rejects_division_in_coupled_row_lowering() {
+        // u = rho_u / rho must be declared with the denominator cleared
+        // (rho * u = rho_u); Div is only for face-expression declarations.
+        let rho_f = vol_scalar_dim::<Density>("rho");
+        let u_f = vol_vector_dim::<Velocity>("u");
+        let rho_u_f = vol_vector_dim::<MomentumDensity>("rho_u");
+        let bad = AlgebraicEquation {
+            target: u_f,
+            lhs: AlgExpr::Field(u_f),
+            rhs: AlgExpr::Div(
+                Box::new(AlgExpr::Field(rho_u_f)),
+                Box::new(AlgExpr::Field(rho_f)),
+            ),
+        };
+        let err = lower_algebraic_equation(&bad, &[rho_f, rho_u_f]).unwrap_err();
+        assert!(err.contains("clear the denominator"), "{err}");
     }
 
     #[test]

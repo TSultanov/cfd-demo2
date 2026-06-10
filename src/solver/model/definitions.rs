@@ -652,8 +652,9 @@ mod scalar_transport;
 
 #[allow(unused_imports)]
 pub use compressible::{
-    compressible_model, compressible_model_with_eos, compressible_system,
-    compressible_wave_speed_sq, CompressibleFields,
+    compressible_central_upwind_decl, compressible_generalized_wave_speed_sq, compressible_model,
+    compressible_model_with_eos, compressible_system, compressible_wave_speed_sq,
+    CompressibleFields,
 };
 #[allow(unused_imports)]
 pub use generic_diffusion_demo::{
@@ -796,7 +797,9 @@ mod tests {
 
         let with_gradients = crate::solver::model::FluxModuleSpec::Scheme {
             gradients: Some(FluxModuleGradientsSpec::FromStateLayout),
-            scheme: FluxSchemeSpec::EulerCentralUpwind,
+            scheme: FluxSchemeSpec::CentralUpwind(
+                compressible::compressible_central_upwind_decl(),
+            ),
         };
 
         // Now that gradient targets are resolved at module creation time,

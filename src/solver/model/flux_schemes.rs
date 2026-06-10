@@ -1,6 +1,7 @@
 use crate::solver::ir::{
     FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec, LimiterSpec,
 };
+use crate::solver::model::backend::algebraic::AlgExpr;
 use crate::solver::model::backend::ast::EquationSystem;
 use crate::solver::model::flux_module::FluxSchemeSpec;
 use crate::solver::scheme::Scheme;
@@ -9,18 +10,80 @@ use crate::solver::ir::reconstruction::{
     limited_linear_face_value, quick_face_value, FaceExprBuilder,
 };
 
+/// Declaration of a compressible conservation system for the central-upwind
+/// (Kurganov-style) flux derivation: which state fields play which role,
+/// plus the EOS relations as algebraic expressions. The derivation supplies
+/// the numerics (reconstruction schemes, Kurganov wave splitting, low-Mach
+/// preconditioning, OpenFOAM-matching viscous corrections); the declaration
+/// supplies the physics.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CentralUpwindDecl {
+    /// Conserved density field.
+    pub density: &'static str,
+    /// Conserved momentum-density field (Vector2).
+    pub momentum: &'static str,
+    /// Conserved total-energy-density field.
+    pub energy: &'static str,
+    /// Primitive temperature field (drives acoustic reconstruction).
+    pub temperature: &'static str,
+    /// Primitive velocity field (Vector2).
+    pub velocity: &'static str,
+    /// Primitive pressure field (named by the generalized wave speed).
+    pub pressure_field: &'static str,
+    /// Face pressure from reconstructed primitives; atoms: `density`,
+    /// `temperature` fields (e.g. `rho * R * T`).
+    pub pressure: AlgExpr,
+    /// Squared acoustic speed for the Kurganov wave bounds; atom:
+    /// `temperature` field (e.g. `gamma * R * T`).
+    pub wave_speed_sq: AlgExpr,
+    /// Generalized squared wave speed for low-Mach dissipation scaling;
+    /// atoms: `pressure_field` (mapped to the reconstructed face pressure)
+    /// and `density` (e.g. `gamma * p / rho + dp_drho`).
+    pub generalized_wave_speed_sq: AlgExpr,
+}
+
+/// Lower a (cell-)algebraic expression to a face expression by mapping its
+/// field atoms through `map_field` (typically to reconstructed face states
+/// of a chosen side). Params become uniform constants; `mag_sqr` has no
+/// face-expression counterpart.
+fn lower_alg_to_face(
+    expr: &AlgExpr,
+    map_field: &dyn Fn(&str) -> Result<S, String>,
+) -> Result<S, String> {
+    let rec = |e: &AlgExpr| lower_alg_to_face(e, map_field);
+    Ok(match expr {
+        AlgExpr::Constant { value, .. } => S::lit(*value as f32),
+        AlgExpr::Param(p) => S::constant(p.name()),
+        AlgExpr::Field(f) => map_field(f.name())?,
+        AlgExpr::MagSqr(f) => {
+            return Err(format!(
+                "mag_sqr({}) is not supported in face-expression lowering",
+                f.name()
+            ))
+        }
+        AlgExpr::Mul(a, b) => S::Mul(Box::new(rec(a)?), Box::new(rec(b)?)),
+        AlgExpr::Div(a, b) => S::Div(Box::new(rec(a)?), Box::new(rec(b)?)),
+        AlgExpr::Add(a, b) => S::Add(Box::new(rec(a)?), Box::new(rec(b)?)),
+        AlgExpr::Sub(a, b) => S::Sub(Box::new(rec(a)?), Box::new(rec(b)?)),
+        AlgExpr::Neg(a) => S::Neg(Box::new(rec(a)?)),
+    })
+}
+
 pub fn lower_flux_scheme(
     flux_scheme: &FluxSchemeSpec,
     system: &EquationSystem,
     reconstruction: Scheme,
 ) -> Result<FluxModuleKernelSpec, String> {
-    match *flux_scheme {
-        FluxSchemeSpec::EulerCentralUpwind => euler_central_upwind(system, reconstruction),
+    match flux_scheme {
+        FluxSchemeSpec::CentralUpwind(decl) => {
+            derive_central_upwind(system, decl, reconstruction)
+        }
     }
 }
 
-fn euler_central_upwind(
+fn derive_central_upwind(
     system: &EquationSystem,
+    decl: &CentralUpwindDecl,
     reconstruction: Scheme,
 ) -> Result<FluxModuleKernelSpec, String> {
     let flux_layout = FluxLayout::from_system(system);
@@ -33,10 +96,10 @@ fn euler_central_upwind(
     let ex = V::vec2(S::lit(1.0), S::lit(0.0));
     let ey = V::vec2(S::lit(0.0), S::lit(1.0));
 
-    // Conventional compressible field names (model-side convention).
-    let rho_name = "rho";
-    let rho_u_name = "rho_u";
-    let rho_e_name = "rho_e";
+    // Field roles from the declaration.
+    let rho_name = decl.density;
+    let rho_u_name = decl.momentum;
+    let rho_e_name = decl.energy;
 
     let other_side = |side: FaceSide| {
         if side == FaceSide::Owner {
@@ -85,7 +148,15 @@ fn euler_central_upwind(
     };
 
     let rho_raw = |side: FaceSide| S::state(side, rho_name);
-    let t_raw = |side: FaceSide| S::state(side, "T");
+    let t_raw = |side: FaceSide| S::state(side, decl.temperature);
+
+    // Derived gradient-field names (state-layout convention: `grad_<field>`).
+    let grad_rho_name = format!("grad_{}", rho_name);
+    let grad_t_name = format!("grad_{}", decl.temperature);
+    let grad_rho_u_x_name = format!("grad_{}_x", rho_u_name);
+    let grad_rho_u_y_name = format!("grad_{}_y", rho_u_name);
+    let grad_u_x_name = format!("grad_{}_x", decl.velocity);
+    let grad_u_y_name = format!("grad_{}_y", decl.velocity);
 
     // OpenFOAM's `vanLeer` / `vanLeerV` reconstruction (as used by rhoCentralFoam) is an NVD/TVD
     // limited interpolation that blends between central differencing and upwind, driven by a
@@ -201,14 +272,14 @@ fn euler_central_upwind(
             side,
             rho_raw(FaceSide::Owner),
             rho_raw(FaceSide::Neighbor),
-            V::state_vec2(FaceSide::Owner, "grad_rho"),
-            V::state_vec2(FaceSide::Neighbor, "grad_rho"),
+            V::state_vec2(FaceSide::Owner, grad_rho_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_rho_name.clone()),
         ),
         _ => reconstruct_scalar(
             side,
             rho_raw(side),
             rho_raw(other_side(side)),
-            V::state_vec2(side, "grad_rho"),
+            V::state_vec2(side, grad_rho_name.clone()),
         ),
     };
 
@@ -217,14 +288,14 @@ fn euler_central_upwind(
             side,
             t_raw(FaceSide::Owner),
             t_raw(FaceSide::Neighbor),
-            V::state_vec2(FaceSide::Owner, "grad_T"),
-            V::state_vec2(FaceSide::Neighbor, "grad_T"),
+            V::state_vec2(FaceSide::Owner, grad_t_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_t_name.clone()),
         ),
         _ => reconstruct_scalar(
             side,
             t_raw(side),
             t_raw(other_side(side)),
-            V::state_vec2(side, "grad_T"),
+            V::state_vec2(side, grad_t_name.clone()),
         ),
     };
 
@@ -235,10 +306,10 @@ fn euler_central_upwind(
             side,
             V::state_vec2(FaceSide::Owner, rho_u_name),
             V::state_vec2(FaceSide::Neighbor, rho_u_name),
-            V::state_vec2(FaceSide::Owner, "grad_rho_u_x"),
-            V::state_vec2(FaceSide::Owner, "grad_rho_u_y"),
-            V::state_vec2(FaceSide::Neighbor, "grad_rho_u_x"),
-            V::state_vec2(FaceSide::Neighbor, "grad_rho_u_y"),
+            V::state_vec2(FaceSide::Owner, grad_rho_u_x_name.clone()),
+            V::state_vec2(FaceSide::Owner, grad_rho_u_y_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_rho_u_x_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_rho_u_y_name.clone()),
         ),
         _ => {
             let rho_u_owner = V::state_vec2(side, rho_u_name);
@@ -247,13 +318,13 @@ fn euler_central_upwind(
                 side,
                 S::Dot(Box::new(rho_u_owner.clone()), Box::new(ex.clone())),
                 S::Dot(Box::new(rho_u_other.clone()), Box::new(ex.clone())),
-                V::state_vec2(side, "grad_rho_u_x"),
+                V::state_vec2(side, grad_rho_u_x_name.clone()),
             );
             let y = reconstruct_scalar(
                 side,
                 S::Dot(Box::new(rho_u_owner), Box::new(ey.clone())),
                 S::Dot(Box::new(rho_u_other), Box::new(ey.clone())),
-                V::state_vec2(side, "grad_rho_u_y"),
+                V::state_vec2(side, grad_rho_u_y_name.clone()),
             );
             V::vec2(x, y)
         }
@@ -264,33 +335,63 @@ fn euler_central_upwind(
         V::MulScalar(Box::new(rho_u(side)), Box::new(inv_rho))
     };
 
-    // Ideal-gas pressure from reconstructed rho and T: p = rho * R * T.
-    // (For barotropic closures, the model still enforces p = rho * R * T via the temperature
-    // recovery constraint, so this remains consistent.)
+    // Face pressure over reconstructed primitives, from the declared EOS
+    // relation (atoms: density -> rho(side), temperature -> t(side)).
+    // (For barotropic closures, the model still enforces the declared
+    // relation via the temperature recovery constraint, so this remains
+    // consistent.)
+    let p_lowered = |side: FaceSide| -> Result<S, String> {
+        lower_alg_to_face(&decl.pressure, &|name| {
+            if name == rho_name {
+                Ok(rho(side))
+            } else if name == decl.temperature {
+                Ok(t(side))
+            } else {
+                Err(format!(
+                    "pressure declaration references '{name}', expected only '{}' or '{}'",
+                    rho_name, decl.temperature
+                ))
+            }
+        })
+    };
+    let p_own = p_lowered(FaceSide::Owner)?;
+    let p_neigh = p_lowered(FaceSide::Neighbor)?;
     let p = |side: FaceSide| {
-        S::Mul(
-            Box::new(S::Mul(Box::new(rho(side)), Box::new(S::constant("eos_r")))),
-            Box::new(t(side)),
-        )
+        if side == FaceSide::Owner {
+            p_own.clone()
+        } else {
+            p_neigh.clone()
+        }
     };
 
     let rho_u_x = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ex.clone()));
     let rho_u_y = |side: FaceSide| S::Dot(Box::new(rho_u(side)), Box::new(ey.clone()));
 
+    // Generalized squared wave speed over reconstructed states, from the
+    // declaration (atoms: pressure_field -> p(side), density -> rho(side)).
+    let c2_lowered = |side: FaceSide| -> Result<S, String> {
+        lower_alg_to_face(&decl.generalized_wave_speed_sq, &|name| {
+            if name == decl.pressure_field {
+                Ok(p(side))
+            } else if name == rho_name {
+                Ok(rho(side))
+            } else {
+                Err(format!(
+                    "generalized wave-speed declaration references '{name}', expected only \
+                     '{}' or '{}'",
+                    decl.pressure_field, rho_name
+                ))
+            }
+        })
+    };
+    let c2_own = c2_lowered(FaceSide::Owner)?;
+    let c2_neigh = c2_lowered(FaceSide::Neighbor)?;
     let c2 = |side: FaceSide| {
-        // Generalized wave speed:
-        //   c^2 = gamma * p / rho + dp_drho
-        // where dp_drho is nonzero for barotropic closures (e.g. linear compressibility).
-        S::Add(
-            Box::new(S::Div(
-                Box::new(S::Mul(
-                    Box::new(S::constant("eos_gamma")),
-                    Box::new(p(side)),
-                )),
-                Box::new(rho(side)),
-            )),
-            Box::new(S::constant("eos_dp_drho")),
-        )
+        if side == FaceSide::Owner {
+            c2_own.clone()
+        } else {
+            c2_neigh.clone()
+        }
     };
 
     // Low-Mach preconditioning should be driven by a representative local Mach number.
@@ -429,12 +530,12 @@ fn euler_central_upwind(
     // boundary semantics for reconstruction. Flip the lerp order so boundary faces default
     // to the owner-cell gradient (while interior faces remain unchanged on our symmetric meshes).
     let grad_u_x_face_raw = V::Lerp(
-        Box::new(V::state_vec2(FaceSide::Neighbor, "grad_u_x")),
-        Box::new(V::state_vec2(FaceSide::Owner, "grad_u_x")),
+        Box::new(V::state_vec2(FaceSide::Neighbor, grad_u_x_name.clone())),
+        Box::new(V::state_vec2(FaceSide::Owner, grad_u_x_name.clone())),
     );
     let grad_u_y_face_raw = V::Lerp(
-        Box::new(V::state_vec2(FaceSide::Neighbor, "grad_u_y")),
-        Box::new(V::state_vec2(FaceSide::Owner, "grad_u_y")),
+        Box::new(V::state_vec2(FaceSide::Neighbor, grad_u_y_name.clone())),
+        Box::new(V::state_vec2(FaceSide::Owner, grad_u_y_name.clone())),
     );
 
     // Match OpenFOAM's Gauss gradient boundary correction.
@@ -449,8 +550,8 @@ fn euler_central_upwind(
     let is_boundary = S::is_boundary();
     let dist_safe = S::Max(Box::new(S::dist()), Box::new(S::lit(1e-6)));
 
-    let u_face = V::state_vec2(FaceSide::Owner, "u");
-    let u_cell = V::cell_state_vec2(FaceSide::Owner, "u");
+    let u_face = V::state_vec2(FaceSide::Owner, decl.velocity);
+    let u_cell = V::cell_state_vec2(FaceSide::Owner, decl.velocity);
     let u_face_x = S::Dot(Box::new(u_face.clone()), Box::new(ex.clone()));
     let u_face_y = S::Dot(Box::new(u_face), Box::new(ey.clone()));
     let u_cell_x = S::Dot(Box::new(u_cell.clone()), Box::new(ex.clone()));
@@ -509,8 +610,8 @@ fn euler_central_upwind(
     // faces and then contracts with Sf. Mirror that by building tauMC from each side's stored
     // cell gradient and linearly interpolating the resulting traction.
     let tau_mc_dot_n_components = |side: FaceSide| {
-        let grad_u_x_side = V::state_vec2(side, "grad_u_x");
-        let grad_u_y_side = V::state_vec2(side, "grad_u_y");
+        let grad_u_x_side = V::state_vec2(side, grad_u_x_name.clone());
+        let grad_u_y_side = V::state_vec2(side, grad_u_y_name.clone());
 
         let dux_dx_s = S::Dot(Box::new(grad_u_x_side.clone()), Box::new(ex.clone()));
         let dux_dy_s = S::Dot(Box::new(grad_u_x_side), Box::new(ey.clone()));
@@ -585,19 +686,38 @@ fn euler_central_upwind(
     // Match OpenFOAM: reconstruct the acoustic speed `c` as a scalar field using the same
     // `reconstruct(T)` scheme (vanLeer) and then multiply by `magSf`.
     //
-    // For a perfect gas with constant gamma and R:
-    //   c = sqrt(gamma * R * T)
-    // and:
-    //   grad(c) = 0.5 * (gamma * R / c) * grad(T)
-    let c_cell = |side: FaceSide| {
-        S::Sqrt(Box::new(S::Mul(
-            Box::new(S::Mul(
-                Box::new(S::constant("eos_gamma")),
-                Box::new(S::constant("eos_r")),
-            )),
-            Box::new(t_raw(side)),
-        )))
+    // `c = sqrt(declared wave_speed_sq)` over raw cell temperatures
+    // (atom: temperature -> t_raw(side)).
+    let c_cell_lowered = |side: FaceSide| -> Result<S, String> {
+        Ok(S::Sqrt(Box::new(lower_alg_to_face(
+            &decl.wave_speed_sq,
+            &|name| {
+                if name == decl.temperature {
+                    Ok(t_raw(side))
+                } else {
+                    Err(format!(
+                        "wave-speed declaration references '{name}', expected only '{}'",
+                        decl.temperature
+                    ))
+                }
+            },
+        )?)))
     };
+    let c_cell_own = c_cell_lowered(FaceSide::Owner)?;
+    let c_cell_neigh = c_cell_lowered(FaceSide::Neighbor)?;
+    let c_cell = |side: FaceSide| {
+        if side == FaceSide::Owner {
+            c_cell_own.clone()
+        } else {
+            c_cell_neigh.clone()
+        }
+    };
+    // Analytic gradient of the ideal-gas acoustic speed:
+    //   grad(c) = 0.5 * (gamma * R / c) * grad(T)
+    // This is d(sqrt(wave_speed_sq))/dT for the declared `gamma*R*T` form and
+    // is only used to drive vanLeer reconstruction of `c`. A non-ideal-gas
+    // wave-speed declaration would need its own gradient form here (no
+    // symbolic differentiation by design).
     let grad_c = |side: FaceSide| {
         let denom = S::Max(Box::new(c_cell(side)), Box::new(S::lit(1e-12)));
         let factor = S::Div(
@@ -610,7 +730,7 @@ fn euler_central_upwind(
             )),
             Box::new(denom),
         );
-        V::MulScalar(Box::new(V::state_vec2(side, "grad_T")), Box::new(factor))
+        V::MulScalar(Box::new(V::state_vec2(side, grad_t_name.clone())), Box::new(factor))
     };
     let c_face_raw = |side: FaceSide| match reconstruction {
         Scheme::SecondOrderUpwindVanLeer => reconstruct_vanleer_scalar(

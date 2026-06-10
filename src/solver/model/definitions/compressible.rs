@@ -73,13 +73,51 @@ const EOS_P_OFFSET: TypedParamRef<Pressure> = TypedParamRef::new("eos_p_offset")
 
 /// Declared squared sound speed of the linearized EOS: `c^2 = gamma * R * T`.
 ///
-/// This is the wave-speed bound the central-upwind flux uses (the generated
-/// flux module computes `sqrt(eos_gamma * eos_r * T)`); the derived-flux work
-/// (Phase 2C) consumes this declaration instead of hardcoding the formula.
+/// The central-upwind flux derivation lowers this to the acoustic speed used
+/// in the Kurganov wave bounds (`sqrt(gamma * R * T)` over cell temperatures).
 pub fn compressible_wave_speed_sq() -> TypedAlgExpr<MulDim<Velocity, Velocity>, Scalar> {
     let t_typed = TypedFieldRef::<Temperature, Scalar>::new("T");
     (typed_alg::param(EOS_GAMMA) * typed_alg::param(EOS_R) * typed_alg::field(t_typed))
         .cast_to::<MulDim<Velocity, Velocity>>()
+}
+
+/// Declared generalized squared wave speed: `c^2 = gamma * p / rho + dp_drho`.
+///
+/// The `dp_drho` term covers barotropic closures (linear compressibility);
+/// it is zero for an ideal gas. The flux derivation evaluates this over
+/// reconstructed face states for low-Mach dissipation scaling.
+pub fn compressible_generalized_wave_speed_sq(
+) -> TypedAlgExpr<DivDim<Pressure, Density>, Scalar> {
+    let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
+    let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
+    ((typed_alg::param(EOS_GAMMA) * typed_alg::field(p_typed)) / typed_alg::field(rho_typed))
+        .cast_to::<DivDim<Pressure, Density>>()
+        + typed_alg::param(EOS_DP_DRHO)
+}
+
+/// Central-upwind flux declaration for this model: which fields play which
+/// conserved/primitive role, plus the EOS relations as math. The face
+/// pressure relation `rho * R * T` is the same algebra as the temperature
+/// recovery row (`rho * R * T = p`), declared here in the direction the flux
+/// needs it.
+pub fn compressible_central_upwind_decl() -> crate::solver::model::flux_schemes::CentralUpwindDecl
+{
+    let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
+    let t_typed = TypedFieldRef::<Temperature, Scalar>::new("T");
+    crate::solver::model::flux_schemes::CentralUpwindDecl {
+        density: "rho",
+        momentum: "rho_u",
+        energy: "rho_e",
+        temperature: "T",
+        velocity: "u",
+        pressure_field: "p",
+        pressure: (typed_alg::field(rho_typed) * typed_alg::param(EOS_R)
+            * typed_alg::field(t_typed))
+        .cast_to::<Pressure>()
+        .to_untyped(),
+        wave_speed_sq: compressible_wave_speed_sq().to_untyped(),
+        generalized_wave_speed_sq: compressible_generalized_wave_speed_sq().to_untyped(),
+    }
 }
 
 fn build_compressible_system(_fields: &CompressibleFields) -> EquationSystem {
@@ -540,7 +578,9 @@ pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> R
         gradients: Some(
             crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout,
         ),
-        scheme: crate::solver::model::flux_module::FluxSchemeSpec::EulerCentralUpwind,
+        scheme: crate::solver::model::flux_module::FluxSchemeSpec::CentralUpwind(
+            compressible_central_upwind_decl(),
+        ),
     };
     let primitives = crate::solver::model::primitives::PrimitiveDerivations::identity();
 

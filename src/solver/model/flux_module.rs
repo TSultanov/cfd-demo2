@@ -39,8 +39,9 @@ pub enum FluxModuleSpec {
 /// Named flux schemes (solver-side, model/PDE-aware lowering).
 #[derive(Debug, Clone, PartialEq)]
 pub enum FluxSchemeSpec {
-    /// Central-upwind (KT-style) Euler flux for an ideal gas.
-    EulerCentralUpwind,
+    /// Central-upwind (KT-style) conservative flux, derived from the model's
+    /// declaration of conserved-field roles and EOS expressions.
+    CentralUpwind(crate::solver::model::flux_schemes::CentralUpwindDecl),
 }
 
 /// Gradients stage spec for flux modules.

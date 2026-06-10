@@ -105,6 +105,15 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     solver.initialize_history();
 
     // Match OpenFOAM reference: 300 steps to reach t=0.003s
+    // Time classification (numerics-honesty record): this case is compared
+    // TIME-ACCURATELY (dtau=0, BDF2, dt=1e-5) at t=0.003s against explicit
+    // rhoCentralFoam during the impulsive-lid startup transient. The ~60%
+    // max-cell u mismatch (near the lid corner, u_scale ~0.137 m/s) is a
+    // formulation difference in the startup acoustics, not convergence
+    // sloppiness: re-running with outer_iters=4 (fully converging each BDF2
+    // step) moves it 59.8% -> 60.3% at the same cell. Tightening this band
+    // requires a later, less formulation-sensitive reference time (needs
+    // regenerated OpenFOAM data), not solver work.
     let mut scorecard = common::CrutchScorecard::new("compressible_lid", &solver);
     for _ in 0..300 {
         solver.step();

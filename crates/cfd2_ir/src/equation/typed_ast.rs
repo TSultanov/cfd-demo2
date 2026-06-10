@@ -220,6 +220,14 @@ impl<D: UnitDimension> TypedTerm<D> {
         self.inner.clone()
     }
 
+    /// Declare the discretization scheme for this term as part of the model's
+    /// math declaration. Takes precedence over the registry default and the
+    /// runtime scheme knob (codegen bakes the declared scheme as a literal).
+    pub fn scheme(mut self, scheme: crate::scheme::Scheme) -> Self {
+        self.inner = self.inner.with_scheme(scheme);
+        self
+    }
+
     /// Create an equation from this single term.
     ///
     /// The target field is the unknown being solved for. Its dimension can be

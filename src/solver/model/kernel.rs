@@ -635,11 +635,25 @@ pub(crate) fn generate_packed_state_gradients_kernel_program(
     _schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<crate::solver::ir::KernelProgram, String> {
     let eos_params = extract_eos_params(model);
+    // When a convection term declares a non-upwind scheme, the gradients are needed
+    // unconditionally: the "skip when the runtime knob says Upwind" guard must not be
+    // emitted (the declared scheme is baked into the assembly and ignores the knob).
+    let has_declared_high_order = model.system.equations().iter().any(|eq| {
+        eq.terms().iter().any(|t| {
+            matches!(
+                t.op,
+                crate::solver::ir::TermOp::Div | crate::solver::ir::TermOp::DivFlux
+            ) && t
+                .scheme
+                .map_or(false, |s| s != crate::solver::scheme::Scheme::Upwind)
+        })
+    });
     cfd2_codegen::solver::codegen::generate_packed_state_gradients_kernel_program(
         "packed_state_gradients",
         &model.state_layout,
         model.system.unknowns_per_cell(),
         &eos_params,
+        !has_declared_high_order,
     )
 }
 

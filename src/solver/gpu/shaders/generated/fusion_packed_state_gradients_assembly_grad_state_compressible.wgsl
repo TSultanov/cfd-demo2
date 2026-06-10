@@ -59,86 +59,85 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (idx >= arrayLength(&cell_vols)) { return; }
     // synthesized by fusion rule: generic_coupled:gradients_assembly_grad_state_v1
     // begin fused segment: packed_state_gradients
-    if (constants.scheme == 0u) {
-        return;
-    }
-    let cell_center = cell_centers[idx];
-    let cell_center_vec: vec2<f32> = vec2<f32>(cell_center.x, cell_center.y);
-    let vol = cell_vols[idx];
-    let start = cell_face_offsets[idx];
-    let end = cell_face_offsets[idx + 1u];
-    var grad_acc_0: vec2<f32> = vec2<f32>(0.0, 0.0);
-    var grad_acc_1: vec2<f32> = vec2<f32>(0.0, 0.0);
-    var grad_acc_2: vec2<f32> = vec2<f32>(0.0, 0.0);
-    var grad_acc_3: vec2<f32> = vec2<f32>(0.0, 0.0);
-    var grad_acc_4: vec2<f32> = vec2<f32>(0.0, 0.0);
-    var grad_acc_5: vec2<f32> = vec2<f32>(0.0, 0.0);
-    var grad_acc_6: vec2<f32> = vec2<f32>(0.0, 0.0);
-    var grad_acc_7: vec2<f32> = vec2<f32>(0.0, 0.0);
-    for (var k = start; k < end; k++) {
-        let face_idx = cell_faces[k];
-        let owner = face_owner[face_idx];
-        let neighbor_raw = face_neighbor[face_idx];
-        let is_boundary = neighbor_raw == -1;
-        let area = face_areas[face_idx];
-        let face_center = face_centers[face_idx];
-        let face_center_vec: vec2<f32> = vec2<f32>(face_center.x, face_center.y);
-        var normal_vec: vec2<f32> = vec2<f32>(face_normals[face_idx].x, face_normals[face_idx].y);
-        if (dot(face_center_vec - cell_center_vec, normal_vec) < 0.0) {
-            normal_vec = -normal_vec;
-        }
-        var other_idx: u32 = idx;
-        var other_center_vec: vec2<f32> = face_center_vec;
-        if (neighbor_raw != -1) {
-            let neighbor = u32(neighbor_raw);
-            other_idx = neighbor;
-            if (owner != idx) {
-                other_idx = owner;
+    if (constants.scheme != 0u) {
+        let cell_center = cell_centers[idx];
+        let cell_center_vec: vec2<f32> = vec2<f32>(cell_center.x, cell_center.y);
+        let vol = cell_vols[idx];
+        let start = cell_face_offsets[idx];
+        let end = cell_face_offsets[idx + 1u];
+        var grad_acc_0: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_1: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_2: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_3: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_4: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_5: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_6: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_7: vec2<f32> = vec2<f32>(0.0, 0.0);
+        for (var k = start; k < end; k++) {
+            let face_idx = cell_faces[k];
+            let owner = face_owner[face_idx];
+            let neighbor_raw = face_neighbor[face_idx];
+            let is_boundary = neighbor_raw == -1;
+            let area = face_areas[face_idx];
+            let face_center = face_centers[face_idx];
+            let face_center_vec: vec2<f32> = vec2<f32>(face_center.x, face_center.y);
+            var normal_vec: vec2<f32> = vec2<f32>(face_normals[face_idx].x, face_normals[face_idx].y);
+            if (dot(face_center_vec - cell_center_vec, normal_vec) < 0.0) {
+                normal_vec = -normal_vec;
             }
-            let other_center = cell_centers[other_idx];
-            other_center_vec = vec2<f32>(other_center.x, other_center.y);
+            var other_idx: u32 = idx;
+            var other_center_vec: vec2<f32> = face_center_vec;
+            if (neighbor_raw != -1) {
+                let neighbor = u32(neighbor_raw);
+                other_idx = neighbor;
+                if (owner != idx) {
+                    other_idx = owner;
+                }
+                let other_center = cell_centers[other_idx];
+                other_center_vec = vec2<f32>(other_center.x, other_center.y);
+            }
+            let d_own = distance(cell_center_vec, face_center_vec);
+            let d_neigh = distance(other_center_vec, face_center_vec);
+            let total_dist = d_own + d_neigh;
+            var lambda: f32 = 0.5;
+            if (total_dist > 0.000001) {
+                lambda = d_neigh / total_dist;
+            }
+            let lambda_other = 1.0 - lambda;
+            grad_acc_0 += normal_vec * (state[idx * 22u + 0u] * lambda + select(state[other_idx * 22u + 0u], select(select(state[idx * 22u + 0u], bc_value[face_idx * 8u + 0u], bc_kind[face_idx * 8u + 0u] == 1u), state[idx * 22u + 0u] + bc_value[face_idx * 8u + 0u] * d_own, bc_kind[face_idx * 8u + 0u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_1 += normal_vec * (state[idx * 22u + 1u] * lambda + select(state[other_idx * 22u + 1u], select(select(state[idx * 22u + 1u], bc_value[face_idx * 8u + 1u], bc_kind[face_idx * 8u + 1u] == 1u), state[idx * 22u + 1u] + bc_value[face_idx * 8u + 1u] * d_own, bc_kind[face_idx * 8u + 1u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_2 += normal_vec * (state[idx * 22u + 2u] * lambda + select(state[other_idx * 22u + 2u], select(select(state[idx * 22u + 2u], bc_value[face_idx * 8u + 2u], bc_kind[face_idx * 8u + 2u] == 1u), state[idx * 22u + 2u] + bc_value[face_idx * 8u + 2u] * d_own, bc_kind[face_idx * 8u + 2u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_3 += normal_vec * (state[idx * 22u + 3u] * lambda + select(state[other_idx * 22u + 3u], select(select(state[idx * 22u + 3u], bc_value[face_idx * 8u + 3u], bc_kind[face_idx * 8u + 3u] == 1u), state[idx * 22u + 3u] + bc_value[face_idx * 8u + 3u] * d_own, bc_kind[face_idx * 8u + 3u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_4 += normal_vec * (state[idx * 22u + 4u] * lambda + select(state[other_idx * 22u + 4u], select(select(state[idx * 22u + 4u], bc_value[face_idx * 8u + 4u], bc_kind[face_idx * 8u + 4u] == 1u), state[idx * 22u + 4u] + bc_value[face_idx * 8u + 4u] * d_own, bc_kind[face_idx * 8u + 4u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_5 += normal_vec * (state[idx * 22u + 5u] * lambda + select(state[other_idx * 22u + 5u], select(select(state[idx * 22u + 5u], bc_value[face_idx * 8u + 5u], bc_kind[face_idx * 8u + 5u] == 1u), state[idx * 22u + 5u] + bc_value[face_idx * 8u + 5u] * d_own, bc_kind[face_idx * 8u + 5u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_6 += normal_vec * (state[idx * 22u + 6u] * lambda + select(state[other_idx * 22u + 6u], select(select(state[idx * 22u + 6u], bc_value[face_idx * 8u + 6u], bc_kind[face_idx * 8u + 6u] == 1u), state[idx * 22u + 6u] + bc_value[face_idx * 8u + 6u] * d_own, bc_kind[face_idx * 8u + 6u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_7 += normal_vec * (state[idx * 22u + 7u] * lambda + select(state[other_idx * 22u + 7u], select(select(state[idx * 22u + 7u], bc_value[face_idx * 8u + 7u], bc_kind[face_idx * 8u + 7u] == 1u), state[idx * 22u + 7u] + bc_value[face_idx * 8u + 7u] * d_own, bc_kind[face_idx * 8u + 7u] == 2u), is_boundary) * lambda_other) * area;
         }
-        let d_own = distance(cell_center_vec, face_center_vec);
-        let d_neigh = distance(other_center_vec, face_center_vec);
-        let total_dist = d_own + d_neigh;
-        var lambda: f32 = 0.5;
-        if (total_dist > 0.000001) {
-            lambda = d_neigh / total_dist;
-        }
-        let lambda_other = 1.0 - lambda;
-        grad_acc_0 += normal_vec * (state[idx * 22u + 0u] * lambda + select(state[other_idx * 22u + 0u], select(select(state[idx * 22u + 0u], bc_value[face_idx * 8u + 0u], bc_kind[face_idx * 8u + 0u] == 1u), state[idx * 22u + 0u] + bc_value[face_idx * 8u + 0u] * d_own, bc_kind[face_idx * 8u + 0u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_1 += normal_vec * (state[idx * 22u + 1u] * lambda + select(state[other_idx * 22u + 1u], select(select(state[idx * 22u + 1u], bc_value[face_idx * 8u + 1u], bc_kind[face_idx * 8u + 1u] == 1u), state[idx * 22u + 1u] + bc_value[face_idx * 8u + 1u] * d_own, bc_kind[face_idx * 8u + 1u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_2 += normal_vec * (state[idx * 22u + 2u] * lambda + select(state[other_idx * 22u + 2u], select(select(state[idx * 22u + 2u], bc_value[face_idx * 8u + 2u], bc_kind[face_idx * 8u + 2u] == 1u), state[idx * 22u + 2u] + bc_value[face_idx * 8u + 2u] * d_own, bc_kind[face_idx * 8u + 2u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_3 += normal_vec * (state[idx * 22u + 3u] * lambda + select(state[other_idx * 22u + 3u], select(select(state[idx * 22u + 3u], bc_value[face_idx * 8u + 3u], bc_kind[face_idx * 8u + 3u] == 1u), state[idx * 22u + 3u] + bc_value[face_idx * 8u + 3u] * d_own, bc_kind[face_idx * 8u + 3u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_4 += normal_vec * (state[idx * 22u + 4u] * lambda + select(state[other_idx * 22u + 4u], select(select(state[idx * 22u + 4u], bc_value[face_idx * 8u + 4u], bc_kind[face_idx * 8u + 4u] == 1u), state[idx * 22u + 4u] + bc_value[face_idx * 8u + 4u] * d_own, bc_kind[face_idx * 8u + 4u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_5 += normal_vec * (state[idx * 22u + 5u] * lambda + select(state[other_idx * 22u + 5u], select(select(state[idx * 22u + 5u], bc_value[face_idx * 8u + 5u], bc_kind[face_idx * 8u + 5u] == 1u), state[idx * 22u + 5u] + bc_value[face_idx * 8u + 5u] * d_own, bc_kind[face_idx * 8u + 5u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_6 += normal_vec * (state[idx * 22u + 6u] * lambda + select(state[other_idx * 22u + 6u], select(select(state[idx * 22u + 6u], bc_value[face_idx * 8u + 6u], bc_kind[face_idx * 8u + 6u] == 1u), state[idx * 22u + 6u] + bc_value[face_idx * 8u + 6u] * d_own, bc_kind[face_idx * 8u + 6u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_7 += normal_vec * (state[idx * 22u + 7u] * lambda + select(state[other_idx * 22u + 7u], select(select(state[idx * 22u + 7u], bc_value[face_idx * 8u + 7u], bc_kind[face_idx * 8u + 7u] == 1u), state[idx * 22u + 7u] + bc_value[face_idx * 8u + 7u] * d_own, bc_kind[face_idx * 8u + 7u] == 2u), is_boundary) * lambda_other) * area;
+        let grad_out_0: vec2<f32> = grad_acc_0 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 22u + 0u].x = grad_out_0.x;
+        grad_state[idx * 22u + 0u].y = grad_out_0.y;
+        let grad_out_1: vec2<f32> = grad_acc_1 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 22u + 1u].x = grad_out_1.x;
+        grad_state[idx * 22u + 1u].y = grad_out_1.y;
+        let grad_out_2: vec2<f32> = grad_acc_2 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 22u + 2u].x = grad_out_2.x;
+        grad_state[idx * 22u + 2u].y = grad_out_2.y;
+        let grad_out_3: vec2<f32> = grad_acc_3 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 22u + 3u].x = grad_out_3.x;
+        grad_state[idx * 22u + 3u].y = grad_out_3.y;
+        let grad_out_4: vec2<f32> = grad_acc_4 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 22u + 4u].x = grad_out_4.x;
+        grad_state[idx * 22u + 4u].y = grad_out_4.y;
+        let grad_out_5: vec2<f32> = grad_acc_5 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 22u + 5u].x = grad_out_5.x;
+        grad_state[idx * 22u + 5u].y = grad_out_5.y;
+        let grad_out_6: vec2<f32> = grad_acc_6 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 22u + 6u].x = grad_out_6.x;
+        grad_state[idx * 22u + 6u].y = grad_out_6.y;
+        let grad_out_7: vec2<f32> = grad_acc_7 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 22u + 7u].x = grad_out_7.x;
+        grad_state[idx * 22u + 7u].y = grad_out_7.y;
     }
-    let grad_out_0: vec2<f32> = grad_acc_0 * 1.0 / max(vol, 0.000000000001);
-    grad_state[idx * 22u + 0u].x = grad_out_0.x;
-    grad_state[idx * 22u + 0u].y = grad_out_0.y;
-    let grad_out_1: vec2<f32> = grad_acc_1 * 1.0 / max(vol, 0.000000000001);
-    grad_state[idx * 22u + 1u].x = grad_out_1.x;
-    grad_state[idx * 22u + 1u].y = grad_out_1.y;
-    let grad_out_2: vec2<f32> = grad_acc_2 * 1.0 / max(vol, 0.000000000001);
-    grad_state[idx * 22u + 2u].x = grad_out_2.x;
-    grad_state[idx * 22u + 2u].y = grad_out_2.y;
-    let grad_out_3: vec2<f32> = grad_acc_3 * 1.0 / max(vol, 0.000000000001);
-    grad_state[idx * 22u + 3u].x = grad_out_3.x;
-    grad_state[idx * 22u + 3u].y = grad_out_3.y;
-    let grad_out_4: vec2<f32> = grad_acc_4 * 1.0 / max(vol, 0.000000000001);
-    grad_state[idx * 22u + 4u].x = grad_out_4.x;
-    grad_state[idx * 22u + 4u].y = grad_out_4.y;
-    let grad_out_5: vec2<f32> = grad_acc_5 * 1.0 / max(vol, 0.000000000001);
-    grad_state[idx * 22u + 5u].x = grad_out_5.x;
-    grad_state[idx * 22u + 5u].y = grad_out_5.y;
-    let grad_out_6: vec2<f32> = grad_acc_6 * 1.0 / max(vol, 0.000000000001);
-    grad_state[idx * 22u + 6u].x = grad_out_6.x;
-    grad_state[idx * 22u + 6u].y = grad_out_6.y;
-    let grad_out_7: vec2<f32> = grad_acc_7 * 1.0 / max(vol, 0.000000000001);
-    grad_state[idx * 22u + 7u].x = grad_out_7.x;
-    grad_state[idx * 22u + 7u].y = grad_out_7.y;
     // end fused segment: packed_state_gradients
     // begin fused segment: generic_coupled_assembly_grad_state
     let k1_center = cell_centers[idx];

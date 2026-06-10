@@ -33,7 +33,8 @@ pub fn expand_schemes_unchecked(
 
     for equation in system.equations() {
         for term in equation.terms() {
-            let scheme = schemes.scheme_for(term);
+            // A scheme declared on the term itself wins over the registry.
+            let scheme = term.scheme.unwrap_or_else(|| schemes.scheme_for(term));
             let needs_gradient =
                 matches!(term.op, TermOp::Div | TermOp::DivFlux) && scheme != Scheme::Upwind;
             if !needs_gradient {

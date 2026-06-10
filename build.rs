@@ -11,6 +11,9 @@ use wgsl_bindgen::{WgslBindgenOptionBuilder, WgslTypeSerializeStrategy};
 mod dimensions {
     pub use cfd2_ir::dimensions::*;
 }
+mod scheme {
+    pub use cfd2_ir::scheme::*;
+}
 mod equation {
     pub mod ast {
         pub use cfd2_ir::equation::ast::*;
@@ -82,6 +85,12 @@ mod solver {
             include!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/src/solver/model/flux_module.rs"
+            ));
+        }
+        pub mod flux_derivation {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/solver/model/flux_derivation.rs"
             ));
         }
         pub mod flux_schemes {

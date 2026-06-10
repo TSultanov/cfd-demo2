@@ -33,6 +33,11 @@ pub struct DiscreteOp {
     pub term_op: TermOp,
     pub discretization: Discretization,
     pub scheme: Scheme,
+    /// True when the scheme was declared on the term itself (model math
+    /// declaration) rather than resolved from the registry default. Declared
+    /// schemes are baked as literals in the generated WGSL and are not
+    /// affected by the runtime `constants.scheme` knob.
+    pub scheme_declared: bool,
     pub field: FieldRef,
     pub flux: Option<FluxRef>,
     pub coeff: Option<Coefficient>,
@@ -95,7 +100,8 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
         kind,
         term_op: term.op,
         discretization: term.discretization,
-        scheme: schemes.scheme_for(term),
+        scheme: term.scheme.unwrap_or_else(|| schemes.scheme_for(term)),
+        scheme_declared: term.scheme.is_some(),
         field: term.field,
         flux: term.flux,
         coeff: term.coeff.clone(),

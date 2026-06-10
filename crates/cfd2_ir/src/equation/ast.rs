@@ -205,6 +205,13 @@ pub struct Term {
     pub field: FieldRef,
     pub flux: Option<FluxRef>,
     pub coeff: Option<Coefficient>,
+    /// Scheme declared on the term itself (part of the model's math declaration).
+    ///
+    /// `Some(_)` takes precedence over both the build-time `SchemeRegistry`
+    /// default and the runtime `constants.scheme` knob: codegen bakes the
+    /// declared scheme as a literal for this term. `None` keeps the term on
+    /// the registry default / runtime knob.
+    pub scheme: Option<crate::scheme::Scheme>,
 }
 
 impl Term {
@@ -221,7 +228,14 @@ impl Term {
             field,
             flux,
             coeff,
+            scheme: None,
         }
+    }
+
+    /// Declare the discretization scheme for this term (see `scheme` field docs).
+    pub fn with_scheme(mut self, scheme: crate::scheme::Scheme) -> Self {
+        self.scheme = Some(scheme);
+        self
     }
 
     pub fn eqn(self, target: FieldRef) -> Equation {

@@ -873,13 +873,20 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             component,
                         );
 
-                        // Runtime-configurable advection scheme.
+                        // Advection scheme selection.
                         //
-                        // Note: we intentionally do not bake the scheme selection into the WGSL
-                        // at codegen time; the solver drives it through `constants.scheme`.
-                        let scheme_lit = typed::EnumExpr::<Scheme>::from_expr(
-                            Expr::ident("constants").field("scheme"),
-                        );
+                        // A scheme declared on the term (model math declaration) is baked as a
+                        // literal; otherwise the solver drives the selection at runtime through
+                        // `constants.scheme`.
+                        let scheme_lit = if conv_op.scheme_declared {
+                            typed::EnumExpr::<Scheme>::from_expr(Expr::from(
+                                conv_op.scheme.gpu_id(),
+                            ))
+                        } else {
+                            typed::EnumExpr::<Scheme>::from_expr(
+                                Expr::ident("constants").field("scheme"),
+                            )
+                        };
 
                         // Reconstruction gradients.
                         //

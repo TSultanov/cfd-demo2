@@ -26,7 +26,6 @@ use crate::solver::gpu::modules::krylov_solve::{
 };
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::structs::LinearSolverStats;
-use std::sync::OnceLock;
 use std::time::Instant;
 
 /// Arguments for the `solve_fgmres` function to reduce parameter count.
@@ -69,9 +68,14 @@ fn parse_usize_env(key: &str) -> Option<usize> {
         .and_then(|v| v.parse::<usize>().ok())
 }
 
-fn one_submission_env_tunables() -> &'static OneSubmissionEnvTunables {
-    static TUNABLES: OnceLock<OneSubmissionEnvTunables> = OnceLock::new();
-    TUNABLES.get_or_init(OneSubmissionEnvTunables::from_env)
+/// Read the one-submission env tunables.
+///
+/// Deliberately *not* a process-global cache: both call sites run once per linear
+/// solve (chunk-layout computation), so the env reads are cheap there, and a
+/// process-wide `OnceLock` froze the first test's environment for the whole test
+/// process, making env-guard-based tests order-dependent.
+fn one_submission_env_tunables() -> OneSubmissionEnvTunables {
+    OneSubmissionEnvTunables::from_env()
 }
 
 /// Pre-computed FGMRES chunk layout for encoded/one-submission solves.

@@ -19,6 +19,7 @@ pub fn generate_packed_state_gradients_wgsl(
     layout: &StateLayout,
     unknown_stride: u32,
     eos_params: &[ParamSpec],
+    knob_gated: bool,
 ) -> Result<KernelWgsl, String> {
     let stride = layout.stride();
     if unknown_stride == 0 {
@@ -36,7 +37,7 @@ pub fn generate_packed_state_gradients_wgsl(
     ));
     module.push(Item::Comment("DO NOT EDIT MANUALLY".to_string()));
     module.extend(base_items(eos_params));
-    module.push(Item::Function(main_fn(layout, unknown_stride)));
+    module.push(Item::Function(main_fn(layout, unknown_stride, knob_gated)));
     Ok(KernelWgsl::from(module))
 }
 
@@ -113,7 +114,7 @@ fn state_bindings() -> Vec<Item> {
     ]
 }
 
-fn main_fn(layout: &StateLayout, unknown_stride: u32) -> Function {
+fn main_fn(layout: &StateLayout, unknown_stride: u32, knob_gated: bool) -> Function {
     let params = vec![Param::new(
         "global_id",
         Type::vec3_u32(),
@@ -125,12 +126,12 @@ fn main_fn(layout: &StateLayout, unknown_stride: u32) -> Function {
         params,
         None,
         vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
-        main_body(layout, unknown_stride),
+        main_body(layout, unknown_stride, knob_gated),
     )
 }
 
-fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
-    let stride = layout.stride();
+fn main_body(layout: &StateLayout, unknown_stride: u32, knob_gated: bool) -> Block {
+    let gradient_stmts = gradient_body_statements(layout, unknown_stride);
 
     let mut stmts = vec![
         dsl::let_expr(
@@ -146,14 +147,36 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
             dsl::block(vec![Stmt::Return(None)]),
             None,
         ),
+    ];
+
+    if knob_gated {
         // Skip the full Green–Gauss pass for first-order upwind to keep overhead low.
-        dsl::if_block_expr(
+        //
+        // The skip is a *body-wrapping guard*, never an early `return`: this kernel is
+        // fused with the assembly kernel, and an early return would abort the fused
+        // kernel's remaining segments (observed as a frozen solver when the runtime
+        // scheme knob is switched to Upwind on a grad-state recipe).
+        //
+        // Models that *declare* a non-upwind scheme on a convection term are generated
+        // with `knob_gated = false`: their gradients are needed regardless of the knob.
+        stmts.push(dsl::if_block_expr(
             Expr::ident("constants")
                 .field("scheme")
-                .eq(Expr::from(0u32)),
-            dsl::block(vec![Stmt::Return(None)]),
+                .ne(Expr::from(0u32)),
+            dsl::block(gradient_stmts),
             None,
-        ),
+        ));
+    } else {
+        stmts.extend(gradient_stmts);
+    }
+
+    Block::new(stmts)
+}
+
+fn gradient_body_statements(layout: &StateLayout, unknown_stride: u32) -> Vec<Stmt> {
+    let stride = layout.stride();
+
+    let mut stmts = vec![
         dsl::let_expr(
             "cell_center",
             dsl::array_access("cell_centers", Expr::ident("idx")),
@@ -368,7 +391,7 @@ fn main_body(layout: &StateLayout, unknown_stride: u32) -> Block {
         ));
     }
 
-    Block::new(stmts)
+    stmts
 }
 
 const PACKED_STATE_GRADIENTS_WORKGROUP_SIZE: u32 = 64;
@@ -378,12 +401,13 @@ const PACKED_STATE_GRADIENTS_WORKGROUP_SIZE: u32 = 64;
 /// The body starts with:
 ///   0: let idx = ...       (invocation index)
 ///   1: if (idx >= ...) { return; }  (bounds check)
-///   2: if (constants.scheme == 0u) { return; }  (scheme guard — goes into preamble)
 ///
-/// Returns (launch, preamble_stmts, consumed_stmts).
-fn launch_from_gradient_statements(
-    stmts: &[Stmt],
-) -> Result<(LaunchSemantics, Vec<Stmt>, usize), String> {
+/// Everything after these is the kernel body proper (which, for knob-gated models,
+/// is a single `if (constants.scheme != 0u) { ... }` wrapping block — deliberately
+/// not an early return so that fusion with downstream segments stays correct).
+///
+/// Returns (launch, consumed_stmts).
+fn launch_from_gradient_statements(stmts: &[Stmt]) -> Result<(LaunchSemantics, usize), String> {
     // Statement 0: `let idx = ...`
     let idx_expr = match stmts.first() {
         Some(Stmt::Let { name, expr, .. }) if name == "idx" => expr.to_string(),
@@ -415,33 +439,13 @@ fn launch_from_gradient_statements(
         }
     };
 
-    // Statement 2: `if (constants.scheme == 0u) { return; }` — scheme guard, goes into preamble
-    let preamble_stmts = match stmts.get(2) {
-        Some(Stmt::If {
-            then_block,
-            else_block,
-            ..
-        }) if else_block.is_none()
-            && then_block.stmts.len() == 1
-            && matches!(then_block.stmts.first(), Some(Stmt::Return(None))) =>
-        {
-            stmts[2..3].to_vec()
-        }
-        _ => {
-            return Err(
-                "packed_state_gradients: expected third statement to be scheme guard".to_string(),
-            );
-        }
-    };
-
     Ok((
         LaunchSemantics::new(
             [PACKED_STATE_GRADIENTS_WORKGROUP_SIZE, 1, 1],
             idx_expr,
             Some(bounds_expr),
         ),
-        preamble_stmts,
-        3,
+        2,
     ))
 }
 
@@ -452,6 +456,7 @@ pub fn generate_packed_state_gradients_kernel_program(
     layout: &StateLayout,
     unknown_stride: u32,
     eos_params: &[ParamSpec],
+    knob_gated: bool,
 ) -> Result<KernelProgram, String> {
     let stride = layout.stride();
     if unknown_stride == 0 {
@@ -465,13 +470,11 @@ pub fn generate_packed_state_gradients_kernel_program(
 
     let items = base_items(eos_params);
     let bindings = kernel_bindings_from_items(&items)?;
-    let main = main_fn(layout, unknown_stride);
-    let (launch, preamble_stmts, consumed_stmts) =
-        launch_from_gradient_statements(&main.body.stmts)?;
+    let main = main_fn(layout, unknown_stride, knob_gated);
+    let (launch, consumed_stmts) = launch_from_gradient_statements(&main.body.stmts)?;
     let kernel_stmts = &main.body.stmts[consumed_stmts..];
 
     let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
-    program.preamble = preamble_stmts;
     program.body = kernel_stmts.to_vec();
     program.eos_params = eos_params.to_vec();
 

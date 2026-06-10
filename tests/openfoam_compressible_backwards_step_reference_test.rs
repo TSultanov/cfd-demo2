@@ -80,9 +80,12 @@ fn openfoam_compressible_backwards_step_matches_reference_field() {
     solver.set_uniform_state(rho0, [u0, 0.0], p0);
     solver.initialize_history();
 
+    let mut scorecard = common::CrutchScorecard::new("compressible_backstep", &solver);
     for _ in 0..200 {
         solver.step();
+        scorecard.sample(&solver);
     }
+    scorecard.assert_quiet(&solver, 0);
 
     let u = pollster::block_on(solver.get_u());
     let p = pollster::block_on(solver.get_p());

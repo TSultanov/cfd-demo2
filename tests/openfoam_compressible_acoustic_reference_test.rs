@@ -93,9 +93,12 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
     solver.set_state_fields(&rho, &u, &p);
     solver.initialize_history();
 
+    let mut scorecard = common::CrutchScorecard::new("compressible_acoustic", &solver);
     for _ in 0..100 {
         solver.step();
+        scorecard.sample(&solver);
     }
+    scorecard.assert_quiet(&solver, 0);
 
     let p_out = pollster::block_on(solver.get_p());
     let u_out = pollster::block_on(solver.get_u());

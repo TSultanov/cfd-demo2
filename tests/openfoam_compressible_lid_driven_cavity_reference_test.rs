@@ -105,9 +105,12 @@ fn openfoam_compressible_lid_driven_cavity_matches_reference_field() {
     solver.initialize_history();
 
     // Match OpenFOAM reference: 300 steps to reach t=0.003s
+    let mut scorecard = common::CrutchScorecard::new("compressible_lid", &solver);
     for _ in 0..300 {
         solver.step();
+        scorecard.sample(&solver);
     }
+    scorecard.assert_quiet(&solver, 0);
 
     let u = pollster::block_on(solver.get_u());
     let p = pollster::block_on(solver.get_p());

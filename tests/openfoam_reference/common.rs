@@ -12,6 +12,87 @@ pub fn diag_enabled() -> bool {
     std::env::var("CFD2_OPENFOAM_DIAG").is_ok()
 }
 
+/// Crutch-quieting scorecard (numerics-honesty gate).
+///
+/// The engine keeps safety nets for compressible runs — positivity
+/// rollback/retry, accept-nonconverged, dt backoff. They must stay
+/// available, but on the reference cases at final settings they must be
+/// SILENT: a crutch firing means the nominal numerics regressed even if the
+/// final field still lands inside its error bands. Sample after every step
+/// (host-side reads only) and assert quiet at the end.
+pub struct CrutchScorecard {
+    case: &'static str,
+    initial_dt: f32,
+    steps: u32,
+    rho_undershoots: u64,
+    p_undershoots: u64,
+    nonconverged_steps: u32,
+}
+
+impl CrutchScorecard {
+    pub fn new(case: &'static str, solver: &cfd2::solver::UnifiedSolver) -> Self {
+        Self {
+            case,
+            initial_dt: solver.step_stats().current_dt.unwrap_or(0.0),
+            steps: 0,
+            rho_undershoots: 0,
+            p_undershoots: 0,
+            nonconverged_steps: 0,
+        }
+    }
+
+    /// Call once after each `solver.step()`.
+    pub fn sample(&mut self, solver: &cfd2::solver::UnifiedSolver) {
+        use cfd2::solver::gpu::OuterStepStatus;
+        let stats = solver.step_stats();
+        self.steps += 1;
+        self.rho_undershoots += stats.positivity_rho_undershoot_count.unwrap_or(0) as u64;
+        self.p_undershoots += stats.positivity_pressure_undershoot_count.unwrap_or(0) as u64;
+        if stats.outer_step_status == Some(OuterStepStatus::AcceptedNonconverged) {
+            self.nonconverged_steps += 1;
+        }
+    }
+
+    /// `allowed_nonconverged` covers documented startup exceptions (e.g. the
+    /// supersonic wedge's impulsive-start step 1); everything else must be 0.
+    pub fn assert_quiet(&self, solver: &cfd2::solver::UnifiedSolver, allowed_nonconverged: u32) {
+        let case = self.case;
+        let stats = solver.step_stats();
+        assert_eq!(
+            stats.rejected_retry_count, None,
+            "[{case}] positivity rollback/retry crutch fired {:?} time(s)",
+            stats.rejected_retry_count
+        );
+        assert_eq!(
+            self.rho_undershoots, 0,
+            "[{case}] rho positivity undershoots over {} steps",
+            self.steps
+        );
+        assert_eq!(
+            self.p_undershoots, 0,
+            "[{case}] pressure positivity undershoots over {} steps",
+            self.steps
+        );
+        assert!(
+            self.nonconverged_steps <= allowed_nonconverged,
+            "[{case}] {} step(s) accepted nonconverged (allowed: {allowed_nonconverged})",
+            self.nonconverged_steps
+        );
+        let final_dt = stats.current_dt.unwrap_or(self.initial_dt);
+        assert_eq!(
+            final_dt, self.initial_dt,
+            "[{case}] dt backoff crutch fired ({} -> {final_dt})",
+            self.initial_dt
+        );
+        if diag_enabled() {
+            eprintln!(
+                "[openfoam][{case}] crutch scorecard: steps={} rho_undershoots={} p_undershoots={} nonconverged={} retries=0 dt_stable=true",
+                self.steps, self.rho_undershoots, self.p_undershoots, self.nonconverged_steps
+            );
+        }
+    }
+}
+
 /// Long-term target per-cell relative tolerances for OpenFOAM reference matches.
 ///
 /// - Velocity `U`: 0.01% (1e-4)

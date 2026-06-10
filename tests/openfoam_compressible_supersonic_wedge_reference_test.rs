@@ -85,12 +85,24 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
     solver.set_uniform_state(rho0, [u0, 0.0], p0);
     solver.initialize_history();
 
+    // Startup classification (numerics-honesty contract for this case):
+    // the impulsive uniform free-stream IC violates the wedge-wall BC, so
+    // step 1 — the first whose BDF2 history contains that correction — may
+    // stagnate against the linear-iteration cap under Jacobi. The transient
+    // is bounded: it must not DIVERGE, and from step 2 on every solve must
+    // converge (the final field is separately held to the reference bands).
+    // A startup dtau ramp was tried and made things strictly worse with
+    // outer_iters=1 (pseudo-relaxed steps never complete the physical step,
+    // the transient compounds, and the bands fail) — do not reintroduce it
+    // without an inner-convergence loop.
+    let mut scorecard = common::CrutchScorecard::new("compressible_wedge", &solver);
     for step in 0..200 {
-        if common::diag_enabled() && step < 3 {
+        if step < 5 {
             let stats = solver
                 .step_with_stats()
-                .expect("step_with_stats for diagnostics");
-            if let Some(last) = stats.last() {
+                .expect("step_with_stats for startup contract");
+            let last = stats.last().expect("startup step produced no solve stats");
+            if common::diag_enabled() && step < 3 {
                 eprintln!(
                     "[openfoam][compressible_wedge] step={step} lin: iters={} resid={:.3e} converged={} diverged={}",
                     last.iterations,
@@ -99,10 +111,28 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
                     last.diverged
                 );
             }
+            assert!(
+                !last.diverged,
+                "startup step {step} diverged (iters={}, resid={:.3e})",
+                last.iterations, last.residual
+            );
+            if step != 1 {
+                assert!(
+                    last.converged,
+                    "startup step {step} failed to converge (iters={}, resid={:.3e}); \
+                     only step 1 is allowed to hit the iteration cap",
+                    last.iterations, last.residual
+                );
+            }
         } else {
             solver.step();
         }
+        scorecard.sample(&solver);
     }
+    // The impulsive start makes step 1 the lone allowed nonconverged step
+    // (see the startup contract above); positivity/backoff crutches must
+    // stay silent throughout.
+    scorecard.assert_quiet(&solver, 1);
 
     let u = pollster::block_on(solver.get_u());
     let p = pollster::block_on(solver.get_p());

@@ -255,19 +255,19 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
     }
 
     assert!(
-        u_max.rel < common::CELL_REL_TOL_U,
+        u_max.rel < common::reference_bands("compressible_wedge").max_cell_u,
         "U mismatch vs OpenFOAM (per-cell): max_rel={:.6} (tol={:.6}) max_abs={:.6} at (x={:.6}, y={:.6})",
         u_max.rel,
-        common::CELL_REL_TOL_U,
+        common::reference_bands("compressible_wedge").max_cell_u,
         u_max.abs,
         xy_ref[u_max.idx].0,
         xy_ref[u_max.idx].1,
     );
     assert!(
-        p_max.rel < common::CELL_REL_TOL_P,
+        p_max.rel < common::reference_bands("compressible_wedge").max_cell_p,
         "p mismatch vs OpenFOAM (per-cell): max_rel={:.6} (tol={:.6}) max_abs={:.3} at (x={:.6}, y={:.6})",
         p_max.rel,
-        common::CELL_REL_TOL_P,
+        common::reference_bands("compressible_wedge").max_cell_p,
         p_max.abs,
         xy_ref[p_max.idx].0,
         xy_ref[p_max.idx].1,

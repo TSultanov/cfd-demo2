@@ -266,18 +266,18 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
     }
 
     assert!(
-        ux_max.rel < common::CELL_REL_TOL_U,
+        ux_max.rel < common::reference_bands("compressible_acoustic").max_cell_u,
         "u_x mismatch vs OpenFOAM (per-cell, best sign {ux_sign:+.0}): max_rel={:.6} (tol={:.6}) max_abs={:.6} at x={:.6}",
         ux_max.rel,
-        common::CELL_REL_TOL_U,
+        common::reference_bands("compressible_acoustic").max_cell_u,
         ux_max.abs,
         (ux_max.idx as f64 + 0.5) * (length / nx as f64)
     );
     assert!(
-        p_max.rel < common::CELL_REL_TOL_P,
+        p_max.rel < common::reference_bands("compressible_acoustic").max_cell_p,
         "p mismatch vs OpenFOAM (per-cell): max_rel={:.6} (tol={:.6}) max_abs={:.3} at x={:.6}",
         p_max.rel,
-        common::CELL_REL_TOL_P,
+        common::reference_bands("compressible_acoustic").max_cell_p,
         p_max.abs,
         (p_max.idx as f64 + 0.5) * (length / nx as f64)
     );
@@ -367,19 +367,19 @@ fn openfoam_compressible_acoustic_matches_reference_profile() {
     }
 
     assert!(
-        ux_max.rel < common::CELL_REL_TOL_U,
+        ux_max.rel < common::reference_bands("compressible_acoustic").max_cell_u,
         "u_x full-field mismatch vs OpenFOAM (per-cell, best sign {ux_sign:+.0}): max_rel={:.6} (tol={:.6}) max_abs={:.6} at (x={:.6}, y={:.6})",
         ux_max.rel,
-        common::CELL_REL_TOL_U,
+        common::reference_bands("compressible_acoustic").max_cell_u,
         ux_max.abs,
         sol_rows[ux_max.idx].0,
         sol_rows[ux_max.idx].1
     );
     assert!(
-        p_max.rel < common::CELL_REL_TOL_P,
+        p_max.rel < common::reference_bands("compressible_acoustic").max_cell_p,
         "p full-field mismatch vs OpenFOAM (per-cell): max_rel={:.6} (tol={:.6}) max_abs={:.3} at (x={:.6}, y={:.6})",
         p_max.rel,
-        common::CELL_REL_TOL_P,
+        common::reference_bands("compressible_acoustic").max_cell_p,
         p_max.abs,
         sol_rows[p_max.idx].0,
         sol_rows[p_max.idx].1

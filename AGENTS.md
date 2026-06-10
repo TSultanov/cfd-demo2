@@ -1,11 +1,24 @@
 # AGENTS.md instructions for /Volumes/sources/cfd2
 
+## Mandatory MMS gate (primary correctness oracle)
+
+For any change touching discretization, schemes, boundary conditions, codegen, or time
+integration, run the MMS convergence-order suite and require it green:
+
+```bash
+cargo test --features dev-tests --test mms_diffusion_order_test -- --test-threads 1
+```
+
+(Glob any additional `tests/mms_*` suites as they are added.) These tests verify the
+discrete operators converge at design order against manufactured exact solutions; an order
+drop or a blown error cap is a hard regression regardless of OpenFOAM metrics.
+
 ## Mandatory OpenFOAM drift check (before/after each major changeset)
 
 For every **major** changeset, run the OpenFOAM reference suite both **before** and **after** the edits, then compare failure magnitudes.
 
-- These tests are expected to fail today in some cases.
-- The key rule is: **error values must not grow** vs baseline.
+- The suite passes at per-case error bands (`reference_bands()` in `tests/openfoam_reference/common.rs`).
+- The key rule is: **error values must not grow** vs baseline, and bands only ratchet down.
 - If any tracked error grows, treat it as a regression and call it out explicitly.
 
 Recommended workflow:

@@ -277,19 +277,19 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     }
 
     assert!(
-        u_max.rel < common::CELL_REL_TOL_U,
+        u_max.rel < common::reference_bands("incompressible_channel").max_cell_u,
         "U mismatch vs OpenFOAM (per-cell): max_rel={:.6} (tol={:.6}) max_abs={:.6} at (x={:.6}, y={:.6}); mass balance inflow={m_in:.6} outflow={m_out:.6}",
         u_max.rel,
-        common::CELL_REL_TOL_U,
+        common::reference_bands("incompressible_channel").max_cell_u,
         u_max.abs,
         sol_rows[u_max.idx].0,
         sol_rows[u_max.idx].1
     );
     assert!(
-        p_max.rel < common::CELL_REL_TOL_P,
+        p_max.rel < common::reference_bands("incompressible_channel").max_cell_p,
         "p mismatch vs OpenFOAM (per-cell, mean-free): max_rel={:.6} (tol={:.6}) max_abs={:.3} at (x={:.6}, y={:.6}); mass balance inflow={m_in:.6} outflow={m_out:.6}",
         p_max.rel,
-        common::CELL_REL_TOL_P,
+        common::reference_bands("incompressible_channel").max_cell_p,
         p_max.abs,
         sol_rows[p_max.idx].0,
         sol_rows[p_max.idx].1

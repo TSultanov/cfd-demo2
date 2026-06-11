@@ -54,6 +54,10 @@ const SCALAR_STALL_REL: u32 = 19u;
 
 const SCALAR_STALL_COUNT: u32 = 20u;
 
+const SCALAR_PREV_EST: u32 = 21u;
+
+const SCALAR_STALL_COUNT_ITER: u32 = 22u;
+
 fn h_idx(row: u32, col: u32) -> u32 {
     return col * (iter_params.max_restart + 1u) + row;
 }
@@ -111,6 +115,27 @@ fn update_hessenberg_givens(@builtin(global_invocation_id) global_id: vec3<u32>)
         indirect_args[0u] = vec4<u32>(0u, 0u, 0u, 0u);
         indirect_args[1u] = vec4<u32>(0u, 0u, 0u, 0u);
         indirect_args[2u] = vec4<u32>(0u, 0u, 0u, 0u);
+    } else {
+        let stall_rel = scalars[SCALAR_STALL_REL];
+        if (stall_rel > 0.0) {
+            let prev_est = scalars[SCALAR_PREV_EST];
+            let no_improve = prev_est > 0.0 && residual > prev_est * 0.995;
+            let level_ok = residual <= stall_rel * scalars[SCALAR_RHS_NORM];
+            if (no_improve && level_ok) {
+                scalars[SCALAR_STALL_COUNT_ITER] = scalars[SCALAR_STALL_COUNT_ITER] + 1.0;
+                if (scalars[SCALAR_STALL_COUNT_ITER] > 9.5) {
+                    scalars[SCALAR_STOP] = 1.0;
+                    scalars[SCALAR_ITERS_USED] = f32(j + 1u);
+                    // Zero indirect dispatch dimensions so subsequent heavy kernels become no-ops.
+                    indirect_args[0u] = vec4<u32>(0u, 0u, 0u, 0u);
+                    indirect_args[1u] = vec4<u32>(0u, 0u, 0u, 0u);
+                    indirect_args[2u] = vec4<u32>(0u, 0u, 0u, 0u);
+                }
+            } else {
+                scalars[SCALAR_STALL_COUNT_ITER] = 0.0;
+            }
+            scalars[SCALAR_PREV_EST] = residual;
+        }
     }
 }
 

@@ -14,7 +14,7 @@ use bytemuck::{bytes_of, Pod, Zeroable};
 pub const DEFAULT_WORKGROUP_SIZE: u32 = 64;
 pub const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
 
-pub(crate) const FGMRES_SCALAR_COUNT: usize = 21;
+pub(crate) const FGMRES_SCALAR_COUNT: usize = 23;
 pub(crate) const FGMRES_SCALAR_STOP: usize = 8;
 pub(crate) const FGMRES_SCALAR_CONVERGED: usize = 9;
 const FGMRES_SCALAR_ITERS_USED: usize = 10;
@@ -39,6 +39,13 @@ const FGMRES_SCALAR_PREV_RESID: usize = 18;
 const FGMRES_SCALAR_STALL_REL: usize = 19;
 #[allow(dead_code)]
 const FGMRES_SCALAR_STALL_COUNT: usize = 20;
+// Mid-cycle stall slots (see the stall branch in
+// gmres_logic/update_hessenberg_givens): 21 = previous Givens residual
+// estimate; 22 = consecutive low-improvement iteration count.
+#[allow(dead_code)]
+const FGMRES_SCALAR_PREV_EST: usize = 21;
+#[allow(dead_code)]
+const FGMRES_SCALAR_STALL_COUNT_ITER: usize = 22;
 
 const FGMRES_INDIRECT_DISPATCH_COUNT: usize = 3;
 const FGMRES_INDIRECT_ENTRY_STRIDE_BYTES: u64 = 16;

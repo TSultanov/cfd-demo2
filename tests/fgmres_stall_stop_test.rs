@@ -97,7 +97,9 @@ fn stall_stop_breaks_early_and_preserves_solution() {
         host_iters.iter().any(|&it| it < 200),
         "stall-stop never fired on the host path: {host_iters:?}"
     );
-    assert!(min_iters >= 60, "broke before a full first restart cycle?");
+    // Mid-cycle stall needs 10 consecutive low-improvement iterations, so
+    // nothing should stop near-instantly.
+    assert!(min_iters >= 10, "broke implausibly early: {host_iters:?}");
 
     // Encoded chunked path: assert agreement with the stall-off run.
     let (u_on, p_on, _) = run(true);

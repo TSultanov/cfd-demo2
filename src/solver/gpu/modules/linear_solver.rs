@@ -402,9 +402,11 @@ pub fn solve_fgmres<P: PreconditionerModule>(
                     tol_abs,
                     reset_x_before_update: false,
                     enable_cgs2: cgs2_enabled(),
-                    // The host loop has its own snapshot/restore guard and
-                    // stall-stop; the GPU-side ones stay off here.
-                    stall_level_rel: 0.0,
+                    // The GPU-side MID-CYCLE stall applies to the encoded
+                    // cycle bodies on every path; the host loop adds its own
+                    // checkpoint stall and snapshot/restore guard on top
+                    // (the GPU restart_guard stays off here).
+                    stall_level_rel: stall_level_rel(),
                     enable_restart_guard: false,
                 },
                 dispatch: dispatch.grids,

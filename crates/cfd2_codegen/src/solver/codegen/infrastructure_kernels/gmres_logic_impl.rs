@@ -166,6 +166,16 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         ty: Type::U32,
         expr: Expr::lit_u32(20),
     });
+    m.push(Item::Const {
+        name: "SCALAR_PREV_EST".into(),
+        ty: Type::U32,
+        expr: Expr::lit_u32(21),
+    });
+    m.push(Item::Const {
+        name: "SCALAR_STALL_COUNT_ITER".into(),
+        ty: Type::U32,
+        expr: Expr::lit_u32(22),
+    });
 
     // ── Helper function: h_idx ──────────────────────────────────────────────
 
@@ -374,7 +384,121 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                         ),
                     ),
                 ]),
-                None,
+                // ── Mid-cycle stall ──
+                // The Givens residual ESTIMATE is monotone within a cycle,
+                // so it cannot fake a stall (orthogonality loss only makes
+                // it optimistic, and the restart-boundary guard verifies the
+                // true residual). With an unreachable tolerance, solves hit
+                // their f32 floor mid-cycle (~iteration 70 of 200 on the
+                // reference cases) and grind out the rest: stop when the
+                // estimate improves <0.5% for 10 consecutive iterations AND
+                // is below SCALAR_STALL_REL * ||b|| (0 disables). Reuses the
+                // convergence-break machinery (STOP + ITERS_USED = j+1 +
+                // zeroed indirect args); SKIP_UPDATE stays 0 so the cycle
+                // tail applies the partial solution update, and CONVERGED
+                // stays 0 for honest reporting.
+                Some(block(vec![
+                    let_expr(
+                        "stall_rel",
+                        Expr::ident("scalars").index(Expr::ident("SCALAR_STALL_REL")),
+                    ),
+                    if_block_expr(
+                        Expr::ident("stall_rel").gt(Expr::lit_f32(0.0)),
+                        block(vec![
+                            let_expr(
+                                "prev_est",
+                                Expr::ident("scalars").index(Expr::ident("SCALAR_PREV_EST")),
+                            ),
+                            let_expr(
+                                "no_improve",
+                                Expr::ident("prev_est").gt(Expr::lit_f32(0.0))
+                                    & Expr::ident("residual")
+                                        .gt(Expr::ident("prev_est") * Expr::lit_f32(0.995)),
+                            ),
+                            let_expr(
+                                "level_ok",
+                                Expr::ident("residual").le(
+                                    Expr::ident("stall_rel")
+                                        * Expr::ident("scalars")
+                                            .index(Expr::ident("SCALAR_RHS_NORM")),
+                                ),
+                            ),
+                            if_block_expr(
+                                Expr::ident("no_improve") & Expr::ident("level_ok"),
+                                block(vec![
+                                    assign_expr(
+                                        Expr::ident("scalars")
+                                            .index(Expr::ident("SCALAR_STALL_COUNT_ITER")),
+                                        Expr::ident("scalars")
+                                            .index(Expr::ident("SCALAR_STALL_COUNT_ITER"))
+                                            + Expr::lit_f32(1.0),
+                                    ),
+                                    if_block_expr(
+                                        Expr::ident("scalars")
+                                            .index(Expr::ident("SCALAR_STALL_COUNT_ITER"))
+                                            .gt(Expr::lit_f32(9.5)),
+                                        block(vec![
+                                            assign_expr(
+                                                Expr::ident("scalars")
+                                                    .index(Expr::ident("SCALAR_STOP")),
+                                                Expr::lit_f32(1.0),
+                                            ),
+                                            assign_expr(
+                                                Expr::ident("scalars")
+                                                    .index(Expr::ident("SCALAR_ITERS_USED")),
+                                                f32_cast(Expr::ident("j") + 1u32),
+                                            ),
+                                            comment(
+                                                "Zero indirect dispatch dimensions so subsequent heavy kernels become no-ops.",
+                                            ),
+                                            assign_expr(
+                                                Expr::ident("indirect_args")
+                                                    .index(Expr::lit_u32(0)),
+                                                vec4_u32(
+                                                    Expr::lit_u32(0),
+                                                    Expr::lit_u32(0),
+                                                    Expr::lit_u32(0),
+                                                    Expr::lit_u32(0),
+                                                ),
+                                            ),
+                                            assign_expr(
+                                                Expr::ident("indirect_args")
+                                                    .index(Expr::lit_u32(1)),
+                                                vec4_u32(
+                                                    Expr::lit_u32(0),
+                                                    Expr::lit_u32(0),
+                                                    Expr::lit_u32(0),
+                                                    Expr::lit_u32(0),
+                                                ),
+                                            ),
+                                            assign_expr(
+                                                Expr::ident("indirect_args")
+                                                    .index(Expr::lit_u32(2)),
+                                                vec4_u32(
+                                                    Expr::lit_u32(0),
+                                                    Expr::lit_u32(0),
+                                                    Expr::lit_u32(0),
+                                                    Expr::lit_u32(0),
+                                                ),
+                                            ),
+                                        ]),
+                                        None,
+                                    ),
+                                ]),
+                                Some(block(vec![assign_expr(
+                                    Expr::ident("scalars")
+                                        .index(Expr::ident("SCALAR_STALL_COUNT_ITER")),
+                                    Expr::lit_f32(0.0),
+                                )])),
+                            ),
+                            assign_expr(
+                                Expr::ident("scalars").index(Expr::ident("SCALAR_PREV_EST")),
+                                Expr::ident("residual"),
+                            ),
+                        ]),
+                        None,
+                    ),
+                ])),
             ),
         ]);
 

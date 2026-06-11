@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: ac6af0f5d64fec4360f52da2c57ec5509aae0e3da817e1b5d63f7da4a37d31e4
+// SourceHash: 8fe4f0825c5a7f2e246fd01dfbfe50c9e1293f252b27f406ec66ddb6d6733ca0
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -83182,6 +83182,8 @@ fn update_w_cgs_reortho(@builtin(global_invocation_id) global_id_4: vec3<u32>, @
         pub const SCALAR_PREV_RESID: u32 = 18u32;
         pub const SCALAR_STALL_REL: u32 = 19u32;
         pub const SCALAR_STALL_COUNT: u32 = 20u32;
+        pub const SCALAR_PREV_EST: u32 = 21u32;
+        pub const SCALAR_STALL_COUNT_ITER: u32 = 22u32;
         pub mod compute {
             use super::{_root, _root::*};
             pub const UPDATE_HESSENBERG_GIVENS_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
@@ -83524,6 +83526,8 @@ const SCALAR_GUARD_FLAG: u32 = 17u;
 const SCALAR_PREV_RESID: u32 = 18u;
 const SCALAR_STALL_REL: u32 = 19u;
 const SCALAR_STALL_COUNT: u32 = 20u;
+const SCALAR_PREV_EST: u32 = 21u;
+const SCALAR_STALL_COUNT_ITER: u32 = 22u;
 
 @group(0) @binding(0) 
 var<storage, read_write> hessenberg: array<f32>;
@@ -83624,7 +83628,31 @@ fn update_hessenberg_givens(@builtin(global_invocation_id) global_id: vec3<u32>)
         indirect_args[2] = vec4<u32>(0u, 0u, 0u, 0u);
         return;
     } else {
-        return;
+        let stall_rel = scalars[19];
+        if (stall_rel > 0f) {
+            let prev_est = scalars[21];
+            let no_improve = ((prev_est > 0f) && (residual > (prev_est * 0.995f)));
+            let _e176 = scalars[14];
+            let level_ok = (residual <= (stall_rel * _e176));
+            if (no_improve && level_ok) {
+                let _e184 = scalars[22];
+                scalars[22] = (_e184 + 1f);
+                let _e189 = scalars[22];
+                if (_e189 > 9.5f) {
+                    scalars[8] = 1f;
+                    scalars[10] = f32((j_1 + 1u));
+                    indirect_args[0] = vec4<u32>(0u, 0u, 0u, 0u);
+                    indirect_args[1] = vec4<u32>(0u, 0u, 0u, 0u);
+                    indirect_args[2] = vec4<u32>(0u, 0u, 0u, 0u);
+                }
+            } else {
+                scalars[22] = 0f;
+            }
+            scalars[21] = residual;
+            return;
+        } else {
+            return;
+        }
     }
 }
 
@@ -83732,11 +83760,11 @@ fn restart_guard(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
             scalars[17] = 0f;
         }
         let prev = scalars[18];
-        let stall_rel = scalars[19];
-        let no_improve = ((prev > 0f) && (r > (prev * 0.98f)));
+        let stall_rel_1 = scalars[19];
+        let no_improve_1 = ((prev > 0f) && (r > (prev * 0.98f)));
         let _e80 = scalars[14];
-        let level_ok = (r <= (stall_rel * _e80));
-        if (((stall_rel > 0f) && no_improve) && level_ok) {
+        let level_ok_1 = (r <= (stall_rel_1 * _e80));
+        if (((stall_rel_1 > 0f) && no_improve_1) && level_ok_1) {
             let _e91 = scalars[20];
             scalars[20] = (_e91 + 1f);
             let _e96 = scalars[20];

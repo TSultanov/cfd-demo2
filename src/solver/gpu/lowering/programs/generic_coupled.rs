@@ -422,8 +422,11 @@ fn validate_schur_model(
 
     // Validate the layout against the equation targets used to assemble the system.
     //
-    // For the current Schur bridge, the linear system is assumed to consist only of a
-    // velocity-like block and a single pressure-like scalar.
+    // The Schur bridge is N-generic: the u-block may contain any number of
+    // non-pressure unknowns (up to SCHUR_MAX_U), with a single
+    // pressure-like scalar; the layout must cover exactly the model's
+    // equation targets. Validated in production by the buoyant model
+    // (u = [U_x, U_y, T], p) — see tests/gpu_buoyant_schur_probe_test.rs.
     //
     // The layout indexes the packed coupled x-vector (0..unknowns_per_cell),
     // so targets must be resolved through the coupled FluxLayout — NOT the

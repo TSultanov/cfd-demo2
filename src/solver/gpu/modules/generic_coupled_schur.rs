@@ -61,6 +61,16 @@ pub struct GenericCoupledSchurPreconditioner {
     u_len: u32,
     u0123: [u32; 4],
     u4567: [u32; 4],
+    /// The pressure-solve kind requested via [`Self::set_pressure_kind`].
+    /// May differ from the active kind on `schur` while AMG resources are
+    /// pending (see `encode_prepare`: the FIRST prepare cannot build the
+    /// AMG hierarchy because the setup kernel that populates
+    /// `pressure_values` is still unsubmitted in the caller's encoder).
+    desired_pressure_kind: CoupledPressureSolveKind,
+    /// Number of `encode_prepare` calls seen; the AMG hierarchy can only be
+    /// built from the second prepare onward (the first prepare's setup has
+    /// not been submitted yet, so `pressure_values` is pre-setup garbage).
+    prepares_seen: u64,
 }
 
 impl GenericCoupledSchurPreconditioner {
@@ -97,6 +107,8 @@ impl GenericCoupledSchurPreconditioner {
             u_len: inputs.u_len,
             u0123: inputs.u0123,
             u4567: inputs.u4567,
+            desired_pressure_kind: inputs.pressure_kind,
+            prepares_seen: 0,
         })
     }
 
@@ -140,6 +152,7 @@ impl GenericCoupledSchurPreconditioner {
     }
 
     pub fn set_pressure_kind(&mut self, kind: CoupledPressureSolveKind) {
+        self.desired_pressure_kind = kind;
         self.schur.set_pressure_kind(kind);
     }
 
@@ -220,27 +233,67 @@ impl PreconditionerModule for GenericCoupledSchurPreconditioner {
     ) {
         self.write_setup_params(queue);
         self.encode_setup(encoder, ctx.dispatch);
+        let first_prepare = self.prepares_seen == 0;
+        self.prepares_seen += 1;
 
-        if self.schur.pressure_kind() == CoupledPressureSolveKind::Amg {
+        if self.desired_pressure_kind == CoupledPressureSolveKind::Amg {
             if !self.schur.has_amg_resources() {
-                if let Ok(values) = self.read_pressure_values(device, queue) {
-                    self.schur.ensure_amg_resources(
-                        device,
-                        CsrMatrix {
-                            row_offsets: self.pressure_row_offsets.clone(),
-                            col_indices: self.pressure_col_indices.clone(),
-                            values,
-                            num_rows: self.num_cells as usize,
-                            num_cols: self.num_cells as usize,
-                        },
-                    ).unwrap_or_else(|_| {
-                        self.schur.set_pressure_kind(CoupledPressureSolveKind::Chebyshev);
-                    });
-                } else {
+                if first_prepare {
+                    // The setup kernel that populates `pressure_values` was
+                    // just encoded into the CALLER's (unsubmitted) encoder;
+                    // a readback now would see pre-setup garbage and build
+                    // the AMG hierarchy from a zero matrix. Run THIS solve
+                    // on Chebyshev and build the hierarchy at the next
+                    // prepare, when the previous solve's submitted setup
+                    // has filled the buffer (one solve stale — fine for a
+                    // preconditioner; level-0 values are refreshed each
+                    // prepare below anyway).
                     self.schur
                         .set_pressure_kind(CoupledPressureSolveKind::Chebyshev);
+                } else {
+                    match self.read_pressure_values(device, queue) {
+                        Ok(values) => {
+                            match self.schur.ensure_amg_resources(
+                                device,
+                                CsrMatrix {
+                                    row_offsets: self.pressure_row_offsets.clone(),
+                                    col_indices: self.pressure_col_indices.clone(),
+                                    values,
+                                    num_rows: self.num_cells as usize,
+                                    num_cols: self.num_cells as usize,
+                                },
+                            ) {
+                                Ok(()) => {
+                                    self.schur
+                                        .set_pressure_kind(CoupledPressureSolveKind::Amg);
+                                }
+                                Err(err) => {
+                                    eprintln!(
+                                        "[cfd2][schur] AMG hierarchy build failed ({err}); \
+                                         falling back to Chebyshev permanently"
+                                    );
+                                    self.desired_pressure_kind =
+                                        CoupledPressureSolveKind::Chebyshev;
+                                    self.schur
+                                        .set_pressure_kind(CoupledPressureSolveKind::Chebyshev);
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "[cfd2][schur] pressure matrix readback failed ({err}); \
+                                 falling back to Chebyshev permanently"
+                            );
+                            self.desired_pressure_kind = CoupledPressureSolveKind::Chebyshev;
+                            self.schur
+                                .set_pressure_kind(CoupledPressureSolveKind::Chebyshev);
+                        }
+                    }
                 }
-            } else {
+            }
+            if self.schur.has_amg_resources()
+                && self.schur.pressure_kind() == CoupledPressureSolveKind::Amg
+            {
                 self.schur.encode_refresh_amg_level0_matrix(
                     encoder,
                     &self.pressure_values,

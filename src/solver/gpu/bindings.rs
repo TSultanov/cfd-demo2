@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: a2c06f1a071783addaebf177a9e95d3be59e62da5da99f04f75476ce9de3bf41
+// SourceHash: 9d2863d79546de3f9c4aca960d6005c4bf29a64e2d2e4d7e32a1b289c40185af
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -82438,10 +82438,42 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     cache: None,
                 })
             }
+            pub const REDUCE_DOTS_CGS_REORTHO_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_reduce_dots_cgs_reortho_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline reduce_dots_cgs_reortho"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("reduce_dots_cgs_reortho"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+            pub const UPDATE_W_CGS_REORTHO_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_update_w_cgs_reortho_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline update_w_cgs_reortho"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("update_w_cgs_reortho"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
         }
         pub const ENTRY_CALC_DOTS_CGS: &str = "calc_dots_cgs";
         pub const ENTRY_REDUCE_DOTS_CGS: &str = "reduce_dots_cgs";
         pub const ENTRY_UPDATE_W_CGS: &str = "update_w_cgs";
+        pub const ENTRY_REDUCE_DOTS_CGS_REORTHO: &str = "reduce_dots_cgs_reortho";
+        pub const ENTRY_UPDATE_W_CGS_REORTHO: &str = "update_w_cgs_reortho";
         #[derive(Debug)]
         pub struct WgpuBindGroup0EntriesParams<'a> {
             pub params: wgpu::BufferBinding<'a>,
@@ -82765,26 +82797,26 @@ fn calc_dots_cgs(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(l
                 let _e191 = sdata_vec4_[(local_id.x + 1u)];
                 let _e192 = sdata_vec4_[local_id.x];
                 sdata_vec4_[local_id.x] = (_e192 + _e191);
-                let sum_1 = sdata_vec4_[0];
+                let sum_2 = sdata_vec4_[0];
                 let _e197 = i;
                 if (_e197 <= j) {
                     let _e200 = i;
-                    b_dot_partial[((_e200 * num_groups_n) + group_flat)] = sum_1.x;
+                    b_dot_partial[((_e200 * num_groups_n) + group_flat)] = sum_2.x;
                 }
                 let _e205 = i;
                 if ((_e205 + 1u) <= j) {
                     let _e209 = i;
-                    b_dot_partial[(((_e209 + 1u) * num_groups_n) + group_flat)] = sum_1.y;
+                    b_dot_partial[(((_e209 + 1u) * num_groups_n) + group_flat)] = sum_2.y;
                 }
                 let _e217 = i;
                 if ((_e217 + 2u) <= j) {
                     let _e221 = i;
-                    b_dot_partial[(((_e221 + 2u) * num_groups_n) + group_flat)] = sum_1.z;
+                    b_dot_partial[(((_e221 + 2u) * num_groups_n) + group_flat)] = sum_2.z;
                 }
                 let _e229 = i;
                 if ((_e229 + 3u) <= j) {
                     let _e233 = i;
-                    b_dot_partial[(((_e233 + 3u) * num_groups_n) + group_flat)] = sum_1.w;
+                    b_dot_partial[(((_e233 + 3u) * num_groups_n) + group_flat)] = sum_2.w;
                 }
             }
             workgroupBarrier();
@@ -82806,10 +82838,10 @@ fn reduce_dots_cgs(@builtin(global_invocation_id) global_id_1: vec3<u32>, @built
     if (_e3 > 0.5f) {
         return;
     }
-    let i_2 = group_id_1.x;
+    let i_3 = group_id_1.x;
     let j_1 = params.num_iters;
     let _e14 = params.max_restart;
-    if ((i_2 > j_1) || (i_2 >= _e14)) {
+    if ((i_3 > j_1) || (i_3 >= _e14)) {
         return;
     }
     let _e19 = params.n;
@@ -82823,7 +82855,7 @@ fn reduce_dots_cgs(@builtin(global_invocation_id) global_id_1: vec3<u32>, @built
         }
         {
             let _e32 = k;
-            let _e35 = b_dot_partial[((i_2 * num_groups_n_1) + _e32)];
+            let _e35 = b_dot_partial[((i_3 * num_groups_n_1) + _e32)];
             let _e36 = sum;
             sum = (_e36 + _e35);
         }
@@ -82870,7 +82902,7 @@ fn reduce_dots_cgs(@builtin(global_invocation_id) global_id_1: vec3<u32>, @built
         let _e127 = sdata[local_id_1.x];
         sdata[local_id_1.x] = (_e127 + _e126);
         let max_restart = params.max_restart;
-        let h_idx = ((j_1 * (max_restart + 1u)) + i_2);
+        let h_idx = ((j_1 * (max_restart + 1u)) + i_3);
         let _e140 = sdata[0];
         b_hessenberg[h_idx] = _e140;
         return;
@@ -82950,6 +82982,165 @@ fn update_w_cgs(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(
     let _e139 = b_w[idx_1];
     let _e140 = correction;
     b_w[idx_1] = (_e139 - _e140);
+    return;
+}
+
+@compute @workgroup_size(64, 1, 1) 
+fn reduce_dots_cgs_reortho(@builtin(global_invocation_id) global_id_3: vec3<u32>, @builtin(local_invocation_id) local_id_2: vec3<u32>, @builtin(workgroup_id) group_id_2: vec3<u32>) {
+    var sum_1: f32 = 0f;
+    var k_1: u32;
+
+    let _e3 = scalars[8];
+    if (_e3 > 0.5f) {
+        return;
+    }
+    let i_4 = group_id_2.x;
+    let j_3 = params.num_iters;
+    let _e14 = params.max_restart;
+    if ((i_4 > j_3) || (i_4 >= _e14)) {
+        return;
+    }
+    let _e19 = params.n;
+    let num_groups_n_2 = ((_e19 + 63u) / 64u);
+    k_1 = local_id_2.x;
+    loop {
+        let _e27 = k_1;
+        if (_e27 < num_groups_n_2) {
+        } else {
+            break;
+        }
+        {
+            let _e32 = k_1;
+            let _e35 = b_dot_partial[((i_4 * num_groups_n_2) + _e32)];
+            let _e36 = sum_1;
+            sum_1 = (_e36 + _e35);
+        }
+        continuing {
+            let _e39 = k_1;
+            k_1 = (_e39 + 64u);
+        }
+    }
+    let _e44 = sum_1;
+    sdata[local_id_2.x] = _e44;
+    workgroupBarrier();
+    if (local_id_2.x < 32u) {
+        let _e56 = sdata[(local_id_2.x + 32u)];
+        let _e57 = sdata[local_id_2.x];
+        sdata[local_id_2.x] = (_e57 + _e56);
+    }
+    workgroupBarrier();
+    if (local_id_2.x < 16u) {
+        let _e70 = sdata[(local_id_2.x + 16u)];
+        let _e71 = sdata[local_id_2.x];
+        sdata[local_id_2.x] = (_e71 + _e70);
+    }
+    workgroupBarrier();
+    if (local_id_2.x < 8u) {
+        let _e84 = sdata[(local_id_2.x + 8u)];
+        let _e85 = sdata[local_id_2.x];
+        sdata[local_id_2.x] = (_e85 + _e84);
+    }
+    workgroupBarrier();
+    if (local_id_2.x < 4u) {
+        let _e98 = sdata[(local_id_2.x + 4u)];
+        let _e99 = sdata[local_id_2.x];
+        sdata[local_id_2.x] = (_e99 + _e98);
+    }
+    workgroupBarrier();
+    if (local_id_2.x < 2u) {
+        let _e112 = sdata[(local_id_2.x + 2u)];
+        let _e113 = sdata[local_id_2.x];
+        sdata[local_id_2.x] = (_e113 + _e112);
+    }
+    workgroupBarrier();
+    if (local_id_2.x < 1u) {
+        let _e126 = sdata[(local_id_2.x + 1u)];
+        let _e127 = sdata[local_id_2.x];
+        sdata[local_id_2.x] = (_e127 + _e126);
+        let max_restart_2 = params.max_restart;
+        let h_idx_1 = ((j_3 * (max_restart_2 + 1u)) + i_4);
+        let d = sdata[0];
+        let _e141 = b_hessenberg[h_idx_1];
+        b_hessenberg[h_idx_1] = (_e141 + d);
+        b_dot_partial[(i_4 * num_groups_n_2)] = d;
+        return;
+    } else {
+        return;
+    }
+}
+
+@compute @workgroup_size(64, 1, 1) 
+fn update_w_cgs_reortho(@builtin(global_invocation_id) global_id_4: vec3<u32>, @builtin(num_workgroups) num_workgroups_2: vec3<u32>) {
+    var correction_1: f32 = 0f;
+    var i_2: u32 = 0u;
+
+    let _e4 = scalars[8];
+    if (_e4 > 0.5f) {
+        return;
+    }
+    let stride_x_2 = (num_workgroups_2.x * WORKGROUP_SIZE);
+    let idx_2 = ((global_id_4.y * stride_x_2) + global_id_4.x);
+    let j_4 = params.num_iters;
+    let n_2 = params.n;
+    let max_restart_3 = params.max_restart;
+    let stride_bytes_2 = (((n_2 * 4u) + 255u) & 4294967040u);
+    let stride_words_2 = (stride_bytes_2 / 4u);
+    let num_groups_n_3 = ((n_2 + 63u) / 64u);
+    if (idx_2 >= n_2) {
+        return;
+    }
+    loop {
+        let _e39 = i_2;
+        if (_e39 <= j_4) {
+        } else {
+            break;
+        }
+        {
+            let _e41 = i_2;
+            if (_e41 <= j_4) {
+                let _e44 = i_2;
+                let h_val_4 = b_dot_partial[(_e44 * num_groups_n_3)];
+                let _e49 = i_2;
+                let v_val_4 = b_basis[((_e49 * stride_words_2) + idx_2)];
+                let _e56 = correction_1;
+                correction_1 = (_e56 + (h_val_4 * v_val_4));
+            }
+            let _e58 = i_2;
+            if ((_e58 + 1u) <= j_4) {
+                let _e62 = i_2;
+                let h_val_5 = b_dot_partial[((_e62 + 1u) * num_groups_n_3)];
+                let _e69 = i_2;
+                let v_val_5 = b_basis[(((_e69 + 1u) * stride_words_2) + idx_2)];
+                let _e78 = correction_1;
+                correction_1 = (_e78 + (h_val_5 * v_val_5));
+            }
+            let _e80 = i_2;
+            if ((_e80 + 2u) <= j_4) {
+                let _e84 = i_2;
+                let h_val_6 = b_dot_partial[((_e84 + 2u) * num_groups_n_3)];
+                let _e91 = i_2;
+                let v_val_6 = b_basis[(((_e91 + 2u) * stride_words_2) + idx_2)];
+                let _e100 = correction_1;
+                correction_1 = (_e100 + (h_val_6 * v_val_6));
+            }
+            let _e102 = i_2;
+            if ((_e102 + 3u) <= j_4) {
+                let _e106 = i_2;
+                let h_val_7 = b_dot_partial[((_e106 + 3u) * num_groups_n_3)];
+                let _e113 = i_2;
+                let v_val_7 = b_basis[(((_e113 + 3u) * stride_words_2) + idx_2)];
+                let _e122 = correction_1;
+                correction_1 = (_e122 + (h_val_7 * v_val_7));
+            }
+        }
+        continuing {
+            let _e125 = i_2;
+            i_2 = (_e125 + 4u);
+        }
+    }
+    let _e131 = b_w[idx_2];
+    let _e132 = correction_1;
+    b_w[idx_2] = (_e131 - _e132);
     return;
 }
 "#;

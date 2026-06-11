@@ -63,6 +63,16 @@ impl OneSubmissionEnvTunables {
     }
 }
 
+/// CGS2 re-orthogonalization A/B switch (default OFF while measurements
+/// accumulate; see the roadmap's Arc 2). Read per solve, not cached: a
+/// process-wide cache froze the first test's environment (see
+/// `one_submission_env_tunables`).
+fn cgs2_enabled() -> bool {
+    std::env::var("CFD2_FGMRES_CGS2")
+        .map(|v| v != "0")
+        .unwrap_or(false)
+}
+
 fn parse_usize_env(key: &str) -> Option<usize> {
     std::env::var(key)
         .ok()
@@ -346,6 +356,7 @@ pub fn solve_fgmres<P: PreconditionerModule>(
                     tol_rel: tol,
                     tol_abs,
                     reset_x_before_update: false,
+                    enable_cgs2: cgs2_enabled(),
                     // The host loop has its own snapshot/restore guard.
                     enable_restart_guard: false,
                 },
@@ -468,6 +479,7 @@ pub fn encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>(
                     tol_rel: tol,
                     tol_abs,
                     reset_x_before_update: false,
+                    enable_cgs2: cgs2_enabled(),
                     // Encoded-seed path: GPU-side monotonicity guard.
                     enable_restart_guard: use_encoded_seed_basis0,
                 },
@@ -579,6 +591,7 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
                     tol_rel: tol,
                     tol_abs,
                     reset_x_before_update: false,
+                    enable_cgs2: cgs2_enabled(),
                     // Encoded-seed path: GPU-side monotonicity guard.
                     enable_restart_guard: use_encoded_seed_basis0,
                 },

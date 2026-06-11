@@ -121,6 +121,8 @@ pub struct FgmresCore<'a> {
     pub pipeline_calc_dots_cgs: &'a wgpu::ComputePipeline,
     pub pipeline_reduce_dots_cgs: &'a wgpu::ComputePipeline,
     pub pipeline_update_w_cgs: &'a wgpu::ComputePipeline,
+    pub pipeline_reduce_dots_cgs_reortho: &'a wgpu::ComputePipeline,
+    pub pipeline_update_w_cgs_reortho: &'a wgpu::ComputePipeline,
     pub pipeline_restart_guard: &'a wgpu::ComputePipeline,
     pub pipeline_guard_copy: &'a wgpu::ComputePipeline,
 }
@@ -185,6 +187,8 @@ pub struct FgmresWorkspace {
     pipeline_calc_dots_cgs: wgpu::ComputePipeline,
     pipeline_reduce_dots_cgs: wgpu::ComputePipeline,
     pipeline_update_w_cgs: wgpu::ComputePipeline,
+    pipeline_reduce_dots_cgs_reortho: wgpu::ComputePipeline,
+    pipeline_update_w_cgs_reortho: wgpu::ComputePipeline,
     pipeline_axpy_fused_from_y: wgpu::ComputePipeline,
     pipeline_restart_guard: wgpu::ComputePipeline,
     pipeline_guard_copy: wgpu::ComputePipeline,
@@ -586,6 +590,18 @@ impl FgmresWorkspace {
                 .map_err(|e| format!("gmres_cgs/update_w_cgs shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
+        let pipeline_reduce_dots_cgs_reortho = {
+            let src =
+                kernel_registry::kernel_source_by_id("", KernelId("gmres_cgs/reduce_dots_cgs_reortho"))
+                    .map_err(|e| format!("gmres_cgs/reduce_dots_cgs_reortho shader missing: {e}"))?;
+            (src.create_pipeline)(device)
+        };
+        let pipeline_update_w_cgs_reortho = {
+            let src =
+                kernel_registry::kernel_source_by_id("", KernelId("gmres_cgs/update_w_cgs_reortho"))
+                    .map_err(|e| format!("gmres_cgs/update_w_cgs_reortho shader missing: {e}"))?;
+            (src.create_pipeline)(device)
+        };
 
         let bgl_cgs = pipeline_calc_dots_cgs.get_bind_group_layout(0);
         let bg_cgs = {
@@ -660,6 +676,8 @@ impl FgmresWorkspace {
             pipeline_calc_dots_cgs,
             pipeline_reduce_dots_cgs,
             pipeline_update_w_cgs,
+            pipeline_reduce_dots_cgs_reortho,
+            pipeline_update_w_cgs_reortho,
             pipeline_restart_guard,
             pipeline_guard_copy,
         })
@@ -716,6 +734,8 @@ impl FgmresWorkspace {
             pipeline_calc_dots_cgs: &self.pipeline_calc_dots_cgs,
             pipeline_reduce_dots_cgs: &self.pipeline_reduce_dots_cgs,
             pipeline_update_w_cgs: &self.pipeline_update_w_cgs,
+            pipeline_reduce_dots_cgs_reortho: &self.pipeline_reduce_dots_cgs_reortho,
+            pipeline_update_w_cgs_reortho: &self.pipeline_update_w_cgs_reortho,
             pipeline_restart_guard: &self.pipeline_restart_guard,
             pipeline_guard_copy: &self.pipeline_guard_copy,
         }
@@ -1262,6 +1282,11 @@ pub struct FgmresSolveOnceConfig {
     pub tol_rel: f32,
     pub tol_abs: f32,
     pub reset_x_before_update: bool,
+    /// Enable CGS2 re-orthogonalization: a second classical Gram-Schmidt
+    /// projection pass per Arnoldi iteration ("twice is enough"). Mitigates
+    /// f32 orthogonality loss at the root (the restart guard treats the
+    /// symptom). Costs one extra calc/reduce/update_w triple per iteration.
+    pub enable_cgs2: bool,
     /// Enable the GPU-side restart-boundary monotonicity guard
     /// (gmres_logic/restart_guard + gmres_ops/guard_copy). Only valid on the
     /// encoded-seed path, where the seed writes the true residual norm into
@@ -2259,6 +2284,40 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
             pass.set_pipeline(core.pipeline_update_w_cgs);
             pass.set_bind_group(0, core.bg_cgs, &[]);
             pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
+        }
+        if config.enable_cgs2 {
+            // CGS2: re-project the corrected w against the basis. The pass-2
+            // reduce ACCUMULATES into the Hessenberg entries (H = d1 + d2)
+            // and stashes the pass-2 coefficients in b_dot_partial, which
+            // the pass-2 update_w reads (subtracting H again would
+            // double-project). b_params still holds params_table_iter[j].
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FGMRES CGS2 Calc"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(core.pipeline_calc_dots_cgs);
+                pass.set_bind_group(0, core.bg_cgs, &[]);
+                pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
+            }
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FGMRES CGS2 Reduce"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(core.pipeline_reduce_dots_cgs_reortho);
+                pass.set_bind_group(0, core.bg_cgs, &[]);
+                pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_SCALAR_OFFSET);
+            }
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("FGMRES CGS2 Update W"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(core.pipeline_update_w_cgs_reortho);
+                pass.set_bind_group(0, core.bg_cgs, &[]);
+                pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
+            }
         }
 
         let norm_bg = create_vector_bind_group(

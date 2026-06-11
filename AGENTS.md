@@ -35,11 +35,15 @@ For every **major** changeset, run the OpenFOAM reference suite both **before** 
 
 Runtime note / skip policy:
 
-- The full suite takes ~13–15 minutes wall clock (the incompressible backstep,
-  channel, and lid cases are the long poles at several minutes each).
-  **TODO: investigate suite performance** — per-case step counts/convergence
-  policies look like the dominant cost, not the comparison machinery; profile
-  and trim before adding more reference cases.
+- The full suite takes ~12–13 minutes wall clock (the incompressible backstep,
+  channel, and lid cases are the long poles at 3.5–5.5 minutes each).
+  RESOLVED (June 2026, inexact-Picard arc): the cost was host-side encoding of
+  linear-solve iterations far past outer-loop usefulness. The reachable
+  relative tolerance (1e-4, `ModelLinearSolverSettings::default`) plus the
+  adaptive encoding budget halved backstep/channel (485→207s, 447→214s) and
+  cut compressible cases 3–4×; the incompressible lid (355→319s) converges
+  late per solve and is the remaining long pole. `CFD2_LIN_TOL` overrides
+  the tolerance for sweeps/diagnostics.
 - For changesets that are **provably numerics-neutral** — generated WGSL
   byte-identical (zero diffs under `shaders/generated/`, clean
   `check_generated_wgsl.sh`) AND no runtime/host solver-path changes — the

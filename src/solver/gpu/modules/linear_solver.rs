@@ -84,6 +84,17 @@ fn stall_level_rel() -> f32 {
         .unwrap_or(0.0)
 }
 
+/// Linear-solve relative-tolerance override (sweep/diagnostic knob for the
+/// inexact-Picard tolerance arc). When set, overrides the model-declared
+/// FGMRES relative tolerance at every solve entry point. Read per solve,
+/// not cached (see `one_submission_env_tunables`).
+fn lin_tol_override() -> Option<f32> {
+    std::env::var("CFD2_LIN_TOL")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| *v > 0.0)
+}
+
 fn parse_usize_env(key: &str) -> Option<usize> {
     std::env::var(key)
         .ok()
@@ -194,6 +205,7 @@ pub fn solve_fgmres<P: PreconditionerModule>(
         precond_label,
         use_encoded_seed_basis0,
     } = args;
+    let tol = lin_tol_override().unwrap_or(tol);
     let start = Instant::now();
 
     let debug_fgmres = std::env::var("CFD2_DEBUG_FGMRES")
@@ -489,6 +501,7 @@ pub fn encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>(
         precond_label,
         use_encoded_seed_basis0,
     } = args;
+    let tol = lin_tol_override().unwrap_or(tol);
     let start = Instant::now();
 
     let FgmresChunkLayout {
@@ -590,24 +603,23 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
         precond_label,
         use_encoded_seed_basis0,
     } = args;
+    let tol = lin_tol_override().unwrap_or(tol);
     let start = Instant::now();
 
     // Adaptive iteration budget: encode only ~what the previous solve
-    // actually needed. Only meaningful when the stall-stop can end solves
-    // early (stall_level_rel > 0); the configured max_iters always caps it,
-    // and a solve that exhausts its budget without stopping doubles the
-    // next budget (AIMD). The wall-time win is on the HOST side: frozen
-    // chunks execute as GPU no-ops either way, but encoding them is what
-    // dominates small-system solves.
+    // actually needed. Engages whenever solves stop early — convergence
+    // (reachable tolerance), stall, or guard; the configured max_iters
+    // always caps it, and a solve that exhausts its budget without
+    // stopping doubles the next budget (AIMD). Inert at an unreachable
+    // tolerance with the stall off: stopped_early never fires, so the
+    // budget stays max_iters. The wall-time win is on the HOST side:
+    // frozen chunks execute as GPU no-ops either way, but encoding them
+    // is what dominates small-system solves.
     let restart_len_u32 = max_restart.max(1) as u32;
-    let budget = if stall_level_rel() > 0.0 {
-        krylov
-            .adaptive_budget
-            .map(|b| b.clamp(restart_len_u32, max_iters.max(1)))
-            .unwrap_or(max_iters)
-    } else {
-        max_iters
-    };
+    let budget = krylov
+        .adaptive_budget
+        .map(|b| b.clamp(restart_len_u32, max_iters.max(1)))
+        .unwrap_or(max_iters);
 
     let FgmresChunkLayout {
         mut params,
@@ -720,18 +732,16 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
                 info.actual_iters, info.stopped_early, stats.residual
             );
         }
-        if stall_level_rel() > 0.0 {
-            let next = if info.stopped_early {
-                // Stall/guard/convergence ended the solve: next budget =
-                // actual work + one restart cycle of margin.
-                (info.actual_iters.saturating_add(restart_len_u32))
-                    .clamp(restart_len_u32, max_iters.max(1))
-            } else {
-                // Budget exhausted without stopping: grow back quickly.
-                budget.saturating_mul(2).clamp(restart_len_u32, max_iters.max(1))
-            };
-            krylov.adaptive_budget = Some(next);
-        }
+        let next = if info.stopped_early {
+            // Stall/guard/convergence ended the solve: next budget =
+            // actual work + one restart cycle of margin.
+            (info.actual_iters.saturating_add(restart_len_u32))
+                .clamp(restart_len_u32, max_iters.max(1))
+        } else {
+            // Budget exhausted without stopping: grow back quickly.
+            budget.saturating_mul(2).clamp(restart_len_u32, max_iters.max(1))
+        };
+        krylov.adaptive_budget = Some(next);
         stats
     } else {
         LinearSolverStats::max_iterations(encoded_total as u32, f32::INFINITY, start.elapsed())

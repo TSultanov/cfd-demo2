@@ -1,9 +1,11 @@
 //! Forced-stall test for the FGMRES stall-stop (roadmap Arc 3).
 //!
-//! With the production tolerance (1e-12, below the f32 floor) every solve
-//! burns to the max_iters cap. With CFD2_FGMRES_STALL_REL=1.0 the level
-//! criterion is always satisfied, so a solve must stop within two restart
-//! checkpoints of reaching its f32 floor:
+//! With an unreachable tolerance (1e-12, below the f32 floor — pinned via
+//! CFD2_LIN_TOL because the production default is now the reachable
+//! inexact-Picard 1e-4, which converges these solves in ~10 iterations and
+//! pre-empts the stall) every solve burns to the max_iters cap. With
+//! CFD2_FGMRES_STALL_REL=1.0 the level criterion is always satisfied, so a
+//! solve must stop within two restart checkpoints of reaching its f32 floor:
 //! - host-driven path (outer_batched_mode=false): LinearSolverStats
 //!   reports the real iteration count -> assert it breaks below the cap;
 //! - encoded chunked path (default): the iteration count is the encoded
@@ -83,6 +85,11 @@ fn rel_l2(a: &[f64], b: &[f64]) -> f64 {
 fn stall_stop_breaks_early_and_preserves_solution() {
     std::env::set_var("CFD2_QUIET", "1");
 
+    // Pin the unreachable-tolerance regime this test exercises (see the
+    // module doc): without this, the reachable default converges every
+    // solve before the stall can fire.
+    std::env::set_var("CFD2_LIN_TOL", "1e-12");
+
     // Baseline: stall off, encoded path.
     std::env::remove_var("CFD2_FGMRES_STALL_REL");
     let (u_off, p_off, _) = run(true);
@@ -104,6 +111,7 @@ fn stall_stop_breaks_early_and_preserves_solution() {
     // Encoded chunked path: assert agreement with the stall-off run.
     let (u_on, p_on, _) = run(true);
     std::env::remove_var("CFD2_FGMRES_STALL_REL");
+    std::env::remove_var("CFD2_LIN_TOL");
 
     assert!(
         u_on.iter().all(|(x, y)| x.is_finite() && y.is_finite())

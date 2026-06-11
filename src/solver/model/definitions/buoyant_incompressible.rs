@@ -311,6 +311,13 @@ fn buoyant_incompressible_model_impl(with_mms_sources: bool) -> Result<ModelSpec
         // NOTE: layout indices are coupled FluxLayout RANKS (equation
         // order: U_x=0, U_y=1, p=2, T=3), NOT state-layout offsets (T sits
         // at state offset 8) — the known rank-vs-offset latent-bug class.
+        //
+        // Wall cost (June 2026, reachable-tolerance era): Schur needs
+        // 1.8x fewer iterations than block-Jacobi at identical floors
+        // (probe: 206 vs 374 total) but its per-application pressure
+        // solve still costs ~+16% wall on the buoyant MMS suite (110s vs
+        // 94s; was +40% when cap-bound). Kept for saddle-point
+        // robustness, not speed.
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
             preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
                 omega: 1.0,

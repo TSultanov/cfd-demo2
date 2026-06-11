@@ -63,10 +63,13 @@ impl OneSubmissionEnvTunables {
     }
 }
 
-/// CGS2 re-orthogonalization A/B switch (default OFF while measurements
-/// accumulate; see the roadmap's Arc 2). Read per solve, not cached: a
-/// process-wide cache froze the first test's environment (see
-/// `one_submission_env_tunables`).
+/// CGS2 re-orthogonalization A/B switch. Default OFF by measurement
+/// (June 2026, reachable-tolerance era): on the OpenFOAM trio it is a
+/// wash — lid −30% wall (its late-converging solves benefit from the
+/// deeper orthogonality) but backstep/channel +20% (their solves
+/// converge fast; the two extra kernels per iteration are overhead).
+/// Read per solve, not cached: a process-wide cache froze the first
+/// test's environment (see `one_submission_env_tunables`).
 fn cgs2_enabled() -> bool {
     std::env::var("CFD2_FGMRES_CGS2")
         .map(|v| v != "0")
@@ -75,8 +78,11 @@ fn cgs2_enabled() -> bool {
 
 /// Stall-stop level factor (0.0 disables; see the stall branch in
 /// gmres_logic/restart_guard and the host loop in `solve_fgmres`).
-/// Default OFF while measurements accumulate (roadmap Arc 3). Read per
-/// solve, not cached (see `one_submission_env_tunables`).
+/// Default OFF by measurement (June 2026): at the reachable
+/// inexact-Picard tolerance the suite's solves converge before the
+/// stall can fire (walls and metrics identical at 1e-2), so it stays a
+/// diagnostic/safety knob for floor-stuck regimes. Read per solve, not
+/// cached (see `one_submission_env_tunables`).
 fn stall_level_rel() -> f32 {
     std::env::var("CFD2_FGMRES_STALL_REL")
         .ok()

@@ -77,6 +77,13 @@ Known engine limits (tracked in the plan):
   on faces where the normal second derivative of p is nonzero. Measured
   cost: pressure converges at ~1.36 with an outlet vs ~1.64 all-Neumann in
   the buoyant MMS; velocity and advected scalars are unaffected (order 2).
+  This is IRREDUCIBLE with face-local data (June 2026 derivation): the two
+  available ∂p/∂n estimates differ by exactly (h/4)·p_nn, any affine
+  recombination only rescales the error, and matching the bracket to the
+  implicit laplacian closure cancels the outlet's pressure coupling — which
+  would un-pin the gauge. A genuine fix needs a wider boundary stencil
+  (CSR-graph change) or a deferred-correction cell kernel; OpenFOAM's
+  fixedValue closure carries the same first-order face centering.
 
 A contract worth knowing when extending codegen: the packed `grad_state`
 buffer is keyed by STATE OFFSET (stride = state stride), matching the

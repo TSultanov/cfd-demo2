@@ -266,6 +266,20 @@ fn buoyant_incompressible_model_impl(with_mms_sources: bool) -> Result<ModelSpec
     )
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
+    // Schur block layout from coupled FluxLayout RANKS (see the comment at
+    // the linear_solver field below).
+    let schur_layout = {
+        let fl = crate::solver::model::FluxLayout::from_system(&system);
+        let ux = fl.offset_for("U_x").ok_or("U_x not in coupled layout")?;
+        let uy = fl.offset_for("U_y").ok_or("U_y not in coupled layout")?;
+        let t = fl
+            .offset_for(BUOYANT_TEMPERATURE_FIELD)
+            .ok_or("T not in coupled layout")?;
+        let p = fl.offset_for("p").ok_or("p not in coupled layout")?;
+        crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(&[ux, uy, t], p)
+            .map_err(|e| format!("invalid buoyant SchurBlockLayout: {e}"))?
+    };
+
     Ok(ModelSpec {
         id: if with_mms_sources {
             "buoyant_incompressible_mms"
@@ -283,14 +297,27 @@ fn buoyant_incompressible_model_impl(with_mms_sources: bool) -> Result<ModelSpec
             crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
             derived_rhie_chow.aux_module,
         ],
-        // Default (Jacobi-style) preconditioning: the generic Schur bridge
-        // currently assumes the non-pressure block is exactly the velocity
-        // pair; with temperature as a third u-block entry the first solve
-        // corrupts (diagnosed via MMS: p -> 2.7e5 on step 0, NaN cascade).
-        // Extending Schur to extra scalar unknowns is engine work tracked in
-        // the plan; the coupled solve converges with the default
-        // preconditioner at validation sizes.
-        linear_solver: None,
+        // Schur preconditioning with T in the u-block. The capstone-era
+        // corruption ("p -> 2.7e5 on step 0, NaN cascade") no longer
+        // reproduces (June 2026, tests/gpu_buoyant_schur_probe_test.rs:
+        // rel_l2 vs the default preconditioner ~1e-7..1e-6, equal residual
+        // floors): it predated the validator's state-offset->FluxLayout-rank
+        // fix and the FGMRES restart monotonicity guard, either of which
+        // explains the observed signature. The Schur kernels are N-generic
+        // (u_index tables, u_len-sized buffers); A_pT/A_Tp blocks are
+        // structurally present but zero, so T degenerates to exact Jacobi
+        // inside the preconditioner — mathematically benign.
+        //
+        // NOTE: layout indices are coupled FluxLayout RANKS (equation
+        // order: U_x=0, U_y=1, p=2, T=3), NOT state-layout offsets (T sits
+        // at state offset 8) — the known rank-vs-offset latent-bug class.
+        linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
+            preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
+                omega: 1.0,
+                layout: schur_layout,
+            },
+            ..Default::default()
+        }),
         primitives,
     })
 }

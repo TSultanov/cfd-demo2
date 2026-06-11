@@ -51,6 +51,26 @@ impl Default for IncompressibleMomentumFields {
 /// variant (Vector2, unit Force/Volume; uploaded host-side per cell).
 pub const INCOMPRESSIBLE_MMS_SOURCE_FIELD: &str = "mms_src_U";
 
+/// Viscous stress form declared in the momentum equation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViscousStressForm {
+    /// `laplacian(mu, U)` only (OpenFOAM icoFoam-like). DEFAULT.
+    LaplacianOnly,
+    /// Plus the explicit transpose/deviatoric correction
+    /// `div(mu * dev2((grad U)^T))` — the OpenFOAM simpleFoam laminar UEqn
+    /// form. Completes the full viscous stress divergence; the correction
+    /// is analytically zero for div-free fields but discretely nonzero
+    /// (measured 2-6% of local viscous at the lid corners, 662ff9f).
+    FullDev2,
+}
+
+/// Experiment toggle (Arc D): flip to `FullDev2`, `cargo build` (regenerates
+/// the committed incompressible WGSL), and run the gate battery. Ships
+/// default-OFF until the OpenFOAM lid/backstep bands measurably improve
+/// (no-growth policy) — same decision-record pattern as `DpFormulation`
+/// at the derive call below.
+const VISCOUS_STRESS_FORM: ViscousStressForm = ViscousStressForm::LaplacianOnly;
+
 fn build_incompressible_momentum_system(
     _fields: &IncompressibleMomentumFields,
     with_mms_source: bool,
@@ -96,6 +116,13 @@ fn build_incompressible_momentum_system(
         + div_term.cast_to::<Force>()
         + laplacian_term.cast_to::<Force>()
         + grad_term.cast_to::<Force>();
+    if VISCOUS_STRESS_FORM == ViscousStressForm::FullDev2 {
+        // Explicit transpose/deviatoric viscous correction; same integrated
+        // unit as the laplacian term (mu * U * Area / Length = Force).
+        let mu_coeff2 = TypedCoeff::from_field(mu_typed);
+        momentum_sum = momentum_sum
+            + typed_fvc::div_dev2_grad_transpose(mu_coeff2, u_typed).cast_to::<Force>();
+    }
     if with_mms_source {
         // Manufactured per-component momentum source (MMS): one more
         // declared equation term, exactly like the scalar MMS variants.

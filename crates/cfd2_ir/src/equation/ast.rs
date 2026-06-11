@@ -224,6 +224,15 @@ pub struct Term {
     /// (e.g. Boussinesq buoyancy `-rho*beta*(T-T0)*g`) with a scalar
     /// coefficient tree, without materializing a vector source field.
     pub direction: Option<Vec<f64>>,
+    /// Explicit transpose/deviatoric viscous form: the term assembles as
+    /// `-div(coeff * dev2((grad field)^T))` in the sum-to-zero residual,
+    /// with `dev2(A) = A - (2/3) tr(A) I`. Together with the implicit
+    /// `laplacian(coeff, field)` this completes the full viscous stress
+    /// (OpenFOAM laminar UEqn form). Only meaningful on explicit
+    /// `Laplacian` terms with a Vector2 field; the assembly evaluates it
+    /// from `grad_state` cell gradients, so declaring it forces the
+    /// gradients pipeline on (see scheme_expansion / packed_state_gradients).
+    pub transpose_dev2: bool,
 }
 
 impl Term {
@@ -243,6 +252,7 @@ impl Term {
             scheme: None,
             bounded: false,
             direction: None,
+            transpose_dev2: false,
         }
     }
 
@@ -261,6 +271,13 @@ impl Term {
     /// Declare the bounded convection form (see `bounded` field docs).
     pub fn with_bounded(mut self) -> Self {
         self.bounded = true;
+        self
+    }
+
+    /// Declare the explicit transpose/deviatoric viscous form (see
+    /// `transpose_dev2` field docs).
+    pub fn with_transpose_dev2(mut self) -> Self {
+        self.transpose_dev2 = true;
         self
     }
 
@@ -714,6 +731,19 @@ pub mod fvc {
             None,
             Some(coeff),
         )
+    }
+
+    /// Explicit transpose/deviatoric viscous correction
+    /// `-div(coeff * dev2((grad field)^T))` (see `Term::transpose_dev2`).
+    pub fn div_dev2_grad_transpose(coeff: Coefficient, field: FieldRef) -> Term {
+        Term::new(
+            TermOp::Laplacian,
+            Discretization::Explicit,
+            field,
+            None,
+            Some(coeff),
+        )
+        .with_transpose_dev2()
     }
 
     pub fn source(field: FieldRef) -> Term {

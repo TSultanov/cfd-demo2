@@ -774,6 +774,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             if let Some(diff_op) = equation.ops.iter().find(|op| {
                 op.kind == DiscreteOpKind::Diffusion
                     && op.discretization == Discretization::Explicit
+                    && !op.transpose_dev2
             }) {
                 if diff_op.field.kind() != equation.target.kind() {
                     panic!(
@@ -897,6 +898,151 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         Some(boundary_contrib),
                     ));
                 }
+            }
+
+            // Explicit transpose/deviatoric viscous correction (RHS-only):
+            //   -div(coeff * dev2((grad field)^T)),  dev2(A) = A - (2/3) tr(A) I
+            // in the sum-to-zero residual. Explicit residual terms accumulate
+            // negated on the RHS (cf. grad p: `rhs -= p_f * n * A`), so the
+            // outward face flux F_j = n_i d(u_i)/d(x_j) - (2/3) divU n_j
+            // enters as `rhs_j += coeff_f * A * F_j` — the same orientation
+            // by which the explicit laplacian realizes -div(coeff grad phi)
+            // via `rhs += coeff*A/d*(phi_N - phi_P)`.
+            //
+            // Face gradients are the owner/neighbor average of grad_state
+            // cell gradients; at boundary faces `other_idx == idx`, so this
+            // degrades to the owner gradient, whose BC ghost handling is
+            // already folded in by packed_state_gradients — no bc branch.
+            //
+            // grad_state is STATE-OFFSET keyed (slots base_offset), NOT the
+            // coupled-rank `offsets` map — the known rank-vs-offset latent
+            // bug class (two prior engine bugs).
+            for dev2_op in equation.ops.iter().filter(|op| {
+                op.kind == DiscreteOpKind::Diffusion
+                    && op.discretization == Discretization::Explicit
+                    && op.transpose_dev2
+            }) {
+                if dev2_op.field.kind() != FieldKind::Vector2
+                    || equation.target.kind() != FieldKind::Vector2
+                {
+                    panic!(
+                        "transpose_dev2 requires a Vector2 field and target (target={}, field={})",
+                        equation.target.name(),
+                        dev2_op.field.name()
+                    );
+                }
+
+                let field_name = dev2_op.field.name();
+                let field_offset = slots
+                    .slots
+                    .iter()
+                    .find(|s| s.name == field_name)
+                    .map(|s| s.base_offset)
+                    .unwrap_or_else(|| {
+                        panic!("missing field '{}' in resolved state slots", field_name)
+                    });
+                let field_slot = slots
+                    .slots
+                    .iter()
+                    .find(|s| s.name == field_name)
+                    .expect("slot checked above");
+
+                // Face-averaged gradient of velocity component `c` (Vector2).
+                let grad_face = |c: u32| -> Expr {
+                    if needs_gradients {
+                        let own = dsl::array_access_linear(
+                            "grad_state",
+                            Expr::ident("idx"),
+                            slots.stride,
+                            field_offset + c,
+                        );
+                        let neigh = dsl::array_access_linear(
+                            "grad_state",
+                            Expr::ident("other_idx"),
+                            slots.stride,
+                            field_offset + c,
+                        );
+                        (own + neigh) * 0.5
+                    } else {
+                        // Two-point fallback (same as the convection
+                        // reconstruction fallback). This variant is never
+                        // scheduled once the dev2 term forces the gradients
+                        // pipeline on, but the kernel must still compile;
+                        // at boundary faces it degrades to zero.
+                        let phi_own = state_component_slot(
+                            slots.stride,
+                            "state",
+                            "idx",
+                            field_slot,
+                            c,
+                        );
+                        let phi_neigh = state_component_slot(
+                            slots.stride,
+                            "state",
+                            "other_idx",
+                            field_slot,
+                            c,
+                        );
+                        let diff = phi_neigh - phi_own;
+                        let denom = dsl::max(
+                            Expr::ident("dx") * Expr::ident("dx")
+                                + Expr::ident("dy") * Expr::ident("dy"),
+                            1e-12,
+                        );
+                        dsl::vec2_f32(
+                            diff.clone() * Expr::ident("dx") / denom.clone(),
+                            diff * Expr::ident("dy") / denom,
+                        )
+                    }
+                };
+
+                let prefix = format!("dev2_{}_{}", equation.target.name(), field_name);
+                let gx_name = format!("{prefix}_gx");
+                let gy_name = format!("{prefix}_gy");
+                let div_name = format!("{prefix}_div");
+                let mu_name = format!("{prefix}_mu");
+
+                body.push(dsl::let_expr(&gx_name, grad_face(0)));
+                body.push(dsl::let_expr(&gy_name, grad_face(1)));
+                body.push(dsl::let_expr(
+                    &div_name,
+                    Expr::ident(&gx_name).field("x") + Expr::ident(&gy_name).field("y"),
+                ));
+
+                let kappa_own =
+                    coefficient_value_expr(slots, dev2_op.coeff.as_ref(), "idx", 1.0.into());
+                let kappa_other =
+                    coefficient_value_expr(slots, dev2_op.coeff.as_ref(), "other_idx", 1.0.into());
+                body.push(dsl::let_expr(
+                    &mu_name,
+                    dsl::select(
+                        kappa_own.clone(),
+                        (kappa_own + kappa_other) * 0.5,
+                        !Expr::ident("is_boundary"),
+                    ),
+                ));
+
+                // F_x = n_x ∂u_x/∂x + n_y ∂u_y/∂x − (2/3) divU n_x
+                let flux_x = Expr::ident("normal").field("x") * Expr::ident(&gx_name).field("x")
+                    + Expr::ident("normal").field("y") * Expr::ident(&gy_name).field("x")
+                    - Expr::from(2.0 / 3.0)
+                        * Expr::ident(&div_name)
+                        * Expr::ident("normal").field("x");
+                // F_y = n_x ∂u_x/∂y + n_y ∂u_y/∂y − (2/3) divU n_y
+                let flux_y = Expr::ident("normal").field("x") * Expr::ident(&gx_name).field("y")
+                    + Expr::ident("normal").field("y") * Expr::ident(&gy_name).field("y")
+                    - Expr::from(2.0 / 3.0)
+                        * Expr::ident(&div_name)
+                        * Expr::ident("normal").field("y");
+
+                body.push(acc.add_rhs(
+                    base_offset,
+                    Expr::ident(&mu_name) * Expr::ident("area") * flux_x,
+                ));
+                body.push(acc.add_rhs(
+                    base_offset + 1,
+                    Expr::ident(&mu_name) * Expr::ident("area") * flux_y,
+                ));
             }
 
             // 2. Convection

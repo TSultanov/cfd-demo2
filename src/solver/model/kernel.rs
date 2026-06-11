@@ -662,17 +662,23 @@ pub(crate) fn generate_packed_state_gradients_kernel_program(
     _schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<crate::solver::ir::KernelProgram, String> {
     let eos_params = extract_eos_params(model);
-    // When a convection term declares a non-upwind scheme, the gradients are needed
-    // unconditionally: the "skip when the runtime knob says Upwind" guard must not be
-    // emitted (the declared scheme is baked into the assembly and ignores the knob).
-    let has_declared_high_order = model.system.equations().iter().any(|eq| {
+    // The gradients are needed UNCONDITIONALLY (the "skip when the runtime
+    // knob says Upwind" guard must not be emitted) when either:
+    // - a convection term declares a non-upwind scheme (the declared scheme
+    //   is baked into the assembly and ignores the knob), or
+    // - a transpose_dev2 viscous term is present (its face flux is built
+    //   from grad_state regardless of the convection scheme; under the
+    //   guard it would silently read zeros — and the Taylor-Green MMS
+    //   cannot detect that, the term being analytically zero there).
+    let gradients_required_unconditionally = model.system.equations().iter().any(|eq| {
         eq.terms().iter().any(|t| {
-            matches!(
+            (matches!(
                 t.op,
                 crate::solver::ir::TermOp::Div | crate::solver::ir::TermOp::DivFlux
             ) && t
                 .scheme
-                .map_or(false, |s| s != crate::solver::scheme::Scheme::Upwind)
+                .map_or(false, |s| s != crate::solver::scheme::Scheme::Upwind))
+                || t.transpose_dev2
         })
     });
     // grad_state is keyed by STATE OFFSET (matching the assembly's
@@ -700,7 +706,7 @@ pub(crate) fn generate_packed_state_gradients_kernel_program(
         &model.state_layout,
         &unknown_state_offsets,
         &eos_params,
-        !has_declared_high_order,
+        !gradients_required_unconditionally,
     )
 }
 

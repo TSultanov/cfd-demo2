@@ -45,6 +45,10 @@ pub struct DiscreteOp {
     /// Per-component direction multipliers for explicit sources on vector
     /// targets (`coeff * direction[c] * V` per component).
     pub direction: Option<Vec<f64>>,
+    /// Explicit transpose/deviatoric viscous form: assemble as
+    /// `-div(coeff * dev2((grad field)^T))` from grad_state cell gradients
+    /// (only meaningful on explicit Diffusion ops with Vector2 fields).
+    pub transpose_dev2: bool,
     pub field: FieldRef,
     pub flux: Option<FluxRef>,
     pub coeff: Option<Coefficient>,
@@ -111,6 +115,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
         scheme_declared: term.scheme.is_some(),
         bounded: term.bounded,
         direction: term.direction.clone(),
+        transpose_dev2: term.transpose_dev2,
         field: term.field,
         flux: term.flux,
         coeff: term.coeff.clone(),

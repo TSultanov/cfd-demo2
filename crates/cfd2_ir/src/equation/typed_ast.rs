@@ -717,6 +717,33 @@ pub mod typed_fvc {
         }
     }
 
+    /// Explicit transpose/deviatoric viscous correction:
+    /// `-div(coeff * dev2((grad field)^T))` with `dev2(A) = A - (2/3) tr(A) I`.
+    ///
+    /// Declared alongside `typed_fvm::laplacian(coeff, field)` this completes
+    /// the full viscous stress divergence (OpenFOAM laminar UEqn form:
+    /// `-fvm::laplacian(nu,U) - fvc::div(nu*dev2(T(fvc::grad(U))))`). The
+    /// assembly evaluates the face flux from `grad_state` cell gradients;
+    /// declaring the term forces the gradients pipeline on unconditionally.
+    /// Vector2 targets only. Shares `LaplacianUnit` (coeff·field·area/length),
+    /// so it casts to the equation unit exactly like the laplacian term.
+    pub fn div_dev2_grad_transpose<FieldD: UnitDimension, CoeffD: UnitDimension>(
+        coeff: TypedCoeff<CoeffD>,
+        field: TypedFieldRef<FieldD, Vector2>,
+    ) -> TypedTerm<LaplacianUnit<FieldD, CoeffD>> {
+        TypedTerm {
+            inner: Term::new(
+                TermOp::Laplacian,
+                Discretization::Explicit,
+                field.to_untyped(),
+                None,
+                Some(coeff.to_untyped()),
+            )
+            .with_transpose_dev2(),
+            _dim: PhantomData,
+        }
+    }
+
     /// Explicit source term.
     ///
     /// For explicit discretization: volume (field-independent, coeff = dimensionless)
@@ -968,6 +995,30 @@ mod tests {
 
         let untyped = term.to_untyped();
         assert_eq!(untyped.op, TermOp::Source);
+    }
+
+    #[test]
+    fn typed_div_dev2_grad_transpose_term() {
+        // Same op + units as the explicit laplacian, distinguished only by
+        // the transpose_dev2 metadata flag (no new TermOp: Laplacian's
+        // integrated_unit coeff*field*AREA/LENGTH is exactly right).
+        let mu = TypedCoeff::<DynamicViscosity>::constant(0.01);
+        let u = TypedFieldRef::<Velocity, Vector2>::new("U");
+
+        let dev2 = typed_fvc::div_dev2_grad_transpose(mu, u).to_untyped();
+        assert_eq!(dev2.op, TermOp::Laplacian);
+        assert_eq!(dev2.discretization, Discretization::Explicit);
+        assert!(dev2.transpose_dev2);
+        assert!(dev2.coeff.is_some());
+
+        let mu2 = TypedCoeff::<DynamicViscosity>::constant(0.01);
+        let lap = typed_fvc::laplacian(mu2, u).to_untyped();
+        assert!(!lap.transpose_dev2);
+        assert_eq!(
+            dev2.integrated_unit().unwrap(),
+            lap.integrated_unit().unwrap(),
+            "dev2 term must share the laplacian's integrated unit"
+        );
     }
 
     #[test]

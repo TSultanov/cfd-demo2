@@ -274,6 +274,17 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
     system: &DiscreteSystem,
     slots: &ResolvedStateSlotsSpec,
 ) -> Function {
+    // This legacy generator does not implement the transpose_dev2 viscous
+    // block (the production unified_assembly generator does). Fail loudly
+    // rather than silently dropping a declared term.
+    assert!(
+        !system
+            .equations
+            .iter()
+            .any(|eq| eq.ops.iter().any(|op| op.transpose_dev2)),
+        "generic_coupled_kernels::main_assembly_fn does not support transpose_dev2 terms; \
+         use the unified_assembly generator"
+    );
     let _stride = slots.stride;
     let unknowns = coupled_unknown_components(system);
     let coupled_stride = unknowns.len() as u32;
@@ -818,6 +829,125 @@ mod tests {
             stride: layout.stride(),
             slots,
         }
+    }
+
+    /// Build a momentum-like system (coupled stride 3, like the real
+    /// incompressible model): U eqn = ddt(rho, U) + dev2 term (both
+    /// integrate to Force), plus a trivial p equation.
+    fn dev2_system(
+        u: crate::solver::ir::FieldRef,
+        p: crate::solver::ir::FieldRef,
+    ) -> EquationSystem {
+        use crate::solver::ir::{fvc, Coefficient};
+        let mut eqn = Equation::new(u);
+        eqn.add_term(fvm::ddt_coeff(
+            Coefficient::constant_unit(1.0, cfd2_ir::units::si::DENSITY),
+            u,
+        ));
+        eqn.add_term(fvc::div_dev2_grad_transpose(
+            Coefficient::constant_unit(0.01, cfd2_ir::units::si::DYNAMIC_VISCOSITY),
+            u,
+        ));
+        let mut p_eqn = Equation::new(p);
+        p_eqn.add_term(fvm::ddt(p));
+        let mut system = EquationSystem::new();
+        system.add_equation(eqn);
+        system.add_equation(p_eqn);
+        system
+    }
+
+    #[test]
+    fn dev2_term_emits_grad_state_face_flux() {
+        let u = crate::solver::ir::vol_vector_dim::<cfd2_ir::dimensions::Velocity>("U");
+        let p = vol_scalar_dim::<cfd2_ir::dimensions::Pressure>("p");
+        let system = dev2_system(u, p);
+
+        let layout = crate::solver::ir::StateLayout::new(vec![u, p]);
+        let slots = slots_from_layout(&layout);
+        let schemes = SchemeRegistry::new(Scheme::Upwind);
+        let discrete = lower_system(&system, &schemes).expect("lower_system");
+
+        let wgsl = crate::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
+            &discrete, &slots, 0, true, &[],
+        )
+        .to_wgsl();
+        // Face gradients of both U components from grad_state (stride 3:
+        // U_x=0, U_y=1, p=2), averaged owner/neighbor.
+        assert!(
+            wgsl.contains("grad_state[idx * 3u + 0u]")
+                && wgsl.contains("grad_state[other_idx * 3u + 0u]"),
+            "dev2 term must read the U_x gradient from grad_state:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("grad_state[idx * 3u + 1u]"),
+            "dev2 term must read the U_y gradient from grad_state"
+        );
+        // Both component RHS accumulations with the face area.
+        assert!(
+            wgsl.contains("rhs_0 += dev2_U_U_mu * area")
+                && wgsl.contains("rhs_1 += dev2_U_U_mu * area"),
+            "dev2 term must accumulate mu * area * flux into both rhs components:\n{wgsl}"
+        );
+    }
+
+    #[test]
+    fn dev2_term_keys_grad_state_by_state_offset_not_rank() {
+        // Non-prefix layout (buoyant-T-style): an aux scalar sits BEFORE the
+        // unknown, so U's state offset (1) differs from its coupled rank (0).
+        // grad_state is STATE-OFFSET keyed — the known rank-vs-offset latent
+        // bug class (two prior engine bugs).
+        let aux = vol_scalar_dim::<cfd2_ir::dimensions::Pressure>("aux");
+        let u = crate::solver::ir::vol_vector_dim::<cfd2_ir::dimensions::Velocity>("U");
+        let p = vol_scalar_dim::<cfd2_ir::dimensions::Pressure>("p");
+        let system = dev2_system(u, p);
+
+        // aux(0), U(1..2), p(3): U's state offsets differ from its ranks.
+        let layout = crate::solver::ir::StateLayout::new(vec![aux, u, p]);
+        let slots = slots_from_layout(&layout);
+        let schemes = SchemeRegistry::new(Scheme::Upwind);
+        let discrete = lower_system(&system, &schemes).expect("lower_system");
+
+        let wgsl = crate::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
+            &discrete, &slots, 0, true, &[],
+        )
+        .to_wgsl();
+        assert!(
+            wgsl.contains("grad_state[idx * 4u + 1u]")
+                && wgsl.contains("grad_state[idx * 4u + 2u]"),
+            "dev2 gradients must use U's STATE offsets 1/2, not coupled ranks:\n{wgsl}"
+        );
+        assert!(
+            !wgsl.contains("grad_state[idx * 4u + 0u]"),
+            "dev2 gradients must not read the aux slot (rank-keyed bug):\n{wgsl}"
+        );
+    }
+
+    #[test]
+    fn dev2_term_compiles_without_gradients_buffer() {
+        // The non-grad assembly variant is still generated for every model;
+        // it must compile with the two-point fallback (never scheduled once
+        // the dev2 term forces the gradients pipeline on).
+        let u = crate::solver::ir::vol_vector_dim::<cfd2_ir::dimensions::Velocity>("U");
+        let p = vol_scalar_dim::<cfd2_ir::dimensions::Pressure>("p");
+        let system = dev2_system(u, p);
+
+        let layout = crate::solver::ir::StateLayout::new(vec![u, p]);
+        let slots = slots_from_layout(&layout);
+        let schemes = SchemeRegistry::new(Scheme::Upwind);
+        let discrete = lower_system(&system, &schemes).expect("lower_system");
+
+        let wgsl = crate::solver::codegen::unified_assembly::generate_unified_assembly_wgsl(
+            &discrete, &slots, 0, false, &[],
+        )
+        .to_wgsl();
+        assert!(
+            !wgsl.contains("grad_state"),
+            "non-grad variant must not reference grad_state"
+        );
+        assert!(
+            wgsl.contains("rhs_0 += dev2_U_U_mu * area"),
+            "non-grad variant still emits the dev2 accumulation via the fallback gradient"
+        );
     }
 
     #[test]

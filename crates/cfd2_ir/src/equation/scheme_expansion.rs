@@ -35,8 +35,13 @@ pub fn expand_schemes_unchecked(
         for term in equation.terms() {
             // A scheme declared on the term itself wins over the registry.
             let scheme = term.scheme.unwrap_or_else(|| schemes.scheme_for(term));
-            let needs_gradient =
-                matches!(term.op, TermOp::Div | TermOp::DivFlux) && scheme != Scheme::Upwind;
+            // dev2-transpose terms evaluate their face flux from grad_state
+            // cell gradients, so they need the gradients pipeline regardless
+            // of the convection scheme (including under Upwind, where it
+            // would otherwise be skipped entirely).
+            let needs_gradient = (matches!(term.op, TermOp::Div | TermOp::DivFlux)
+                && scheme != Scheme::Upwind)
+                || term.transpose_dev2;
             if !needs_gradient {
                 continue;
             }
@@ -80,6 +85,31 @@ mod tests {
         let registry = SchemeRegistry::new(Scheme::Upwind);
         let expansion = expand_schemes(&system, &registry).unwrap();
         assert!(!expansion.needs_gradients());
+    }
+
+    #[test]
+    fn expand_schemes_forces_gradients_for_dev2_term_under_upwind() {
+        use crate::equation::ast::{fvc, Coefficient};
+
+        let u = vol_vector("U", si::VELOCITY);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
+
+        let mut system = EquationSystem::new();
+        system.add_equation(
+            (fvm::div(phi, u)
+                + fvc::div_dev2_grad_transpose(
+                    Coefficient::constant_unit(0.01, si::DYNAMIC_VISCOSITY),
+                    u,
+                ))
+            .eqn(u),
+        );
+
+        // Upwind everywhere: convection alone would skip gradients, but the
+        // dev2 term reads grad_state — it must force the pipeline on.
+        let registry = SchemeRegistry::new(Scheme::Upwind);
+        let expansion = expand_schemes_unchecked(&system, &registry);
+        assert!(expansion.needs_gradients());
+        assert!(expansion.gradient_fields().iter().any(|f| f.name() == "U"));
     }
 
     #[test]

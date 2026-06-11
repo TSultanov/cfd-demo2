@@ -38,10 +38,17 @@ use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
 /// beta * |g|: thermal expansion coefficient times gravity magnitude.
 /// Modest value so buoyancy is a well-behaved coupling for validation.
+///
+/// DEFAULT of the runtime param `buoyant.beta_g` (see
+/// `modules::buoyant_ports`); the equations read `constants.buoyant_beta_g`
+/// at runtime. The MMS manufactured solutions are derived from these
+/// canonical values, so tests must leave the params at their defaults.
 pub const BUOYANT_BETA_G: f64 = 0.1;
 /// Reference temperature of the Boussinesq linearization.
+/// Default of the runtime param `buoyant.t0`.
 pub const BUOYANT_T0: f64 = 0.5;
 /// Conduction coefficient divided by specific heat (rho * thermal diffusivity).
+/// Default of the runtime param `buoyant.k_over_cp`.
 pub const BUOYANT_K_OVER_CP: f64 = 1.0;
 /// Name of the solved temperature field.
 pub const BUOYANT_TEMPERATURE_FIELD: &str = "T";
@@ -78,12 +85,21 @@ fn build_buoyant_system(with_mms_sources: bool) -> EquationSystem {
 
     // Boussinesq buoyancy, direction [0, -1] (gravity along -y):
     //   (-beta_g * rho * T) * dir_c  +  (beta_g * T0 * rho) * dir_c
-    let minus_beta_g: TypedCoeff<BetaG> = TypedCoeff::constant(-BUOYANT_BETA_G);
-    let buoy_t_coeff = minus_beta_g
+    // beta_g and T0 are runtime uniform params (constants.buoyant_*): the
+    // field names below are not state slots, so coefficient lowering falls
+    // through to the named-constants table (coeff_named_expr_dyn).
+    let beta_g_param =
+        TypedCoeff::from_field(TypedFieldRef::<BetaG, Scalar>::new("buoyant_beta_g"));
+    let t0_param =
+        TypedCoeff::from_field(TypedFieldRef::<Temperature, Scalar>::new("buoyant_t0"));
+    let minus_one: TypedCoeff<cfd2_ir::dimensions::Dimensionless> = TypedCoeff::constant(-1.0);
+    let buoy_t_coeff = minus_one
+        .multiply(beta_g_param.clone())
         .multiply(rho_coeff.clone())
         .multiply(TypedCoeff::from_field(t_typed));
-    let beta_g_t0: TypedCoeff<Acceleration> = TypedCoeff::constant(BUOYANT_BETA_G * BUOYANT_T0);
-    let buoy_const_coeff = beta_g_t0.multiply(rho_coeff.clone());
+    let buoy_const_coeff = beta_g_param
+        .multiply(t0_param)
+        .multiply(rho_coeff.clone());
 
     let gravity_dir = [0.0, -1.0];
     let buoy_t_term = typed_fvc::source_directional(buoy_t_coeff, gravity_dir, u_typed);
@@ -113,8 +129,11 @@ fn build_buoyant_system(with_mms_sources: bool) -> EquationSystem {
     // ---- Temperature (divided by cp): advected by the SOLVED flux. ----
     let t_ddt = typed_fvm::ddt_coeff(rho_coeff, t_typed);
     let t_div = typed_fvm::div(phi_typed, t_typed);
-    let k_over_cp: TypedCoeff<DivDim<MulDim<Density, Volume>, MulDim<Length, Time>>> =
-        TypedCoeff::constant(BUOYANT_K_OVER_CP);
+    // Runtime uniform param (constants.buoyant_k_over_cp).
+    let k_over_cp = TypedCoeff::from_field(TypedFieldRef::<
+        DivDim<MulDim<Density, Volume>, MulDim<Length, Time>>,
+        Scalar,
+    >::new("buoyant_k_over_cp"));
     let t_lap = typed_fvm::laplacian(k_over_cp, t_typed);
 
     let mut t_sum = t_ddt.cast_to::<TEquationUnit>()
@@ -293,6 +312,7 @@ fn buoyant_incompressible_model_impl(with_mms_sources: bool) -> Result<ModelSpec
             crate::solver::model::modules::eos::eos_module(
                 crate::solver::model::eos::EosSpec::Constant,
             ),
+            crate::solver::model::modules::buoyant_ports::buoyant_params_module(),
             flux_module_module,
             crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
             derived_rhie_chow.aux_module,

@@ -550,13 +550,19 @@ fn resolved_slots_from_layout(layout: &StateLayout) -> ResolvedStateSlotsSpec {
     registry.to_resolved_state_slots()
 }
 
-/// Extract EOS params for WGSL generation.
+/// Extract Constants-struct extra params for WGSL generation.
 ///
-/// Uses the model's "eos" module port manifest if present, otherwise falls back
-/// to the canonical EOS param list to ensure shared kernels generate identical
-/// WGSL across all models.
+/// The canonical EOS block always comes first (the model's "eos" module port
+/// manifest if present, otherwise the canonical EOS param list) so shared
+/// kernels generate identical WGSL across all models. Additional module
+/// manifest params (e.g. the buoyant model's runtime params) are appended
+/// AFTER the EOS block, skipping specs that alias base constants fields —
+/// some modules declare those purely for named-parameter routing.
+///
+/// LAYOUT CONTRACT: the host `GpuConstants` POD is shared across models and
+/// written wholesale; appended params must mirror its tail field order.
 pub(crate) fn extract_eos_params(model: &crate::solver::model::ModelSpec) -> Vec<ParamSpec> {
-    model
+    let mut params = model
         .modules
         .iter()
         .find(|m| m.name == "eos")
@@ -564,7 +570,27 @@ pub(crate) fn extract_eos_params(model: &crate::solver::model::ModelSpec) -> Vec
         .map(|p| p.params.clone())
         .unwrap_or_else(|| {
             crate::solver::model::modules::eos_ports::eos_uniform_port_manifest().params
-        })
+        });
+
+    let base_names = cfd2_codegen::solver::codegen::constants::base_constant_field_names();
+    for module in &model.modules {
+        if module.name == "eos" {
+            continue;
+        }
+        let Some(manifest) = &module.port_manifest else {
+            continue;
+        };
+        for spec in &manifest.params {
+            if base_names.contains(&spec.wgsl_field) {
+                continue;
+            }
+            if params.iter().any(|p| p.wgsl_field == spec.wgsl_field) {
+                continue;
+            }
+            params.push(spec.clone());
+        }
+    }
+    params
 }
 
 fn generate_generic_coupled_assembly_kernel_program_impl(

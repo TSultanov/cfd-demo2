@@ -27,3 +27,8 @@ pub mod bc_expr {
 pub mod generic_coupled_ports {
     include!("generic_coupled_ports.rs");
 }
+
+// buoyant_ports is defined separately to avoid build script issues with proc macros
+pub mod buoyant_ports {
+    include!("buoyant_ports.rs");
+}

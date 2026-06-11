@@ -2,9 +2,7 @@ use crate::solver::gpu::enums::{GpuBoundaryType, TimeScheme};
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::program::build_program_plan;
 use crate::solver::gpu::program::plan::{GpuProgramPlan, StepGraphTiming};
-use crate::solver::gpu::program::plan_instance::{
-    PlanAction, PlanInitConfig, PlanParamValue, PlanStepStats,
-};
+use crate::solver::gpu::program::plan_instance::{PlanAction, PlanInitConfig, PlanStepStats};
 use crate::solver::gpu::recipe::SteppingMode;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
 use crate::solver::mesh::Mesh;
@@ -15,6 +13,9 @@ use crate::solver::scheme::Scheme;
 use std::sync::Arc;
 
 pub use crate::solver::gpu::program::plan_instance::FgmresSizing;
+// Re-exported: `set_named_param` is public API, so its value type must be
+// publicly nameable (the defining module is crate-private).
+pub use crate::solver::gpu::program::plan_instance::PlanParamValue;
 
 /// UI-relevant state access metadata.
 ///

@@ -25,6 +25,9 @@ struct Constants {
     eos_dp_drho: f32,
     eos_p_offset: f32,
     eos_theta_ref: f32,
+    buoyant_beta_g: f32,
+    buoyant_t0: f32,
+    buoyant_k_over_cp: f32,
 }
 
 
@@ -144,8 +147,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         diag_3 += constants.density * dual_time_scale;
         rhs_3 += constants.density * dual_time_scale * state_iter[idx * 12u + 8u];
     }
-    rhs_1 += -(-0.1 * constants.density * state[idx * 12u + 8u]) * vol;
-    rhs_1 += -(0.05 * constants.density) * vol;
+    rhs_1 += -(-constants.buoyant_beta_g * constants.density * state[idx * 12u + 8u]) * vol;
+    rhs_1 += -(constants.buoyant_beta_g * constants.buoyant_t0 * constants.density) * vol;
     rhs_0 += state[idx * 12u + 9u] * vol;
     rhs_1 += state[idx * 12u + 10u] * vol;
     rhs_3 += state[idx * 12u + 11u] * vol;
@@ -280,7 +283,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             phi_2 -= phi_2 * 2.0;
         }
         rhs_2 -= phi_2;
-        let diff_coeff_T = select(1.0, (1.0 + 1.0) * 0.5, !is_boundary) * area / dist;
+        let diff_coeff_T = select(constants.buoyant_k_over_cp, (constants.buoyant_k_over_cp + constants.buoyant_k_over_cp) * 0.5, !is_boundary) * area / dist;
         if (!is_boundary) {
             diag_3 += diff_coeff_T;
             matrix_values[start_row_3 + neighbor_rank * 4u + 3u] -= diff_coeff_T;
@@ -290,7 +293,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 rhs_3 += diff_coeff_T * bc_value[face_idx * 4u + 3u];
             } else {
                 if (bc_kind[face_idx * 4u + 3u] == 2u) {
-                    rhs_3 += select(1.0, (1.0 + 1.0) * 0.5, !is_boundary) * area * bc_value[face_idx * 4u + 3u];
+                    rhs_3 += select(constants.buoyant_k_over_cp, (constants.buoyant_k_over_cp + constants.buoyant_k_over_cp) * 0.5, !is_boundary) * area * bc_value[face_idx * 4u + 3u];
                 }
             }
         }

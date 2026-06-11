@@ -6,8 +6,8 @@ use crate::solver::codegen::wgsl_ast::Expr;
 use crate::solver::ir::ports::{PortFieldKind, ResolvedStateSlotsSpec};
 use crate::solver::ir::Coefficient;
 use cfd2_ir::dimensions::{
-    Density, Dimensionless, DivDim, DynamicViscosity, InvTime, Length, MulDim, Power, Pressure,
-    Temperature, UnitDimension,
+    Acceleration, Density, Dimensionless, DivDim, DynamicViscosity, InvTime, Length, MulDim,
+    Power, Pressure, Temperature, Time, UnitDimension, Volume,
 };
 
 #[derive(Clone)]
@@ -105,6 +105,26 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
             Expr::ident("constants").field("eos_theta_ref"),
             DslType::f32(),
             Temperature::UNIT,
+        )),
+        // Buoyant Boussinesq runtime params (declared by the buoyant model's
+        // port manifest; constants-struct tail fields after the EOS block).
+        // beta*g: acceleration per kelvin.
+        "buoyant_beta_g" => Some(DynExpr::new(
+            Expr::ident("constants").field("buoyant_beta_g"),
+            DslType::f32(),
+            DivDim::<Acceleration, Temperature>::UNIT,
+        )),
+        "buoyant_t0" => Some(DynExpr::new(
+            Expr::ident("constants").field("buoyant_t0"),
+            DslType::f32(),
+            Temperature::UNIT,
+        )),
+        // k/cp = rho * thermal diffusivity: kg/(m*s), declared in the model
+        // as Density*Volume/(Length*Time) to match the T-equation laplacian.
+        "buoyant_k_over_cp" => Some(DynExpr::new(
+            Expr::ident("constants").field("buoyant_k_over_cp"),
+            DslType::f32(),
+            DivDim::<MulDim<Density, Volume>, MulDim<Length, Time>>::UNIT,
         )),
         _ => None,
     }

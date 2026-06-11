@@ -102,6 +102,16 @@ pub struct GpuConstants {
     pub eos_dp_drho: f32,
     pub eos_p_offset: f32,
     pub eos_theta_ref: f32,
+
+    // --- Buoyant Boussinesq model (runtime) ---
+    // LAYOUT CONTRACT: tail fields must mirror the buoyant port manifest
+    // order (`buoyant_uniform_port_manifest`); the WGSL Constants struct
+    // appends those specs after the EOS block and this buffer is written
+    // wholesale. Defaults are the canonical BUOYANT_* values that the MMS
+    // manufactured solutions are derived from.
+    pub buoyant_beta_g: f32,
+    pub buoyant_t0: f32,
+    pub buoyant_k_over_cp: f32,
 }
 
 impl Default for GpuConstants {
@@ -125,6 +135,9 @@ impl Default for GpuConstants {
             eos_dp_drho: 0.0,
             eos_p_offset: 0.0,
             eos_theta_ref: 1.0,
+            buoyant_beta_g: crate::solver::model::BUOYANT_BETA_G as f32,
+            buoyant_t0: crate::solver::model::BUOYANT_T0 as f32,
+            buoyant_k_over_cp: crate::solver::model::BUOYANT_K_OVER_CP as f32,
         }
     }
 }

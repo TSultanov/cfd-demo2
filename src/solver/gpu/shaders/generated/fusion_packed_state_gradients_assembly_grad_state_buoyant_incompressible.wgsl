@@ -25,6 +25,9 @@ struct Constants {
     eos_dp_drho: f32,
     eos_p_offset: f32,
     eos_theta_ref: f32,
+    buoyant_beta_g: f32,
+    buoyant_t0: f32,
+    buoyant_k_over_cp: f32,
 }
 
 
@@ -208,8 +211,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         k1_diag_3 += constants.density * k1_dual_time_scale;
         k1_rhs_3 += constants.density * k1_dual_time_scale * state_iter[idx * 9u + 8u];
     }
-    k1_rhs_1 += -(-0.1 * constants.density * state[idx * 9u + 8u]) * k1_vol;
-    k1_rhs_1 += -(0.05 * constants.density) * k1_vol;
+    k1_rhs_1 += -(-constants.buoyant_beta_g * constants.density * state[idx * 9u + 8u]) * k1_vol;
+    k1_rhs_1 += -(constants.buoyant_beta_g * constants.buoyant_t0 * constants.density) * k1_vol;
     var k1_bounded_sum_phi_0: f32 = 0.0;
     var k1_bounded_sum_phi_1: f32 = 0.0;
     for (var k1_k = k1_start; k1_k < k1_end; k1_k++) {
@@ -341,7 +344,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             k1_phi_2 -= k1_phi_2 * 2.0;
         }
         k1_rhs_2 -= k1_phi_2;
-        let k1_diff_coeff_T = select(1.0, (1.0 + 1.0) * 0.5, !k1_is_boundary) * k1_area / k1_dist;
+        let k1_diff_coeff_T = select(constants.buoyant_k_over_cp, (constants.buoyant_k_over_cp + constants.buoyant_k_over_cp) * 0.5, !k1_is_boundary) * k1_area / k1_dist;
         if (!k1_is_boundary) {
             k1_diag_3 += k1_diff_coeff_T;
             matrix_values[k1_start_row_3 + k1_neighbor_rank * 4u + 3u] -= k1_diff_coeff_T;
@@ -351,7 +354,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 k1_rhs_3 += k1_diff_coeff_T * bc_value[k1_face_idx * 4u + 3u];
             } else {
                 if (bc_kind[k1_face_idx * 4u + 3u] == 2u) {
-                    k1_rhs_3 += select(1.0, (1.0 + 1.0) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 4u + 3u];
+                    k1_rhs_3 += select(constants.buoyant_k_over_cp, (constants.buoyant_k_over_cp + constants.buoyant_k_over_cp) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 4u + 3u];
                 }
             }
         }

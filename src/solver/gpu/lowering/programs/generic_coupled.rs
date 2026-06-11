@@ -2414,6 +2414,57 @@ pub(crate) fn param_eos_theta_ref(
     Ok(())
 }
 
+pub(crate) fn param_buoyant_beta_g(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(beta_g) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.buoyant_beta_g = beta_g;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
+pub(crate) fn param_buoyant_t0(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(t0) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.buoyant_t0 = t0;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
+pub(crate) fn param_buoyant_k_over_cp(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(k_over_cp) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.buoyant_k_over_cp = k_over_cp;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
 pub(crate) fn param_alpha_u(
     plan: &mut GpuProgramPlan,
     value: PlanParamValue,

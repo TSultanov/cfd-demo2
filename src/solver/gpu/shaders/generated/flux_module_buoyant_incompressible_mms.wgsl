@@ -25,6 +25,9 @@ struct Constants {
     eos_dp_drho: f32,
     eos_p_offset: f32,
     eos_theta_ref: f32,
+    buoyant_beta_g: f32,
+    buoyant_t0: f32,
+    buoyant_k_over_cp: f32,
 }
 
 

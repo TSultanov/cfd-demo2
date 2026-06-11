@@ -79,6 +79,18 @@ fn run(
     Vec<f64>,
     Vec<LinearSolverStats>,
 ) {
+    run_with(schur, None)
+}
+
+fn run_with(
+    schur: bool,
+    beta_g_override: Option<f32>,
+) -> (
+    Vec<(f64, f64)>,
+    Vec<f64>,
+    Vec<f64>,
+    Vec<LinearSolverStats>,
+) {
     let mesh = generate_structured_rect_mesh(
         N,
         N,
@@ -206,6 +218,14 @@ fn run(
     solver
         .set_field_scalar(BUOYANT_TEMPERATURE_FIELD, &vec![0.0; mesh.num_cells()])
         .expect("init T");
+    if let Some(beta_g) = beta_g_override {
+        solver
+            .set_named_param(
+                "buoyant.beta_g",
+                cfd2::solver::gpu::unified_solver::PlanParamValue::F32(beta_g),
+            )
+            .expect("set buoyant.beta_g");
+    }
     solver.initialize_history();
 
     let mut stats = Vec::new();
@@ -270,5 +290,31 @@ fn buoyant_schur_matches_block_jacobi_smoke() {
     assert!(
         du < tol && dp < tol && dt < tol,
         "Schur run diverged from default-preconditioner run: u={du:.3e} p={dp:.3e} T={dt:.3e}"
+    );
+}
+
+/// The Boussinesq coefficients are runtime uniform params, not baked
+/// literals: zeroing `buoyant.beta_g` through the named-param API must
+/// remove the buoyancy force and materially change the flow.
+#[test]
+fn buoyant_beta_g_is_runtime_settable() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let (u_def, _, _, _) = run_with(false, None);
+    let (u_zero, _, _, _) = run_with(false, Some(0.0));
+
+    let ux_def: Vec<f64> = u_def.iter().map(|v| v.0).collect();
+    let uy_def: Vec<f64> = u_def.iter().map(|v| v.1).collect();
+    let ux_zero: Vec<f64> = u_zero.iter().map(|v| v.0).collect();
+    let uy_zero: Vec<f64> = u_zero.iter().map(|v| v.1).collect();
+    let du = rel_l2(&ux_zero, &ux_def).max(rel_l2(&uy_zero, &uy_def));
+    println!("[buoyant-param-probe] rel_l2(u) beta_g=0 vs default: {du:.3e}");
+    // The buoyancy force is a small fraction of the manufactured-source-driven
+    // flow on this box (measured effect ~7e-4), but the discriminant is the
+    // pure-numerics wake between twin runs (~1e-6, cf. the Schur probe):
+    // two orders of magnitude of separation.
+    assert!(
+        du > 1e-4,
+        "zeroing buoyant.beta_g did not change the flow (rel_l2 {du:.3e}) — \
+         the runtime param is not reaching the assembly kernel"
     );
 }

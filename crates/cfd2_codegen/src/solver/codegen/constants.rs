@@ -29,6 +29,29 @@ pub fn constants_struct(extra_params: &[ParamSpec]) -> StructDef {
     StructDef::new("Constants", fields)
 }
 
+/// Names of the base constant fields, in struct order.
+///
+/// Exposed so callers composing `extra_params` (e.g. from module port
+/// manifests) can filter out specs that alias base fields — some modules
+/// declare ParamSpecs for base fields (`dt`, `viscosity`, ...) purely for
+/// named-parameter routing, and appending those would corrupt the struct.
+pub fn base_constant_field_names() -> &'static [&'static str] {
+    &[
+        "dt",
+        "dt_old",
+        "dtau",
+        "time",
+        "viscosity",
+        "density",
+        "component",
+        "alpha_p",
+        "scheme",
+        "alpha_u",
+        "stride_x",
+        "time_scheme",
+    ]
+}
+
 /// Returns the base constant fields shared across all kernels.
 ///
 /// These fields are always present in the `Constants` struct:

@@ -103,6 +103,21 @@ mod tests {
     }
 
     #[test]
+    fn named_params_include_buoyant_keys_via_port_manifest() {
+        // The buoyant Boussinesq runtime params are declared via the
+        // buoyant_params module's port_manifest and must be runtime-settable.
+        let model = crate::solver::model::buoyant_incompressible_model().expect("model");
+        let params = named_params_for_model(&model).expect("named params");
+
+        for key in ["buoyant.beta_g", "buoyant.t0", "buoyant.k_over_cp"] {
+            assert!(
+                params.contains_key(key),
+                "{key} should be discoverable via port_manifest"
+            );
+        }
+    }
+
+    #[test]
     fn named_params_include_generic_coupled_keys_via_port_manifest() {
         // Regression test: generic_coupled uniform params are declared via port_manifest,
         // not named_params. Ensure they are still discoverable.

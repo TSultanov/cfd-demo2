@@ -49,12 +49,30 @@ pub fn derive_rhie_chow(
     system: &EquationSystem,
     layout: &StateLayout,
 ) -> Result<DerivedRhieChow, String> {
+    derive_rhie_chow_with_dp(
+        system,
+        layout,
+        crate::solver::model::modules::rhie_chow::DpFormulation::ClosedForm,
+    )
+}
+
+/// [`derive_rhie_chow`] with an explicit coupling-coefficient formulation
+/// (see [`crate::solver::model::modules::rhie_chow::DpFormulation`]).
+pub fn derive_rhie_chow_with_dp(
+    system: &EquationSystem,
+    layout: &StateLayout,
+    dp_formulation: crate::solver::model::modules::rhie_chow::DpFormulation,
+) -> Result<DerivedRhieChow, String> {
     let (flux_kernel, d_p) = derive_rhie_chow_flux(system, layout)?;
     // The aux-module port manifest requires 'static names (same pattern as
     // the module's own grad_p name interning).
     let d_p_static: &'static str = Box::leak(d_p.into_boxed_str());
     let aux_module = crate::solver::model::modules::rhie_chow::rhie_chow_aux_module(
-        system, d_p_static, true, true,
+        system,
+        d_p_static,
+        true,
+        true,
+        dp_formulation,
     )
     .map_err(|e| format!("derive_rhie_chow: aux module: {e}"))?;
     Ok(DerivedRhieChow {

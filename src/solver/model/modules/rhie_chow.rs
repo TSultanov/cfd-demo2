@@ -17,6 +17,38 @@ use cfd2_ir::kernel::{
     BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelProgram, LaunchSemantics,
 };
 
+/// How the Rhie–Chow coupling coefficient `d_p` is computed each outer
+/// iteration (the `dp_update_from_diag` kernel).
+///
+/// `ClosedForm` is the historical default: a uniform `alpha_u * dt / rho`.
+/// `FromAssembledDiagonal` is the OpenFOAM `rAU` analogue: `V / a_P` from
+/// the assembled momentum diagonal (averaged over the two momentum
+/// components), optionally scaled by `alpha_u` (`include_relaxation`;
+/// OpenFOAM PISO mode uses the UNRELAXED 1/a_P, SIMPLE mode the relaxed
+/// one), and damped across outer iterations
+/// (`d_p <- theta*new + (1-theta)*old`) to stabilize the lagged
+/// d_p -> assembly -> d_p feedback loop. With this formulation `dp_init`
+/// seeds the closed form once (when d_p is still zero) instead of zeroing,
+/// so the damped update has a sane starting value and persists across
+/// iterations.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DpFormulation {
+    /// `d_p = alpha_u * dt / rho` (uniform; historical default).
+    ClosedForm,
+    /// `d_p = [alpha_u *] V / a_P` from the assembled momentum diagonal,
+    /// damped across outer iterations by `theta`.
+    FromAssembledDiagonal {
+        include_relaxation: bool,
+        theta: f32,
+    },
+}
+
+impl Default for DpFormulation {
+    fn default() -> Self {
+        Self::ClosedForm
+    }
+}
+
 /// Rhie-Chow auxiliary module that manages pressure correction and velocity correction.
 ///
 /// This module provides kernels for:
@@ -32,6 +64,7 @@ use cfd2_ir::kernel::{
 /// * `dp_field` - The name of the pressure correction field in the state layout
 /// * `require_vector2_momentum` - Whether to require Vector2 momentum field
 /// * `require_pressure_gradient` - Whether to require pressure gradient fields
+/// * `dp_formulation` - How `d_p` is computed (see [`DpFormulation`])
 ///
 /// # Errors
 ///
@@ -41,6 +74,7 @@ pub fn rhie_chow_aux_module(
     dp_field: &'static str,
     require_vector2_momentum: bool,
     require_pressure_gradient: bool,
+    dp_formulation: DpFormulation,
 ) -> Result<KernelBundleModule, String> {
     // Infer coupling once at module construction time
     let coupling =
@@ -121,10 +155,15 @@ pub fn rhie_chow_aux_module(
 
     let generators = vec![
         ModelKernelGeneratorSpec::new_dsl(kernel_dp_init, move |model, _schemes| {
-            generate_dp_init_kernel_program(model, dp_field)
+            generate_dp_init_kernel_program(model, dp_field, dp_formulation)
         }),
         ModelKernelGeneratorSpec::new_dsl(kernel_dp_update_from_diag, move |model, _schemes| {
-            generate_dp_update_from_diag_kernel_program(model, dp_field, coupling_for_dp_update)
+            generate_dp_update_from_diag_kernel_program(
+                model,
+                dp_field,
+                coupling_for_dp_update,
+                dp_formulation,
+            )
         }),
         ModelKernelGeneratorSpec::new_dsl(kernel_store_grad_p, move |model, _schemes| {
             generate_rhie_chow_store_grad_p_kernel_program(model, grad_p_name, grad_p_old_name)
@@ -264,30 +303,52 @@ pub fn rhie_chow_aux_module(
                 ),
             ],
             binding_remaps: vec![],
-            expected_hazards: vec![
-                ExpectedHazard {
+            expected_hazards: {
+                let mut hazards = vec![ExpectedHazard {
                     kind: HazardKind::WAW,
                     kernel_id: "dp_update_from_diag",
                     justification: "dp_init and dp_update both write d_p at same index; \
                                     dp_update overwrites dp_init's zero, last-writer-wins is correct \
                                     because both are per-cell scalar writes at idx*stride+offset",
-                },
-                ExpectedHazard {
+                }];
+                // Only the diagonal formulation reads d_p in dp_init
+                // (seed-if-zero) and dp_update (damped update); the
+                // whitelist must stay exact per formulation.
+                if matches!(dp_formulation, DpFormulation::FromAssembledDiagonal { .. }) {
+                    hazards.push(ExpectedHazard {
+                        kind: HazardKind::RAW,
+                        kernel_id: "dp_update_from_diag",
+                        justification: "with DpFormulation::FromAssembledDiagonal, dp_update reads \
+                                        the d_p seeded by dp_init for its damped update; both access \
+                                        the same cell at idx*stride+offset, so the sequential \
+                                        read-after-write within the fused body is the intended \
+                                        semantics",
+                    });
+                    hazards.push(ExpectedHazard {
+                        kind: HazardKind::WAR,
+                        kernel_id: "dp_update_from_diag",
+                        justification: "with DpFormulation::FromAssembledDiagonal, dp_init reads d_p \
+                                        (seed-if-zero) before dp_update overwrites it; per-cell at \
+                                        idx*stride+offset, sequential within the fused body",
+                    });
+                }
+                hazards.push(ExpectedHazard {
                     kind: HazardKind::WAR,
                     kernel_id: "rhie_chow/grad_p_update",
                     justification: "store_grad_p reads grad_p before grad_p_update writes it; \
                                     safe because both operate on the same cell index (idx) and \
                                     store_grad_p's read is sequentially before grad_p_update's write \
                                     in the fused body",
-                },
-                ExpectedHazard {
+                });
+                hazards.push(ExpectedHazard {
                     kind: HazardKind::RAW,
                     kernel_id: "rhie_chow/correct_velocity_delta",
                     justification: "correct_velocity_delta reads d_p, grad_p, grad_p_old written \
                                     by earlier segments; safe because all accesses are per-cell at \
                                     idx*stride+offset with no cross-cell dependencies",
-                },
-            ],
+                });
+                hazards
+            },
         },
         ModelKernelFusionRule {
             name: "rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1",
@@ -452,6 +513,7 @@ pub fn rhie_chow_aux_module(
 fn generate_dp_init_kernel_program(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
+    dp_formulation: DpFormulation,
 ) -> Result<KernelProgram, String> {
     use crate::solver::model::ports::dimensions::D_P;
     use crate::solver::model::ports::PortRegistry;
@@ -471,16 +533,44 @@ fn generate_dp_init_kernel_program(
         rhie_chow_state_bindings(),
     );
     let indexing_stmts = vec![dsl::let_expr("base", Expr::ident("idx") * stride)];
-    let body_stmts = vec![dsl::assign_expr(
-        dsl::array_access("state", Expr::ident("base") + d_p_offset),
-        Expr::lit_f32(0.0),
-    )];
+    let body_stmts = match dp_formulation {
+        DpFormulation::ClosedForm => vec![dsl::assign_expr(
+            dsl::array_access("state", Expr::ident("base") + d_p_offset),
+            Expr::lit_f32(0.0),
+        )],
+        // The diagonal formulation damps d_p across outer iterations, so the
+        // field must PERSIST between updates: seed the closed form once
+        // (while d_p is still zero from state init) instead of re-zeroing.
+        DpFormulation::FromAssembledDiagonal { .. } => {
+            let d_p_old = dsl::array_access("state", Expr::ident("base") + d_p_offset);
+            let rho = dsl::max(
+                Expr::ident("constants").field("density"),
+                Expr::lit_f32(1e-12),
+            );
+            let dt = dsl::max(Expr::ident("constants").field("dt"), Expr::lit_f32(0.0));
+            let seed = Expr::ident("constants").field("alpha_u") * dt / rho;
+            vec![dsl::assign_expr(
+                dsl::array_access("state", Expr::ident("base") + d_p_offset),
+                dsl::select(d_p_old.clone(), seed, d_p_old.eq(Expr::lit_f32(0.0))),
+            )]
+        }
+    };
     program.indexing = indexing_stmts;
     program.body = body_stmts;
     program
         .side_effects
         .read_set
         .insert(EffectResource::binding(0, 1));
+    if matches!(dp_formulation, DpFormulation::FromAssembledDiagonal { .. }) {
+        program
+            .side_effects
+            .read_set
+            .insert(EffectResource::component(
+                0,
+                0,
+                format!("state:{d_p_offset}"),
+            ));
+    }
     program
         .side_effects
         .write_set
@@ -602,6 +692,7 @@ fn generate_dp_update_from_diag_kernel_program(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
     coupling: crate::solver::model::invariants::MomentumPressureCoupling,
+    dp_formulation: DpFormulation,
 ) -> Result<KernelProgram, String> {
     use crate::solver::model::ports::dimensions::{AnyDimension, D_P};
     use crate::solver::model::ports::PortRegistry;
@@ -622,13 +713,160 @@ fn generate_dp_update_from_diag_kernel_program(
     let stride = registry.state_layout().stride();
     let d_p_offset = d_p.offset();
 
+    match dp_formulation {
+        DpFormulation::ClosedForm => {
+            let mut program = KernelProgram::new(
+                "dp_update_from_diag",
+                DispatchDomain::Cells,
+                rhie_chow_state_launch(stride),
+                rhie_chow_state_bindings(),
+            );
+            let indexing_stmts = vec![dsl::let_expr("base", Expr::ident("idx") * stride)];
+            let preamble_stmts = vec![
+                dsl::let_expr(
+                    "rho",
+                    dsl::max(
+                        Expr::ident("constants").field("density"),
+                        Expr::lit_f32(1e-12),
+                    ),
+                ),
+                dsl::let_expr(
+                    "dt",
+                    dsl::max(Expr::ident("constants").field("dt"), Expr::lit_f32(0.0)),
+                ),
+                dsl::let_expr(
+                    "d_p",
+                    Expr::ident("constants").field("alpha_u") * Expr::ident("dt")
+                        / Expr::ident("rho"),
+                ),
+            ];
+            let body_stmts = vec![dsl::assign_expr(
+                dsl::array_access("state", Expr::ident("base") + d_p_offset),
+                Expr::ident("d_p"),
+            )];
+            program.indexing = indexing_stmts;
+            program.preamble = preamble_stmts;
+            program.body = body_stmts;
+            program
+                .side_effects
+                .read_set
+                .insert(EffectResource::binding(0, 1));
+            program
+                .side_effects
+                .write_set
+                .insert(EffectResource::component(
+                    0,
+                    0,
+                    format!("state:{d_p_offset}"),
+                ));
+
+            Ok(program)
+        }
+        DpFormulation::FromAssembledDiagonal {
+            include_relaxation,
+            theta,
+        } => generate_dp_update_from_assembled_diagonal(
+            model,
+            stride,
+            d_p_offset,
+            momentum.name(),
+            include_relaxation,
+            theta,
+        ),
+    }
+}
+
+/// OpenFOAM-`rAU`-style coupling coefficient: `d_p = [alpha_u *] V / a_P`
+/// with `a_P` the assembled momentum diagonal averaged over the two momentum
+/// components, damped across outer iterations
+/// (`d_p <- theta*new + (1-theta)*old`).
+///
+/// The kernel runs in the Update phase, after this outer iteration's
+/// assembly and solve, so `matrix_values` holds the matrix assembled with
+/// the PREVIOUS iteration's d_p — the damped update converges this lagged
+/// loop to the rAU fixed point. The matrix diagonal layout matches the
+/// Schur setup kernel (`generate_generic_coupled_schur_setup`):
+///   a(c,c) = matrix_values[scalar_offset*S^2 + c*num_neighbors*S + diag_rank*S + c]
+/// with ranks in FluxLayout component order (rank-keyed, like bc tables —
+/// NOT state offsets). Falls back to the closed form while the diagonal is
+/// zero (matrix not yet assembled).
+fn generate_dp_update_from_assembled_diagonal(
+    model: &crate::solver::model::ModelSpec,
+    stride: u32,
+    d_p_offset: u32,
+    momentum_name: &str,
+    include_relaxation: bool,
+    theta: f32,
+) -> Result<KernelProgram, String> {
+    let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
+    let unknowns: Vec<String> = flux_layout
+        .components
+        .iter()
+        .map(|c| c.name.clone())
+        .collect();
+    let s = unknowns.len() as u32;
+    let ux_rank = unknowns
+        .iter()
+        .position(|n| n == &format!("{momentum_name}_x"))
+        .ok_or_else(|| {
+            format!("dp_update_from_diag: momentum component {momentum_name}_x not in flux layout")
+        })? as u32;
+    let uy_rank = unknowns
+        .iter()
+        .position(|n| n == &format!("{momentum_name}_y"))
+        .ok_or_else(|| {
+            format!("dp_update_from_diag: momentum component {momentum_name}_y not in flux layout")
+        })? as u32;
+
+    let mut bindings = rhie_chow_state_bindings();
+    // Slot choices merge with the rhie_chow fused families: cell_vols
+    // matches grad_p_update's (1,5); the CSR buffers take the free slots
+    // (1,8..10). All names resolve through the generic-coupled backend
+    // ResourceRegistry (mesh: scalar_row_offsets/diagonal_indices/cell_vols;
+    // linear ports: matrix_values).
+    bindings.push(KernelBinding::new(
+        1,
+        5,
+        "cell_vols",
+        "array<f32>",
+        BindingAccess::ReadOnlyStorage,
+    ));
+    bindings.push(KernelBinding::new(
+        1,
+        8,
+        "scalar_row_offsets",
+        "array<u32>",
+        BindingAccess::ReadOnlyStorage,
+    ));
+    bindings.push(KernelBinding::new(
+        1,
+        9,
+        "diagonal_indices",
+        "array<u32>",
+        BindingAccess::ReadOnlyStorage,
+    ));
+    bindings.push(KernelBinding::new(
+        1,
+        10,
+        "matrix_values",
+        "array<f32>",
+        BindingAccess::ReadOnlyStorage,
+    ));
+
     let mut program = KernelProgram::new(
         "dp_update_from_diag",
         DispatchDomain::Cells,
         rhie_chow_state_launch(stride),
-        rhie_chow_state_bindings(),
+        bindings,
     );
     let indexing_stmts = vec![dsl::let_expr("base", Expr::ident("idx") * stride)];
+
+    let alpha_u = Expr::ident("constants").field("alpha_u");
+    let closed_form_scale: Expr = if include_relaxation {
+        alpha_u.clone()
+    } else {
+        Expr::lit_f32(1.0)
+    };
     let preamble_stmts = vec![
         dsl::let_expr(
             "rho",
@@ -641,9 +879,80 @@ fn generate_dp_update_from_diag_kernel_program(
             "dt",
             dsl::max(Expr::ident("constants").field("dt"), Expr::lit_f32(0.0)),
         ),
+        // Closed-form fallback (used while the matrix is unassembled). Keep
+        // the historical alpha_u scaling here regardless of
+        // include_relaxation: it is only the pre-assembly seed magnitude.
+        dsl::let_expr(
+            "d_p_closed",
+            alpha_u * Expr::ident("dt") / Expr::ident("rho"),
+        ),
+        dsl::let_expr(
+            "scalar_offset",
+            dsl::array_access("scalar_row_offsets", Expr::ident("idx")),
+        ),
+        dsl::let_expr(
+            "num_neighbors",
+            dsl::array_access("scalar_row_offsets", Expr::ident("idx") + 1u32)
+                - Expr::ident("scalar_offset"),
+        ),
+        dsl::let_expr(
+            "diag_rank",
+            dsl::array_access("diagonal_indices", Expr::ident("idx"))
+                - Expr::ident("scalar_offset"),
+        ),
+        dsl::let_expr(
+            "row_stride",
+            Expr::ident("num_neighbors") * Expr::lit_u32(s),
+        ),
+        dsl::let_expr(
+            "mat_base",
+            Expr::ident("scalar_offset") * Expr::lit_u32(s * s)
+                + Expr::ident("diag_rank") * Expr::lit_u32(s),
+        ),
+        dsl::let_expr(
+            "a_u_x",
+            dsl::array_access(
+                "matrix_values",
+                Expr::ident("mat_base")
+                    + Expr::lit_u32(ux_rank) * Expr::ident("row_stride")
+                    + Expr::lit_u32(ux_rank),
+            ),
+        ),
+        dsl::let_expr(
+            "a_u_y",
+            dsl::array_access(
+                "matrix_values",
+                Expr::ident("mat_base")
+                    + Expr::lit_u32(uy_rank) * Expr::ident("row_stride")
+                    + Expr::lit_u32(uy_rank),
+            ),
+        ),
+        dsl::let_expr(
+            "a_bar",
+            Expr::lit_f32(0.5) * (Expr::ident("a_u_x") + Expr::ident("a_u_y")),
+        ),
+        dsl::let_expr("vol", dsl::array_access("cell_vols", Expr::ident("idx"))),
+        dsl::let_expr(
+            "d_p_diag",
+            closed_form_scale * Expr::ident("vol")
+                / dsl::max(Expr::ident("a_bar"), Expr::lit_f32(1e-30)),
+        ),
+        dsl::let_expr(
+            "d_p_new",
+            dsl::select(
+                Expr::ident("d_p_closed"),
+                Expr::ident("d_p_diag"),
+                Expr::ident("a_bar").gt(Expr::lit_f32(1e-30)),
+            ),
+        ),
+        dsl::let_expr(
+            "d_p_old",
+            dsl::array_access("state", Expr::ident("base") + d_p_offset),
+        ),
         dsl::let_expr(
             "d_p",
-            Expr::ident("constants").field("alpha_u") * Expr::ident("dt") / Expr::ident("rho"),
+            Expr::lit_f32(theta) * Expr::ident("d_p_new")
+                + Expr::lit_f32(1.0 - theta) * Expr::ident("d_p_old"),
         ),
     ];
     let body_stmts = vec![dsl::assign_expr(
@@ -657,6 +966,20 @@ fn generate_dp_update_from_diag_kernel_program(
         .side_effects
         .read_set
         .insert(EffectResource::binding(0, 1));
+    for slot in [5u32, 8, 9, 10] {
+        program
+            .side_effects
+            .read_set
+            .insert(EffectResource::binding(1, slot));
+    }
+    program
+        .side_effects
+        .read_set
+        .insert(EffectResource::component(
+            0,
+            0,
+            format!("state:{d_p_offset}"),
+        ));
     program
         .side_effects
         .write_set
@@ -1196,7 +1519,7 @@ mod tests {
         let layout = StateLayout::new(vec![u, p, dp_custom, grad_p, grad_p_old]);
 
         let module =
-            rhie_chow_aux_module(&system, "dp_custom", true, true).expect("module creation failed");
+            rhie_chow_aux_module(&system, "dp_custom", true, true, DpFormulation::ClosedForm).expect("module creation failed");
 
         let model = crate::solver::model::ModelSpec {
             id: "rhie_chow_dp_custom_test",
@@ -1491,7 +1814,7 @@ mod tests {
 
         // Module creation should succeed (no StateLayout validation yet)
         let module =
-            rhie_chow_aux_module(&system, "dp", true, true).expect("module creation failed");
+            rhie_chow_aux_module(&system, "dp", true, true, DpFormulation::ClosedForm).expect("module creation failed");
 
         let model = crate::solver::model::ModelSpec {
             id: "rhie_chow_missing_grad_p_old_test",
@@ -1564,7 +1887,7 @@ mod tests {
 
         let _layout = StateLayout::new(vec![u, p, dp, grad_p, grad_p_old]);
 
-        let module = rhie_chow_aux_module(&system, "dp", true, true).expect("module creation");
+        let module = rhie_chow_aux_module(&system, "dp", true, true, DpFormulation::ClosedForm).expect("module creation");
 
         // Check that port_manifest is present
         let port_manifest = module

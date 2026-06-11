@@ -165,6 +165,20 @@ fn incompressible_momentum_model_impl(with_mms_source: bool) -> Result<ModelSpec
         ));
     }
     let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
+    // d_p stays the closed form. The OpenFOAM-rAU-style alternative
+    // (DpFormulation::FromAssembledDiagonal, June 2026) computes a VERIFIED
+    // correct d_p = V/a_P (numerically matches the physical estimate;
+    // see tests/dp_diag_probe.rs) but destabilizes the coupled outer loop:
+    // the pressure response scales ~1/d_p while the relaxed updates and the
+    // d_p-scaled velocity correction are calibrated for the closed-form
+    // scale, so the step map amplifies (|u| x3.5/step at gentle settings;
+    // NaN within 2-4 steps at momentum-MMS settings where a_P is 10x the
+    // ddt-only value; lid reference rel_l2 0.61 vs 0.019). theta-damping of
+    // d_p and alpha pairing (0.7/0.3, 1.0/1.0, relaxed/unrelaxed rAU) do
+    // not help: the loop gain AT the target d_p is unstable. Re-enabling
+    // requires a compensating mechanism (pressure-row equilibration or an
+    // update/preconditioner redesign) — tracked in the plan as the Phase A
+    // follow-up.
     let derived_rhie_chow =
         crate::solver::model::flux_derivation::derive_rhie_chow(&system, &layout)
             .map_err(|e| format!("failed to derive Rhie–Chow flux: {e}"))?;

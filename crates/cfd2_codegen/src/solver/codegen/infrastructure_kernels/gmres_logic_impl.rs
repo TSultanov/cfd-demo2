@@ -176,6 +176,11 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         ty: Type::U32,
         expr: Expr::lit_u32(22),
     });
+    m.push(Item::Const {
+        name: "SCALAR_TOTAL_ITERS".into(),
+        ty: Type::U32,
+        expr: Expr::lit_u32(23),
+    });
 
     // ── Helper function: h_idx ──────────────────────────────────────────────
 
@@ -206,6 +211,14 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                     .gt(Expr::lit_f32(0.5)),
                 block(vec![return_void()]),
                 None,
+            ),
+            // Count actual Arnoldi iterations (past the STOP early-out, so
+            // frozen no-op dispatches don't count). Feeds the host-side
+            // adaptive iteration budget.
+            assign_expr(
+                Expr::ident("scalars").index(Expr::ident("SCALAR_TOTAL_ITERS")),
+                Expr::ident("scalars").index(Expr::ident("SCALAR_TOTAL_ITERS"))
+                    + Expr::lit_f32(1.0),
             ),
             // let j = iter_params.current_idx;
             let_expr("j", Expr::ident("iter_params").field("current_idx")),

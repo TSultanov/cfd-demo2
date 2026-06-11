@@ -4,7 +4,7 @@ use crate::solver::gpu::linear_solver::fgmres::{
     encode_rhs_norm_into_scalars, encode_write_params, read_solver_scalars_after_submit,
     solve_once_from_encoded_status, submit_fgmres_encoded_pass, FgmresSolveOnceConfig,
     FgmresSolveOnceResult, FgmresWorkspace, IterParams, RawFgmresParams, FGMRES_SCALAR_CONVERGED,
-    FGMRES_SCALAR_RESIDUAL_EST,
+    FGMRES_SCALAR_RESIDUAL_EST, FGMRES_SCALAR_STOP_PUB, FGMRES_SCALAR_TOTAL_ITERS,
 };
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, PreconditionerModule};
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
@@ -13,6 +13,23 @@ use crate::solver::gpu::structs::LinearSolverStats;
 pub struct KrylovSolveModule<P> {
     pub fgmres: FgmresWorkspace,
     pub precond: P,
+    /// Adaptive iteration budget for the chunked encoded path: the next
+    /// solve encodes only ~what the previous solve actually needed (the
+    /// stall-stop makes "actually needed" observable). None = no history
+    /// yet; the configured max_iters always caps it. See
+    /// `submit_solve_fgmres_fixed_iterations_chunked`.
+    pub adaptive_budget: Option<u32>,
+}
+
+/// Extra information read back alongside [`LinearSolverStats`] from the
+/// encoded path (see [`KrylovSolveModule::read_last_solver_stats`]).
+pub struct EncodedSolveInfo {
+    /// Actual Arnoldi iterations executed (SCALAR_TOTAL_ITERS), as opposed
+    /// to the encoded budget.
+    pub actual_iters: u32,
+    /// Whether the solve stopped itself (convergence, guard freeze, or
+    /// stall) before exhausting the encoded budget.
+    pub stopped_early: bool,
 }
 
 /// Arguments for the `solve_once` method to reduce parameter count.
@@ -47,7 +64,11 @@ pub struct EncodeSolveOnceArgs<'a> {
 
 impl<P> KrylovSolveModule<P> {
     pub fn new(fgmres: FgmresWorkspace, precond: P) -> Self {
-        Self { fgmres, precond }
+        Self {
+            fgmres,
+            precond,
+            adaptive_budget: None,
+        }
     }
 
     pub fn rhs_norm(&self, context: &GpuContext, system: LinearSystemView<'_>, n: u32) -> f32 {
@@ -83,19 +104,30 @@ impl<P> KrylovSolveModule<P> {
         submission_index: wgpu::SubmissionIndex,
         iterations: u32,
         time: std::time::Duration,
-    ) -> LinearSolverStats {
+    ) -> (LinearSolverStats, EncodedSolveInfo) {
         let core = self.fgmres.core(&context.device, &context.queue);
         let scalars = read_solver_scalars_after_submit(&core, submission_index);
         let residual_est = scalars[FGMRES_SCALAR_RESIDUAL_EST];
         let converged = scalars[FGMRES_SCALAR_CONVERGED] > 0.5;
-
-        if !residual_est.is_finite() {
-            LinearSolverStats::diverged(iterations, residual_est, time)
-        } else if converged {
-            LinearSolverStats::converged(iterations, residual_est, time)
+        let total = scalars[FGMRES_SCALAR_TOTAL_ITERS];
+        let actual_iters = if total.is_finite() && total >= 1.0 {
+            (total.round() as u32).min(iterations)
         } else {
-            LinearSolverStats::max_iterations(iterations, residual_est, time)
-        }
+            iterations
+        };
+        let info = EncodedSolveInfo {
+            actual_iters,
+            stopped_early: scalars[FGMRES_SCALAR_STOP_PUB] > 0.5,
+        };
+
+        let stats = if !residual_est.is_finite() {
+            LinearSolverStats::diverged(actual_iters, residual_est, time)
+        } else if converged {
+            LinearSolverStats::converged(actual_iters, residual_est, time)
+        } else {
+            LinearSolverStats::max_iterations(actual_iters, residual_est, time)
+        };
+        (stats, info)
     }
 }
 

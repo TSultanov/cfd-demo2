@@ -14,7 +14,7 @@ use bytemuck::{bytes_of, Pod, Zeroable};
 pub const DEFAULT_WORKGROUP_SIZE: u32 = 64;
 pub const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
 
-pub(crate) const FGMRES_SCALAR_COUNT: usize = 23;
+pub(crate) const FGMRES_SCALAR_COUNT: usize = 24;
 pub(crate) const FGMRES_SCALAR_STOP: usize = 8;
 pub(crate) const FGMRES_SCALAR_CONVERGED: usize = 9;
 const FGMRES_SCALAR_ITERS_USED: usize = 10;
@@ -46,6 +46,12 @@ const FGMRES_SCALAR_STALL_COUNT: usize = 20;
 const FGMRES_SCALAR_PREV_EST: usize = 21;
 #[allow(dead_code)]
 const FGMRES_SCALAR_STALL_COUNT_ITER: usize = 22;
+// 23: actual Arnoldi iterations executed this solve (incremented once per
+// update_hessenberg_givens past the STOP early-out; zeroed by the
+// non-preserve init). Feeds the adaptive iteration budget.
+pub(crate) const FGMRES_SCALAR_TOTAL_ITERS: usize = 23;
+// STOP flag readback for the adaptive budget (stopped-early detection).
+pub(crate) const FGMRES_SCALAR_STOP_PUB: usize = FGMRES_SCALAR_STOP;
 
 const FGMRES_INDIRECT_DISPATCH_COUNT: usize = 3;
 const FGMRES_INDIRECT_ENTRY_STRIDE_BYTES: u64 = 16;

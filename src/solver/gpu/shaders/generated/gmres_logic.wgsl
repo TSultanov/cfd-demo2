@@ -58,6 +58,8 @@ const SCALAR_PREV_EST: u32 = 21u;
 
 const SCALAR_STALL_COUNT_ITER: u32 = 22u;
 
+const SCALAR_TOTAL_ITERS: u32 = 23u;
+
 fn h_idx(row: u32, col: u32) -> u32 {
     return col * (iter_params.max_restart + 1u) + row;
 }
@@ -68,6 +70,7 @@ fn update_hessenberg_givens(@builtin(global_invocation_id) global_id: vec3<u32>)
     if (scalars[SCALAR_STOP] > 0.5) {
         return;
     }
+    scalars[SCALAR_TOTAL_ITERS] = scalars[SCALAR_TOTAL_ITERS] + 1.0;
     let j = iter_params.current_idx;
     // Apply previous Givens rotations to the new column H[:, j]
     for (var i: u32 = 0u; i < j; i++) {

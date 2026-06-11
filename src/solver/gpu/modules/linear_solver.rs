@@ -590,6 +590,23 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
     } = args;
     let start = Instant::now();
 
+    // Adaptive iteration budget: encode only ~what the previous solve
+    // actually needed. Only meaningful when the stall-stop can end solves
+    // early (stall_level_rel > 0); the configured max_iters always caps it,
+    // and a solve that exhausts its budget without stopping doubles the
+    // next budget (AIMD). The wall-time win is on the HOST side: frozen
+    // chunks execute as GPU no-ops either way, but encoding them is what
+    // dominates small-system solves.
+    let restart_len_u32 = max_restart.max(1) as u32;
+    let budget = if stall_level_rel() > 0.0 {
+        krylov
+            .adaptive_budget
+            .map(|b| b.clamp(restart_len_u32, max_iters.max(1)))
+            .unwrap_or(max_iters)
+    } else {
+        max_iters
+    };
+
     let FgmresChunkLayout {
         mut params,
         chunk_sizes,
@@ -598,7 +615,7 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
         num_cells,
         dispatch.dofs_dispatch_x_threads,
         max_restart,
-        max_iters,
+        budget,
         krylov.fgmres.max_restart(),
     );
 
@@ -693,7 +710,27 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
     // Read back solver scalars from the last chunk to produce a meaningful
     // LinearSolverStats with the real GPU-computed residual.
     if let Some(sub_idx) = last_submission_index {
-        krylov.read_last_solver_stats(context, sub_idx, encoded_total as u32, start.elapsed())
+        let (stats, info) =
+            krylov.read_last_solver_stats(context, sub_idx, encoded_total as u32, start.elapsed());
+        if std::env::var("CFD2_DEBUG_FGMRES").map(|v| v != "0").unwrap_or(false) {
+            eprintln!(
+                "[cfd2][fgmres][chunked] budget={budget} actual={} stopped_early={} resid={:.3e}",
+                info.actual_iters, info.stopped_early, stats.residual
+            );
+        }
+        if stall_level_rel() > 0.0 {
+            let next = if info.stopped_early {
+                // Stall/guard/convergence ended the solve: next budget =
+                // actual work + one restart cycle of margin.
+                (info.actual_iters.saturating_add(restart_len_u32))
+                    .clamp(restart_len_u32, max_iters.max(1))
+            } else {
+                // Budget exhausted without stopping: grow back quickly.
+                budget.saturating_mul(2).clamp(restart_len_u32, max_iters.max(1))
+            };
+            krylov.adaptive_budget = Some(next);
+        }
+        stats
     } else {
         LinearSolverStats::max_iterations(encoded_total as u32, f32::INFINITY, start.elapsed())
     }

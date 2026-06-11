@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 8fe4f0825c5a7f2e246fd01dfbfe50c9e1293f252b27f406ec66ddb6d6733ca0
+// SourceHash: 6c0583d8466ab8d9ae37ae50dd1e88bc32f390a576c569f04606ed6b9b2ee970
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -83184,6 +83184,7 @@ fn update_w_cgs_reortho(@builtin(global_invocation_id) global_id_4: vec3<u32>, @
         pub const SCALAR_STALL_COUNT: u32 = 20u32;
         pub const SCALAR_PREV_EST: u32 = 21u32;
         pub const SCALAR_STALL_COUNT_ITER: u32 = 22u32;
+        pub const SCALAR_TOTAL_ITERS: u32 = 23u32;
         pub mod compute {
             use super::{_root, _root::*};
             pub const UPDATE_HESSENBERG_GIVENS_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
@@ -83528,6 +83529,7 @@ const SCALAR_STALL_REL: u32 = 19u;
 const SCALAR_STALL_COUNT: u32 = 20u;
 const SCALAR_PREV_EST: u32 = 21u;
 const SCALAR_STALL_COUNT_ITER: u32 = 22u;
+const SCALAR_TOTAL_ITERS: u32 = 23u;
 
 @group(0) @binding(0) 
 var<storage, read_write> hessenberg: array<f32>;
@@ -83560,64 +83562,66 @@ fn update_hessenberg_givens(@builtin(global_invocation_id) global_id: vec3<u32>)
     if (_e5 > 0.5f) {
         return;
     }
+    let _e12 = scalars[23];
+    scalars[23] = (_e12 + 1f);
     let j_1 = iter_params.current_idx;
     loop {
-        let _e12 = i;
-        if (_e12 < j_1) {
+        let _e19 = i;
+        if (_e19 < j_1) {
         } else {
             break;
         }
         {
-            let _e14 = i;
-            let _e15 = h_idx(_e14, j_1);
-            let _e16 = i;
-            let _e19 = h_idx((_e16 + 1u), j_1);
-            let h_ij = hessenberg[_e15];
-            let h_i1j = hessenberg[_e19];
-            let _e27 = i;
-            let cs = givens[_e27];
+            let _e21 = i;
+            let _e22 = h_idx(_e21, j_1);
+            let _e23 = i;
+            let _e26 = h_idx((_e23 + 1u), j_1);
+            let h_ij = hessenberg[_e22];
+            let h_i1j = hessenberg[_e26];
+            let _e34 = i;
+            let cs = givens[_e34];
             let c_1 = cs.x;
             let s_1 = cs.y;
-            hessenberg[_e15] = ((c_1 * h_ij) + (s_1 * h_i1j));
-            hessenberg[_e19] = ((-(s_1) * h_ij) + (c_1 * h_i1j));
+            hessenberg[_e22] = ((c_1 * h_ij) + (s_1 * h_i1j));
+            hessenberg[_e26] = ((-(s_1) * h_ij) + (c_1 * h_i1j));
         }
         continuing {
-            let _e44 = i;
-            i = (_e44 + 1u);
+            let _e51 = i;
+            i = (_e51 + 1u);
         }
     }
-    let _e46 = h_idx(j_1, j_1);
-    let _e49 = h_idx((j_1 + 1u), j_1);
-    let h_jj = hessenberg[_e46];
-    let h_j1j = hessenberg[_e49];
+    let _e53 = h_idx(j_1, j_1);
+    let _e56 = h_idx((j_1 + 1u), j_1);
+    let h_jj = hessenberg[_e53];
+    let h_j1j = hessenberg[_e56];
     rho = sqrt(((h_jj * h_jj) + (h_j1j * h_j1j)));
-    let _e61 = rho;
-    if (abs(_e61) > 0.00000000000000000001f) {
-        let _e65 = rho;
-        c = (h_jj / _e65);
-        let _e68 = rho;
-        s = (h_j1j / _e68);
+    let _e68 = rho;
+    if (abs(_e68) > 0.00000000000000000001f) {
+        let _e72 = rho;
+        c = (h_jj / _e72);
+        let _e75 = rho;
+        s = (h_j1j / _e75);
     }
-    let _e73 = c;
-    let _e74 = s;
-    givens[j_1] = vec2<f32>(_e73, _e74);
-    let _e78 = rho;
-    hessenberg[_e46] = _e78;
-    hessenberg[_e49] = 0f;
+    let _e80 = c;
+    let _e81 = s;
+    givens[j_1] = vec2<f32>(_e80, _e81);
+    let _e85 = rho;
+    hessenberg[_e53] = _e85;
+    hessenberg[_e56] = 0f;
     let g_j = g_rhs[j_1];
     let g_j1_ = g_rhs[(j_1 + 1u)];
-    let _e92 = c;
-    let _e94 = s;
-    g_rhs[j_1] = ((_e92 * g_j) + (_e94 * g_j1_));
+    let _e99 = c;
     let _e101 = s;
-    let _e104 = c;
-    g_rhs[(j_1 + 1u)] = ((-(_e101) * g_j) + (_e104 * g_j1_));
-    let _e111 = g_rhs[(j_1 + 1u)];
-    let residual = abs(_e111);
+    g_rhs[j_1] = ((_e99 * g_j) + (_e101 * g_j1_));
+    let _e108 = s;
+    let _e111 = c;
+    g_rhs[(j_1 + 1u)] = ((-(_e108) * g_j) + (_e111 * g_j1_));
+    let _e118 = g_rhs[(j_1 + 1u)];
+    let residual = abs(_e118);
     scalars[11] = residual;
-    let _e117 = scalars[12];
-    let _e120 = scalars[14];
-    let tol_rel_rhs = (_e117 * _e120);
+    let _e124 = scalars[12];
+    let _e127 = scalars[14];
+    let tol_rel_rhs = (_e124 * _e127);
     let tol_abs = scalars[13];
     if ((residual <= tol_rel_rhs) || (residual <= tol_abs)) {
         scalars[8] = 1f;
@@ -83632,13 +83636,13 @@ fn update_hessenberg_givens(@builtin(global_invocation_id) global_id: vec3<u32>)
         if (stall_rel > 0f) {
             let prev_est = scalars[21];
             let no_improve = ((prev_est > 0f) && (residual > (prev_est * 0.995f)));
-            let _e176 = scalars[14];
-            let level_ok = (residual <= (stall_rel * _e176));
+            let _e183 = scalars[14];
+            let level_ok = (residual <= (stall_rel * _e183));
             if (no_improve && level_ok) {
-                let _e184 = scalars[22];
-                scalars[22] = (_e184 + 1f);
-                let _e189 = scalars[22];
-                if (_e189 > 9.5f) {
+                let _e191 = scalars[22];
+                scalars[22] = (_e191 + 1f);
+                let _e196 = scalars[22];
+                if (_e196 > 9.5f) {
                     scalars[8] = 1f;
                     scalars[10] = f32((j_1 + 1u));
                     indirect_args[0] = vec4<u32>(0u, 0u, 0u, 0u);

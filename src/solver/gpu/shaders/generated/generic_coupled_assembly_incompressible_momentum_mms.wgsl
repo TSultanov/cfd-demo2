@@ -198,6 +198,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
+        let dev2_U_U_gx = vec2<f32>((state[other_idx * 10u + 0u] - state[idx * 10u + 0u]) * dx / max(dx * dx + dy * dy, 0.000000000001), (state[other_idx * 10u + 0u] - state[idx * 10u + 0u]) * dy / max(dx * dx + dy * dy, 0.000000000001));
+        let dev2_U_U_gy = vec2<f32>((state[other_idx * 10u + 1u] - state[idx * 10u + 1u]) * dx / max(dx * dx + dy * dy, 0.000000000001), (state[other_idx * 10u + 1u] - state[idx * 10u + 1u]) * dy / max(dx * dx + dy * dy, 0.000000000001));
+        let dev2_U_U_div = dev2_U_U_gx.x + dev2_U_U_gy.y;
+        let dev2_U_U_mu = select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !is_boundary);
+        rhs_0 += dev2_U_U_mu * area * (normal.x * dev2_U_U_gx.x + normal.y * dev2_U_U_gy.x - 0.6666667 * dev2_U_U_div * normal.x);
+        rhs_1 += dev2_U_U_mu * area * (normal.x * dev2_U_U_gx.y + normal.y * dev2_U_U_gy.y - 0.6666667 * dev2_U_U_div * normal.y);
         var phi_0: f32 = fluxes[face_idx * 3u + 0u];
         if (owner != idx) {
             phi_0 -= phi_0 * 2.0;

@@ -173,6 +173,15 @@ pub enum FusionGuard {
     RequiresModule(&'static str),
     MinPolicy(KernelFusionPolicy),
     ExactPolicy(KernelFusionPolicy),
+    /// Reject when the model declares a term whose ASSEMBLY reads NEIGHBOR
+    /// cells' grad_state with numerical effect (transpose_dev2 viscous
+    /// terms). Fusing the gradients kernel into the assembly dispatch then
+    /// makes neighbor gradient reads racy (fresh-or-stale within the same
+    /// dispatch), breaking the Safe policy's bit-identical contract.
+    /// (The SOU reconstruction's neighbor gradient reads predate this guard
+    /// and are tolerated as a lagged correction; dev2 terms make gradient
+    /// values first-class operands, so the fusion must not apply.)
+    RequiresNoNeighborGradConsumers,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -257,6 +266,10 @@ pub struct KernelFusionContext<'a> {
     pub policy: KernelFusionPolicy,
     pub stepping: KernelFusionStepping,
     pub has_grad_state: bool,
+    /// Model declares transpose_dev2 terms (assembly consumes neighbor
+    /// grad_state values with numerical effect; see
+    /// `FusionGuard::RequiresNoNeighborGradConsumers`).
+    pub has_neighbor_grad_consumers: bool,
     pub module_names: &'a [&'static str],
 }
 
@@ -421,7 +434,18 @@ fn guard_matches(guard: FusionGuard, ctx: &KernelFusionContext<'_>) -> bool {
         FusionGuard::RequiresModule(name) => ctx.module_names.contains(&name),
         FusionGuard::MinPolicy(min) => ctx.policy >= min,
         FusionGuard::ExactPolicy(policy) => ctx.policy == policy,
+        FusionGuard::RequiresNoNeighborGradConsumers => !ctx.has_neighbor_grad_consumers,
     }
+}
+
+/// True when the model's system declares any transpose_dev2 term (the
+/// assembly then consumes neighbor grad_state values with numerical effect).
+pub fn model_has_neighbor_grad_consumers(model: &crate::solver::model::ModelSpec) -> bool {
+    model
+        .system
+        .equations()
+        .iter()
+        .any(|eq| eq.terms().iter().any(|t| t.transpose_dev2))
 }
 
 fn rule_enabled(rule: &ModelKernelFusionRule, ctx: &KernelFusionContext<'_>) -> bool {
@@ -1467,6 +1491,7 @@ mod tests {
             policy: KernelFusionPolicy::Safe,
             stepping: KernelFusionStepping::Coupled,
             has_grad_state: false,
+            has_neighbor_grad_consumers: false,
             module_names: &module_names,
         };
 
@@ -1508,6 +1533,7 @@ mod tests {
             policy: KernelFusionPolicy::Safe,
             stepping: KernelFusionStepping::Coupled,
             has_grad_state: false,
+            has_neighbor_grad_consumers: false,
             module_names: &module_names,
         };
         let safe_out = apply_model_fusion_rules(&kernels, &rules, &safe_ctx);
@@ -1519,6 +1545,7 @@ mod tests {
             policy: KernelFusionPolicy::Aggressive,
             stepping: KernelFusionStepping::Coupled,
             has_grad_state: false,
+            has_neighbor_grad_consumers: false,
             module_names: &module_names,
         };
         let aggressive_out = apply_model_fusion_rules(&kernels, &rules, &aggressive_ctx);
@@ -1558,6 +1585,7 @@ mod tests {
             policy: KernelFusionPolicy::Off,
             stepping: KernelFusionStepping::Coupled,
             has_grad_state: false,
+            has_neighbor_grad_consumers: false,
             module_names: &module_names,
         };
         let off_out = apply_model_fusion_rules(&kernels, &rules, &off_ctx);
@@ -1568,6 +1596,7 @@ mod tests {
             policy: KernelFusionPolicy::Safe,
             stepping: KernelFusionStepping::Coupled,
             has_grad_state: false,
+            has_neighbor_grad_consumers: false,
             module_names: &module_names,
         };
         let safe_out = apply_model_fusion_rules(&kernels, &rules, &safe_ctx);
@@ -1578,6 +1607,7 @@ mod tests {
             policy: KernelFusionPolicy::Aggressive,
             stepping: KernelFusionStepping::Coupled,
             has_grad_state: false,
+            has_neighbor_grad_consumers: false,
             module_names: &module_names,
         };
         let aggressive_out = apply_model_fusion_rules(&kernels, &rules, &aggressive_ctx);

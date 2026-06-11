@@ -146,6 +146,12 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                     FusionGuard::RequiresStepping(KernelFusionStepping::Coupled),
                     FusionGuard::RequiresModule("generic_coupled"),
                     FusionGuard::MinPolicy(KernelFusionPolicy::Safe),
+                    // Fusing gradients into the assembly dispatch makes
+                    // NEIGHBOR grad_state reads racy (fresh-or-stale within
+                    // the dispatch). Reconstruction reads tolerate that as a
+                    // lagged correction; transpose_dev2 terms consume the
+                    // values directly, so the fusion must not apply.
+                    FusionGuard::RequiresNoNeighborGradConsumers,
                 ],
                 // The gradients kernel (program 0) has a different bind layout
                 // than assembly (program 1). Remap program 0's slots to match

@@ -947,7 +947,10 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     .find(|s| s.name == field_name)
                     .expect("slot checked above");
 
-                // Face-averaged gradient of velocity component `c` (Vector2).
+                // Face-averaged gradient of velocity component `c`, as a
+                // vec2<f32> (grad_state elements are the Vector2 STRUCT,
+                // which WGSL cannot add — convert member-wise first, like
+                // the convection reconstruction does).
                 let grad_face = |c: u32| -> Expr {
                     if needs_gradients {
                         let own = dsl::array_access_linear(
@@ -962,7 +965,10 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             slots.stride,
                             field_offset + c,
                         );
-                        (own + neigh) * 0.5
+                        let own_v = dsl::vec2_f32(own.clone().field("x"), own.field("y"));
+                        let neigh_v =
+                            dsl::vec2_f32(neigh.clone().field("x"), neigh.field("y"));
+                        (own_v + neigh_v) * 0.5
                     } else {
                         // Two-point fallback (same as the convection
                         // reconstruction fallback). This variant is never

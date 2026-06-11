@@ -720,7 +720,13 @@ mod tests {
         assert_eq!(system.equations().len(), 2);
         let momentum = &system.equations()[0];
         assert_eq!(momentum.target().name(), "U");
-        assert_eq!(momentum.terms().len(), 4);
+        // 4 base terms, plus the explicit dev2 transpose viscous term when
+        // ViscousStressForm::FullDev2 is the declared default.
+        assert!(
+            momentum.terms().len() == 4 || momentum.terms().len() == 5,
+            "unexpected momentum term count {}",
+            momentum.terms().len()
+        );
         assert_eq!(momentum.terms()[0].op, TermOp::Ddt);
         match &momentum.terms()[0].coeff {
             Some(Coefficient::Field(field)) => assert_eq!(field.name(), "rho"),
@@ -729,6 +735,10 @@ mod tests {
         assert_eq!(momentum.terms()[1].op, TermOp::Div);
         assert_eq!(momentum.terms()[2].op, TermOp::Laplacian);
         assert_eq!(momentum.terms()[3].op, TermOp::Grad);
+        if let Some(dev2) = momentum.terms().get(4) {
+            assert_eq!(dev2.op, TermOp::Laplacian);
+            assert!(dev2.transpose_dev2, "5th momentum term must be the dev2 form");
+        }
 
         let pressure = &system.equations()[1];
         assert_eq!(pressure.target().name(), "p");

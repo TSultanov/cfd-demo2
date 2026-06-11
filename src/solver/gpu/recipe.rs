@@ -1000,10 +1000,15 @@ mod tests {
             "flux stride should match packed coupled unknown layout"
         );
         assert!(recipe.kernels.iter().any(|k| k.id == KernelId::FLUX_MODULE));
-        assert!(recipe
-            .kernels
-            .iter()
-            .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY));
+        // A transpose_dev2 term forces the gradients pipeline on even under
+        // the Upwind scheme, selecting the grad_state assembly variant.
+        let has_dev2 = crate::solver::model::kernel::model_has_neighbor_grad_consumers(&model);
+        let expected_assembly = if has_dev2 {
+            KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE
+        } else {
+            KernelId::GENERIC_COUPLED_ASSEMBLY
+        };
+        assert!(recipe.kernels.iter().any(|k| k.id == expected_assembly));
     }
 
     #[test]

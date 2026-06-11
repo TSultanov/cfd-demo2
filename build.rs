@@ -805,6 +805,8 @@ fn generate_fusion_schedule_registry(manifest_dir: &str, models: &[solver::model
             });
         let fusion_rules = solver::model::kernel::derive_kernel_fusion_rules_for_model(model);
         let module_names: Vec<&'static str> = model.modules.iter().map(|m| m.name).collect();
+        let has_neighbor_grad_consumers =
+            solver::model::kernel::model_has_neighbor_grad_consumers(model);
 
         for (stepping_tag, fusion_stepping, satisfies_requires_implicit_stepping) in stepping_cases
         {
@@ -827,6 +829,7 @@ fn generate_fusion_schedule_registry(manifest_dir: &str, models: &[solver::model
                         policy,
                         stepping: fusion_stepping,
                         has_grad_state,
+                        has_neighbor_grad_consumers,
                         module_names: &module_names,
                     };
                     let result = solver::model::kernel::apply_model_fusion_rules(

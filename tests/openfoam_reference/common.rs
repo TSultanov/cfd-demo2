@@ -128,13 +128,18 @@ pub struct ReferenceBands {
 
 pub fn reference_bands(case: &str) -> ReferenceBands {
     let (max_cell_u, max_cell_p) = match case {
-        // measured 2026-03-09: u=0.1486, p=0.2377 (errors concentrate at the lid corners)
-        "incompressible_lid" => (0.18, 0.29),
-        // measured: u=0.0788, p=0.1287 (errors concentrate at the inlet ring;
-        // centerline rel_l2 is ~2e-5 and asserted separately)
-        "incompressible_channel" => (0.095, 0.16),
-        // measured: u=0.0824, p=0.1469
-        "incompressible_backstep" => (0.10, 0.18),
+        // measured June 2026 with the dev2 transpose viscous term (the
+        // OpenFOAM UEqn form): u=0.0933, p=0.1105 — down from u=0.1486,
+        // p=0.2377 (−37%/−54%; the corner-singular mismatch was largely the
+        // missing transpose stress).
+        "incompressible_lid" => (0.11, 0.14),
+        // measured June 2026 (dev2): u=0.0800, p=0.1154 (u +1.6% vs the
+        // laplacian-only form's 0.0788 — explicitly accepted growth, see the
+        // ViscousStressForm decision record; p −10%). Errors concentrate at
+        // the inlet ring; centerline rel_l2 is ~1e-5, asserted separately.
+        "incompressible_channel" => (0.095, 0.14),
+        // measured June 2026 (dev2): u=0.0801, p=0.1126 (p −25%)
+        "incompressible_backstep" => (0.095, 0.14),
         // measured: u=0.0247, p=1.0e-5 (June 2026, after the tauMC
         // doubled-shear fix: was u=0.5983 — the long-standing ~60% mismatch
         // was the doubled effective shear viscosity thickening the developing

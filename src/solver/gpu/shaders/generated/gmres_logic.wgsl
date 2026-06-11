@@ -227,3 +227,12 @@ fn restart_guard(@builtin(global_invocation_id) global_id: vec3<u32>) {
         scalars[SCALAR_PREV_RESID] = r;
     }
 }
+
+@compute
+@workgroup_size(1)
+fn clamp_rel_scale(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let beta = hessenberg[0u];
+    if (beta < scalars[SCALAR_RHS_NORM]) {
+        scalars[SCALAR_RHS_NORM] = beta;
+    }
+}

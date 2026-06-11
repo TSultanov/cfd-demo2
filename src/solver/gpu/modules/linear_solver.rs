@@ -264,7 +264,7 @@ pub fn solve_fgmres<P: PreconditionerModule>(
     // gmres_logic/restart_guard — keep the two in sync): with an
     // unreachable tolerance every solve burns to the iteration cap at its
     // f32 floor; stop when the checkpoint residual improves <2% twice in a
-    // row AND is already below stall_rel * ||b||. 0.0 disables.
+    // row AND is already below stall_rel * rel_scale. 0.0 disables.
     let stall_rel = stall_level_rel();
     let mut prev_checkpoint_residual: Option<f32> = None;
     let mut stall_count = 0u32;
@@ -345,7 +345,9 @@ pub fn solve_fgmres<P: PreconditionerModule>(
         if stall_rel > 0.0 {
             if let Some(prev) = prev_checkpoint_residual {
                 let no_improve = residual > prev * (1.0 - STALL_IMPROVEMENT_TOL);
-                let level_ok = residual <= stall_rel * rhs_norm;
+                // Level against rel_scale (= min(||b||, ||r0||)), matching the
+                // GPU path where clamp_rel_scale folds ||r0|| into RHS_NORM.
+                let level_ok = residual <= stall_rel * rel_scale_for_restart;
                 if no_improve && level_ok {
                     stall_count += 1;
                 } else {

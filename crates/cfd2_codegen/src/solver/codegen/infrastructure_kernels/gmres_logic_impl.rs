@@ -405,7 +405,8 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                 // their f32 floor mid-cycle (~iteration 70 of 200 on the
                 // reference cases) and grind out the rest: stop when the
                 // estimate improves <0.5% for 10 consecutive iterations AND
-                // is below SCALAR_STALL_REL * ||b|| (0 disables). Reuses the
+                // is below SCALAR_STALL_REL * scalars[SCALAR_RHS_NORM]
+                // (0 disables). Reuses the
                 // convergence-break machinery (STOP + ITERS_USED = j+1 +
                 // zeroed indirect args); SKIP_UPDATE stays 0 so the cycle
                 // tail applies the partial solution update, and CONVERGED
@@ -767,7 +768,9 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                     // iteration cap at its f32 floor. When the true residual
                     // stops improving (<2% across a checkpoint) for two
                     // consecutive checkpoints AND is already small relative
-                    // to ||b|| (level factor in SCALAR_STALL_REL; 0 disables),
+                    // to the tolerance scale in SCALAR_RHS_NORM (clamped to
+                    // min(||b||, ||r0||) on the fully-encoded path; level
+                    // factor in SCALAR_STALL_REL; 0 disables),
                     // freeze the remaining work like the convergence break,
                     // keeping the best iterate. Mirrors the host loop in
                     // solve_fgmres — keep the two in sync.
@@ -889,6 +892,42 @@ pub fn generate_gmres_logic() -> KernelWgsl {
 
         m.push(Item::Function(Function::new(
             "restart_guard",
+            vec![Param::new(
+                "global_id",
+                Type::vec3_u32(),
+                vec![Attribute::Builtin("global_invocation_id".into())],
+            )],
+            None,
+            vec![Attribute::Compute, Attribute::WorkgroupSize(1)],
+            body,
+        )));
+    }
+
+    // ── Entry point: clamp_rel_scale ────────────────────────────────────────
+    //
+    // Align the fully-encoded path's relative-tolerance scale with the host
+    // loop (solve_fgmres): rel_scale = min(||b||, ||r0||). Runs on the first
+    // restart chunk only, after the GPU-side ||rhs|| computation wrote ||b||
+    // into scalars[SCALAR_RHS_NORM] and the encoded seed's beta = ||r0|| was
+    // restored into hessenberg[0]. Without the clamp, a near-converged warm
+    // start (||r0|| << ||b||) would declare convergence against ||b|| alone.
+    // NaN-safe: the comparison is false for non-finite beta, keeping ||b||
+    // (the seed/guard machinery handles non-finite residuals).
+    {
+        let body = block(vec![
+            let_expr("beta", Expr::ident("hessenberg").index(Expr::lit_u32(0))),
+            if_block_expr(
+                Expr::ident("beta").lt(Expr::ident("scalars").index(Expr::ident("SCALAR_RHS_NORM"))),
+                block(vec![assign_expr(
+                    Expr::ident("scalars").index(Expr::ident("SCALAR_RHS_NORM")),
+                    Expr::ident("beta"),
+                )]),
+                None,
+            ),
+        ]);
+
+        m.push(Item::Function(Function::new(
+            "clamp_rel_scale",
             vec![Param::new(
                 "global_id",
                 Type::vec3_u32(),

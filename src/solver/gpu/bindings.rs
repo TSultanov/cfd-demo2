@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 6c0583d8466ab8d9ae37ae50dd1e88bc32f390a576c569f04606ed6b9b2ee970
+// SourceHash: 503b70448f40ef3db9aa0bb4fc7bf28d83ed422c8ce9f6350ef708cbb71aaea4
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -83247,11 +83247,27 @@ fn update_w_cgs_reortho(@builtin(global_invocation_id) global_id_4: vec3<u32>, @
                     cache: None,
                 })
             }
+            pub const CLAMP_REL_SCALE_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
+            pub fn create_clamp_rel_scale_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline clamp_rel_scale"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("clamp_rel_scale"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
         }
         pub const ENTRY_UPDATE_HESSENBERG_GIVENS: &str = "update_hessenberg_givens";
         pub const ENTRY_SOLVE_TRIANGULAR: &str = "solve_triangular";
         pub const ENTRY_FINISH_NORM: &str = "finish_norm";
         pub const ENTRY_RESTART_GUARD: &str = "restart_guard";
+        pub const ENTRY_CLAMP_REL_SCALE: &str = "clamp_rel_scale";
         #[derive(Debug)]
         pub struct WgpuBindGroup0EntriesParams<'a> {
             pub hessenberg: wgpu::BufferBinding<'a>,
@@ -83786,6 +83802,18 @@ fn restart_guard(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
             scalars[20] = 0f;
         }
         scalars[18] = r;
+        return;
+    }
+}
+
+@compute @workgroup_size(1, 1, 1) 
+fn clamp_rel_scale(@builtin(global_invocation_id) global_id_4: vec3<u32>) {
+    let beta = hessenberg[0];
+    let _e5 = scalars[14];
+    if (beta < _e5) {
+        scalars[14] = beta;
+        return;
+    } else {
         return;
     }
 }

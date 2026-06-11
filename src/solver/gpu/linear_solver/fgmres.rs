@@ -147,6 +147,7 @@ pub struct FgmresCore<'a> {
     pub pipeline_update_w_cgs_reortho: &'a wgpu::ComputePipeline,
     pub pipeline_restart_guard: &'a wgpu::ComputePipeline,
     pub pipeline_guard_copy: &'a wgpu::ComputePipeline,
+    pub pipeline_clamp_rel_scale: &'a wgpu::ComputePipeline,
 }
 
 pub struct FgmresWorkspace {
@@ -214,6 +215,7 @@ pub struct FgmresWorkspace {
     pipeline_axpy_fused_from_y: wgpu::ComputePipeline,
     pipeline_restart_guard: wgpu::ComputePipeline,
     pipeline_guard_copy: wgpu::ComputePipeline,
+    pipeline_clamp_rel_scale: wgpu::ComputePipeline,
 }
 
 impl FgmresWorkspace {
@@ -562,6 +564,12 @@ impl FgmresWorkspace {
                     .map_err(|e| format!("gmres_logic/restart_guard shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
+        let pipeline_clamp_rel_scale = {
+            let src =
+                kernel_registry::kernel_source_by_id("", KernelId("gmres_logic/clamp_rel_scale"))
+                    .map_err(|e| format!("gmres_logic/clamp_rel_scale shader missing: {e}"))?;
+            (src.create_pipeline)(device)
+        };
 
         let bgl_logic = pipeline_update_hessenberg.get_bind_group_layout(0);
         let bgl_logic_params = pipeline_update_hessenberg.get_bind_group_layout(1);
@@ -702,6 +710,7 @@ impl FgmresWorkspace {
             pipeline_update_w_cgs_reortho,
             pipeline_restart_guard,
             pipeline_guard_copy,
+            pipeline_clamp_rel_scale,
         })
     }
 
@@ -760,6 +769,7 @@ impl FgmresWorkspace {
             pipeline_update_w_cgs_reortho: &self.pipeline_update_w_cgs_reortho,
             pipeline_restart_guard: &self.pipeline_restart_guard,
             pipeline_guard_copy: &self.pipeline_guard_copy,
+            pipeline_clamp_rel_scale: &self.pipeline_clamp_rel_scale,
         }
     }
 
@@ -2169,6 +2179,21 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         encode_rhs_norm_into_scalars(core, encoder, system);
         // Restore hessenberg[0] (beta) ← b_y[0].
         encoder.copy_buffer_to_buffer(core.b_y, 0, core.b_hessenberg, 0, 4);
+        // Align with the host loop's rel_scale = min(||b||, ||r0||): clamp
+        // scalars[RHS_NORM] (= ||b||) by beta (= ||r0||, restored above).
+        // Without this, a warm start with ||r0|| << ||b|| would declare
+        // convergence against ||b|| alone — the two paths diverge exactly
+        // when the tolerance is reachable.
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("FGMRES clamp rel scale"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(core.pipeline_clamp_rel_scale);
+            pass.set_bind_group(0, core.bg_logic, &[]);
+            pass.set_bind_group(1, core.bg_logic_params, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
     }
 
     // ── Restart-boundary monotonicity guard ─────────────────────────────

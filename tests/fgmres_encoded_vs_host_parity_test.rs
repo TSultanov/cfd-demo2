@@ -298,3 +298,207 @@ fn encoded_fgmres_matches_host_fgmres_on_small_system() {
         "encoded vs host FGMRES: max relative error {max_rel:.4e} exceeds 1e-3"
     );
 }
+
+/// Solve tridiag(-1, 3, -1) x = rhs exactly on the host (Thomas algorithm, f64).
+fn solve_tridiag_host(rhs: &[f32]) -> Vec<f64> {
+    let n = rhs.len();
+    let mut c_prime = vec![0.0f64; n];
+    let mut d_prime = vec![0.0f64; n];
+    c_prime[0] = -1.0 / 3.0;
+    d_prime[0] = rhs[0] as f64 / 3.0;
+    for i in 1..n {
+        let m = 3.0 - (-1.0) * c_prime[i - 1];
+        c_prime[i] = -1.0 / m;
+        d_prime[i] = (rhs[i] as f64 - (-1.0) * d_prime[i - 1]) / m;
+    }
+    let mut x = vec![0.0f64; n];
+    x[n - 1] = d_prime[n - 1];
+    for i in (0..n - 1).rev() {
+        x[i] = d_prime[i] - c_prime[i] * x[i + 1];
+    }
+    x
+}
+
+/// Residual norm ||rhs - A x|| for A = tridiag(-1, 3, -1), computed in f64.
+fn tridiag_residual_norm(rhs: &[f32], x: &[f64]) -> f64 {
+    let n = rhs.len();
+    let mut sum = 0.0f64;
+    for i in 0..n {
+        let mut ax = 3.0 * x[i];
+        if i > 0 {
+            ax -= x[i - 1];
+        }
+        if i + 1 < n {
+            ax -= x[i + 1];
+        }
+        let r = rhs[i] as f64 - ax;
+        sum += r * r;
+    }
+    sum.sqrt()
+}
+
+/// Warm-start convergence-scale parity: with a REACHABLE relative tolerance
+/// and a warm start where ||r0|| << ||b||, both paths must declare
+/// convergence against rel_scale = min(||b||, ||r0||).
+///
+/// The host loop has always used min(||b||, ||r0||); the encoded path
+/// computes RHS_NORM = ||b|| on the GPU and (without the clamp_rel_scale
+/// kernel) would accept a residual that only beat tol * ||b|| — orders of
+/// magnitude looser than the host on near-converged warm starts. This test
+/// fails without the gmres_logic/clamp_rel_scale dispatch.
+#[test]
+fn encoded_fgmres_warm_start_uses_min_b_r0_scale() {
+    std::env::set_var("CFD2_QUIET", "1");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_CHUNKS");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_RESTART_BUDGET");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_TOTAL_ITERS");
+    std::env::remove_var("CFD2_ONE_SUBMISSION_MIN_TAIL");
+    std::env::remove_var("CFD2_FGMRES_STALL_REL");
+    std::env::remove_var("CFD2_FGMRES_CGS2");
+
+    let n = 64u32;
+    let (row_offsets, col_indices, values, rhs) = build_tridiag_csr(n as usize);
+
+    // Warm start: exact solution plus a small smooth perturbation, sized so
+    // that ||r0|| ≈ 1e-3 * ||b||. With tol = 1e-2 the unclamped criterion
+    // tol * ||b|| is ABOVE ||r0|| (instant fake convergence); the aligned
+    // criterion tol * ||r0|| demands another ~100x reduction.
+    let x_exact = solve_tridiag_host(&rhs);
+    let rhs_norm = (rhs.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>()).sqrt();
+    let perturb = 1.0e-3;
+    let x_warm_f64: Vec<f64> = x_exact
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| v + perturb * ((i as f64 * 0.37).sin() + 1.5))
+        .collect();
+    let x_warm: Vec<f32> = x_warm_f64.iter().map(|&v| v as f32).collect();
+    let r0_norm = tridiag_residual_norm(&rhs, &x_warm.iter().map(|&v| v as f64).collect::<Vec<_>>());
+
+    let tol = 1.0e-2f32;
+    let aligned_threshold = tol as f64 * r0_norm.min(rhs_norm);
+    let unclamped_threshold = tol as f64 * rhs_norm;
+    eprintln!(
+        "[fgmres_warm] ||b||={rhs_norm:.4e} ||r0||={r0_norm:.4e} aligned_thr={aligned_threshold:.4e} unclamped_thr={unclamped_threshold:.4e}"
+    );
+    // Construction sanity: the warm start must sit between the two criteria,
+    // otherwise the test cannot discriminate.
+    assert!(
+        r0_norm < unclamped_threshold && r0_norm > aligned_threshold * 2.0,
+        "warm start does not discriminate the two scales"
+    );
+
+    let ctx = pollster::block_on(GpuContext::new(None, None)).expect("gpu context");
+    let (port_space, ports) = create_gpu_linear_system(
+        &ctx.device,
+        &row_offsets,
+        &col_indices,
+        &values,
+        &rhs,
+        &x_warm,
+    );
+    let system = LinearSystemView {
+        ports,
+        space: &port_space,
+    };
+
+    let diag_inv = vec![1.0f32 / 3.0; n as usize];
+    let b_diag_u = device_buffer_f32(&ctx.device, &diag_inv, "diag_u");
+    let b_diag_v = device_buffer_f32(&ctx.device, &diag_inv, "diag_v");
+    let b_diag_p = device_buffer_f32(&ctx.device, &diag_inv, "diag_p");
+    let precond_bg = FgmresWorkspace::build_precond_bind_group(
+        &ctx.device,
+        "test FGMRES precond BG",
+        |name| match name {
+            "diag_u" => Some(b_diag_u.as_entire_binding()),
+            "diag_v" => Some(b_diag_v.as_entire_binding()),
+            "diag_p" => Some(b_diag_p.as_entire_binding()),
+            _ => None,
+        },
+    );
+
+    let max_restart = 32usize;
+    let fgmres = FgmresWorkspace::new_from_system(
+        &ctx.device,
+        n,
+        n,
+        max_restart,
+        FgmresSolutionUpdateStrategy::FusedContiguous,
+        system,
+        precond_bg.expect("precond bind group"),
+        "test",
+    );
+    let mut krylov =
+        KrylovSolveModule::new(fgmres.expect("fgmres workspace"), IdentityPreconditioner::new());
+    let dispatch = DispatchGrids::for_sizes(n, n);
+
+    // ====== Encoded path from the warm start ======
+    let mut encoder = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("encoded fgmres warm"),
+        });
+    let stats_enc = encode_solve_fgmres_fixed_iterations(
+        &mut krylov,
+        SolveFgmresArgs {
+            context: &ctx,
+            system,
+            n,
+            num_cells: n,
+            dispatch,
+            max_restart,
+            max_iters: n * 2,
+            tol,
+            tol_abs: 1e-12,
+            precond_label: "test:encoded-warm",
+            use_encoded_seed_basis0: true,
+        },
+        &mut encoder,
+    );
+    ctx.queue.submit(Some(encoder.finish()));
+    let x_enc = readback_buffer_f32(&ctx, system.x(), n as usize);
+    let enc_true_residual =
+        tridiag_residual_norm(&rhs, &x_enc.iter().map(|&v| v as f64).collect::<Vec<_>>());
+    eprintln!(
+        "[fgmres_warm] encoded: iters={} est={:.3e} true_resid={:.3e}",
+        stats_enc.iterations, stats_enc.residual, enc_true_residual
+    );
+
+    // ====== Host path from the same warm start ======
+    ctx.queue
+        .write_buffer(system.x(), 0, bytemuck::cast_slice(&x_warm));
+    let stats_host = solve_fgmres(
+        &mut krylov,
+        SolveFgmresArgs {
+            context: &ctx,
+            system,
+            n,
+            num_cells: n,
+            dispatch,
+            max_restart,
+            max_iters: n * 2,
+            tol,
+            tol_abs: 1e-12,
+            precond_label: "test:host-warm",
+            use_encoded_seed_basis0: false,
+        },
+    );
+    let x_host = readback_buffer_f32(&ctx, system.x(), n as usize);
+    let host_true_residual =
+        tridiag_residual_norm(&rhs, &x_host.iter().map(|&v| v as f64).collect::<Vec<_>>());
+    eprintln!(
+        "[fgmres_warm] host: iters={} est={:.3e} true_resid={:.3e} converged={}",
+        stats_host.iterations, stats_host.residual, host_true_residual, stats_host.converged
+    );
+
+    // Allow slack for the f32 Givens estimate vs the f64 true residual.
+    let slack = 1.5f64;
+    assert!(
+        enc_true_residual <= aligned_threshold * slack,
+        "encoded path stopped at true residual {enc_true_residual:.4e} > aligned threshold {aligned_threshold:.4e} — rel-scale clamp not applied (criterion was tol*||b||?)"
+    );
+    assert!(
+        host_true_residual <= aligned_threshold * slack,
+        "host path stopped at true residual {host_true_residual:.4e} > aligned threshold {aligned_threshold:.4e}"
+    );
+    assert!(stats_host.converged, "host path failed to converge");
+}

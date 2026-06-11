@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 9d2863d79546de3f9c4aca960d6005c4bf29a64e2d2e4d7e32a1b289c40185af
+// SourceHash: ac6af0f5d64fec4360f52da2c57ec5509aae0e3da817e1b5d63f7da4a37d31e4
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -83179,6 +83179,9 @@ fn update_w_cgs_reortho(@builtin(global_invocation_id) global_id_4: vec3<u32>, @
         pub const SCALAR_SKIP_UPDATE: u32 = 15u32;
         pub const SCALAR_BEST_RESID: u32 = 16u32;
         pub const SCALAR_GUARD_FLAG: u32 = 17u32;
+        pub const SCALAR_PREV_RESID: u32 = 18u32;
+        pub const SCALAR_STALL_REL: u32 = 19u32;
+        pub const SCALAR_STALL_COUNT: u32 = 20u32;
         pub mod compute {
             use super::{_root, _root::*};
             pub const UPDATE_HESSENBERG_GIVENS_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
@@ -83518,6 +83521,9 @@ const SCALAR_RHS_NORM: u32 = 14u;
 const SCALAR_SKIP_UPDATE: u32 = 15u;
 const SCALAR_BEST_RESID: u32 = 16u;
 const SCALAR_GUARD_FLAG: u32 = 17u;
+const SCALAR_PREV_RESID: u32 = 18u;
+const SCALAR_STALL_REL: u32 = 19u;
+const SCALAR_STALL_COUNT: u32 = 20u;
 
 @group(0) @binding(0) 
 var<storage, read_write> hessenberg: array<f32>;
@@ -83722,11 +83728,33 @@ fn restart_guard(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
         if ((best <= 0f) || (r < best)) {
             scalars[16] = r;
             scalars[17] = 1f;
-            return;
         } else {
             scalars[17] = 0f;
-            return;
         }
+        let prev = scalars[18];
+        let stall_rel = scalars[19];
+        let no_improve = ((prev > 0f) && (r > (prev * 0.98f)));
+        let _e80 = scalars[14];
+        let level_ok = (r <= (stall_rel * _e80));
+        if (((stall_rel > 0f) && no_improve) && level_ok) {
+            let _e91 = scalars[20];
+            scalars[20] = (_e91 + 1f);
+            let _e96 = scalars[20];
+            if (_e96 > 1.5f) {
+                let best_now = scalars[16];
+                scalars[17] = select(2f, 1f, (r <= best_now));
+                scalars[8] = 1f;
+                scalars[15] = 1f;
+                scalars[11] = min(r, best_now);
+                indirect_args[0] = vec4<u32>(0u, 0u, 0u, 0u);
+                indirect_args[1] = vec4<u32>(0u, 0u, 0u, 0u);
+                indirect_args[2] = vec4<u32>(0u, 0u, 0u, 0u);
+            }
+        } else {
+            scalars[20] = 0f;
+        }
+        scalars[18] = r;
+        return;
     }
 }
 "#;

@@ -73,6 +73,17 @@ fn cgs2_enabled() -> bool {
         .unwrap_or(false)
 }
 
+/// Stall-stop level factor (0.0 disables; see the stall branch in
+/// gmres_logic/restart_guard and the host loop in `solve_fgmres`).
+/// Default OFF while measurements accumulate (roadmap Arc 3). Read per
+/// solve, not cached (see `one_submission_env_tunables`).
+fn stall_level_rel() -> f32 {
+    std::env::var("CFD2_FGMRES_STALL_REL")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.0)
+}
+
 fn parse_usize_env(key: &str) -> Option<usize> {
     std::env::var(key)
         .ok()
@@ -249,6 +260,16 @@ pub fn solve_fgmres<P: PreconditionerModule>(
     let mut have_snapshot = false;
     const RESTART_GROWTH_TOL: f32 = 1.25;
 
+    // Stall-stop (mirrors the GPU-side stall branch in
+    // gmres_logic/restart_guard — keep the two in sync): with an
+    // unreachable tolerance every solve burns to the iteration cap at its
+    // f32 floor; stop when the checkpoint residual improves <2% twice in a
+    // row AND is already below stall_rel * ||b||. 0.0 disables.
+    let stall_rel = stall_level_rel();
+    let mut prev_checkpoint_residual: Option<f32> = None;
+    let mut stall_count = 0u32;
+    const STALL_IMPROVEMENT_TOL: f32 = 0.02;
+
     while total_iters < max_iters {
         let remaining = (max_iters - total_iters) as usize;
         let iter_restart = restart_len.min(remaining).max(1);
@@ -321,6 +342,30 @@ pub fn solve_fgmres<P: PreconditionerModule>(
             break;
         }
 
+        if stall_rel > 0.0 {
+            if let Some(prev) = prev_checkpoint_residual {
+                let no_improve = residual > prev * (1.0 - STALL_IMPROVEMENT_TOL);
+                let level_ok = residual <= stall_rel * rhs_norm;
+                if no_improve && level_ok {
+                    stall_count += 1;
+                } else {
+                    stall_count = 0;
+                }
+                if stall_count >= 2 {
+                    if debug_fgmres {
+                        eprintln!(
+                            "[cfd2][fgmres] stall-stop at iters={total_iters} residual={residual:.3e}"
+                        );
+                    }
+                    // x is the current iterate; the !converged epilogue
+                    // recomputes the true residual and restores the best
+                    // snapshot if this one is worse.
+                    break;
+                }
+            }
+            prev_checkpoint_residual = Some(residual);
+        }
+
         if !use_encoded_seed_basis0 {
             // Non-encoded path seeds and normalizes basis0 on host before the restart body.
             {
@@ -357,7 +402,9 @@ pub fn solve_fgmres<P: PreconditionerModule>(
                     tol_abs,
                     reset_x_before_update: false,
                     enable_cgs2: cgs2_enabled(),
-                    // The host loop has its own snapshot/restore guard.
+                    // The host loop has its own snapshot/restore guard and
+                    // stall-stop; the GPU-side ones stay off here.
+                    stall_level_rel: 0.0,
                     enable_restart_guard: false,
                 },
                 dispatch: dispatch.grids,
@@ -480,6 +527,7 @@ pub fn encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>(
                     tol_abs,
                     reset_x_before_update: false,
                     enable_cgs2: cgs2_enabled(),
+                    stall_level_rel: stall_level_rel(),
                     // Encoded-seed path: GPU-side monotonicity guard.
                     enable_restart_guard: use_encoded_seed_basis0,
                 },
@@ -592,6 +640,7 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
                     tol_abs,
                     reset_x_before_update: false,
                     enable_cgs2: cgs2_enabled(),
+                    stall_level_rel: stall_level_rel(),
                     // Encoded-seed path: GPU-side monotonicity guard.
                     enable_restart_guard: use_encoded_seed_basis0,
                 },

@@ -151,6 +151,21 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         ty: Type::U32,
         expr: Expr::lit_u32(17),
     });
+    m.push(Item::Const {
+        name: "SCALAR_PREV_RESID".into(),
+        ty: Type::U32,
+        expr: Expr::lit_u32(18),
+    });
+    m.push(Item::Const {
+        name: "SCALAR_STALL_REL".into(),
+        ty: Type::U32,
+        expr: Expr::lit_u32(19),
+    });
+    m.push(Item::Const {
+        name: "SCALAR_STALL_COUNT".into(),
+        ty: Type::U32,
+        expr: Expr::lit_u32(20),
+    });
 
     // ── Helper function: h_idx ──────────────────────────────────────────────
 
@@ -592,23 +607,146 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                         ),
                     ),
                 ]),
-                Some(block(vec![if_block_expr(
-                    best.clone().le(Expr::lit_f32(0.0)) | r.clone().lt(best),
-                    block(vec![
-                        assign_expr(
-                            Expr::ident("scalars").index(Expr::ident("SCALAR_BEST_RESID")),
-                            r,
-                        ),
-                        assign_expr(
+                Some(block(vec![
+                    if_block_expr(
+                        best.clone().le(Expr::lit_f32(0.0)) | r.clone().lt(best.clone()),
+                        block(vec![
+                            assign_expr(
+                                Expr::ident("scalars").index(Expr::ident("SCALAR_BEST_RESID")),
+                                r.clone(),
+                            ),
+                            assign_expr(
+                                Expr::ident("scalars").index(Expr::ident("SCALAR_GUARD_FLAG")),
+                                Expr::lit_f32(1.0),
+                            ),
+                        ]),
+                        Some(block(vec![assign_expr(
                             Expr::ident("scalars").index(Expr::ident("SCALAR_GUARD_FLAG")),
-                            Expr::lit_f32(1.0),
+                            Expr::lit_f32(0.0),
+                        )])),
+                    ),
+                    // ── Stall-stop ──
+                    // With an unreachable tolerance every solve burns to the
+                    // iteration cap at its f32 floor. When the true residual
+                    // stops improving (<2% across a checkpoint) for two
+                    // consecutive checkpoints AND is already small relative
+                    // to ||b|| (level factor in SCALAR_STALL_REL; 0 disables),
+                    // freeze the remaining work like the convergence break,
+                    // keeping the best iterate. Mirrors the host loop in
+                    // solve_fgmres — keep the two in sync.
+                    let_expr(
+                        "prev",
+                        Expr::ident("scalars").index(Expr::ident("SCALAR_PREV_RESID")),
+                    ),
+                    let_expr(
+                        "stall_rel",
+                        Expr::ident("scalars").index(Expr::ident("SCALAR_STALL_REL")),
+                    ),
+                    let_expr(
+                        "no_improve",
+                        Expr::ident("prev").gt(Expr::lit_f32(0.0))
+                            & r.clone().gt(Expr::ident("prev") * Expr::lit_f32(0.98)),
+                    ),
+                    let_expr(
+                        "level_ok",
+                        r.clone().le(
+                            Expr::ident("stall_rel")
+                                * Expr::ident("scalars").index(Expr::ident("SCALAR_RHS_NORM")),
                         ),
-                    ]),
-                    Some(block(vec![assign_expr(
-                        Expr::ident("scalars").index(Expr::ident("SCALAR_GUARD_FLAG")),
-                        Expr::lit_f32(0.0),
-                    )])),
-                )])),
+                    ),
+                    if_block_expr(
+                        Expr::ident("stall_rel").gt(Expr::lit_f32(0.0))
+                            & Expr::ident("no_improve")
+                            & Expr::ident("level_ok"),
+                        block(vec![
+                            assign_expr(
+                                Expr::ident("scalars").index(Expr::ident("SCALAR_STALL_COUNT")),
+                                Expr::ident("scalars").index(Expr::ident("SCALAR_STALL_COUNT"))
+                                    + Expr::lit_f32(1.0),
+                            ),
+                            if_block_expr(
+                                Expr::ident("scalars")
+                                    .index(Expr::ident("SCALAR_STALL_COUNT"))
+                                    .gt(Expr::lit_f32(1.5)),
+                                block(vec![
+                                    let_expr(
+                                        "best_now",
+                                        Expr::ident("scalars")
+                                            .index(Expr::ident("SCALAR_BEST_RESID")),
+                                    ),
+                                    assign_expr(
+                                        Expr::ident("scalars")
+                                            .index(Expr::ident("SCALAR_GUARD_FLAG")),
+                                        Expr::call_named(
+                                            "select",
+                                            vec![
+                                                Expr::lit_f32(2.0),
+                                                Expr::lit_f32(1.0),
+                                                r.clone().le(Expr::ident("best_now")),
+                                            ],
+                                        ),
+                                    ),
+                                    assign_expr(
+                                        Expr::ident("scalars").index(Expr::ident("SCALAR_STOP")),
+                                        Expr::lit_f32(1.0),
+                                    ),
+                                    assign_expr(
+                                        Expr::ident("scalars")
+                                            .index(Expr::ident("SCALAR_SKIP_UPDATE")),
+                                        Expr::lit_f32(1.0),
+                                    ),
+                                    assign_expr(
+                                        Expr::ident("scalars")
+                                            .index(Expr::ident("SCALAR_RESIDUAL_EST")),
+                                        Expr::call_named(
+                                            "min",
+                                            vec![r.clone(), Expr::ident("best_now")],
+                                        ),
+                                    ),
+                                    comment(
+                                        "Zero indirect dispatch dimensions so subsequent heavy kernels become no-ops.",
+                                    ),
+                                    assign_expr(
+                                        Expr::ident("indirect_args").index(Expr::lit_u32(0)),
+                                        vec4_u32(
+                                            Expr::lit_u32(0),
+                                            Expr::lit_u32(0),
+                                            Expr::lit_u32(0),
+                                            Expr::lit_u32(0),
+                                        ),
+                                    ),
+                                    assign_expr(
+                                        Expr::ident("indirect_args").index(Expr::lit_u32(1)),
+                                        vec4_u32(
+                                            Expr::lit_u32(0),
+                                            Expr::lit_u32(0),
+                                            Expr::lit_u32(0),
+                                            Expr::lit_u32(0),
+                                        ),
+                                    ),
+                                    assign_expr(
+                                        Expr::ident("indirect_args").index(Expr::lit_u32(2)),
+                                        vec4_u32(
+                                            Expr::lit_u32(0),
+                                            Expr::lit_u32(0),
+                                            Expr::lit_u32(0),
+                                            Expr::lit_u32(0),
+                                        ),
+                                    ),
+                                ]),
+                                None,
+                            ),
+                        ]),
+                        Some(block(vec![assign_expr(
+                            Expr::ident("scalars").index(Expr::ident("SCALAR_STALL_COUNT")),
+                            Expr::lit_f32(0.0),
+                        )])),
+                    ),
+                    assign_expr(
+                        Expr::ident("scalars").index(Expr::ident("SCALAR_PREV_RESID")),
+                        r.clone(),
+                    ),
+                ])),
             ),
         ]);
 

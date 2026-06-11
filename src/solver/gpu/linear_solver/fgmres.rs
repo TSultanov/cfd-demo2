@@ -14,7 +14,7 @@ use bytemuck::{bytes_of, Pod, Zeroable};
 pub const DEFAULT_WORKGROUP_SIZE: u32 = 64;
 pub const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
 
-pub(crate) const FGMRES_SCALAR_COUNT: usize = 18;
+pub(crate) const FGMRES_SCALAR_COUNT: usize = 21;
 pub(crate) const FGMRES_SCALAR_STOP: usize = 8;
 pub(crate) const FGMRES_SCALAR_CONVERGED: usize = 9;
 const FGMRES_SCALAR_ITERS_USED: usize = 10;
@@ -30,6 +30,15 @@ const FGMRES_SCALAR_SKIP_UPDATE: usize = 15;
 const FGMRES_SCALAR_BEST_RESID: usize = 16;
 #[allow(dead_code)]
 const FGMRES_SCALAR_GUARD_FLAG: usize = 17;
+// Stall-stop slots (see the stall branch in gmres_logic/restart_guard).
+// 18: residual at the previous guard checkpoint; 19: host-written level
+// factor (stop only when residual <= STALL_REL * ||b||; 0.0 disables);
+// 20: consecutive no-improvement checkpoint count.
+#[allow(dead_code)]
+const FGMRES_SCALAR_PREV_RESID: usize = 18;
+const FGMRES_SCALAR_STALL_REL: usize = 19;
+#[allow(dead_code)]
+const FGMRES_SCALAR_STALL_COUNT: usize = 20;
 
 const FGMRES_INDIRECT_DISPATCH_COUNT: usize = 3;
 const FGMRES_INDIRECT_ENTRY_STRIDE_BYTES: u64 = 16;
@@ -1282,6 +1291,12 @@ pub struct FgmresSolveOnceConfig {
     pub tol_rel: f32,
     pub tol_abs: f32,
     pub reset_x_before_update: bool,
+    /// Stall-stop level factor for the GPU-side guard (encoded path):
+    /// freeze the solve when the restart-boundary true residual improves
+    /// <2% for two consecutive checkpoints AND is already below
+    /// `stall_level_rel * ||b||`. 0.0 disables. Mirrors the host-loop
+    /// stall logic in `solve_fgmres` — keep the two in sync.
+    pub stall_level_rel: f32,
     /// Enable CGS2 re-orthogonalization: a second classical Gram-Schmidt
     /// projection pass per Arnoldi iteration ("twice is enough"). Mitigates
     /// f32 orthogonality loss at the root (the restart guard treats the
@@ -2090,6 +2105,7 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         solver_scalars[FGMRES_SCALAR_TOL_ABS] = tol_abs;
         solver_scalars[FGMRES_SCALAR_RHS_NORM] = 1.0; // shader multiplies TOL_REL_RHS * RHS_NORM
         solver_scalars[FGMRES_SCALAR_SKIP_UPDATE] = 0.0;
+        solver_scalars[FGMRES_SCALAR_STALL_REL] = config.stall_level_rel;
         encode_write_buffer_from_bytes(
             core.device,
             encoder,

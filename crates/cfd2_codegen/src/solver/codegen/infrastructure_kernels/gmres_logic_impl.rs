@@ -141,6 +141,16 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         ty: Type::U32,
         expr: Expr::lit_u32(15),
     });
+    m.push(Item::Const {
+        name: "SCALAR_BEST_RESID".into(),
+        ty: Type::U32,
+        expr: Expr::lit_u32(16),
+    });
+    m.push(Item::Const {
+        name: "SCALAR_GUARD_FLAG".into(),
+        ty: Type::U32,
+        expr: Expr::lit_u32(17),
+    });
 
     // ── Helper function: h_idx ──────────────────────────────────────────────
 
@@ -479,6 +489,131 @@ pub fn generate_gmres_logic() -> KernelWgsl {
 
         m.push(Item::Function(Function::new(
             "finish_norm",
+            vec![Param::new(
+                "global_id",
+                Type::vec3_u32(),
+                vec![Attribute::Builtin("global_invocation_id".into())],
+            )],
+            None,
+            vec![Attribute::Compute, Attribute::WorkgroupSize(1)],
+            body,
+        )));
+    }
+
+    // ── Entry point: restart_guard ──────────────────────────────────────────
+    //
+    // Restart-boundary monotonicity guard. Runs after the encoded seed has
+    // written the TRUE residual norm ||b - A*x|| into hessenberg[0]. f32
+    // Arnoldi can lose orthogonality on hard preconditioned systems and a
+    // restart cycle may then APPLY an update that increases the true
+    // residual; unguarded this compounds across restarts (observed June
+    // 2026 on the coupled incompressible system: residual growth by orders
+    // of magnitude, ending in NaN). On improvement the guard requests a
+    // snapshot of x (GUARD_FLAG=1, executed by gmres_ops/guard_copy); on
+    // growth past BEST*1.25 (or a non-finite seed) it requests a restore
+    // (GUARD_FLAG=2), freezes the remaining work like the convergence
+    // break (STOP + SKIP_UPDATE + zeroed indirect args), and reports the
+    // best residual.
+    {
+        let r = Expr::ident("r");
+        let best = Expr::ident("best");
+        let body = block(vec![
+            if_block_expr(
+                Expr::ident("scalars")
+                    .index(Expr::ident("SCALAR_STOP"))
+                    .gt(Expr::lit_f32(0.5)),
+                block(vec![
+                    assign_expr(
+                        Expr::ident("scalars").index(Expr::ident("SCALAR_GUARD_FLAG")),
+                        Expr::lit_f32(0.0),
+                    ),
+                    return_void(),
+                ]),
+                None,
+            ),
+            let_expr("r", Expr::ident("hessenberg").index(Expr::lit_u32(0))),
+            let_expr(
+                "best",
+                Expr::ident("scalars").index(Expr::ident("SCALAR_BEST_RESID")),
+            ),
+            let_expr(
+                "grew",
+                r.clone().ne(r.clone())
+                    | (best.clone().gt(Expr::lit_f32(0.0))
+                        & r.clone().gt(best.clone() * Expr::lit_f32(1.25))),
+            ),
+            if_block_expr(
+                Expr::ident("grew"),
+                block(vec![
+                    assign_expr(
+                        Expr::ident("scalars").index(Expr::ident("SCALAR_GUARD_FLAG")),
+                        Expr::lit_f32(2.0),
+                    ),
+                    assign_expr(
+                        Expr::ident("scalars").index(Expr::ident("SCALAR_STOP")),
+                        Expr::lit_f32(1.0),
+                    ),
+                    assign_expr(
+                        Expr::ident("scalars").index(Expr::ident("SCALAR_SKIP_UPDATE")),
+                        Expr::lit_f32(1.0),
+                    ),
+                    assign_expr(
+                        Expr::ident("scalars").index(Expr::ident("SCALAR_RESIDUAL_EST")),
+                        best.clone(),
+                    ),
+                    comment(
+                        "Zero indirect dispatch dimensions so subsequent heavy kernels become no-ops.",
+                    ),
+                    assign_expr(
+                        Expr::ident("indirect_args").index(Expr::lit_u32(0)),
+                        vec4_u32(
+                            Expr::lit_u32(0),
+                            Expr::lit_u32(0),
+                            Expr::lit_u32(0),
+                            Expr::lit_u32(0),
+                        ),
+                    ),
+                    assign_expr(
+                        Expr::ident("indirect_args").index(Expr::lit_u32(1)),
+                        vec4_u32(
+                            Expr::lit_u32(0),
+                            Expr::lit_u32(0),
+                            Expr::lit_u32(0),
+                            Expr::lit_u32(0),
+                        ),
+                    ),
+                    assign_expr(
+                        Expr::ident("indirect_args").index(Expr::lit_u32(2)),
+                        vec4_u32(
+                            Expr::lit_u32(0),
+                            Expr::lit_u32(0),
+                            Expr::lit_u32(0),
+                            Expr::lit_u32(0),
+                        ),
+                    ),
+                ]),
+                Some(block(vec![if_block_expr(
+                    best.clone().le(Expr::lit_f32(0.0)) | r.clone().lt(best),
+                    block(vec![
+                        assign_expr(
+                            Expr::ident("scalars").index(Expr::ident("SCALAR_BEST_RESID")),
+                            r,
+                        ),
+                        assign_expr(
+                            Expr::ident("scalars").index(Expr::ident("SCALAR_GUARD_FLAG")),
+                            Expr::lit_f32(1.0),
+                        ),
+                    ]),
+                    Some(block(vec![assign_expr(
+                        Expr::ident("scalars").index(Expr::ident("SCALAR_GUARD_FLAG")),
+                        Expr::lit_f32(0.0),
+                    )])),
+                )])),
+            ),
+        ]);
+
+        m.push(Item::Function(Function::new(
+            "restart_guard",
             vec![Param::new(
                 "global_id",
                 Type::vec3_u32(),

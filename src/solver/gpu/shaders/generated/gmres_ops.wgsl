@@ -22,6 +22,8 @@ const WORKGROUP_SIZE: u32 = 64u;
 
 const SCALAR_STOP: u32 = 8u;
 
+const SCALAR_GUARD_FLAG: u32 = 17u;
+
 fn global_index(global_id: vec3<u32>, num_workgroups: vec3<u32>) -> u32 {
     return global_id.y * num_workgroups.x * WORKGROUP_SIZE + global_id.x;
 }
@@ -295,4 +297,21 @@ fn apply_diag_inv(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(
         return;
     }
     vec_y[idx] = diag_u[idx] * vec_x[idx];
+}
+
+@compute
+@workgroup_size(64)
+fn guard_copy(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
+    let idx = global_index(global_id, num_workgroups);
+    if (idx >= params.n) {
+        return;
+    }
+    let flag = scalars[SCALAR_GUARD_FLAG];
+    if (flag == 1.0) {
+        vec_z[idx] = vec_y[idx];
+    } else {
+        if (flag == 2.0) {
+            vec_y[idx] = vec_z[idx];
+        }
+    }
 }

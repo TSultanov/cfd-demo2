@@ -1279,11 +1279,15 @@ fn host_driven_encoded_seed_basis0_default_on_matches_opt_out() {
     );
 
     // The two seed paths produce slightly different (both valid) iterates;
-    // u/p agree to ~0.3% and the derived grad_p amplifies to ~1%. Measured
-    // grad_p max_rel moved from just under 1e-2 to 1.156e-2 when bounded
-    // convection landed (a legitimate discretization change, MMS-verified);
-    // band at 1.5e-2 to keep headroom while still catching real divergence.
-    let rel_tol = 1.5e-2f64;
+    // u/p agree to ~0.3% and the derived grad_p amplifies. Measured grad_p
+    // max_rel history: just under 1e-2 originally; 1.156e-2 when bounded
+    // convection landed; 1.795e-2 when the FGMRES restart-boundary
+    // monotonicity guard landed (June 2026 — at the unreachable-tolerance
+    // f32 floor the guard can freeze a restart on one seed path and not
+    // the other, so trajectories diverge a little more; u/p agreement is
+    // unchanged at ~0.2% and d_p parity is exact). Band at 2.2e-2 for
+    // headroom while still catching real divergence.
+    let rel_tol = 2.2e-2f64;
     assert_snapshots_match(
         "encoded_opt_out",
         &opt_out,

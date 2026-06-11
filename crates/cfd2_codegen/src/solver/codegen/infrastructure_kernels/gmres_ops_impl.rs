@@ -53,6 +53,12 @@ pub fn generate_gmres_ops() -> KernelWgsl {
         expr: Expr::lit_u32(8),
     });
 
+    m.push(Item::Const {
+        name: "SCALAR_GUARD_FLAG".into(),
+        ty: Type::U32,
+        expr: Expr::lit_u32(17),
+    });
+
     // ── Helper functions ────────────────────────────────────────────────────
 
     // global_index
@@ -923,6 +929,58 @@ pub fn generate_gmres_ops() -> KernelWgsl {
 
         m.push(Item::Function(Function::new(
             "apply_diag_inv",
+            std_params.clone(),
+            None,
+            std_attrs.clone(),
+            body,
+        )));
+    }
+
+    // ── Entry point: guard_copy ─────────────────────────────────────────────
+    //
+    // Companion to gmres_logic/restart_guard: conditionally snapshots or
+    // restores the solution vector based on scalars[SCALAR_GUARD_FLAG].
+    // Bind the solution x as vec_y (read_write) and the snapshot buffer as
+    // vec_z (read_write); vec_x is unused.
+    //   flag == 1.0: vec_z = vec_y (snapshot the improved x)
+    //   flag == 2.0: vec_y = vec_z (restore the best x after growth)
+    {
+        let body = block(vec![
+            let_expr(
+                "idx",
+                Expr::call_named(
+                    "global_index",
+                    vec![Expr::ident("global_id"), Expr::ident("num_workgroups")],
+                ),
+            ),
+            if_block_expr(
+                Expr::ident("idx").ge(Expr::ident("params").field("n")),
+                block(vec![return_void()]),
+                None,
+            ),
+            let_expr(
+                "flag",
+                Expr::ident("scalars").index(Expr::ident("SCALAR_GUARD_FLAG")),
+            ),
+            if_block_expr(
+                Expr::ident("flag").eq(Expr::lit_f32(1.0)),
+                block(vec![assign_expr(
+                    Expr::ident("vec_z").index(Expr::ident("idx")),
+                    Expr::ident("vec_y").index(Expr::ident("idx")),
+                )]),
+                Some(block(vec![if_block_expr(
+                    Expr::ident("flag").eq(Expr::lit_f32(2.0)),
+                    block(vec![assign_expr(
+                        Expr::ident("vec_y").index(Expr::ident("idx")),
+                        Expr::ident("vec_z").index(Expr::ident("idx")),
+                    )]),
+                    None,
+                )])),
+            ),
+        ]);
+
+        m.push(Item::Function(Function::new(
+            "guard_copy",
             std_params.clone(),
             None,
             std_attrs.clone(),

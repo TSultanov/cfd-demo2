@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: b78f07765f24321a0b60890a669a13205c9d8ced734670945e5d067e8a86a6cd
+// SourceHash: a2c06f1a071783addaebf177a9e95d3be59e62da5da99f04f75476ce9de3bf41
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -82986,6 +82986,8 @@ fn update_w_cgs(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(
         pub const SCALAR_TOL_ABS: u32 = 13u32;
         pub const SCALAR_RHS_NORM: u32 = 14u32;
         pub const SCALAR_SKIP_UPDATE: u32 = 15u32;
+        pub const SCALAR_BEST_RESID: u32 = 16u32;
+        pub const SCALAR_GUARD_FLAG: u32 = 17u32;
         pub mod compute {
             use super::{_root, _root::*};
             pub const UPDATE_HESSENBERG_GIVENS_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
@@ -83033,10 +83035,26 @@ fn update_w_cgs(@builtin(global_invocation_id) global_id_2: vec3<u32>, @builtin(
                     cache: None,
                 })
             }
+            pub const RESTART_GUARD_WORKGROUP_SIZE: [u32; 3] = [1, 1, 1];
+            pub fn create_restart_guard_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline restart_guard"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("restart_guard"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
         }
         pub const ENTRY_UPDATE_HESSENBERG_GIVENS: &str = "update_hessenberg_givens";
         pub const ENTRY_SOLVE_TRIANGULAR: &str = "solve_triangular";
         pub const ENTRY_FINISH_NORM: &str = "finish_norm";
+        pub const ENTRY_RESTART_GUARD: &str = "restart_guard";
         #[derive(Debug)]
         pub struct WgpuBindGroup0EntriesParams<'a> {
             pub hessenberg: wgpu::BufferBinding<'a>,
@@ -83307,6 +83325,8 @@ const SCALAR_TOL_REL_RHS: u32 = 12u;
 const SCALAR_TOL_ABS: u32 = 13u;
 const SCALAR_RHS_NORM: u32 = 14u;
 const SCALAR_SKIP_UPDATE: u32 = 15u;
+const SCALAR_BEST_RESID: u32 = 16u;
+const SCALAR_GUARD_FLAG: u32 = 17u;
 
 @group(0) @binding(0) 
 var<storage, read_write> hessenberg: array<f32>;
@@ -83487,6 +83507,37 @@ fn finish_norm(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
         return;
     }
 }
+
+@compute @workgroup_size(1, 1, 1) 
+fn restart_guard(@builtin(global_invocation_id) global_id_3: vec3<u32>) {
+    let _e2 = scalars[8];
+    if (_e2 > 0.5f) {
+        scalars[17] = 0f;
+        return;
+    }
+    let r = hessenberg[0];
+    let best = scalars[16];
+    let grew = ((r != r) || ((best > 0f) && (r > (best * 1.25f))));
+    if grew {
+        scalars[17] = 2f;
+        scalars[8] = 1f;
+        scalars[15] = 1f;
+        scalars[11] = best;
+        indirect_args[0] = vec4<u32>(0u, 0u, 0u, 0u);
+        indirect_args[1] = vec4<u32>(0u, 0u, 0u, 0u);
+        indirect_args[2] = vec4<u32>(0u, 0u, 0u, 0u);
+        return;
+    } else {
+        if ((best <= 0f) || (r < best)) {
+            scalars[16] = r;
+            scalars[17] = 1f;
+            return;
+        } else {
+            scalars[17] = 0f;
+            return;
+        }
+    }
+}
 "#;
     }
     pub mod gmres_ops {
@@ -83558,6 +83609,7 @@ fn finish_norm(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
         }
         pub const WORKGROUP_SIZE: u32 = 64u32;
         pub const SCALAR_STOP: u32 = 8u32;
+        pub const SCALAR_GUARD_FLAG: u32 = 17u32;
         pub mod compute {
             use super::{_root, _root::*};
             pub const SPMV_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
@@ -83770,6 +83822,21 @@ fn finish_norm(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
                     cache: None,
                 })
             }
+            pub const GUARD_COPY_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_guard_copy_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline guard_copy"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("guard_copy"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
         }
         pub const ENTRY_SPMV: &str = "spmv";
         pub const ENTRY_AXPY: &str = "axpy";
@@ -83785,6 +83852,7 @@ fn finish_norm(@builtin(global_invocation_id) global_id_2: vec3<u32>) {
         pub const ENTRY_REDUCE_FINAL_AND_FINISH_NORM: &str = "reduce_final_and_finish_norm";
         pub const ENTRY_EXTRACT_DIAG_INV: &str = "extract_diag_inv";
         pub const ENTRY_APPLY_DIAG_INV: &str = "apply_diag_inv";
+        pub const ENTRY_GUARD_COPY: &str = "guard_copy";
         #[derive(Debug)]
         pub struct WgpuBindGroup0EntriesParams<'a> {
             pub vec_x: wgpu::BufferBinding<'a>,
@@ -84283,6 +84351,7 @@ struct IterParams {
 
 const WORKGROUP_SIZE: u32 = 64u;
 const SCALAR_STOP: u32 = 8u;
+const SCALAR_GUARD_FLAG: u32 = 17u;
 
 @group(0) @binding(0) 
 var<storage> vec_x: array<f32>;
@@ -84314,12 +84383,12 @@ var<storage, read_write> hessenberg: array<f32>;
 var<storage> y_sol: array<f32>;
 var<workgroup> partial_sums: array<f32, 64>;
 
-fn global_index(global_id_14: vec3<u32>, num_workgroups_12: vec3<u32>) -> u32 {
-    return (((global_id_14.y * num_workgroups_12.x) * WORKGROUP_SIZE) + global_id_14.x);
+fn global_index(global_id_15: vec3<u32>, num_workgroups_13: vec3<u32>) -> u32 {
+    return (((global_id_15.y * num_workgroups_13.x) * WORKGROUP_SIZE) + global_id_15.x);
 }
 
-fn workgroup_index(group_id_2: vec3<u32>, num_workgroups_13: vec3<u32>) -> u32 {
-    return ((group_id_2.y * num_workgroups_13.x) + group_id_2.x);
+fn workgroup_index(group_id_2: vec3<u32>, num_workgroups_14: vec3<u32>) -> u32 {
+    return ((group_id_2.y * num_workgroups_14.x) + group_id_2.x);
 }
 
 fn safe_inverse(val: f32) -> f32 {
@@ -84696,6 +84765,29 @@ fn apply_diag_inv(@builtin(global_invocation_id) global_id_13: vec3<u32>, @built
     let _e14 = vec_x[_e2];
     vec_y[_e2] = (_e11 * _e14);
     return;
+}
+
+@compute @workgroup_size(64, 1, 1) 
+fn guard_copy(@builtin(global_invocation_id) global_id_14: vec3<u32>, @builtin(num_workgroups) num_workgroups_12: vec3<u32>) {
+    let _e2 = global_index(global_id_14, num_workgroups_12);
+    let _e5 = params.n;
+    if (_e2 >= _e5) {
+        return;
+    }
+    let flag = scalars[17];
+    if (flag == 1f) {
+        let _e16 = vec_y[_e2];
+        vec_z[_e2] = _e16;
+        return;
+    } else {
+        if (flag == 2f) {
+            let _e23 = vec_z[_e2];
+            vec_y[_e2] = _e23;
+            return;
+        } else {
+            return;
+        }
+    }
 }
 "#;
     }

@@ -21,7 +21,7 @@ plus a registry entry, with every kernel derived.
 | Bounded convection | `.bounded()` on an implicit div term — subtracts the continuity defect `(div φ)·φ_P` from the diagonal (OpenFOAM `bounded Gauss`) | assembly |
 | Algebraic relations (EOS, primitive recovery) | `typed_alg::equation(target, lhs, rhs)` over `TypedAlgExpr` (fields, params, `mag_sqr`, `+ − ×`; clear denominators — no `/` in coupled rows) | `lower_algebraic_equation` → implicit/explicit source rows scaled by `inv_dt` |
 | Uniform model parameters | `TypedParamRef<D>` consts matching a module port manifest (e.g. `eos_*`) | name-resolved to `constants.<param>` |
-| Flux definitions | `FluxExprSpec::AdvectingVelocity`, `derive_rhie_chow(system, layout)`, `FluxSchemeSpec::CentralUpwind(CentralUpwindDecl)` | flux-module codegen; Rhie–Chow aux kernels auto-attached by the deriver |
+| Flux definitions | `FluxExprSpec::AdvectingVelocity`, `derive_rhie_chow(system, layout)` (or `derive_rhie_chow_with_dp` to pick the `DpFormulation`: `ClosedForm` default, `FromAssembledRowSum` = SIMPLEC, `FromAssembledDiagonal` = rAU — see the decision record at the incompressible model's derive call), `FluxSchemeSpec::CentralUpwind(CentralUpwindDecl)` | flux-module codegen; Rhie–Chow aux kernels auto-attached by the deriver |
 | Wave speeds / EOS face relations | `AlgExpr` declarations on `CentralUpwindDecl` (`pressure`, `wave_speed_sq`, `generalized_wave_speed_sq`) | `lower_alg_to_face` into reconstructed-state face expressions |
 | Boundary conditions | `BoundaryCondition` (Dirichlet/Neumann/zero-gradient) with `BcValue::Const` or `BcValue::Expr(BoundaryExpr)` over `interior(f)` / `bc(f)` / `param(p)` | static GPU tables + one generic `bc_expr_update` kernel (snapshot semantics, refreshed every outer iteration) |
 | Directional body forces | `typed_fvc::source_directional(coeff, [dx, dy], target)` — scalar coefficient tree × constant direction per component | assembly explicit-source path |
@@ -64,7 +64,13 @@ batching and adaptive convergence breaks, dual-time retry/rollback and
 positivity guards, kernel fusion, bind-group/port plumbing, and the
 build.rs WGSL pipeline. Models parameterize these through policy structs
 (`CoupledCapabilities`, `RelaxationDefaults`, `ModelLinearSolverSpec`) —
-never through equations.
+never through equations. The FGMRES driver carries a restart-boundary
+monotonicity guard (June 2026): f32 Arnoldi can lose orthogonality on hard
+preconditioned systems and a restart cycle can return a solution with a
+LARGER true residual; the solver snapshots the best-so-far `x` at each
+restart's true-residual checkpoint and restores it when a cycle made
+things worse (host loop in `solve_fgmres`; `gmres_logic/restart_guard` +
+`gmres_ops/guard_copy` on the encoded one-submission path).
 
 Known engine limits (tracked in the plan):
 

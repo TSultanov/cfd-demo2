@@ -44,6 +44,10 @@ const SCALAR_RHS_NORM: u32 = 14u;
 
 const SCALAR_SKIP_UPDATE: u32 = 15u;
 
+const SCALAR_BEST_RESID: u32 = 16u;
+
+const SCALAR_GUARD_FLAG: u32 = 17u;
+
 fn h_idx(row: u32, col: u32) -> u32 {
     return col * (iter_params.max_restart + 1u) + row;
 }
@@ -137,5 +141,34 @@ fn finish_norm(@builtin(global_invocation_id) global_id: vec3<u32>) {
         scalars[0u] = 1.0 / norm;
     } else {
         scalars[0u] = 0.0;
+    }
+}
+
+@compute
+@workgroup_size(1)
+fn restart_guard(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    if (scalars[SCALAR_STOP] > 0.5) {
+        scalars[SCALAR_GUARD_FLAG] = 0.0;
+        return;
+    }
+    let r = hessenberg[0u];
+    let best = scalars[SCALAR_BEST_RESID];
+    let grew = r != r || best > 0.0 && r > best * 1.25;
+    if (grew) {
+        scalars[SCALAR_GUARD_FLAG] = 2.0;
+        scalars[SCALAR_STOP] = 1.0;
+        scalars[SCALAR_SKIP_UPDATE] = 1.0;
+        scalars[SCALAR_RESIDUAL_EST] = best;
+        // Zero indirect dispatch dimensions so subsequent heavy kernels become no-ops.
+        indirect_args[0u] = vec4<u32>(0u, 0u, 0u, 0u);
+        indirect_args[1u] = vec4<u32>(0u, 0u, 0u, 0u);
+        indirect_args[2u] = vec4<u32>(0u, 0u, 0u, 0u);
+    } else {
+        if (best <= 0.0 || r < best) {
+            scalars[SCALAR_BEST_RESID] = r;
+            scalars[SCALAR_GUARD_FLAG] = 1.0;
+        } else {
+            scalars[SCALAR_GUARD_FLAG] = 0.0;
+        }
     }
 }

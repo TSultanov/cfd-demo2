@@ -165,20 +165,29 @@ fn incompressible_momentum_model_impl(with_mms_source: bool) -> Result<ModelSpec
         ));
     }
     let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
-    // d_p stays the closed form. The OpenFOAM-rAU-style alternative
-    // (DpFormulation::FromAssembledDiagonal, June 2026) computes a VERIFIED
-    // correct d_p = V/a_P (numerically matches the physical estimate;
-    // see tests/dp_diag_probe.rs) but destabilizes the coupled outer loop:
-    // the pressure response scales ~1/d_p while the relaxed updates and the
-    // d_p-scaled velocity correction are calibrated for the closed-form
-    // scale, so the step map amplifies (|u| x3.5/step at gentle settings;
-    // NaN within 2-4 steps at momentum-MMS settings where a_P is 10x the
-    // ddt-only value; lid reference rel_l2 0.61 vs 0.019). theta-damping of
-    // d_p and alpha pairing (0.7/0.3, 1.0/1.0, relaxed/unrelaxed rAU) do
-    // not help: the loop gain AT the target d_p is unstable. Re-enabling
-    // requires a compensating mechanism (pressure-row equilibration or an
-    // update/preconditioner redesign) — tracked in the plan as the Phase A
-    // follow-up.
+    // d_p stays the closed form. Two assembled-matrix alternatives exist
+    // (June 2026, both probed via tests/dp_diag_probe.rs):
+    //
+    // - DpFormulation::FromAssembledDiagonal (OpenFOAM rAU, d_p = V/a_P):
+    //   kernel VERIFIED correct, but the coupled outer loop's gain at the
+    //   Schur-consistent d_p scale is >1 even with f32-floor linear solves
+    //   (|u| x3.5/step in an unforced box; alpha pairings and theta-damping
+    //   all amplify). Pressure-row equilibration CANNOT fix this: it is a
+    //   pure row scaling, and the amplification survives near-exact solves,
+    //   so the exact-solve outer map itself is unstable at that scale.
+    //
+    // - DpFormulation::FromAssembledRowSum (SIMPLEC, d_p = V/Σ_row a):
+    //   STABLE by construction (interior row sum = ddt coefficient, so the
+    //   interior d_p stays at the proven closed-form scale; Dirichlet
+    //   boundaries shrink it locally). All 5 MMS suites green; u/p errors
+    //   strictly better per level on the momentum MMS. OpenFOAM measured
+    //   (June 11, 2026): channel u 0.079→0.047 / p 0.129→0.067, backstep
+    //   +3%, lid u 0.149→0.165 / p 0.238→0.268. The lid corner mismatch
+    //   WORSENS with rAU-style spatial d_p — the spatial-structure
+    //   hypothesis for the lid error is refuted; under the no-growth
+    //   policy SIMPLEC stays default-off. Flip this call to
+    //   derive_rhie_chow_with_dp(.., FromAssembledRowSum { theta: 0.5 })
+    //   for inlet-dominated flows where the channel-like gains matter.
     let derived_rhie_chow =
         crate::solver::model::flux_derivation::derive_rhie_chow(&system, &layout)
             .map_err(|e| format!("failed to derive Rhie–Chow flux: {e}"))?;

@@ -41,11 +41,39 @@ pub enum DpFormulation {
         include_relaxation: bool,
         theta: f32,
     },
+    /// SIMPLEC-consistent: `d_p = V / Σ_rank a(c,c)` — the momentum-row sum
+    /// over same-component columns (diagonal + signed off-diagonals).
+    /// Conservative transport rows sum to the ddt coefficient plus
+    /// eliminated-boundary contributions, so d_p stays at the proven-stable
+    /// `dt/rho` scale in the interior while shrinking near Dirichlet
+    /// boundaries where wall friction inflates the diagonal. No `alpha_u`
+    /// factor anywhere: SIMPLEC's point is relaxation-consistency. Same
+    /// damped update across outer iterations as `FromAssembledDiagonal`.
+    ///
+    /// Rationale (June 2026): the plain `V / a_P` formulation is
+    /// kernel-correct but its `~1/d_p` outer-loop gain is unstable at the
+    /// Schur-consistent scale even with f32-floor linear solves
+    /// (tests/dp_diag_probe.rs), and a pressure-row equilibration cannot
+    /// help — row scaling leaves exact-solve outer dynamics unchanged.
+    /// The row-sum denominator avoids that scale by construction.
+    FromAssembledRowSum { theta: f32 },
 }
 
 impl Default for DpFormulation {
     fn default() -> Self {
         Self::ClosedForm
+    }
+}
+
+impl DpFormulation {
+    /// True for the formulations that read the assembled momentum rows and
+    /// persist d_p across outer iterations (seed-if-zero init + damped
+    /// update), as opposed to the recomputed-each-iteration closed form.
+    pub fn uses_assembled_matrix(&self) -> bool {
+        matches!(
+            self,
+            Self::FromAssembledDiagonal { .. } | Self::FromAssembledRowSum { .. }
+        )
     }
 }
 
@@ -311,14 +339,14 @@ pub fn rhie_chow_aux_module(
                                     dp_update overwrites dp_init's zero, last-writer-wins is correct \
                                     because both are per-cell scalar writes at idx*stride+offset",
                 }];
-                // Only the diagonal formulation reads d_p in dp_init
-                // (seed-if-zero) and dp_update (damped update); the
+                // Only the assembled-matrix formulations read d_p in
+                // dp_init (seed-if-zero) and dp_update (damped update); the
                 // whitelist must stay exact per formulation.
-                if matches!(dp_formulation, DpFormulation::FromAssembledDiagonal { .. }) {
+                if dp_formulation.uses_assembled_matrix() {
                     hazards.push(ExpectedHazard {
                         kind: HazardKind::RAW,
                         kernel_id: "dp_update_from_diag",
-                        justification: "with DpFormulation::FromAssembledDiagonal, dp_update reads \
+                        justification: "with an assembled-matrix DpFormulation, dp_update reads \
                                         the d_p seeded by dp_init for its damped update; both access \
                                         the same cell at idx*stride+offset, so the sequential \
                                         read-after-write within the fused body is the intended \
@@ -327,7 +355,7 @@ pub fn rhie_chow_aux_module(
                     hazards.push(ExpectedHazard {
                         kind: HazardKind::WAR,
                         kernel_id: "dp_update_from_diag",
-                        justification: "with DpFormulation::FromAssembledDiagonal, dp_init reads d_p \
+                        justification: "with an assembled-matrix DpFormulation, dp_init reads d_p \
                                         (seed-if-zero) before dp_update overwrites it; per-cell at \
                                         idx*stride+offset, sequential within the fused body",
                     });
@@ -538,10 +566,11 @@ fn generate_dp_init_kernel_program(
             dsl::array_access("state", Expr::ident("base") + d_p_offset),
             Expr::lit_f32(0.0),
         )],
-        // The diagonal formulation damps d_p across outer iterations, so the
-        // field must PERSIST between updates: seed the closed form once
-        // (while d_p is still zero from state init) instead of re-zeroing.
-        DpFormulation::FromAssembledDiagonal { .. } => {
+        // The assembled-matrix formulations damp d_p across outer
+        // iterations, so the field must PERSIST between updates: seed the
+        // closed form once (while d_p is still zero from state init)
+        // instead of re-zeroing.
+        DpFormulation::FromAssembledDiagonal { .. } | DpFormulation::FromAssembledRowSum { .. } => {
             let d_p_old = dsl::array_access("state", Expr::ident("base") + d_p_offset);
             let rho = dsl::max(
                 Expr::ident("constants").field("density"),
@@ -561,7 +590,7 @@ fn generate_dp_init_kernel_program(
         .side_effects
         .read_set
         .insert(EffectResource::binding(0, 1));
-    if matches!(dp_formulation, DpFormulation::FromAssembledDiagonal { .. }) {
+    if dp_formulation.uses_assembled_matrix() {
         program
             .side_effects
             .read_set
@@ -772,24 +801,49 @@ fn generate_dp_update_from_diag_kernel_program(
             momentum.name(),
             include_relaxation,
             theta,
+            DpDenominator::Diagonal,
         ),
+        DpFormulation::FromAssembledRowSum { theta } => {
+            generate_dp_update_from_assembled_diagonal(
+                model,
+                stride,
+                d_p_offset,
+                momentum.name(),
+                // SIMPLEC carries no relaxation factor by construction.
+                false,
+                theta,
+                DpDenominator::RowSum,
+            )
+        }
     }
 }
 
-/// OpenFOAM-`rAU`-style coupling coefficient: `d_p = [alpha_u *] V / a_P`
-/// with `a_P` the assembled momentum diagonal averaged over the two momentum
-/// components, damped across outer iterations
-/// (`d_p <- theta*new + (1-theta)*old`).
+/// Which momentum-row reduction feeds the d_p denominator.
+#[derive(Clone, Copy, PartialEq)]
+enum DpDenominator {
+    /// `a_P` — the same-component diagonal entry (OpenFOAM rAU analogue).
+    Diagonal,
+    /// `Σ_rank a(c,c)` — same-component row sum (SIMPLEC).
+    RowSum,
+}
+
+/// Assembled-matrix coupling coefficient, damped across outer iterations
+/// (`d_p <- theta*new + (1-theta)*old`):
+/// - `DpDenominator::Diagonal`: `d_p = [alpha_u *] V / a_P` with `a_P` the
+///   assembled momentum diagonal (OpenFOAM rAU analogue);
+/// - `DpDenominator::RowSum`: `d_p = V / Σ_rank a(c,c)` — same-component
+///   row sum (SIMPLEC), no relaxation factor.
+/// Either denominator is averaged over the two momentum components.
 ///
 /// The kernel runs in the Update phase, after this outer iteration's
 /// assembly and solve, so `matrix_values` holds the matrix assembled with
 /// the PREVIOUS iteration's d_p — the damped update converges this lagged
-/// loop to the rAU fixed point. The matrix diagonal layout matches the
-/// Schur setup kernel (`generate_generic_coupled_schur_setup`):
-///   a(c,c) = matrix_values[scalar_offset*S^2 + c*num_neighbors*S + diag_rank*S + c]
+/// loop to the fixed point. The matrix entry layout matches the Schur
+/// setup kernel (`generate_generic_coupled_schur_setup`):
+///   a(c,c at rank r) = matrix_values[scalar_offset*S^2 + c*num_neighbors*S + r*S + c]
 /// with ranks in FluxLayout component order (rank-keyed, like bc tables —
-/// NOT state offsets). Falls back to the closed form while the diagonal is
-/// zero (matrix not yet assembled).
+/// NOT state offsets). Falls back to the closed form while the denominator
+/// is zero (matrix not yet assembled).
 fn generate_dp_update_from_assembled_diagonal(
     model: &crate::solver::model::ModelSpec,
     stride: u32,
@@ -797,6 +851,7 @@ fn generate_dp_update_from_assembled_diagonal(
     momentum_name: &str,
     include_relaxation: bool,
     theta: f32,
+    denominator: DpDenominator,
 ) -> Result<KernelProgram, String> {
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
     let unknowns: Vec<String> = flux_layout
@@ -867,7 +922,7 @@ fn generate_dp_update_from_assembled_diagonal(
     } else {
         Expr::lit_f32(1.0)
     };
-    let preamble_stmts = vec![
+    let mut preamble_stmts = vec![
         dsl::let_expr(
             "rho",
             dsl::max(
@@ -909,24 +964,71 @@ fn generate_dp_update_from_assembled_diagonal(
             Expr::ident("scalar_offset") * Expr::lit_u32(s * s)
                 + Expr::ident("diag_rank") * Expr::lit_u32(s),
         ),
-        dsl::let_expr(
-            "a_u_x",
-            dsl::array_access(
-                "matrix_values",
-                Expr::ident("mat_base")
-                    + Expr::lit_u32(ux_rank) * Expr::ident("row_stride")
-                    + Expr::lit_u32(ux_rank),
+    ];
+    match denominator {
+        DpDenominator::Diagonal => preamble_stmts.extend([
+            dsl::let_expr(
+                "a_u_x",
+                dsl::array_access(
+                    "matrix_values",
+                    Expr::ident("mat_base")
+                        + Expr::lit_u32(ux_rank) * Expr::ident("row_stride")
+                        + Expr::lit_u32(ux_rank),
+                ),
             ),
-        ),
-        dsl::let_expr(
-            "a_u_y",
-            dsl::array_access(
-                "matrix_values",
-                Expr::ident("mat_base")
-                    + Expr::lit_u32(uy_rank) * Expr::ident("row_stride")
-                    + Expr::lit_u32(uy_rank),
+            dsl::let_expr(
+                "a_u_y",
+                dsl::array_access(
+                    "matrix_values",
+                    Expr::ident("mat_base")
+                        + Expr::lit_u32(uy_rank) * Expr::ident("row_stride")
+                        + Expr::lit_u32(uy_rank),
+                ),
             ),
-        ),
+        ]),
+        DpDenominator::RowSum => preamble_stmts.extend([
+            dsl::let_expr(
+                "row_base_x",
+                Expr::ident("scalar_offset") * Expr::lit_u32(s * s)
+                    + Expr::lit_u32(ux_rank) * Expr::ident("row_stride"),
+            ),
+            dsl::let_expr(
+                "row_base_y",
+                Expr::ident("scalar_offset") * Expr::lit_u32(s * s)
+                    + Expr::lit_u32(uy_rank) * Expr::ident("row_stride"),
+            ),
+            dsl::var_expr("a_u_x", Expr::lit_f32(0.0)),
+            dsl::var_expr("a_u_y", Expr::lit_f32(0.0)),
+            dsl::for_loop_expr(
+                dsl::for_init_var_expr("r", Expr::lit_u32(0)),
+                Expr::ident("r").lt(Expr::ident("num_neighbors")),
+                ForStep::Increment(Expr::ident("r")),
+                dsl::block(vec![
+                    dsl::assign_op_expr(
+                        AssignOp::Add,
+                        Expr::ident("a_u_x"),
+                        dsl::array_access(
+                            "matrix_values",
+                            Expr::ident("row_base_x")
+                                + Expr::ident("r") * Expr::lit_u32(s)
+                                + Expr::lit_u32(ux_rank),
+                        ),
+                    ),
+                    dsl::assign_op_expr(
+                        AssignOp::Add,
+                        Expr::ident("a_u_y"),
+                        dsl::array_access(
+                            "matrix_values",
+                            Expr::ident("row_base_y")
+                                + Expr::ident("r") * Expr::lit_u32(s)
+                                + Expr::lit_u32(uy_rank),
+                        ),
+                    ),
+                ]),
+            ),
+        ]),
+    }
+    preamble_stmts.extend([
         dsl::let_expr(
             "a_bar",
             Expr::lit_f32(0.5) * (Expr::ident("a_u_x") + Expr::ident("a_u_y")),
@@ -954,7 +1056,7 @@ fn generate_dp_update_from_assembled_diagonal(
             Expr::lit_f32(theta) * Expr::ident("d_p_new")
                 + Expr::lit_f32(1.0 - theta) * Expr::ident("d_p_old"),
         ),
-    ];
+    ]);
     let body_stmts = vec![dsl::assign_expr(
         dsl::array_access("state", Expr::ident("base") + d_p_offset),
         Expr::ident("d_p"),

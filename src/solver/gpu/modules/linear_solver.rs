@@ -18,7 +18,8 @@
 
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::linear_solver::fgmres::{
-    write_params, FgmresSolveOnceConfig, IterParams, RawFgmresParams,
+    encode_fgmres_seed_basis0_from_system, encode_restart_guard, write_params,
+    FgmresSolveOnceConfig, IterParams, RawFgmresParams, FGMRES_SCALAR_COUNT,
 };
 use crate::solver::gpu::modules::krylov_precond::{KrylovDispatch, PreconditionerModule};
 use crate::solver::gpu::modules::krylov_solve::{
@@ -227,6 +228,17 @@ pub fn solve_fgmres<P: PreconditionerModule>(
     let mut rel_scale: Option<f32> = None;
     let mut precond_prepared = false;
 
+    // Restart-boundary monotonicity guard. A restart cycle whose f32 Arnoldi
+    // basis lost orthogonality can APPLY an update that increases the true
+    // residual; left unguarded this compounds across restarts (observed:
+    // residual growth by orders of magnitude, ending in NaN, on the coupled
+    // incompressible system — see tests/dp_diag_probe.rs). Track the
+    // best-so-far x at the true-residual checkpoints and restore it when a
+    // cycle made things worse.
+    let mut best_residual = f32::INFINITY;
+    let mut have_snapshot = false;
+    const RESTART_GROWTH_TOL: f32 = 1.25;
+
     while total_iters < max_iters {
         let remaining = (max_iters - total_iters) as usize;
         let iter_restart = restart_len.min(remaining).max(1);
@@ -249,7 +261,40 @@ pub fn solve_fgmres<P: PreconditionerModule>(
             if debug_fgmres {
                 eprintln!("[cfd2][fgmres] diverged: residual non-finite at iters={total_iters}");
             }
+            if have_snapshot {
+                // The last cycle corrupted x; hand back the best iterate
+                // instead of the non-finite one.
+                let core = krylov.fgmres.core(&context.device, &context.queue);
+                krylov
+                    .fgmres
+                    .restore_x(&core, system.x(), "Generic FGMRES x restore");
+                return LinearSolverStats::max_iterations(
+                    total_iters,
+                    best_residual,
+                    start.elapsed(),
+                );
+            }
             return LinearSolverStats::diverged(total_iters, residual, start.elapsed());
+        }
+        if residual < best_residual {
+            best_residual = residual;
+            let core = krylov.fgmres.core(&context.device, &context.queue);
+            krylov
+                .fgmres
+                .snapshot_x(&core, system.x(), "Generic FGMRES x snapshot");
+            have_snapshot = true;
+        } else if have_snapshot && residual > best_residual * RESTART_GROWTH_TOL {
+            if debug_fgmres {
+                eprintln!(
+                    "[cfd2][fgmres] restart residual grew {best_residual:.3e} -> {residual:.3e}; restoring best x and stopping"
+                );
+            }
+            let core = krylov.fgmres.core(&context.device, &context.queue);
+            krylov
+                .fgmres
+                .restore_x(&core, system.x(), "Generic FGMRES x restore");
+            residual = best_residual;
+            break;
         }
         if rel_scale.is_none() {
             // Avoid declaring convergence purely because the RHS happens to have a much larger
@@ -301,6 +346,8 @@ pub fn solve_fgmres<P: PreconditionerModule>(
                     tol_rel: tol,
                     tol_abs,
                     reset_x_before_update: false,
+                    // The host loop has its own snapshot/restore guard.
+                    enable_restart_guard: false,
                 },
                 dispatch: dispatch.grids,
                 precond_label,
@@ -331,6 +378,14 @@ pub fn solve_fgmres<P: PreconditionerModule>(
                 "Generic FGMRES final",
             )
         };
+        // The final (uncheckpointed) cycle may also have corrupted x.
+        if have_snapshot && (!residual.is_finite() || residual > best_residual) {
+            let core = krylov.fgmres.core(&context.device, &context.queue);
+            krylov
+                .fgmres
+                .restore_x(&core, system.x(), "Generic FGMRES x restore final");
+            residual = best_residual;
+        }
     }
 
     let stats = if converged {
@@ -413,6 +468,8 @@ pub fn encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>(
                     tol_rel: tol,
                     tol_abs,
                     reset_x_before_update: false,
+                    // Encoded-seed path: GPU-side monotonicity guard.
+                    enable_restart_guard: use_encoded_seed_basis0,
                 },
                 dispatch: dispatch.grids,
                 precond_label,
@@ -522,6 +579,8 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
                     tol_rel: tol,
                     tol_abs,
                     reset_x_before_update: false,
+                    // Encoded-seed path: GPU-side monotonicity guard.
+                    enable_restart_guard: use_encoded_seed_basis0,
                 },
                 dispatch: dispatch.grids,
                 precond_label,
@@ -535,6 +594,25 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
         );
         let consumed = encoded.max(1);
         encoded_total = encoded_total.saturating_add(consumed);
+
+        // Final verification: recompute the true residual and let the guard
+        // restore the best-so-far x if the LAST cycle corrupted it (cycles
+        // before the last are covered by the per-chunk guard at the next
+        // seed). Must run before post_encode so the model's update kernels
+        // consume the verified x. Re-capture scalars afterwards so the
+        // readback reflects the guard's verdict.
+        if is_last_chunk && use_encoded_seed_basis0 {
+            let core = krylov.fgmres.core(&context.device, &context.queue);
+            encode_fgmres_seed_basis0_from_system(&core, &mut encoder, system, 1, true);
+            encode_restart_guard(&core, &mut encoder, system.x(), &params);
+            encoder.copy_buffer_to_buffer(
+                core.b_scalars,
+                0,
+                core.b_staging_scalar,
+                0,
+                (FGMRES_SCALAR_COUNT as u64) * 4,
+            );
+        }
 
         // Let the caller encode update/assembly commands after the last solve chunk.
         if is_last_chunk {

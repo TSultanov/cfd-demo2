@@ -14,7 +14,7 @@ use bytemuck::{bytes_of, Pod, Zeroable};
 pub const DEFAULT_WORKGROUP_SIZE: u32 = 64;
 pub const MAX_WORKGROUPS_PER_DIMENSION: u32 = 65535;
 
-pub(crate) const FGMRES_SCALAR_COUNT: usize = 16;
+pub(crate) const FGMRES_SCALAR_COUNT: usize = 18;
 pub(crate) const FGMRES_SCALAR_STOP: usize = 8;
 pub(crate) const FGMRES_SCALAR_CONVERGED: usize = 9;
 const FGMRES_SCALAR_ITERS_USED: usize = 10;
@@ -23,6 +23,13 @@ const FGMRES_SCALAR_TOL_REL_RHS: usize = 12;
 const FGMRES_SCALAR_TOL_ABS: usize = 13;
 const FGMRES_SCALAR_RHS_NORM: usize = 14;
 const FGMRES_SCALAR_SKIP_UPDATE: usize = 15;
+// Restart-boundary monotonicity guard slots (see gmres_logic/restart_guard).
+// 16: best true residual so far (0.0 = unset); 17: guard action flag
+// (0 none / 1 snapshot / 2 restore).
+#[allow(dead_code)]
+const FGMRES_SCALAR_BEST_RESID: usize = 16;
+#[allow(dead_code)]
+const FGMRES_SCALAR_GUARD_FLAG: usize = 17;
 
 const FGMRES_INDIRECT_DISPATCH_COUNT: usize = 3;
 const FGMRES_INDIRECT_ENTRY_STRIDE_BYTES: u64 = 16;
@@ -89,6 +96,8 @@ pub struct FgmresCore<'a> {
     /// Tiny scratch buffer (4 bytes) for intra-`b_scalars` copies that cannot use
     /// `copy_buffer_to_buffer` with source == destination (WebGPU forbids same-buffer copies).
     pub b_scalar_copy_staging: &'a wgpu::Buffer,
+    /// Best-so-far solution snapshot for the restart-boundary monotonicity guard.
+    pub b_x_snapshot: &'a wgpu::Buffer,
 
     pub bg_matrix: &'a wgpu::BindGroup,
     pub bg_precond: &'a wgpu::BindGroup,
@@ -112,6 +121,8 @@ pub struct FgmresCore<'a> {
     pub pipeline_calc_dots_cgs: &'a wgpu::ComputePipeline,
     pub pipeline_reduce_dots_cgs: &'a wgpu::ComputePipeline,
     pub pipeline_update_w_cgs: &'a wgpu::ComputePipeline,
+    pub pipeline_restart_guard: &'a wgpu::ComputePipeline,
+    pub pipeline_guard_copy: &'a wgpu::ComputePipeline,
 }
 
 pub struct FgmresWorkspace {
@@ -127,6 +138,9 @@ pub struct FgmresWorkspace {
     b_z_storage: wgpu::Buffer,
     b_w: wgpu::Buffer,
     b_temp: wgpu::Buffer,
+    /// Best-so-far solution snapshot for the restart-boundary monotonicity
+    /// guard (see `snapshot_x` / `restore_x`).
+    b_x_snapshot: wgpu::Buffer,
     b_dot_partial: wgpu::Buffer,
     b_scalars: wgpu::Buffer,
     b_indirect_args: wgpu::Buffer,
@@ -172,6 +186,8 @@ pub struct FgmresWorkspace {
     pipeline_reduce_dots_cgs: wgpu::ComputePipeline,
     pipeline_update_w_cgs: wgpu::ComputePipeline,
     pipeline_axpy_fused_from_y: wgpu::ComputePipeline,
+    pipeline_restart_guard: wgpu::ComputePipeline,
+    pipeline_guard_copy: wgpu::ComputePipeline,
 }
 
 impl FgmresWorkspace {
@@ -278,6 +294,15 @@ impl FgmresWorkspace {
             mapped_at_creation: false,
         });
 
+        let b_x_snapshot = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES x snapshot")),
+            size: (n as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
         let b_dot_partial = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label_prefix} FGMRES dot partial")),
             size: (num_dot_groups as u64) * ((max_restart + 1) as u64) * 4,
@@ -289,7 +314,7 @@ impl FgmresWorkspace {
 
         let b_scalars = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label_prefix} FGMRES scalars")),
-            size: 16 * 4,
+            size: (FGMRES_SCALAR_COUNT as u64) * 4,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
@@ -446,6 +471,11 @@ impl FgmresWorkspace {
             .map_err(|e| format!("gmres_ops/reduce_final_and_finish_norm shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
+        let pipeline_guard_copy = {
+            let src = kernel_registry::kernel_source_by_id("", KernelId("gmres_ops/guard_copy"))
+                .map_err(|e| format!("gmres_ops/guard_copy shader missing: {e}"))?;
+            (src.create_pipeline)(device)
+        };
 
         let bgl_vectors = pipeline_spmv.get_bind_group_layout(0);
         let bgl_matrix = pipeline_spmv.get_bind_group_layout(1);
@@ -498,6 +528,12 @@ impl FgmresWorkspace {
             let src =
                 kernel_registry::kernel_source_by_id("", KernelId::GMRES_LOGIC_SOLVE_TRIANGULAR)
                     .map_err(|e| format!("gmres_logic/solve_triangular shader missing: {e}"))?;
+            (src.create_pipeline)(device)
+        };
+        let pipeline_restart_guard = {
+            let src =
+                kernel_registry::kernel_source_by_id("", KernelId("gmres_logic/restart_guard"))
+                    .map_err(|e| format!("gmres_logic/restart_guard shader missing: {e}"))?;
             (src.create_pipeline)(device)
         };
 
@@ -598,6 +634,7 @@ impl FgmresWorkspace {
             b_y,
             b_staging_scalar,
             b_scalar_copy_staging,
+            b_x_snapshot,
             bgl_vectors,
             vector_bindings: ops_bindings,
             bgl_matrix,
@@ -623,6 +660,8 @@ impl FgmresWorkspace {
             pipeline_calc_dots_cgs,
             pipeline_reduce_dots_cgs,
             pipeline_update_w_cgs,
+            pipeline_restart_guard,
+            pipeline_guard_copy,
         })
     }
 
@@ -656,6 +695,7 @@ impl FgmresWorkspace {
             b_y: &self.b_y,
             b_staging_scalar: &self.b_staging_scalar,
             b_scalar_copy_staging: &self.b_scalar_copy_staging,
+            b_x_snapshot: &self.b_x_snapshot,
             bg_matrix: &self.bg_matrix,
             bg_precond: &self.bg_precond,
             bg_params: &self.bg_params,
@@ -676,6 +716,8 @@ impl FgmresWorkspace {
             pipeline_calc_dots_cgs: &self.pipeline_calc_dots_cgs,
             pipeline_reduce_dots_cgs: &self.pipeline_reduce_dots_cgs,
             pipeline_update_w_cgs: &self.pipeline_update_w_cgs,
+            pipeline_restart_guard: &self.pipeline_restart_guard,
+            pipeline_guard_copy: &self.pipeline_guard_copy,
         }
     }
 
@@ -752,6 +794,42 @@ impl FgmresWorkspace {
             dispatch_y,
             label,
         );
+    }
+
+    /// Copy the current solution `x` into the internal snapshot buffer.
+    ///
+    /// Together with [`Self::restore_x`] this implements the restart-boundary
+    /// monotonicity guard: f32 Arnoldi can lose orthogonality on hard
+    /// preconditioned systems, and a restart cycle may then APPLY a solution
+    /// update that increases the true residual (observed June 2026 on the
+    /// coupled incompressible system: residual growing across restarts by
+    /// orders of magnitude, ending in NaN). The host restart loop snapshots
+    /// the best-so-far `x` and restores it when a cycle made things worse.
+    pub fn snapshot_x<'a>(&'a self, core: &FgmresCore<'a>, x: &'a wgpu::Buffer, label: &str) {
+        let workgroups = workgroups_for_size(self.n);
+        let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
+        let bg = self.create_vector_bind_group(
+            core.device,
+            x.as_entire_binding(),
+            self.b_x_snapshot.as_entire_binding(),
+            self.temp_buffer().as_entire_binding(),
+            &format!("{label} BG"),
+        );
+        dispatch_vector_pipeline(core, self.pipeline_copy(), &bg, dispatch_x, dispatch_y, label);
+    }
+
+    /// Restore the solution `x` from the snapshot taken by [`Self::snapshot_x`].
+    pub fn restore_x<'a>(&'a self, core: &FgmresCore<'a>, x: &'a wgpu::Buffer, label: &str) {
+        let workgroups = workgroups_for_size(self.n);
+        let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
+        let bg = self.create_vector_bind_group(
+            core.device,
+            self.b_x_snapshot.as_entire_binding(),
+            x.as_entire_binding(),
+            self.temp_buffer().as_entire_binding(),
+            &format!("{label} BG"),
+        );
+        dispatch_vector_pipeline(core, self.pipeline_copy(), &bg, dispatch_x, dispatch_y, label);
     }
 
     pub fn compute_residual_norm_into<'a>(
@@ -1184,6 +1262,12 @@ pub struct FgmresSolveOnceConfig {
     pub tol_rel: f32,
     pub tol_abs: f32,
     pub reset_x_before_update: bool,
+    /// Enable the GPU-side restart-boundary monotonicity guard
+    /// (gmres_logic/restart_guard + gmres_ops/guard_copy). Only valid on the
+    /// encoded-seed path, where the seed writes the true residual norm into
+    /// hessenberg[0]; host-seeded paths must keep this false (they have a
+    /// host-side guard in `solve_fgmres` instead).
+    pub enable_restart_guard: bool,
 }
 
 pub struct FgmresSolveOnceResult {
@@ -2033,6 +2117,13 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         encoder.copy_buffer_to_buffer(core.b_y, 0, core.b_hessenberg, 0, 4);
     }
 
+    // ── Restart-boundary monotonicity guard ─────────────────────────────
+    // Must run after the scalars init (so BEST_RESID/GUARD_FLAG survive)
+    // and after seed_basis0 wrote beta = ||b - A*x|| into hessenberg[0].
+    if config.enable_restart_guard {
+        encode_restart_guard(core, encoder, x, &params);
+    }
+
     let max_restart_u32 = max_restart as u32;
     let params_iter_table: Vec<RawFgmresParams> = (0..max_restart)
         .map(|j| RawFgmresParams {
@@ -2336,6 +2427,67 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
     }
 
     FgmresEncodeSolveOnceResult { max_restart }
+}
+
+/// Encode the restart-boundary monotonicity guard: a 1-thread decision
+/// kernel (gmres_logic/restart_guard) followed by a conditional
+/// snapshot/restore of the solution vector (gmres_ops/guard_copy).
+///
+/// Preconditions: the encoded seed has written beta = ||b - A*x|| into
+/// hessenberg[0] and the solver scalars are initialized. Overwrites
+/// b_params with `params` (vector-op params) for the copy dispatch; the
+/// restart body re-writes per-iteration params from its tables, and any
+/// caller after the body must not rely on b_params contents.
+pub fn encode_restart_guard<'a>(
+    core: &FgmresCore<'a>,
+    encoder: &mut wgpu::CommandEncoder,
+    x: &'a wgpu::Buffer,
+    params: &RawFgmresParams,
+) {
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("FGMRES restart guard"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(core.pipeline_restart_guard);
+        pass.set_bind_group(0, core.bg_logic, &[]);
+        pass.set_bind_group(1, core.bg_logic_params, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+
+    encode_write_buffer_from_bytes(
+        core.device,
+        encoder,
+        core.b_params,
+        0,
+        bytes_of(params),
+        "FGMRES restart guard params",
+    );
+
+    let workgroups = workgroups_for_size(core.n);
+    let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
+    // vec_x unused (read-only slot), x as vec_y (read_write), snapshot as vec_z.
+    let bg = create_vector_bind_group(
+        core.device,
+        core.bgl_vectors,
+        core.vector_bindings,
+        core.b_temp.as_entire_binding(),
+        x.as_entire_binding(),
+        core.b_x_snapshot.as_entire_binding(),
+        "FGMRES restart guard copy BG",
+    );
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("FGMRES restart guard copy"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(core.pipeline_guard_copy);
+        pass.set_bind_group(0, &bg, &[]);
+        pass.set_bind_group(1, core.bg_matrix, &[]);
+        pass.set_bind_group(2, core.bg_precond, &[]);
+        pass.set_bind_group(3, core.bg_params, &[]);
+        pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+    }
 }
 
 pub fn submit_fgmres_encoded_pass(

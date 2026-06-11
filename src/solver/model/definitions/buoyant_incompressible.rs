@@ -253,10 +253,15 @@ fn buoyant_incompressible_model_impl(with_mms_sources: bool) -> Result<ModelSpec
                 1,
                 BoundaryCondition::zero_gradient_dim::<DivDim<Temperature, Length>>(),
             )
+            // MovingWall is the THERMALLY HELD wall: Dirichlet T (per-face
+            // values settable), no-slip U like Wall. Gives sealed-cavity
+            // benchmarks (heated cavity: hot/cold = MovingWall, adiabatic =
+            // Wall) without an Outlet's pressure pin. Wall/SlipWall stay
+            // adiabatic (zero-gradient).
             .set_uniform(
                 GpuBoundaryType::MovingWall,
                 1,
-                BoundaryCondition::zero_gradient_dim::<DivDim<Temperature, Length>>(),
+                BoundaryCondition::dirichlet_dim::<Temperature>(0.0),
             ),
     );
 

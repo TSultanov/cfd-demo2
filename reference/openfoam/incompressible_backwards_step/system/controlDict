@@ -19,7 +19,7 @@ startFrom       startTime;
 startTime       0;
 
 stopAt          endTime;
-endTime         2.0;
+endTime         24;
 
 deltaT          0.02;
 

@@ -13,6 +13,14 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 
 /// Test compressible lid-driven cavity against OpenFOAM reference.
 ///
+/// # Reference provenance (audited June 2026): MATCHED-TIME TRANSIENT
+/// This is a transient-by-design comparison, NOT a steady-state anchor:
+/// both codes are time-accurate and compared at the identical instant
+/// (cfd2: 300 steps at the reference dt = endTime 3e-3 s; one acoustic crossing; convective steady state is unreachable for an explicit density-based reference in feasible time).
+/// Unlike the incompressible cases (steady references since June 2026),
+/// extending this case's endTime would change the reference field --
+/// the matched-time contract is what makes the comparison valid.
+///
 /// # Timeout
 /// This test requires extended timeout (~120-300s) due to GPU compute and 300 timesteps.
 /// Run with: `cargo test --test openfoam_compressible_lid_driven_cavity_reference_test -- --ignored --timeout 300`

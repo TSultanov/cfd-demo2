@@ -60,6 +60,11 @@ fn openfoam_incompressible_backwards_step_matches_reference_field() {
     ))
     .expect("solver init");
 
+    // Canonical configuration dt = 0.02 / alpha_u = 0.7: d_p ∝ alpha_u*dt
+    // is part of cfd2's spatial discretization, so dt changes the discrete
+    // steady state (this case measured u 0.0734 at dt=0.02 vs 0.0437 at
+    // dt=0.05 — better there, but a coincidental dissipation match) — dt=0.02 matches the reference's own dt and the historical
+    // d_p. See the lid test header for the full d_p-sensitivity record.
     solver.set_dt(0.02);
     solver.set_dtau(0.0).unwrap();
     solver.set_density(1.0).unwrap();
@@ -67,13 +72,42 @@ fn openfoam_incompressible_backwards_step_matches_reference_field() {
     solver.set_inlet_velocity(1.0).unwrap();
     solver.set_alpha_u(0.7).unwrap();
     solver.set_alpha_p(0.3).unwrap();
-    solver.set_outer_iters(50).unwrap();
+    solver.set_outer_iters(5).unwrap();
     solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();
 
-    for _ in 0..100 {
-        solver.step();
+
+    // March to steady state: the reference is the machine-converged steady
+    // end state (final pimpleFoam initial residuals at the noise floor), so
+    // the transient path -- dt, time scheme, outer iterations -- drops out
+    // of the comparison; both codes compare converged states.
+    const CHECK_EVERY: usize = 25;
+    const STEADY_TOL: f64 = 1e-7;
+    const MAX_STEPS: usize = 3000;
+    let mut prev = pollster::block_on(solver.get_u());
+    let mut steps = 0usize;
+    loop {
+        for _ in 0..CHECK_EVERY {
+            solver.step();
+        }
+        steps += CHECK_EVERY;
+        let cur = pollster::block_on(solver.get_u());
+        let delta = cur
+            .iter()
+            .zip(&prev)
+            .map(|(a, b)| (a.0 - b.0).abs().max((a.1 - b.1).abs()))
+            .fold(0.0f64, f64::max)
+            / CHECK_EVERY as f64;
+        prev = cur;
+        if delta < STEADY_TOL {
+            println!("[openfoam][incompressible_backstep] steady after {steps} steps (per-step delta {delta:.2e})");
+            break;
+        }
+        assert!(
+            steps < MAX_STEPS,
+            "no steady state within {MAX_STEPS} steps (delta {delta:.2e})"
+        );
     }
 
     let u = pollster::block_on(solver.get_u());

@@ -14,6 +14,14 @@ use std::collections::HashMap;
 
 /// Test compressible supersonic wedge against OpenFOAM reference.
 ///
+/// # Reference provenance (audited June 2026): MATCHED-TIME TRANSIENT
+/// This is a transient-by-design comparison, NOT a steady-state anchor:
+/// both codes are time-accurate and compared at the identical instant
+/// (cfd2: 200 steps at the reference dt = endTime 7e-5 s; shock formation phase).
+/// Unlike the incompressible cases (steady references since June 2026),
+/// extending this case's endTime would change the reference field --
+/// the matched-time contract is what makes the comparison valid.
+///
 /// # Timeout
 /// This test requires extended timeout (~60-120s) due to GPU compute.
 /// Run with: `cargo test --test openfoam_compressible_supersonic_wedge_reference_test -- --ignored --timeout 120`

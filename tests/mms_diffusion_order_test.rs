@@ -12,14 +12,17 @@
 mod mms_support;
 
 use cfd2::solver::gpu::enums::GpuBoundaryType;
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
+use cfd2::solver::mesh::{
+    generate_graded_rect_mesh, generate_structured_rect_mesh, AxisGrading, BoundarySides,
+    BoundaryType, Mesh,
+};
 use cfd2::solver::model::helpers::SolverRuntimeParamsExt;
 use cfd2::solver::model::{
     generic_diffusion_demo_mms_dirichlet_model, generic_diffusion_demo_mms_model,
     generic_diffusion_demo_mms_neumann_model, ModelSpec, MMS_SOURCE_FIELD,
 };
 use cfd2::solver::{SolverConfig, TimeScheme, UnifiedSolver};
-use mms_support::{assert_convergence_order, field_errors, run_to_steady};
+use mms_support::{assert_convergence_order, field_errors, max_cell_extent, run_to_steady};
 use std::f64::consts::PI;
 
 // Absolute steady-state detection threshold. The f32 state jitters at a few ULPs of the
@@ -77,6 +80,15 @@ fn solve_steady_case(
     setup_bcs: &dyn Fn(&mut UnifiedSolver, &Mesh),
 ) -> (Mesh, Vec<f64>) {
     let mesh = unit_square_mesh(n, sides);
+    solve_steady_case_on_mesh(model_fn, mesh, source, setup_bcs)
+}
+
+fn solve_steady_case_on_mesh(
+    model_fn: fn() -> Result<ModelSpec, String>,
+    mesh: Mesh,
+    source: &dyn Fn(f64, f64) -> f64,
+    setup_bcs: &dyn Fn(&mut UnifiedSolver, &Mesh),
+) -> (Mesh, Vec<f64>) {
     let model = model_fn().expect("model");
     let mut solver = build_solver(&mesh, model);
     // dt of the order of the diffusion time L^2/kappa: implicit Euler contracts the
@@ -184,6 +196,63 @@ fn steady_perface_dirichlet_second_order() {
         errs.push(field_errors(&mesh, &phi, exact).l2);
     }
     assert_convergence_order("steady_perface_dirichlet", &hs, &errs, 2.0, 0.25, 1.5e-4);
+}
+
+/// The per-face Dirichlet study repeated on a two-sided geometrically graded
+/// mesh (Arc M generality gate): smallest cells at every wall, center/wall
+/// ratio 4 on both axes. Orders are fitted against the MAX cell extent (see
+/// `max_cell_extent`) — second order must hold, proving the discretization
+/// (including the distance-weighted face-coefficient interpolation) is not
+/// uniform-mesh-only.
+#[test]
+fn steady_perface_dirichlet_graded_second_order() {
+    let exact = |x: f64, y: f64| (PI * x).cos() * (PI * y).cos();
+    let source = move |x: f64, y: f64| 2.0 * PI * PI * (PI * x).cos() * (PI * y).cos();
+    let grading = AxisGrading::TwoSided { ratio: 4.0 };
+
+    let mut hs = Vec::new();
+    let mut errs = Vec::new();
+    for n in [8usize, 16, 32, 64] {
+        let mesh = generate_graded_rect_mesh(
+            n,
+            n,
+            1.0,
+            1.0,
+            grading,
+            grading,
+            inlet_outlet_wall_sides(),
+        );
+        let (mesh, phi) = solve_steady_case_on_mesh(
+            generic_diffusion_demo_mms_dirichlet_model,
+            mesh,
+            &source,
+            &|solver, mesh| {
+                let face_value = |mesh: &Mesh| {
+                    let fx = mesh.face_cx.clone();
+                    let fy = mesh.face_cy.clone();
+                    move |face_idx: u32| {
+                        let i = face_idx as usize;
+                        ((PI * fx[i]).cos() * (PI * fy[i]).cos()) as f32
+                    }
+                };
+                for boundary in [
+                    GpuBoundaryType::Inlet,
+                    GpuBoundaryType::Outlet,
+                    GpuBoundaryType::Wall,
+                ] {
+                    solver
+                        .set_boundary_values_per_face(boundary, "phi", 0, &face_value(mesh))
+                        .expect("per-face dirichlet");
+                }
+            },
+        );
+        hs.push(max_cell_extent(&mesh));
+        errs.push(field_errors(&mesh, &phi, exact).l2);
+    }
+    // Measured June 2026 (first run): order 2.150, finest l2 7.95e-5 at
+    // h_eff 0.0287 — better than the uniform line at matched h_eff (the
+    // refinement sits where the boundary-layer curvature is). Cap ~2x.
+    assert_convergence_order("steady_perface_dirichlet_graded", &hs, &errs, 2.0, 0.25, 1.6e-4);
 }
 
 /// phi* = sin(pi x) sin(pi y): Dirichlet 0 at left/right, spatially varying *non-zero*

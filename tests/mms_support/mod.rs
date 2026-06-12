@@ -155,6 +155,35 @@ pub fn run_to_steady_vec2(
     panic!("did not reach steady state within {max_steps} steps (tol {steady_tol:.1e}, last max_delta={last_delta:.3e})");
 }
 
+/// Effective mesh spacing for convergence fits on non-uniform meshes: the
+/// maximum cell extent (width or height) over all cells.
+///
+/// Decision (Arc M): on a smoothly graded mesh the LARGEST cell bounds the
+/// truncation error, so fitting orders against it is the conservative
+/// choice — a mean or minimum spacing would inflate apparent orders. On a
+/// uniform n x n unit square this reduces to 1/n, so graded and uniform
+/// studies share one fit convention.
+#[allow(dead_code)]
+pub fn max_cell_extent(mesh: &Mesh) -> f64 {
+    let mut h_max = 0.0f64;
+    for c in 0..mesh.num_cells() {
+        let start = mesh.cell_vertex_offsets[c];
+        let end = mesh.cell_vertex_offsets[c + 1];
+        let mut x_min = f64::INFINITY;
+        let mut x_max = f64::NEG_INFINITY;
+        let mut y_min = f64::INFINITY;
+        let mut y_max = f64::NEG_INFINITY;
+        for &v in &mesh.cell_vertices[start..end] {
+            x_min = x_min.min(mesh.vx[v]);
+            x_max = x_max.max(mesh.vx[v]);
+            y_min = y_min.min(mesh.vy[v]);
+            y_max = y_max.max(mesh.vy[v]);
+        }
+        h_max = h_max.max(x_max - x_min).max(y_max - y_min);
+    }
+    h_max
+}
+
 /// Least-squares slope of log(err) vs log(h): the observed convergence order.
 pub fn fit_order(hs: &[f64], errors: &[f64]) -> f64 {
     assert_eq!(hs.len(), errors.len());

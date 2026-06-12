@@ -31,14 +31,17 @@ mod mms_support;
 use std::f64::consts::PI;
 
 use cfd2::solver::gpu::enums::GpuBoundaryType;
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, Mesh};
+use cfd2::solver::mesh::{
+    generate_graded_rect_mesh, generate_structured_rect_mesh, AxisGrading, BoundarySides, Mesh,
+};
 use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
 use cfd2::solver::model::{incompressible_momentum_mms_model, INCOMPRESSIBLE_MMS_SOURCE_FIELD};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 
 use mms_support::{
-    assert_convergence_order, field_errors, field_errors_vec2, run_to_steady_vec2,
+    assert_convergence_order, field_errors, field_errors_vec2, max_cell_extent,
+    run_to_steady_vec2,
 };
 
 const MU: f64 = 1.0;
@@ -63,6 +66,13 @@ fn source(x: f64, y: f64) -> (f64, f64) {
 
 fn solve_steady_taylor_green(n: usize, advection_scheme: Scheme) -> (Mesh, Vec<(f64, f64)>, Vec<f64>) {
     let mesh = generate_structured_rect_mesh(n, n, 1.0, 1.0, BoundarySides::wall());
+    solve_steady_taylor_green_on_mesh(mesh, advection_scheme)
+}
+
+fn solve_steady_taylor_green_on_mesh(
+    mesh: Mesh,
+    advection_scheme: Scheme,
+) -> (Mesh, Vec<(f64, f64)>, Vec<f64>) {
     let model = incompressible_momentum_mms_model().expect("model");
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
@@ -174,6 +184,50 @@ fn steady_taylor_green_sou_velocity_second_order() {
     assert_convergence_order("taylor_green_sou_u", &hs, &u_errs, 2.0, 0.35, 1.0e-3);
     let p_order = mms_support::fit_order(&hs, &p_errs);
     println!("[mms][taylor_green_sou] pressure order {p_order:.3}");
+    assert!(
+        p_order > 0.9,
+        "pressure order regressed: {p_order:.3} (errors {p_errs:?})"
+    );
+}
+
+/// The SOU Taylor-Green study repeated on a two-sided geometrically graded
+/// mesh (Arc M generality gate): smallest cells at every wall, center/wall
+/// ratio 4 on both axes, orders fitted against the MAX cell extent (see
+/// `max_cell_extent`). This drives the full coupled saddle-point path —
+/// distance-weighted assembly coefficients, derived Rhie-Chow flux, and
+/// gradient reconstruction — on non-uniform spacing; velocity must hold
+/// second order and pressure must not regress below the uniform-mesh floor.
+#[test]
+fn steady_taylor_green_sou_graded_second_order() {
+    let grading = AxisGrading::TwoSided { ratio: 4.0 };
+    let mut hs = Vec::new();
+    let mut u_errs = Vec::new();
+    let mut p_errs = Vec::new();
+    for n in [8usize, 16, 32, 64] {
+        let mesh =
+            generate_graded_rect_mesh(n, n, 1.0, 1.0, grading, grading, BoundarySides::wall());
+        let h_eff = max_cell_extent(&mesh);
+        let (mesh, u, p) = solve_steady_taylor_green_on_mesh(mesh, Scheme::SecondOrderUpwind);
+        let u_err = field_errors_vec2(&mesh, &u, exact_u).l2;
+        let p_mean = volume_mean(&mesh, &p);
+        let exact_mean = {
+            let exact: Vec<f64> = (0..mesh.num_cells())
+                .map(|i| exact_p(mesh.cell_cx[i], mesh.cell_cy[i]))
+                .collect();
+            volume_mean(&mesh, &exact)
+        };
+        let p_err = field_errors(&mesh, &p, |x, y| exact_p(x, y) - exact_mean + p_mean).l2;
+        println!("[mms][taylor_green_graded] n={n} h_eff={h_eff:.4e} u_l2={u_err:.4e} p_l2={p_err:.4e}");
+        hs.push(h_eff);
+        u_errs.push(u_err);
+        p_errs.push(p_err);
+    }
+    // Measured June 2026 (first run): u order 1.978 (uniform study: 1.87),
+    // finest u_l2 3.28e-4 at h_eff 0.0287; p order 1.678 (uniform: 1.69).
+    // Graded errors sit BELOW the uniform line at matched h_eff. Cap ~2x.
+    assert_convergence_order("taylor_green_sou_graded_u", &hs, &u_errs, 2.0, 0.35, 7.0e-4);
+    let p_order = mms_support::fit_order(&hs, &p_errs);
+    println!("[mms][taylor_green_sou_graded] pressure order {p_order:.3}");
     assert!(
         p_order > 0.9,
         "pressure order regressed: {p_order:.3} (errors {p_errs:?})"

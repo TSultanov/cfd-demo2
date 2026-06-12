@@ -501,7 +501,17 @@ fn build_run(
     solver.set_dtau(0.0).expect("dtau");
     solver.set_viscosity(mu as f32).expect("viscosity");
     solver.set_density(RHO0 as f32).expect("density");
-    solver.set_outer_iters(OUTER_ITERS).expect("outer_iters");
+    // Thread the REQUESTED outer count (a previous version set the
+    // OUTER_ITERS=1 const here, silently running the o2/o4 probe rows at
+    // one iteration — the parameter-threading no-op bug class), and pin
+    // the adaptive outer-convergence break OPEN so requested iterations
+    // actually run: the break's relative tolerance fires after iteration
+    // 1 on these smooth marches, collapsing the step to a single Picard
+    // iteration (= forward-Euler-in-flux).
+    solver.set_outer_iters(outer_iters).expect("outer_iters");
+    solver.set_outer_tolerance(0.0).expect("outer_tol");
+    solver.set_outer_tolerance_abs(0.0).expect("outer_tol_abs");
+    println!("[probe] config: n={n} mu={mu} dt={dt} outer_iters={outer_iters} (break pinned open)");
 
     // Per-face exact Dirichlet rho and u on the (all-Inlet) boundary; seed
     // the expression-valued entries (rho_u/rho_e/p/T) with exact face values
@@ -911,30 +921,58 @@ fn measure_growth(
 ///   BDF2  o1 n32                 103.5  nyq 1e-3  bf 0.08  u 4.6e-2  rho 1.5e-2
 ///   BDF2  o1 n48                  60.6  nyq 1e-4  bf 0.07  u 3.5e-2  rho 1.8e-2
 ///   Euler o1 n32/n48          104/116  (same character)
-///   BDF2  o2/o4 n48               60.6  bit-identical to o1
+///   BDF2  o2/o4 n48            116.1/116.5  (genuine iterations; see below)
 ///   BDF2  o1 n48 dtau=dt lm=Off   77.2  bf 0.51   u 5.1e-3  rho 3.0e-3
 ///   BDF2  o1 n48 dtau=dt lm=WS    "0"   u 0.18    rho 9.0e10  (BLOWN)
 ///   BDF2  o1 n48 dtau lm=WS a=0   "0"   u 1.7e7   (BLOWN)
 ///   BDF2  o1 n48 dtau lm=Legacy   "0"   rho 9.0e10  (BLOWN)
 ///   BDF2  o1 n48 dt=1e-2 (fast)   "0"   u 1.5e12  (BLOWN)
 ///
+/// CORRECTION (Arc R, June 12 2026): the original o2/o4 rows read
+/// "bit-identical to o1" and were taken as proof the flux is frozen per
+/// step. BOTH were instrument artifacts: (1) build_run overrode the
+/// outer_iters parameter with the OUTER_ITERS=1 const (the
+/// parameter-threading no-op bug class), and (2) the adaptive
+/// outer-convergence break fires after one iteration on these smooth
+/// marches anyway. With the threading fixed and the break pinned open
+/// (outer_tol = 0), genuine o2/o4 Picard iterations CONVERGE (o2 = o4 to
+/// 0.4%) and the converged implicit-in-flux step grows at ~116 %/tu —
+/// matching Euler-o1 and WORSE than the unconverged o1-BDF2 map (60.6,
+/// which partially damps the mode by accident). Time integration is
+/// thereby exonerated BY MEASUREMENT: the spatial semi-discretization
+/// itself has an eigenvalue with positive real part at this
+/// configuration.
+///
 /// VERDICT — every knob-level hypothesis REFUTED; the instability is
-/// intrinsic to the spatial discretization at mu = 0, moderate Mach:
-/// - NOT time integration (Euler grows like BDF2).
-/// - NOT outer-iteration lag (o2/o4 bit-identical — which also proves the
-///   flux module is evaluated once per STEP, frozen across outer iters).
+/// intrinsic to the SPATIAL discretization at mu = 0, moderate Mach:
+/// - NOT time integration (Euler ~ BDF2 ~ converged Picard, all ~116).
+/// - NOT outer-iteration lag (converged o2/o4 grow at the spatial rate).
+/// - NOT the implicit EOS-recovery coupling (Arc R P3a/P3b: with the
+///   recovery rows decoupled to trivial holds and primitives recovered
+///   explicitly from conserved state — rhoCentralFoam semantics — the
+///   instability persists at comparable magnitude: n32 66, n48 diverges).
 /// - NOT a checkerboard (nyquist ~1e-4 on the growing runs) and NOT
-///   boundary-fed (boundary band holds LESS error mass than uniform).
+///   boundary-fed (boundary band holds LESS error mass than uniform);
+///   the Inlet closure is characteristic-correct by design (rho/u
+///   prescribed, p follows the interior via bc_expr).
 /// - Pseudo-time damping (dtau = dt, preconditioning Off) DAMPS the mode
 ///   ~7x in final error but does not stabilize it.
 /// - Low-Mach preconditioning (either model, with or without the
 ///   pressure-coupling term) makes it catastrophically WORSE: at M ~ 0.5
 ///   it rescales the dissipation wave speed c -> ~|u|, halving the
 ///   acoustic dissipation — a low-Mach tool misapplied at moderate Mach.
-/// The growing object is a smooth INTERIOR mode of the coupled
-/// KT-flux + inv_dt-scaled-EOS-recovery system, damped only by physical
-/// viscosity (mu k^2 must beat the mode's growth; mu = 5e-3 holds through
-/// n = 32 at this problem's scales — the Euler study's operating point).
+/// - Flux-dissipation redesign cannot fix it (Arc K): jump-proportional
+///   dissipation is O(h^3) on the smooth mode; non-vanishing raw-jump
+///   dissipation damps it linearly in dose but collapses orders first.
+/// The growing object is a smooth INTERIOR eigenmode of the spatial
+/// KT-flux discretization (EOS coupling exonerated), damped only by
+/// physical viscosity (mu k^2 must beat the mode's growth; mu = 5e-3
+/// holds through n = 32 at this problem's scales — the Euler study's
+/// operating point). Remaining suspects for a future arc: the discrete
+/// interplay of the bc_expr boundary refresh with the face flux
+/// (Kreiss-type discrete well-posedness — needs periodic-domain support
+/// to discriminate), and the vanLeer-reconstructed acoustic-speed field
+/// feeding the wave bounds.
 /// STABILITY ENVELOPE (model contract, see the compressible model docs):
 /// time-accurate compressible marching requires nonzero physical
 /// viscosity; the inviscid limit is out of envelope on this
@@ -967,7 +1005,8 @@ fn probe_inviscid_margin_matrix() {
     report("Euler o1 n32", build_run(32, EXTRA_SHEAR, 0.0, dt, TimeScheme::Euler, 1), dt, steps);
     report("Euler o1 n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::Euler, 1), dt, steps);
 
-    // H2: outer iterations.
+    // H2: outer iterations (genuine since the Arc R threading fix +
+    // break pinning in build_run; converged Picard = implicit-in-flux).
     report("BDF2 o2 n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2), dt, steps);
     report("BDF2 o4 n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 4), dt, steps);
 
@@ -1021,6 +1060,41 @@ fn probe_inviscid_margin_matrix() {
 
     // Fast branch (CFL ~ 1): the n=48/dt=0.01 outright divergence.
     report("BDF2 o1 n48 dt=1e-2 (fast)", build_run(48, EXTRA_SHEAR, 0.0, 1.0e-2, TimeScheme::BDF2, 1), 1.0e-2, steps);
+}
+
+/// ARC R diagnostic: does the outer Picard loop actually refresh the KT
+/// flux/assembly inputs, or is the step effectively explicit-in-flux?
+/// Run with CFD2_DEBUG_FGMRES=1 CFD2_LIN_TOL=1e-7 and read the per-solve
+/// trace within each step.
+///
+/// FINDINGS (June 12, 2026):
+/// - The batched one-submission outer loop emits NO per-solve trace
+///   (encoded up front, no readback) — disable it first, as below.
+/// - Even un-batched, only ONE solve fired per step at outer_iters=4:
+///   the adaptive outer-convergence break (outer_tol relative) fires
+///   after iteration 1 on smooth marches. Production compressible
+///   stepping is therefore one-Picard-iteration (explicit-in-flux) by
+///   default — ironically MORE stable here than the converged implicit
+///   step (60.6 vs 116 %/tu at n48; see the matrix verdict), so this is
+///   recorded as a characterization, not a defect to fix.
+/// - With the break pinned open (outer_tol = 0) the assembly does
+///   re-read the updated state each iteration and Picard converges
+///   (o2 = o4 to 0.4%): the per-outer refresh architecture works.
+#[test]
+#[ignore]
+fn probe_arcr_outer_refresh() {
+    let dt = 5.0e-3;
+    let mut run = build_run(32, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 4);
+    // The batched one-submission outer loop encodes all solves up front with
+    // no readback — the FGMRES trace never fires there. Force the
+    // per-iteration path so each solve is visible.
+    run.solver
+        .set_outer_batched_mode(false)
+        .expect("outer_batched_mode");
+    for k in 0..3 {
+        run.solver.step();
+        println!("[arcr-refresh] completed step {}", k + 1);
+    }
 }
 
 /// ARC K probe: order study of the UNPRECONDITIONED operator at mu = 0,

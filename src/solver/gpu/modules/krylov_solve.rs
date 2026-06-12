@@ -19,6 +19,13 @@ pub struct KrylovSolveModule<P> {
     /// yet; the configured max_iters always caps it. See
     /// `submit_solve_fgmres_fixed_iterations_chunked`.
     pub adaptive_budget: Option<u32>,
+    /// AUTO-mode CGS2 arming (see `cgs2_mode` in `linear_solver.rs`): set
+    /// when the previous solve's actual iterations exceeded the arming
+    /// fraction of max_iters — a late-converging solver benefits from CGS2
+    /// re-orthogonalization on its next solve, a fast one only pays its
+    /// overhead. Per-module state, like `adaptive_budget`: each solver
+    /// arms independently.
+    pub cgs2_auto_engaged: bool,
 }
 
 /// Extra information read back alongside [`LinearSolverStats`] from the
@@ -68,6 +75,7 @@ impl<P> KrylovSolveModule<P> {
             fgmres,
             precond,
             adaptive_budget: None,
+            cgs2_auto_engaged: false,
         }
     }
 

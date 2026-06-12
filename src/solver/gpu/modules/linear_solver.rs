@@ -63,17 +63,76 @@ impl OneSubmissionEnvTunables {
     }
 }
 
-/// CGS2 re-orthogonalization A/B switch. Default OFF by measurement
-/// (June 2026, reachable-tolerance era): on the OpenFOAM trio it is a
-/// wash — lid −30% wall (its late-converging solves benefit from the
-/// deeper orthogonality) but backstep/channel +20% (their solves
-/// converge fast; the two extra kernels per iteration are overhead).
+/// CGS2 re-orthogonalization switch, three-state (Arc C, June 2026):
+/// `CFD2_FGMRES_CGS2` unset → AUTO (default), "0" → force off, anything
+/// else → force on.
+///
+/// Decision record (measured June 12, linear tolerance 1e-4,
+/// max_iters=200, post-dev2/M1):
+/// - actual_iters/max_iters distributions: channel p99 = 0.18, backstep
+///   p99 = 0.07 (max 0.30), lid hard-solve cluster 0.86–1.0 (22.7% of
+///   solves above 0.5). The 0.5 arming threshold separates them cleanly:
+///   lid arms 450 of 4125 solves, channel 1 (AIMD warmup), backstep 0.
+/// - AUTO is shipped for ROBUSTNESS, not wall: armed lid solves converge
+///   in mean 27 iters instead of exhausting the budget (at-cap solves
+///   313 → 3; total lid iterations −25%), with wall NEUTRAL on all three
+///   cases (the capped iterations were already wall-cheap: frozen chunks
+///   are GPU no-ops and the adaptive budget contains their encoding).
+/// - The June 11 "lid −30% wall" for always-on CGS2 is STALE: re-measured
+///   −10% (256 → 229 s), and that residual win lives in the MID-GRADE
+///   solves (mean 0.24 of max_iters) — capturing them needs an arming
+///   threshold of ~0.2, knife-edge against channel's 0.18 p99. Declined
+///   as fragile wall-tuning; revisit only if solve dynamics change.
 /// Read per solve, not cached: a process-wide cache froze the first
 /// test's environment (see `one_submission_env_tunables`).
-fn cgs2_enabled() -> bool {
-    std::env::var("CFD2_FGMRES_CGS2")
-        .map(|v| v != "0")
-        .unwrap_or(false)
+#[derive(Clone, Copy, PartialEq)]
+enum Cgs2Mode {
+    Auto,
+    Off,
+    On,
+}
+
+/// AUTO-mode arming threshold: previous actual_iters > this fraction of
+/// max_iters enables CGS2 for the next solve (see `Cgs2Mode`).
+const CGS2_AUTO_ARM_FRACTION: f32 = 0.5;
+
+/// AUTO-mode disarming low-water mark (hysteresis): once armed, CGS2 stays
+/// on until a solve finishes below this fraction, guarding against
+/// oscillation across a hard-solve cluster (a CGS2-accelerated hard solve
+/// finishing under the arm threshold would disarm and leave the next slow
+/// solve bare). 0.25 sits between the fast cases' p99 (0.18, must disarm
+/// immediately) and the armed lid solves. Measured June 12: on the lid the
+/// hysteresis trace is bit-identical to the plain threshold (the armed
+/// cluster's solves stay above 0.5 anyway) — kept as cheap insurance for
+/// other regimes.
+const CGS2_AUTO_DISARM_FRACTION: f32 = 0.25;
+
+/// Sticky AUTO arming update from a finished solve's iteration count.
+fn cgs2_auto_update(engaged: bool, actual_iters: u32, max_iters: u32) -> bool {
+    let frac = if engaged {
+        CGS2_AUTO_DISARM_FRACTION
+    } else {
+        CGS2_AUTO_ARM_FRACTION
+    };
+    (actual_iters as f32) > frac * (max_iters.max(1) as f32)
+}
+
+fn cgs2_mode() -> Cgs2Mode {
+    match std::env::var("CFD2_FGMRES_CGS2") {
+        Err(_) => Cgs2Mode::Auto,
+        Ok(v) if v == "0" => Cgs2Mode::Off,
+        Ok(_) => Cgs2Mode::On,
+    }
+}
+
+/// Resolve the effective CGS2 setting for this solve from the mode and the
+/// per-module AUTO arming state.
+fn cgs2_enabled_for(auto_engaged: bool) -> bool {
+    match cgs2_mode() {
+        Cgs2Mode::Auto => auto_engaged,
+        Cgs2Mode::Off => false,
+        Cgs2Mode::On => true,
+    }
 }
 
 /// Stall-stop level factor (0.0 disables; see the stall branch in
@@ -421,7 +480,7 @@ pub fn solve_fgmres<P: PreconditionerModule>(
                     tol_rel: tol,
                     tol_abs,
                     reset_x_before_update: false,
-                    enable_cgs2: cgs2_enabled(),
+                    enable_cgs2: cgs2_enabled_for(krylov.cgs2_auto_engaged),
                     // The GPU-side MID-CYCLE stall applies to the encoded
                     // cycle bodies on every path; the host loop adds its own
                     // checkpoint stall and snapshot/restore guard on top
@@ -467,6 +526,11 @@ pub fn solve_fgmres<P: PreconditionerModule>(
             residual = best_residual;
         }
     }
+
+    // AUTO CGS2 arming for the NEXT solve (see `Cgs2Mode`), mirroring the
+    // chunked path's update.
+    krylov.cgs2_auto_engaged =
+        cgs2_auto_update(krylov.cgs2_auto_engaged, total_iters, max_iters as u32);
 
     let stats = if converged {
         LinearSolverStats::converged(total_iters, residual, start.elapsed())
@@ -549,7 +613,7 @@ pub fn encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>(
                     tol_rel: tol,
                     tol_abs,
                     reset_x_before_update: false,
-                    enable_cgs2: cgs2_enabled(),
+                    enable_cgs2: cgs2_enabled_for(krylov.cgs2_auto_engaged),
                     stall_level_rel: stall_level_rel(),
                     // Encoded-seed path: GPU-side monotonicity guard.
                     enable_restart_guard: use_encoded_seed_basis0,
@@ -678,7 +742,7 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
                     tol_rel: tol,
                     tol_abs,
                     reset_x_before_update: false,
-                    enable_cgs2: cgs2_enabled(),
+                    enable_cgs2: cgs2_enabled_for(krylov.cgs2_auto_engaged),
                     stall_level_rel: stall_level_rel(),
                     // Encoded-seed path: GPU-side monotonicity guard.
                     enable_restart_guard: use_encoded_seed_basis0,
@@ -732,10 +796,13 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
     if let Some(sub_idx) = last_submission_index {
         let (stats, info) =
             krylov.read_last_solver_stats(context, sub_idx, encoded_total as u32, start.elapsed());
+        // AUTO CGS2 arming for the NEXT solve (see `Cgs2Mode`).
+        krylov.cgs2_auto_engaged =
+            cgs2_auto_update(krylov.cgs2_auto_engaged, info.actual_iters, max_iters);
         if std::env::var("CFD2_DEBUG_FGMRES").map(|v| v != "0").unwrap_or(false) {
             eprintln!(
-                "[cfd2][fgmres][chunked] budget={budget} actual={} stopped_early={} resid={:.3e}",
-                info.actual_iters, info.stopped_early, stats.residual
+                "[cfd2][fgmres][chunked] budget={budget} actual={} stopped_early={} resid={:.3e} cgs2_next={}",
+                info.actual_iters, info.stopped_early, stats.residual, krylov.cgs2_auto_engaged
             );
         }
         let next = if info.stopped_early {

@@ -180,6 +180,208 @@ pub fn generate_structured_rect_mesh(
     mesh
 }
 
+/// Per-axis grading for [`generate_graded_rect_mesh`].
+#[derive(Clone, Copy, Debug)]
+pub enum AxisGrading {
+    /// Equal cell sizes.
+    Uniform,
+    /// Geometric stretching across the whole axis; `ratio` is the last cell's
+    /// size over the first's (`> 1` puts the smallest cells at the axis
+    /// start, `< 1` at the end) — the OpenFOAM `simpleGrading` convention.
+    OneSided { ratio: f64 },
+    /// Symmetric geometric refinement toward both ends (boundary-layer
+    /// meshes): smallest cells at the walls, largest at the center; `ratio`
+    /// is the center cell's size over the wall cell's. Requires an even cell
+    /// count.
+    TwoSided { ratio: f64 },
+}
+
+/// Vertex coordinates for `n` geometrically stretched cells spanning
+/// `[0, len]`, with `ratio` = last cell size / first cell size.
+fn geometric_axis_coords(n: usize, len: f64, ratio: f64) -> Vec<f64> {
+    assert!(ratio.is_finite() && ratio > 0.0, "grading ratio must be > 0");
+    let mut coords = Vec::with_capacity(n + 1);
+    coords.push(0.0);
+    if n == 1 || (ratio - 1.0).abs() < 1e-12 {
+        for i in 1..=n {
+            coords.push(len * i as f64 / n as f64);
+        }
+        return coords;
+    }
+    // Cell sizes h_i = h0 * r^i with r^(n-1) = ratio.
+    let r = ratio.powf(1.0 / (n as f64 - 1.0));
+    let h0 = len * (r - 1.0) / (r.powi(n as i32) - 1.0);
+    let mut x = 0.0;
+    let mut h = h0;
+    for _ in 0..n {
+        x += h;
+        coords.push(x);
+        h *= r;
+    }
+    coords[n] = len;
+    coords
+}
+
+/// Vertex coordinates (`n + 1` values spanning `[0, len]`) for one axis.
+fn graded_axis_coords(n: usize, len: f64, grading: AxisGrading) -> Vec<f64> {
+    match grading {
+        AxisGrading::Uniform => geometric_axis_coords(n, len, 1.0),
+        AxisGrading::OneSided { ratio } => geometric_axis_coords(n, len, ratio),
+        AxisGrading::TwoSided { ratio } => {
+            assert!(n % 2 == 0, "TwoSided grading requires an even cell count");
+            let m = n / 2;
+            let half = geometric_axis_coords(m, len * 0.5, ratio);
+            let mut coords = vec![0.0; n + 1];
+            for i in 0..=m {
+                coords[i] = half[i];
+                coords[n - i] = len - half[i];
+            }
+            coords
+        }
+    }
+}
+
+/// Like [`generate_structured_rect_mesh`] but with per-axis geometric
+/// grading. `AxisGrading::Uniform` on both axes reproduces the uniform
+/// generator's vertex grid exactly.
+pub fn generate_graded_rect_mesh(
+    nx: usize,
+    ny: usize,
+    length: f64,
+    height: f64,
+    grading_x: AxisGrading,
+    grading_y: AxisGrading,
+    boundaries: BoundarySides,
+) -> Mesh {
+    assert!(nx > 0, "nx must be > 0");
+    assert!(ny > 0, "ny must be > 0");
+    assert!(length > 0.0, "length must be > 0");
+    assert!(height > 0.0, "height must be > 0");
+
+    let xs = graded_axis_coords(nx, length, grading_x);
+    let ys = graded_axis_coords(ny, height, grading_y);
+
+    let num_vertices = (nx + 1) * (ny + 1);
+    let mut vx = vec![0.0; num_vertices];
+    let mut vy = vec![0.0; num_vertices];
+    let vid = |i: usize, j: usize| -> usize { j * (nx + 1) + i };
+    for j in 0..=ny {
+        for i in 0..=nx {
+            let v = vid(i, j);
+            vx[v] = xs[i];
+            vy[v] = ys[j];
+        }
+    }
+
+    generate_structured_mesh_from_vertex_grid(nx, ny, vx, vy, |_i, _j| true, boundaries)
+}
+
+#[cfg(test)]
+mod graded_mesh_tests {
+    use super::*;
+
+    fn assert_mesh_invariants(mesh: &Mesh, length: f64, height: f64) {
+        let total_vol: f64 = mesh.cell_vol.iter().sum();
+        assert!(
+            (total_vol - length * height).abs() < 1e-12 * length * height,
+            "cell volumes must sum to the domain area: {total_vol} vs {}",
+            length * height
+        );
+        for c in 0..mesh.cell_vol.len() {
+            assert!(mesh.cell_vol[c] > 0.0, "cell {c} has non-positive volume");
+        }
+        // Per-cell divergence theorem on a constant field: outward-signed
+        // face areas cancel (interior faces store the owner-outward normal).
+        for c in 0..mesh.cell_vol.len() {
+            let mut sx = 0.0;
+            let mut sy = 0.0;
+            for k in mesh.cell_face_offsets[c]..mesh.cell_face_offsets[c + 1] {
+                let f = mesh.cell_faces[k];
+                let sign = if mesh.face_owner[f] == c { 1.0 } else { -1.0 };
+                sx += sign * mesh.face_nx[f] * mesh.face_area[f];
+                sy += sign * mesh.face_ny[f] * mesh.face_area[f];
+            }
+            assert!(
+                sx.abs() < 1e-12 && sy.abs() < 1e-12,
+                "cell {c} face areas do not close: ({sx}, {sy})"
+            );
+        }
+    }
+
+    #[test]
+    fn uniform_grading_matches_uniform_generator() {
+        let graded = generate_graded_rect_mesh(
+            8,
+            6,
+            2.0,
+            1.5,
+            AxisGrading::Uniform,
+            AxisGrading::Uniform,
+            BoundarySides::wall(),
+        );
+        let uniform = generate_structured_rect_mesh(8, 6, 2.0, 1.5, BoundarySides::wall());
+        assert_eq!(graded.vx, uniform.vx);
+        assert_eq!(graded.vy, uniform.vy);
+        assert_eq!(graded.cell_vol.len(), uniform.cell_vol.len());
+        assert_mesh_invariants(&graded, 2.0, 1.5);
+    }
+
+    #[test]
+    fn one_sided_grading_hits_requested_ratio() {
+        let n = 16;
+        let ratio = 4.0;
+        let coords = graded_axis_coords(n, 1.0, AxisGrading::OneSided { ratio });
+        assert_eq!(coords.len(), n + 1);
+        assert_eq!(coords[0], 0.0);
+        assert_eq!(coords[n], 1.0);
+        let h_first = coords[1] - coords[0];
+        let h_last = coords[n] - coords[n - 1];
+        assert!(
+            (h_last / h_first - ratio).abs() < 1e-9,
+            "last/first = {} vs requested {ratio}",
+            h_last / h_first
+        );
+        for w in coords.windows(2) {
+            assert!(w[1] > w[0], "coords must be strictly increasing");
+        }
+    }
+
+    #[test]
+    fn two_sided_grading_is_symmetric_wall_refined() {
+        let n = 32;
+        let ratio = 8.0;
+        let coords = graded_axis_coords(n, 1.0, AxisGrading::TwoSided { ratio });
+        assert_eq!(coords[0], 0.0);
+        assert_eq!(coords[n], 1.0);
+        assert_eq!(coords[n / 2], 0.5);
+        for i in 0..=n {
+            assert!(
+                (coords[i] - (1.0 - coords[n - i])).abs() < 1e-15,
+                "two-sided coords must be mirror-symmetric at i={i}"
+            );
+        }
+        let h_wall = coords[1] - coords[0];
+        let h_center = coords[n / 2] - coords[n / 2 - 1];
+        assert!(
+            (h_center / h_wall - ratio).abs() < 1e-9,
+            "center/wall = {} vs requested {ratio}",
+            h_center / h_wall
+        );
+
+        let mesh = generate_graded_rect_mesh(
+            n,
+            n,
+            1.0,
+            1.0,
+            AxisGrading::TwoSided { ratio },
+            AxisGrading::TwoSided { ratio },
+            BoundarySides::wall(),
+        );
+        assert_eq!(mesh.cell_vol.len(), n * n);
+        assert_mesh_invariants(&mesh, 1.0, 1.0);
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum CellEdge {
     Left,

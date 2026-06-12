@@ -128,11 +128,17 @@ pub struct ReferenceBands {
 
 pub fn reference_bands(case: &str) -> ReferenceBands {
     let (max_cell_u, max_cell_p) = match case {
-        // measured June 2026 with the dev2 transpose viscous term (the
-        // OpenFOAM UEqn form): u=0.0933, p=0.1105 — down from u=0.1486,
-        // p=0.2377 (−37%/−54%; the corner-singular mismatch was largely the
-        // missing transpose stress).
-        "incompressible_lid" => (0.11, 0.14),
+        // measured June 2026 against the STEADY reference (t=32,
+        // machine-converged pimpleFoam; the old t=1.6 snapshot was
+        // mid-transient — 10% of lid speed from the Ghia steady state):
+        // u=0.0713, p=0.0337. The transient-path differences were most of
+        // the old p mismatch (0.1105 → 0.0337); the residual is
+        // corner-localized (corner-excl r=4: max 0.0068, rel_l2 0.0015).
+        // History: u=0.1486/p=0.2377 (laplacian-only viscous, transient
+        // ref) → 0.0933/0.1105 (dev2, transient ref) → 0.0713/0.0337
+        // (dev2, steady ref). Absolute accuracy vs literature is anchored
+        // separately by tests/ghia_lid_cavity_test.rs.
+        "incompressible_lid" => (0.085, 0.045),
         // measured June 2026 (dev2): u=0.0800, p=0.1154 (u +1.6% vs the
         // laplacian-only form's 0.0788 — explicitly accepted growth, see the
         // ViscousStressForm decision record; p −10%). Errors concentrate at

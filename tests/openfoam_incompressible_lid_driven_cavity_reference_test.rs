@@ -10,11 +10,19 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 
 /// Test incompressible lid-driven cavity against OpenFOAM reference.
 ///
-/// # Mismatch classification (June 2026, measured — re-classified after dev2)
-/// Original decomposition (pre-dev2, max-cell u 0.149): corner-radiated sum
-/// of formulation differences vs pimpleFoam (PISO mode). Updated June 12
-/// after the dev2 transpose term shipped (max-cell u 0.0933 at the default
-/// alpha_u = 0.7):
+/// # Reference provenance (June 2026): STEADY end state
+/// The reference CSV is the machine-converged steady state (t = 32, final
+/// pimpleFoam initial residuals ~5e-12). The original t = 1.6 snapshot was
+/// MID-TRANSIENT — 10% of lid speed from the Ghia steady state with the
+/// primary vortex still descending — so the old comparison anchored a
+/// transient path, not physics; regenerating it at steady state dropped
+/// the p mismatch 3.3x with no solver change. Absolute accuracy vs
+/// literature is anchored separately by tests/ghia_lid_cavity_test.rs.
+///
+/// # Mismatch classification (June 2026, measured)
+/// History of the max-cell u metric: 0.149 (laplacian-only viscous,
+/// transient ref) → 0.0933 (dev2 shipped, transient ref) → 0.0713
+/// (dev2, STEADY ref; p 0.0337). Findings along the way, all measured:
 ///
 /// - Time scheme (Euler reference vs BDF2 here): REFUTED — switching this
 ///   test to Euler moves max-cell u by 3.5e-5; the t=1.6 field is nearly
@@ -27,22 +35,24 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 ///   probe below now measures the reference-field quantity for context
 ///   only (the term is in the solver).
 /// - Rhie-Chow coupling coefficient (cfd2: uniform d_p ∝ alpha_u dt/rho;
-///   OpenFOAM: rAU = 1/a_P, UNRELAXED in PISO mode): still the DOMINANT
-///   remaining lever, and under dev2 it no longer flattens — max-cell u is
-///   0.0933 / 0.0490 (p 0.1105 / 0.0559) at CFD2_LID_ALPHA_U = 0.7 / 1.0
-///   (pre-dev2 the same sweep flattened near ~0.13). Since the reference
-///   PISO loop is unrelaxed, alpha_u = 1.0 is arguably the faithful
-///   comparison; re-configuring this test (with stability scrutiny) is the
-///   recorded candidate for the next incompressible-accuracy arc.
+///   OpenFOAM: rAU = 1/a_P): the alpha_u sensitivity REVERSED when the
+///   reference went steady. Vs the TRANSIENT t=1.6 snapshot, alpha 1.0
+///   halved the mismatch (0.0933 → 0.0490) and looked like the "faithful
+///   unrelaxed-PISO comparison"; vs the STEADY reference it nearly doubles
+///   it (0.0713 → 0.1305, p 0.0337 → 0.0836). The transient-era gain was
+///   an artifact of matching OpenFOAM's transient path, not physics —
+///   the "re-configure the test at alpha 1.0" candidate is REFUTED.
+///   Default alpha 0.7 stays.
 /// - SIMPLEC spatial d_p (FromAssembledRowSum): RE-REFUTED under dev2
 ///   (Arc S, June 12): lid u +27% (band fail) while channel improves 62% —
 ///   the boundary-shrunk d_p intrinsically hurts wall-bounded
 ///   recirculation. Permanently default-off; see the decision record at
 ///   the model's derive call.
 ///
-/// Error structure under dev2 (alpha 0.7): still corner-radiated — max-cell
-/// 0.0933 all-cells vs corner-exclusion r=1..4 max 0.104/0.044/0.022/0.019,
-/// smooth-field rel_l2 0.0097/0.0064/0.0047/0.0041 (3x below pre-dev2).
+/// Error structure vs the STEADY reference (alpha 0.7): corner-localized —
+/// max-cell u 0.0713 all-cells vs corner-exclusion r=1..4 max
+/// 0.065/0.027/0.013/0.0068, smooth-field rel_l2 0.0057/0.0027/0.0018/
+/// 0.0015 — the two codes agree to ~0.15% away from the singular corners.
 /// The band stays at the measured all-cells value; the corner-exclusion
 /// diag lines report the smooth-field agreement.
 ///
@@ -79,11 +89,10 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
         incompressible_momentum_model().expect("model"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
-            // BDF2 vs the reference's Euler ddt is immaterial here: probed
-            // June 2026, switching to Euler moves max-cell u by 3.5e-5
-            // (0.148580 -> 0.148615) and p by 0.5% relative -- both
-            // schemes' temporal error is far below the corner-driven
-            // mismatch, and the t=1.6 field is nearly steady.
+            // The reference is the machine-steady end state (t = 32, final
+            // pimpleFoam initial residuals ~5e-12), so the transient path —
+            // time scheme, dt, outer iterations — drops out of the
+            // comparison entirely; both codes compare converged states.
             time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Coupled,
@@ -93,7 +102,9 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     ))
     .expect("solver init");
 
-    solver.set_dt(0.02);
+    // Steady marching: dt/outer chosen for wall time, not transient
+    // fidelity (see the SolverConfig note).
+    solver.set_dt(0.05);
     solver.set_dtau(0.0).unwrap();
     solver.set_density(1.0).unwrap();
     solver.set_viscosity(0.01).unwrap();
@@ -101,26 +112,51 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     solver
         .set_boundary_vec2(GpuBoundaryType::MovingWall, "U", [1.0, 0.0])
         .unwrap();
-    // d_p sensitivity probe knob (diagnostic only; default matches the
-    // reference relaxation): d_p = alpha_u*dt/rho scales linearly with
-    // alpha_u. Measured max-cell u: 0.209 @ 0.35, 0.149 @ 0.7, 0.134 @ 1.0
-    // — see the classification comment at the top.
+    // d_p sensitivity probe knob (diagnostic only). Vs the STEADY
+    // reference: max-cell u 0.0713 @ 0.7 (default), 0.1305 @ 1.0 — see the
+    // classification comment at the top for the sensitivity reversal.
     let alpha_u_probe: f32 = std::env::var("CFD2_LID_ALPHA_U")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.7);
     solver.set_alpha_u(alpha_u_probe).unwrap();
     solver.set_alpha_p(0.3).unwrap();
-    solver.set_outer_iters(50).unwrap();
+    solver.set_outer_iters(5).unwrap();
     solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();
 
-    for _ in 0..80 {
-        solver.step();
+    // March to steady state: stop when the per-step max velocity delta
+    // drops below tolerance (lid speed = 1).
+    const CHECK_EVERY: usize = 25;
+    const STEADY_TOL: f64 = 1e-7;
+    const MAX_STEPS: usize = 3000;
+    let mut prev = pollster::block_on(solver.get_u());
+    let mut steps = 0usize;
+    loop {
+        for _ in 0..CHECK_EVERY {
+            solver.step();
+        }
+        steps += CHECK_EVERY;
+        let cur = pollster::block_on(solver.get_u());
+        let delta = cur
+            .iter()
+            .zip(&prev)
+            .map(|(a, b)| (a.0 - b.0).abs().max((a.1 - b.1).abs()))
+            .fold(0.0f64, f64::max)
+            / CHECK_EVERY as f64;
+        prev = cur;
+        if delta < STEADY_TOL {
+            println!("[openfoam][incompressible_lid] steady after {steps} steps (per-step delta {delta:.2e})");
+            break;
+        }
+        assert!(
+            steps < MAX_STEPS,
+            "no steady state within {MAX_STEPS} steps (delta {delta:.2e})"
+        );
     }
 
-    let u = pollster::block_on(solver.get_u());
+    let u = prev;
     let p = pollster::block_on(solver.get_p());
 
     let table = common::load_csv(&common::data_path(

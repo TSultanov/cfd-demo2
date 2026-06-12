@@ -10,33 +10,41 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 
 /// Test incompressible lid-driven cavity against OpenFOAM reference.
 ///
-/// # Mismatch classification (June 2026, measured — no longer "unexplained")
-/// The ~14.9% max-cell u mismatch decomposes into quantified formulation
-/// differences vs pimpleFoam (PISO mode), all concentrated at / radiating
-/// from the two singular lid corners (max always in the corner-radiated
-/// region along the lid and right wall; smooth-field rel_l2 is ~1.2-1.9%):
+/// # Mismatch classification (June 2026, measured — re-classified after dev2)
+/// Original decomposition (pre-dev2, max-cell u 0.149): corner-radiated sum
+/// of formulation differences vs pimpleFoam (PISO mode). Updated June 12
+/// after the dev2 transpose term shipped (max-cell u 0.0933 at the default
+/// alpha_u = 0.7):
 ///
 /// - Time scheme (Euler reference vs BDF2 here): REFUTED — switching this
 ///   test to Euler moves max-cell u by 3.5e-5; the t=1.6 field is nearly
 ///   steady, so the mismatch is spatial.
-/// - Missing dev2 transpose stress (pimpleFoam assembles
-///   `div(nu dev2(T(grad U)))`, cfd2 does not): MINOR — host-computed on
-///   the reference field it is 2-6% of the local viscous term, co-located
-///   with the error maxima (see the diag probe below).
-/// - Rhie-Chow coupling coefficient (cfd2: uniform d_p = alpha_u dt/rho;
-///   OpenFOAM: spatially varying rAU = 1/a_P, unrelaxed in PISO mode):
-///   the DOMINANT measured lever — max-cell u is 0.209 / 0.149 / 0.134 at
-///   d_p = 0.007 / 0.014 / 0.020 (CFD2_LID_ALPHA_U = 0.35 / 0.7 / 1.0),
-///   with the curve flattening near ~0.13. The d_p-from-assembled-diagonal
-///   fix path is the plan's 3.2b (needs OpenFOAM-style relaxation
-///   placement; a naive version diverges — see the plan log).
+/// - dev2 transpose stress: RESOLVED — shipping
+///   `div(mu dev2(T(grad U)))` (Arc D, 6fe28e9) cut max-cell u 37% and
+///   p 54%. The pre-dev2 "MINOR, 2-6% of local viscous" probe estimate
+///   badly underpredicted the global effect: the error was corner-SOURCED,
+///   so term-local smallness did not bound the solution error. The diag
+///   probe below now measures the reference-field quantity for context
+///   only (the term is in the solver).
+/// - Rhie-Chow coupling coefficient (cfd2: uniform d_p ∝ alpha_u dt/rho;
+///   OpenFOAM: rAU = 1/a_P, UNRELAXED in PISO mode): still the DOMINANT
+///   remaining lever, and under dev2 it no longer flattens — max-cell u is
+///   0.0933 / 0.0490 (p 0.1105 / 0.0559) at CFD2_LID_ALPHA_U = 0.7 / 1.0
+///   (pre-dev2 the same sweep flattened near ~0.13). Since the reference
+///   PISO loop is unrelaxed, alpha_u = 1.0 is arguably the faithful
+///   comparison; re-configuring this test (with stability scrutiny) is the
+///   recorded candidate for the next incompressible-accuracy arc.
+/// - SIMPLEC spatial d_p (FromAssembledRowSum): RE-REFUTED under dev2
+///   (Arc S, June 12): lid u +27% (band fail) while channel improves 62% —
+///   the boundary-shrunk d_p intrinsically hurts wall-bounded
+///   recirculation. Permanently default-off; see the decision record at
+///   the model's derive call.
 ///
-/// Even at the favorable end of the d_p range ~13% max-cell remains: the
-/// corner-singular region is a sum of small formulation differences
-/// (dev2, upwind/RC details) that two codes cannot be expected to agree on
-/// cell-by-cell at O(1) gradients. The band stays at the measured
-/// all-cells value; the corner-exclusion diag lines report the smooth-field
-/// agreement.
+/// Error structure under dev2 (alpha 0.7): still corner-radiated — max-cell
+/// 0.0933 all-cells vs corner-exclusion r=1..4 max 0.104/0.044/0.022/0.019,
+/// smooth-field rel_l2 0.0097/0.0064/0.0047/0.0041 (3x below pre-dev2).
+/// The band stays at the measured all-cells value; the corner-exclusion
+/// diag lines report the smooth-field agreement.
 ///
 /// # Timeout
 /// This test requires extended timeout (~60-120s) due to GPU compute.

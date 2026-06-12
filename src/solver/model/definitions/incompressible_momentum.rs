@@ -217,11 +217,17 @@ fn incompressible_momentum_model_impl(with_mms_source: bool) -> Result<ModelSpec
     //   interior d_p stays at the proven closed-form scale; Dirichlet
     //   boundaries shrink it locally). All 5 MMS suites green; u/p errors
     //   strictly better per level on the momentum MMS. OpenFOAM measured
-    //   (June 11, 2026): channel u 0.079→0.047 / p 0.129→0.067, backstep
-    //   +3%, lid u 0.149→0.165 / p 0.238→0.268. The lid corner mismatch
-    //   WORSENS with rAU-style spatial d_p — the spatial-structure
-    //   hypothesis for the lid error is refuted; under the no-growth
-    //   policy SIMPLEC stays default-off. Flip this call to
+    //   TWICE, in both viscous-stress eras, same verdict:
+    //   - pre-dev2 (June 11): channel u 0.079→0.047 / p 0.129→0.067,
+    //     backstep +3%, lid u 0.149→0.165 (+11%).
+    //   - under dev2 (June 12, Arc S re-measurement): channel
+    //     u 0.080→0.031 / p 0.115→0.052 (−62%/−55%), backstep +4%,
+    //     lid u 0.093→0.118 / p 0.110→0.139 (+27%, band fail).
+    //   The lid penalty is INTRINSIC to the boundary-shrunk d_p on
+    //   wall-bounded recirculating flows — it persists (relatively worse)
+    //   after the transpose-stress fix removed most of the corner error,
+    //   so it is not a corner-singularity interaction. PERMANENTLY
+    //   default-off under the no-growth policy. Flip this call to
     //   derive_rhie_chow_with_dp(.., FromAssembledRowSum { theta: 0.5 })
     //   for inlet-dominated flows where the channel-like gains matter.
     let derived_rhie_chow =

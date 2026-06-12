@@ -872,7 +872,6 @@ fn measure_growth(
     };
     let p = pollster::block_on(run.solver.get_field_scalar("p")).expect("read p");
     let u = pollster::block_on(run.solver.get_field_vec2("u")).expect("read u");
-    let ux: Vec<f64> = u.iter().map(|v| v.0).collect();
 
     // Spatial localization of the (final) u error: fraction of the squared
     // error mass within 2 cells of the boundary.

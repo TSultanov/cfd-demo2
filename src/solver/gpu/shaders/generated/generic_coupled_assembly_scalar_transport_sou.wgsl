@@ -128,9 +128,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (dist_proj > 0.000001) {
             dist = dist_proj;
         }
+        let lam_f_center_v = vec2<f32>(f_center.x, f_center.y);
+        let lam_d_own = distance(vec2<f32>(center.x, center.y), lam_f_center_v);
+        let lam_d_neigh = distance(vec2<f32>(other_center.x, other_center.y), lam_f_center_v);
+        let lam_total = lam_d_own + lam_d_neigh;
+        var lambda_f: f32 = 0.5;
+        if (lam_total > 0.000001) {
+            lambda_f = lam_d_neigh / lam_total;
+        }
         let scalar_mat_idx = cell_face_matrix_indices[k];
         let neighbor_rank = scalar_mat_idx - scalar_offset;
-        let diff_coeff_T = select(1.0, (1.0 + 1.0) * 0.5, !is_boundary) * area / dist;
+        let diff_coeff_T = select(1.0, lambda_f + 1.0 - lambda_f, !is_boundary) * area / dist;
         if (!is_boundary) {
             diag_0 += diff_coeff_T;
             matrix_values[start_row_0 + neighbor_rank * 1u + 0u] -= diff_coeff_T;
@@ -140,7 +148,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 rhs_0 += diff_coeff_T * bc_value[face_idx * 1u + 0u];
             } else {
                 if (bc_kind[face_idx * 1u + 0u] == 2u) {
-                    rhs_0 += select(1.0, (1.0 + 1.0) * 0.5, !is_boundary) * area * bc_value[face_idx * 1u + 0u];
+                    rhs_0 += select(1.0, lambda_f + 1.0 - lambda_f, !is_boundary) * area * bc_value[face_idx * 1u + 0u];
                 }
             }
         }

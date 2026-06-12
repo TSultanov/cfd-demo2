@@ -575,6 +575,55 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             None,
         ));
 
+        // Distance-weighted face interpolation weight (owner weight =
+        // d_neigh / (d_own + d_neigh), the standard FV linear weight).
+        // Matches the derived Rhie-Chow flux kernel's Lerp convention —
+        // the assembly's face coefficients MUST interpolate identically to
+        // the flux module's face d_p or the pressure system loses
+        // consistency. On uniform meshes lambda = 0.5 (the previous
+        // arithmetic mean); on graded meshes the mean is only first-order.
+        // (Vector2 is the custom STRUCT; convert member-wise for distance().)
+        body.push(dsl::let_expr(
+            "lam_f_center_v",
+            dsl::vec2_f32(
+                Expr::ident("f_center").field("x"),
+                Expr::ident("f_center").field("y"),
+            ),
+        ));
+        body.push(dsl::let_expr(
+            "lam_d_own",
+            dsl::distance(
+                dsl::vec2_f32(
+                    Expr::ident("center").field("x"),
+                    Expr::ident("center").field("y"),
+                ),
+                Expr::ident("lam_f_center_v"),
+            ),
+        ));
+        body.push(dsl::let_expr(
+            "lam_d_neigh",
+            dsl::distance(
+                dsl::vec2_f32(
+                    Expr::ident("other_center").field("x"),
+                    Expr::ident("other_center").field("y"),
+                ),
+                Expr::ident("lam_f_center_v"),
+            ),
+        ));
+        body.push(dsl::let_expr(
+            "lam_total",
+            Expr::ident("lam_d_own") + Expr::ident("lam_d_neigh"),
+        ));
+        body.push(dsl::var_typed_expr("lambda_f", Type::F32, Some(0.5.into())));
+        body.push(dsl::if_block_expr(
+            Expr::ident("lam_total").gt(1e-6),
+            dsl::block(vec![dsl::assign_expr(
+                Expr::ident("lambda_f"),
+                Expr::ident("lam_d_neigh") / Expr::ident("lam_total"),
+            )]),
+            None,
+        ));
+
         body.push(dsl::let_expr(
             "scalar_mat_idx",
             dsl::array_access("cell_face_matrix_indices", Expr::ident("k")),
@@ -618,10 +667,11 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     coefficient_value_expr(slots, diff_op.coeff.as_ref(), "idx", 1.0.into());
                 let kappa_other =
                     coefficient_value_expr(slots, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
-                // Use arithmetic mean for interior faces; for boundaries use owner value.
+                // Distance-weighted for interior faces; owner value at boundaries.
                 let kappa = dsl::select(
                     kappa_own.clone(),
-                    (kappa_own + kappa_other) * 0.5,
+                    kappa_own * Expr::ident("lambda_f")
+                        + kappa_other * (Expr::from(1.0) - Expr::ident("lambda_f")),
                     !Expr::ident("is_boundary"),
                 );
 
@@ -792,7 +842,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     coefficient_value_expr(slots, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
                 let kappa_face = dsl::select(
                     kappa_own.clone(),
-                    (kappa_own.clone() + kappa_other) * 0.5,
+                    kappa_own.clone() * Expr::ident("lambda_f")
+                        + kappa_other * (Expr::from(1.0) - Expr::ident("lambda_f")),
                     !Expr::ident("is_boundary"),
                 );
 
@@ -1023,7 +1074,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     &mu_name,
                     dsl::select(
                         kappa_own.clone(),
-                        (kappa_own + kappa_other) * 0.5,
+                        kappa_own * Expr::ident("lambda_f")
+                            + kappa_other * (Expr::from(1.0) - Expr::ident("lambda_f")),
                         !Expr::ident("is_boundary"),
                     ),
                 ));

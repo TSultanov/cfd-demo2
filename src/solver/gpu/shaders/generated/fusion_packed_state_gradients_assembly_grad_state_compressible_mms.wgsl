@@ -352,6 +352,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (k1_dist_proj > 0.000001) {
             k1_dist = k1_dist_proj;
         }
+        let k1_lam_f_center_v = vec2<f32>(k1_f_center.x, k1_f_center.y);
+        let k1_lam_d_own = distance(vec2<f32>(k1_center.x, k1_center.y), k1_lam_f_center_v);
+        let k1_lam_d_neigh = distance(vec2<f32>(k1_other_center.x, k1_other_center.y), k1_lam_f_center_v);
+        let k1_lam_total = k1_lam_d_own + k1_lam_d_neigh;
+        var k1_lambda_f: f32 = 0.5;
+        if (k1_lam_total > 0.000001) {
+            k1_lambda_f = k1_lam_d_neigh / k1_lam_total;
+        }
         let k1_scalar_mat_idx = cell_face_matrix_indices[k1_k];
         let k1_neighbor_rank = k1_scalar_mat_idx - k1_scalar_offset;
         var k1_phi_0: f32 = fluxes[k1_face_idx * 8u + 0u];
@@ -359,7 +367,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             k1_phi_0 -= k1_phi_0 * 2.0;
         }
         k1_rhs_0 -= k1_phi_0;
-        let k1_diff_coeff_rho_u = select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !k1_is_boundary) * k1_area / k1_dist;
+        let k1_diff_coeff_rho_u = select(constants.viscosity, constants.viscosity * k1_lambda_f + constants.viscosity * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
         if (!k1_is_boundary) {
             matrix_values[k1_start_row_1 + k1_diag_rank * 8u + 4u] += k1_diff_coeff_rho_u;
             matrix_values[k1_start_row_1 + k1_neighbor_rank * 8u + 4u] -= k1_diff_coeff_rho_u;
@@ -373,7 +381,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     k1_rhs_1 += k1_diff_coeff_rho_u * bc_value[k1_face_idx * 8u + 4u];
                 } else {
                     if (bc_kind[k1_face_idx * 8u + 4u] == 2u) {
-                        k1_rhs_1 += select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 8u + 4u];
+                        k1_rhs_1 += select(constants.viscosity, constants.viscosity * k1_lambda_f + constants.viscosity * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 8u + 4u];
                     }
                 }
             }
@@ -391,7 +399,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     k1_rhs_2 += k1_diff_coeff_rho_u * bc_value[k1_face_idx * 8u + 5u];
                 } else {
                     if (bc_kind[k1_face_idx * 8u + 5u] == 2u) {
-                        k1_rhs_2 += select(constants.viscosity, (constants.viscosity + constants.viscosity) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 8u + 5u];
+                        k1_rhs_2 += select(constants.viscosity, constants.viscosity * k1_lambda_f + constants.viscosity * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 8u + 5u];
                     }
                 }
             }
@@ -406,7 +414,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             k1_phi_2 -= k1_phi_2 * 2.0;
         }
         k1_rhs_2 -= k1_phi_2;
-        let k1_diff_coeff_rho_e = select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, (constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71) * 0.5, !k1_is_boundary) * k1_area / k1_dist;
+        let k1_diff_coeff_rho_e = select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * k1_lambda_f + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
         if (!k1_is_boundary) {
             matrix_values[k1_start_row_3 + k1_diag_rank * 8u + 7u] += k1_diff_coeff_rho_e;
             matrix_values[k1_start_row_3 + k1_neighbor_rank * 8u + 7u] -= k1_diff_coeff_rho_e;
@@ -416,7 +424,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 k1_rhs_3 += k1_diff_coeff_rho_e * bc_value[k1_face_idx * 8u + 7u];
             } else {
                 if (bc_kind[k1_face_idx * 8u + 7u] == 2u) {
-                    k1_rhs_3 += select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, (constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71) * 0.5, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 8u + 7u];
+                    k1_rhs_3 += select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * k1_lambda_f + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 8u + 7u];
                 }
             }
         }

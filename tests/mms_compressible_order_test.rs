@@ -1023,6 +1023,68 @@ fn probe_inviscid_margin_matrix() {
     report("BDF2 o1 n48 dt=1e-2 (fast)", build_run(48, EXTRA_SHEAR, 0.0, 1.0e-2, TimeScheme::BDF2, 1), 1.0e-2, steps);
 }
 
+/// ARC K probe: order study of the UNPRECONDITIONED operator at mu = 0,
+/// for measuring candidate flux-dissipation designs against the success
+/// criterion (stable at mu = 0 AND orders ~2). Run with a candidate
+/// dissipation active in flux_schemes.rs.
+///
+/// ARC K VERDICT (June 12, 2026) — two candidate families probed and
+/// REFUTED; the timebox closed the arc:
+/// - Family 1, Rusanov symmetric wave-speed split (ap = a_max = -am,
+///   dissipation (|u|+c)/2 instead of the signed KT ~(1-M^2)c/2, ~2x at
+///   M=0.5): growth moved only 103.5->98.3 / 115.9->109.9 %/tu. Jump-
+///   proportional dissipation vanishes at O(h^3) on smooth reconstructed
+///   fields and cannot reach the smooth thermo-mode AT ANY coefficient
+///   scale. (Side finding: it does rescue the PRECONDITIONED rows from
+///   catastrophic blow-up, rho 9e10 -> bounded, and stabilizes the
+///   dt=1e-2 row — relevant if preconditioning is ever revisited.)
+/// - Family 2, raw-cell-jump dissipation on the rho/rhoE rows
+///   (mu_art ~ k2*c*h, non-vanishing on smooth fields): clean monotone
+///   dose-response — n32 growth 103.5 (k2=0) -> 72.7 (0.05) -> 34.4 (0.2)
+///   -> 5.6 (0.4) %/tu — the mode IS reachable by smooth-field
+///   dissipation. But the joint criterion fails: at k2=0.4 this probe
+///   measured orders rho 0.458 / u 0.235 / p 0.709 / T 0.673 (the O(h)
+///   dissipation error dominates), errors RISE with k2 at fixed n, and a
+///   pressure checkerboard emerges (nyq(p) 0.136 on the Euler n48 row).
+///   There is no sweet spot: full stabilization needs k2 >~ 0.5 and
+///   order 2 dies well before k2 = 0.4.
+/// Conclusion: face-local dissipation design cannot deliver "stable at
+/// mu=0 with orders ~2"; the gap between the O(h^3) jump dissipation and
+/// the O(h) damping the mode needs is structural. A real fix must change
+/// the structure of the inv_dt-scaled EOS-recovery coupling (e.g.
+/// entropy-consistent coupling rows) — backlog, own plan. The stability
+/// envelope contract in compressible.rs stands.
+#[test]
+#[ignore]
+fn probe_arck_mu0_order() {
+    let dt = 5.0e-3;
+    let mut hs = Vec::new();
+    let mut rho_errs = Vec::new();
+    let mut u_errs = Vec::new();
+    let mut p_errs = Vec::new();
+    let mut t_errs = Vec::new();
+    for &n in &[16usize, 24, 32, 48] {
+        let mut run = build_run(n, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1);
+        march_to_plateau(&mut run.solver);
+        let (rho_err, u_err, p_err, t_err) = read_errors(&run);
+        println!("[arck-mu0] n={n} rho_l2={rho_err:.4e} u_l2={u_err:.4e} p_l2={p_err:.4e} t_l2={t_err:.4e}");
+        hs.push(1.0 / n as f64);
+        rho_errs.push(rho_err);
+        u_errs.push(u_err);
+        p_errs.push(p_err);
+        t_errs.push(t_err);
+    }
+    for (name, errs) in [
+        ("rho", &rho_errs),
+        ("u", &u_errs),
+        ("p", &p_errs),
+        ("T", &t_errs),
+    ] {
+        let o = ((errs[0] / errs[errs.len() - 1]).ln()) / ((hs[0] / hs[hs.len() - 1]).ln());
+        println!("[arck-mu0] {name} order(first-last) = {o:.3}");
+    }
+}
+
 /// Order study of the PRECONDITIONED inviscid operator: mu = 0 with
 /// dual-time WeissSmith preconditioning. MEASURED June 12, 2026: BLOWS UP
 /// (rho/p -> 1e10..1e12 by n=24; u stays bounded through the rho_u/rho

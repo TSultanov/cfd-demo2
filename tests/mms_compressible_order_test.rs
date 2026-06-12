@@ -127,9 +127,30 @@ fn exact_rho(x: f64, y: f64) -> f64 {
     RHO0 * (1.0 + RHOA * (PI * x + PHX).sin() * (PI * y + PHY).sin())
 }
 
+/// ARC N: strain-free manufactured-field family toggle (uniform velocity
+/// (U0, V0); rho/p waves advect through it). The default (strained) family's
+/// base flow is inviscidly UNSTABLE as physics — O(1) strain with
+/// inflection-point shear; measured growth is linear in the velocity
+/// amplitude (116/76/56.6 %/tu at amp 1/0.5/0.25 on the converged-Picard
+/// rows, h-independent) and matches the strain-rate scale. The uniform
+/// family has zero velocity gradients (no production mechanism), so a
+/// faithful discretization must march it stably at mu = 0: the diagnosis's
+/// falsifiable counterpart, exercised by `probe_arcn_uniform_mu0`.
+/// NOTE: uniform flow exits through the right/top faces — runs must use
+/// left/bottom Inlet + right/top Outlet sides, not the all-Inlet box.
+static UNIFORM_FLOW_FAMILY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn uniform_family() -> bool {
+    UNIFORM_FLOW_FAMILY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Inflow on all four unit-box boundaries: u_x(0,·)=U0>0, u_x(1,·)=-U0,
 /// u_y(·,0)=V0>0, u_y(·,1)=-V0 (the UA/UB terms vanish on the boundary).
 fn exact_u(x: f64, y: f64) -> (f64, f64) {
+    if uniform_family() {
+        return (U0, V0);
+    }
     (
         U0 * (PI * x).cos() + UA * (PI * x).sin() * (PI * y).sin(),
         V0 * (PI * y).cos() + UB * (PI * x).sin() * (PI * y).sin(),
@@ -172,6 +193,9 @@ fn rho_partials(x: f64, y: f64) -> (f64, f64, f64, f64, f64) {
 
 /// (u, u_x, u_y, u_xx, u_yy, u_xy)
 fn u_partials(x: f64, y: f64) -> (f64, f64, f64, f64, f64, f64) {
+    if uniform_family() {
+        return (U0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    }
     let (sx, cx) = (PI * x).sin_cos();
     let (sy, cy) = (PI * y).sin_cos();
     (
@@ -186,6 +210,9 @@ fn u_partials(x: f64, y: f64) -> (f64, f64, f64, f64, f64, f64) {
 
 /// (v, v_x, v_y, v_xx, v_yy, v_xy)
 fn v_partials(x: f64, y: f64) -> (f64, f64, f64, f64, f64, f64) {
+    if uniform_family() {
+        return (V0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    }
     let (sx, cx) = (PI * x).sin_cos();
     let (sy, cy) = (PI * y).sin_cos();
     (
@@ -464,7 +491,7 @@ fn build_run(
     time_scheme: TimeScheme,
     outer_iters: usize,
 ) -> SteadyRun {
-    let mesh = generate_structured_rect_mesh(
+    build_run_box(
         n,
         n,
         1.0,
@@ -475,7 +502,36 @@ fn build_run(
             bottom: BoundaryType::Inlet,
             top: BoundaryType::Inlet,
         },
-    );
+        extra,
+        mu,
+        dt,
+        time_scheme,
+        outer_iters,
+    )
+}
+
+/// Arc N generalization of `build_run`: arbitrary rectangular box and
+/// per-side boundary types. The manufactured fields/sources/BC closures
+/// are all evaluated at mesh coordinates, so any (lx, ly) works; when a
+/// side is Outlet, the model's outlet closure needs its per-face Dirichlet
+/// p, seeded from the exact solution like the inlet entries.
+#[allow(clippy::too_many_arguments)]
+fn build_run_box(
+    nx: usize,
+    ny: usize,
+    lx: f64,
+    ly: f64,
+    sides: BoundarySides,
+    extra: f64,
+    mu: f64,
+    dt: f64,
+    time_scheme: TimeScheme,
+    outer_iters: usize,
+) -> SteadyRun {
+    let has_outlet = [sides.left, sides.right, sides.bottom, sides.top]
+        .iter()
+        .any(|s| *s == BoundaryType::Outlet);
+    let mesh = generate_structured_rect_mesh(nx, ny, lx, ly, sides);
     let model = compressible_mms_model().expect("model");
     let eos = EosSpec::IdealGas {
         gamma: GAMMA,
@@ -511,7 +567,7 @@ fn build_run(
     solver.set_outer_iters(outer_iters).expect("outer_iters");
     solver.set_outer_tolerance(0.0).expect("outer_tol");
     solver.set_outer_tolerance_abs(0.0).expect("outer_tol_abs");
-    println!("[probe] config: n={n} mu={mu} dt={dt} outer_iters={outer_iters} (break pinned open)");
+    println!("[probe] config: nx={nx} ny={ny} lx={lx} ly={ly} mu={mu} dt={dt} outer_iters={outer_iters} (break pinned open)");
 
     // Per-face exact Dirichlet rho and u on the (all-Inlet) boundary; seed
     // the expression-valued entries (rho_u/rho_e/p/T) with exact face values
@@ -581,6 +637,18 @@ fn build_run(
             .set_boundary_values_per_face(GpuBoundaryType::Inlet, "rho_u", c as u32, &rho_u_face)
             .expect("rho_u bc");
     }
+    // Outlet sides (Arc N BC-flip rows): the model's outlet closure takes a
+    // per-face Dirichlet p; everything else extrapolates via bc_expr.
+    if has_outlet {
+        solver
+            .set_boundary_values_per_face(
+                GpuBoundaryType::Outlet,
+                "p",
+                0,
+                &scalar_face(&exact_p, &fx, &fy),
+            )
+            .expect("outlet p bc");
+    }
 
     // Manufactured sources at cell centers (per-volume PDE residuals).
     let cells = mesh.num_cells();
@@ -613,7 +681,7 @@ fn build_run(
         })
         .sum();
     let eps = (vol_int - bflux) / vol_total;
-    println!("[mms][compressible] n={n} mass-compatibility eps={eps:.3e}");
+    println!("[mms][compressible] nx={nx} mass-compatibility eps={eps:.3e}");
     for s in src_rho.iter_mut() {
         *s -= eps;
     }
@@ -864,8 +932,11 @@ fn measure_growth(
 
     // Grid-Nyquist (checkerboard) fraction of the de-meaned field:
     // |sum f' * (-1)^(i+j)| / (N * rms(f')).
-    let n = (run.mesh.num_cells() as f64).sqrt().round() as usize;
-    let h = 1.0 / n as f64;
+    // Domain extents derived from the mesh (Arc N: probes run on boxes
+    // other than the unit square); assumes uniform square cells.
+    let lx = run.mesh.vx.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let ly = run.mesh.vy.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let h = (lx * ly / run.mesh.num_cells() as f64).sqrt();
     let nyq = |f: &[f64]| -> f64 {
         let mean = f.iter().sum::<f64>() / f.len() as f64;
         let mut alt = 0.0;
@@ -893,7 +964,7 @@ fn measure_growth(
         let (uex, uey) = exact_u(x, y);
         let e2 = (u[c].0 - uex).powi(2) + (u[c].1 - uey).powi(2);
         e_tot += e2;
-        if x < band || x > 1.0 - band || y < band || y > 1.0 - band {
+        if x < band || x > lx - band || y < band || y > ly - band {
             e_band += e2;
         }
     }
@@ -1060,6 +1131,268 @@ fn probe_inviscid_margin_matrix() {
 
     // Fast branch (CFL ~ 1): the n=48/dt=0.01 outright divergence.
     report("BDF2 o1 n48 dt=1e-2 (fast)", build_run(48, EXTRA_SHEAR, 0.0, 1.0e-2, TimeScheme::BDF2, 1), 1.0e-2, steps);
+}
+
+/// ARC N verification: the strain-free (uniform-velocity) family at mu = 0.
+/// The physical-instability diagnosis predicts: with zero base-flow
+/// velocity gradients there is no production mechanism, so the same
+/// discretization that grows at ~116 %/tu on the strained family must
+/// march this family STABLY at mu = 0 — and converge at design order.
+///
+/// MEASURED (June 13, 2026): CONFOUNDED by the outlet closure, not a
+/// clean interior test — uniform flow must exit somewhere, the run needs
+/// right/top Outlets, and the Outlet-bearing MMS configuration has its
+/// own boundary-band instability/inconsistency (bfrac 0.93-1.00, n48
+/// blown, plateau errors 0.1-0.2 with orders ~0.35 — the SAME boundary
+/// problem the small-amplitude all-Inlet rows unmask at bfrac 0.90; see
+/// the domain-matrix verdict). The interior half of the diagnosis is
+/// instead confirmed by the amplitude-scaling law; THIS probe becomes the
+/// acceptance test for the boundary-closure fix family: it must turn
+/// stable (growth <= 0, orders ~2) when the closure is fixed — or when
+/// run on a periodic domain.
+#[test]
+#[ignore]
+fn probe_arcn_uniform_mu0() {
+    use std::sync::atomic::Ordering;
+    UNIFORM_FLOW_FAMILY.store(true, Ordering::Relaxed);
+    let dt = 5.0e-3;
+    let steps = 600;
+    let sides = BoundarySides {
+        left: BoundaryType::Inlet,
+        right: BoundaryType::Outlet,
+        bottom: BoundaryType::Inlet,
+        top: BoundaryType::Outlet,
+    };
+    println!(
+        "[arcn-uniform] {:34} {:>12} {:>8} {:>8} {:>9} {:>9}",
+        "config", "growth %/tu", "nyq(p)", "bfrac", "u_l2", "rho_l2"
+    );
+    let mut report = |label: &str, mut run: SteadyRun| {
+        let (rate, nyq_p, bfrac, u_l2, rho_l2) = measure_growth(&mut run, dt, steps, 25);
+        println!("[arcn-uniform] {label:34} {rate:12.2} {nyq_p:8.4} {bfrac:8.4} {u_l2:9.2e} {rho_l2:9.2e}");
+    };
+    report(
+        "uniform mu0 BDF2 o1 n32",
+        build_run_box(32, 32, 1.0, 1.0, sides, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1),
+    );
+    report(
+        "uniform mu0 BDF2 o1 n48",
+        build_run_box(48, 48, 1.0, 1.0, sides, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1),
+    );
+    report(
+        "uniform mu0 BDF2 o2 n48 (conv)",
+        build_run_box(48, 48, 1.0, 1.0, sides, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2),
+    );
+
+    // Order study at mu = 0: march to plateau, read errors, fit first-last.
+    let mut hs = Vec::new();
+    let mut errs: Vec<[f64; 4]> = Vec::new();
+    for &n in &[16usize, 24, 32] {
+        let mut run =
+            build_run_box(n, n, 1.0, 1.0, sides, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1);
+        march_to_plateau(&mut run.solver);
+        let (rho_err, u_err, p_err, t_err) = read_errors(&run);
+        println!("[arcn-uniform] n={n} rho_l2={rho_err:.4e} u_l2={u_err:.4e} p_l2={p_err:.4e} t_l2={t_err:.4e}");
+        hs.push(1.0 / n as f64);
+        errs.push([rho_err, u_err, p_err, t_err]);
+    }
+    for (k, name) in ["rho", "u", "p", "T"].iter().enumerate() {
+        let o = ((errs[0][k] / errs[errs.len() - 1][k]).ln())
+            / ((hs[0] / hs[hs.len() - 1]).ln());
+        println!("[arcn-uniform] {name} order(first-last) = {o:.3}");
+    }
+    UNIFORM_FLOW_FAMILY.store(false, Ordering::Relaxed);
+}
+
+/// ARC N S2+S3: boundary-vs-interior discriminators at MATCHED h.
+/// - [0,3]² all-Inlet (odd L keeps the unit box's all-inflow boundary
+///   structure: cos(3π) = −1, sin(3π) = 0): an interior-driven mode must
+///   reproduce the unit-box rate; boundary-driven growth scales down with
+///   the perimeter/area ratio (×1/3) or changes character.
+/// - [0,2]² left/bottom Inlet + right/top Outlet (genuine outflow there:
+///   u_x(2,y) = +U0): changes the boundary reflection structure entirely;
+///   a strongly different rate convicts the boundary closure.
+///
+/// MEASURED (June 13, 2026): L3 reproduces the unit-box rate at matched h
+/// (61.6 vs 60.6 at h=1/48; 83.8 vs 103.5 at h=1/32) — interior-driven at
+/// FULL amplitude. The in/out rows grow in the same band but with large
+/// boundary-band error levels (bfrac 0.58-0.66, levels 0.2-0.3): the
+/// Outlet-bearing MMS configuration has its own boundary problem (never
+/// previously validated — the MMS suite is all-Inlet).
+///
+/// AMPLITUDE-SCALING VERDICT (the arc's decisive measurement, run by
+/// scaling the manufactured-field consts in the working tree): on the
+/// converged-Picard rows, growth vs amplitude is
+///   velocity amps x1.0/0.5/0.25 (rho,p fixed):  116 / 76 / 56.6 %/tu
+///   (two-point linear fit 80*amp + 36 predicted 56 at 0.25 — confirmed)
+///   ALL amps x0.25:                              63.7 %/tu, bfrac 0.90
+/// Two superposed mechanisms:
+/// 1. INTERIOR, amplitude-LINEAR (dominates at full amplitude, bfrac
+///    0.09): the manufactured base flow itself — O(1) strain with
+///    inflection-point shear — is linearly UNSTABLE as inviscid PHYSICS
+///    (strain scale 0.8-1.3/tu matches the measured 1.04-1.16/tu;
+///    h-independent on the converged rows; immune to every numerics
+///    change probed across Arcs I/K/R/N; quenched by physical mu*k^2).
+///    NOT a discretization defect; do not try to "fix" it.
+/// 2. BOUNDARY-BAND, amplitude-independent ~60 %/tu at n48 (unmasked at
+///    small amplitude: bfrac flips 0.09 -> 0.90): a genuine DISCRETE
+///    boundary-closure instability — the remaining numerics target
+///    (characteristic/LODI inlet closure family; the periodic-domain
+///    instrument separates it cleanly if needed).
+#[test]
+#[ignore]
+fn probe_arcn_domain_matrix() {
+    let dt = 5.0e-3;
+    let steps = 600;
+    let all_inlet = BoundarySides {
+        left: BoundaryType::Inlet,
+        right: BoundaryType::Inlet,
+        bottom: BoundaryType::Inlet,
+        top: BoundaryType::Inlet,
+    };
+    let inlet_outlet = BoundarySides {
+        left: BoundaryType::Inlet,
+        right: BoundaryType::Outlet,
+        bottom: BoundaryType::Inlet,
+        top: BoundaryType::Outlet,
+    };
+    println!(
+        "[arcn-domain] {:34} {:>12} {:>8} {:>8} {:>9} {:>9}",
+        "config", "growth %/tu", "nyq(p)", "bfrac", "u_l2", "rho_l2"
+    );
+    let mut report = |label: &str, mut run: SteadyRun| {
+        let (rate, nyq_p, bfrac, u_l2, rho_l2) = measure_growth(&mut run, dt, steps, 25);
+        println!("[arcn-domain] {label:34} {rate:12.2} {nyq_p:8.4} {bfrac:8.4} {u_l2:9.2e} {rho_l2:9.2e}");
+    };
+    report(
+        "L1 allIn n32 (base)",
+        build_run_box(32, 32, 1.0, 1.0, all_inlet, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1),
+    );
+    report(
+        "L1 allIn n48 (base)",
+        build_run_box(48, 48, 1.0, 1.0, all_inlet, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1),
+    );
+    report(
+        "L3 allIn n96  (h=1/32)",
+        build_run_box(96, 96, 3.0, 3.0, all_inlet, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1),
+    );
+    report(
+        "L3 allIn n144 (h=1/48)",
+        build_run_box(144, 144, 3.0, 3.0, all_inlet, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1),
+    );
+    report(
+        "L2 in/out n64 (h=1/32)",
+        build_run_box(64, 64, 2.0, 2.0, inlet_outlet, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1),
+    );
+    report(
+        "L2 in/out n96 (h=1/48)",
+        build_run_box(96, 96, 2.0, 2.0, inlet_outlet, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1),
+    );
+}
+
+/// ARC N S1: eigenmode dump — capture the growing inviscid mode's spatial
+/// structure. Marches n=48 / mu=0 / BDF2 / o1, snapshots per-cell deltas
+/// vs the exact solution at steps 400 and 500, and writes CSV to
+/// target/arcn_probes/eigenmode_n48.csv with columns
+/// x,y,d1_<f>,d2_<f>,g_<f> for f in rho,ux,uy,p,T — where d1/d2 are the
+/// two snapshots' deltas and g = d2 - d1 is the GROWING-MODE component
+/// (the snapshot difference cancels the steady O(h^2) discretization
+/// error).
+///
+/// MODE CARD (measured June 12, 2026; n=48, mu=0, BDF2 o1, steps 400-500):
+/// - growth-component rms: rho 1.98e-2, ux 1.65e-2, uy 1.48e-2,
+///   p 2.43e-2, T 1.10e-2 — ALL fields participate; p is largest.
+/// - spectral content: 86-93% of energy at |freq| > 8 (NEAR GRID SCALE;
+///   peaks at (3,15), (21,-19) etc.) — the mode is HIGH-FREQUENCY, not
+///   the smooth k~11 object inferred earlier. THIRD METRIC TRAP: the
+///   nyquist-checkerboard fraction (strict alternating-sign measure) is
+///   blind to broadband high-k content; it read ~1e-4 while 90% of the
+///   mode energy sat above kh ~ 1.
+/// - corr(p, rho) = +0.978, rms p/rho = 1.23 (between isothermal 1.0 and
+///   acoustic c^2 = 1.4): an acoustic-LIKE correlated pattern, not an
+///   entropy mode. corr(p, T) = +0.64.
+/// - envelope: interior rms slightly ABOVE edge rms — interior-
+///   distributed, consistent with the bfrac findings.
+/// Mechanism candidate consistent with all of this: small-amplitude
+/// high-k perturbations riding a smooth background see near-central
+/// (psi ~ 1) limited reconstruction, whose linearized face jumps nearly
+/// cancel — the KNP jump dissipation has a near-null direction there,
+/// leaving non-dissipative central transport that the coupled system
+/// tips unstable. The k-content REOPENS k-selective (JST-style compact
+/// 4th-difference) dissipation as the fix family: O(h^3) on smooth
+/// fields (order-preserving) but O(amplitude) at grid scale — Arc K
+/// had excluded it under the (wrong) smooth-mode belief.
+#[test]
+#[ignore]
+fn probe_arcn_eigenmode_dump() {
+    let dt = 5.0e-3;
+    let n = 48;
+    let mut run = build_run(n, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1);
+
+    let read_deltas = |run: &SteadyRun| -> Vec<[f64; 5]> {
+        let u = pollster::block_on(run.solver.get_field_vec2("u")).expect("read u");
+        let rho = pollster::block_on(run.solver.get_field_scalar("rho")).expect("read rho");
+        let p = pollster::block_on(run.solver.get_field_scalar("p")).expect("read p");
+        let t = pollster::block_on(run.solver.get_field_scalar("T")).expect("read T");
+        (0..run.mesh.num_cells())
+            .map(|i| {
+                let (x, y) = (run.mesh.cell_cx[i], run.mesh.cell_cy[i]);
+                let (eux, euy) = exact_u(x, y);
+                [
+                    rho[i] - exact_rho(x, y),
+                    u[i].0 - eux,
+                    u[i].1 - euy,
+                    p[i] - exact_p(x, y),
+                    t[i] - exact_t(x, y),
+                ]
+            })
+            .collect()
+    };
+
+    for _ in 0..400 {
+        run.solver.step();
+    }
+    let d1 = read_deltas(&run);
+    for _ in 0..100 {
+        run.solver.step();
+    }
+    let d2 = read_deltas(&run);
+
+    std::fs::create_dir_all("target/arcn_probes").expect("mkdir");
+    let mut csv = String::from("x,y,d1_rho,d1_ux,d1_uy,d1_p,d1_T,d2_rho,d2_ux,d2_uy,d2_p,d2_T,g_rho,g_ux,g_uy,g_p,g_T\n");
+    for i in 0..run.mesh.num_cells() {
+        let (x, y) = (run.mesh.cell_cx[i], run.mesh.cell_cy[i]);
+        csv.push_str(&format!("{x},{y}"));
+        for v in &d1[i] {
+            csv.push_str(&format!(",{v:.6e}"));
+        }
+        for v in &d2[i] {
+            csv.push_str(&format!(",{v:.6e}"));
+        }
+        for k in 0..5 {
+            csv.push_str(&format!(",{:.6e}", d2[i][k] - d1[i][k]));
+        }
+        csv.push('\n');
+    }
+    std::fs::write("target/arcn_probes/eigenmode_n48.csv", csv).expect("write csv");
+
+    // Quick in-test summary: RMS of the growth component per field.
+    let mut rms = [0.0f64; 5];
+    for i in 0..d1.len() {
+        for k in 0..5 {
+            let g = d2[i][k] - d1[i][k];
+            rms[k] += g * g;
+        }
+    }
+    let nn = d1.len() as f64;
+    println!(
+        "[arcn-mode] growth-component rms: rho={:.3e} ux={:.3e} uy={:.3e} p={:.3e} T={:.3e}",
+        (rms[0] / nn).sqrt(),
+        (rms[1] / nn).sqrt(),
+        (rms[2] / nn).sqrt(),
+        (rms[3] / nn).sqrt(),
+        (rms[4] / nn).sqrt()
+    );
 }
 
 /// ARC R diagnostic: does the outer Picard loop actually refresh the KT

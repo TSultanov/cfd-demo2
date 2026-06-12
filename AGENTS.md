@@ -35,15 +35,16 @@ For every **major** changeset, run the OpenFOAM reference suite both **before** 
 
 Runtime note / skip policy:
 
-- The full suite takes ~10 minutes wall clock (the incompressible backstep
-  and channel are the long poles at ~3.5 minutes each).
-  RESOLVED (June 2026, inexact-Picard arc): the cost was host-side encoding of
-  linear-solve iterations far past outer-loop usefulness. The reachable
-  relative tolerance (1e-4, `ModelLinearSolverSettings::default`) plus the
-  adaptive encoding budget halved backstep/channel (485→207s, 447→214s) and
-  cut compressible cases 3–4×; the lid dropped again (319→144s) when its
-  reference went steady-state and the test switched to steady marching.
-  `CFD2_LIN_TOL` overrides the tolerance for sweeps/diagnostics.
+- The full suite takes ~8 minutes wall clock (the incompressible lid ~4 min
+  and backstep ~3 min are the long poles; the channel converges from rest
+  in ~20 s). The incompressible references are machine-converged STEADY
+  states (audited June 2026; the old lid/backstep snapshots were
+  mid-transient) and their tests march to steady at the canonical
+  configuration dt=0.02/alpha_u=0.7 — dt is NOT a free knob (d_p ∝
+  alpha_u·dt is part of the spatial discretization). The compressible
+  references are matched-time transients by construction (provenance
+  notes in the test headers). `CFD2_LIN_TOL` overrides the linear
+  tolerance for sweeps/diagnostics.
 - For changesets that are **provably numerics-neutral** — generated WGSL
   byte-identical (zero diffs under `shaders/generated/`, clean
   `check_generated_wgsl.sh`) AND no runtime/host solver-path changes — the

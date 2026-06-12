@@ -60,8 +60,18 @@ const R_GAS: f64 = 1.0;
 /// The assembly lowers the declared `laplacian(kappa, T)` coefficient to
 /// `mu * gamma * R / (gamma - 1) / 0.71` (= mu cp / Pr with Pr = 0.71).
 const PRANDTL: f64 = 0.71;
+/// Viscosity of the Navier-Stokes study (Re ~ 8). Conduction k = mu cp / Pr
+/// tracks mu in the sources for both studies.
 const MU: f64 = 0.05;
-const K_COND: f64 = MU * GAMMA * R_GAS / (GAMMA - 1.0) / PRANDTL;
+/// Euler-dominated study: smallest STABLE viscous floor (Re ~ 112; the
+/// convective error dominates the budget ~6x). Probed June 2026: mu = 0
+/// diverges at n=48/dt=0.01 and grows secularly at every dt; the growth
+/// rate rises with n and is bounded only by physical damping (see the
+/// inviscid-margin instability record in the test docs below).
+const MU_EULER: f64 = 5.0e-3;
+/// CFL ~ 0.5 at n=32 for the Euler study (the n=48/dt=0.01 blow-up is the
+/// fast branch of the inviscid-margin instability).
+const DT_EULER: f64 = 0.005;
 
 /// 0.0 = sources for physical NS (the operator since the tauMC fix).
 /// 1.0 = sources for the pre-fix doubled-shear operator (full-stress tauMC
@@ -217,7 +227,9 @@ fn source_rho(x: f64, y: f64) -> f64 {
 }
 
 /// S_rho_u = div(rho u x u) + grad p - div(tau_full) - extra * mu lap(u).
-fn source_rho_u(x: f64, y: f64, extra: f64) -> (f64, f64) {
+/// `mu` parameterizes the viscosity so the Euler-dominated study (mu = 0)
+/// shares the derivation; the viscous study passes the canonical `MU`.
+fn source_rho_u(x: f64, y: f64, extra: f64, mu: f64) -> (f64, f64) {
     let (rho, rho_x, rho_y, _, _) = rho_partials(x, y);
     let (u, ux, uy, uxx, uyy, uxy) = u_partials(x, y);
     let (v, vx, vy, vxx, vyy, vxy) = v_partials(x, y);
@@ -229,19 +241,21 @@ fn source_rho_u(x: f64, y: f64, extra: f64) -> (f64, f64) {
     // tau_full = mu (grad u + grad u^T - 2/3 I div u)
     let div_x = uxx + vxy; // d/dx (div u)
     let div_y = uxy + vyy; // d/dy (div u)
-    let div_tau_x = MU * (2.0 * uxx - (2.0 / 3.0) * div_x + uyy + vxy);
-    let div_tau_y = MU * (uxy + vxx + 2.0 * vyy - (2.0 / 3.0) * div_y);
+    let div_tau_x = mu * (2.0 * uxx - (2.0 / 3.0) * div_x + uyy + vxy);
+    let div_tau_y = mu * (uxy + vxx + 2.0 * vyy - (2.0 / 3.0) * div_y);
 
     (
-        conv_x - div_tau_x - extra * MU * (uxx + uyy),
-        conv_y - div_tau_y - extra * MU * (vxx + vyy),
+        conv_x - div_tau_x - extra * mu * (uxx + uyy),
+        conv_y - div_tau_y - extra * mu * (vxx + vyy),
     )
 }
 
 /// S_rho_e = div((rho_e + p) u) - div(W) - k lap(T), where the work flux is
 /// W = tau_full . u + extra * (mu/2) grad(|u|^2) (the as-coded sigmaDotU
 /// traction is `mu (grad u) n + tau_full n`).
-fn source_rho_e(x: f64, y: f64, extra: f64) -> f64 {
+fn source_rho_e(x: f64, y: f64, extra: f64, mu: f64) -> f64 {
+    // Conduction tracks the viscosity (kappa = mu cp / Pr in the assembly).
+    let k_cond = mu * GAMMA * R_GAS / (GAMMA - 1.0) / PRANDTL;
     let (rho, rho_x, rho_y, rho_xx, rho_yy) = rho_partials(x, y);
     let (u, ux, uy, uxx, uyy, uxy) = u_partials(x, y);
     let (v, vx, vy, vxx, vyy, vxy) = v_partials(x, y);
@@ -256,15 +270,15 @@ fn source_rho_e(x: f64, y: f64, extra: f64) -> f64 {
 
     // Viscous work divergence.
     let div_u = ux + vy;
-    let tau_xx = MU * (2.0 * ux - (2.0 / 3.0) * div_u);
-    let tau_yy = MU * (2.0 * vy - (2.0 / 3.0) * div_u);
-    let tau_xy = MU * (uy + vx);
+    let tau_xx = mu * (2.0 * ux - (2.0 / 3.0) * div_u);
+    let tau_yy = mu * (2.0 * vy - (2.0 / 3.0) * div_u);
+    let tau_xy = mu * (uy + vx);
     let div_x = uxx + vxy;
     let div_y = uxy + vyy;
-    let tau_xx_x = MU * (2.0 * uxx - (2.0 / 3.0) * div_x);
-    let tau_xy_x = MU * (uxy + vxx);
-    let tau_xy_y = MU * (uyy + vxy);
-    let tau_yy_y = MU * (2.0 * vyy - (2.0 / 3.0) * div_y);
+    let tau_xx_x = mu * (2.0 * uxx - (2.0 / 3.0) * div_x);
+    let tau_xy_x = mu * (uxy + vxx);
+    let tau_xy_y = mu * (uyy + vxy);
+    let tau_yy_y = mu * (2.0 * vyy - (2.0 / 3.0) * div_y);
     let q2_xx = 2.0 * (ux * ux + u * uxx + vx * vx + v * vxx);
     let q2_yy = 2.0 * (uy * uy + u * uyy + vy * vy + v * vyy);
     let div_w = tau_xx_x * u + tau_xx * ux + tau_xy_x * v + tau_xy * vx
@@ -272,7 +286,7 @@ fn source_rho_e(x: f64, y: f64, extra: f64) -> f64 {
         + tau_xy * uy
         + tau_yy_y * v
         + tau_yy * vy
-        + extra * 0.5 * MU * (q2_xx + q2_yy);
+        + extra * 0.5 * mu * (q2_xx + q2_yy);
 
     // Conduction: k lap(T), T = p/(R rho).
     let w = 1.0 / rho;
@@ -283,7 +297,7 @@ fn source_rho_e(x: f64, y: f64, extra: f64) -> f64 {
     let t_xx = (pxx * w + 2.0 * px * wx + p * wxx) / R_GAS;
     let t_yy = (pyy * w + 2.0 * py * wy + p * wyy) / R_GAS;
 
-    conv - div_w - K_COND * (t_xx + t_yy)
+    conv - div_w - k_cond * (t_xx + t_yy)
 }
 
 // ---------------------------------------------------------------------------
@@ -311,13 +325,13 @@ fn analytic_sources_match_finite_differences() {
     let dudy = move |x: f64, y: f64| d4y(&ux_f, x, y, h);
     let dvdx = move |x: f64, y: f64| d4x(&uy_f, x, y, h);
     let dvdy = move |x: f64, y: f64| d4y(&uy_f, x, y, h);
-    let tau = move |x: f64, y: f64| {
+    let tau = move |x: f64, y: f64, mu: f64| {
         let (ux, uy, vx, vy) = (dudx(x, y), dudy(x, y), dvdx(x, y), dvdy(x, y));
         let div = ux + vy;
         (
-            MU * (2.0 * ux - (2.0 / 3.0) * div),
-            MU * (uy + vx),
-            MU * (2.0 * vy - (2.0 / 3.0) * div),
+            mu * (2.0 * ux - (2.0 / 3.0) * div),
+            mu * (uy + vx),
+            mu * (2.0 * vy - (2.0 / 3.0) * div),
         )
     };
     let t_f = |x: f64, y: f64| exact_t(x, y);
@@ -327,7 +341,8 @@ fn analytic_sources_match_finite_differences() {
         for j in 1..=5 {
             let x = 0.1 + 0.16 * i as f64;
             let y = 0.08 + 0.16 * j as f64;
-            for &extra in &[0.0, 1.0] {
+            for &(extra, mu) in &[(0.0, MU), (1.0, MU), (0.0, 0.0)] {
+                let k_cond = mu * GAMMA * R_GAS / (GAMMA - 1.0) / PRANDTL;
                 // Continuity.
                 let f1 = |x: f64, y: f64| exact_rho(x, y) * exact_u(x, y).0;
                 let f2 = |x: f64, y: f64| exact_rho(x, y) * exact_u(x, y).1;
@@ -338,30 +353,30 @@ fn analytic_sources_match_finite_differences() {
                 let gx = move |x: f64, y: f64| {
                     let r = exact_rho(x, y);
                     let (u, _v) = exact_u(x, y);
-                    let (txx, _txy, _tyy) = tau(x, y);
-                    r * u * u + exact_p(x, y) - txx - extra * MU * dudx(x, y)
+                    let (txx, _txy, _tyy) = tau(x, y, mu);
+                    r * u * u + exact_p(x, y) - txx - extra * mu * dudx(x, y)
                 };
                 let gy = move |x: f64, y: f64| {
                     let r = exact_rho(x, y);
                     let (u, v) = exact_u(x, y);
-                    let (_txx, txy, _tyy) = tau(x, y);
-                    r * u * v - txy - extra * MU * dudy(x, y)
+                    let (_txx, txy, _tyy) = tau(x, y, mu);
+                    r * u * v - txy - extra * mu * dudy(x, y)
                 };
                 let fd_mx = d4x(&gx, x, y, h) + d4y(&gy, x, y, h);
                 let hx_ = move |x: f64, y: f64| {
                     let r = exact_rho(x, y);
                     let (u, v) = exact_u(x, y);
-                    let (_txx, txy, _tyy) = tau(x, y);
-                    r * u * v - txy - extra * MU * dvdx(x, y)
+                    let (_txx, txy, _tyy) = tau(x, y, mu);
+                    r * u * v - txy - extra * mu * dvdx(x, y)
                 };
                 let hy_ = move |x: f64, y: f64| {
                     let r = exact_rho(x, y);
                     let (_u, v) = exact_u(x, y);
-                    let (_txx, _txy, tyy) = tau(x, y);
-                    r * v * v + exact_p(x, y) - tyy - extra * MU * dvdy(x, y)
+                    let (_txx, _txy, tyy) = tau(x, y, mu);
+                    r * v * v + exact_p(x, y) - tyy - extra * mu * dvdy(x, y)
                 };
                 let fd_my = d4x(&hx_, x, y, h) + d4y(&hy_, x, y, h);
-                let (an_mx, an_my) = source_rho_u(x, y, extra);
+                let (an_mx, an_my) = source_rho_u(x, y, extra, mu);
 
                 // Energy.
                 let q2x = move |x: f64, y: f64| {
@@ -375,19 +390,19 @@ fn analytic_sources_match_finite_differences() {
                 let ex = move |x: f64, y: f64| {
                     let (u, v) = exact_u(x, y);
                     let hgas = exact_rho_e(x, y) + exact_p(x, y);
-                    let (txx, txy, _tyy) = tau(x, y);
-                    let wx = txx * u + txy * v + extra * 0.5 * MU * q2x(x, y);
-                    hgas * u - wx - K_COND * d4x(&t_f, x, y, h)
+                    let (txx, txy, _tyy) = tau(x, y, mu);
+                    let wx = txx * u + txy * v + extra * 0.5 * mu * q2x(x, y);
+                    hgas * u - wx - k_cond * d4x(&t_f, x, y, h)
                 };
                 let ey = move |x: f64, y: f64| {
                     let (u, v) = exact_u(x, y);
                     let hgas = exact_rho_e(x, y) + exact_p(x, y);
-                    let (_txx, txy, tyy) = tau(x, y);
-                    let wy = txy * u + tyy * v + extra * 0.5 * MU * q2y(x, y);
-                    hgas * v - wy - K_COND * d4y(&t_f, x, y, h)
+                    let (_txx, txy, tyy) = tau(x, y, mu);
+                    let wy = txy * u + tyy * v + extra * 0.5 * mu * q2y(x, y);
+                    hgas * v - wy - k_cond * d4y(&t_f, x, y, h)
                 };
                 let fd_e = d4x(&ex, x, y, h) + d4y(&ey, x, y, h);
-                let an_e = source_rho_e(x, y, extra);
+                let an_e = source_rho_e(x, y, extra, mu);
 
                 for (name, an, fd) in [
                     ("rho", an_rho, fd_rho),
@@ -433,7 +448,7 @@ fn read_errors(run: &SteadyRun) -> (f64, f64, f64, f64) {
     )
 }
 
-fn solve_steady(n: usize, extra: f64) -> SteadyRun {
+fn solve_steady(n: usize, extra: f64, mu: f64, dt: f64) -> SteadyRun {
     let mesh = generate_structured_rect_mesh(
         n,
         n,
@@ -469,9 +484,9 @@ fn solve_steady(n: usize, extra: f64) -> SteadyRun {
     .expect("solver init");
 
     solver.set_eos(&eos).expect("eos");
-    solver.set_dt(DT as f32);
+    solver.set_dt(dt as f32);
     solver.set_dtau(0.0).expect("dtau");
-    solver.set_viscosity(MU as f32).expect("viscosity");
+    solver.set_viscosity(mu as f32).expect("viscosity");
     solver.set_density(RHO0 as f32).expect("density");
     solver.set_outer_iters(OUTER_ITERS).expect("outer_iters");
 
@@ -580,10 +595,10 @@ fn solve_steady(n: usize, extra: f64) -> SteadyRun {
         *s -= eps;
     }
     let src_rho_u: Vec<(f64, f64)> = (0..cells)
-        .map(|i| source_rho_u(mesh.cell_cx[i], mesh.cell_cy[i], extra))
+        .map(|i| source_rho_u(mesh.cell_cx[i], mesh.cell_cy[i], extra, mu))
         .collect();
     let src_rho_e: Vec<f64> = (0..cells)
-        .map(|i| source_rho_e(mesh.cell_cx[i], mesh.cell_cy[i], extra))
+        .map(|i| source_rho_e(mesh.cell_cx[i], mesh.cell_cy[i], extra, mu))
         .collect();
     solver
         .set_field_scalar(COMPRESSIBLE_MMS_SOURCE_RHO_FIELD, &src_rho)
@@ -688,14 +703,14 @@ fn march_to_plateau(solver: &mut UnifiedSolver) {
     panic!("no steady tolerance or plateau within {STEADY_MAX_STEPS} steps (best={best:.3e})");
 }
 
-fn order_study(extra: f64, levels: &[usize], label: &str) -> (Vec<f64>, [Vec<f64>; 4]) {
+fn order_study(extra: f64, mu: f64, dt: f64, levels: &[usize], label: &str) -> (Vec<f64>, [Vec<f64>; 4]) {
     let mut hs = Vec::new();
     let mut rho_errs = Vec::new();
     let mut u_errs = Vec::new();
     let mut p_errs = Vec::new();
     let mut t_errs = Vec::new();
     for (li, &n) in levels.iter().enumerate() {
-        let mut run = solve_steady(n, extra);
+        let mut run = solve_steady(n, extra, mu, dt);
         let (rho_err, u_err, p_err, t_err) = read_errors(&run);
         println!(
             "[mms][{label}] n={n} rho_l2={rho_err:.4e} u_l2={u_err:.4e} p_l2={p_err:.4e} t_l2={t_err:.4e}"
@@ -737,7 +752,7 @@ fn order_study(extra: f64, levels: &[usize], label: &str) -> (Vec<f64>, [Vec<f64
 #[test]
 fn steady_compressible_vanleer_order() {
     let (hs, [rho_errs, u_errs, p_errs, t_errs]) =
-        order_study(EXTRA_SHEAR, &[16, 24, 32, 48], "compressible");
+        order_study(EXTRA_SHEAR, MU, DT, &[16, 24, 32, 48], "compressible");
     // Measured at the ratchet (June 2026, post-tauMC-fix, physical-NS
     // sources): rho 1.956 / u 2.153 / p 1.831 / T 1.858, finest errors
     // 5.6e-4 / 2.7e-4 / 5.2e-4 / 5.8e-4. (Pre-fix, with doubled-shear
@@ -746,6 +761,46 @@ fn steady_compressible_vanleer_order() {
     assert_convergence_order("compressible_u", &hs, &u_errs, 2.0, 0.35, 7.0e-4);
     assert_convergence_order("compressible_p", &hs, &p_errs, 2.0, 0.35, 1.2e-3);
     assert_convergence_order("compressible_T", &hs, &t_errs, 2.0, 0.40, 1.2e-3);
+}
+
+/// Euler-dominated variant of the oracle: the same manufactured solution
+/// and harness with mu = 0 — no viscous stress, no conduction (k tracks mu),
+/// pure KT/vanLeer convection + EOS recovery + pressure work. This orders
+/// the convective operator in isolation: the NS study at Re ~ 8 is
+/// viscosity-dominated, so a convective-flux defect could hide under the
+/// laplacians there.
+///
+/// INVISCID-MARGIN INSTABILITY (June 2026, probed during this test's
+/// derivation — the reason mu is 5e-3 and not 0): the coupled-implicit
+/// compressible path develops a slow secular instability as mu -> 0,
+/// strongest at fine grids (rate rises with n, bounded only by physical
+/// damping mu k^2):
+/// - mu = 0,    dt = 0.01:  n=48 diverges outright (state -> inf).
+/// - mu = 0,    dt = 0.005: no blow-up, but secular growth at every level
+///   (u error +52% per 100 steps at n=48) — not CFL, a genuine
+///   marginal-mode instability.
+/// - mu = 1e-3, dt = 0.01:  n=48 still diverges (fast branch at CFL ~ 1).
+/// - mu = 1e-3, dt = 0.005: n=32 clean; n=48 drifts +49%/100 steps.
+/// - mu = 5e-3, dt = 0.005: n=16/24/32 clean (this test); n=48 still
+///   marginal (errors grow ~80% per 3 time units under extended march).
+/// Recorded as an engine-robustness backlog item (rhoCentralFoam runs
+/// inviscid fine, so the coupled-implicit path's inviscid stability is a
+/// real gap). Within the stable envelope the conservative viscous-era
+/// march policy holds (plateaus at steps 215-839, drift guard <10%).
+#[test]
+fn steady_euler_dominated_vanleer_order() {
+    let (hs, [rho_errs, u_errs, p_errs, t_errs]) =
+        order_study(EXTRA_SHEAR, MU_EULER, DT_EULER, &[16, 24, 32], "euler");
+    // Measured June 2026 (first run, mu = 5e-3, dt = 5e-3, n = 16/24/32):
+    // orders rho 2.430 / u ~2.05 / p ~3.2 / T ~2.45; finest errors
+    // 3.28e-3 / 6.36e-3 / 6.17e-4 / 3.21e-3 (larger than the NS study's:
+    // no conduction smoothing). n=32 drift guard measured +8.4% (rho) —
+    // close to the 10% bound; if it ever flakes, the march is the lever,
+    // not the band. Caps at ~1.3x measured; ratchet-only thereafter.
+    assert_convergence_order("euler_rho", &hs, &rho_errs, 2.0, 0.35, 4.5e-3);
+    assert_convergence_order("euler_u", &hs, &u_errs, 2.0, 0.35, 8.5e-3);
+    assert_convergence_order("euler_p", &hs, &p_errs, 2.0, 0.35, 9.0e-4);
+    assert_convergence_order("euler_T", &hs, &t_errs, 2.0, 0.40, 4.5e-3);
 }
 
 /// Probe: the same study with sources for the PRE-FIX doubled-shear
@@ -766,7 +821,7 @@ fn steady_compressible_vanleer_order() {
 #[ignore]
 fn probe_doubled_shear_sources_saturate() {
     let (hs, [rho_errs, u_errs, p_errs, t_errs]) =
-        order_study(1.0, &[16, 32], "compressible-doubled-shear");
+        order_study(1.0, MU, DT, &[16, 32], "compressible-doubled-shear");
     let _ = (&hs, &p_errs);
     println!(
         "[mms][compressible-doubled-shear] rho={rho_errs:?} u={u_errs:?} T={t_errs:?} (must NOT converge; compare against the physical-NS study)"

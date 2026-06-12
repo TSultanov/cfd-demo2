@@ -23,12 +23,19 @@
 
 #![cfg(feature = "dev-tests")]
 
+#[path = "mms_support/mod.rs"]
+mod mms_support;
+
 use cfd2::solver::gpu::enums::GpuBoundaryType;
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
+use cfd2::solver::mesh::{
+    generate_graded_rect_mesh, generate_structured_rect_mesh, AxisGrading, BoundarySides,
+    BoundaryType, Mesh,
+};
 use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
+use mms_support::tensor_grid;
 
 const N: usize = 64;
 const RE: f64 = 100.0;
@@ -153,6 +160,48 @@ const GHIA_UY_1000: &[(f64, f64)] = &[
     (0.9688, -0.21388),
 ];
 
+/// Ghia, Ghia & Shin (1982), Re = 3200: u_x through the vertical centerline.
+/// Verified against the ivan-pi gist reproduction of Table I. The published
+/// value at y = 0.4531 (-0.86636) is a known misprint (a physically
+/// impossible jump between -0.04 neighbors, same class as the Re=400
+/// x=0.9063 misprint) and is excluded.
+const GHIA_UX_3200: &[(f64, f64)] = &[
+    (0.0547, -0.32407),
+    (0.0625, -0.35344),
+    (0.0703, -0.37827),
+    (0.1016, -0.41933),
+    (0.1719, -0.34323),
+    (0.2813, -0.24427),
+    (0.5000, -0.04272),
+    (0.6172, 0.07156),
+    (0.7344, 0.19791),
+    (0.8516, 0.34682),
+    (0.9531, 0.46101),
+    (0.9609, 0.46547),
+    (0.9688, 0.48296),
+    (0.9766, 0.53236),
+];
+
+/// Ghia, Ghia & Shin (1982), Re = 3200: u_y through the horizontal
+/// centerline (Table II, verified against the ivan-pi gist).
+const GHIA_UY_3200: &[(f64, f64)] = &[
+    (0.0625, 0.39560),
+    (0.0703, 0.40917),
+    (0.0781, 0.41906),
+    (0.0938, 0.42768),
+    (0.1563, 0.37119),
+    (0.2266, 0.29030),
+    (0.2344, 0.28188),
+    (0.5000, 0.00999),
+    (0.8047, -0.31184),
+    (0.8594, -0.37401),
+    (0.9063, -0.44307),
+    (0.9453, -0.54053),
+    (0.9531, -0.52357),
+    (0.9609, -0.47425),
+    (0.9688, -0.39017),
+];
+
 /// Linearly interpolate a (coord, value) profile (sorted by coord) at `c`,
 /// with the no-slip/lid boundary values pinned at the ends.
 fn interp(profile: &[(f64, f64)], c: f64, end0: f64, end1: f64) -> f64 {
@@ -172,26 +221,33 @@ fn interp(profile: &[(f64, f64)], c: f64, end0: f64, end1: f64) -> f64 {
 
 /// March a steady lid-driven cavity at the given Re and return the
 /// centerline profiles: (y, u_x at x=0.5) and (x, u_y at y=0.5).
+fn lid_sides() -> BoundarySides {
+    BoundarySides {
+        left: BoundaryType::Wall,
+        right: BoundaryType::Wall,
+        bottom: BoundaryType::Wall,
+        top: BoundaryType::MovingWall,
+    }
+}
+
 fn run_cavity(
     re: f64,
     n: usize,
     dt: f32,
     max_steps: usize,
 ) -> (Vec<(f64, f64)>, Vec<(f64, f64)>) {
-    let mesh = generate_structured_rect_mesh(
-        n,
-        n,
-        1.0,
-        1.0,
-        BoundarySides {
-            left: BoundaryType::Wall,
-            right: BoundaryType::Wall,
-            bottom: BoundaryType::Wall,
-            top: BoundaryType::MovingWall,
-        },
-    );
+    let mesh = generate_structured_rect_mesh(n, n, 1.0, 1.0, lid_sides());
+    run_cavity_on_mesh(&mesh, re, dt, max_steps)
+}
+
+fn run_cavity_on_mesh(
+    mesh: &Mesh,
+    re: f64,
+    dt: f32,
+    max_steps: usize,
+) -> (Vec<(f64, f64)>, Vec<(f64, f64)>) {
     let mut solver = pollster::block_on(UnifiedSolver::new(
-        &mesh,
+        mesh,
         incompressible_momentum_model().expect("model"),
         SolverConfig {
             advection_scheme: Scheme::SecondOrderUpwind,
@@ -207,7 +263,11 @@ fn run_cavity(
     // Echo the configuration so a parameter-threading no-op can never
     // silently masquerade as a result (a refactor once ran "Re=400" with
     // the Re=100 viscosity; the field data exposed it).
-    println!("[ghia] config: Re={re} n={n} dt={dt} nu={}", 1.0 / re);
+    println!(
+        "[ghia] config: Re={re} cells={} dt={dt} nu={}",
+        mesh.num_cells(),
+        1.0 / re
+    );
     solver.set_dt(dt);
     solver.set_dtau(0.0).unwrap();
     solver.set_density(1.0).unwrap();
@@ -252,32 +312,44 @@ fn run_cavity(
     }
     let u = prev;
 
-    // Centerline profiles from the two cell columns/rows adjacent to 0.5
-    // (even n: centers at 0.5 ± h/2, averaged).
-    let h = 1.0 / n as f64;
-    let near = |c: f64| (c - 0.5).abs() < h * 0.75;
+    // Centerline profiles from the two cell columns/rows adjacent to 0.5,
+    // located by coordinate (tensor_grid) rather than round(coord/h) — the
+    // latter assumes uniform spacing. Even n: the pair straddles 0.5
+    // symmetrically and the average is the centerline value.
+    let grid = tensor_grid(mesh);
+    let col_center = |i: usize| 0.5 * (grid.x_bounds[i] + grid.x_bounds[i + 1]);
+    let row_center = |j: usize| 0.5 * (grid.y_bounds[j] + grid.y_bounds[j + 1]);
+    let two_nearest = |n_axis: usize, center: &dyn Fn(usize) -> f64| -> Vec<usize> {
+        let mut idx: Vec<usize> = (0..n_axis).collect();
+        idx.sort_by(|&a, &b| {
+            (center(a) - 0.5)
+                .abs()
+                .partial_cmp(&(center(b) - 0.5).abs())
+                .unwrap()
+        });
+        idx[..2].to_vec()
+    };
+    let near_cols = two_nearest(grid.nx(), &col_center);
+    let near_rows = two_nearest(grid.ny(), &row_center);
     let mut ux_prof: Vec<(f64, f64)> = Vec::new(); // (y, u_x at x=0.5)
     let mut uy_prof: Vec<(f64, f64)> = Vec::new(); // (x, u_y at y=0.5)
     {
         use std::collections::BTreeMap;
-        let mut by_y: BTreeMap<i64, (f64, Vec<f64>)> = BTreeMap::new();
-        let mut by_x: BTreeMap<i64, (f64, Vec<f64>)> = BTreeMap::new();
+        let mut by_row: BTreeMap<usize, Vec<f64>> = BTreeMap::new();
+        let mut by_col: BTreeMap<usize, Vec<f64>> = BTreeMap::new();
         for i in 0..mesh.num_cells() {
-            let (x, y) = (mesh.cell_cx[i], mesh.cell_cy[i]);
-            if near(x) {
-                let e = by_y.entry((y / h).round() as i64).or_insert((y, vec![]));
-                e.1.push(u[i].0);
+            if near_cols.contains(&grid.cell_col[i]) {
+                by_row.entry(grid.cell_row[i]).or_default().push(u[i].0);
             }
-            if near(y) {
-                let e = by_x.entry((x / h).round() as i64).or_insert((x, vec![]));
-                e.1.push(u[i].1);
+            if near_rows.contains(&grid.cell_row[i]) {
+                by_col.entry(grid.cell_col[i]).or_default().push(u[i].1);
             }
         }
-        for (_, (y, vs)) in by_y {
-            ux_prof.push((y, vs.iter().sum::<f64>() / vs.len() as f64));
+        for (j, vs) in by_row {
+            ux_prof.push((row_center(j), vs.iter().sum::<f64>() / vs.len() as f64));
         }
-        for (_, (x, vs)) in by_x {
-            uy_prof.push((x, vs.iter().sum::<f64>() / vs.len() as f64));
+        for (i, vs) in by_col {
+            uy_prof.push((col_center(i), vs.iter().sum::<f64>() / vs.len() as f64));
         }
     }
     (ux_prof, uy_prof)
@@ -343,6 +415,31 @@ fn ghia_re400_centerline_profiles() {
     // ratchet-only thereafter.
     assert!(max_ux < 0.005, "u_x deviates {max_ux:.4} from Ghia Re=400");
     assert!(max_uy < 0.009, "u_y deviates {max_uy:.4} from Ghia Re=400");
+}
+
+/// Re = 3200 on a wall-refined graded mesh (Arc M consumer): at this Re the
+/// boundary layers (~Re^(-1/2) ≈ 0.018) are under-resolved by a uniform
+/// 128^2 mesh, so both axes get two-sided geometric refinement (wall cells
+/// ~0.0036 at ratio 4, ~5 cells per layer).
+///
+/// PROVISIONAL — NEVER COMPLETED A RUN. The June 2026 probe was killed
+/// (user timebox) after ~90 min wall at t ≈ 170 with the field still
+/// settling (Re=1000 settled at t = 83.5 on the uniform mesh; Re=3200's
+/// secondary vortices are slower, and dt is fixed at the canonical 0.02
+/// because d_p ∝ dt is part of the spatial discretization). The bands
+/// below are ESTIMATES, not measurements — before trusting this test,
+/// complete a run and reset the bands from it.
+#[test]
+#[ignore = "PROVISIONAL: never completed (multi-hour settling); bands unmeasured; run explicitly and re-band"]
+fn ghia_re3200_centerline_profiles_graded() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let grading = AxisGrading::TwoSided { ratio: 4.0 };
+    let mesh = generate_graded_rect_mesh(128, 128, 1.0, 1.0, grading, grading, lid_sides());
+    let (ux_prof, uy_prof) = run_cavity_on_mesh(&mesh, 3200.0, 0.02, 30000);
+    let (max_ux, max_uy) =
+        compare_to_ghia("Re3200", &ux_prof, &uy_prof, GHIA_UX_3200, GHIA_UY_3200);
+    assert!(max_ux < 0.04, "u_x deviates {max_ux:.4} from Ghia Re=3200");
+    assert!(max_uy < 0.04, "u_y deviates {max_uy:.4} from Ghia Re=3200");
 }
 
 #[test]

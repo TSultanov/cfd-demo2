@@ -184,6 +184,76 @@ pub fn max_cell_extent(mesh: &Mesh) -> f64 {
     h_max
 }
 
+/// Column/row indexing of a tensor-product (structured rectangular) mesh,
+/// derived from the unique vertex coordinates — valid on uniform AND graded
+/// meshes, replacing the `round(coord / h)` grouping that assumes uniform
+/// spacing.
+#[allow(dead_code)]
+pub struct TensorGrid {
+    /// Sorted unique vertex x coordinates (column boundaries, len nx+1).
+    pub x_bounds: Vec<f64>,
+    /// Sorted unique vertex y coordinates (row boundaries, len ny+1).
+    pub y_bounds: Vec<f64>,
+    /// Per-cell column index (0..nx).
+    pub cell_col: Vec<usize>,
+    /// Per-cell row index (0..ny).
+    pub cell_row: Vec<usize>,
+}
+
+#[allow(dead_code)]
+impl TensorGrid {
+    pub fn nx(&self) -> usize {
+        self.x_bounds.len() - 1
+    }
+    pub fn ny(&self) -> usize {
+        self.y_bounds.len() - 1
+    }
+    /// Cell index at (col, row); panics if the mesh has holes there.
+    pub fn cell_at(&self, col: usize, row: usize) -> usize {
+        for c in 0..self.cell_col.len() {
+            if self.cell_col[c] == col && self.cell_row[c] == row {
+                return c;
+            }
+        }
+        panic!("no cell at column {col}, row {row}");
+    }
+}
+
+#[allow(dead_code)]
+pub fn tensor_grid(mesh: &Mesh) -> TensorGrid {
+    let unique_sorted = |vals: &[f64]| -> Vec<f64> {
+        let mut v = vals.to_vec();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mut out: Vec<f64> = Vec::new();
+        for x in v {
+            if out.last().map_or(true, |&last| x - last > 1e-9) {
+                out.push(x);
+            }
+        }
+        out
+    };
+    let x_bounds = unique_sorted(&mesh.vx);
+    let y_bounds = unique_sorted(&mesh.vy);
+    let locate = |bounds: &[f64], c: f64| -> usize {
+        match bounds.binary_search_by(|b| b.partial_cmp(&c).unwrap()) {
+            Ok(i) => i,
+            Err(i) => i - 1,
+        }
+    };
+    let cell_col = (0..mesh.num_cells())
+        .map(|i| locate(&x_bounds, mesh.cell_cx[i]))
+        .collect();
+    let cell_row = (0..mesh.num_cells())
+        .map(|i| locate(&y_bounds, mesh.cell_cy[i]))
+        .collect();
+    TensorGrid {
+        x_bounds,
+        y_bounds,
+        cell_col,
+        cell_row,
+    }
+}
+
 /// Least-squares slope of log(err) vs log(h): the observed convergence order.
 pub fn fit_order(hs: &[f64], errors: &[f64]) -> f64 {
     assert_eq!(hs.len(), errors.len());

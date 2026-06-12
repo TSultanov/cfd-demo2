@@ -20,13 +20,20 @@
 
 #![cfg(feature = "dev-tests")]
 
+#[path = "mms_support/mod.rs"]
+mod mms_support;
+
 use cfd2::solver::gpu::enums::GpuBoundaryType;
 use cfd2::solver::gpu::unified_solver::PlanParamValue;
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
+use cfd2::solver::mesh::{
+    generate_graded_rect_mesh, generate_structured_rect_mesh, AxisGrading, BoundarySides,
+    BoundaryType, Mesh,
+};
 use cfd2::solver::model::buoyant_incompressible_model;
 use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
+use mms_support::tensor_grid;
 
 const N: usize = 40;
 const PRANDTL: f64 = 0.71;
@@ -42,22 +49,24 @@ struct CavityResult {
     final_delta: f64,
 }
 
+fn cavity_sides() -> BoundarySides {
+    BoundarySides {
+        left: BoundaryType::MovingWall,
+        right: BoundaryType::MovingWall,
+        bottom: BoundaryType::Wall,
+        top: BoundaryType::Wall,
+    }
+}
+
 fn run_cavity(ra: f64, dt: f64, max_steps: usize) -> CavityResult {
-    let mesh = generate_structured_rect_mesh(
-        N,
-        N,
-        1.0,
-        1.0,
-        BoundarySides {
-            left: BoundaryType::MovingWall,
-            right: BoundaryType::MovingWall,
-            bottom: BoundaryType::Wall,
-            top: BoundaryType::Wall,
-        },
-    );
+    let mesh = generate_structured_rect_mesh(N, N, 1.0, 1.0, cavity_sides());
+    run_cavity_on_mesh(&mesh, ra, dt, max_steps)
+}
+
+fn run_cavity_on_mesh(mesh: &Mesh, ra: f64, dt: f64, max_steps: usize) -> CavityResult {
     let model = buoyant_incompressible_model().expect("model");
     let mut solver = pollster::block_on(UnifiedSolver::new(
-        &mesh,
+        mesh,
         model,
         SolverConfig {
             advection_scheme: Scheme::SecondOrderUpwind,
@@ -139,31 +148,43 @@ fn run_cavity(ra: f64, dt: f64, max_steps: usize) -> CavityResult {
     }
 
     // Wall-average Nu via second-order one-sided gradients on the two
-    // interior cell layers (structured uniform mesh).
+    // interior cell layers adjacent to each held wall. Coordinate-based
+    // (tensor_grid + non-uniform quadratic stencil), valid on graded
+    // meshes; at uniform spacing this reduces exactly to the classic
+    // (9 T1 - T2 - 8 T_w) / (3h) form.
     let t = t_prev;
-    let h = 1.0 / N as f64;
-    let col = |x: f64| -> usize { (x / h).floor() as usize };
-    // Map (i, j) -> cell index by coordinates.
-    let mut grid = vec![usize::MAX; N * N];
+    let grid = tensor_grid(mesh);
+    let (nx, ny) = (grid.nx(), grid.ny());
+    let lx = *grid.x_bounds.last().unwrap();
+    // dT/dn at the wall (n = distance into the fluid) from the quadratic
+    // through (0, t_w), (d1, t1), (d2, t2).
+    let one_sided_grad = |t_w: f64, t1: f64, d1: f64, t2: f64, d2: f64| -> f64 {
+        -t_w * (d1 + d2) / (d1 * d2) + t1 * d2 / (d1 * (d2 - d1)) - t2 * d1 / (d2 * (d2 - d1))
+    };
+    let mut grid_idx = vec![usize::MAX; nx * ny];
     for c in 0..mesh.num_cells() {
-        let i = col(mesh.cell_cx[c]);
-        let j = col(mesh.cell_cy[c]);
-        grid[j * N + i] = c;
+        grid_idx[grid.cell_row[c] * nx + grid.cell_col[c]] = c;
     }
     let mut nu_hot = 0.0f64;
     let mut nu_cold = 0.0f64;
-    for j in 0..N {
-        let t1h = t[grid[j * N]];
-        let t2h = t[grid[j * N + 1]];
-        // dT/dx at x=0 with T_w = 1: (9 T1 - T2 - 8 T_w) / (3h)
-        let grad_hot = (9.0 * t1h - t2h - 8.0 * 1.0) / (3.0 * h);
-        nu_hot += -grad_hot * h; // q = -dT/dx, integrated over face area h
-
-        let t1c = t[grid[j * N + (N - 1)]];
-        let t2c = t[grid[j * N + (N - 2)]];
-        // dT/dx at x=1 with T_w = 0 (one-sided from the left)
-        let grad_cold = (8.0 * 0.0 - 9.0 * t1c + t2c) / (3.0 * h);
-        nu_cold += -grad_cold * h;
+    for j in 0..ny {
+        let dy = grid.y_bounds[j + 1] - grid.y_bounds[j];
+        // Hot wall x=0, T_w = 1; q = -dT/dx = -dT/dn.
+        let c1 = grid_idx[j * nx];
+        let c2 = grid_idx[j * nx + 1];
+        let g_hot = one_sided_grad(1.0, t[c1], mesh.cell_cx[c1], t[c2], mesh.cell_cx[c2]);
+        nu_hot += -g_hot * dy;
+        // Cold wall x=lx, T_w = 0; n points in -x, so q = -dT/dx = +dT/dn.
+        let c1 = grid_idx[j * nx + (nx - 1)];
+        let c2 = grid_idx[j * nx + (nx - 2)];
+        let g_cold = one_sided_grad(
+            0.0,
+            t[c1],
+            lx - mesh.cell_cx[c1],
+            t[c2],
+            lx - mesh.cell_cx[c2],
+        );
+        nu_cold += g_cold * dy;
     }
 
     CavityResult {
@@ -171,6 +192,60 @@ fn run_cavity(ra: f64, dt: f64, max_steps: usize) -> CavityResult {
         nu_cold,
         steps,
         final_delta,
+    }
+}
+
+/// High-Ra extension on a wall-refined graded mesh (Arc M consumer): the
+/// thermal boundary layers at the held walls thin as Ra^(-1/4) (~0.056 at
+/// Ra = 1e5), so the x axis gets two-sided geometric refinement while y
+/// stays uniform. de Vahl Davis (1983): Nu_avg = 4.519 at Ra = 1e5.
+#[test]
+#[ignore = "external-physics benchmark, tens of minutes; run explicitly like the OpenFOAM reference suite"]
+fn heated_cavity_high_ra_nusselt_graded() {
+    std::env::set_var("CFD2_QUIET", "1");
+
+    // (Ra, reference Nu, n, x-grading ratio, dt, step cap). Wall-cell CFL
+    // sizing: u_max ~ alpha * v_max(Ra) (de Vahl Davis v_max ≈ 68.6 at 1e5
+    // in alpha/L units), dt ≈ 0.5 * h_wall / u_max. A Ra = 1e6 case
+    // (Nu = 8.800; ~80² at ratio 8, dt ≈ 2e-4) is the natural next rung but
+    // was not measured — add it only with a fresh measured run.
+    for &(ra, nu_ref, n, ratio, dt, cap) in &[(1e5, 4.519, 64, 4.0, 1e-3, 20000)] {
+        let mesh = generate_graded_rect_mesh(
+            n,
+            n,
+            1.0,
+            1.0,
+            AxisGrading::TwoSided { ratio },
+            AxisGrading::Uniform,
+            cavity_sides(),
+        );
+        let r = run_cavity_on_mesh(&mesh, ra, dt, cap);
+        let nu_avg = 0.5 * (r.nu_hot + r.nu_cold);
+        let balance = (r.nu_hot - r.nu_cold).abs() / nu_ref;
+        let rel_err = (nu_avg - nu_ref).abs() / nu_ref;
+        println!(
+            "[cavity-graded] Ra={ra:.0e} n={n} ratio={ratio} dt={dt}: Nu_hot={:.4} \
+             Nu_cold={:.4} avg={nu_avg:.4} ref={nu_ref} rel_err={rel_err:.4} \
+             balance={balance:.4} steps={} delta={:.2e}",
+            r.nu_hot, r.nu_cold, r.steps, r.final_delta
+        );
+        assert!(
+            r.final_delta < 1e-5,
+            "Ra={ra:.0e}: did not reach steady state (delta {:.2e} after {} steps)",
+            r.final_delta,
+            r.steps
+        );
+        // Measured June 2026 (first run, 64² ratio 4, steady at 2900 steps):
+        // Nu_hot 4.5277 / Nu_cold 4.5276 vs 4.519 — rel_err 0.0019,
+        // balance 3e-5. Bands ~2.5x measured; ratchet-only thereafter.
+        assert!(
+            balance < 0.005,
+            "Ra={ra:.0e}: hot/cold wall Nusselt imbalance {balance:.4}"
+        );
+        assert!(
+            rel_err < 0.005,
+            "Ra={ra:.0e}: Nu_avg {nu_avg:.4} deviates {rel_err:.4} from de Vahl Davis {nu_ref}"
+        );
     }
 }
 

@@ -26,7 +26,7 @@ plus a registry entry, with every kernel derived.
 | Boundary conditions | `BoundaryCondition` (Dirichlet/Neumann/zero-gradient) with `BcValue::Const` or `BcValue::Expr(BoundaryExpr)` over `interior(f)` / `bc(f)` / `param(p)` | static GPU tables + one generic `bc_expr_update` kernel (snapshot semantics, refreshed every outer iteration) |
 | Directional body forces | `typed_fvc::source_directional(coeff, [dx, dy], target)` — scalar coefficient tree × constant direction per component | assembly explicit-source path |
 | Per-component vector sources (MMS) | `typed_fvc::source_vector(field, target)` — a Vector2 state field read component-wise | assembly explicit-source path |
-| Transpose/deviatoric viscous stress | `typed_fvc::div_dev2_grad_transpose(coeff, U)` — explicit `−div(μ·dev2((∇U)ᵀ))`, completing the full stress with `fvm::laplacian(μ, U)` (OpenFOAM laminar UEqn); Vector2 targets only; forces the gradients pipeline on unconditionally and excludes the gradients+assembly fusion (neighbor `grad_state` reads must be from a separate dispatch) | assembly face-loop block from `grad_state` cell gradients |
+| Transpose/deviatoric viscous stress | `typed_fvc::div_dev2_grad_transpose(coeff, U)` — explicit `−div(μ·dev2((∇U)ᵀ))`, completing the full stress with `fvm::laplacian(μ, U)` (OpenFOAM laminar UEqn); declared by both the incompressible and buoyant models; Vector2 targets only; forces the gradients pipeline on unconditionally and excludes the gradients+assembly fusion (neighbor `grad_state` reads must be from a separate dispatch) | assembly face-loop block from `grad_state` cell gradients |
 | MMS sources | one more declared equation term + a state field uploaded host-side | same machinery as any source |
 
 ### Model contracts worth knowing

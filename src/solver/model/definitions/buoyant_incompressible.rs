@@ -111,6 +111,17 @@ fn build_buoyant_system(with_mms_sources: bool) -> EquationSystem {
         + grad_term.cast_to::<Force>()
         + buoy_t_term.cast_to::<Force>()
         + buoy_const_term.cast_to::<Force>();
+    // Explicit dev2 transpose viscous correction — same full-stress form as
+    // the incompressible sibling (Arc D, shipped default there June 2026);
+    // the manufactured MMS velocity is divergence-free, so the MMS sources
+    // are unchanged. Declaring the term forces the gradients pipeline on
+    // and excludes the gradients+assembly fusion (neighbor grad_state
+    // reads), exactly as for incompressible.
+    {
+        let mu_coeff2 = TypedCoeff::from_field(mu_typed);
+        momentum_sum = momentum_sum
+            + typed_fvc::div_dev2_grad_transpose(mu_coeff2, u_typed).cast_to::<Force>();
+    }
     if with_mms_sources {
         let mms_u = TypedFieldRef::<DivDim<Force, Volume>, Vector2>::new(
             BUOYANT_MMS_SOURCE_U_FIELD,

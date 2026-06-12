@@ -1,3 +1,17 @@
+// STABILITY ENVELOPE (model contract, measured June 2026 — probe matrix in
+// tests/mms_compressible_order_test.rs::probe_inviscid_margin_matrix):
+// this discretization (explicit KT/vanLeer flux + implicit inv_dt-scaled
+// EOS-recovery rows) develops a slow secular instability in the inviscid
+// limit at moderate Mach: a smooth interior thermo-field mode whose growth
+// rate rises with mesh resolution and is damped ONLY by physical viscosity
+// (mu k^2 must beat it; mu = 5e-3 holds through n = 32 at the MMS box's
+// scales, mu = 0.05 is robust everywhere measured). Time scheme, outer
+// iterations, pseudo-time damping, and low-Mach preconditioning were all
+// probed and refuted as cures — preconditioning makes it WORSE at moderate
+// Mach (it removes acoustic-scale dissipation). Time-accurate compressible
+// marching therefore REQUIRES nonzero physical viscosity; do not run this
+// model inviscid.
+
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::algebraic::{
     add_algebraic_equation, typed_alg, TypedAlgExpr, TypedParamRef,

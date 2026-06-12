@@ -42,6 +42,12 @@ plus a registry entry, with every kernel derived.
   boundary ghosts; a model used on an outlet-bearing mesh must pin the
   pressure gauge with an outlet Dirichlet, or the pressure system is
   singular.
+- **Compressible inviscid limit is out of envelope**: the KT-flux +
+  EOS-recovery discretization grows a smooth interior thermo-mode as
+  μ→0 at moderate Mach (damped only by physical μk²; every time-marching
+  knob refuted, preconditioning worsens it — probe matrix in
+  `mms_compressible_order_test.rs`). Time-accurate compressible runs
+  require nonzero physical viscosity.
 - **Units close at compile time** (type-level dimensions with `cast_to`
   escape hatches) and are re-validated at runtime (`validate_units`).
   Boundary-expression literals are unit wildcards (epsilon floors).

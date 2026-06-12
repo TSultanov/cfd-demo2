@@ -449,6 +449,21 @@ fn read_errors(run: &SteadyRun) -> (f64, f64, f64, f64) {
 }
 
 fn solve_steady(n: usize, extra: f64, mu: f64, dt: f64) -> SteadyRun {
+    let mut run = build_run(n, extra, mu, dt, TimeScheme::BDF2, OUTER_ITERS);
+    march_to_plateau(&mut run.solver);
+    run
+}
+
+/// Construct mesh + solver + BCs + sources + exact-solution init WITHOUT
+/// marching (shared by the order studies and the stability probes).
+fn build_run(
+    n: usize,
+    extra: f64,
+    mu: f64,
+    dt: f64,
+    time_scheme: TimeScheme,
+    outer_iters: usize,
+) -> SteadyRun {
     let mesh = generate_structured_rect_mesh(
         n,
         n,
@@ -472,11 +487,9 @@ fn solve_steady(n: usize, extra: f64, mu: f64, dt: f64) -> SteadyRun {
         model,
         SolverConfig {
             advection_scheme: Scheme::SecondOrderUpwindVanLeer,
-            time_scheme: TimeScheme::BDF2,
+            time_scheme,
             preconditioner: PreconditionerType::Jacobi,
-            stepping: SteppingMode::Implicit {
-                outer_iters: OUTER_ITERS,
-            },
+            stepping: SteppingMode::Implicit { outer_iters },
         },
         None,
         None,
@@ -642,8 +655,6 @@ fn solve_steady(n: usize, extra: f64, mu: f64, dt: f64) -> SteadyRun {
     solver.set_field_scalar("T", &t0).expect("init T");
     solver.set_field_vec2("u", &u0).expect("init u");
     solver.initialize_history();
-
-    march_to_plateau(&mut solver);
     SteadyRun { mesh, solver }
 }
 
@@ -801,6 +812,258 @@ fn steady_euler_dominated_vanleer_order() {
     assert_convergence_order("euler_u", &hs, &u_errs, 2.0, 0.35, 8.5e-3);
     assert_convergence_order("euler_p", &hs, &p_errs, 2.0, 0.35, 9.0e-4);
     assert_convergence_order("euler_T", &hs, &t_errs, 2.0, 0.40, 4.5e-3);
+}
+
+// ---------------------------------------------------------------------------
+// Inviscid-margin instability probes (Arc I, June 2026).
+// ---------------------------------------------------------------------------
+
+/// March `steps`, sampling the u-vs-exact L2 error every `sample_every`
+/// steps; return (growth rate in %/time-unit fitted on the second half of
+/// the series, final p checkerboard fraction, final u_x checkerboard
+/// fraction). A diverged run reports f64::INFINITY.
+fn measure_growth(
+    run: &mut SteadyRun,
+    dt: f64,
+    steps: usize,
+    sample_every: usize,
+) -> (f64, f64, f64, f64, f64) {
+    let mut series: Vec<(f64, f64)> = Vec::new(); // (t, u_l2)
+    let mut t = 0.0;
+    for k in 0..(steps / sample_every) {
+        for _ in 0..sample_every {
+            run.solver.step();
+        }
+        t = ((k + 1) * sample_every) as f64 * dt;
+        let u = pollster::block_on(run.solver.get_field_vec2("u")).expect("read u");
+        let e = field_errors_vec2(&run.mesh, &u, exact_u).l2;
+        if !e.is_finite() {
+            return (f64::INFINITY, f64::INFINITY, f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        }
+        series.push((t, e));
+    }
+    // Log-slope fit over the second half (skips the settle-in transient).
+    let half = series.len() / 2;
+    let (t0, e0) = series[half];
+    let (t1, e1) = *series.last().unwrap();
+    let rate = if e0 > 0.0 && e1 > 0.0 && t1 > t0 {
+        ((e1 / e0).ln() / (t1 - t0)) * 100.0
+    } else {
+        f64::NAN
+    };
+
+    // Grid-Nyquist (checkerboard) fraction of the de-meaned field:
+    // |sum f' * (-1)^(i+j)| / (N * rms(f')).
+    let n = (run.mesh.num_cells() as f64).sqrt().round() as usize;
+    let h = 1.0 / n as f64;
+    let nyq = |f: &[f64]| -> f64 {
+        let mean = f.iter().sum::<f64>() / f.len() as f64;
+        let mut alt = 0.0;
+        let mut ss = 0.0;
+        for c in 0..run.mesh.num_cells() {
+            let i = (run.mesh.cell_cx[c] / h - 0.5).round() as i64;
+            let j = (run.mesh.cell_cy[c] / h - 0.5).round() as i64;
+            let v = f[c] - mean;
+            alt += v * if (i + j) % 2 == 0 { 1.0 } else { -1.0 };
+            ss += v * v;
+        }
+        let rms = (ss / f.len() as f64).sqrt();
+        (alt / f.len() as f64).abs() / rms.max(1e-300)
+    };
+    let p = pollster::block_on(run.solver.get_field_scalar("p")).expect("read p");
+    let u = pollster::block_on(run.solver.get_field_vec2("u")).expect("read u");
+    let ux: Vec<f64> = u.iter().map(|v| v.0).collect();
+
+    // Spatial localization of the (final) u error: fraction of the squared
+    // error mass within 2 cells of the boundary.
+    let band = 2.5 * h;
+    let mut e_band = 0.0;
+    let mut e_tot = 0.0;
+    for c in 0..run.mesh.num_cells() {
+        let (x, y) = (run.mesh.cell_cx[c], run.mesh.cell_cy[c]);
+        let (uex, uey) = exact_u(x, y);
+        let e2 = (u[c].0 - uex).powi(2) + (u[c].1 - uey).powi(2);
+        e_tot += e2;
+        if x < band || x > 1.0 - band || y < band || y > 1.0 - band {
+            e_band += e2;
+        }
+    }
+    let bfrac = e_band / e_tot.max(1e-300);
+
+    // Final error LEVELS (u and rho): the growth rate alone is blind to a
+    // fast blow-up that saturates before the fit window — and to
+    // thermo-field blow-up hidden by the bounded u = rho_u/rho recovery.
+    let u_final = series.last().unwrap().1;
+    let rho = pollster::block_on(run.solver.get_field_scalar("rho")).expect("read rho");
+    let rho_final = field_errors(&run.mesh, &rho, exact_rho).l2;
+    (rate, nyq(&p), bfrac, u_final, rho_final)
+}
+
+/// Probe matrix for the inviscid-margin instability (Arc I). All runs at
+/// mu = 0, dt = 5e-3 (the slow-growth regime; the fast CFL~1 branch at
+/// dt = 0.01/n=48 is probed separately by the last row).
+///
+/// MEASURED (June 12, 2026) — growth %/tu, p-nyquist, boundary fraction,
+/// FINAL u/rho error levels (the levels matter: a rate fitted on the
+/// second half is blind to a fast blow-up that saturates early, and a
+/// u-only metric is blind to thermo-field blow-up hidden by the bounded
+/// u = rho_u/rho recovery — both blindnesses produced a wrong
+/// "preconditioning stabilizes" reading on the first pass):
+///   BDF2  o1 n32                 103.5  nyq 1e-3  bf 0.08  u 4.6e-2  rho 1.5e-2
+///   BDF2  o1 n48                  60.6  nyq 1e-4  bf 0.07  u 3.5e-2  rho 1.8e-2
+///   Euler o1 n32/n48          104/116  (same character)
+///   BDF2  o2/o4 n48               60.6  bit-identical to o1
+///   BDF2  o1 n48 dtau=dt lm=Off   77.2  bf 0.51   u 5.1e-3  rho 3.0e-3
+///   BDF2  o1 n48 dtau=dt lm=WS    "0"   u 0.18    rho 9.0e10  (BLOWN)
+///   BDF2  o1 n48 dtau lm=WS a=0   "0"   u 1.7e7   (BLOWN)
+///   BDF2  o1 n48 dtau lm=Legacy   "0"   rho 9.0e10  (BLOWN)
+///   BDF2  o1 n48 dt=1e-2 (fast)   "0"   u 1.5e12  (BLOWN)
+///
+/// VERDICT — every knob-level hypothesis REFUTED; the instability is
+/// intrinsic to the spatial discretization at mu = 0, moderate Mach:
+/// - NOT time integration (Euler grows like BDF2).
+/// - NOT outer-iteration lag (o2/o4 bit-identical — which also proves the
+///   flux module is evaluated once per STEP, frozen across outer iters).
+/// - NOT a checkerboard (nyquist ~1e-4 on the growing runs) and NOT
+///   boundary-fed (boundary band holds LESS error mass than uniform).
+/// - Pseudo-time damping (dtau = dt, preconditioning Off) DAMPS the mode
+///   ~7x in final error but does not stabilize it.
+/// - Low-Mach preconditioning (either model, with or without the
+///   pressure-coupling term) makes it catastrophically WORSE: at M ~ 0.5
+///   it rescales the dissipation wave speed c -> ~|u|, halving the
+///   acoustic dissipation — a low-Mach tool misapplied at moderate Mach.
+/// The growing object is a smooth INTERIOR mode of the coupled
+/// KT-flux + inv_dt-scaled-EOS-recovery system, damped only by physical
+/// viscosity (mu k^2 must beat the mode's growth; mu = 5e-3 holds through
+/// n = 32 at this problem's scales — the Euler study's operating point).
+/// STABILITY ENVELOPE (model contract, see the compressible model docs):
+/// time-accurate compressible marching requires nonzero physical
+/// viscosity; the inviscid limit is out of envelope on this
+/// discretization at moderate Mach.
+///
+/// Run:
+/// `cargo test --features dev-tests --test mms_compressible_order_test -- --ignored probe_inviscid --nocapture`
+#[test]
+#[ignore]
+fn probe_inviscid_margin_matrix() {
+    use cfd2::solver::gpu::enums::GpuLowMachPrecondModel;
+    use cfd2::solver::gpu::unified_solver::PlanParamValue;
+
+    let dt = 5.0e-3;
+    let steps = 600;
+    println!(
+        "[inviscid-probe] {:34} {:>12} {:>8} {:>8} {:>9} {:>9}",
+        "config", "growth %/tu", "nyq(p)", "bfrac", "u_l2", "rho_l2"
+    );
+    let mut report = |label: &str, mut run: SteadyRun, dt: f64, steps: usize| {
+        let (rate, nyq_p, bfrac, u_l2, rho_l2) = measure_growth(&mut run, dt, steps, 25);
+        println!("[inviscid-probe] {label:34} {rate:12.2} {nyq_p:8.4} {bfrac:8.4} {u_l2:9.2e} {rho_l2:9.2e}");
+    };
+
+    // Baselines (BDF2, outer 1, dtau 0).
+    report("BDF2 o1 n32", build_run(32, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1), dt, steps);
+    report("BDF2 o1 n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1), dt, steps);
+
+    // H1: Euler time scheme.
+    report("Euler o1 n32", build_run(32, EXTRA_SHEAR, 0.0, dt, TimeScheme::Euler, 1), dt, steps);
+    report("Euler o1 n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::Euler, 1), dt, steps);
+
+    // H2: outer iterations.
+    report("BDF2 o2 n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2), dt, steps);
+    report("BDF2 o4 n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 4), dt, steps);
+
+    // H3: pseudo-time damping (dtau also un-gates low-mach paths; vary the
+    // model to separate the two effects).
+    {
+        let mut run = build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1);
+        run.solver.set_dtau(dt as f32).expect("dtau");
+        report("BDF2 o1 n48 dtau=dt lm=Off", run, dt, steps);
+    }
+    {
+        let mut run = build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1);
+        run.solver.set_dtau(dt as f32).expect("dtau");
+        run.solver
+            .set_named_param(
+                "low_mach.model",
+                PlanParamValue::LowMachModel(GpuLowMachPrecondModel::WeissSmith),
+            )
+            .expect("low_mach.model");
+        report("BDF2 o1 n48 dtau=dt lm=WS", run, dt, steps);
+    }
+
+    // WS-row decomposition: WeissSmith turned on BOTH the wave-speed
+    // rescale and the pressure-coupling dissipation (rho' = alpha*p'/c^2 in
+    // the KT dissipation state). Separate them.
+    {
+        let mut run = build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1);
+        run.solver.set_dtau(dt as f32).expect("dtau");
+        run.solver
+            .set_named_param(
+                "low_mach.model",
+                PlanParamValue::LowMachModel(GpuLowMachPrecondModel::WeissSmith),
+            )
+            .expect("low_mach.model");
+        run.solver
+            .set_named_param("low_mach.pressure_coupling_alpha", PlanParamValue::F32(0.0))
+            .expect("alpha");
+        report("BDF2 o1 n48 dtau lm=WS a=0", run, dt, steps);
+    }
+    {
+        let mut run = build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1);
+        run.solver.set_dtau(dt as f32).expect("dtau");
+        run.solver
+            .set_named_param(
+                "low_mach.model",
+                PlanParamValue::LowMachModel(GpuLowMachPrecondModel::Legacy),
+            )
+            .expect("low_mach.model");
+        report("BDF2 o1 n48 dtau lm=Legacy", run, dt, steps);
+    }
+
+    // Fast branch (CFL ~ 1): the n=48/dt=0.01 outright divergence.
+    report("BDF2 o1 n48 dt=1e-2 (fast)", build_run(48, EXTRA_SHEAR, 0.0, 1.0e-2, TimeScheme::BDF2, 1), 1.0e-2, steps);
+}
+
+/// Order study of the PRECONDITIONED inviscid operator: mu = 0 with
+/// dual-time WeissSmith preconditioning. MEASURED June 12, 2026: BLOWS UP
+/// (rho/p -> 1e10..1e12 by n=24; u stays bounded through the rho_u/rho
+/// recovery, which is how the first probe pass mislabeled this
+/// configuration "stable"). Kept as the falsification record for the
+/// "just use preconditioning for inviscid" idea — at moderate Mach the
+/// preconditioned wave-speed rescale REMOVES dissipation and worsens the
+/// instability. See the probe matrix verdict above.
+#[test]
+#[ignore]
+fn probe_euler_preconditioned_order() {
+    use cfd2::solver::gpu::enums::GpuLowMachPrecondModel;
+    use cfd2::solver::gpu::unified_solver::PlanParamValue;
+
+    let dt = 5.0e-3;
+    let mut hs = Vec::new();
+    let mut u_errs = Vec::new();
+    let mut rho_errs = Vec::new();
+    let mut p_errs = Vec::new();
+    for &n in &[16usize, 24, 32, 48] {
+        let mut run = build_run(n, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 1);
+        run.solver.set_dtau(dt as f32).expect("dtau");
+        run.solver
+            .set_named_param(
+                "low_mach.model",
+                PlanParamValue::LowMachModel(GpuLowMachPrecondModel::WeissSmith),
+            )
+            .expect("low_mach.model");
+        march_to_plateau(&mut run.solver);
+        let (rho_err, u_err, p_err, t_err) = read_errors(&run);
+        println!("[euler-precond] n={n} rho_l2={rho_err:.4e} u_l2={u_err:.4e} p_l2={p_err:.4e} t_l2={t_err:.4e}");
+        hs.push(1.0 / n as f64);
+        u_errs.push(u_err);
+        rho_errs.push(rho_err);
+        p_errs.push(p_err);
+    }
+    for (name, errs) in [("rho", &rho_errs), ("u", &u_errs), ("p", &p_errs)] {
+        let o = ((errs[0] / errs[errs.len() - 1]).ln()) / ((hs[0] / hs[hs.len() - 1]).ln());
+        println!("[euler-precond] {name} order(first-last) = {o:.3}");
+    }
 }
 
 /// Probe: the same study with sources for the PRE-FIX doubled-shear

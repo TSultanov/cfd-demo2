@@ -177,9 +177,18 @@ fn set_amp_scale(s: f64) {
 /// out as the boundary-mode seed. Both default OFF.
 static RECON_UPWIND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static MASS_COMPAT_OFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// ARC N N4: select the KNP central-upwind MINMOD reconstruction (sharper
+/// limiter) instead of vanLeer. Minmod caps psi at 1 (no compressive overshoot
+/// for r>1) — the candidate fix for the interior grid-scale under-dissipation.
+/// Default OFF (vanLeer). Ignored if RECON_UPWIND is set.
+static RECON_MINMOD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn recon_upwind() -> bool {
     RECON_UPWIND.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn recon_minmod() -> bool {
+    RECON_MINMOD.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 fn mass_compat_off() -> bool {
@@ -604,6 +613,8 @@ fn build_run_box(
         SolverConfig {
             advection_scheme: if recon_upwind() {
                 Scheme::Upwind
+            } else if recon_minmod() {
+                Scheme::SecondOrderUpwindMinMod
             } else {
                 Scheme::SecondOrderUpwindVanLeer
             },
@@ -1502,6 +1513,78 @@ fn probe_arcn_periodic() {
     }
     PERIODIC.store(false, Ordering::Relaxed);
     set_amp_scale(1.0);
+}
+
+/// ARC N N4: does the sharper MINMOD limiter (KNP central-upwind) suppress the
+/// interior grid-scale instability that vanLeer under-dissipates? A/B on the
+/// boundary-free [0,2]^2 periodic box (the N3 instrument), small amplitude,
+/// mu=0, converged Picard. vanLeer is the baseline (the N3 divergence at fine
+/// h); minmod is the candidate fix — psi capped at 1, no compressive overshoot.
+/// SUCCESS = minmod growth bounded / <= 0 where vanLeer diverges, at fine h.
+/// (The mu>0 MMS-order gate — minmod must still reach order ~2 — is separate.)
+#[test]
+#[ignore]
+fn probe_arcn_minmod() {
+    use std::sync::atomic::Ordering;
+    let dt = 5.0e-3;
+    let steps = 600;
+    set_amp_scale(0.25);
+    PERIODIC.store(true, Ordering::Relaxed);
+    let inlet = BoundarySides {
+        left: BoundaryType::Inlet,
+        right: BoundaryType::Inlet,
+        bottom: BoundaryType::Inlet,
+        top: BoundaryType::Inlet,
+    };
+    println!(
+        "[arcn-minmod] amp=0.25 mu=0 [0,2]^2  {:16} {:>12} {:>9} {:>9}",
+        "config", "growth %/tu", "u_l2", "rho_l2"
+    );
+    for &n in &[32usize, 48, 64, 96] {
+        let cells = 2 * n;
+        for (label, minmod) in [("vanLeer", false), ("minmod", true)] {
+            RECON_MINMOD.store(minmod, Ordering::Relaxed);
+            let mut run = build_run_box(
+                cells, cells, 2.0, 2.0, inlet, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2,
+            );
+            let (rate, _nyq, _bfrac, u_l2, rho_l2) = measure_growth(&mut run, dt, steps, 25);
+            println!("[arcn-minmod] {label:>7} h=1/{n:<7} {rate:12.2} {u_l2:9.2e} {rho_l2:9.2e}");
+        }
+    }
+    RECON_MINMOD.store(false, Ordering::Relaxed);
+    PERIODIC.store(false, Ordering::Relaxed);
+    set_amp_scale(1.0);
+}
+
+/// ARC N N4: minmod's mu>0 convergence order — the accuracy gate. Minmod can
+/// clip to first order at smooth extrema, so this measures whether KNP+minmod
+/// still reaches order ~2 (the bar vanLeer clears at 1.96/2.15/1.83/1.86).
+/// Reports observed orders without asserting (characterization probe).
+#[test]
+#[ignore]
+fn probe_arcn_minmod_order() {
+    use std::sync::atomic::Ordering;
+    RECON_MINMOD.store(true, Ordering::Relaxed);
+    let levels = [16usize, 24, 32, 48];
+    let (hs, [rho_errs, u_errs, p_errs, t_errs]) =
+        order_study(EXTRA_SHEAR, MU, DT, &levels, "minmod");
+    RECON_MINMOD.store(false, Ordering::Relaxed);
+    let fit = |errs: &[f64]| -> f64 {
+        let k = errs.len();
+        (errs[k - 2] / errs[k - 1]).ln() / (hs[k - 2] / hs[k - 1]).ln()
+    };
+    for (name, errs) in [
+        ("rho", &rho_errs),
+        ("u", &u_errs),
+        ("p", &p_errs),
+        ("T", &t_errs),
+    ] {
+        println!(
+            "[arcn-minmod-order] {name}: finest-pair order={:.3} finest_err={:.3e}",
+            fit(errs),
+            errs[errs.len() - 1]
+        );
+    }
 }
 
 /// ARC N S1: eigenmode dump — capture the growing inviscid mode's spatial

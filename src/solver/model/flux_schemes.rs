@@ -197,13 +197,37 @@ fn derive_central_upwind(
         )
     };
 
+    // Minmod limiter in the same OpenFOAM NVDTVD ratio convention (r = 2*gradcf/gradf - 1):
+    //   psi(r) = max(0, min(1, r))
+    // Sharper than vanLeer: it CAPS psi at 1 (no anti-diffusion for r>1, where vanLeer rises
+    // toward 2 and adds the compressive/destabilizing correction) and is more dissipative for
+    // r<1. Arc N N4: the inviscid mu=0 instability is the vanLeer reconstruction's grid-scale
+    // under-dissipation (proved interior by the periodic probe); minmod removes the compressive
+    // overshoot that feeds it. min(1,..)/max(0,..) already bound the output to [0,1], so the
+    // vanLeer 1000x guard clamp is unnecessary here.
+    let minmod_limiter = |gradf: S, gradcf: S| {
+        let gradf2 = S::Mul(Box::new(gradf.clone()), Box::new(gradf.clone()));
+        let ratio = S::Div(
+            Box::new(S::Mul(Box::new(gradcf), Box::new(gradf.clone()))),
+            Box::new(S::Add(Box::new(gradf2), Box::new(eps2.clone()))),
+        );
+        let r = S::Sub(
+            Box::new(S::Mul(Box::new(S::lit(2.0)), Box::new(ratio))),
+            Box::new(S::lit(1.0)),
+        );
+        S::Max(
+            Box::new(S::lit(0.0)),
+            Box::new(S::Min(Box::new(r), Box::new(S::lit(1.0)))),
+        )
+    };
+
     let d = V::Sub(
         Box::new(V::cell_to_face(FaceSide::Owner)),
         Box::new(V::cell_to_face(FaceSide::Neighbor)),
     );
 
-    let reconstruct_vanleer_scalar =
-        |side: FaceSide, phi_p: S, phi_n: S, grad_p: V, grad_n: V| -> S {
+    let reconstruct_limited_scalar =
+        |limiter_fn: &dyn Fn(S, S) -> S, side: FaceSide, phi_p: S, phi_n: S, grad_p: V, grad_n: V| -> S {
             let gradf = S::Sub(Box::new(phi_n.clone()), Box::new(phi_p.clone()));
             let grad = if side == FaceSide::Owner {
                 grad_p
@@ -211,7 +235,7 @@ fn derive_central_upwind(
                 grad_n
             };
             let gradcf = S::Dot(Box::new(d.clone()), Box::new(grad));
-            let limiter = vanleer_limiter(gradf.clone(), gradcf);
+            let limiter = limiter_fn(gradf.clone(), gradcf);
             let delta = match side {
                 FaceSide::Owner => S::Mul(Box::new(limiter), Box::new(S::lambda_other())),
                 FaceSide::Neighbor => S::Mul(Box::new(limiter), Box::new(S::lambda())),
@@ -228,8 +252,8 @@ fn derive_central_upwind(
             }
         };
 
-    let reconstruct_vanleer_vec2 =
-        |side: FaceSide, phi_p: V, phi_n: V, grad_px: V, grad_py: V, grad_nx: V, grad_ny: V| -> V {
+    let reconstruct_limited_vec2 =
+        |limiter_fn: &dyn Fn(S, S) -> S, side: FaceSide, phi_p: V, phi_n: V, grad_px: V, grad_py: V, grad_nx: V, grad_ny: V| -> V {
             let gradf_v = V::Sub(Box::new(phi_n.clone()), Box::new(phi_p.clone()));
             let gradf = S::Dot(Box::new(gradf_v.clone()), Box::new(gradf_v.clone()));
 
@@ -255,7 +279,7 @@ fn derive_central_upwind(
                 Box::new(gradf_v.clone()),
                 Box::new(V::vec2(gradcf_x, gradcf_y)),
             );
-            let limiter = vanleer_limiter(gradf, gradcf);
+            let limiter = limiter_fn(gradf, gradcf);
             let delta = match side {
                 FaceSide::Owner => S::Mul(Box::new(limiter), Box::new(S::lambda_other())),
                 FaceSide::Neighbor => S::Mul(Box::new(limiter), Box::new(S::lambda())),
@@ -268,7 +292,16 @@ fn derive_central_upwind(
         };
 
     let rho = |side: FaceSide| match reconstruction {
-        Scheme::SecondOrderUpwindVanLeer => reconstruct_vanleer_scalar(
+        Scheme::SecondOrderUpwindVanLeer => reconstruct_limited_scalar(
+            &vanleer_limiter,
+            side,
+            rho_raw(FaceSide::Owner),
+            rho_raw(FaceSide::Neighbor),
+            V::state_vec2(FaceSide::Owner, grad_rho_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_rho_name.clone()),
+        ),
+        Scheme::SecondOrderUpwindMinMod => reconstruct_limited_scalar(
+            &minmod_limiter,
             side,
             rho_raw(FaceSide::Owner),
             rho_raw(FaceSide::Neighbor),
@@ -284,7 +317,16 @@ fn derive_central_upwind(
     };
 
     let t = |side: FaceSide| match reconstruction {
-        Scheme::SecondOrderUpwindVanLeer => reconstruct_vanleer_scalar(
+        Scheme::SecondOrderUpwindVanLeer => reconstruct_limited_scalar(
+            &vanleer_limiter,
+            side,
+            t_raw(FaceSide::Owner),
+            t_raw(FaceSide::Neighbor),
+            V::state_vec2(FaceSide::Owner, grad_t_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_t_name.clone()),
+        ),
+        Scheme::SecondOrderUpwindMinMod => reconstruct_limited_scalar(
+            &minmod_limiter,
             side,
             t_raw(FaceSide::Owner),
             t_raw(FaceSide::Neighbor),
@@ -302,7 +344,18 @@ fn derive_central_upwind(
     // Match OpenFOAM's rhoCentralFoam: reconstruct conserved momentum `rhoU` using `vanLeerV`
     // and derive face velocity as `U = rhoU/rho`.
     let rho_u = |side: FaceSide| match reconstruction {
-        Scheme::SecondOrderUpwindVanLeer => reconstruct_vanleer_vec2(
+        Scheme::SecondOrderUpwindVanLeer => reconstruct_limited_vec2(
+            &vanleer_limiter,
+            side,
+            V::state_vec2(FaceSide::Owner, rho_u_name),
+            V::state_vec2(FaceSide::Neighbor, rho_u_name),
+            V::state_vec2(FaceSide::Owner, grad_rho_u_x_name.clone()),
+            V::state_vec2(FaceSide::Owner, grad_rho_u_y_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_rho_u_x_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_rho_u_y_name.clone()),
+        ),
+        Scheme::SecondOrderUpwindMinMod => reconstruct_limited_vec2(
+            &minmod_limiter,
             side,
             V::state_vec2(FaceSide::Owner, rho_u_name),
             V::state_vec2(FaceSide::Neighbor, rho_u_name),
@@ -748,7 +801,16 @@ fn derive_central_upwind(
         V::MulScalar(Box::new(V::state_vec2(side, grad_t_name.clone())), Box::new(factor))
     };
     let c_face_raw = |side: FaceSide| match reconstruction {
-        Scheme::SecondOrderUpwindVanLeer => reconstruct_vanleer_scalar(
+        Scheme::SecondOrderUpwindVanLeer => reconstruct_limited_scalar(
+            &vanleer_limiter,
+            side,
+            c_cell(FaceSide::Owner),
+            c_cell(FaceSide::Neighbor),
+            grad_c(FaceSide::Owner),
+            grad_c(FaceSide::Neighbor),
+        ),
+        Scheme::SecondOrderUpwindMinMod => reconstruct_limited_scalar(
+            &minmod_limiter,
             side,
             c_cell(FaceSide::Owner),
             c_cell(FaceSide::Neighbor),

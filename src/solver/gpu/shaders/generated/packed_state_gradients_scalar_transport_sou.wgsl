@@ -37,6 +37,7 @@ struct Constants {
 @group(0) @binding(6) var<storage, read> cell_face_offsets: array<u32>;
 @group(0) @binding(7) var<storage, read> cell_faces: array<u32>;
 @group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
+@group(0) @binding(14) var<storage, read> face_wrap_shift: array<Vector2>;
 @group(1) @binding(0) var<storage, read> state: array<f32>;
 @group(1) @binding(3) var<uniform> constants: Constants;
 @group(1) @binding(4) var<storage, read_write> grad_state: array<Vector2>;
@@ -62,7 +63,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let face_center = face_centers[face_idx];
         let face_center_vec: vec2<f32> = vec2<f32>(face_center.x, face_center.y);
         var normal_vec: vec2<f32> = vec2<f32>(face_normals[face_idx].x, face_normals[face_idx].y);
-        if (dot(face_center_vec - cell_center_vec, normal_vec) < 0.0) {
+        let wrap_shift: vec2<f32> = vec2<f32>(face_wrap_shift[face_idx].x, face_wrap_shift[face_idx].y);
+        var own_center_vec: vec2<f32> = cell_center_vec;
+        if (owner != idx) {
+            own_center_vec = own_center_vec + wrap_shift;
+        }
+        if (dot(face_center_vec - own_center_vec, normal_vec) < 0.0) {
             normal_vec = -normal_vec;
         }
         var other_idx: u32 = idx;
@@ -75,8 +81,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             let other_center = cell_centers[other_idx];
             other_center_vec = vec2<f32>(other_center.x, other_center.y);
+            if (owner == idx) {
+                other_center_vec = other_center_vec + wrap_shift;
+            }
         }
-        let d_own = distance(cell_center_vec, face_center_vec);
+        let d_own = distance(own_center_vec, face_center_vec);
         let d_neigh = distance(other_center_vec, face_center_vec);
         let total_dist = d_own + d_neigh;
         var lambda: f32 = 0.5;

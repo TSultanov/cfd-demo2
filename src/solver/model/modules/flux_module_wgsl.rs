@@ -596,6 +596,15 @@ fn mesh_bindings() -> Vec<Item> {
             13,
             AccessMode::Read,
         ),
+        // Periodic-seam wrap shift: added to the neighbor cell center to bring it into the
+        // owner's frame. Zero on every non-periodic mesh (no-op there, bit-identical results).
+        storage_var(
+            "face_wrap_shift",
+            Type::array(Type::Custom("Vector2".to_string())),
+            0,
+            14,
+            AccessMode::Read,
+        ),
     ]
 }
 
@@ -894,6 +903,16 @@ fn face_stmts(
         Type::vec2_f32(),
         Some(typed::VecExpr::<2>::from_xy_fields(Expr::ident("c_neigh")).expr()),
     ));
+    // Periodic wrap: lift the neighbor center into the owner's frame across a seam face.
+    // `face_wrap_shift` is zero on every non-periodic mesh, so this is a no-op there.
+    body.push(dsl::assign_expr(
+        Expr::ident("c_neigh_vec"),
+        typed::VecExpr::<2>::from_expr(Expr::ident("c_neigh_vec"))
+            .add(&typed::VecExpr::<2>::from_xy_fields(
+                Expr::ident("face_wrap_shift").index(Expr::ident("idx")),
+            ))
+            .expr(),
+    ));
 
     // Preserve the true neighbor-cell center even on boundary faces.
     //
@@ -1094,6 +1113,16 @@ fn face_stmts_runtime_scheme(
             "c_neigh_vec",
             Type::vec2_f32(),
             Some(typed::VecExpr::<2>::from_xy_fields(Expr::ident("c_neigh")).expr()),
+        ),
+        // Periodic wrap: lift the neighbor center into the owner's frame across a seam face.
+        // `face_wrap_shift` is zero on every non-periodic mesh, so this is a no-op there.
+        dsl::assign_expr(
+            Expr::ident("c_neigh_vec"),
+            typed::VecExpr::<2>::from_expr(Expr::ident("c_neigh_vec"))
+                .add(&typed::VecExpr::<2>::from_xy_fields(
+                    Expr::ident("face_wrap_shift").index(Expr::ident("idx")),
+                ))
+                .expr(),
         ),
         dsl::let_typed_expr(
             "c_neigh_cell_vec",

@@ -42,6 +42,7 @@ struct LowMachParams {
 @group(0) @binding(4) var<storage, read> cell_centers: array<Vector2>;
 @group(0) @binding(12) var<storage, read> face_boundary: array<u32>;
 @group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
+@group(0) @binding(14) var<storage, read> face_wrap_shift: array<Vector2>;
 @group(1) @binding(0) var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) var<storage, read> state_old: array<f32>;
 @group(1) @binding(2) var<storage, read> state_old_old: array<f32>;
@@ -86,6 +87,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let c_neigh = cell_centers[neigh_idx];
     var c_neigh_vec: vec2<f32> = vec2<f32>(c_neigh.x, c_neigh.y);
+    c_neigh_vec = c_neigh_vec + vec2<f32>(face_wrap_shift[idx].x, face_wrap_shift[idx].y);
     let c_neigh_cell_vec: vec2<f32> = c_neigh_vec;
     if (is_boundary) {
         c_neigh_vec = face_center_vec;

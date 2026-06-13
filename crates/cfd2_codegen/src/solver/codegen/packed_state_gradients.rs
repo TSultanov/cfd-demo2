@@ -103,6 +103,16 @@ fn mesh_bindings() -> Vec<Item> {
             13,
             AccessMode::Read,
         ),
+        // Periodic-seam wrap shift: the vector to add to a wrapped neighbor's cell center to
+        // bring it into the owner's frame. Zero on every non-periodic mesh (so the generated
+        // arithmetic is a no-op and runtime results are bit-identical there).
+        storage_var(
+            "face_wrap_shift",
+            Type::array(Type::Custom("Vector2".to_string())),
+            0,
+            14,
+            AccessMode::Read,
+        ),
         storage_var(
             "cell_centers",
             Type::array(Type::Custom("Vector2".to_string())),
@@ -270,8 +280,37 @@ fn gradient_body_statements(layout: &StateLayout, unknown_state_offsets: &[u32])
                 .expr(),
             ),
         ));
+
+        // Periodic wrap: the face center is stored in the OWNER's frame. When this cell is the
+        // wrap-neighbor side of a seam face (owner != idx), lift our own center into that frame;
+        // when this cell is the owner, the OTHER (neighbor) center is lifted instead (below).
+        // `face_wrap_shift` is zero on every non-periodic mesh, so both shifts are no-ops there.
+        body.push(dsl::let_typed_expr(
+            "wrap_shift",
+            Type::vec2_f32(),
+            typed::VecExpr::<2>::from_xy_fields(
+                Expr::ident("face_wrap_shift").index(Expr::ident("face_idx")),
+            )
+            .expr(),
+        ));
+        body.push(dsl::var_typed_expr(
+            "own_center_vec",
+            Type::vec2_f32(),
+            Some(Expr::ident("cell_center_vec")),
+        ));
+        body.push(dsl::if_block_expr(
+            Expr::ident("owner").ne(Expr::ident("idx")),
+            dsl::block(vec![dsl::assign_expr(
+                Expr::ident("own_center_vec"),
+                typed::VecExpr::<2>::from_expr(Expr::ident("own_center_vec"))
+                    .add(&typed::VecExpr::<2>::from_expr(Expr::ident("wrap_shift")))
+                    .expr(),
+            )]),
+            None,
+        ));
+
         let cell_to_face = typed::VecExpr::<2>::from_expr(Expr::ident("face_center_vec")).sub(
-            &typed::VecExpr::<2>::from_expr(Expr::ident("cell_center_vec")),
+            &typed::VecExpr::<2>::from_expr(Expr::ident("own_center_vec")),
         );
         body.push(dsl::if_block_expr(
             cell_to_face
@@ -320,6 +359,17 @@ fn gradient_body_statements(layout: &StateLayout, unknown_state_offsets: &[u32])
                     Expr::ident("other_center_vec"),
                     typed::VecExpr::<2>::from_xy_fields(Expr::ident("other_center")).expr(),
                 ),
+                // When this cell is the seam face's owner, the neighbor center is the wrapped one.
+                dsl::if_block_expr(
+                    Expr::ident("owner").eq(Expr::ident("idx")),
+                    dsl::block(vec![dsl::assign_expr(
+                        Expr::ident("other_center_vec"),
+                        typed::VecExpr::<2>::from_expr(Expr::ident("other_center_vec"))
+                            .add(&typed::VecExpr::<2>::from_expr(Expr::ident("wrap_shift")))
+                            .expr(),
+                    )]),
+                    None,
+                ),
             ]),
             None,
         ));
@@ -327,7 +377,7 @@ fn gradient_body_statements(layout: &StateLayout, unknown_state_offsets: &[u32])
         body.push(dsl::let_expr(
             "d_own",
             dsl::distance(
-                Expr::ident("cell_center_vec"),
+                Expr::ident("own_center_vec"),
                 Expr::ident("face_center_vec"),
             ),
         ));

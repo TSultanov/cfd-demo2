@@ -124,7 +124,7 @@ const LONG_MARCH_ACCEPT_STEPS: usize = 1200;
 // ---------------------------------------------------------------------------
 
 fn exact_rho(x: f64, y: f64) -> f64 {
-    RHO0 * (1.0 + RHOA * (PI * x + PHX).sin() * (PI * y + PHY).sin())
+    RHO0 * (1.0 + amp_scale() * RHOA * (PI * x + PHX).sin() * (PI * y + PHY).sin())
 }
 
 /// ARC N: strain-free manufactured-field family toggle (uniform velocity
@@ -145,22 +145,45 @@ fn uniform_family() -> bool {
     UNIFORM_FLOW_FAMILY.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// ARC N: global amplitude scale on the manufactured PERTURBATIONS — the
+/// velocity scales (U0/V0/UA/UB) and the rho/p wave amplitudes (RHOA/PA);
+/// the RHO0/P0 backgrounds are NOT scaled. Shrinking the whole solution
+/// deviation isolates the amplitude-INDEPENDENT boundary mode from the
+/// amplitude-LINEAR interior KH physics, repeatably, without editing
+/// consts. Default 1.0 (bits 0 = unset = 1.0). The sources derive from the
+/// same `amp_scale()`, so the scaled family is a consistent MMS.
+static AMP_SCALE_BITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn amp_scale() -> f64 {
+    let b = AMP_SCALE_BITS.load(std::sync::atomic::Ordering::Relaxed);
+    if b == 0 {
+        1.0
+    } else {
+        f64::from_bits(b)
+    }
+}
+
+fn set_amp_scale(s: f64) {
+    AMP_SCALE_BITS.store(s.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Inflow on all four unit-box boundaries: u_x(0,·)=U0>0, u_x(1,·)=-U0,
 /// u_y(·,0)=V0>0, u_y(·,1)=-V0 (the UA/UB terms vanish on the boundary).
 fn exact_u(x: f64, y: f64) -> (f64, f64) {
+    let s = amp_scale();
     if uniform_family() {
-        return (U0, V0);
+        return (U0 * s, V0 * s);
     }
     (
-        U0 * (PI * x).cos() + UA * (PI * x).sin() * (PI * y).sin(),
-        V0 * (PI * y).cos() + UB * (PI * x).sin() * (PI * y).sin(),
+        s * (U0 * (PI * x).cos() + UA * (PI * x).sin() * (PI * y).sin()),
+        s * (V0 * (PI * y).cos() + UB * (PI * x).sin() * (PI * y).sin()),
     )
 }
 
 /// Zero normal derivative on all four boundaries (sin(2 pi {0,1}) = 0):
 /// required so the inlet "p follows interior" closure is O(h^2) consistent.
 fn exact_p(x: f64, y: f64) -> f64 {
-    P0 * (1.0 + PA * (2.0 * PI * x).cos() * (2.0 * PI * y).cos())
+    P0 * (1.0 + amp_scale() * PA * (2.0 * PI * x).cos() * (2.0 * PI * y).cos())
 }
 
 fn exact_t(x: f64, y: f64) -> f64 {
@@ -181,7 +204,7 @@ fn exact_rho_e(x: f64, y: f64) -> f64 {
 fn rho_partials(x: f64, y: f64) -> (f64, f64, f64, f64, f64) {
     let (sx, cx) = (PI * x + PHX).sin_cos();
     let (sy, cy) = (PI * y + PHY).sin_cos();
-    let a = RHO0 * RHOA;
+    let a = RHO0 * RHOA * amp_scale();
     (
         RHO0 + a * sx * sy,
         a * PI * cx * sy,
@@ -193,35 +216,37 @@ fn rho_partials(x: f64, y: f64) -> (f64, f64, f64, f64, f64) {
 
 /// (u, u_x, u_y, u_xx, u_yy, u_xy)
 fn u_partials(x: f64, y: f64) -> (f64, f64, f64, f64, f64, f64) {
+    let s = amp_scale();
     if uniform_family() {
-        return (U0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        return (U0 * s, 0.0, 0.0, 0.0, 0.0, 0.0);
     }
     let (sx, cx) = (PI * x).sin_cos();
     let (sy, cy) = (PI * y).sin_cos();
     (
-        U0 * cx + UA * sx * sy,
-        -U0 * PI * sx + UA * PI * cx * sy,
-        UA * PI * sx * cy,
-        -U0 * PI * PI * cx - UA * PI * PI * sx * sy,
-        -UA * PI * PI * sx * sy,
-        UA * PI * PI * cx * cy,
+        s * (U0 * cx + UA * sx * sy),
+        s * (-U0 * PI * sx + UA * PI * cx * sy),
+        s * (UA * PI * sx * cy),
+        s * (-U0 * PI * PI * cx - UA * PI * PI * sx * sy),
+        s * (-UA * PI * PI * sx * sy),
+        s * (UA * PI * PI * cx * cy),
     )
 }
 
 /// (v, v_x, v_y, v_xx, v_yy, v_xy)
 fn v_partials(x: f64, y: f64) -> (f64, f64, f64, f64, f64, f64) {
+    let s = amp_scale();
     if uniform_family() {
-        return (V0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        return (V0 * s, 0.0, 0.0, 0.0, 0.0, 0.0);
     }
     let (sx, cx) = (PI * x).sin_cos();
     let (sy, cy) = (PI * y).sin_cos();
     (
-        V0 * cy + UB * sx * sy,
-        UB * PI * cx * sy,
-        -V0 * PI * sy + UB * PI * sx * cy,
-        -UB * PI * PI * sx * sy,
-        -V0 * PI * PI * cy - UB * PI * PI * sx * sy,
-        UB * PI * PI * cx * cy,
+        s * (V0 * cy + UB * sx * sy),
+        s * (UB * PI * cx * sy),
+        s * (-V0 * PI * sy + UB * PI * sx * cy),
+        s * (-UB * PI * PI * sx * sy),
+        s * (-V0 * PI * PI * cy - UB * PI * PI * sx * sy),
+        s * (UB * PI * PI * cx * cy),
     )
 }
 
@@ -229,7 +254,7 @@ fn v_partials(x: f64, y: f64) -> (f64, f64, f64, f64, f64, f64) {
 fn p_partials(x: f64, y: f64) -> (f64, f64, f64, f64, f64) {
     let (s2x, c2x) = (2.0 * PI * x).sin_cos();
     let (s2y, c2y) = (2.0 * PI * y).sin_cos();
-    let a = P0 * PA;
+    let a = P0 * PA * amp_scale();
     (
         P0 + a * c2x * c2y,
         -2.0 * PI * a * s2x * c2y,
@@ -1292,6 +1317,45 @@ fn probe_arcn_domain_matrix() {
 
 /// ARC N S1: eigenmode dump — capture the growing inviscid mode's spatial
 /// structure. Marches n=48 / mu=0 / BDF2 / o1, snapshots per-cell deltas
+/// ARC N′ N1 — IS THE BOUNDARY-BAND μ=0 INSTABILITY GENUINE? Converged-Picard
+/// (outer=2), small amplitude (perturbations ×AMP so the amplitude-INDEPENDENT
+/// boundary mode dominates the amplitude-LINEAR interior KH physics), all-Inlet
+/// box, n = 32/48/64/96. The growth-rate trend under refinement is the verdict:
+///   rate → 0 with h  ⇒ BENIGN O(h) boundary inconsistency (the inviscid limit
+///                      is reachable at resolution — close the arc);
+///   rate constant/↑  ⇒ GENUINE discrete instability (continue to N2/N3).
+/// Bit-reproduces the committed full-amplitude probe at AMP=1 (the amp_scale
+/// refactor is transparent there).
+///
+/// MEASURED (June 13, 2026; amp=0.25, o2, μ=0, 600 steps): n=32 → 61.2,
+/// n=48 → 63.7 (rate CONSTANT, not falling), n=64 → DIVERGES (u_l2 9.96e8),
+/// n=96 → DIVERGES (u_l2 2.03e13). **VERDICT: GENUINE and
+/// REFINEMENT-AMPLIFIED** — finer grids blow up harder (the "0.00" rate at
+/// n≥64 is the saturated-blowup metric trap; the levels show divergence).
+/// This is a grid-scale numerical instability (consistent with the
+/// high-k eigenmode card), NOT a benign O(h) inconsistency. NOTE for
+/// re-measuring the n≥64 *rate*: shorten `steps` so the fit window precedes
+/// saturation.
+#[test]
+#[ignore]
+fn probe_arcn_refinement_trend() {
+    let dt = 5.0e-3;
+    let steps = 600;
+    let amp = 0.25;
+    set_amp_scale(amp);
+    println!(
+        "[arcn-refine] amp={amp}  {:14} {:>12} {:>8} {:>8} {:>9} {:>9}",
+        "config", "growth %/tu", "nyq(p)", "bfrac", "u_l2", "rho_l2"
+    );
+    for &n in &[32usize, 48, 64, 96] {
+        // outer=2 = converged Picard (build_run pins the outer break open).
+        let mut run = build_run(n, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2);
+        let (rate, nyq_p, bfrac, u_l2, rho_l2) = measure_growth(&mut run, dt, steps, 25);
+        println!("[arcn-refine] o2 n={n:<11} {rate:12.2} {nyq_p:8.4} {bfrac:8.4} {u_l2:9.2e} {rho_l2:9.2e}");
+    }
+    set_amp_scale(1.0);
+}
+
 /// vs the exact solution at steps 400 and 500, and writes CSV to
 /// target/arcn_probes/eigenmode_n48.csv with columns
 /// x,y,d1_<f>,d2_<f>,g_<f> for f in rho,ux,uy,p,T — where d1/d2 are the

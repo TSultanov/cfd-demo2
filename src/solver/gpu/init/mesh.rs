@@ -8,6 +8,7 @@ pub struct MeshResources {
     pub b_face_areas: wgpu::Buffer,
     pub b_face_normals: wgpu::Buffer,
     pub b_face_centers: wgpu::Buffer,
+    pub b_face_wrap_shift: wgpu::Buffer,
     pub b_cell_centers: wgpu::Buffer,
     pub b_cell_vols: wgpu::Buffer,
     pub b_cell_face_offsets: wgpu::Buffer,
@@ -29,6 +30,7 @@ impl MeshResources {
             "face_areas" => Some(&self.b_face_areas),
             "face_normals" => Some(&self.b_face_normals),
             "face_centers" => Some(&self.b_face_centers),
+            "face_wrap_shift" => Some(&self.b_face_wrap_shift),
             "cell_centers" => Some(&self.b_cell_centers),
             "cell_vols" => Some(&self.b_cell_vols),
             "cell_face_offsets" => Some(&self.b_cell_face_offsets),
@@ -56,6 +58,7 @@ impl MeshResources {
             "face_neighbor",
             "face_normals",
             "face_owner",
+            "face_wrap_shift",
             "scalar_col_indices",
             "scalar_row_offsets",
         ]
@@ -172,6 +175,22 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, St
         usage: wgpu::BufferUsages::STORAGE,
     });
 
+    // Periodic wrap shift, one vec2 per face (zero on ordinary faces; an empty
+    // mesh field means all-zero, so non-periodic meshes are unaffected).
+    let face_wrap_shift: Vec<[f32; 2]> = if mesh.face_wrap_shift.is_empty() {
+        vec![[0.0f32, 0.0f32]; mesh.face_cx.len()]
+    } else {
+        mesh.face_wrap_shift
+            .iter()
+            .map(|&[sx, sy]| [sx as f32, sy as f32])
+            .collect()
+    };
+    let b_face_wrap_shift = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Face Wrap Shift Buffer"),
+        contents: bytemuck::cast_slice(&face_wrap_shift),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+
     let cell_centers: Vec<[f32; 2]> = mesh
         .cell_cx
         .iter()
@@ -271,6 +290,7 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, St
     });
 
     Ok(MeshResources {
+        b_face_wrap_shift,
         b_face_owner,
         b_face_neighbor,
         b_face_boundary,

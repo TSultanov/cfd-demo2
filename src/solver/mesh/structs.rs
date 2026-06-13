@@ -47,6 +47,11 @@ pub struct Mesh {
     pub face_area: Vec<f64>,
     pub face_cx: Vec<f64>,
     pub face_cy: Vec<f64>,
+    /// Per-face periodic wrap shift: the vector ADDED to the neighbor-side
+    /// cell center to bring it into the owner's frame across a periodic seam
+    /// (zero on every ordinary face). Empty on non-periodic meshes; consumers
+    /// treat empty as length-`num_faces` zeros.
+    pub face_wrap_shift: Vec<[f64; 2]>,
 
     // Cells
     pub cell_cx: Vec<f64>,

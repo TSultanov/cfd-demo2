@@ -631,6 +631,7 @@ impl TraceMesh {
             face_area: self.face_area.clone(),
             face_cx: self.face_cx.clone(),
             face_cy: self.face_cy.clone(),
+            face_wrap_shift: Vec::new(),
             cell_cx: self.cell_cx.clone(),
             cell_cy: self.cell_cy.clone(),
             cell_vol: self.cell_vol.clone(),

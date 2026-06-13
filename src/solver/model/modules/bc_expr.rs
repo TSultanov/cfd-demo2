@@ -153,6 +153,11 @@ fn lower_expr(expr: &BoundaryExpr) -> Expr {
         BoundaryExpr::Mul(a, b) => lower_expr(a) * lower_expr(b),
         BoundaryExpr::Div(a, b) => lower_expr(a) / lower_expr(b),
         BoundaryExpr::Neg(a) => -lower_expr(a),
+        BoundaryExpr::Sqrt(a) => dsl::sqrt(lower_expr(a)),
+        BoundaryExpr::Normal { component } => {
+            let comp = if *component == 0 { "x" } else { "y" };
+            dsl::array_access("face_normals", Expr::ident("idx")).field(comp)
+        }
         BoundaryExpr::Max(a, b) => dsl::max(lower_expr(a), lower_expr(b)),
         BoundaryExpr::Min(a, b) => dsl::min(lower_expr(a), lower_expr(b)),
         BoundaryExpr::SelectGt {
@@ -190,7 +195,20 @@ fn generate_bc_expr_kernel_program(
         "global_id.y * constants.stride_x + global_id.x",
         Some("idx >= arrayLength(&face_boundary)"),
     );
-    let bindings = vec![
+    // BoundaryExpr::Normal reads the face outward normal — bind `face_normals`
+    // only when some declared expression actually uses it, so models without
+    // characteristic (normal-bearing) closures emit no unused binding (and
+    // their generated WGSL is unaffected by the grammar's existence).
+    let uses_normal = entries.iter().any(|e| {
+        let mut found = false;
+        e.expr.visit(&mut |node| {
+            if matches!(node, BoundaryExpr::Normal { .. }) {
+                found = true;
+            }
+        });
+        found
+    });
+    let mut bindings = vec![
         KernelBinding::new(0, 0, "state", "array<f32>", BindingAccess::ReadOnlyStorage),
         KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
         KernelBinding::new(0, 2, "bc_value", "array<f32>", BindingAccess::ReadWriteStorage),
@@ -209,6 +227,16 @@ fn generate_bc_expr_kernel_program(
             BindingAccess::ReadOnlyStorage,
         ),
     ];
+    if uses_normal {
+        // Face outward normals (flat [f32;2] pairs, bound as vec2).
+        bindings.push(KernelBinding::new(
+            1,
+            2,
+            "face_normals",
+            "array<vec2<f32>>",
+            BindingAccess::ReadOnlyStorage,
+        ));
+    }
 
     let bc = BcTable::new(Expr::ident("idx"), coupled_stride);
     let base = Expr::ident("base");
@@ -407,6 +435,59 @@ mod tests {
             .bindings
             .iter()
             .any(|b| b.name == "bc_value" && b.access.allows_write()));
+    }
+
+    fn diffusion_model_with_normal_outlet() -> ModelSpec {
+        let mut model =
+            crate::solver::model::generic_diffusion_demo_model().expect("model");
+        let phi: FieldRef = *model.system.equations()[0].target();
+        // Outlet phi := interior(phi) + normal_x — a synthetic normal-bearing BC.
+        let expr = BoundaryExpr::interior(phi) + BoundaryExpr::normal(0);
+        let spec = crate::solver::model::definitions::FieldBoundarySpec::new().set_components(
+            GpuBoundaryType::Outlet,
+            vec![crate::solver::model::BoundaryCondition {
+                kind: cfd2_ir::gpu_enums::GpuBcKind::Dirichlet,
+                value: crate::solver::model::BcValue::Expr(expr),
+                unit: phi.unit(),
+            }],
+        );
+        model.boundaries.set_field(phi.name(), spec);
+        model
+    }
+
+    #[test]
+    fn normal_bearing_expr_binds_face_normals_and_lowers() {
+        let model = diffusion_model_with_normal_outlet();
+        let program = generate_bc_expr_kernel_program(
+            &model,
+            &crate::solver::ir::SchemeRegistry::default(),
+        )
+        .expect("bc_expr kernel");
+        assert!(
+            program.bindings.iter().any(|b| b.name == "face_normals"),
+            "face_normals must be bound when a Normal atom is used"
+        );
+        let wgsl = format!("{program:?}");
+        assert!(
+            wgsl.contains("face_normals"),
+            "lowered body must read face_normals"
+        );
+    }
+
+    #[test]
+    fn no_normal_means_no_face_normals_binding() {
+        // The stock expr-outlet model uses no Normal: the grammar stays dormant
+        // (no unused binding, generated WGSL unaffected).
+        let model = diffusion_model_with_expr_outlet();
+        let program = generate_bc_expr_kernel_program(
+            &model,
+            &crate::solver::ir::SchemeRegistry::default(),
+        )
+        .expect("bc_expr kernel");
+        assert!(
+            !program.bindings.iter().any(|b| b.name == "face_normals"),
+            "no Normal atom => no face_normals binding"
+        );
     }
 
     #[test]

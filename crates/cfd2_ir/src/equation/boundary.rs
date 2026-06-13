@@ -49,6 +49,15 @@ pub enum BoundaryExpr {
     Mul(Box<BoundaryExpr>, Box<BoundaryExpr>),
     Div(Box<BoundaryExpr>, Box<BoundaryExpr>),
     Neg(Box<BoundaryExpr>),
+    /// Square root. Unit-wildcard (the LODI/characteristic closures mix it
+    /// into otherwise dimensioned trees; see `Normal`).
+    Sqrt(Box<BoundaryExpr>),
+    /// A component of the face OUTWARD normal (unit vector). Unit-wildcard.
+    /// Per-face geometric atom (the only one): lets boundary closures form
+    /// the normal velocity `u·n` for characteristic conditions. Has no
+    /// host-evaluation form (seeding helpers must not declare normal-bearing
+    /// expressions; the GPU `bc_expr` kernel reads `face_normals`).
+    Normal { component: u32 },
     Max(Box<BoundaryExpr>, Box<BoundaryExpr>),
     Min(Box<BoundaryExpr>, Box<BoundaryExpr>),
     /// `if lhs > rhs { on_true } else { on_false }`.
@@ -95,6 +104,16 @@ impl BoundaryExpr {
         BoundaryExpr::BcValue { field, component }
     }
 
+    /// Square root of this expression.
+    pub fn sqrt(self) -> Self {
+        BoundaryExpr::Sqrt(Box::new(self))
+    }
+
+    /// A component (0 = x, 1 = y) of the face outward normal.
+    pub fn normal(component: u32) -> Self {
+        BoundaryExpr::Normal { component }
+    }
+
     pub fn max(self, other: BoundaryExpr) -> Self {
         BoundaryExpr::Max(Box::new(self), Box::new(other))
     }
@@ -139,6 +158,10 @@ impl BoundaryExpr {
                 _ => Ok(None),
             },
             BoundaryExpr::Neg(a) => a.unit(),
+            // Wildcards: these atoms appear inside characteristic closures
+            // whose units we do not track through the sqrt/normal algebra
+            // (the enclosing Add against a dimensioned term re-pins the unit).
+            BoundaryExpr::Sqrt(_) | BoundaryExpr::Normal { .. } => Ok(None),
             BoundaryExpr::SelectGt {
                 lhs,
                 rhs,
@@ -168,7 +191,8 @@ impl BoundaryExpr {
                 a.visit(visit);
                 b.visit(visit);
             }
-            BoundaryExpr::Neg(a) => a.visit(visit),
+            BoundaryExpr::Neg(a) | BoundaryExpr::Sqrt(a) => a.visit(visit),
+            BoundaryExpr::Normal { .. } => {}
             BoundaryExpr::SelectGt {
                 lhs,
                 rhs,
@@ -261,6 +285,13 @@ pub fn eval_boundary_expr(
         BoundaryExpr::Mul(a, b) => eval(a)? * eval(b)?,
         BoundaryExpr::Div(a, b) => eval(a)? / eval(b)?,
         BoundaryExpr::Neg(a) => -eval(a)?,
+        BoundaryExpr::Sqrt(a) => eval(a)?.sqrt(),
+        BoundaryExpr::Normal { component } => {
+            return Err(format!(
+                "boundary expression: normal({component}) has no host evaluation \
+                 (declare normal-bearing closures only on the GPU bc_expr path)"
+            ))
+        }
         BoundaryExpr::Max(a, b) => eval(a)?.max(eval(b)?),
         BoundaryExpr::Min(a, b) => eval(a)?.min(eval(b)?),
         BoundaryExpr::SelectGt {
@@ -299,6 +330,13 @@ pub fn eval_boundary_expr_f32(
         BoundaryExpr::Mul(a, b) => eval(a)? * eval(b)?,
         BoundaryExpr::Div(a, b) => eval(a)? / eval(b)?,
         BoundaryExpr::Neg(a) => -eval(a)?,
+        BoundaryExpr::Sqrt(a) => eval(a)?.sqrt(),
+        BoundaryExpr::Normal { component } => {
+            return Err(format!(
+                "boundary expression: normal({component}) has no host evaluation \
+                 (declare normal-bearing closures only on the GPU bc_expr path)"
+            ))
+        }
         BoundaryExpr::Max(a, b) => eval(a)?.max(eval(b)?),
         BoundaryExpr::Min(a, b) => eval(a)?.min(eval(b)?),
         BoundaryExpr::SelectGt {
@@ -386,5 +424,32 @@ mod tests {
         let ke_expected = 0.5 * 1.0 * (9.0 + 16.0);
         let value = eval_boundary_expr(&rho_e, &interior, &bc, &param).unwrap();
         assert_eq!(value, 2.0 / 0.4 + ke_expected);
+    }
+
+    #[test]
+    fn sqrt_and_normal_grammar() {
+        use crate::dimensions::Velocity;
+
+        let interior = |_: &FieldRef, _: u32| -> Result<f64, String> { Ok(0.0) };
+        let bc = |_: &FieldRef, _: u32| -> Result<f64, String> { Ok(0.0) };
+        let param = |_: &ParamRef| -> Result<f64, String> { Ok(0.0) };
+
+        // Sqrt evaluates host-side.
+        let four = BoundaryExpr::lit(4.0).sqrt();
+        assert_eq!(eval_boundary_expr(&four, &interior, &bc, &param).unwrap(), 2.0);
+
+        // Normal is a unit-wildcard and has NO host evaluation (soft error):
+        // characteristic closures live only on the GPU bc_expr path.
+        let n = BoundaryExpr::normal(0);
+        assert_eq!(n.unit().unwrap(), None);
+        assert_eq!(BoundaryExpr::lit(1.0).sqrt().unit().unwrap(), None);
+        assert!(eval_boundary_expr(&n, &interior, &bc, &param).is_err());
+
+        // A wildcard (normal/sqrt) term added against a dimensioned interior
+        // value re-pins the unit (velocity + wildcard = velocity).
+        let u = vol_vector_dim::<Velocity>("u");
+        let expr = BoundaryExpr::interior_comp(u, 0)
+            + BoundaryExpr::lit(1.0).sqrt() * BoundaryExpr::normal(0);
+        assert_eq!(expr.unit().unwrap(), Some(Velocity::UNIT));
     }
 }

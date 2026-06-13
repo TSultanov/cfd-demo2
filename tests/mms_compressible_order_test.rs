@@ -167,6 +167,22 @@ fn set_amp_scale(s: f64) {
     AMP_SCALE_BITS.store(s.to_bits(), std::sync::atomic::Ordering::Relaxed);
 }
 
+/// ARC N′ N2 mechanism toggles. RECON_UPWIND forces first-order Upwind (no
+/// gradient reconstruction) to test whether the 2nd-order vanLeer
+/// reconstruction is the source of the grid-scale boundary instability;
+/// MASS_COMPAT_OFF skips the source mass-compatibility projection to rule it
+/// out as the boundary-mode seed. Both default OFF.
+static RECON_UPWIND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static MASS_COMPAT_OFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn recon_upwind() -> bool {
+    RECON_UPWIND.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn mass_compat_off() -> bool {
+    MASS_COMPAT_OFF.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Inflow on all four unit-box boundaries: u_x(0,·)=U0>0, u_x(1,·)=-U0,
 /// u_y(·,0)=V0>0, u_y(·,1)=-V0 (the UA/UB terms vanish on the boundary).
 fn exact_u(x: f64, y: f64) -> (f64, f64) {
@@ -567,7 +583,11 @@ fn build_run_box(
         &mesh,
         model,
         SolverConfig {
-            advection_scheme: Scheme::SecondOrderUpwindVanLeer,
+            advection_scheme: if recon_upwind() {
+                Scheme::Upwind
+            } else {
+                Scheme::SecondOrderUpwindVanLeer
+            },
             time_scheme,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Implicit { outer_iters },
@@ -707,8 +727,10 @@ fn build_run_box(
         .sum();
     let eps = (vol_int - bflux) / vol_total;
     println!("[mms][compressible] nx={nx} mass-compatibility eps={eps:.3e}");
-    for s in src_rho.iter_mut() {
-        *s -= eps;
+    if !mass_compat_off() {
+        for s in src_rho.iter_mut() {
+            *s -= eps;
+        }
     }
     let src_rho_u: Vec<(f64, f64)> = (0..cells)
         .map(|i| source_rho_u(mesh.cell_cx[i], mesh.cell_cy[i], extra, mu))
@@ -1315,8 +1337,6 @@ fn probe_arcn_domain_matrix() {
     );
 }
 
-/// ARC N S1: eigenmode dump — capture the growing inviscid mode's spatial
-/// structure. Marches n=48 / mu=0 / BDF2 / o1, snapshots per-cell deltas
 /// ARC N′ N1 — IS THE BOUNDARY-BAND μ=0 INSTABILITY GENUINE? Converged-Picard
 /// (outer=2), small amplitude (perturbations ×AMP so the amplitude-INDEPENDENT
 /// boundary mode dominates the amplitude-LINEAR interior KH physics), all-Inlet
@@ -1356,6 +1376,60 @@ fn probe_arcn_refinement_trend() {
     set_amp_scale(1.0);
 }
 
+/// ARC N′ N2 — mechanism isolation for the grid-scale boundary instability
+/// (small amplitude, converged Picard, all-Inlet). Two cheap discriminators:
+/// - Upwind vs vanLeer: first-order Upwind disables the whole gradient/
+///   reconstruction path. If the boundary mode VANISHES under Upwind, the
+///   2nd-order vanLeer reconstruction (the owner-side reconstruct-to-face vs
+///   the 0th-order face ghost asymmetry) is the source.
+/// - mass-compat on/off: rules out the source projection (expected null —
+///   O(h²)).
+///
+/// MEASURED (June 13, 2026; amp=0.25, o2): vanLeer n32/n48 = 61.2/63.7;
+/// **Upwind n32/n48 = 0.28/2.74 — a 20–200× reduction, NEARLY STABLE**;
+/// no-masscompat n48 = 63.1 (≈ baseline ⇒ mass-compat RULED OUT). Verdict:
+/// the 2nd-order vanLeer reconstruction is the DOMINANT driver — its
+/// near-central limiter (ψ≈1 on the smooth background) is under-dissipative
+/// at grid scale (the KNP jump dissipation is O(h³) on smooth reconstructed
+/// states), exactly matching the high-k eigenmode card; Upwind's numerical
+/// dissipation suppresses it. CAVEAT: Upwind n64 still DIVERGES (u_l2 6e8) —
+/// its O(h) dissipation VANISHES under refinement, so Upwind only DELAYS the
+/// refinement-amplified mode. The instability is fundamentally
+/// under-dissipation at high k. N3 (periodic) separates whether this is the
+/// INTERIOR reconstruction or specifically the BOUNDARY.
+#[test]
+#[ignore]
+fn probe_arcn_mechanism() {
+    use std::sync::atomic::Ordering;
+    let dt = 5.0e-3;
+    let steps = 600;
+    set_amp_scale(0.25);
+    println!(
+        "[arcn-mech] amp=0.25 o2  {:20} {:>12} {:>8} {:>8} {:>9} {:>9}",
+        "config", "growth %/tu", "nyq(p)", "bfrac", "u_l2", "rho_l2"
+    );
+    let mut report = |label: &str, mut run: SteadyRun| {
+        let (rate, nyq_p, bfrac, u_l2, rho_l2) = measure_growth(&mut run, dt, steps, 25);
+        println!("[arcn-mech] {label:20} {rate:12.2} {nyq_p:8.4} {bfrac:8.4} {u_l2:9.2e} {rho_l2:9.2e}");
+    };
+    // Baseline vanLeer (boundary mode present: ~61/64 at n32/48).
+    report("vanLeer n32", build_run(32, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2));
+    report("vanLeer n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2));
+    // First-order Upwind (no gradient reconstruction).
+    RECON_UPWIND.store(true, Ordering::Relaxed);
+    report("upwind n32", build_run(32, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2));
+    report("upwind n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2));
+    report("upwind n64", build_run(64, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2));
+    RECON_UPWIND.store(false, Ordering::Relaxed);
+    // Mass-compat projection off.
+    MASS_COMPAT_OFF.store(true, Ordering::Relaxed);
+    report("no-masscompat n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2));
+    MASS_COMPAT_OFF.store(false, Ordering::Relaxed);
+    set_amp_scale(1.0);
+}
+
+/// ARC N S1: eigenmode dump — capture the growing inviscid mode's spatial
+/// structure. Marches n=48 / mu=0 / BDF2 / o1, snapshots per-cell deltas
 /// vs the exact solution at steps 400 and 500, and writes CSV to
 /// target/arcn_probes/eigenmode_n48.csv with columns
 /// x,y,d1_<f>,d2_<f>,g_<f> for f in rho,ux,uy,p,T — where d1/d2 are the

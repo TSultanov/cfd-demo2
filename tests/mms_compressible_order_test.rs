@@ -42,7 +42,10 @@ mod mms_support;
 use std::f64::consts::PI;
 
 use cfd2::solver::gpu::enums::GpuBoundaryType;
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
+use cfd2::solver::mesh::{
+    generate_structured_rect_mesh, generate_structured_rect_mesh_periodic, BoundarySides,
+    BoundaryType, Mesh,
+};
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::SolverRuntimeParamsExt;
 use cfd2::solver::model::{
@@ -181,6 +184,18 @@ fn recon_upwind() -> bool {
 
 fn mass_compat_off() -> bool {
     MASS_COMPAT_OFF.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// ARC N′ N3 toggle: run on a fully-periodic box (zero boundary faces) instead
+/// of the Dirichlet rectangle, so the interior operator is isolated from the
+/// boundary stencil. Default OFF. The boundary seeding in `build_run_box`
+/// no-ops (no Inlet/Outlet faces) and the mass-compatibility `bflux` term is
+/// zero, so `eps` becomes the mean source — exactly the closed-system
+/// constraint a periodic domain requires.
+static PERIODIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn periodic() -> bool {
+    PERIODIC.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Inflow on all four unit-box boundaries: u_x(0,·)=U0>0, u_x(1,·)=-U0,
@@ -572,7 +587,11 @@ fn build_run_box(
     let has_outlet = [sides.left, sides.right, sides.bottom, sides.top]
         .iter()
         .any(|s| *s == BoundaryType::Outlet);
-    let mesh = generate_structured_rect_mesh(nx, ny, lx, ly, sides);
+    let mesh = if periodic() {
+        generate_structured_rect_mesh_periodic(nx, ny, lx, ly)
+    } else {
+        generate_structured_rect_mesh(nx, ny, lx, ly, sides)
+    };
     let model = compressible_mms_model().expect("model");
     let eos = EosSpec::IdealGas {
         gamma: GAMMA,
@@ -1425,6 +1444,63 @@ fn probe_arcn_mechanism() {
     MASS_COMPAT_OFF.store(true, Ordering::Relaxed);
     report("no-masscompat n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2));
     MASS_COMPAT_OFF.store(false, Ordering::Relaxed);
+    set_amp_scale(1.0);
+}
+
+/// ARC N′ N3 — the periodic-domain instrument: the decisive interior-vs-boundary
+/// separator. A fully-periodic box has ZERO boundary faces, so any growth is the
+/// INTERIOR operator alone — the all-Inlet box's boundary band is structurally
+/// absent. The manufactured fields are 2-periodic, so the box is [0,2]^2 at 2n
+/// cells/side (h = 1/n), matched to the N1/N2 unit-box rows. Small amplitude
+/// (0.25), mu = 0, converged Picard (outer=2, break pinned open) — identical to
+/// `probe_arcn_refinement_trend` except for the periodic mesh.
+///
+/// MEASURED (June 13, 2026) — VERDICT: ENTIRELY INTERIOR.
+///   h=1/32 (64 cells):  +43.94 %/tu, u_l2 1.26e-2  (all-Inlet N1: 61.2)
+///   h=1/48 (96 cells):  +41.06 %/tu, u_l2 9.72e-3  (all-Inlet N1: 63.7)
+///   h=1/64 (128 cells): DIVERGES, u_l2 5.77e5      (all-Inlet N1: 9.96e8)
+///   h=1/96 (192 cells): DIVERGES, u_l2 2.86e8      (all-Inlet N1: 2.03e13)
+/// The boundary-free box reproduces the WHOLE N1 signature — finite growth at
+/// coarse h AND the refinement-amplified blow-up at fine h (the "0.00" rate at
+/// n>=64 is the saturated-blowup metric trap; the LEVELS show divergence). So
+/// the instability needs NO boundary faces: it is the interior vanLeer
+/// reconstruction's high-k under-dissipation (N2), full stop. The all-Inlet
+/// box's bfrac~0.90 "boundary band" was a metric artifact (the interior high-k
+/// mode's amplitude concentrating near edges); the boundary geometry AMPLIFIES
+/// the mode (~3 orders harder at n=64) but does not cause it. => N4 targets a
+/// k-selective INTERIOR dissipation (must hold the mu>0 MMS orders).
+#[test]
+#[ignore]
+fn probe_arcn_periodic() {
+    use std::sync::atomic::Ordering;
+    let dt = 5.0e-3;
+    let steps = 600;
+    let amp = 0.25;
+    set_amp_scale(amp);
+    PERIODIC.store(true, Ordering::Relaxed);
+    // `sides` is ignored on a periodic mesh (it has no boundary faces).
+    let inlet = BoundarySides {
+        left: BoundaryType::Inlet,
+        right: BoundaryType::Inlet,
+        bottom: BoundaryType::Inlet,
+        top: BoundaryType::Inlet,
+    };
+    println!(
+        "[arcn-periodic] amp={amp} mu=0 [0,2]^2  {:12} {:>12} {:>9} {:>9}",
+        "config", "growth %/tu", "u_l2", "rho_l2"
+    );
+    // 2n cells over [0,2] => h = 1/n, matched to the N1 unit-box n rows
+    // (where all-Inlet diverged at n=64/96 — does the boundary-free box too?).
+    for &n in &[32usize, 48, 64, 96] {
+        let cells = 2 * n;
+        // outer=2 = converged Picard (build_run_box pins the outer break open).
+        let mut run = build_run_box(
+            cells, cells, 2.0, 2.0, inlet, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2,
+        );
+        let (rate, _nyq_p, _bfrac, u_l2, rho_l2) = measure_growth(&mut run, dt, steps, 25);
+        println!("[arcn-periodic] h=1/{n:<7} {rate:12.2} {u_l2:9.2e} {rho_l2:9.2e}");
+    }
+    PERIODIC.store(false, Ordering::Relaxed);
     set_amp_scale(1.0);
 }
 

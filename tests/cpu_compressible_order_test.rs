@@ -496,7 +496,7 @@ fn diag_compressible_trajectory() {
     );
     let _ = (&mesh, steps);
     // Reuse solve() with step-by-step reporting by calling it for increasing counts.
-    for st in [1usize, 3] {
+    for st in [1usize, 10, 30, 60, 120] {
         let (m, rho, _u, p, _t, rho_e, rho_u) = solve(n, st, CpuBackendConfig::default());
         let er = l2_scalar(&m, &rho, exact_rho);
         let ep = l2_scalar(&m, &p, exact_p);

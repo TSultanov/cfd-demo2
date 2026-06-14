@@ -381,7 +381,7 @@ impl CpuSolver {
             col_indices: &self.col_indices,
             values: &matrix,
         };
-        bicgstab(&a, &rhs, &mut x, LINEAR_MAX_ITERS, LINEAR_TOL);
+        bicgstab(&a, &rhs, &mut x, LINEAR_MAX_ITERS, LINEAR_TOL, self.config.simd);
 
         self.buffers.copy_into_f32("x", &x);
     }
@@ -737,5 +737,32 @@ mod tests {
             max_diff == 0.0,
             "multithreaded result differs from serial: max|diff|={max_diff:.3e}"
         );
+    }
+
+    #[test]
+    fn cpu_compute_options_all_agree() {
+        // Validate every runtime CPU computation option against the reference
+        // {1 thread, scalar}: {1,4 threads} × {scalar, SIMD}. SIMD reorders the
+        // reduction summation so it matches to rounding (not bit-exact); threads
+        // are bit-identical.
+        let n = 32;
+        let base = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { threads: 1, simd: false }).1;
+        for (threads, simd, tol) in [
+            (4usize, false, 0.0f64),
+            (1, true, 1e-4),
+            (4, true, 1e-4),
+        ] {
+            let t = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { threads, simd }).1;
+            let max_diff = base
+                .iter()
+                .zip(&t)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f64, f64::max);
+            println!("[cpu-opts] threads={threads} simd={simd} max|diff vs ref|={max_diff:.3e}");
+            assert!(
+                max_diff <= tol,
+                "option (threads={threads}, simd={simd}) diverges: {max_diff:.3e} > {tol:.1e}"
+            );
+        }
     }
 }

@@ -56,6 +56,29 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
+/// SIMD dot product (4-wide f64). FP reductions don't auto-vectorise (summation
+/// is non-associative), so this is the meaningful manual-SIMD path; it differs
+/// from the scalar dot only in summation order (matches to rounding).
+fn dot_simd(a: &[f64], b: &[f64]) -> f64 {
+    use wide::f64x4;
+    let n = a.len();
+    let mut acc = f64x4::splat(0.0);
+    let mut i = 0;
+    while i + 4 <= n {
+        let va = f64x4::from([a[i], a[i + 1], a[i + 2], a[i + 3]]);
+        let vb = f64x4::from([b[i], b[i + 1], b[i + 2], b[i + 3]]);
+        acc += va * vb;
+        i += 4;
+    }
+    let lanes = acc.to_array();
+    let mut s = lanes[0] + lanes[1] + lanes[2] + lanes[3];
+    while i < n {
+        s += a[i] * b[i];
+        i += 1;
+    }
+    s
+}
+
 fn norm(a: &[f64]) -> f64 {
     dot(a, a).sqrt()
 }
@@ -71,10 +94,21 @@ pub struct SolveStats {
 
 /// Solve `A x = b` with preconditioned BiCGSTAB. `x` is used as the initial guess
 /// and overwritten with the solution. Returns convergence statistics.
-pub fn bicgstab(a: &CsrView, b: &[f32], x: &mut [f32], max_iter: usize, tol: f64) -> SolveStats {
+pub fn bicgstab(
+    a: &CsrView,
+    b: &[f32],
+    x: &mut [f32],
+    max_iter: usize,
+    tol: f64,
+    simd: bool,
+) -> SolveStats {
     let n = a.n();
     assert_eq!(b.len(), n);
     assert_eq!(x.len(), n);
+
+    // The SIMD switch only changes the dot/norm reduction implementation.
+    let vdot = |a: &[f64], b: &[f64]| if simd { dot_simd(a, b) } else { dot(a, b) };
+    let vnorm = |a: &[f64]| vdot(a, a).sqrt();
 
     let diag = a.diagonal();
     let minv = |v: &[f64], out: &mut [f64]| {
@@ -85,7 +119,7 @@ pub fn bicgstab(a: &CsrView, b: &[f32], x: &mut [f32], max_iter: usize, tol: f64
     };
 
     let bf: Vec<f64> = b.iter().map(|&v| v as f64).collect();
-    let bnorm = norm(&bf).max(1e-300);
+    let bnorm = vnorm(&bf).max(1e-300);
 
     let mut xf: Vec<f64> = x.iter().map(|&v| v as f64).collect();
 
@@ -105,7 +139,7 @@ pub fn bicgstab(a: &CsrView, b: &[f32], x: &mut [f32], max_iter: usize, tol: f64
         }
     };
 
-    let mut res = norm(&r);
+    let mut res = vnorm(&r);
     if res / bnorm <= tol {
         return finish(&xf, x, 0, res, true);
     }
@@ -119,7 +153,7 @@ pub fn bicgstab(a: &CsrView, b: &[f32], x: &mut [f32], max_iter: usize, tol: f64
     let (mut phat, mut shat, mut t) = (vec![0.0f64; n], vec![0.0f64; n], vec![0.0f64; n]);
 
     for iter in 1..=max_iter {
-        let rho_new = dot(&rhat, &r);
+        let rho_new = vdot(&rhat, &r);
         if rho_new.abs() < 1e-300 {
             // Breakdown; restart from the current residual.
             return finish(&xf, x, iter, res, res / bnorm <= tol);
@@ -130,7 +164,7 @@ pub fn bicgstab(a: &CsrView, b: &[f32], x: &mut [f32], max_iter: usize, tol: f64
         }
         minv(&p, &mut phat);
         a.spmv(&phat, &mut v);
-        let rhat_v = dot(&rhat, &v);
+        let rhat_v = vdot(&rhat, &v);
         alpha = rho_new / rhat_v;
 
         // s = r - alpha v  (reuse r as s after recording)
@@ -138,7 +172,7 @@ pub fn bicgstab(a: &CsrView, b: &[f32], x: &mut [f32], max_iter: usize, tol: f64
         for i in 0..n {
             s[i] = r[i] - alpha * v[i];
         }
-        let snorm = norm(&s);
+        let snorm = vnorm(&s);
         if snorm / bnorm <= tol {
             for i in 0..n {
                 xf[i] += alpha * phat[i];
@@ -148,14 +182,14 @@ pub fn bicgstab(a: &CsrView, b: &[f32], x: &mut [f32], max_iter: usize, tol: f64
 
         minv(&s, &mut shat);
         a.spmv(&shat, &mut t);
-        let tt = dot(&t, &t).max(1e-300);
-        omega = dot(&t, &s) / tt;
+        let tt = vdot(&t, &t).max(1e-300);
+        omega = vdot(&t, &s) / tt;
 
         for i in 0..n {
             xf[i] += alpha * phat[i] + omega * shat[i];
             r[i] = s[i] - omega * t[i];
         }
-        res = norm(&r);
+        res = vnorm(&r);
         if res / bnorm <= tol {
             return finish(&xf, x, iter, res, true);
         }
@@ -202,7 +236,7 @@ mod tests {
         };
         let b = [1.0f32, 2.0, 3.0];
         let mut x = [0.0f32; 3];
-        let stats = bicgstab(&a, &b, &mut x, 100, 1e-10);
+        let stats = bicgstab(&a, &b, &mut x, 100, 1e-10, false);
         assert!(stats.converged, "did not converge: {stats:?}");
         assert!(
             residual_norm(&a, &b, &x) < 1e-5,
@@ -239,7 +273,7 @@ mod tests {
         };
         let b = vec![1.0f32; n];
         let mut x = vec![0.0f32; n];
-        let stats = bicgstab(&a, &b, &mut x, 500, 1e-10);
+        let stats = bicgstab(&a, &b, &mut x, 500, 1e-10, false);
         assert!(stats.converged, "did not converge: {stats:?}");
         assert!(residual_norm(&a, &b, &x) < 1e-4);
     }

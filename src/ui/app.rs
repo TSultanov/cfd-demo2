@@ -280,6 +280,11 @@ pub struct CFDApp {
     selected_scheme: Scheme,
     current_fluid: Fluid,
     show_mesh_lines: bool,
+    // Compute-backend selection (env-driven; applied on Initialize / Reset).
+    cpu_backend: bool,
+    cpu_engine_transpiled: bool,
+    cpu_threads: usize,
+    cpu_simd: bool,
     adaptive_dt: bool,
     target_cfl: f64,
     dual_time: bool,
@@ -414,6 +419,10 @@ impl CFDApp {
             selected_scheme: Scheme::Upwind,
             current_fluid: default_fluid,
             show_mesh_lines: true,
+            cpu_backend: false,
+            cpu_engine_transpiled: false,
+            cpu_threads: 1,
+            cpu_simd: false,
             adaptive_dt: true,
             target_cfl: 0.9,
             dual_time: false,
@@ -717,7 +726,29 @@ impl CFDApp {
         // visualization buffer. Field selection is driven by uniforms (stride/offset/mode).
     }
 
+    /// Apply the selected compute backend via environment (read by
+    /// `UnifiedSolver::new`). CPU options are runtime-switchable; changes take
+    /// effect on the next solver (re)build.
+    fn apply_backend_env(&self) {
+        if self.cpu_backend {
+            std::env::set_var("CFD2_BACKEND", "cpu");
+            std::env::set_var(
+                "CFD2_CPU_ENGINE",
+                if self.cpu_engine_transpiled {
+                    "transpiled"
+                } else {
+                    "interpreter"
+                },
+            );
+            std::env::set_var("CFD2_CPU_THREADS", self.cpu_threads.max(1).to_string());
+            std::env::set_var("CFD2_CPU_SIMD", if self.cpu_simd { "1" } else { "0" });
+        } else {
+            std::env::remove_var("CFD2_BACKEND");
+        }
+    }
+
     fn init_solver(&mut self) {
+        self.apply_backend_env();
         self.is_running = false;
         self.solver_worker
             .send(SolverWorkerCommand::SetRunning(false));
@@ -2429,6 +2460,21 @@ impl eframe::App for CFDApp {
                             // diverge. `init_solver` refreshes the model caps.
                             self.apply_model_defaults();
                             self.init_solver();
+                        }
+
+                        ui.separator();
+                        ui.label("Compute Backend");
+                        ui.checkbox(&mut self.cpu_backend, "CPU backend (scalar_transport)");
+                        if self.cpu_backend {
+                            ui.checkbox(
+                                &mut self.cpu_engine_transpiled,
+                                "Transpiled (compiled) kernels",
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut self.cpu_threads, 1..=16).text("Threads"),
+                            );
+                            ui.checkbox(&mut self.cpu_simd, "SIMD linear-solve");
+                            ui.label("Applied on Initialize / Reset.");
                         }
 
                         ui.separator();

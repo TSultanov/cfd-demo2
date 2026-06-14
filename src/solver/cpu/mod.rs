@@ -20,6 +20,8 @@ pub mod linalg;
 pub mod lowering;
 pub mod solver;
 
+pub use solver::CpuSolver;
+
 /// Runtime-selectable execution mode for the CPU backend.
 ///
 /// Both multithreading and SIMD are intended to be switchable at runtime (the

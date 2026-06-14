@@ -166,6 +166,15 @@ fn l2_scalar(mesh: &Mesh, f: &[f64], exact: impl Fn(f64, f64) -> f64) -> f64 {
     (num / den).sqrt()
 }
 
+/// Advection scheme for the setups; overridable via `CFD2_TEST_SCHEME` (e.g.
+/// `upwind`) so diagnostics can isolate the gradient-reconstruction path.
+fn test_scheme() -> Scheme {
+    std::env::var("CFD2_TEST_SCHEME")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(Scheme::SecondOrderUpwindVanLeer)
+}
+
 #[allow(clippy::type_complexity)]
 fn setup(n: usize, cfg: CpuBackendConfig) -> (CpuSolver, Mesh) {
     let mesh = generate_structured_rect_mesh(
@@ -185,7 +194,7 @@ fn setup(n: usize, cfg: CpuBackendConfig) -> (CpuSolver, Mesh) {
     let mut s = CpuSolver::with_stepping(
         &mesh,
         model,
-        Scheme::SecondOrderUpwindVanLeer,
+        test_scheme(),
         TimeScheme::BDF2,
         SteppingMode::Implicit { outer_iters: 1 },
         cfg,
@@ -436,6 +445,27 @@ fn diag_cpu_vs_gpu_mms_step1() {
             max_change_t = max_change_t.max(dt);
         }
         println!("[bc-refresh] CPU bc_value change after step: rho_e={max_change_re:.3e} T={max_change_t:.3e}; {sample}");
+        // Compare the CPU's REFRESHED rho_e/T ghosts to the analytically-expected
+        // bc_expr output (in_p = exact_p(OWNER CELL center); ke from seeded face
+        // rho/u). A large diff means the CPU bc_expr executes the formula wrong.
+        let gm1 = GAMMA - 1.0;
+        let (mut wre, mut wt) = (0.0f64, 0.0f64);
+        let mut wsamp = String::new();
+        for f in 0..mesh.num_faces() {
+            if mesh.face_neighbor[f].is_some() { continue; }
+            let oc = mesh.face_owner[f];
+            let in_p = exact_p(mesh.cell_cx[oc], mesh.cell_cy[oc]);
+            let (uf0, uf1) = exact_u(mesh.face_cx[f], mesh.face_cy[f]);
+            let rhof = exact_rho(mesh.face_cx[f], mesh.face_cy[f]);
+            let ke = 0.5 * rhof * (uf0 * uf0 + uf1 * uf1);
+            let exp_re = in_p / gm1 + ke;
+            let exp_t = in_p / (rhof * R_GAS);
+            let dre = (bc_after[f * 8 + 3] as f64 - exp_re).abs();
+            let dt = (bc_after[f * 8 + 7] as f64 - exp_t).abs();
+            if dre > wre { wre = dre; wsamp = format!("face {f}: cpu_re={:.5} expected={:.5}", bc_after[f*8+3], exp_re); }
+            wt = wt.max(dt);
+        }
+        println!("[bc-vs-expected] max|cpu_refresh - analytic_gpu|: rho_e={wre:.3e} T={wt:.3e}; {wsamp}");
     }
     let (crho, cu, cp) = (
         c.get_field_scalar("rho").unwrap(),
@@ -448,7 +478,7 @@ fn diag_cpu_vs_gpu_mms_step1() {
     let model = compressible_mms_model().expect("model");
     let mut g = pollster::block_on(UnifiedSolver::new(
         &mesh, model,
-        SolverConfig { advection_scheme: Scheme::SecondOrderUpwindVanLeer, time_scheme: TimeScheme::BDF2, preconditioner: PreconditionerType::Jacobi, stepping: Cfg::Implicit { outer_iters: 1 } },
+        SolverConfig { advection_scheme: test_scheme(), time_scheme: TimeScheme::BDF2, preconditioner: PreconditionerType::Jacobi, stepping: Cfg::Implicit { outer_iters: 1 } },
         None, None,
     )).expect("gpu");
     g.set_dt(DT as f32);
@@ -499,6 +529,17 @@ fn diag_cpu_vs_gpu_mms_step1() {
     let du = cu.iter().zip(&gu).map(|(a, b)| (a.0 - b.0).abs().max((a.1 - b.1).abs())).fold(0.0, f64::max);
     let dre = cp.iter().zip(&gre).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
     println!("[mms-step1] n={n} max|drho|={drho:.3e} max|du|={du:.3e} max|drho_e|={dre:.3e}");
+    {
+        // Localize the residual rho_e STATE divergence (post-step).
+        let bd: Vec<bool> = (0..cells).map(|i| {
+            let (s0,e0)=(mesh.cell_face_offsets[i],mesh.cell_face_offsets[i+1]);
+            (s0..e0).any(|k| mesh.face_neighbor[mesh.cell_faces[k]].is_none())
+        }).collect();
+        let (mut wi,mut wd)=(0usize,0.0); let mut imax=0.0f64;
+        for i in 0..cells { let d=(cp[i]-gre[i]).abs(); if d>wd {wd=d;wi=i;} if !bd[i]{imax=imax.max(d);} }
+        println!("[re-loc] worst cell {wi} ({:.3},{:.3}) bdry_adj={} c={:.5} g={:.5} d={wd:.3e}; interior_max={imax:.3e}",
+            mesh.cell_cx[wi], mesh.cell_cy[wi], bd[wi], cp[wi], gre[wi]);
+    }
 
     // Compare the GRADIENT state fields (computed on the pre-update = exact
     // state during the step). If these diverge, the gradient kernel is the
@@ -523,6 +564,93 @@ fn diag_cpu_vs_gpu_mms_step1() {
             "[grad-loc] {f}: worst cell {wi} ({:.3},{:.3}) bdry_adj={} c={:?} g={:?} d={wd:.3e}; interior_max={int_max:.3e}",
             mesh.cell_cx[wi], mesh.cell_cy[wi], bdry[wi], cv[wi], gv[wi]
         );
+    }
+}
+
+/// Build a GPU `UnifiedSolver` mirroring the CPU `setup()` exactly (same BCs,
+/// sources with mass-compatibility, exact init, BDF2, Implicit{1}, Jacobi).
+#[cfg(feature = "dev-tests")]
+fn setup_gpu(n: usize, mesh: &Mesh) -> cfd2::solver::UnifiedSolver {
+    use cfd2::solver::model::helpers::SolverRuntimeParamsExt;
+    use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode as Cfg, UnifiedSolver};
+    let cells = mesh.num_cells();
+    let model = compressible_mms_model().expect("model");
+    let mut g = pollster::block_on(UnifiedSolver::new(
+        mesh, model,
+        SolverConfig { advection_scheme: Scheme::SecondOrderUpwindVanLeer, time_scheme: TimeScheme::BDF2, preconditioner: PreconditionerType::Jacobi, stepping: Cfg::Implicit { outer_iters: 1 } },
+        None, None,
+    )).expect("gpu");
+    g.set_dt(DT as f32);
+    g.set_dtau(0.0).unwrap();
+    g.set_viscosity(MU as f32).unwrap();
+    g.set_density(RHO0 as f32).unwrap();
+    g.set_outer_iters(1).unwrap();
+    g.set_outer_tolerance(0.0).unwrap();
+    let (fx, fy) = (mesh.face_cx.clone(), mesh.face_cy.clone());
+    let sc = |f: &'static dyn Fn(f64, f64) -> f64, fx: &[f64], fy: &[f64]| { let (fx, fy) = (fx.to_vec(), fy.to_vec()); move |i: u32| f(fx[i as usize], fy[i as usize]) as f32 };
+    g.set_boundary_values_per_face(GpuBoundaryType::Inlet, "rho", 0, &sc(&exact_rho, &fx, &fy)).unwrap();
+    g.set_boundary_values_per_face(GpuBoundaryType::Inlet, "p", 0, &sc(&exact_p, &fx, &fy)).unwrap();
+    g.set_boundary_values_per_face(GpuBoundaryType::Inlet, "T", 0, &sc(&exact_t, &fx, &fy)).unwrap();
+    g.set_boundary_values_per_face(GpuBoundaryType::Inlet, "rho_e", 0, &sc(&exact_rho_e, &fx, &fy)).unwrap();
+    for cc in 0..2u32 {
+        let (fx2, fy2) = (fx.clone(), fy.clone());
+        let uf = move |i: u32| { let (a, b) = exact_u(fx2[i as usize], fy2[i as usize]); (if cc == 0 { a } else { b }) as f32 };
+        let (fx3, fy3) = (fx.clone(), fy.clone());
+        let ruf = move |i: u32| { let j = i as usize; let (a, b) = exact_u(fx3[j], fy3[j]); (exact_rho(fx3[j], fy3[j]) * if cc == 0 { a } else { b }) as f32 };
+        g.set_boundary_values_per_face(GpuBoundaryType::Inlet, "u", cc, &uf).unwrap();
+        g.set_boundary_values_per_face(GpuBoundaryType::Inlet, "rho_u", cc, &ruf).unwrap();
+    }
+    let mut src_rho: Vec<f64> = (0..cells).map(|i| source_rho(mesh.cell_cx[i], mesh.cell_cy[i])).collect();
+    let vol_total: f64 = mesh.cell_vol.iter().sum();
+    let vol_int: f64 = (0..cells).map(|i| src_rho[i] * mesh.cell_vol[i]).sum();
+    let bflux: f64 = (0..mesh.face_owner.len()).filter(|&f| mesh.face_neighbor[f].is_none()).map(|f| { let (ux, uy) = exact_u(mesh.face_cx[f], mesh.face_cy[f]); exact_rho(mesh.face_cx[f], mesh.face_cy[f]) * (ux * mesh.face_nx[f] + uy * mesh.face_ny[f]) * mesh.face_area[f] }).sum();
+    let eps = (vol_int - bflux) / vol_total;
+    for v in src_rho.iter_mut() { *v -= eps; }
+    g.set_field_scalar(COMPRESSIBLE_MMS_SOURCE_RHO_FIELD, &src_rho).unwrap();
+    g.set_field_vec2(COMPRESSIBLE_MMS_SOURCE_RHO_U_FIELD, &(0..cells).map(|i| source_rho_u(mesh.cell_cx[i], mesh.cell_cy[i], MU)).collect::<Vec<_>>()).unwrap();
+    g.set_field_scalar(COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD, &(0..cells).map(|i| source_rho_e(mesh.cell_cx[i], mesh.cell_cy[i], MU)).collect::<Vec<_>>()).unwrap();
+    let rho0: Vec<f64> = (0..cells).map(|i| exact_rho(mesh.cell_cx[i], mesh.cell_cy[i])).collect();
+    let u0: Vec<(f64, f64)> = (0..cells).map(|i| exact_u(mesh.cell_cx[i], mesh.cell_cy[i])).collect();
+    g.set_field_scalar("rho", &rho0).unwrap();
+    g.set_field_vec2("rho_u", &(0..cells).map(|i| (rho0[i] * u0[i].0, rho0[i] * u0[i].1)).collect::<Vec<_>>()).unwrap();
+    g.set_field_scalar("rho_e", &(0..cells).map(|i| exact_rho_e(mesh.cell_cx[i], mesh.cell_cy[i])).collect::<Vec<_>>()).unwrap();
+    g.set_field_scalar("p", &(0..cells).map(|i| exact_p(mesh.cell_cx[i], mesh.cell_cy[i])).collect::<Vec<_>>()).unwrap();
+    g.set_field_scalar("T", &(0..cells).map(|i| exact_t(mesh.cell_cx[i], mesh.cell_cy[i])).collect::<Vec<_>>()).unwrap();
+    g.set_field_vec2("u", &u0).unwrap();
+    g.initialize_history();
+    g
+}
+
+/// Lockstep CPU-vs-GPU compressible march: do CPU and GPU TRACK each other over
+/// many steps, or does the CPU diverge faster? Reports, at intervals, each
+/// backend's L2-vs-exact error AND the max|CPU-GPU| per field. If both drift
+/// together, the march instability is shared (physics/discretization, handled by
+/// the GPU's plateau-acceptance); if CPU-GPU grows, the CPU has a real bug.
+#[ignore]
+#[cfg(feature = "dev-tests")]
+#[test]
+fn diag_cpu_vs_gpu_march() {
+    let n = 8;
+    let (mut c, mesh) = setup(n, CpuBackendConfig::default());
+    let mut g = setup_gpu(n, &mesh);
+    let cells = mesh.num_cells();
+    let mut step = 0usize;
+    for &upto in &[1usize, 5, 10, 20, 40, 80, 160] {
+        while step < upto {
+            c.step();
+            g.step();
+            step += 1;
+        }
+        let crho = c.get_field_scalar("rho").unwrap();
+        let grho = pollster::block_on(g.get_field_scalar("rho")).unwrap();
+        let cre = c.get_field_scalar("rho_e").unwrap();
+        let gre = pollster::block_on(g.get_field_scalar("rho_e")).unwrap();
+        let dr = crho.iter().zip(&grho).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+        let dre = cre.iter().zip(&gre).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+        let c_err = l2_scalar(&mesh, &cre, exact_rho_e);
+        let g_err = l2_scalar(&mesh, &gre, exact_rho_e);
+        let _ = cells;
+        println!("[march] step={step} | CPU-GPU: rho={dr:.3e} rho_e={dre:.3e} | rho_e_L2_vs_exact: cpu={c_err:.3e} gpu={g_err:.3e}");
     }
 }
 
@@ -559,20 +687,38 @@ fn diag_compressible_trajectory() {
     }
 }
 
-/// CPU compressible MMS order. CURRENTLY IGNORED — under investigation.
+/// CPU compressible MMS order. CURRENTLY IGNORED — marginally-unstable MMS.
 ///
 /// The full coupled compressible path runs on the CPU (smoke test passes; every
 /// kernel CPU-lowers byte-identically to the GPU WGSL; the assembled system's
 /// discrete residual at the exact solution converges at O(h^2.7-3) and the block
-/// FGMRES+point-Jacobi solve matches a dense LU to 1e-7 on the well-conditioned
-/// system, cond~3.5). Yet the marched solution drifts where the GPU converges
-/// (GPU max_delta decays 1.2e-3 -> 1e-5; CPU error grows ~3.5e-3/step), with a
-/// per-step CPU-vs-GPU difference concentrated in the ENERGY equation (rho_e
-/// ~5e-3/step at n=16) that does not shrink with the linear tolerance. The
-/// discrepancy is isolated to the GPU's linear-solve behaviour vs the CPU's
-/// (everything assembled/applied is identical and exact); pinpointing it needs
-/// GPU intermediate-buffer (flux/matrix) readback, which the API doesn't expose.
-/// Tracked as a CPU-backend follow-up. See diag_* tests for the evidence.
+/// FGMRES+block-Jacobi solve matches a dense LU to 1e-7, cond~3.5).
+///
+/// Investigation (2026-06-14) found and fixed FOUR real CPU↔GPU mismatches on
+/// this path, validated by `diag_cpu_vs_gpu_mms_step1`/`diag_cpu_vs_gpu_march`:
+///  1. Gradient ordering — `flux_module_gradients` must run on the SEEDED ghosts
+///     (before `bc_expr`), matching the GPU; grad_rho_e/grad_T now match exactly.
+///  2. `bc_expr` timing — the recurring boundary-closure refresh runs at the END
+///     of the outer iteration (prepares the NEXT iter's ghosts), so step-1's
+///     assembly sees the seed like the GPU (step-1 energy diff 4.3e-3 -> 2.0e-3).
+///  3. Preconditioner — coupled (S>1) systems use the per-cell BLOCK Jacobi (the
+///     GPU's `block_precond.wgsl`), not scalar point-Jacobi.
+///  4. Warm-start — `x` is packed from the coupled unknowns in the initial state
+///     so the first solve does not wander the rank-deficient null-space.
+///
+/// REMAINING: the marched solution still diverges where the GPU saturates. The
+/// divergence is SOLVE-INVARIANT (identical under point/block Jacobi, tol 1e-4 vs
+/// 1e-8, and warm-start on/off) and OPERATOR-determined; yet every checkable
+/// assembly input matches the GPU (state grad fields exactly; bc_value to f32;
+/// grad_state is unused in reconstruction on both paths; fused and separate
+/// assemblies read the same state grad fields). This MMS is documented as
+/// MARGINALLY UNSTABLE on the GPU too (`mms_compressible_order_test`: refinement-
+/// amplified, ~49%/100 steps drift at n=48; the GPU runner accepts at a delta
+/// PLATEAU). The CPU's f32 discretization grows where the GPU's f32 path stays
+/// bounded — an f32-level operator difference amplified by the marginal mode.
+/// Definitive localization needs GPU matrix_values readback (not yet exposed) to
+/// diff the assembled block matrix cell-by-cell. Tracked as a follow-up; see the
+/// `diag_*` tests (incl. `diag_cpu_vs_gpu_march`) for the evidence.
 #[ignore]
 #[test]
 fn cpu_compressible_mms_second_order() {

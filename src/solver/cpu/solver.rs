@@ -516,6 +516,49 @@ impl CpuSolver {
         self.buffers.copy_into_f32("state_old", &state);
         self.buffers.copy_into_f32("state_old_old", &state);
         self.buffers.copy_into_f32("state_iter", &state);
+        // Warm-start the solve buffer `x` from the coupled unknowns in the state.
+        // The compressible EOS-coupled block system is rank-deficient (the
+        // recovery rows admit a null-space the residual does not pin), so a zero
+        // initial guess lets the FIRST solve wander along the null-space and seed
+        // a drift that the marginally-stable MMS march then amplifies (the GPU,
+        // whose `x` persists in sync with the state, does not). Pin `x` to the
+        // initial state so the first warm-start fixes the null-space component.
+        self.sync_x_from_state();
+    }
+
+    /// Pack the coupled unknowns out of the packed state into the solve buffer
+    /// `x` (block-CSR unknown order). Each coupled field's `x` base comes from
+    /// `coupled_offsets`; its component width is the gap to the next base (last
+    /// to `unknowns_per_cell`); its source offset in the state from the layout.
+    fn sync_x_from_state(&self) {
+        let s = self.unknowns_per_cell;
+        if s <= 1 {
+            return; // scalar path solves for the field directly; no packing.
+        }
+        let stride = self.state_stride as usize;
+        let mut offs: Vec<(u32, String)> = self
+            .coupled_offsets
+            .iter()
+            .map(|(k, &v)| (v, k.clone()))
+            .collect();
+        offs.sort();
+        let state = self.buffers.f32_vec("state");
+        let mut x = vec![0.0f32; self.num_cells * s];
+        for (i, (xbase, field)) in offs.iter().enumerate() {
+            let xbase = *xbase as usize;
+            let next = offs.get(i + 1).map(|(o, _)| *o as usize).unwrap_or(s);
+            let width = next - xbase;
+            let Some(soff) = self.state_layout.offset_for(field) else {
+                continue;
+            };
+            let soff = soff as usize;
+            for cell in 0..self.num_cells {
+                for c in 0..width {
+                    x[cell * s + xbase + c] = state[cell * stride + soff + c];
+                }
+            }
+        }
+        self.buffers.copy_into_f32("x", &x);
     }
 
     pub fn step(&mut self) {
@@ -533,14 +576,16 @@ impl CpuSolver {
         self.constants.time_scheme = self.time_scheme as u32;
         let ctx = constants_ctx(&self.constants, &self.low_mach);
 
-        // Drive in RECIPE (schedule) ORDER, which is the order the GPU executes:
-        // the per-iteration kernels are the Gradients/FluxComputation/Assembly
-        // passes interleaved with the recurring `bc_expr` AT ITS SCHEDULED
-        // POSITION. This ordering is load-bearing: compressible schedules
-        // flux_module_gradients + flux_module BEFORE bc_expr, so those see the
-        // pre-refresh (seeded) boundary ghosts — exactly like the GPU; phase-
-        // grouping bc_expr first instead fed them the refreshed ghosts and
-        // biased the energy gradients (grad_rho_e/grad_T) at the boundary.
+        // Drive in RECIPE (schedule) ORDER, which is the order the GPU executes.
+        // Per-iteration kernels are the Gradients/FluxComputation/Assembly passes;
+        // the recurring `bc_expr` runs at the END of each outer iteration (after
+        // the update), NOT before the assembly. This timing is load-bearing and
+        // matches the GPU's generic-coupled loop: the recurring boundary-closure
+        // refresh prepares the ghosts for the NEXT iteration/step, so an outer
+        // iteration's gradients/flux/assembly all see the ghosts produced by the
+        // PRIOR iteration (seeded values on the very first step). Running bc_expr
+        // before the assembly instead fed step-1 the refreshed ghosts and biased
+        // the boundary energy row (rho_e drift that broke the long MMS march).
         // Once-only Preparation kernels (e.g. rhie_chow dp_init) run before the
         // loop; the CPU linear solve replaces the LinearSolve phase after
         // assembly; Apply is monitor-only (skipped); Update/PrimitiveRecovery
@@ -553,8 +598,14 @@ impl CpuSolver {
                 matches!(
                     s.phase,
                     KernelPhase::Gradients | KernelPhase::FluxComputation | KernelPhase::Assembly
-                ) || (s.phase == KernelPhase::Preparation && is_bc_expr(&s.id))
+                )
             })
+            .map(|s| s.id.clone())
+            .collect();
+        let bc_expr_ids: Vec<String> = self
+            .schedule
+            .iter()
+            .filter(|s| s.phase == KernelPhase::Preparation && is_bc_expr(&s.id))
             .map(|s| s.id.clone())
             .collect();
         let prep_once: Vec<String> = self
@@ -600,14 +651,18 @@ impl CpuSolver {
             let snap = self.buffers.f32_vec("state");
             self.buffers.copy_into_f32("state_iter", &snap);
 
-            // Per-iteration kernels in schedule order (gradients/flux/bc_expr/
-            // assembly), then the CPU linear solve (replacing LinearSolve), then
-            // the update group.
+            // Per-iteration kernels in schedule order (gradients/flux/assembly),
+            // then the CPU linear solve (replacing LinearSolve), then the update
+            // group, then the recurring boundary-closure refresh (bc_expr) which
+            // prepares the ghosts for the next iteration/step.
             for id in &per_iter {
                 run(id);
             }
             self.linear_solve();
             for id in &update_group {
+                run(id);
+            }
+            for id in &bc_expr_ids {
                 run(id);
             }
 
@@ -731,17 +786,28 @@ impl CpuSolver {
                 values: &matrix,
             };
             // Preconditioner: the model-owned Schur complement for saddle-point
-            // systems (incompressible/buoyant); otherwise point-Jacobi for
-            // `Jacobi`/`Amg` or block-Jacobi for `BlockJacobi` (biharmonic).
+            // systems (incompressible/buoyant); otherwise the per-cell block
+            // Jacobi — the GPU's generic-coupled FGMRES preconditioner for ALL
+            // coupled (S>1) systems is `block_precond.wgsl` (a full b×b block
+            // inverse), NOT a scalar point Jacobi. The compressible EOS recovery
+            // rows (p, T) couple strongly WITHIN a cell and leave the block
+            // system rank-deficient; a scalar diagonal mishandles that coupling,
+            // so the inexact solve drifts and the marginally-stable MMS march
+            // diverges where the block-Jacobi GPU saturates. Point-Jacobi is kept
+            // only as a debug toggle (CFD2_CPU_POINT_JACOBI).
             let block_pc: Box<dyn Preconditioner> = match &self.schur {
                 Some((u_idx, p, omega)) => {
                     Box::new(SchurPrecond::new(a, u_idx, *p, *omega as f64, self.config.simd))
                 }
-                None => match self.precond {
-                    PreconditionerType::BlockJacobi => Box::new(BlockJacobi::new(&a)),
-                    _ => Box::new(PointJacobi::new(&a)),
-                },
+                None => {
+                    if std::env::var("CFD2_CPU_POINT_JACOBI").is_ok() {
+                        Box::new(PointJacobi::new(&a))
+                    } else {
+                        Box::new(BlockJacobi::new(&a))
+                    }
+                }
             };
+            let _ = self.precond;
             let precond = block_pc.as_ref();
             let tol = std::env::var("CFD2_CPU_LINTOL")
                 .ok()

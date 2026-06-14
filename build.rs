@@ -321,6 +321,11 @@ fn main() {
         write_u64_hex(&model_codegen_fingerprint_path, model_codegen_fingerprint);
     }
 
+    // Transpiled CPU kernels (compiled-Rust path) — only when `cpu` is enabled.
+    if std::env::var("CARGO_FEATURE_CPU").is_ok() {
+        emit_transpiled_cpu_kernels(&out_dir, &models, &schemes);
+    }
+
     // Generate infrastructure kernels (dot_product, amg, scalars, etc.) from DSL
     emit_infrastructure_kernels(&manifest_dir);
 
@@ -1335,4 +1340,77 @@ fn write_u64_hex(path: &PathBuf, value: u64) {
         let _ = fs::create_dir_all(parent);
     }
     fs::write(path, format!("{value:016x}\n")).expect("Failed to write fingerprint file");
+}
+
+fn sanitize_ident(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+/// Emit the transpiled (compiled-Rust) CPU kernels for the CPU-supported models
+/// into `$OUT_DIR/cpu_transpiled_kernels.rs`, plus a `lookup(model, kernel)`
+/// dispatch. Only the scalar-transport models are emitted (the kernels the CPU
+/// backend runs), so the generated module is guaranteed to compile.
+fn emit_transpiled_cpu_kernels(
+    out_dir: &str,
+    models: &[solver::model::ModelSpec],
+    schemes: &solver::model::backend::SchemeRegistry,
+) {
+    use solver::model::kernel::ModelKernelArtifact;
+    use solver::model::module::ModelModule;
+
+    let supported = |id: &str| id == "scalar_transport" || id == "scalar_transport_sou";
+
+    let mut fns = String::new();
+    let mut entries: Vec<(String, String, String)> = Vec::new();
+    for model in models {
+        if !supported(model.id) {
+            continue;
+        }
+        for module in &model.modules {
+            let module: &dyn ModelModule = module;
+            for spec in module.kernel_generators() {
+                let artifact = match (spec.generator)(model, schemes) {
+                    Ok(a) => a,
+                    Err(_) => continue,
+                };
+                if let ModelKernelArtifact::DslProgram(program) = artifact {
+                    let fn_name = format!(
+                        "k_{}__{}",
+                        sanitize_ident(model.id),
+                        sanitize_ident(spec.id.as_str())
+                    );
+                    if entries.iter().any(|(_, _, f)| f == &fn_name) {
+                        continue;
+                    }
+                    let src = cfd2_codegen::solver::codegen::rust_emit::emit_kernel_fn(
+                        &fn_name, &program,
+                    );
+                    fns.push_str(&src);
+                    fns.push('\n');
+                    entries.push((
+                        model.id.to_string(),
+                        spec.id.as_str().to_string(),
+                        fn_name,
+                    ));
+                }
+            }
+        }
+    }
+
+    let mut out = String::from("// @generated transpiled CPU kernels — do not edit\n");
+    out.push_str(&fns);
+    out.push_str("\npub type TranspiledKernel = fn(&Buffers, u32, &GpuConstants);\n");
+    out.push_str("pub fn lookup(model_id: &str, kernel_id: &str) -> Option<TranspiledKernel> {\n");
+    out.push_str("    match (model_id, kernel_id) {\n");
+    for (m, k, f) in &entries {
+        out.push_str(&format!(
+            "        ({m:?}, {k:?}) => Some({f} as TranspiledKernel),\n"
+        ));
+    }
+    out.push_str("        _ => None,\n    }\n}\n");
+
+    let path = PathBuf::from(out_dir).join("cpu_transpiled_kernels.rs");
+    fs::write(&path, out).expect("failed to write cpu_transpiled_kernels.rs");
 }

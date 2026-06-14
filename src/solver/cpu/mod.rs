@@ -2,46 +2,58 @@
 //!
 //! The GPU backend compiles the model's kernel IR (`cfd2_ir`) to WGSL and runs it
 //! on wgpu. The CPU backend reuses *everything up to and including* the typed
-//! `KernelProgram` IR and replaces only the runtime: instead of emitting WGSL and
-//! dispatching compute passes, it executes the same `Stmt`/`Expr` AST directly on
-//! CPU-side `Vec<f32>`/`Vec<u32>` buffers.
+//! `KernelProgram` IR and replaces only the runtime.
 //!
-//! Staging (see plan):
-//! - **Phase 1 (this module today):** a tree-walking [`interpreter`] over the
-//!   kernel AST — a GPU-free *reference* executor validated against the existing
-//!   MMS order tests.
-//! - **Phase 2:** runtime-switchable multithreading behind a single
-//!   parallel-for abstraction (not committed to rayon).
-//! - **Phase 3:** an IR→Rust transpiler emitting scalar + SIMD kernel variants,
-//!   selected at runtime.
+//! Two execution engines share the same buffers, schedule, BCs and CPU linear
+//! solver (see [`solver::CpuSolver`]):
+//! - **Interpreter** ([`interpreter`]): tree-walks the kernel AST at runtime.
+//!   GPU-free reference path; no codegen/compile step; tracks the IR automatically.
+//! - **Transpiled** ([`generated`]): runs compiled Rust kernels emitted at build
+//!   time by `cfd2_codegen::solver::codegen::rust_emit` (targeting the
+//!   [`transpile_rt`] prelude). Native speed; falls back to the interpreter for
+//!   any kernel without a generated variant.
+//!
+//! Multithreading ([`parallel`]) and the linear-solve SIMD path ([`linalg`]) are
+//! selected at runtime via [`CpuBackendConfig`].
 
+pub mod generated;
 pub mod interpreter;
 pub mod linalg;
 pub mod lowering;
 pub mod parallel;
 pub mod solver;
-pub mod transpile;
+pub mod transpile_rt;
 
 pub use solver::CpuSolver;
 
-/// Runtime-selectable execution mode for the CPU backend.
-///
-/// Both multithreading and SIMD are intended to be switchable at runtime (the
-/// user's requirement), so these live in a value passed at construction rather
-/// than in cargo features. Phase 1 only honours single-threaded scalar
-/// execution; the other fields are wired in later phases.
+/// Kernel execution engine for the CPU backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CpuEngine {
+    /// Tree-walking interpreter over the kernel IR (reference path).
+    #[default]
+    Interpreter,
+    /// Compiled Rust kernels (build-time transpiled), interpreter fallback.
+    Transpiled,
+}
+
+/// Runtime-selectable execution configuration for the CPU backend. All knobs are
+/// runtime values (not cargo features), per the user's requirement that engine,
+/// threading and SIMD all be switchable at runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CpuBackendConfig {
-    /// Worker threads for per-cell/face dispatch. `1` = serial. (Phase 2.)
+    /// Kernel engine: interpreter (default) or transpiled compiled-Rust.
+    pub engine: CpuEngine,
+    /// Worker threads for per-cell/face dispatch. `1` = serial.
     pub threads: usize,
-    /// Use SIMD kernel variants when available. (Phase 3.)
+    /// Use the SIMD path for the linear-solve reductions.
     pub simd: bool,
 }
 
 impl Default for CpuBackendConfig {
     fn default() -> Self {
-        // Phase-1 default: the deterministic, always-correct reference path.
+        // Default: the deterministic, always-correct reference path.
         Self {
+            engine: CpuEngine::Interpreter,
             threads: 1,
             simd: false,
         }

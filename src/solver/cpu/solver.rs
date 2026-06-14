@@ -18,7 +18,7 @@ use cfd2_ir::ast::Stmt;
 use crate::solver::cpu::interpreter::{Buffers, Ctx, Frame, Interpreter, Value};
 use crate::solver::cpu::linalg::{bicgstab, CsrView};
 use crate::solver::cpu::lowering::model_kernel_programs;
-use crate::solver::cpu::CpuBackendConfig;
+use crate::solver::cpu::{CpuBackendConfig, CpuEngine};
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
 use crate::solver::gpu::structs::{GpuConstants, PreconditionerType};
@@ -42,6 +42,7 @@ struct CpuKernel {
 }
 
 pub struct CpuSolver {
+    model_id: &'static str,
     num_cells: usize,
     num_faces: usize,
     state_stride: u32,
@@ -180,6 +181,7 @@ impl CpuSolver {
         constants.time_scheme = time_scheme as u32;
 
         Ok(Self {
+            model_id: model.id,
             num_cells,
             num_faces,
             state_stride,
@@ -316,11 +318,27 @@ impl CpuSolver {
         let ctx = constants_ctx(&self.constants);
 
         let threads = self.config.threads;
+        let engine = self.config.engine;
+        let model_id = self.model_id;
         let nf = self.num_faces;
         let nc = self.num_cells;
+        let run = |id: &str| {
+            run_kernel(
+                &self.buffers,
+                &ctx,
+                &self.kernels,
+                id,
+                nf,
+                nc,
+                threads,
+                engine,
+                model_id,
+                &self.constants,
+            );
+        };
 
         // Advective flux from the (frozen) advecting velocity — once per step.
-        run_kernel(&self.buffers, &ctx, &self.kernels, "flux_module", nf, nc, threads);
+        run("flux_module");
 
         let assembly_id = if self.needs_gradients {
             "generic_coupled_assembly_grad_state"
@@ -334,38 +352,20 @@ impl CpuSolver {
             self.buffers.copy_into_f32("state_iter", &cur);
 
             if self.needs_gradients {
-                run_kernel(
-                    &self.buffers,
-                    &ctx,
-                    &self.kernels,
-                    "packed_state_gradients",
-                    nf,
-                    nc,
-                    threads,
-                );
+                run("packed_state_gradients");
             }
-
-            run_kernel(&self.buffers, &ctx, &self.kernels, assembly_id, nf, nc, threads);
-
+            run(assembly_id);
             self.linear_solve();
-
-            run_kernel(
-                &self.buffers,
-                &ctx,
-                &self.kernels,
-                "generic_coupled_update",
-                nf,
-                nc,
-                threads,
-            );
+            run("generic_coupled_update");
         }
 
         self.dt_old = self.dt;
     }
 
     /// Solve `A x = b` (the assembled CSR system) on the CPU; result lands in the
-    /// `x` buffer that the update kernel consumes.
-    fn linear_solve(&mut self) {
+    /// `x` buffer that the update kernel consumes. Takes `&self`: it mutates only
+    /// the (interior-mutable atomic) buffers, not solver fields.
+    fn linear_solve(&self) {
         // Initial guess = current T.
         let stride = self.state_stride as usize;
         let off = self.t_offset as usize;
@@ -389,6 +389,7 @@ impl CpuSolver {
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn run_kernel(
     buffers: &Buffers,
     ctx: &Ctx,
@@ -397,6 +398,9 @@ fn run_kernel(
     num_faces: usize,
     num_cells: usize,
     threads: usize,
+    engine: CpuEngine,
+    model_id: &str,
+    constants: &GpuConstants,
 ) {
     let kernel = kernels
         .get(id)
@@ -406,6 +410,18 @@ fn run_kernel(
         DispatchDomain::Cells => num_cells,
         DispatchDomain::Custom(_) => panic!("custom dispatch domain unsupported on CPU"),
     };
+
+    // Transpiled engine: run the compiled-Rust kernel if one was generated for
+    // this (model, kernel); otherwise fall back to the interpreter.
+    if engine == CpuEngine::Transpiled {
+        if let Some(f) = crate::solver::cpu::generated::lookup(model_id, id) {
+            crate::solver::cpu::parallel::parallel_for(domain, threads, |idx| {
+                f(buffers, idx as u32, constants);
+            });
+            return;
+        }
+    }
+
     let stmts = &kernel.stmts;
     crate::solver::cpu::parallel::parallel_for(domain, threads, |idx| {
         // The launch wrapper's `let idx = <invocation_index_expr>;` and the
@@ -725,8 +741,8 @@ mod tests {
         // buffers + disjoint per-cell writes make the parallel run deterministic and
         // identical to the serial run.
         let n = 32;
-        let (_, t1) = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { threads: 1, simd: false });
-        let (_, t4) = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { threads: 4, simd: false });
+        let (_, t1) = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false });
+        let (_, t4) = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 4, simd: false });
         let max_diff = t1
             .iter()
             .zip(&t4)
@@ -746,13 +762,13 @@ mod tests {
         // reduction summation so it matches to rounding (not bit-exact); threads
         // are bit-identical.
         let n = 32;
-        let base = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { threads: 1, simd: false }).1;
+        let base = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false }).1;
         for (threads, simd, tol) in [
             (4usize, false, 0.0f64),
             (1, true, 1e-4),
             (4, true, 1e-4),
         ] {
-            let t = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { threads, simd }).1;
+            let t = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { engine: CpuEngine::Interpreter, threads, simd }).1;
             let max_diff = base
                 .iter()
                 .zip(&t)
@@ -763,6 +779,34 @@ mod tests {
                 max_diff <= tol,
                 "option (threads={threads}, simd={simd}) diverges: {max_diff:.3e} > {tol:.1e}"
             );
+        }
+    }
+
+    #[test]
+    fn cpu_transpiled_matches_interpreter() {
+        // The compiled-Rust (transpiled) engine must agree with the interpreter
+        // for both schemes and across the thread/SIMD options.
+        for scheme in [Scheme::Upwind, Scheme::SecondOrderUpwind] {
+            let n = 32;
+            let interp = solve_steady_cfg(
+                n,
+                scheme,
+                CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false },
+            )
+            .1;
+            for (label, cfg) in [
+                ("transpiled/1t", CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 1, simd: false }),
+                ("transpiled/4t/simd", CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 4, simd: true }),
+            ] {
+                let t = solve_steady_cfg(n, scheme, cfg).1;
+                let d = interp
+                    .iter()
+                    .zip(&t)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0f64, f64::max);
+                println!("[cpu-transpiled] scheme={scheme:?} {label} max|interp-transpiled|={d:.3e}");
+                assert!(d < 1e-5, "transpiled {label} diverges for {scheme:?}: {d:.3e}");
+            }
         }
     }
 }

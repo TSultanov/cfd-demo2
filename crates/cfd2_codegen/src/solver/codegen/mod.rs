@@ -12,6 +12,7 @@ pub mod packed_state_gradients;
 pub mod plan;
 pub mod primitive_expr;
 pub mod reconstruction;
+pub mod rust_emit;
 pub mod state_access;
 pub mod time_integration;
 pub mod unified_assembly;

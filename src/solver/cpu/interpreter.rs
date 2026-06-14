@@ -199,6 +199,18 @@ impl Buffers {
         self.map.contains_key(name)
     }
 
+    /// Raw atomic backing slice for a buffer, regardless of kind — used by the
+    /// transpiled (compiled-Rust) kernels, which resolve a handle once per kernel
+    /// and then load/store through the `transpile_rt` helpers.
+    pub fn atom(&self, name: &str) -> &[AtomicU32] {
+        match self.map.get(name) {
+            Some(Store::F32 { data, .. }) => data,
+            Some(Store::U32(d)) => d,
+            Some(Store::I32(d)) => d,
+            None => panic!("atom: unknown buffer `{name}`"),
+        }
+    }
+
     /// Snapshot a flat `f32` buffer (also interleaved Vector2 data) into a `Vec`.
     pub fn f32_vec(&self, name: &str) -> Vec<f32> {
         match self.map.get(name) {

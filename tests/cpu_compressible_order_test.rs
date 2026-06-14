@@ -841,24 +841,28 @@ fn diag_compressible_trajectory() {
 /// Euler-startup fix; recovery rows exact). The block-Jacobi preconditioner uses
 /// the same Gauss-Jordan-with-pivoting algorithm as the GPU's `block_precond`.
 /// Yet the marched solution still diverges where the GPU saturates, and this is
-/// SOLVE-PRECISION-bound, not an operator/tolerance bug:
+/// in the LINEAR-SOLVE DYNAMICS on the marginal mode, not an operator/tolerance
+/// bug:
 ///   • This MMS is documented MARGINALLY UNSTABLE on the GPU too
 ///     (`mms_compressible_order_test`: refinement-amplified, ~49%/100 steps drift
 ///     at n=48; the GPU runner accepts at a delta PLATEAU, not a fixed step).
 ///   • The CPU solve is preconditioner-dominated (iters=1/step, rel_res ~4e-5):
-///     the per-step move is ~one block-Jacobi correction. The CPU Krylov runs in
-///     f64 (linalg.rs), the GPU in f32. On the marginal mode this matters: a
-///     LOOSE CPU tol (1e-2) freezes at the exact fixed point (no iterations,
-///     error ~7e-8 at all n -> order 0); the DEFAULT/TIGHT tol resolves and
-///     amplifies the unstable mode -> blow-up. There is no CPU tolerance that
-///     reproduces the GPU's f32 "drift to the discretization level" (order ~2).
+///     the per-step move is ~one block-Jacobi correction. The divergence is
+///     tolerance-INVARIANT: a LOOSE tol (1e-2) freezes at the exact fixed point
+///     (zero iterations, error ~7e-8 at all n -> order 0); DEFAULT/TIGHT (1e-4 /
+///     1e-8) resolve and AMPLIFY the unstable mode -> blow-up (~step 320, n=8).
+///     There is no CPU tolerance that reproduces the GPU's drift to the
+///     discretization level (order ~2). Rounding the SpMV/preconditioner outputs
+///     to f32 had no effect (the f32-stored operator is already ~f32), so plain
+///     precision is not it; the CPU's FGMRES Krylov polynomial amplifies the
+///     marginal eigenmode where the GPU's solver damps it.
 /// The plan anticipates exactly this: "CPU Krylov won't reproduce GPU iteration
 /// paths; target tolerance/order parity, not bit-exactness." On a STABLE problem
 /// that is fine (incompressible/buoyant MMS pass); this one marginally-unstable
-/// MMS is the pathological exception. The path to full parity here is an f32
-/// block-solve path (mirroring the GPU's f32 FGMRES/block_precond) — a
-/// cross-cutting linalg change deferred as a follow-up. See `diag_cpu_vs_gpu_*`
-/// (march, matrix, step1) for the evidence.
+/// MMS is the pathological exception. Closing it needs the CPU solve to reproduce
+/// the GPU's damping of the marginal mode (match the GPU FGMRES/block_precond
+/// Krylov behaviour) — deferred. See `diag_cpu_vs_gpu_*` (march, matrix, step1)
+/// for the evidence.
 #[ignore]
 #[test]
 fn cpu_compressible_mms_second_order() {

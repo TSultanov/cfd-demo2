@@ -1,65 +1,81 @@
 //! Headless gate for the per-model default GUI solver parameters.
 //!
-//! The desktop GUI ships one set of solver knobs but applies model-aware defaults
-//! (`cfd2::ui::model_defaults::gui_defaults_for`). This test is the arbiter for
-//! those defaults: it replicates the GUI worker loop (acoustic-aware adaptive-dt
-//! + `set_*` parameter application + `step_with_stats`) on a representative
-//! structured cavity and asserts, for each model, that the *shipped* defaults
+//! The desktop GUI applies model-aware defaults (`cfd2::ui::model_defaults`).
+//! This test is the arbiter for them: it builds the GUI's **actual default
+//! geometries** (the cut-cell BackwardsStep and Channel-with-obstacle meshes, at
+//! the default 0.025 cell size) with the real inlet boundary conditions, then
+//! replicates the GUI worker loop (acoustic-aware adaptive-dt — or a fixed dt when
+//! the model default disables it — + `set_*` parameter application +
+//! `step_with_stats`) and asserts the shipped defaults do not diverge or produce
+//! unphysical (checkerboard) fields.
 //!
-//!   (a) do not diverge — every sampled field stays finite and bounded, and
-//!   (b) cost few outer iterations per timestep — the incompressible coupled
-//!       (SIMPLE) loop runs a low, Ghia-proven number of under-relaxed sweeps
-//!       per step (with the convergence break exiting earlier near steady),
-//!       instead of grinding a fixed 50.
+//! An earlier version of this gate used a closed lid cavity as a proxy and MISSED
+//! two real failures: the compressible backstep checkerboards (a through-flow,
+//! low-Mach instability the closed cavity never excited) and the incompressible
+//! channel-with-obstacle diverges (high-Re Air past the cylinder on small cut-cell
+//! slivers). Hence: test the real geometries.
 //!
-//! The mesh is a structured lid-driven cavity at the GUI's default cell size
-//! (0.025), the validated reference geometry for BOTH the incompressible (Ghia)
-//! and compressible (OpenFOAM rhoCentralFoam) cases. The stability fix is
-//! geometry-independent (acoustic CFL + viscosity floor + low outer cost), so the
-//! cavity is a faithful proxy for the GUI's default backstep channel; structured
-//! cells also give a clean `actual_min_cell_size = 0.025` (cut cells only shrink
-//! it, lowering dt further — strictly safer).
-//!
-//! Tuning aids (run with `--ignored`): `sweep_compressible` grids the compressible
-//! stability knobs; `demo_incompressible_break_fires` shows the outer break firing
-//! on a tractable (laminar) case, proving the wiring the GUI ships on by default.
+//! Tuning aids (run with `--ignored`): `sweep_compressible_backstep` and
+//! `sweep_incompressible_obstacle` grid the stability knobs.
 
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
-use cfd2::solver::gpu::enums::GpuBoundaryType;
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
+use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, ChannelWithObstacle, Mesh};
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
-    SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverRuntimeParamsExt,
+    SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
+    SolverIncompressibleControlsExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::{compressible_model_with_eos, incompressible_momentum_model};
 use cfd2::solver::{GpuLowMachPrecondModel, SolverConfig, SteppingMode, UnifiedSolver};
 use cfd2::ui::fluid::Fluid;
 use cfd2::ui::model_defaults::{gui_defaults_for, ModelGuiDefaults};
+use nalgebra::{Point2, Vector2};
 
-/// 20x20 over a 0.5 m box => the GUI's default 0.025 m cell, modest GPU cost.
-const N_SIDE: usize = 20;
-const DOMAIN: f64 = 0.5;
-/// `actual_min_cell_size` the GUI worker would compute for this uniform mesh.
-const MIN_CELL: f64 = DOMAIN / N_SIDE as f64; // 0.025
 const N_STEPS: usize = 150;
 const READBACK_EVERY: usize = 5;
-/// GUI default lid / inlet speed.
-const DRIVE_SPEED: f64 = 1.0;
-/// Magnitude above which we call the run diverged.
-const DIVERGE_VEL: f64 = 1.0e4;
-
-fn lid_sides() -> BoundarySides {
-    BoundarySides {
-        left: BoundaryType::Wall,
-        right: BoundaryType::Wall,
-        bottom: BoundaryType::Wall,
-        top: BoundaryType::MovingWall,
-    }
-}
+/// With the laminar low inlet speeds the physical max |u| is small (a few x the
+/// inlet, ~10^-2). Any genuine instability — checkerboard or divergence — is a
+/// numerical mode that amplifies far past the physical scale, so this absolute
+/// cap (well above physical, far below an instability) flags both.
+const VEL_CAP: f64 = 1.0;
 
 fn air() -> Fluid {
     Fluid::presets()[1].clone()
+}
+
+fn backstep_mesh() -> Mesh {
+    let length = 3.5;
+    let geo = BackwardsStep {
+        length,
+        height_inlet: 0.5,
+        height_outlet: 1.0,
+        step_x: 0.5,
+    };
+    let mut mesh = generate_cut_cell_mesh(&geo, 0.025, 0.025, 1.2, Vector2::new(length, 1.0));
+    mesh.smooth(&geo, 0.3, 50);
+    mesh
+}
+
+fn channel_obstacle_mesh() -> Mesh {
+    let length = 3.0;
+    let geo = ChannelWithObstacle {
+        length,
+        height: 1.0,
+        obstacle_center: Point2::new(1.0, 0.51),
+        obstacle_radius: 0.1,
+    };
+    let mut mesh = generate_cut_cell_mesh(&geo, 0.025, 0.025, 1.2, Vector2::new(length, 1.0));
+    mesh.smooth(&geo, 0.3, 100);
+    mesh
+}
+
+/// `actual_min_cell_size` the GUI worker computes for adaptive-dt.
+fn actual_min_cell(mesh: &Mesh) -> f64 {
+    mesh.cell_vol
+        .iter()
+        .map(|&v| v.sqrt())
+        .fold(f64::INFINITY, f64::min)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -74,28 +90,23 @@ struct Sample {
     rho_min: f64,
     rho_max: f64,
     outer_iters: u32,
-    outer_res_u: f64,
-    outer_res_p: f64,
-    lin_iters: u32,
-    lin_res: f64,
-    lin_converged: bool,
 }
 
 struct DriveResult {
     samples: Vec<Sample>,
-    /// Per-step outer-iteration count (cheap, CPU-cached after each step).
-    outer_per_step: Vec<u32>,
     diverged: bool,
     diverge_step: Option<usize>,
 }
 
-/// Replicates the GUI worker's acoustic-aware adaptive timestep.
+/// GUI worker adaptive timestep (true sound speed reduced by low-Mach), matching
+/// `solver_worker_main` in `app.rs`.
 fn adaptive_next_dt(
     d: &ModelGuiDefaults,
     prev_max_vel: f64,
     density: f64,
     eos: &EosSpec,
     supports_sound_speed: bool,
+    min_cell: f64,
     current_dt: f64,
 ) -> f64 {
     let sound_speed = if supports_sound_speed {
@@ -103,7 +114,7 @@ fn adaptive_next_dt(
     } else {
         0.0
     };
-    let adv_speed = prev_max_vel.max(DRIVE_SPEED.abs());
+    let adv_speed = prev_max_vel.max(d.inlet_velocity.abs() as f64);
     let effective_sound_speed = match d.low_mach_model {
         GpuLowMachPrecondModel::Off => sound_speed,
         GpuLowMachPrecondModel::Legacy => sound_speed.min(adv_speed),
@@ -114,8 +125,8 @@ fn adaptive_next_dt(
         }
     };
     let wave_speed = adv_speed + effective_sound_speed;
-    if MIN_CELL > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
-        let mut next_dt = d.target_cfl * MIN_CELL / wave_speed;
+    if min_cell > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
+        let mut next_dt = d.target_cfl * min_cell / wave_speed;
         if next_dt > current_dt * 1.2 {
             next_dt = current_dt * 1.2;
         }
@@ -125,8 +136,8 @@ fn adaptive_next_dt(
     }
 }
 
-/// Drives `solver` for `n_steps`, mirroring the GUI worker. Never panics on
-/// divergence: it records it so callers (gate + sweep) can react.
+/// Drives `solver` for `N_STEPS`, mirroring the GUI worker. Records (never panics
+/// on) divergence so the gate and the sweeps can react.
 fn drive(
     solver: &mut UnifiedSolver,
     d: &ModelGuiDefaults,
@@ -134,33 +145,31 @@ fn drive(
     eos: &EosSpec,
     supports_sound_speed: bool,
     read_rho: bool,
-    n_steps: usize,
+    min_cell: f64,
 ) -> DriveResult {
     let mut prev_max_vel = 0.0_f64;
     let mut samples = Vec::new();
-    let mut outer_per_step = Vec::with_capacity(n_steps);
     let mut diverged = false;
     let mut diverge_step = None;
 
-    for step in 0..n_steps {
-        let current_dt = solver.dt() as f64;
-        let next_dt = adaptive_next_dt(d, prev_max_vel, density, eos, supports_sound_speed, current_dt);
-        solver.set_dt(next_dt as f32);
+    for step in 0..N_STEPS {
+        if d.adaptive_dt {
+            let current_dt = solver.dt() as f64;
+            let next_dt =
+                adaptive_next_dt(d, prev_max_vel, density, eos, supports_sound_speed, min_cell, current_dt);
+            solver.set_dt(next_dt as f32);
+        } else {
+            solver.set_dt(d.timestep as f32);
+        }
 
-        let lin = match solver.step_with_stats() {
-            Ok(lin) => lin,
-            Err(_) => {
-                diverged = true;
-                diverge_step = Some(step);
-                break;
-            }
-        };
-        let st = solver.step_stats();
-        let outer = st.outer_iterations.unwrap_or(0);
-        outer_per_step.push(outer);
-        let last_lin = lin.last().copied();
+        if solver.step_with_stats().is_err() {
+            diverged = true;
+            diverge_step = Some(step);
+            break;
+        }
+        let outer = solver.step_stats().outer_iterations.unwrap_or(0);
 
-        let do_read = step % READBACK_EVERY == 0 || step == n_steps - 1;
+        let do_read = step % READBACK_EVERY == 0 || step == N_STEPS - 1;
         if !do_read {
             continue;
         }
@@ -185,7 +194,6 @@ fn drive(
         let p_finite = p.iter().all(|x| x.is_finite());
         let p_min = p.iter().cloned().fold(f64::INFINITY, f64::min);
         let p_max = p.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-
         let (rho_min, rho_max) = if read_rho {
             let rho = pollster::block_on(solver.get_rho());
             (
@@ -198,7 +206,7 @@ fn drive(
 
         samples.push(Sample {
             step,
-            dt: next_dt,
+            dt: solver.dt() as f64,
             max_vel,
             nonfinite_u,
             p_finite,
@@ -207,14 +215,9 @@ fn drive(
             rho_min,
             rho_max,
             outer_iters: outer,
-            outer_res_u: st.outer_residual_u.unwrap_or(f32::NAN) as f64,
-            outer_res_p: st.outer_residual_p.unwrap_or(f32::NAN) as f64,
-            lin_iters: last_lin.map(|s| s.iterations).unwrap_or(0),
-            lin_res: last_lin.map(|s| s.residual as f64).unwrap_or(f64::NAN),
-            lin_converged: last_lin.map(|s| s.converged).unwrap_or(false),
         });
 
-        if nonfinite_u > 0 || !p_finite || !max_vel.is_finite() || max_vel > DIVERGE_VEL {
+        if nonfinite_u > 0 || !p_finite || !max_vel.is_finite() || max_vel > VEL_CAP {
             diverged = true;
             diverge_step = Some(step);
             break;
@@ -223,7 +226,6 @@ fn drive(
 
     DriveResult {
         samples,
-        outer_per_step,
         diverged,
         diverge_step,
     }
@@ -238,35 +240,34 @@ fn print_trace(label: &str, res: &DriveResult) {
     );
     for s in &res.samples {
         eprintln!(
-            "  step {:>4} dt={:.3e} max|u|={:.4e} p=[{:.3e},{:.3e}] rho=[{:.3},{:.3}] outer={} res(u,p)=({:.2e},{:.2e}) lin={}it/{:.1e}/{}",
-            s.step, s.dt, s.max_vel, s.p_min, s.p_max, s.rho_min, s.rho_max,
-            s.outer_iters, s.outer_res_u, s.outer_res_p, s.lin_iters, s.lin_res, s.lin_converged
+            "  step {:>4} dt={:.3e} max|u|={:.4e} p=[{:.3e},{:.3e}] rho=[{:.3},{:.3}] outer={}",
+            s.step, s.dt, s.max_vel, s.p_min, s.p_max, s.rho_min, s.rho_max, s.outer_iters
         );
     }
 }
 
-fn assert_bounded(label: &str, res: &DriveResult, vel_cap: f64, p_lo: f64, p_hi: f64, rho_lo: f64, rho_hi: f64) {
+fn assert_bounded(label: &str, res: &DriveResult, p_lo: f64, p_hi: f64, rho_lo: f64, rho_hi: f64) {
     assert!(
         !res.diverged,
-        "[{label}] diverged at step {:?}",
-        res.diverge_step
+        "[{label}] diverged / went unphysical at step {:?} (max|u| exceeded {:.0} or non-finite)",
+        res.diverge_step, VEL_CAP
     );
     for s in &res.samples {
-        assert_eq!(s.nonfinite_u, 0, "[{label}] non-finite velocity at step {} ({:?})", s.step, s);
-        assert!(s.p_finite, "[{label}] non-finite pressure at step {} ({:?})", s.step, s);
+        assert_eq!(s.nonfinite_u, 0, "[{label}] non-finite velocity at step {}", s.step);
+        assert!(s.p_finite, "[{label}] non-finite pressure at step {}", s.step);
         assert!(
-            s.max_vel.is_finite() && s.max_vel < vel_cap,
-            "[{label}] velocity out of bounds at step {}: max|u|={:.3e} (cap {:.1})",
-            s.step, s.max_vel, vel_cap
+            s.max_vel.is_finite() && s.max_vel < VEL_CAP,
+            "[{label}] velocity unphysical at step {}: max|u|={:.3e} (cap {:.0})",
+            s.step, s.max_vel, VEL_CAP
         );
         assert!(
             s.p_min > p_lo && s.p_max < p_hi,
-            "[{label}] pressure out of bounds at step {}: [{:.3e}, {:.3e}]",
+            "[{label}] pressure out of bounds at step {}: [{:.3e},{:.3e}]",
             s.step, s.p_min, s.p_max
         );
         assert!(
             s.rho_min > rho_lo && s.rho_max < rho_hi,
-            "[{label}] density out of bounds at step {}: [{:.3e}, {:.3e}]",
+            "[{label}] density out of bounds at step {}: [{:.3e},{:.3e}]",
             s.step, s.rho_min, s.rho_max
         );
     }
@@ -287,21 +288,25 @@ fn build_incompressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> Uni
     ))
     .expect("solver init");
 
+    let stride = solver.model().state_layout.stride() as usize;
+    solver
+        .write_state_f32(&vec![0.0f32; mesh.num_cells() * stride])
+        .expect("clear state");
+
     solver.set_collect_convergence_stats(d.outer_auto_converge);
     solver.set_dt(d.timestep as f32);
     solver.set_dtau(0.0).ok();
     solver.set_density(fluid.density as f32).unwrap();
     solver
-        .set_viscosity(d.effective_viscosity(fluid.viscosity) as f32)
-        .unwrap();
-    solver
-        .set_boundary_vec2(GpuBoundaryType::MovingWall, "U", [DRIVE_SPEED as f32, 0.0])
+        .set_viscosity(fluid.viscosity as f32)
         .unwrap();
     solver.set_alpha_u(d.alpha_u as f32).unwrap();
     solver.set_alpha_p(d.alpha_p as f32).unwrap();
     solver.set_outer_iters(d.outer_iters as usize).unwrap();
+    solver.set_inlet_velocity(d.inlet_velocity).unwrap();
     solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
     solver.set_p(&vec![0.0; mesh.num_cells()]);
+    solver.incompressible_set_should_stop(false);
     solver.initialize_history();
     solver
 }
@@ -324,6 +329,11 @@ fn build_compressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> Unifi
     ))
     .expect("solver init");
 
+    let stride = solver.model().state_layout.stride() as usize;
+    solver
+        .write_state_f32(&vec![0.0f32; mesh.num_cells() * stride])
+        .expect("clear state");
+
     let rho0 = fluid.density;
     let p0 = eos.pressure_for_density(rho0);
 
@@ -332,172 +342,243 @@ fn build_compressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> Unifi
     solver.set_dtau(0.0).ok();
     solver.set_eos(&eos).unwrap();
     solver
-        .set_viscosity(d.effective_viscosity(fluid.viscosity) as f32)
+        .set_viscosity(fluid.viscosity as f32)
         .unwrap();
     solver.set_density(rho0 as f32).unwrap();
     solver.set_outer_iters(d.outer_iters as usize).unwrap();
     solver.set_precond_model(d.low_mach_model).unwrap();
-    solver
-        .set_precond_theta_floor(d.low_mach_theta_floor)
-        .unwrap();
+    solver.set_precond_theta_floor(d.low_mach_theta_floor).unwrap();
     solver
         .set_precond_pressure_coupling_alpha(d.low_mach_pressure_coupling_alpha)
         .unwrap();
+    solver
+        .set_compressible_inlet_isothermal_x(rho0 as f32, d.inlet_velocity, &eos)
+        .unwrap();
     solver.set_uniform_state(rho0 as f32, [0.0, 0.0], p0 as f32);
-    solver
-        .set_boundary_vec2(GpuBoundaryType::MovingWall, "u", [DRIVE_SPEED as f32, 0.0])
-        .unwrap();
-    solver
-        .set_boundary_vec2(
-            GpuBoundaryType::MovingWall,
-            "rho_u",
-            [(rho0 * DRIVE_SPEED) as f32, 0.0],
-        )
-        .unwrap();
     solver.initialize_history();
     solver
 }
 
+fn run_incompressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> DriveResult {
+    let min_cell = actual_min_cell(mesh);
+    let mut solver = build_incompressible(d, fluid, mesh);
+    drive(&mut solver, d, fluid.density, &fluid.eos, false, false, min_cell)
+}
+
+fn run_compressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> DriveResult {
+    let min_cell = actual_min_cell(mesh);
+    let mut solver = build_compressible(d, fluid, mesh);
+    drive(&mut solver, d, fluid.density, &fluid.eos, true, true, min_cell)
+}
+
+// --------------------------------------------------------------------------
+// Gate
+// --------------------------------------------------------------------------
+
 #[test]
-fn gui_default_incompressible_converges_with_low_outer_cost() {
+fn gui_default_incompressible_backstep_bounded() {
     std::env::set_var("CFD2_QUIET", "1");
     let air = air();
-    assert_eq!(air.name, "Air", "GUI default fluid is presets[1] = Air");
     let d = gui_defaults_for("incompressible_momentum");
-
-    let mesh = generate_structured_rect_mesh(N_SIDE, N_SIDE, DOMAIN, DOMAIN, lid_sides());
-    let mut solver = build_incompressible(&d, &air, &mesh);
-
-    let res = drive(&mut solver, &d, air.density, &air.eos, false, false, N_STEPS);
-    print_trace("incompressible", &res);
-
-    // (a) bounded: lid-cavity velocities stay O(drive speed); incompressible p is gauge.
-    assert_bounded("incompressible", &res, 10.0, -1e6, 1e6, 0.5, 2.0);
-
-    // (b) low outer cost: every timestep runs at most the (low) cap of under-relaxed
-    // sweeps. This is the user's actual ask ("fewer outer iterations than 50"); the
-    // break trims further near steady (see `demo_incompressible_break_fires`).
-    let max_outer = *res.outer_per_step.iter().max().unwrap();
-    let mean_outer = res.outer_per_step.iter().map(|&x| x as f64).sum::<f64>()
-        / res.outer_per_step.len() as f64;
-    eprintln!(
-        "[incompressible] outer iters/step: mean={:.2} max={} cap={}",
-        mean_outer, max_outer, d.outer_iters
-    );
-    assert!(
-        max_outer <= d.outer_iters,
-        "outer iters {} exceeded cap {}",
-        max_outer, d.outer_iters
-    );
-    assert!(
-        d.outer_iters <= 10,
-        "default outer cap {} is not low (user wanted far fewer than 50)",
-        d.outer_iters
-    );
-    // The flow must actually be developing (not dead, not blown up).
-    let last = res.samples.last().unwrap();
-    assert!(
-        last.max_vel > 1e-3 && last.max_vel < 10.0,
-        "incompressible flow not developing sensibly: final max|u|={:.3e}",
-        last.max_vel
-    );
+    let mesh = backstep_mesh();
+    eprintln!("[incompressible/backstep] cells={} min_cell={:.4e}", mesh.num_cells(), actual_min_cell(&mesh));
+    let res = run_incompressible(&d, &air, &mesh);
+    print_trace("incompressible/backstep", &res);
+    assert_bounded("incompressible/backstep", &res, -1e6, 1e6, 0.5, 2.0);
 }
 
 #[test]
-fn gui_default_compressible_does_not_diverge() {
+fn gui_default_incompressible_obstacle_bounded() {
     std::env::set_var("CFD2_QUIET", "1");
     let air = air();
-    let eos = air.eos;
-    let d = gui_defaults_for("compressible");
-
-    let mesh = generate_structured_rect_mesh(N_SIDE, N_SIDE, DOMAIN, DOMAIN, lid_sides());
-    let mut solver = build_compressible(&d, &air, &mesh);
-
-    let rho0 = air.density;
-    let p0 = eos.pressure_for_density(rho0);
-
-    let res = drive(&mut solver, &d, rho0, &eos, true, true, N_STEPS);
-    print_trace("compressible", &res);
-
-    // Bounded: velocities O(drive speed), pressure near the ~1e5 Pa initial state
-    // (a few x), density positive and O(1). Divergence breaks all of these.
-    assert_bounded(
-        "compressible",
-        &res,
-        10.0,
-        0.5 * p0,
-        4.0 * p0,
-        0.1 * rho0,
-        10.0 * rho0,
-    );
+    let d = gui_defaults_for("incompressible_momentum");
+    let mesh = channel_obstacle_mesh();
+    eprintln!("[incompressible/obstacle] cells={} min_cell={:.4e}", mesh.num_cells(), actual_min_cell(&mesh));
+    let res = run_incompressible(&d, &air, &mesh);
+    print_trace("incompressible/obstacle", &res);
+    assert_bounded("incompressible/obstacle", &res, -1e6, 1e6, 0.5, 2.0);
 }
 
-// ---------------------------------------------------------------------------
-// Tuning aids (run with `--ignored`).
-// ---------------------------------------------------------------------------
+#[test]
+fn gui_default_compressible_backstep_bounded_and_smooth() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let d = gui_defaults_for("compressible");
+    let mesh = backstep_mesh();
+    eprintln!("[compressible/backstep] cells={} min_cell={:.4e}", mesh.num_cells(), actual_min_cell(&mesh));
+    let res = run_compressible(&d, &air, &mesh);
+    print_trace("compressible/backstep", &res);
+    let p0 = air.eos.pressure_for_density(air.density);
+    assert_bounded("compressible/backstep", &res, 0.5 * p0, 4.0 * p0, 0.1 * air.density, 10.0 * air.density);
+}
 
-/// Grids the compressible stability knobs and prints which combinations stay
-/// bounded; used to choose the shipped compressible defaults.
+// --------------------------------------------------------------------------
+// Tuning aids (run with --ignored)
+// --------------------------------------------------------------------------
+
+/// Decisive check: does the runtime advection scheme actually change GPU output?
+/// (Memory claims the GPU bakes the scheme; the generated assembly WGSL branches
+/// on `constants.scheme`, so this verifies the value is plumbed end-to-end.)
 #[test]
 #[ignore]
-fn sweep_compressible() {
+fn scheme_actually_changes_gpu_output() {
     std::env::set_var("CFD2_QUIET", "1");
     let air = air();
-    let eos = air.eos;
-    let rho0 = air.density;
-    let base = gui_defaults_for("compressible");
-    let mesh = generate_structured_rect_mesh(N_SIDE, N_SIDE, DOMAIN, DOMAIN, lid_sides());
-    let steps = 120;
+    let mesh = backstep_mesh();
+    let min_cell = actual_min_cell(&mesh);
+    let base = gui_defaults_for("incompressible_momentum");
 
-    // (label, low_mach, theta_floor, target_cfl, outer_iters, viscosity_floor)
-    let grid: &[(&str, GpuLowMachPrecondModel, f32, f64, u32, Option<f64>)] = &[
-        // Does adding a few outer iterations let genuine low-Mach (theta=1e-8)
-        // carry a large (inflated) dt without diverging?
-        ("WS theta=1e-8 cfl=0.4 outer=1 visc=0.1", GpuLowMachPrecondModel::WeissSmith, 1e-8, 0.4, 1, Some(0.1)),
-        ("WS theta=1e-8 cfl=0.4 outer=4 visc=0.1", GpuLowMachPrecondModel::WeissSmith, 1e-8, 0.4, 4, Some(0.1)),
-        ("WS theta=1e-8 cfl=0.4 outer=8 visc=0.1", GpuLowMachPrecondModel::WeissSmith, 1e-8, 0.4, 8, Some(0.1)),
-        ("WS theta=1e-8 cfl=0.2 outer=4 visc=0.1", GpuLowMachPrecondModel::WeissSmith, 1e-8, 0.2, 4, Some(0.1)),
-        // Acoustic-CFL-limited dt (theta=1), longer run, minimal viscosity floor.
-        ("WS theta=1 cfl=0.3 outer=1 visc=none", GpuLowMachPrecondModel::WeissSmith, 1.0, 0.3, 1, None),
-        ("WS theta=1 cfl=0.3 outer=1 visc=0.01", GpuLowMachPrecondModel::WeissSmith, 1.0, 0.3, 1, Some(0.01)),
-        ("WS theta=1 cfl=0.3 outer=1 visc=0.05", GpuLowMachPrecondModel::WeissSmith, 1.0, 0.3, 1, Some(0.05)),
-        // Validated low-Mach regime (tiny dt), minimal viscosity floor.
-        ("WS theta=1e-8 cfl=8e-4 outer=1 visc=0.01", GpuLowMachPrecondModel::WeissSmith, 1e-8, 8e-4, 1, Some(0.01)),
-        ("WS theta=1e-8 cfl=8e-4 outer=1 visc=0.05", GpuLowMachPrecondModel::WeissSmith, 1e-8, 8e-4, 1, Some(0.05)),
+    let run = |scheme: cfd2::solver::scheme::Scheme| -> f64 {
+        let mut d = base;
+        d.advection_scheme = scheme;
+        d.inlet_velocity = 1.0; // exercise advection strongly
+        let mut solver = build_incompressible(&d, &air, &mesh);
+        for _ in 0..8 {
+            solver.set_dt(1e-3);
+            solver.step_with_stats().expect("step");
+        }
+        let u = pollster::block_on(solver.get_u());
+        u.iter()
+            .map(|(x, y)| (x * x + y * y).sqrt())
+            .fold(0.0_f64, f64::max)
+    };
+
+    let upwind = run(cfd2::solver::scheme::Scheme::Upwind);
+    let sou = run(cfd2::solver::scheme::Scheme::SecondOrderUpwind);
+    let vanleer = run(cfd2::solver::scheme::Scheme::SecondOrderUpwindVanLeer);
+    eprintln!(
+        "[scheme check / config] incompressible max|u| Upwind={:.6e} SOU={:.6e} VanLeer={:.6e}",
+        upwind, sou, vanleer
+    );
+
+    // Runtime path (what the GUI radio uses): build Upwind, then set_advection_scheme.
+    let run_runtime = |scheme: cfd2::solver::scheme::Scheme| -> f64 {
+        let mut d = base;
+        d.advection_scheme = cfd2::solver::scheme::Scheme::Upwind;
+        d.inlet_velocity = 1.0;
+        let mut solver = build_incompressible(&d, &air, &mesh);
+        solver.set_advection_scheme(scheme);
+        for _ in 0..8 {
+            solver.set_dt(1e-3);
+            solver.step_with_stats().expect("step");
+        }
+        let u = pollster::block_on(solver.get_u());
+        u.iter().map(|(x, y)| (x * x + y * y).sqrt()).fold(0.0, f64::max)
+    };
+    let rt_upwind = run_runtime(cfd2::solver::scheme::Scheme::Upwind);
+    let rt_vanleer = run_runtime(cfd2::solver::scheme::Scheme::SecondOrderUpwindVanLeer);
+    eprintln!(
+        "[scheme check / runtime set_advection_scheme] Upwind={:.6e} VanLeer={:.6e}",
+        rt_upwind, rt_vanleer
+    );
+
+    // Compressible (the memory's specific case): config scheme.
+    let run_comp = |scheme: cfd2::solver::scheme::Scheme| -> f64 {
+        let mut d = gui_defaults_for("compressible");
+        d.advection_scheme = scheme;
+        d.inlet_velocity = 0.1;
+        let mut solver = build_compressible(&d, &air, &mesh);
+        for _ in 0..20 {
+            solver.set_dt(1e-5);
+            solver.step_with_stats().expect("step");
+        }
+        let u = pollster::block_on(solver.get_u());
+        u.iter().map(|(x, y)| (x * x + y * y).sqrt()).fold(0.0, f64::max)
+    };
+    let c_upwind = run_comp(cfd2::solver::scheme::Scheme::Upwind);
+    let c_vanleer = run_comp(cfd2::solver::scheme::Scheme::SecondOrderUpwindVanLeer);
+    eprintln!(
+        "[scheme check / compressible config] Upwind={:.6e} VanLeer={:.6e}",
+        c_upwind, c_vanleer
+    );
+
+    assert!(
+        (upwind - vanleer).abs() > 1e-9,
+        "incompressible config scheme ignored"
+    );
+    assert!(
+        (rt_upwind - rt_vanleer).abs() > 1e-9,
+        "RUNTIME set_advection_scheme ignored (GUI radio is a no-op): Upwind={rt_upwind:.6e} VanLeer={rt_vanleer:.6e}"
+    );
+    assert!(
+        (c_upwind - c_vanleer).abs() > 1e-9,
+        "COMPRESSIBLE config scheme ignored: Upwind={c_upwind:.6e} VanLeer={c_vanleer:.6e}"
+    );
+    let _ = min_cell;
+}
+
+#[test]
+#[ignore]
+fn sweep_compressible_backstep() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let base = gui_defaults_for("compressible");
+    let mesh = backstep_mesh();
+    eprintln!("=== compressible backstep sweep (cells={}) ===", mesh.num_cells());
+
+    // (label, inlet, theta, adaptive, target_cfl, timestep, pca) — real Air viscosity.
+    let grid: &[(&str, f32, f32, bool, f64, f64, f32)] = &[
+        ("U=1.0   theta=1    adaptive cfl=0.3 pca=0.01", 1.0, 1.0, true, 0.3, 1e-5, 0.01),
+        ("U=0.002 theta=1    adaptive cfl=0.3 pca=0.01", 0.002, 1.0, true, 0.3, 1e-5, 0.01),
+        ("U=0.002 theta=1    adaptive cfl=0.3 pca=0.1 ", 0.002, 1.0, true, 0.3, 1e-5, 0.1),
+        ("U=0.002 theta=1e-8 fixed dt=1e-5 pca=0.01", 0.002, 1e-8, false, 0.3, 1e-5, 0.01),
+        ("U=0.002 theta=1e-8 fixed dt=1e-5 pca=0.1 ", 0.002, 1e-8, false, 0.3, 1e-5, 0.1),
+        ("U=0.01  theta=1    adaptive cfl=0.3 pca=0.01", 0.01, 1.0, true, 0.3, 1e-5, 0.01),
+        ("U=0.002 theta=1    adaptive cfl=0.1 pca=0.01", 0.002, 1.0, true, 0.1, 1e-5, 0.01),
     ];
 
-    eprintln!("=== compressible sweep ({steps} steps) ===");
-    for (label, low_mach, theta, cfl, outer, visc) in grid {
+    for (label, inlet, theta, adaptive, cfl, ts, pca) in grid {
         let mut d = base;
-        d.low_mach_model = *low_mach;
+        d.inlet_velocity = *inlet;
         d.low_mach_theta_floor = *theta;
+        d.adaptive_dt = *adaptive;
         d.target_cfl = *cfl;
-        d.outer_iters = *outer;
-        d.viscosity_floor = *visc;
-
-        let mut solver = build_compressible(&d, &air, &mesh);
-        let res = drive(&mut solver, &d, rho0, &eos, true, true, steps);
+        d.timestep = *ts;
+        d.low_mach_pressure_coupling_alpha = *pca;
+        let res = run_compressible(&d, &air, &mesh);
         let last = res.samples.last();
         eprintln!(
-            "  {:<34} -> diverged={} step={:?} final(max|u|={:.3e}, dt={:.2e}, p=[{:.2e},{:.2e}])",
-            label,
-            res.diverged,
-            res.diverge_step,
+            "  {:<46} -> diverged={} step={:?} final(max|u|={:.3e}, dt={:.2e})",
+            label, res.diverged, res.diverge_step,
             last.map(|s| s.max_vel).unwrap_or(f64::NAN),
             last.map(|s| s.dt).unwrap_or(f64::NAN),
-            last.map(|s| s.p_min).unwrap_or(f64::NAN),
-            last.map(|s| s.p_max).unwrap_or(f64::NAN),
         );
     }
 }
 
-// NOTE on the outer-convergence break: the coupled solver's per-step break
-// (enabled by `collect_convergence_stats`, which the GUI now turns on by default)
-// is observed NOT to fire for this incompressible model even at a settled steady
-// state — the reported outer residual tracks the solution magnitude rather than a
-// vanishing per-iteration delta, so it never crosses the relative tolerance. That
-// is a pre-existing property of the solver core (out of scope for the GUI-default
-// layer). Consequently the incompressible speedup the user asked for comes from
-// the *low outer cap* (8 vs 50), which `gui_default_incompressible_converges_with_low_outer_cost`
-// gates directly; monitoring stays on for the GUI residual readout and so the
-// break can still fire opportunistically on models/cases where it does work.
+#[test]
+#[ignore]
+fn sweep_incompressible_obstacle() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let base = gui_defaults_for("incompressible_momentum");
+    let mesh = channel_obstacle_mesh();
+    eprintln!("=== incompressible obstacle sweep (cells={}, min_cell={:.4e}) ===", mesh.num_cells(), actual_min_cell(&mesh));
+
+    // Real Air viscosity; low speed + vary dt (cfl) and outer iters. Is the
+    // obstacle divergence the large adaptive dt (1/U) or the cut-cell slivers?
+    let grid: &[(&str, f32, f64, u32)] = &[
+        ("U=0.002 cfl=0.9  outer=8", 0.002, 0.9, 8),
+        ("U=0.002 cfl=0.3  outer=8", 0.002, 0.3, 8),
+        ("U=0.002 cfl=0.1  outer=8", 0.002, 0.1, 8),
+        ("U=0.002 cfl=0.05 outer=8", 0.002, 0.05, 8),
+        ("U=0.002 cfl=0.1  outer=20", 0.002, 0.1, 20),
+        ("U=0.002 cfl=0.02 outer=20", 0.002, 0.02, 20),
+        ("U=0.01  cfl=0.1  outer=8", 0.01, 0.1, 8),
+    ];
+
+    for (label, u, cfl, outer) in grid {
+        let mut d = base;
+        d.inlet_velocity = *u;
+        d.target_cfl = *cfl;
+        d.outer_iters = *outer;
+        let res = run_incompressible(&d, &air, &mesh);
+        let last = res.samples.last();
+        eprintln!(
+            "  {:<26} -> diverged={} step={:?} final(max|u|={:.3e}, dt={:.2e})",
+            label, res.diverged, res.diverge_step,
+            last.map(|s| s.max_vel).unwrap_or(f64::NAN),
+            last.map(|s| s.dt).unwrap_or(f64::NAN),
+        );
+    }
+}

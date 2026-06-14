@@ -473,7 +473,7 @@ impl CFDApp {
             alpha_p: self.alpha_p as f32,
             inlet_velocity: self.inlet_velocity,
             density: self.current_fluid.density as f32,
-            viscosity: self.effective_viscosity() as f32,
+            viscosity: self.current_fluid.viscosity as f32,
             eos: self.current_fluid.eos,
         }
     }
@@ -499,17 +499,11 @@ impl CFDApp {
         self.outer_auto_converge = d.outer_auto_converge;
         self.target_cfl = d.target_cfl;
         self.timestep = d.timestep;
+        self.adaptive_dt = d.adaptive_dt;
         self.low_mach_model = d.low_mach_model;
         self.low_mach_theta_floor = d.low_mach_theta_floor;
         self.low_mach_pressure_coupling_alpha = d.low_mach_pressure_coupling_alpha;
-    }
-
-    /// Effective viscosity sent to the solver: the fluid's own viscosity, raised
-    /// to the active model's stability floor if it sets one (the compressible
-    /// default floors the near-inviscid Air viscosity; see `model_defaults`).
-    fn effective_viscosity(&self) -> f64 {
-        crate::ui::model_defaults::gui_defaults_for(self.model_id)
-            .effective_viscosity(self.current_fluid.viscosity)
+        self.inlet_velocity = d.inlet_velocity;
     }
 
     fn current_trace_runtime_params(&self) -> tracefmt::TraceRuntimeParams {
@@ -533,7 +527,7 @@ impl CFDApp {
             alpha_p: self.alpha_p as f32,
             inlet_velocity: self.inlet_velocity,
             density: self.current_fluid.density as f32,
-            viscosity: self.effective_viscosity() as f32,
+            viscosity: self.current_fluid.viscosity as f32,
             eos: tracefmt::TraceEosSpec::from(self.current_fluid.eos),
         }
     }
@@ -1918,7 +1912,7 @@ impl eframe::App for CFDApp {
                         let re = self.current_fluid.density
                             * self.inlet_velocity.abs() as f64
                             * char_length
-                            / self.effective_viscosity();
+                            / self.current_fluid.viscosity;
                         ui.label(format!("Est. Reynolds Number: {:.0}", re));
                         });
 

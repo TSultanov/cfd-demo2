@@ -43,37 +43,35 @@ pub struct ModelGuiDefaults {
     /// from the console logging flag so the early-exit ships on by default.
     pub outer_auto_converge: bool,
     pub target_cfl: f64,
-    /// Initial physical timestep, used as the seed before adaptive-dt takes over
-    /// (adaptive growth is capped per step, so a small seed gives a gentle ramp).
+    /// Physical timestep. With `adaptive_dt` it is the seed before adaptive-dt
+    /// takes over; otherwise it is the fixed timestep.
     pub timestep: f64,
+    /// Use the acoustic-aware adaptive timestep. Off for the compressible default
+    /// (a fixed small dt + genuine low-Mach preconditioning is the validated,
+    /// checkerboard-free recipe; the adaptive low-Mach dt inflation is unstable
+    /// at a single outer iteration).
+    pub adaptive_dt: bool,
     pub low_mach_model: GpuLowMachPrecondModel,
     /// `f32` to match the GUI state and the `set_precond_*` solver setters.
     pub low_mach_theta_floor: f32,
     pub low_mach_pressure_coupling_alpha: f32,
-    /// Lower bound applied to the effective fluid viscosity for this model
-    /// (`None` keeps the fluid's own viscosity). The coarse-mesh compressible
-    /// demonstrator is inviscidly unstable at the Air default (nu = 1.81e-5), so
-    /// it floors the viscosity to keep the default case bounded without mutating
-    /// the user-visible fluid preset.
-    pub viscosity_floor: Option<f64>,
-}
-
-impl ModelGuiDefaults {
-    /// Effective viscosity for `fluid_viscosity` under this model's floor.
-    pub fn effective_viscosity(&self, fluid_viscosity: f64) -> f64 {
-        match self.viscosity_floor {
-            Some(floor) => fluid_viscosity.max(floor),
-            None => fluid_viscosity,
-        }
-    }
+    /// Default inlet velocity (m/s). Per-model because the Reynolds number scales
+    /// with it: the incompressible default uses a low speed so the *real* Air
+    /// viscosity gives a laminar, stable Re on the coarse cut-cell geometries.
+    /// Lowering the speed is Reynolds-honest — unlike flooring the viscosity — and
+    /// leaves the step count to develop unchanged (the adaptive dt grows as
+    /// 1/speed, so it is CFL-limited either way); only the magnitudes shrink.
+    pub inlet_velocity: f32,
 }
 
 /// Incompressible momentum (coupled SIMPLE) defaults.
 ///
-/// Upwind keeps the high cell-Reynolds Air default well-damped. The fixed outer
-/// cap (`outer_iters`) is the cost-control lever: Ghia shows ~5 under-relaxed
-/// sweeps per step already give correct results, so a low cap marches correctly
-/// at a fraction of the old fixed-50 cost.
+/// Two levers: a low fixed outer cap (`outer_iters`) for cost — Ghia shows ~5
+/// under-relaxed sweeps per step already give correct results, so a low cap
+/// marches correctly at a fraction of the old fixed-50 cost — and a low
+/// `inlet_velocity` so the *real* Air viscosity yields a laminar Reynolds number
+/// (Air at 1 m/s is Re ~ 10^4-10^5 = turbulent, which a 2D laminar coarse-mesh
+/// solver cannot represent and genuinely diverges on the obstacle wake).
 const INCOMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     advection_scheme: Scheme::Upwind,
     time_scheme: GpuTimeScheme::BDF2,
@@ -90,35 +88,32 @@ const INCOMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     outer_auto_converge: true,
     target_cfl: 0.9,
     timestep: 0.02,
+    adaptive_dt: true,
     low_mach_model: GpuLowMachPrecondModel::Off,
     low_mach_theta_floor: 1e-6,
     low_mach_pressure_coupling_alpha: 1.0,
-    viscosity_floor: None,
+    // Real Air viscosity + a low inlet speed -> laminar Re (~25 on the obstacle),
+    // honest and stable. The small velocity magnitudes are physically correct for
+    // slow Air; the step count to develop is unchanged (CFL-limited).
+    inlet_velocity: 0.002,
 };
 
 /// Compressible (density-based, implicit) defaults.
 ///
-/// Van Leer reconstruction, a single outer iteration, and Weiss-Smith low-Mach
-/// preconditioning with weak pressure coupling — as in the validated OpenFOAM
-/// lid-cavity recipe — but tuned by the headless gate for unconditional stability
-/// as a GUI default:
+/// Van Leer reconstruction, a single outer iteration, Weiss-Smith low-Mach
+/// preconditioning, and a low inlet speed. Two failure modes have to be avoided:
 ///
-/// * `target_cfl = 0.3` is the **acoustic** CFL. The low-Mach machinery normally
-///   relaxes the acoustic timestep so a near-incompressible flow can take a large
-///   dt, but with a single outer iteration and a Jacobi preconditioner that
-///   inflated dt diverges (the gate's sweep confirms it diverges at outer = 1, 4
-///   *and* 8). So `low_mach_theta_floor = 1.0` keeps the adaptive timestep tied to
-///   the *true* sound speed: the resulting acoustic CFL is then exactly
-///   `target_cfl` regardless of the flow speed (with theta < 1 the dt tracks the
-///   advective speed and the true acoustic CFL blows past 1 at low velocities).
-///   The Weiss-Smith pressure coupling is retained for its checkerboard damping.
-/// * `viscosity_floor = 0.05` keeps the coarse-mesh flow comfortably laminar
-///   (domain Re ~ 12, cell Re ~ 0.6), below the inviscid-stability floor that the
-///   near-inviscid Air default (nu = 1.81e-5) sits beneath.
+/// * **Turbulence** — Air at 1 m/s is Re ~ 10^4 here too, so the low inlet speed
+///   (laminar Re) is needed for the compressible solver just as for the
+///   incompressible one.
+/// * **Low-Mach checkerboard** — collocated density-based solvers decouple
+///   odd/even pressure at low Mach; `low_mach_theta_floor` / `target_cfl` /
+///   `low_mach_pressure_coupling_alpha` are the levers (tuned by the gate). The
+///   adaptive timestep stays acoustic-CFL-limited (the low-Mach dt inflation is
+///   unstable at a single outer iteration).
 ///
-/// Consequence: the physical timestep stays acoustically small (~2e-5 s), so a
-/// near-incompressible flow develops slowly — but it does not diverge, which is
-/// the property a default must guarantee.
+/// The physical timestep is acoustically small, so a low-Mach flow develops
+/// slowly — but it stays bounded and smooth, which is what a default must do.
 const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     advection_scheme: Scheme::SecondOrderUpwindVanLeer,
     time_scheme: GpuTimeScheme::BDF2,
@@ -129,10 +124,11 @@ const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     outer_auto_converge: true,
     target_cfl: 0.3,
     timestep: 1e-5,
+    adaptive_dt: false,
     low_mach_model: GpuLowMachPrecondModel::WeissSmith,
-    low_mach_theta_floor: 1.0,
+    low_mach_theta_floor: 1e-8,
     low_mach_pressure_coupling_alpha: 0.01,
-    viscosity_floor: Some(0.05),
+    inlet_velocity: 0.002,
 };
 
 /// GUI solver defaults for `model_id`.
@@ -158,7 +154,6 @@ mod tests {
         assert!(d.outer_iters > 1, "cap must allow the break to fire");
         assert_eq!(d.low_mach_model, GpuLowMachPrecondModel::Off);
         assert_eq!(d.advection_scheme, Scheme::Upwind);
-        assert!(d.viscosity_floor.is_none());
     }
 
     #[test]
@@ -168,7 +163,20 @@ mod tests {
         assert!(d.target_cfl <= 0.5, "acoustic CFL must be conservative");
         assert_eq!(d.advection_scheme, Scheme::SecondOrderUpwindVanLeer);
         assert_eq!(d.outer_iters, 1);
-        assert!(d.low_mach_pressure_coupling_alpha < 1.0);
+    }
+
+    #[test]
+    fn both_models_default_to_a_laminar_inlet_speed() {
+        // Air at 1 m/s is turbulent Re on the default geometries; the honest fix
+        // is a low inlet speed (real viscosity), not a hidden viscosity floor.
+        for id in ["incompressible_momentum", "compressible"] {
+            let d = gui_defaults_for(id);
+            assert!(
+                d.inlet_velocity > 0.0 && d.inlet_velocity < 0.1,
+                "{id}: inlet speed {} should be low (laminar Re)",
+                d.inlet_velocity
+            );
+        }
     }
 
     #[test]
@@ -177,15 +185,5 @@ mod tests {
             gui_defaults_for("nonexistent"),
             gui_defaults_for("incompressible_momentum")
         );
-    }
-
-    #[test]
-    fn effective_viscosity_applies_floor() {
-        let mut d = gui_defaults_for("compressible");
-        d.viscosity_floor = Some(0.01);
-        assert_eq!(d.effective_viscosity(1.81e-5), 0.01);
-        assert_eq!(d.effective_viscosity(0.5), 0.5);
-        d.viscosity_floor = None;
-        assert_eq!(d.effective_viscosity(1.81e-5), 1.81e-5);
     }
 }

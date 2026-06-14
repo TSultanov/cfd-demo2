@@ -35,6 +35,7 @@ struct RuntimeParams {
     time_scheme: GpuTimeScheme,
     preconditioner: PreconditionerType,
     outer_iters: u32,
+    outer_auto_converge: bool,
     low_mach_model: GpuLowMachPrecondModel,
     low_mach_theta_floor: f32,
     low_mach_pressure_coupling_alpha: f32,
@@ -293,6 +294,9 @@ pub struct CFDApp {
     alpha_p: f64,
     time_scheme: GpuTimeScheme,
     outer_iters: u32,
+    /// Enable the per-step outer-convergence monitor (GUI residual readout +
+    /// opportunistic early exit). Decoupled from the console logging flag.
+    outer_auto_converge: bool,
     low_mach_model: GpuLowMachPrecondModel,
     low_mach_theta_floor: f32,
     low_mach_pressure_coupling_alpha: f32,
@@ -402,7 +406,7 @@ impl CFDApp {
             min_cell_size: 0.025,
             max_cell_size: 0.025,
             growth_rate: 1.2,
-            timestep: 0.001,
+            timestep: 0.02,
             selected_geometry: GeometryType::default(),
             mesh_type: MeshType::default(),
             plot_field: PlotField::VelocityMag,
@@ -411,7 +415,7 @@ impl CFDApp {
             current_fluid: default_fluid,
             show_mesh_lines: true,
             adaptive_dt: true,
-            target_cfl: 0.95,
+            target_cfl: 0.9,
             dual_time: false,
             dtau: 1e-5,
             log_convergence: false,
@@ -423,7 +427,8 @@ impl CFDApp {
             alpha_u: 0.7,
             alpha_p: 0.3,
             time_scheme: GpuTimeScheme::BDF2,
-            outer_iters: 50,
+            outer_iters: 8,
+            outer_auto_converge: true,
             low_mach_model: GpuLowMachPrecondModel::Off,
             low_mach_theta_floor: 1e-6,
             low_mach_pressure_coupling_alpha: 1.0,
@@ -438,6 +443,7 @@ impl CFDApp {
             viz_field: None,
             viz_field_front: 0,
         };
+        app.apply_model_defaults();
         app.refresh_model_caps();
         app.sync_worker_params();
         app
@@ -459,6 +465,7 @@ impl CFDApp {
             time_scheme: self.time_scheme,
             preconditioner: self.selected_preconditioner,
             outer_iters: self.outer_iters.max(1),
+            outer_auto_converge: self.outer_auto_converge,
             low_mach_model: self.low_mach_model,
             low_mach_theta_floor: self.low_mach_theta_floor,
             low_mach_pressure_coupling_alpha: self.low_mach_pressure_coupling_alpha,
@@ -466,7 +473,7 @@ impl CFDApp {
             alpha_p: self.alpha_p as f32,
             inlet_velocity: self.inlet_velocity,
             density: self.current_fluid.density as f32,
-            viscosity: self.current_fluid.viscosity as f32,
+            viscosity: self.effective_viscosity() as f32,
             eos: self.current_fluid.eos,
         }
     }
@@ -475,6 +482,34 @@ impl CFDApp {
         self.solver_worker.send(SolverWorkerCommand::UpdateParams(
             self.current_runtime_params(),
         ));
+    }
+
+    /// Apply the per-model GUI default solver parameters (single source of truth
+    /// in `model_defaults`). Called at startup and whenever the active model
+    /// changes, so the incompressible and compressible solvers each get sane,
+    /// non-diverging knobs instead of one shared set tuned for neither.
+    fn apply_model_defaults(&mut self) {
+        let d = crate::ui::model_defaults::gui_defaults_for(self.model_id);
+        self.selected_scheme = d.advection_scheme;
+        self.time_scheme = d.time_scheme;
+        self.selected_preconditioner = d.preconditioner;
+        self.alpha_u = d.alpha_u;
+        self.alpha_p = d.alpha_p;
+        self.outer_iters = d.outer_iters;
+        self.outer_auto_converge = d.outer_auto_converge;
+        self.target_cfl = d.target_cfl;
+        self.timestep = d.timestep;
+        self.low_mach_model = d.low_mach_model;
+        self.low_mach_theta_floor = d.low_mach_theta_floor;
+        self.low_mach_pressure_coupling_alpha = d.low_mach_pressure_coupling_alpha;
+    }
+
+    /// Effective viscosity sent to the solver: the fluid's own viscosity, raised
+    /// to the active model's stability floor if it sets one (the compressible
+    /// default floors the near-inviscid Air viscosity; see `model_defaults`).
+    fn effective_viscosity(&self) -> f64 {
+        crate::ui::model_defaults::gui_defaults_for(self.model_id)
+            .effective_viscosity(self.current_fluid.viscosity)
     }
 
     fn current_trace_runtime_params(&self) -> tracefmt::TraceRuntimeParams {
@@ -498,7 +533,7 @@ impl CFDApp {
             alpha_p: self.alpha_p as f32,
             inlet_velocity: self.inlet_velocity,
             density: self.current_fluid.density as f32,
-            viscosity: self.current_fluid.viscosity as f32,
+            viscosity: self.effective_viscosity() as f32,
             eos: tracefmt::TraceEosSpec::from(self.current_fluid.eos),
         }
     }
@@ -1883,7 +1918,7 @@ impl eframe::App for CFDApp {
                         let re = self.current_fluid.density
                             * self.inlet_velocity.abs() as f64
                             * char_length
-                            / self.current_fluid.viscosity;
+                            / self.effective_viscosity();
                         ui.label(format!("Est. Reynolds Number: {:.0}", re));
                         });
 
@@ -2393,17 +2428,12 @@ impl eframe::App for CFDApp {
                                 }
                             });
                         if prev_model_id != self.model_id {
-                            self.refresh_model_caps();
-                            if self.model_id == "compressible"
-                                && (self.alpha_u - 0.7).abs() < 1e-12
-                                && (self.alpha_p - 0.3).abs() < 1e-12
-                            {
-                                // Compressible dual-time now uses full updates by default and
-                                // relies on pseudo-time convergence classification to decide
-                                // when extra damping is necessary.
-                                self.alpha_u = 1.0;
-                                self.alpha_p = 1.0;
-                            }
+                            // Re-seed every solver knob from the per-model defaults
+                            // (scheme, relaxation, outer cap, adaptive-dt target,
+                            // low-Mach preconditioning, viscosity floor) so each
+                            // model starts from settings that converge and do not
+                            // diverge. `init_solver` refreshes the model caps.
+                            self.apply_model_defaults();
                             self.init_solver();
                         }
 
@@ -2513,7 +2543,10 @@ impl eframe::App for CFDApp {
 }
 
 fn solver_worker_apply_params(solver: &mut UnifiedSolver, params: RuntimeParams) {
-    solver.set_collect_convergence_stats(params.log_convergence);
+    // Outer-convergence monitoring drives the GUI residual readout and the
+    // opportunistic per-step break; enable it from the model default (on by
+    // default) OR when the user turns on console convergence logging.
+    solver.set_collect_convergence_stats(params.outer_auto_converge || params.log_convergence);
     solver.set_dt(params.requested_dt);
     let named_params = solver.model().named_param_keys();
     let has_param = |key: &str| named_params.iter().any(|&k| k == key);
@@ -2758,6 +2791,7 @@ fn solver_worker_main(
         time_scheme: GpuTimeScheme::Euler,
         preconditioner: PreconditionerType::Jacobi,
         outer_iters: 1,
+        outer_auto_converge: false,
         low_mach_model: GpuLowMachPrecondModel::Off,
         low_mach_theta_floor: 1e-6,
         low_mach_pressure_coupling_alpha: 1.0,

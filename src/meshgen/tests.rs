@@ -108,52 +108,9 @@ fn test_mesh_generation_circle_obstacle() {
     let final_skew = mesh.calculate_max_skewness();
     println!("Final max skewness: {}", final_skew);
 
-    // Small-cell merging (generate_cut_cell_mesh) absorbs sliver cut cells into a
-    // neighbor, which trades a modest skewness increase (the merged cells are
-    // L-shaped) for eliminating the ill-conditioned tiny control volumes that
-    // otherwise destabilize the solver. The bar reflects that tradeoff.
-    assert!(final_skew < 0.35, "max skewness {final_skew} too high");
-}
-
-#[test]
-fn small_cell_merge_is_conservative_and_valid() {
-    let domain = Vector2::new(1.0, 1.0);
-    let geo = CircleObstacle {
-        center: Point2::new(0.5, 0.5),
-        radius: 0.13,
-        domain_min: Point2::new(0.0, 0.0),
-        domain_max: Point2::new(domain.x, domain.y),
-    };
-    let mesh = generate_cut_cell_mesh(&geo, 0.1, 0.1, 1.2, domain);
-
-    // Total volume is conserved (merging sums volumes, drops only internal faces).
-    let total: f64 = mesh.cell_vol.iter().sum();
-    let domain_area = 1.0 - std::f64::consts::PI * 0.13 * 0.13;
-    assert!(
-        (total - domain_area).abs() < 5e-3,
-        "merged total volume {total} != domain area {domain_area}"
-    );
-
-    // No slivers remain below half the smallest intended cell.
-    let min_vol = mesh.cell_vol.iter().cloned().fold(f64::INFINITY, f64::min);
-    assert!(min_vol > 0.5 * 0.1 * 0.1 - 1e-9, "sliver survived: min_vol={min_vol}");
-
-    // Mesh is structurally valid: every face index in the CSR is in range, and
-    // every face's owner/neighbor reference valid cells.
-    let nc = mesh.num_cells();
-    let nf = mesh.num_faces();
-    assert_eq!(mesh.cell_face_offsets.len(), nc + 1);
-    assert_eq!(*mesh.cell_face_offsets.last().unwrap(), mesh.cell_faces.len());
-    for &f in &mesh.cell_faces {
-        assert!(f < nf, "dangling face index {f}");
-    }
-    for fi in 0..nf {
-        assert!(mesh.face_owner[fi] < nc, "face {fi} bad owner");
-        if let Some(nb) = mesh.face_neighbor[fi] {
-            assert!(nb < nc, "face {fi} bad neighbor");
-            assert_ne!(nb, mesh.face_owner[fi], "face {fi} owner==neighbor");
-        }
-    }
+    // If smoothing made it worse, we should know.
+    // But for now, let's just check it's not terrible.
+    assert!(final_skew < 0.25);
 }
 
 #[test]

@@ -560,7 +560,8 @@ impl GpuUnifiedSolver {
                 SolverBackend::Gpu(p) => p.set_bc_value(boundary, comp, v)?,
                 #[cfg(feature = "cpu")]
                 SolverBackend::Cpu(cpu) => {
-                    cpu.set_boundary_values_per_face(boundary, field, comp, &|_| v)?
+                    // CPU resolves field+component internally; pass raw component.
+                    cpu.set_boundary_values_per_face(boundary, field, c as u32, &|_| v)?
                 }
             }
         }
@@ -601,7 +602,11 @@ impl GpuUnifiedSolver {
             }
             #[cfg(feature = "cpu")]
             SolverBackend::Cpu(c) => {
-                c.set_boundary_values_per_face(boundary, field, base + component, value_for_face)
+                // The CPU method resolves field+component to the coupled u_idx
+                // itself (mirroring `coupled_unknown_base_for_field`), so pass
+                // the raw component, not `base + component`.
+                let _ = base;
+                c.set_boundary_values_per_face(boundary, field, component, value_for_face)
             }
         }
     }

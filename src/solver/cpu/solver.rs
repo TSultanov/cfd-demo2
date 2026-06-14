@@ -16,12 +16,12 @@ use std::collections::HashMap;
 use cfd2_ir::ast::Stmt;
 
 use crate::solver::cpu::interpreter::{Buffers, Ctx, Frame, Interpreter, Value};
-use crate::solver::cpu::linalg::{bicgstab, CsrView};
+use crate::solver::cpu::linalg::{bicgstab, fgmres, BlockCsr, BlockJacobi, CsrView, PointJacobi, Preconditioner};
 use crate::solver::cpu::lowering::model_kernel_programs;
 use crate::solver::cpu::{CpuBackendConfig, CpuEngine};
 use crate::solver::gpu::enums::GpuBoundaryType;
-use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
-use crate::solver::gpu::structs::{GpuConstants, PreconditionerType};
+use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe, SteppingMode};
+use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, PreconditionerType};
 use crate::solver::ir::DispatchDomain;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::SchemeRegistry;
@@ -29,13 +29,15 @@ use crate::solver::model::ModelSpec;
 use crate::solver::scheme::Scheme;
 use crate::solver::TimeScheme;
 
-const DIRICHLET: u32 = 1;
-/// Linear-solve budget for the CPU BiCGSTAB (per outer iteration).
+/// Linear-solve budget per outer iteration.
 const LINEAR_MAX_ITERS: usize = 5000;
+/// Fallback relative tolerance for the CPU linear solve (scalar path); the block
+/// path uses the model's `linear_solver.tolerance` (the GPU inexact-Picard 1e-4).
 const LINEAR_TOL: f64 = 1e-9;
 
 /// A model kernel prepared for interpretation: its dispatch domain plus the
-/// concatenated `indexing ++ preamble ++ body` statement list.
+/// concatenated `indexing ++ preamble ++ body` statement list. (Execution
+/// phase + ordering live in the `schedule`.)
 struct CpuKernel {
     domain: DispatchDomain,
     stmts: Vec<Stmt>,
@@ -46,30 +48,55 @@ pub struct CpuSolver {
     num_cells: usize,
     num_faces: usize,
     state_stride: u32,
-    t_offset: u32,
     unknowns_per_cell: usize,
 
     buffers: Buffers,
+    /// Kernels keyed by id (the program store).
     kernels: HashMap<String, CpuKernel>,
+    /// The scheduled execution order (recipe order), with phases.
+    schedule: Vec<ScheduledKernel>,
 
-    // CSR topology (fixed for the mesh); also mirrored into buffers for kernels.
-    row_offsets: Vec<u32>,
+    // Block-CSR topology (block-level; shared by kernels and the CPU solver).
+    scalar_row_offsets: Vec<u32>,
     col_indices: Vec<u32>,
+    diagonal_indices: Vec<u32>,
+
+    // Coupled-unknown base offset per equation-target field name.
+    coupled_offsets: HashMap<String, u32>,
 
     // Faces grouped by boundary type index (`GpuBoundaryType as u32`).
     boundary_faces: Vec<Vec<u32>>,
 
     constants: GpuConstants,
+    /// Low-Mach preconditioning + biharmonic-dissipation uniform (a separate
+    /// uniform buffer on the GPU; bound by the compressible flux kernels).
+    low_mach: GpuLowMachParams,
     state_layout: crate::solver::model::backend::StateLayout,
 
+    stepping: SteppingMode,
     outer_iters: usize,
+    /// Relative correction-norm tolerance for the adaptive outer break
+    /// (0 = never break; matches the GPU outer gate pinned open).
+    outer_tol: f64,
+    /// CPU linear-solve relative tolerance (block path; GPU inexact-Picard).
+    linear_tol: f64,
+    linear_restart: usize,
+    /// Block-system preconditioner choice (mirrors the recipe/runtime config).
+    precond: PreconditionerType,
     dt: f32,
     dt_old: f32,
+    dtau: f32,
     time: f32,
     time_scheme: TimeScheme,
-    needs_gradients: bool,
     #[allow(dead_code)]
     config: CpuBackendConfig,
+}
+
+/// One scheduled dispatch: a kernel id and its phase (recipe order).
+#[derive(Clone)]
+struct ScheduledKernel {
+    id: String,
+    phase: KernelPhase,
 }
 
 impl CpuSolver {
@@ -80,67 +107,136 @@ impl CpuSolver {
         time_scheme: TimeScheme,
         config: CpuBackendConfig,
     ) -> Result<Self, String> {
+        Self::with_stepping(
+            mesh,
+            model,
+            advection_scheme,
+            time_scheme,
+            SteppingMode::Coupled,
+            config,
+        )
+    }
+
+    pub fn with_stepping(
+        mesh: &Mesh,
+        model: ModelSpec,
+        advection_scheme: Scheme,
+        time_scheme: TimeScheme,
+        stepping: SteppingMode,
+        config: CpuBackendConfig,
+    ) -> Result<Self, String> {
+        // Kernel fusion is a GPU dispatch-overhead optimization; the CPU
+        // interprets one kernel at a time, so disable it. The unfused schedule
+        // is exactly the set of per-module kernel generators (each a typed
+        // `DslProgram`), so every scheduled compute kernel is CPU-executable.
+        let mut model = model;
+        {
+            let mut ls = model.linear_solver.unwrap_or_default();
+            ls.solver.kernel_fusion_policy =
+                crate::solver::model::kernel::KernelFusionPolicy::Off;
+            model.linear_solver = Some(ls);
+        }
         let recipe = SolverRecipe::from_model(
             &model,
             advection_scheme,
             time_scheme,
             PreconditionerType::Jacobi,
-            SteppingMode::Coupled,
+            stepping,
         )?;
         let schemes = SchemeRegistry::new(advection_scheme);
-        let (programs, wgsl_only) = model_kernel_programs(&model, &schemes)?;
-        if !wgsl_only.is_empty() {
-            // For scalar transport every model kernel is typed AST; if a model
-            // brings WGSL-only kernels they must be migrated before CPU support.
-            let names: Vec<&str> = wgsl_only.iter().map(|k| k.as_str()).collect();
-            return Err(format!(
-                "model `{}` has WGSL-only kernels (not CPU-executable): {}",
-                model.id,
-                names.join(", ")
-            ));
-        }
+        // All model-module kernels as typed programs (a superset of the
+        // scheduled set; the recipe selects + orders the ones that run).
+        let (programs, _wgsl_only) = model_kernel_programs(&model, &schemes)?;
+        let program_map: HashMap<String, _> =
+            programs.into_iter().map(|(id, p)| (id.as_str().to_string(), p)).collect();
 
-        let mut kernels = HashMap::new();
-        for (id, prog) in programs {
-            let mut stmts = Vec::with_capacity(
-                prog.indexing.len() + prog.preamble.len() + prog.body.len(),
-            );
-            stmts.extend_from_slice(&prog.indexing);
-            stmts.extend_from_slice(&prog.preamble);
-            stmts.extend_from_slice(&prog.body);
-            kernels.insert(
-                id.as_str().to_string(),
-                CpuKernel {
-                    domain: prog.dispatch.clone(),
-                    stmts,
-                },
-            );
+        // Phases that the CPU executes by interpreting a model kernel. The
+        // LinearSolve phase (FGMRES/AMG/Schur WGSL infrastructure) is replaced
+        // by the CPU's own solver; Apply is a monitor-only matvec (writes `y`,
+        // not state) so it is skipped.
+        let is_compute_phase = |p: KernelPhase| {
+            matches!(
+                p,
+                KernelPhase::Preparation
+                    | KernelPhase::Gradients
+                    | KernelPhase::FluxComputation
+                    | KernelPhase::ExplicitUpdate
+                    | KernelPhase::Assembly
+                    | KernelPhase::Update
+                    | KernelPhase::PrimitiveRecovery
+            )
+        };
+
+        let mut kernels: HashMap<String, CpuKernel> = HashMap::new();
+        let mut schedule: Vec<ScheduledKernel> = Vec::new();
+        for kspec in &recipe.kernels {
+            let id = kspec.id.as_str().to_string();
+            schedule.push(ScheduledKernel {
+                id: id.clone(),
+                phase: kspec.phase,
+            });
+            if kernels.contains_key(&id) {
+                continue;
+            }
+            match program_map.get(&id) {
+                Some(prog) => {
+                    let mut stmts = Vec::with_capacity(
+                        prog.indexing.len() + prog.preamble.len() + prog.body.len(),
+                    );
+                    stmts.extend_from_slice(&prog.indexing);
+                    stmts.extend_from_slice(&prog.preamble);
+                    stmts.extend_from_slice(&prog.body);
+                    kernels.insert(
+                        id.clone(),
+                        CpuKernel {
+                            domain: prog.dispatch.clone(),
+                            stmts,
+                        },
+                    );
+                }
+                None => {
+                    // A scheduled kernel with no typed program: tolerable only
+                    // for the linear-solve / apply infrastructure the CPU
+                    // replaces. A missing *compute* kernel is a real gap.
+                    if is_compute_phase(kspec.phase) {
+                        return Err(format!(
+                            "model `{}` schedules compute kernel `{}` ({:?}) with no CPU-executable program",
+                            model.id, id, kspec.phase
+                        ));
+                    }
+                }
+            }
         }
 
         let state_layout = model.state_layout.clone();
         let state_stride = state_layout.stride();
-        let t_offset = state_layout
-            .offset_for(crate::solver::model::SCALAR_TRANSPORT_FIELD)
-            .ok_or("model has no scalar transport field `T`")?;
         let unknowns_per_cell = recipe.unknowns_per_cell;
-        if unknowns_per_cell != 1 {
-            return Err(format!(
-                "CpuSolver currently supports scalar systems only (unknowns_per_cell={unknowns_per_cell})"
-            ));
+        let s = unknowns_per_cell;
+
+        // Coupled-unknown base offsets (equation-target order), mirroring
+        // `coupled_offsets` in the codegen: field name -> first u_idx.
+        let mut coupled_offsets: HashMap<String, u32> = HashMap::new();
+        {
+            let mut cur = 0u32;
+            for eq in model.system.equations() {
+                coupled_offsets.insert(eq.target().name().to_string(), cur);
+                cur += eq.target().kind().component_count() as u32;
+            }
         }
 
         let num_cells = mesh.num_cells();
         let num_faces = mesh.num_faces();
 
-        let (row_offsets, col_indices, diagonal_indices, cell_face_matrix_indices) =
+        let (scalar_row_offsets, col_indices, diagonal_indices, cell_face_matrix_indices) =
             build_csr_topology(mesh);
-        let nnz = *row_offsets.last().unwrap() as usize;
+        let nnz_blocks = *scalar_row_offsets.last().unwrap() as usize;
 
         let mut buffers = Buffers::new();
         upload_mesh(&mut buffers, mesh);
-        buffers.insert_u32("scalar_row_offsets", row_offsets.clone());
-        buffers.insert_u32("row_offsets", row_offsets.clone());
-        buffers.insert_u32("diagonal_indices", diagonal_indices);
+        buffers.insert_u32("scalar_row_offsets", scalar_row_offsets.clone());
+        buffers.insert_u32("row_offsets", scalar_row_offsets.clone());
+        buffers.insert_u32("col_indices", col_indices.clone());
+        buffers.insert_u32("diagonal_indices", diagonal_indices.clone());
         buffers.insert_u32("cell_face_matrix_indices", cell_face_matrix_indices);
 
         // State + history + per-iteration snapshot.
@@ -150,8 +246,10 @@ impl CpuSolver {
         buffers.insert_f32("state_old_old", vec![0.0; state_len]);
         buffers.insert_f32("state_iter", vec![0.0; state_len]);
 
-        // Flux (one value per face), gradients, linear system, solution.
-        buffers.insert_f32("fluxes", vec![0.0; num_faces]);
+        // Flux table: `flux_stride` floats per face (the packed coupled-unknown
+        // layout); falls back to 1 for models with no flux buffer.
+        let flux_stride = recipe.flux.map(|f| f.stride as usize).unwrap_or(1);
+        buffers.insert_f32("fluxes", vec![0.0; num_faces * flux_stride]);
         // grad_state mirrors the state layout: one Vector2 gradient per state slot
         // (indexed `grad_state[cell * stride + component]`), so it holds
         // `num_cells * stride` Vector2 elements (× 2 floats each).
@@ -159,47 +257,59 @@ impl CpuSolver {
             "grad_state",
             vec![0.0; num_cells * state_stride as usize * 2],
         );
-        buffers.insert_f32("matrix_values", vec![0.0; nnz]);
-        buffers.insert_f32("rhs", vec![0.0; num_cells]);
-        buffers.insert_f32("x", vec![0.0; num_cells]);
+        // Block-CSR: nnz_blocks * S*S matrix entries; rhs/x packed `[cell*S + u]`.
+        buffers.insert_f32("matrix_values", vec![0.0; nnz_blocks * s * s]);
+        buffers.insert_f32("rhs", vec![0.0; num_cells * s]);
+        buffers.insert_f32("x", vec![0.0; num_cells * s]);
+        buffers.insert_f32("y", vec![0.0; num_cells * s]);
 
-        // Boundary conditions: kind per face (scalar stride 1), values per face.
-        let mut bc_kind = vec![0u32; num_faces];
-        for f in 0..num_faces {
-            if mesh.face_neighbor[f].is_none() {
-                // scalar_transport declares Dirichlet on every boundary type used.
-                bc_kind[f] = DIRICHLET;
-            }
-        }
+        // Boundary conditions: per face x coupled-unknown component.
+        let (bc_kind, bc_value) = build_bc_tables(mesh, &model, s)?;
         buffers.insert_u32("bc_kind", bc_kind);
-        buffers.insert_f32("bc_value", vec![0.0; num_faces]);
+        buffers.insert_f32("bc_value", bc_value);
 
         let boundary_faces = group_boundary_faces(mesh);
 
         let mut constants = recipe.initial_constants;
-        constants.dtau = 0.0; // coupled solve: no dual-time term
+        constants.dtau = 0.0; // dual-time off by default
         constants.time_scheme = time_scheme as u32;
+
+        let outer_iters = match stepping {
+            SteppingMode::Implicit { outer_iters } => outer_iters.max(1),
+            _ => 2,
+        };
 
         Ok(Self {
             model_id: model.id,
             num_cells,
             num_faces,
             state_stride,
-            t_offset,
             unknowns_per_cell,
             buffers,
             kernels,
-            row_offsets,
+            schedule,
+            scalar_row_offsets,
             col_indices,
+            diagonal_indices,
+            coupled_offsets,
             boundary_faces,
             constants,
+            low_mach: GpuLowMachParams::default(),
             state_layout,
-            outer_iters: 2,
+            stepping,
+            outer_iters,
+            outer_tol: 0.0,
+            linear_tol: recipe.linear_solver.tolerance as f64,
+            linear_restart: match recipe.linear_solver.solver_type {
+                crate::solver::gpu::recipe::LinearSolverType::Fgmres { max_restart } => max_restart,
+                crate::solver::gpu::recipe::LinearSolverType::Cg => 60,
+            },
+            precond: recipe.linear_solver.preconditioner,
             dt: 0.01,
             dt_old: 0.01,
+            dtau: 0.0,
             time: 0.0,
             time_scheme,
-            needs_gradients: recipe.needs_gradients(),
             config,
         })
     }
@@ -212,12 +322,27 @@ impl CpuSolver {
     pub fn set_dt(&mut self, dt: f32) {
         self.dt = dt;
     }
+    pub fn set_dtau(&mut self, dtau: f32) {
+        self.dtau = dtau;
+    }
+    /// Relative correction-norm tolerance for the adaptive outer-iteration
+    /// break (0 keeps every requested iteration, matching the GPU outer gate
+    /// pinned open). Mirrors `set_outer_tolerance` on the GPU solver.
+    pub fn set_outer_tolerance(&mut self, tol: f64) {
+        self.outer_tol = tol;
+    }
     pub fn set_time_scheme(&mut self, scheme: TimeScheme) {
         self.time_scheme = scheme;
         self.constants.time_scheme = scheme as u32;
     }
     pub fn set_advection_scheme(&mut self, scheme: Scheme) {
         self.constants.scheme = scheme.gpu_id();
+    }
+    pub fn set_viscosity(&mut self, mu: f32) {
+        self.constants.viscosity = mu;
+    }
+    pub fn set_density(&mut self, rho: f32) {
+        self.constants.density = rho;
     }
 
     // ── field I/O ─────────────────────────────────────────────────────────
@@ -316,12 +441,25 @@ impl CpuSolver {
     pub fn set_boundary_values_per_face(
         &mut self,
         boundary: GpuBoundaryType,
-        _field: &str,
+        field: &str,
         component: u32,
         value_for_face: &dyn Fn(u32) -> f32,
     ) -> Result<(), String> {
         let bidx = boundary as usize;
         let stride = self.unknowns_per_cell;
+        // Map field+component to the coupled-unknown index. Equation-target
+        // fields use their coupled offset; a field that is not itself a coupled
+        // unknown (e.g. a primitive whose BC seeds an expression closure) falls
+        // back to the raw component (single-unknown / scalar models).
+        let u_idx = match self.coupled_offsets.get(field) {
+            Some(&base) => (base + component) as usize,
+            None => component as usize,
+        };
+        if u_idx >= stride {
+            return Err(format!(
+                "boundary field `{field}` component {component} maps to u_idx {u_idx} >= stride {stride}"
+            ));
+        }
         let faces = self
             .boundary_faces
             .get(bidx)
@@ -329,7 +467,7 @@ impl CpuSolver {
             .clone();
         for face in faces {
             self.buffers
-                .set_f32("bc_value", face as usize * stride + component as usize, value_for_face(face));
+                .set_f32("bc_value", face as usize * stride + u_idx, value_for_face(face));
         }
         Ok(())
     }
@@ -361,10 +499,36 @@ impl CpuSolver {
 
         self.constants.dt = self.dt;
         self.constants.dt_old = self.dt_old;
+        self.constants.dtau = self.dtau;
         self.time += self.dt;
         self.constants.time = self.time;
         self.constants.time_scheme = self.time_scheme as u32;
-        let ctx = constants_ctx(&self.constants);
+        let ctx = constants_ctx(&self.constants, &self.low_mach);
+
+        // Group the scheduled kernels by execution role, preserving RECIPE
+        // ORDER within each group (the recipe schedule is already dependency-
+        // correct — e.g. compressible runs flux_module_gradients -> flux_module
+        // -> packed_state_gradients -> assembly, two distinct gradient passes
+        // feeding the flux and the assembly respectively, so re-sorting by phase
+        // would feed the flux the wrong gradients). Mirrors the GPU coupled
+        // backend: init_prepare (once) then per outer iteration the assembly
+        // group, the CPU linear solve, then the update group. Expression BCs
+        // (bc_expr) re-run every outer iteration.
+        let collect = |phases: &[KernelPhase]| -> Vec<String> {
+            self.schedule
+                .iter()
+                .filter(|s| phases.contains(&s.phase))
+                .map(|s| s.id.clone())
+                .collect()
+        };
+        let prep = collect(&[KernelPhase::Preparation]);
+        let bc_expr: Vec<String> = prep.iter().filter(|id| id.contains("bc_expr")).cloned().collect();
+        let assembly_group = collect(&[
+            KernelPhase::Gradients,
+            KernelPhase::FluxComputation,
+            KernelPhase::Assembly,
+        ]);
+        let update_group = collect(&[KernelPhase::Update, KernelPhase::PrimitiveRecovery]);
 
         let threads = self.config.threads;
         let engine = self.config.engine;
@@ -386,51 +550,172 @@ impl CpuSolver {
             );
         };
 
-        // Advective flux from the (frozen) advecting velocity — once per step.
-        run("flux_module");
-
-        let assembly_id = if self.needs_gradients {
-            "generic_coupled_assembly_grad_state"
-        } else {
-            "generic_coupled_assembly"
-        };
+        // Prepare once per step.
+        for id in &prep {
+            run(id);
+        }
 
         for _ in 0..self.outer_iters {
-            // Snapshot current iterate (used only when dual-time is active).
-            let cur = self.buffers.f32_vec("state");
-            self.buffers.copy_into_f32("state_iter", &cur);
+            // Snapshot current iterate (dual-time reference + outer-break delta).
+            let snap = self.buffers.f32_vec("state");
+            self.buffers.copy_into_f32("state_iter", &snap);
 
-            if self.needs_gradients {
-                run("packed_state_gradients");
+            // Expression-valued BCs read interior state: refresh each iteration.
+            for id in &bc_expr {
+                run(id);
             }
-            run(assembly_id);
+            for id in &assembly_group {
+                run(id);
+            }
             self.linear_solve();
-            run("generic_coupled_update");
+            for id in &update_group {
+                run(id);
+            }
+
+            // Adaptive outer break (off when outer_tol == 0).
+            if self.outer_tol > 0.0 {
+                let cur = self.buffers.f32_vec("state");
+                let (mut maxd, mut maxs) = (0.0f32, 0.0f32);
+                for i in 0..cur.len() {
+                    maxd = maxd.max((cur[i] - snap[i]).abs());
+                    maxs = maxs.max(cur[i].abs());
+                }
+                if (maxd as f64) <= self.outer_tol * (maxs as f64 + 1e-30) {
+                    break;
+                }
+            }
         }
 
         self.dt_old = self.dt;
     }
 
-    /// Solve `A x = b` (the assembled CSR system) on the CPU; result lands in the
-    /// `x` buffer that the update kernel consumes. Takes `&self`: it mutates only
-    /// the (interior-mutable atomic) buffers, not solver fields.
-    fn linear_solve(&self) {
-        // Initial guess = current T.
-        let stride = self.state_stride as usize;
-        let off = self.t_offset as usize;
-        let state = self.buffers.f32_vec("state");
-        let mut x: Vec<f32> = (0..self.num_cells)
-            .map(|i| state[i * stride + off])
-            .collect();
+    /// Debug: run prepare + the assembly group (gradients, flux, assembly) at the
+    /// current state and return the assembled `(matrix_values, rhs)`. Used by the
+    /// MMS consistency check to compute the per-equation discrete residual at the
+    /// exact solution. Does NOT solve or update.
+    pub fn debug_assemble(&mut self) -> (Vec<f32>, Vec<f32>) {
+        self.constants.dt = self.dt;
+        self.constants.dt_old = self.dt_old;
+        self.constants.dtau = self.dtau;
+        self.constants.time = self.time;
+        self.constants.time_scheme = self.time_scheme as u32;
+        let ctx = constants_ctx(&self.constants, &self.low_mach);
+        let collect = |phases: &[KernelPhase]| -> Vec<String> {
+            self.schedule
+                .iter()
+                .filter(|s| phases.contains(&s.phase))
+                .map(|s| s.id.clone())
+                .collect()
+        };
+        let prep = collect(&[KernelPhase::Preparation]);
+        let assembly_group = collect(&[
+            KernelPhase::Gradients,
+            KernelPhase::FluxComputation,
+            KernelPhase::Assembly,
+        ]);
+        let (threads, engine, model_id, nf, nc) = (
+            self.config.threads,
+            self.config.engine,
+            self.model_id,
+            self.num_faces,
+            self.num_cells,
+        );
+        let run = |id: &str| {
+            run_kernel(
+                &self.buffers, &ctx, &self.kernels, id, nf, nc, threads, engine, model_id,
+                &self.constants,
+            );
+        };
+        for id in &prep {
+            run(id);
+        }
+        for id in &assembly_group {
+            run(id);
+        }
+        (self.buffers.f32_vec("matrix_values"), self.buffers.f32_vec("rhs"))
+    }
 
+    /// Block-CSR topology accessors (for the MMS residual consistency check).
+    pub fn debug_topology(&self) -> (&[u32], &[u32], &[u32], usize) {
+        (
+            &self.scalar_row_offsets,
+            &self.col_indices,
+            &self.diagonal_indices,
+            self.unknowns_per_cell,
+        )
+    }
+
+    /// Solve the assembled block system `A x = rhs` on the CPU; the result lands
+    /// in the `x` buffer that the update/apply kernel consumes. Takes `&self`: it
+    /// mutates only the (interior-mutable atomic) buffers, not solver fields.
+    ///
+    /// `x` starts at zero each solve: the assembled system has a unique solution
+    /// independent of the guess, so this is correct whether the model's update is
+    /// Picard (x = new state) or Newton (x = correction). FGMRES + block-Jacobi
+    /// mirrors the GPU FGMRES(restart); the scalar (`S==1`) path keeps the
+    /// validated BiCGSTAB.
+    fn linear_solve(&self) {
+        let s = self.unknowns_per_cell;
+        let n = self.num_cells * s;
         let matrix = self.buffers.f32_vec("matrix_values");
         let rhs = self.buffers.f32_vec("rhs");
-        let a = CsrView {
-            row_offsets: &self.row_offsets,
-            col_indices: &self.col_indices,
-            values: &matrix,
-        };
-        bicgstab(&a, &rhs, &mut x, LINEAR_MAX_ITERS, LINEAR_TOL, self.config.simd);
+        // Warm-start from the persisted `x` buffer (the previous solve's
+        // solution, which the update kernel keeps in sync with the state). The
+        // EOS-coupled compressible block system is rank-deficient (the recovery
+        // rows admit a null-space the residual does not pin), so a zero guess
+        // lets the Krylov solve wander along the null-space and drift the
+        // marched solution; warm-starting pins the null-space component to the
+        // current state, matching the GPU (whose `x` buffer likewise persists).
+        let mut x = self.buffers.f32_vec("x");
+        if x.len() != n {
+            x = vec![0.0f32; n];
+        }
+
+        if s == 1 {
+            let a = CsrView {
+                row_offsets: &self.scalar_row_offsets,
+                col_indices: &self.col_indices,
+                values: &matrix,
+            };
+            bicgstab(&a, &rhs, &mut x, LINEAR_MAX_ITERS, LINEAR_TOL, self.config.simd);
+        } else {
+            let a = BlockCsr {
+                s,
+                scalar_row_offsets: &self.scalar_row_offsets,
+                col_indices: &self.col_indices,
+                diagonal_indices: &self.diagonal_indices,
+                values: &matrix,
+            };
+            // Preconditioner mirrors the model/runtime choice: point-Jacobi for
+            // `Jacobi`/`Amg` (the marginally-stable compressible/incompressible
+            // path relies on its weaker, inexact-Picard-damped correction),
+            // block-Jacobi for `BlockJacobi` (the biharmonic conditioning cure).
+            let block_pc: Box<dyn Preconditioner> = match self.precond {
+                PreconditionerType::BlockJacobi => Box::new(BlockJacobi::new(&a)),
+                _ => Box::new(PointJacobi::new(&a)),
+            };
+            let precond = block_pc.as_ref();
+            let tol = std::env::var("CFD2_CPU_LINTOL")
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(self.linear_tol);
+            let stats = fgmres(
+                &a,
+                &rhs,
+                &mut x,
+                precond,
+                self.linear_restart,
+                LINEAR_MAX_ITERS,
+                tol,
+                self.config.simd,
+            );
+            if std::env::var("CFD2_CPU_DEBUG_SOLVE").is_ok() {
+                eprintln!(
+                    "[cpu-solve] block S={s} n={n} iters={} rel_res={:.3e} conv={}",
+                    stats.iters, stats.rel_residual, stats.converged
+                );
+            }
+        }
 
         self.buffers.copy_into_f32("x", &x);
     }
@@ -486,9 +771,19 @@ fn run_kernel(
     });
 }
 
-/// Build the constants uniform as an interpreter struct value (`constants.field`).
-fn constants_ctx(c: &GpuConstants) -> Ctx {
+/// Build the uniform structs the kernels read as interpreter `Ctx` structs:
+/// `constants.*` (GpuConstants incl. EOS + buoyant tail) and `low_mach_params.*`
+/// (low-Mach preconditioning + biharmonic dissipation).
+fn constants_ctx(c: &GpuConstants, lm: &GpuLowMachParams) -> Ctx {
     Ctx::new()
+        .with_constant("low_mach_params", "model", Value::U32(lm.model))
+        .with_constant("low_mach_params", "theta_floor", Value::F32(lm.theta_floor))
+        .with_constant(
+            "low_mach_params",
+            "pressure_coupling_alpha",
+            Value::F32(lm.pressure_coupling_alpha),
+        )
+        .with_constant("low_mach_params", "eps4", Value::F32(lm.eps4))
         .with_constant("constants", "dt", Value::F32(c.dt))
         .with_constant("constants", "dt_old", Value::F32(c.dt_old))
         .with_constant("constants", "dtau", Value::F32(c.dtau))
@@ -507,6 +802,10 @@ fn constants_ctx(c: &GpuConstants) -> Ctx {
         .with_constant("constants", "eos_dp_drho", Value::F32(c.eos_dp_drho))
         .with_constant("constants", "eos_p_offset", Value::F32(c.eos_p_offset))
         .with_constant("constants", "eos_theta_ref", Value::F32(c.eos_theta_ref))
+        // Buoyant Boussinesq tail (mirrors the buoyant uniform port manifest).
+        .with_constant("constants", "buoyant_beta_g", Value::F32(c.buoyant_beta_g))
+        .with_constant("constants", "buoyant_t0", Value::F32(c.buoyant_t0))
+        .with_constant("constants", "buoyant_k_over_cp", Value::F32(c.buoyant_k_over_cp))
 }
 
 /// Upload mesh geometry/topology into named CPU buffers matching kernel bindings.
@@ -607,6 +906,43 @@ fn build_csr_topology(mesh: &Mesh) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>) {
         }
     }
     (row_offsets, col_indices, diagonal_indices, cell_face_matrix_indices)
+}
+
+/// Build per-face `(bc_kind, bc_value)` tables (length `num_faces * S`) by
+/// scattering the model's per-boundary-type tables onto boundary faces — exactly
+/// as the GPU generic-coupled backend does (`row_base(i) = i * S`). Interior and
+/// `None`-typed faces stay zero (kernels guard with `is_boundary`). The values
+/// are *seeds*; `set_boundary_values_per_face` overrides them at runtime and the
+/// `bc_expr` kernel refreshes expression-valued entries each iteration.
+fn build_bc_tables(
+    mesh: &Mesh,
+    model: &ModelSpec,
+    s: usize,
+) -> Result<(Vec<u32>, Vec<f32>), String> {
+    let (kind_by_type, value_by_type) = model
+        .boundaries
+        .to_gpu_tables(&model.system)
+        .map_err(|e| format!("failed to build BC tables: {e}"))?;
+    let num_faces = mesh.num_faces();
+    let mut bc_kind = vec![0u32; num_faces * s];
+    let mut bc_value = vec![0.0f32; num_faces * s];
+    for f in 0..num_faces {
+        if mesh.face_neighbor[f].is_some() {
+            continue; // interior
+        }
+        let boundary_idx = match mesh.face_boundary.get(f).copied().flatten() {
+            None => 0usize,
+            Some(bt) => bt.bc_table_index(),
+        };
+        if boundary_idx == 0 {
+            continue;
+        }
+        let src = boundary_idx * s;
+        let dst = f * s;
+        bc_kind[dst..dst + s].copy_from_slice(&kind_by_type[src..src + s]);
+        bc_value[dst..dst + s].copy_from_slice(&value_by_type[src..src + s]);
+    }
+    Ok((bc_kind, bc_value))
 }
 
 /// Group boundary faces by `BoundaryType::bc_table_index()` (== `GpuBoundaryType

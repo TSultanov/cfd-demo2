@@ -730,6 +730,27 @@ impl<'a> Interpreter<'a> {
                 let target = &other["bitcast<".len()..other.len() - 1];
                 bitcast(target, a[0])
             }
+            // ── model kernel helper functions (module-level in WGSL, emitted
+            //    outside the KernelProgram statement AST, so reproduced here) ──
+            // bc_neighbor_scalar(interior, owner, kind, value, d_own, is_boundary):
+            // the boundary ghost value for face reconstruction — Dirichlet (kind
+            // 1) returns the prescribed value, Neumann (kind 2) extrapolates by
+            // the outward gradient, otherwise zero-gradient (owner); interior
+            // faces pass `interior` through.
+            "bc_neighbor_scalar" => {
+                let interior = a[0].as_f32();
+                let owner = a[1].as_f32();
+                let kind = a[2].as_u32();
+                let value = a[3].as_f32();
+                let d_own = a[4].as_f32();
+                let is_boundary = a[5].as_bool();
+                let boundary = match kind {
+                    1 => value,
+                    2 => owner + value * d_own,
+                    _ => owner,
+                };
+                Value::F32(if is_boundary { boundary } else { interior })
+            }
             other => panic!("unsupported intrinsic `{other}` (args: {})", a.len()),
         }
     }

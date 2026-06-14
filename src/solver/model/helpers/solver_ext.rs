@@ -567,6 +567,26 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
 
         let stride = self.model().state_layout.stride() as usize;
 
+        // CPU backend: the port registry is GPU-only, so seed via the routed
+        // field-name API (which writes the CPU state buffer directly). Touches
+        // only the named fields, preserving mu/gradients like the GPU path.
+        if self.is_cpu() {
+            let n = self.num_cells() as usize;
+            let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
+            let rho_e = if gm1 > 0.0 { p / gm1 + ke } else { ke };
+            let t = if r_gas > 0.0 { p / (rho.max(1e-12) * r_gas) } else { 0.0 };
+            let _ = self.set_field_scalar(FIELD_RHO, &vec![rho as f64; n]);
+            let _ = self
+                .set_field_vec2("rho_u", &vec![((rho * u[0]) as f64, (rho * u[1]) as f64); n]);
+            let _ = self.set_field_scalar("rho_e", &vec![rho_e as f64; n]);
+            let _ = self.set_field_scalar(FIELD_P, &vec![p as f64; n]);
+            let _ = self.set_field_scalar("T", &vec![t as f64; n]);
+            let _ = self
+                .set_field_vec2(FIELD_U_UPPER, &vec![(u[0] as f64, u[1] as f64); n])
+                .or_else(|_| self.set_field_vec2(FIELD_U_LOWER, &vec![(u[0] as f64, u[1] as f64); n]));
+            return;
+        }
+
         // Use cached port registry for field offset lookups
         let Some(registry) = self.port_registry() else {
             return;
@@ -622,6 +642,36 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         let r_gas = eos_params.r;
 
         let stride = self.model().state_layout.stride() as usize;
+
+        // CPU backend: seed via the routed field-name API (port registry is
+        // GPU-only).
+        if self.is_cpu() {
+            let n = self.num_cells() as usize;
+            let rho_f: Vec<f64> = rho.iter().map(|&v| v as f64).collect();
+            let rho_u: Vec<(f64, f64)> = (0..n)
+                .map(|i| ((rho[i] * u[i][0]) as f64, (rho[i] * u[i][1]) as f64))
+                .collect();
+            let rho_e: Vec<f64> = (0..n)
+                .map(|i| {
+                    let ke = 0.5 * rho[i] * (u[i][0] * u[i][0] + u[i][1] * u[i][1]);
+                    (if gm1 > 0.0 { p[i] / gm1 + ke } else { ke }) as f64
+                })
+                .collect();
+            let p_f: Vec<f64> = p.iter().map(|&v| v as f64).collect();
+            let t_f: Vec<f64> = (0..n)
+                .map(|i| if r_gas > 0.0 { (p[i] / (rho[i].max(1e-12) * r_gas)) as f64 } else { 0.0 })
+                .collect();
+            let u_f: Vec<(f64, f64)> = (0..n).map(|i| (u[i][0] as f64, u[i][1] as f64)).collect();
+            let _ = self.set_field_scalar(FIELD_RHO, &rho_f);
+            let _ = self.set_field_vec2("rho_u", &rho_u);
+            let _ = self.set_field_scalar("rho_e", &rho_e);
+            let _ = self.set_field_scalar(FIELD_P, &p_f);
+            let _ = self.set_field_scalar("T", &t_f);
+            let _ = self
+                .set_field_vec2(FIELD_U_UPPER, &u_f)
+                .or_else(|_| self.set_field_vec2(FIELD_U_LOWER, &u_f));
+            return;
+        }
 
         // Use cached port registry for field offset lookups
         let Some(registry) = self.port_registry() else {

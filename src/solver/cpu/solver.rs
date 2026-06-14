@@ -387,6 +387,12 @@ impl CpuSolver {
     pub fn set_alpha_p(&mut self, alpha: f32) {
         self.constants.alpha_p = alpha;
     }
+    /// Biharmonic-dissipation coefficient (the `compressible_mms_biharmonic`
+    /// model's `+eps4*(lap_neigh-lap_own)` flux term). Mirrors the GPU's
+    /// `set_named_param("low_mach.eps4", …)`.
+    pub fn set_eps4(&mut self, eps4: f32) {
+        self.low_mach.eps4 = eps4;
+    }
 
     // ── field I/O ─────────────────────────────────────────────────────────
 

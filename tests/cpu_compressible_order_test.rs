@@ -14,7 +14,8 @@ use cfd2::solver::gpu::enums::GpuBoundaryType;
 use cfd2::solver::gpu::recipe::SteppingMode;
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
 use cfd2::solver::model::{
-    compressible_mms_model, COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD, COMPRESSIBLE_MMS_SOURCE_RHO_FIELD,
+    compressible_mms_biharmonic_model, compressible_mms_model,
+    COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD, COMPRESSIBLE_MMS_SOURCE_RHO_FIELD,
     COMPRESSIBLE_MMS_SOURCE_RHO_U_FIELD,
 };
 use cfd2::solver::scheme::Scheme;
@@ -177,6 +178,15 @@ fn test_scheme() -> Scheme {
 
 #[allow(clippy::type_complexity)]
 fn setup(n: usize, cfg: CpuBackendConfig) -> (CpuSolver, Mesh) {
+    setup_g(n, cfg, false, 0.0)
+}
+
+/// Generalized setup: `biharmonic` selects the ∇⁴-dissipation compressible model
+/// and `eps4` sets its coefficient (the GPU's cure for the interior marginal
+/// instability). The manufactured solution + sources are identical (the eps4 term
+/// is a consistent O(h²) dissipation).
+#[allow(clippy::type_complexity)]
+fn setup_g(n: usize, cfg: CpuBackendConfig, biharmonic: bool, eps4: f32) -> (CpuSolver, Mesh) {
     let mesh = generate_structured_rect_mesh(
         n,
         n,
@@ -189,7 +199,11 @@ fn setup(n: usize, cfg: CpuBackendConfig) -> (CpuSolver, Mesh) {
             top: BoundaryType::Inlet,
         },
     );
-    let model = compressible_mms_model().expect("model");
+    let model = if biharmonic {
+        compressible_mms_biharmonic_model().expect("biharmonic model")
+    } else {
+        compressible_mms_model().expect("model")
+    };
     let cells = mesh.num_cells();
     let mut s = CpuSolver::with_stepping(
         &mesh,
@@ -200,6 +214,7 @@ fn setup(n: usize, cfg: CpuBackendConfig) -> (CpuSolver, Mesh) {
         cfg,
     )
     .expect("cpu solver");
+    s.set_eps4(eps4);
     s.set_dt(DT as f32);
     s.set_dtau(0.0);
     s.set_viscosity(MU as f32);
@@ -812,6 +827,30 @@ fn diag_compressible_trajectory() {
             (num / den).sqrt()
         };
         println!("[diag] step={st} | L2 rho={er:.3e} rho_u={eru:.3e} rho_e={ere:.3e} p={ep:.3e}");
+    }
+}
+
+/// Does the biharmonic ∇⁴ dissipation (the GPU's documented cure for the interior
+/// marginal instability) keep the CPU compressible march BOUNDED where the plain
+/// model blows up? Sweeps eps4 and reports the rho_e L2 error over a long march.
+/// eps4=0 is the control (plain behaviour); eps4>0 should stay bounded + converge.
+#[ignore]
+#[test]
+fn diag_biharmonic_march() {
+    let n = 8;
+    for eps4 in [0.0_f32, 0.1, 0.25, 0.5] {
+        let (mut s, mesh) = setup_g(n, CpuBackendConfig::default(), true, eps4);
+        let mut step = 0usize;
+        for &upto in &[1usize, 40, 160, 320, 600] {
+            while step < upto {
+                s.step();
+                step += 1;
+            }
+            let rho_e = s.get_field_scalar("rho_e").unwrap();
+            let e = l2_scalar(&mesh, &rho_e, exact_rho_e);
+            let finite = rho_e.iter().all(|v| v.is_finite());
+            println!("[bihar-march] eps4={eps4:.2} step={step} rho_e_L2={e:.3e} finite={finite}");
+        }
     }
 }
 

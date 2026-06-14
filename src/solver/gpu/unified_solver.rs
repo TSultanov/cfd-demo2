@@ -116,9 +116,16 @@ impl Default for SolverConfig {
     }
 }
 
+/// Internal backend implementation held by the solver.
+enum SolverBackend {
+    Gpu(GpuProgramPlan),
+    #[cfg(feature = "cpu")]
+    Cpu(Box<crate::solver::cpu::CpuSolver>),
+}
+
 pub struct GpuUnifiedSolver {
     model: ModelSpec,
-    plan: GpuProgramPlan,
+    backend: SolverBackend,
     config: SolverConfig,
     /// Post-step State-Redistribution operator for cut-cell small cells. `None`
     /// unless the mesh carries sliver cut cells (see [`crate::solver::gpu::srd`]).
@@ -140,6 +147,26 @@ impl GpuUnifiedSolver {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Result<Self, String> {
+        #[cfg(feature = "cpu")]
+        if let Some(cpu_cfg) = cpu_backend_from_env() {
+            let cpu = crate::solver::cpu::CpuSolver::new(
+                mesh,
+                model.clone(),
+                config.advection_scheme,
+                config.time_scheme,
+                cpu_cfg,
+            )?;
+            return Ok(Self {
+                model,
+                backend: SolverBackend::Cpu(Box::new(cpu)),
+                config,
+                // SRD is a GPU-only cut-cell stabilizer; the CPU backend never
+                // builds or applies it.
+                srd: None,
+                srd_enabled: false,
+            });
+        }
+
         // Model-owned preconditioners (e.g. GenericCoupled+Schur) must remain authoritative.
         crate::solver::gpu::lowering::validate_model_owned_preconditioner_config(
             &model,
@@ -162,7 +189,7 @@ impl GpuUnifiedSolver {
 
         let mut solver = Self {
             model,
-            plan,
+            backend: SolverBackend::Gpu(plan),
             config,
             srd: None,
             srd_enabled: false,
@@ -175,15 +202,22 @@ impl GpuUnifiedSolver {
         // untouched.
         let ports = solver.ui_ports();
         if let Some(u_offset) = ports.u_offset {
-            if let Some(csr) = crate::solver::gpu::srd::build_srd_operator(mesh) {
-                solver.srd = Some(crate::solver::gpu::srd::SrdGpu::new(
-                    &solver.plan.context.device,
-                    &csr,
-                    u_offset,
-                    ports.stride,
-                    mesh.num_cells() as u32,
-                ));
-            }
+            // Borrow the GPU plan to build the operator in an inner scope, then
+            // assign (the plan borrow must end before writing `solver.srd`).
+            // `plan()` is safe here — the CPU backend returned early above.
+            let srd = {
+                let plan = solver.plan();
+                crate::solver::gpu::srd::build_srd_operator(mesh).map(|csr| {
+                    crate::solver::gpu::srd::SrdGpu::new(
+                        &plan.context.device,
+                        &csr,
+                        u_offset,
+                        ports.stride,
+                        mesh.num_cells() as u32,
+                    )
+                })
+            };
+            solver.srd = srd;
         }
 
         Ok(solver)
@@ -197,9 +231,9 @@ impl GpuUnifiedSolver {
         }
         if let Some(srd) = self.srd.as_ref() {
             srd.apply(
-                &self.plan.context.device,
-                &self.plan.context.queue,
-                self.plan.state_buffer(),
+                &self.plan().context.device,
+                &self.plan().context.queue,
+                self.plan().state_buffer(),
             );
         }
     }
@@ -224,10 +258,56 @@ impl GpuUnifiedSolver {
     pub fn apply_srd_pass(&self) {
         if let Some(srd) = self.srd.as_ref() {
             srd.apply(
-                &self.plan.context.device,
-                &self.plan.context.queue,
-                self.plan.state_buffer(),
+                &self.plan().context.device,
+                &self.plan().context.queue,
+                self.plan().state_buffer(),
             );
+        }
+    }
+
+    /// Access the GPU plan (panics on the CPU backend; only GPU-specific methods
+    /// — profiling, render-buffer access, linear-system debug — call this).
+    fn plan(&self) -> &GpuProgramPlan {
+        match &self.backend {
+            SolverBackend::Gpu(p) => p,
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(_) => panic!("GPU-only operation invoked on the CPU backend"),
+        }
+    }
+
+    fn plan_mut(&mut self) -> &mut GpuProgramPlan {
+        match &mut self.backend {
+            SolverBackend::Gpu(p) => p,
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(_) => panic!("GPU-only operation invoked on the CPU backend"),
+        }
+    }
+
+    #[cfg(feature = "cpu")]
+    fn cpu_ref(&self) -> Option<&crate::solver::cpu::CpuSolver> {
+        match &self.backend {
+            SolverBackend::Cpu(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    #[cfg(feature = "cpu")]
+    fn cpu_mut(&mut self) -> Option<&mut crate::solver::cpu::CpuSolver> {
+        match &mut self.backend {
+            SolverBackend::Cpu(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    /// True if this solver is running on the CPU backend.
+    pub fn is_cpu(&self) -> bool {
+        #[cfg(feature = "cpu")]
+        {
+            matches!(self.backend, SolverBackend::Cpu(_))
+        }
+        #[cfg(not(feature = "cpu"))]
+        {
+            false
         }
     }
 
@@ -240,9 +320,13 @@ impl GpuUnifiedSolver {
     }
 
     /// Access the cached port registry from the plan resources.
-    /// Returns `None` if the registry is not available.
+    /// Returns `None` if the registry is not available (e.g. CPU backend).
     pub fn port_registry(&self) -> Option<&PortRegistry> {
-        Some(self.plan.resources.port_registry.as_ref())
+        match &self.backend {
+            SolverBackend::Gpu(p) => Some(p.resources.port_registry.as_ref()),
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(_) => None,
+        }
     }
 
     /// Get the UI port set for accessing common field offsets.
@@ -258,51 +342,79 @@ impl GpuUnifiedSolver {
     }
 
     pub fn num_cells(&self) -> u32 {
-        self.plan.num_cells()
+        #[cfg(feature = "cpu")]
+        if let Some(c) = self.cpu_ref() {
+            return c.num_cells();
+        }
+        self.plan().num_cells()
     }
 
     pub fn time(&self) -> f32 {
-        self.plan.time()
+        #[cfg(feature = "cpu")]
+        if let Some(c) = self.cpu_ref() {
+            return c.time();
+        }
+        self.plan().time()
     }
 
     pub fn dt(&self) -> f32 {
-        self.plan.dt()
+        #[cfg(feature = "cpu")]
+        if let Some(c) = self.cpu_ref() {
+            return c.dt();
+        }
+        self.plan().dt()
     }
 
     pub fn step_stats(&self) -> PlanStepStats {
-        self.plan.step_stats()
+        #[cfg(feature = "cpu")]
+        if self.is_cpu() {
+            return PlanStepStats::default();
+        }
+        self.plan().step_stats()
     }
 
+    #[allow(irrefutable_let_patterns)]
     pub fn set_collect_convergence_stats(&mut self, enable: bool) {
-        self.plan.collect_convergence_stats = enable;
+        if let SolverBackend::Gpu(p) = &mut self.backend {
+            p.collect_convergence_stats = enable;
+        }
     }
 
+    #[allow(irrefutable_let_patterns)]
     pub fn set_collect_trace(&mut self, enable: bool) {
-        self.plan.collect_trace = enable;
+        if let SolverBackend::Gpu(p) = &mut self.backend {
+            p.collect_trace = enable;
+        }
     }
 
     pub fn outer_field_residuals(&self) -> Option<&[(String, f32)]> {
-        if self.plan.outer_field_residuals.is_empty() {
-            None
-        } else {
-            Some(&self.plan.outer_field_residuals)
+        match &self.backend {
+            SolverBackend::Gpu(p) if !p.outer_field_residuals.is_empty() => {
+                Some(&p.outer_field_residuals)
+            }
+            _ => None,
         }
     }
 
     pub fn outer_field_residuals_scaled(&self) -> Option<&[(String, f32)]> {
-        if self.plan.outer_field_residuals_scaled.is_empty() {
-            None
-        } else {
-            Some(&self.plan.outer_field_residuals_scaled)
+        match &self.backend {
+            SolverBackend::Gpu(p) if !p.outer_field_residuals_scaled.is_empty() => {
+                Some(&p.outer_field_residuals_scaled)
+            }
+            _ => None,
         }
     }
 
     pub fn step_graph_timings(&self) -> &[StepGraphTiming] {
-        &self.plan.step_graph_timings
+        match &self.backend {
+            SolverBackend::Gpu(p) => &p.step_graph_timings,
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(_) => &[],
+        }
     }
 
     pub fn state_buffer(&self) -> &wgpu::Buffer {
-        self.plan.state_buffer()
+        self.plan().state_buffer()
     }
 
     pub fn state_size_bytes(&self) -> u64 {
@@ -317,8 +429,8 @@ impl GpuUnifiedSolver {
             return;
         }
 
-        let device = &self.plan.context.device;
-        let queue = &self.plan.context.queue;
+        let device = &self.plan().context.device;
+        let queue = &self.plan().context.queue;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("GpuUnifiedSolver:copy_state_to_buffer"),
         });
@@ -332,11 +444,18 @@ impl GpuUnifiedSolver {
         name: &str,
         value: PlanParamValue,
     ) -> Result<(), String> {
-        self.plan.set_named_param(name, value)
+        self.set_named_param(name, value)
     }
 
     pub fn set_named_param(&mut self, name: &str, value: PlanParamValue) -> Result<(), String> {
-        self.plan.set_named_param(name, value)
+        match &mut self.backend {
+            SolverBackend::Gpu(p) => p.set_named_param(name, value),
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(c) => {
+                cpu_set_param(c, name, value);
+                Ok(())
+            }
+        }
     }
 
     fn coupled_unknown_base_for_field(&self, field: &str) -> Option<(u32, u32)> {
@@ -372,7 +491,14 @@ impl GpuUnifiedSolver {
             ));
         }
         for (c, &v) in values.iter().enumerate() {
-            self.plan.set_bc_value(boundary, base + c as u32, v)?;
+            let comp = base + c as u32;
+            match &mut self.backend {
+                SolverBackend::Gpu(p) => p.set_bc_value(boundary, comp, v)?,
+                #[cfg(feature = "cpu")]
+                SolverBackend::Cpu(cpu) => {
+                    cpu.set_boundary_values_per_face(boundary, field, comp, &|_| v)?
+                }
+            }
         }
         Ok(())
     }
@@ -405,8 +531,15 @@ impl GpuUnifiedSolver {
                 "component {component} out of range for field '{field}' ({comps} component(s))"
             ));
         }
-        self.plan
-            .set_bc_values_per_face(boundary, base + component, value_for_face)
+        match &mut self.backend {
+            SolverBackend::Gpu(p) => {
+                p.set_bc_values_per_face(boundary, base + component, value_for_face)
+            }
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(c) => {
+                c.set_boundary_values_per_face(boundary, field, base + component, value_for_face)
+            }
+        }
     }
 
     pub fn set_boundary_vec2(
@@ -419,28 +552,23 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_dt(&mut self, dt: f32) {
-        let _ = self.plan.set_named_param("dt", PlanParamValue::F32(dt));
+        let _ = self.set_named_param("dt", PlanParamValue::F32(dt));
     }
 
     pub fn set_advection_scheme(&mut self, scheme: Scheme) {
         self.config.advection_scheme = scheme;
-        let _ = self
-            .plan
-            .set_named_param("advection_scheme", PlanParamValue::Scheme(scheme));
+        let _ = self.set_named_param("advection_scheme", PlanParamValue::Scheme(scheme));
     }
 
     pub fn set_time_scheme(&mut self, scheme: TimeScheme) {
         self.config.time_scheme = scheme;
-        let _ = self
-            .plan
-            .set_named_param("time_scheme", PlanParamValue::TimeScheme(scheme));
+        let _ = self.set_named_param("time_scheme", PlanParamValue::TimeScheme(scheme));
     }
 
     pub fn set_preconditioner(&mut self, preconditioner: PreconditionerType) {
         // Model-owned preconditioners (e.g. GenericCoupled+Schur) must remain authoritative.
         // If the plan rejects this param, keep the config unchanged.
         if self
-            .plan
             .set_named_param(
                 "preconditioner",
                 PlanParamValue::Preconditioner(preconditioner),
@@ -452,45 +580,65 @@ impl GpuUnifiedSolver {
     }
 
     pub fn step(&mut self) {
-        self.plan.step();
+        match &mut self.backend {
+            SolverBackend::Gpu(p) => p.step(),
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(c) => c.step(),
+        }
+        // Post-step cut-cell State Redistribution (GPU only; no-op when disabled
+        // or no slivers — `srd` is `None` for the CPU backend).
         self.apply_srd();
     }
 
     pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
-        let stats = self.plan.step_with_stats()?;
+        let stats = match &mut self.backend {
+            SolverBackend::Gpu(p) => p.step_with_stats()?,
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(c) => {
+                c.step();
+                Vec::new()
+            }
+        };
         self.apply_srd();
         Ok(stats)
     }
 
     pub fn initialize_history(&self) {
-        self.plan.initialize_history();
+        match &self.backend {
+            SolverBackend::Gpu(p) => p.initialize_history(),
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(c) => c.initialize_history(),
+        }
     }
 
     pub fn enable_detailed_profiling(&mut self, enable: bool) -> Result<(), String> {
-        self.plan
-            .set_named_param("detailed_profiling_enabled", PlanParamValue::Bool(enable))
+        self.set_named_param("detailed_profiling_enabled", PlanParamValue::Bool(enable))
     }
 
     pub fn start_profiling_session(&self) -> Result<(), String> {
-        self.plan.perform(PlanAction::StartProfilingSession)
+        self.plan().perform(PlanAction::StartProfilingSession)
     }
 
     pub fn end_profiling_session(&self) -> Result<(), String> {
-        self.plan.perform(PlanAction::EndProfilingSession)
+        self.plan().perform(PlanAction::EndProfilingSession)
     }
 
     pub fn get_profiling_stats(&self) -> Result<Arc<ProfilingStats>, String> {
-        Ok(self.plan.profiling_stats())
+        Ok(self.plan().profiling_stats())
     }
 
     pub fn print_profiling_report(&self) -> Result<(), String> {
-        self.plan.perform(PlanAction::PrintProfilingReport)
+        self.plan().perform(PlanAction::PrintProfilingReport)
     }
 
     pub async fn read_state_f32(&self) -> Vec<f32> {
+        #[cfg(feature = "cpu")]
+        if let Some(c) = self.cpu_ref() {
+            return c.read_state_f32();
+        }
         let stride = self.model.state_layout.stride() as u64;
         let bytes = self.num_cells() as u64 * stride * 4;
-        let raw = self.plan.read_state_bytes(bytes).await;
+        let raw = self.plan().read_state_bytes(bytes).await;
         bytemuck::cast_slice(&raw).to_vec()
     }
 
@@ -506,7 +654,11 @@ impl GpuUnifiedSolver {
                 stride
             ));
         }
-        self.plan.write_state_bytes(bytemuck::cast_slice(state))
+        #[cfg(feature = "cpu")]
+        if let Some(c) = self.cpu_mut() {
+            return c.write_state_f32(state);
+        }
+        self.plan_mut().write_state_bytes(bytemuck::cast_slice(state))
     }
 
     /// Set a scalar field with initial-condition semantics: the write propagates to all
@@ -514,15 +666,23 @@ impl GpuUnifiedSolver {
     /// state. For mid-run updates that must not disturb multi-step time schemes (BDF2),
     /// use [`Self::set_field_scalar_current`].
     pub fn set_field_scalar(&mut self, field: &str, values: &[f64]) -> Result<(), String> {
+        #[cfg(feature = "cpu")]
+        if let Some(c) = self.cpu_mut() {
+            return c.set_field_scalar(field, values);
+        }
         let state = self.state_with_scalar_field(field, values)?;
-        self.plan.write_state_bytes(bytemuck::cast_slice(&state))
+        self.plan_mut().write_state_bytes(bytemuck::cast_slice(&state))
     }
 
     /// Set a scalar field in the current state only, preserving the time history.
     /// Use for mid-run updates of non-solved fields (e.g. time-varying source terms).
     pub fn set_field_scalar_current(&mut self, field: &str, values: &[f64]) -> Result<(), String> {
+        #[cfg(feature = "cpu")]
+        if let Some(c) = self.cpu_mut() {
+            return c.set_field_scalar_current(field, values);
+        }
         let state = self.state_with_scalar_field(field, values)?;
-        self.plan
+        self.plan_mut()
             .write_state_bytes_current(bytemuck::cast_slice(&state))
     }
 
@@ -580,6 +740,10 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_field_vec2(&mut self, field: &str, values: &[(f64, f64)]) -> Result<(), String> {
+        #[cfg(feature = "cpu")]
+        if let Some(c) = self.cpu_mut() {
+            return c.set_field_vec2(field, values);
+        }
         let stride = self.model.state_layout.stride() as usize;
         let state_field = self
             .model
@@ -610,7 +774,7 @@ impl GpuUnifiedSolver {
             state[base] = x as f32;
             state[base + 1] = y as f32;
         }
-        self.plan.write_state_bytes(bytemuck::cast_slice(&state))
+        self.plan_mut().write_state_bytes(bytemuck::cast_slice(&state))
     }
 
     pub async fn get_field_vec2(&self, field: &str) -> Result<Vec<(f64, f64)>, String> {
@@ -637,7 +801,7 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_linear_system(&mut self, matrix_values: &[f32], rhs: &[f32]) -> Result<(), String> {
-        let Some(debug) = self.plan.linear_system_debug() else {
+        let Some(debug) = self.plan_mut().linear_system_debug() else {
             return Err("plan does not support linear system debug operations".into());
         };
         debug.set_linear_system(matrix_values, rhs)
@@ -649,14 +813,14 @@ impl GpuUnifiedSolver {
         max_iters: u32,
         tol: f32,
     ) -> Result<LinearSolverStats, String> {
-        let Some(debug) = self.plan.linear_system_debug() else {
+        let Some(debug) = self.plan_mut().linear_system_debug() else {
             return Err("plan does not support linear system debug operations".into());
         };
         debug.solve_linear_system_with_size(n, max_iters, tol)
     }
 
     pub async fn get_linear_solution(&mut self) -> Result<Vec<f32>, String> {
-        let Some(debug) = self.plan.linear_system_debug() else {
+        let Some(debug) = self.plan_mut().linear_system_debug() else {
             return Err("plan does not support linear system debug operations".into());
         };
         debug.get_linear_solution().await
@@ -672,5 +836,50 @@ impl GpuUnifiedSolver {
             num_unknowns: n,
             num_dot_groups: n.div_ceil(64),
         })
+    }
+}
+
+/// Select the CPU backend from the environment, returning its config when
+/// `CFD2_BACKEND=cpu`. Engine/threads/SIMD come from `CFD2_CPU_ENGINE`
+/// (`interpreter`|`transpiled`), `CFD2_CPU_THREADS` (integer), `CFD2_CPU_SIMD`
+/// (`1`/`true`). This keeps backend selection out of `SolverConfig` so existing
+/// call sites are unchanged; the GUI sets these before constructing the solver.
+#[cfg(feature = "cpu")]
+fn cpu_backend_from_env() -> Option<crate::solver::cpu::CpuBackendConfig> {
+    use crate::solver::cpu::{CpuBackendConfig, CpuEngine};
+    let on = std::env::var("CFD2_BACKEND")
+        .map(|v| v.eq_ignore_ascii_case("cpu"))
+        .unwrap_or(false);
+    if !on {
+        return None;
+    }
+    let engine = match std::env::var("CFD2_CPU_ENGINE").as_deref() {
+        Ok(v) if v.eq_ignore_ascii_case("transpiled") || v.eq_ignore_ascii_case("transpile") => {
+            CpuEngine::Transpiled
+        }
+        _ => CpuEngine::Interpreter,
+    };
+    let threads = std::env::var("CFD2_CPU_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1)
+        .max(1);
+    let simd = std::env::var("CFD2_CPU_SIMD")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    Some(CpuBackendConfig { engine, threads, simd })
+}
+
+/// Route a runtime named-param onto the CPU backend. Params that don't apply to
+/// the CPU scalar path are ignored (GPU-specific relaxation/preconditioner knobs).
+#[cfg(feature = "cpu")]
+fn cpu_set_param(c: &mut crate::solver::cpu::CpuSolver, name: &str, value: PlanParamValue) {
+    match (name, value) {
+        ("dt", PlanParamValue::F32(v)) => c.set_dt(v),
+        ("advection_scheme", PlanParamValue::Scheme(s)) => c.set_advection_scheme(s),
+        ("time_scheme", PlanParamValue::TimeScheme(s)) => c.set_time_scheme(s),
+        ("outer_iters", PlanParamValue::Usize(n)) => c.set_outer_iters(n),
+        ("outer_iters", PlanParamValue::U32(n)) => c.set_outer_iters(n as usize),
+        _ => {}
     }
 }

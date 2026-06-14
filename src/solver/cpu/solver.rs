@@ -262,6 +262,55 @@ impl CpuSolver {
             .collect())
     }
 
+    pub fn get_field_vec2(&self, field: &str) -> Result<Vec<(f64, f64)>, String> {
+        let off = self
+            .state_layout
+            .offset_for(field)
+            .ok_or_else(|| format!("unknown field `{field}`"))? as usize;
+        let stride = self.state_stride as usize;
+        Ok((0..self.num_cells)
+            .map(|i| {
+                (
+                    self.buffers.get_f32("state", i * stride + off) as f64,
+                    self.buffers.get_f32("state", i * stride + off + 1) as f64,
+                )
+            })
+            .collect())
+    }
+
+    // ── backend-routing accessors (used by UnifiedSolver) ──────────────────
+
+    pub fn num_cells(&self) -> u32 {
+        self.num_cells as u32
+    }
+    pub fn time(&self) -> f32 {
+        self.time
+    }
+    pub fn dt(&self) -> f32 {
+        self.dt
+    }
+    pub fn state_stride(&self) -> u32 {
+        self.state_stride
+    }
+
+    /// Full packed state (all components, `num_cells * stride` floats).
+    pub fn read_state_f32(&self) -> Vec<f32> {
+        self.buffers.f32_vec("state")
+    }
+
+    /// Overwrite the full packed state.
+    pub fn write_state_f32(&self, state: &[f32]) -> Result<(), String> {
+        let expected = self.num_cells * self.state_stride as usize;
+        if state.len() != expected {
+            return Err(format!(
+                "state length {} != expected {expected}",
+                state.len()
+            ));
+        }
+        self.buffers.copy_into_f32("state", state);
+        Ok(())
+    }
+
     // ── boundary conditions ───────────────────────────────────────────────
 
     pub fn set_boundary_values_per_face(
@@ -296,7 +345,7 @@ impl CpuSolver {
 
     // ── stepping ──────────────────────────────────────────────────────────
 
-    pub fn initialize_history(&mut self) {
+    pub fn initialize_history(&self) {
         let state = self.buffers.f32_vec("state");
         self.buffers.copy_into_f32("state_old", &state);
         self.buffers.copy_into_f32("state_old_old", &state);

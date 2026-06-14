@@ -127,17 +127,31 @@ impl Value {
             Type::Vec2(_) => Value::Vec2([0.0; 2]),
             Type::Vec3(_) => Value::Vec3([0.0; 3]),
             Type::Vec4(_) => Value::Vec4([0.0; 4]),
+            // Codegen emits the named structs `VectorN { x, y, ... }` for vector locals.
+            Type::Custom(name) if name == "Vector2" => Value::Vec2([0.0; 2]),
+            Type::Custom(name) if name == "Vector3" => Value::Vec3([0.0; 3]),
+            Type::Custom(name) if name == "Vector4" => Value::Vec4([0.0; 4]),
             other => panic!("no default value for type {other}"),
         }
     }
 }
 
-/// Named CPU buffers, the runtime stand-in for wgpu storage buffers. Generated
-/// kernels index these linearly (`buf[idx*stride + off]`).
+/// Backing store for one named buffer. WGSL storage buffers are either flat
+/// scalar arrays (`array<f32>`/`array<u32>`/`array<i32>`) or arrays of small
+/// structs (`array<Vector2>`), the latter stored interleaved with a component
+/// stride. `arrayLength(&b)` returns the *element* count (floats/stride).
+#[derive(Debug, Clone)]
+enum Store {
+    /// `comps == 1` → `array<f32>`; `comps == 2` → `array<Vector2>`, etc.
+    F32 { data: Vec<f32>, comps: usize },
+    U32(Vec<u32>),
+    I32(Vec<i32>),
+}
+
+/// Named CPU buffers, the runtime stand-in for wgpu storage buffers.
 #[derive(Debug, Default, Clone)]
 pub struct Buffers {
-    pub f32: HashMap<String, Vec<f32>>,
-    pub u32: HashMap<String, Vec<u32>>,
+    map: HashMap<String, Store>,
 }
 
 impl Buffers {
@@ -145,42 +159,95 @@ impl Buffers {
         Self::default()
     }
 
+    /// Insert a flat `array<f32>` buffer.
     pub fn insert_f32(&mut self, name: impl Into<String>, data: Vec<f32>) {
-        self.f32.insert(name.into(), data);
+        self.map
+            .insert(name.into(), Store::F32 { data, comps: 1 });
+    }
+
+    /// Insert an `array<Vector2>` buffer (interleaved x,y,x,y,...).
+    pub fn insert_vec2(&mut self, name: impl Into<String>, data: Vec<f32>) {
+        debug_assert!(data.len() % 2 == 0, "Vector2 buffer must have even length");
+        self.map
+            .insert(name.into(), Store::F32 { data, comps: 2 });
     }
 
     pub fn insert_u32(&mut self, name: impl Into<String>, data: Vec<u32>) {
-        self.u32.insert(name.into(), data);
+        self.map.insert(name.into(), Store::U32(data));
     }
 
-    /// Runtime length of a buffer (the `arrayLength(&b)` intrinsic).
+    pub fn insert_i32(&mut self, name: impl Into<String>, data: Vec<i32>) {
+        self.map.insert(name.into(), Store::I32(data));
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.map.contains_key(name)
+    }
+
+    /// Read back a flat `f32` buffer (also works for Vector2 as interleaved data).
+    pub fn f32_slice(&self, name: &str) -> &[f32] {
+        match self.map.get(name) {
+            Some(Store::F32 { data, .. }) => data,
+            _ => panic!("`{name}` is not an f32 buffer"),
+        }
+    }
+
+    pub fn f32_slice_mut(&mut self, name: &str) -> &mut [f32] {
+        match self.map.get_mut(name) {
+            Some(Store::F32 { data, .. }) => data,
+            _ => panic!("`{name}` is not an f32 buffer"),
+        }
+    }
+
+    pub fn u32_slice(&self, name: &str) -> &[u32] {
+        match self.map.get(name) {
+            Some(Store::U32(data)) => data,
+            _ => panic!("`{name}` is not a u32 buffer"),
+        }
+    }
+
+    /// Element count — the value of `arrayLength(&name)`.
     fn len(&self, name: &str) -> usize {
-        if let Some(b) = self.f32.get(name) {
-            b.len()
-        } else if let Some(b) = self.u32.get(name) {
-            b.len()
-        } else {
-            panic!("arrayLength of unknown buffer `{name}`");
+        match self.map.get(name) {
+            Some(Store::F32 { data, comps }) => data.len() / comps,
+            Some(Store::U32(d)) => d.len(),
+            Some(Store::I32(d)) => d.len(),
+            None => panic!("arrayLength of unknown buffer `{name}`"),
         }
     }
 
     fn load(&self, name: &str, idx: usize) -> Value {
-        if let Some(b) = self.f32.get(name) {
-            Value::F32(b[idx])
-        } else if let Some(b) = self.u32.get(name) {
-            Value::U32(b[idx])
-        } else {
-            panic!("read of unknown buffer `{name}`");
+        match self.map.get(name) {
+            Some(Store::F32 { data, comps }) => match comps {
+                1 => Value::F32(data[idx]),
+                2 => Value::Vec2([data[2 * idx], data[2 * idx + 1]]),
+                3 => Value::Vec3([data[3 * idx], data[3 * idx + 1], data[3 * idx + 2]]),
+                n => panic!("unsupported buffer comps {n}"),
+            },
+            Some(Store::U32(d)) => Value::U32(d[idx]),
+            Some(Store::I32(d)) => Value::I32(d[idx]),
+            None => panic!("read of unknown buffer `{name}`"),
         }
     }
 
     fn store(&mut self, name: &str, idx: usize, v: Value) {
-        if let Some(b) = self.f32.get_mut(name) {
-            b[idx] = v.as_f32();
-        } else if let Some(b) = self.u32.get_mut(name) {
-            b[idx] = v.as_u32();
-        } else {
-            panic!("write of unknown buffer `{name}`");
+        match self.map.get_mut(name) {
+            Some(Store::F32 { data, comps }) => match comps {
+                1 => data[idx] = v.as_f32(),
+                2 => {
+                    data[2 * idx] = v.component(0);
+                    data[2 * idx + 1] = v.component(1);
+                }
+                3 => {
+                    data[3 * idx] = v.component(0);
+                    data[3 * idx + 1] = v.component(1);
+                    data[3 * idx + 2] = v.component(2);
+                }
+                n => panic!("unsupported buffer comps {n}"),
+            },
+            Some(Store::U32(d)) => d[idx] = v.as_u32(),
+            Some(Store::I32(d)) => d[idx] = v.as_i32(),
+            None => panic!("write of unknown buffer `{name}`"),
         }
     }
 }
@@ -990,7 +1057,7 @@ mod tests {
         };
         let mut frame = Frame::new();
         run(&[loop_stmt], &mut buffers, &ctx, &mut frame);
-        assert_eq!(buffers.f32["out"], vec![21.0, 41.0, 61.0]);
+        assert_eq!(buffers.f32_slice("out"), &[21.0, 41.0, 61.0]);
     }
 
     #[test]
@@ -1046,7 +1113,7 @@ mod tests {
         let mut frame = Frame::new();
         run(&stmts, &mut buffers, &ctx, &mut frame);
         assert_eq!(frame.get("old"), Some(Value::F32(5.0)));
-        assert_eq!(buffers.f32["acc"], vec![8.0]);
+        assert_eq!(buffers.f32_slice("acc"), &[8.0]);
     }
 
     #[test]

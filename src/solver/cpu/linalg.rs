@@ -102,6 +102,7 @@ fn norm(a: &[f64]) -> f64 {
 // reads the *same assembled buffers* and solves with its own Krylov method.
 
 /// A borrowed block-CSR matrix in the assembly kernel's SoA layout.
+#[derive(Clone, Copy)]
 pub struct BlockCsr<'a> {
     /// Unknowns per cell (block dimension S).
     pub s: usize,
@@ -320,6 +321,123 @@ impl Preconditioner for PointJacobi {
     fn apply(&self, r: &[f64], z: &mut [f64]) {
         for i in 0..r.len() {
             z[i] = self.inv_diag[i] * r[i];
+        }
+    }
+}
+
+/// SIMPLE-like Schur-complement preconditioner for saddle-point block systems
+/// (incompressible/buoyant), mirroring the GPU generic Schur
+/// (`schur_precond_generic.wgsl` + `generic_coupled_schur_setup.wgsl`):
+///   1. predict velocity  z_u = diag(A_uu)^-1 r_u,  z_p = 0
+///   2. Schur RHS         g_p = r_p - A_pu diag(A_uu)^-1 r_u
+///   3. pressure solve    A_pp p = g_p   (A_pp = the pressure-pressure block;
+///                        the GPU smooths it, here BiCGSTAB solves it — FGMRES is
+///                        flexible, so a variable/accurate inner solve is fine)
+///   4. correct velocity  z_u -= diag(A_uu)^-1 A_up p,   z_p = p
+/// Built per solve from the assembled block matrix (the matrix changes each
+/// outer iteration). `omega` is accepted for parity with the GPU spec but the
+/// BiCGSTAB pressure solve makes the relaxation factor moot.
+pub struct SchurPrecond<'a> {
+    a: BlockCsr<'a>,
+    u_idx: Vec<usize>,
+    p: usize,
+    diag_u_inv: Vec<f64>, // num_cells * u_len
+    diag_p_inv: Vec<f64>, // num_cells
+    p_values: Vec<f32>,   // A_pp scalar-CSR values (topology = scalar_row_offsets/col_indices)
+    simd: bool,
+}
+
+impl<'a> SchurPrecond<'a> {
+    pub fn new(a: BlockCsr<'a>, u_idx: &[usize], p: usize, _omega: f64, simd: bool) -> Self {
+        let s = a.s;
+        let cells = a.num_cells();
+        let u_len = u_idx.len();
+        let mut diag_u_inv = vec![0.0f64; cells * u_len];
+        let mut diag_p_inv = vec![0.0f64; cells];
+        let nnz = a.col_indices.len();
+        let mut p_values = vec![0.0f32; nnz];
+        for cell in 0..cells {
+            let scalar_offset = a.scalar_offset(cell);
+            let num_neighbors = a.num_neighbors(cell);
+            let diag_rank = a.diagonal_indices[cell] as usize - scalar_offset;
+            // diag(A_pp)
+            let base_p = a.start_row(cell, p) + diag_rank * s;
+            let dp = a.values[base_p + p] as f64;
+            diag_p_inv[cell] = if dp.abs() > 1e-30 { 1.0 / dp } else { 0.0 };
+            // diag(A_uu) per velocity component
+            for (i, &u) in u_idx.iter().enumerate() {
+                let base_u = a.start_row(cell, u) + diag_rank * s;
+                let du = a.values[base_u + u] as f64;
+                diag_u_inv[cell * u_len + i] = if du.abs() > 1e-30 { 1.0 / du } else { 0.0 };
+            }
+            // A_pp scalar-CSR row (one value per neighbour block).
+            let srp = a.start_row(cell, p);
+            for rank in 0..num_neighbors {
+                p_values[scalar_offset + rank] = a.values[srp + rank * s + p];
+            }
+        }
+        Self { a, u_idx: u_idx.to_vec(), p, diag_u_inv, diag_p_inv, p_values, simd }
+    }
+}
+
+impl Preconditioner for SchurPrecond<'_> {
+    fn apply(&self, r: &[f64], z: &mut [f64]) {
+        let s = self.a.s;
+        let cells = self.a.num_cells();
+        let u_len = self.u_idx.len();
+        let p = self.p;
+
+        // 1. predict velocity + 2. form Schur RHS g_p.
+        z.copy_from_slice(r);
+        let mut gp = vec![0.0f64; cells];
+        for cell in 0..cells {
+            for (i, &u) in self.u_idx.iter().enumerate() {
+                z[cell * s + u] = self.diag_u_inv[cell * u_len + i] * r[cell * s + u];
+            }
+            z[cell * s + p] = 0.0;
+            let scalar_offset = self.a.scalar_offset(cell);
+            let num_neighbors = self.a.num_neighbors(cell);
+            let srp = self.a.start_row(cell, p);
+            let mut g = r[cell * s + p];
+            for rank in 0..num_neighbors {
+                let col_cell = self.a.col_indices[scalar_offset + rank] as usize;
+                for (i, &u) in self.u_idx.iter().enumerate() {
+                    let a_pu = self.a.values[srp + rank * s + u] as f64;
+                    g -= a_pu * self.diag_u_inv[col_cell * u_len + i] * r[col_cell * s + u];
+                }
+            }
+            gp[cell] = g;
+        }
+
+        // 3. pressure solve A_pp p = g_p (scalar CSR; topology = block topology).
+        let pa = CsrView {
+            row_offsets: self.a.scalar_row_offsets,
+            col_indices: self.a.col_indices,
+            values: &self.p_values,
+        };
+        let gp_f32: Vec<f32> = gp.iter().map(|&v| v as f32).collect();
+        let mut psol = vec![0.0f32; cells];
+        // Cheap APPROXIMATE pressure solve — this is a preconditioner, and FGMRES
+        // is flexible, so a loose inner solve (few iterations) keeps each outer
+        // iteration cheap (mirrors the GPU's fixed smoother sweeps).
+        bicgstab(&pa, &gp_f32, &mut psol, 40, 1e-2, self.simd);
+        let psol: Vec<f64> = psol.iter().map(|&v| v as f64).collect();
+
+        // 4. correct velocity, write pressure.
+        for cell in 0..cells {
+            let scalar_offset = self.a.scalar_offset(cell);
+            let num_neighbors = self.a.num_neighbors(cell);
+            for (i, &u) in self.u_idx.iter().enumerate() {
+                let sru = self.a.start_row(cell, u);
+                let mut corr = 0.0f64;
+                for rank in 0..num_neighbors {
+                    let col_cell = self.a.col_indices[scalar_offset + rank] as usize;
+                    let a_up = self.a.values[sru + rank * s + p] as f64;
+                    corr += a_up * psol[col_cell];
+                }
+                z[cell * s + u] -= self.diag_u_inv[cell * u_len + i] * corr;
+            }
+            z[cell * s + p] = psol[cell];
         }
     }
 }

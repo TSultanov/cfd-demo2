@@ -977,10 +977,18 @@ fn cpu_backend_from_env() -> Option<crate::solver::cpu::CpuBackendConfig> {
 fn cpu_set_param(c: &mut crate::solver::cpu::CpuSolver, name: &str, value: PlanParamValue) {
     match (name, value) {
         ("dt", PlanParamValue::F32(v)) => c.set_dt(v),
+        ("dtau", PlanParamValue::F32(v)) => c.set_dtau(v),
+        ("viscosity", PlanParamValue::F32(v)) => c.set_viscosity(v),
+        ("density", PlanParamValue::F32(v)) => c.set_density(v),
+        ("alpha_u", PlanParamValue::F32(v)) => c.set_alpha_u(v),
+        ("alpha_p", PlanParamValue::F32(v)) => c.set_alpha_p(v),
+        ("outer_tol", PlanParamValue::F32(v)) => c.set_outer_tolerance(v as f64),
         ("advection_scheme", PlanParamValue::Scheme(s)) => c.set_advection_scheme(s),
         ("time_scheme", PlanParamValue::TimeScheme(s)) => c.set_time_scheme(s),
         ("outer_iters", PlanParamValue::Usize(n)) => c.set_outer_iters(n),
         ("outer_iters", PlanParamValue::U32(n)) => c.set_outer_iters(n as usize),
+        // outer_tol_abs / fixed-iteration / batched modes: no CPU analogue
+        // (the CPU driver runs the requested outer_iters with a relative break).
         _ => {}
     }
 }

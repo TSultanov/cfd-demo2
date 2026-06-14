@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use cfd2_ir::ast::Stmt;
 
 use crate::solver::cpu::interpreter::{Buffers, Ctx, Frame, Interpreter, Value};
-use crate::solver::cpu::linalg::{bicgstab, fgmres, BlockCsr, BlockJacobi, CsrView, PointJacobi, Preconditioner};
+use crate::solver::cpu::linalg::{
+    bicgstab, fgmres, BlockCsr, BlockJacobi, CsrView, PointJacobi, Preconditioner, SchurPrecond,
+};
 use crate::solver::cpu::lowering::model_kernel_programs;
 use crate::solver::cpu::{CpuBackendConfig, CpuEngine};
 use crate::solver::gpu::enums::GpuBoundaryType;
@@ -83,6 +85,10 @@ pub struct CpuSolver {
     linear_restart: usize,
     /// Block-system preconditioner choice (mirrors the recipe/runtime config).
     precond: PreconditionerType,
+    /// Model-owned Schur preconditioner spec, when present: (velocity unknown
+    /// indices, pressure unknown index, omega). Saddle-point models
+    /// (incompressible/buoyant) use the CPU Schur preconditioner.
+    schur: Option<(Vec<usize>, usize, f32)>,
     dt: f32,
     dt_old: f32,
     dtau: f32,
@@ -279,6 +285,21 @@ impl CpuSolver {
             _ => 2,
         };
 
+        // Model-owned Schur preconditioner (saddle-point models).
+        let schur = match model.linear_solver.and_then(|ls| match ls.preconditioner {
+            crate::solver::model::ModelPreconditionerSpec::Schur { omega, layout } => {
+                Some((layout, omega))
+            }
+            _ => None,
+        }) {
+            Some((layout, omega)) => Some((
+                layout.u_indices().iter().map(|&u| u as usize).collect::<Vec<usize>>(),
+                layout.p as usize,
+                omega,
+            )),
+            None => None,
+        };
+
         Ok(Self {
             model_id: model.id,
             num_cells,
@@ -305,6 +326,7 @@ impl CpuSolver {
                 crate::solver::gpu::recipe::LinearSolverType::Cg => 60,
             },
             precond: recipe.linear_solver.preconditioner,
+            schur,
             dt: 0.01,
             dt_old: 0.01,
             dtau: 0.0,
@@ -343,6 +365,12 @@ impl CpuSolver {
     }
     pub fn set_density(&mut self, rho: f32) {
         self.constants.density = rho;
+    }
+    pub fn set_alpha_u(&mut self, alpha: f32) {
+        self.constants.alpha_u = alpha;
+    }
+    pub fn set_alpha_p(&mut self, alpha: f32) {
+        self.constants.alpha_p = alpha;
     }
 
     // ── field I/O ─────────────────────────────────────────────────────────
@@ -686,13 +714,17 @@ impl CpuSolver {
                 diagonal_indices: &self.diagonal_indices,
                 values: &matrix,
             };
-            // Preconditioner mirrors the model/runtime choice: point-Jacobi for
-            // `Jacobi`/`Amg` (the marginally-stable compressible/incompressible
-            // path relies on its weaker, inexact-Picard-damped correction),
-            // block-Jacobi for `BlockJacobi` (the biharmonic conditioning cure).
-            let block_pc: Box<dyn Preconditioner> = match self.precond {
-                PreconditionerType::BlockJacobi => Box::new(BlockJacobi::new(&a)),
-                _ => Box::new(PointJacobi::new(&a)),
+            // Preconditioner: the model-owned Schur complement for saddle-point
+            // systems (incompressible/buoyant); otherwise point-Jacobi for
+            // `Jacobi`/`Amg` or block-Jacobi for `BlockJacobi` (biharmonic).
+            let block_pc: Box<dyn Preconditioner> = match &self.schur {
+                Some((u_idx, p, omega)) => {
+                    Box::new(SchurPrecond::new(a, u_idx, *p, *omega as f64, self.config.simd))
+                }
+                None => match self.precond {
+                    PreconditionerType::BlockJacobi => Box::new(BlockJacobi::new(&a)),
+                    _ => Box::new(PointJacobi::new(&a)),
+                },
             };
             let precond = block_pc.as_ref();
             let tol = std::env::var("CFD2_CPU_LINTOL")

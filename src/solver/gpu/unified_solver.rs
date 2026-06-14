@@ -123,6 +123,17 @@ enum SolverBackend {
     Cpu(Box<crate::solver::cpu::CpuSolver>),
 }
 
+/// GUI render bridge for the CPU backend: a wgpu mirror of the CPU state buffer,
+/// uploaded after each step/write so the existing wgpu visualisation path
+/// (`state_buffer`/`copy_state_to_buffer`) works unchanged. Present only when the
+/// caller (the GUI) supplies a device+queue.
+#[cfg(feature = "cpu")]
+struct CpuRender {
+    queue: wgpu::Queue,
+    buffer: wgpu::Buffer,
+    capacity: u64,
+}
+
 pub struct GpuUnifiedSolver {
     model: ModelSpec,
     backend: SolverBackend,
@@ -137,6 +148,8 @@ pub struct GpuUnifiedSolver {
     /// Runtime toggle for the SRD pass (**default off**; only meaningful when
     /// `srd` is `Some`). Opt-in via [`Self::set_srd_enabled`].
     srd_enabled: bool,
+    #[cfg(feature = "cpu")]
+    cpu_render: Option<CpuRender>,
 }
 
 impl GpuUnifiedSolver {
@@ -156,7 +169,28 @@ impl GpuUnifiedSolver {
                 config.time_scheme,
                 cpu_cfg,
             )?;
-            return Ok(Self {
+            // Optional GUI render mirror (the GUI supplies device+queue).
+            let cpu_render = match (device.as_ref(), queue) {
+                (Some(dev), Some(q)) => {
+                    let bytes =
+                        cpu.num_cells() as u64 * model.state_layout.stride() as u64 * 4;
+                    let buffer = dev.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("CpuUnifiedSolver:state_mirror"),
+                        size: bytes.max(4),
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_SRC
+                            | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    Some(CpuRender {
+                        queue: q,
+                        buffer,
+                        capacity: bytes,
+                    })
+                }
+                _ => None,
+            };
+            let solver = Self {
                 model,
                 backend: SolverBackend::Cpu(Box::new(cpu)),
                 config,
@@ -164,7 +198,10 @@ impl GpuUnifiedSolver {
                 // builds or applies it.
                 srd: None,
                 srd_enabled: false,
-            });
+                cpu_render,
+            };
+            solver.sync_cpu_render();
+            return Ok(solver);
         }
 
         // Model-owned preconditioners (e.g. GenericCoupled+Schur) must remain authoritative.
@@ -193,6 +230,8 @@ impl GpuUnifiedSolver {
             config,
             srd: None,
             srd_enabled: false,
+            #[cfg(feature = "cpu")]
+            cpu_render: None,
         };
 
         // Build the cut-cell State-Redistribution operator from the mesh (kept
@@ -262,6 +301,18 @@ impl GpuUnifiedSolver {
                 &self.plan().context.queue,
                 self.plan().state_buffer(),
             );
+        }
+    }
+
+    /// Upload the current CPU state into the render-mirror buffer (no-op unless on
+    /// the CPU backend with a render bridge).
+    #[cfg(feature = "cpu")]
+    fn sync_cpu_render(&self) {
+        if let (SolverBackend::Cpu(c), Some(r)) = (&self.backend, &self.cpu_render) {
+            let bytes = c.read_state_f32();
+            let n = (r.capacity as usize / 4).min(bytes.len());
+            r.queue
+                .write_buffer(&r.buffer, 0, bytemuck::cast_slice(&bytes[..n]));
         }
     }
 
@@ -414,6 +465,10 @@ impl GpuUnifiedSolver {
     }
 
     pub fn state_buffer(&self) -> &wgpu::Buffer {
+        #[cfg(feature = "cpu")]
+        if let Some(r) = &self.cpu_render {
+            return &r.buffer;
+        }
         self.plan().state_buffer()
     }
 
@@ -426,6 +481,15 @@ impl GpuUnifiedSolver {
     pub fn copy_state_to_buffer(&self, dst: &wgpu::Buffer) {
         let size_bytes = self.state_size_bytes();
         if size_bytes == 0 {
+            return;
+        }
+
+        #[cfg(feature = "cpu")]
+        if let (SolverBackend::Cpu(c), Some(r)) = (&self.backend, &self.cpu_render) {
+            let bytes = c.read_state_f32();
+            let n = (size_bytes as usize / 4).min(bytes.len());
+            r.queue
+                .write_buffer(dst, 0, bytemuck::cast_slice(&bytes[..n]));
             return;
         }
 
@@ -588,6 +652,10 @@ impl GpuUnifiedSolver {
         // Post-step cut-cell State Redistribution (GPU only; no-op when disabled
         // or no slivers — `srd` is `None` for the CPU backend).
         self.apply_srd();
+        // Mirror the CPU state into the GUI render buffer (no-op without a render
+        // bridge / on the GPU backend).
+        #[cfg(feature = "cpu")]
+        self.sync_cpu_render();
     }
 
     pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
@@ -616,18 +684,34 @@ impl GpuUnifiedSolver {
     }
 
     pub fn start_profiling_session(&self) -> Result<(), String> {
+        #[cfg(feature = "cpu")]
+        if self.is_cpu() {
+            return Ok(());
+        }
         self.plan().perform(PlanAction::StartProfilingSession)
     }
 
     pub fn end_profiling_session(&self) -> Result<(), String> {
+        #[cfg(feature = "cpu")]
+        if self.is_cpu() {
+            return Ok(());
+        }
         self.plan().perform(PlanAction::EndProfilingSession)
     }
 
     pub fn get_profiling_stats(&self) -> Result<Arc<ProfilingStats>, String> {
+        #[cfg(feature = "cpu")]
+        if self.is_cpu() {
+            return Err("profiling stats unavailable on the CPU backend".into());
+        }
         Ok(self.plan().profiling_stats())
     }
 
     pub fn print_profiling_report(&self) -> Result<(), String> {
+        #[cfg(feature = "cpu")]
+        if self.is_cpu() {
+            return Ok(());
+        }
         self.plan().perform(PlanAction::PrintProfilingReport)
     }
 
@@ -667,8 +751,12 @@ impl GpuUnifiedSolver {
     /// use [`Self::set_field_scalar_current`].
     pub fn set_field_scalar(&mut self, field: &str, values: &[f64]) -> Result<(), String> {
         #[cfg(feature = "cpu")]
-        if let Some(c) = self.cpu_mut() {
-            return c.set_field_scalar(field, values);
+        if self.is_cpu() {
+            if let Some(c) = self.cpu_mut() {
+                c.set_field_scalar(field, values)?;
+            }
+            self.sync_cpu_render();
+            return Ok(());
         }
         let state = self.state_with_scalar_field(field, values)?;
         self.plan_mut().write_state_bytes(bytemuck::cast_slice(&state))
@@ -678,8 +766,12 @@ impl GpuUnifiedSolver {
     /// Use for mid-run updates of non-solved fields (e.g. time-varying source terms).
     pub fn set_field_scalar_current(&mut self, field: &str, values: &[f64]) -> Result<(), String> {
         #[cfg(feature = "cpu")]
-        if let Some(c) = self.cpu_mut() {
-            return c.set_field_scalar_current(field, values);
+        if self.is_cpu() {
+            if let Some(c) = self.cpu_mut() {
+                c.set_field_scalar_current(field, values)?;
+            }
+            self.sync_cpu_render();
+            return Ok(());
         }
         let state = self.state_with_scalar_field(field, values)?;
         self.plan_mut()
@@ -741,8 +833,12 @@ impl GpuUnifiedSolver {
 
     pub fn set_field_vec2(&mut self, field: &str, values: &[(f64, f64)]) -> Result<(), String> {
         #[cfg(feature = "cpu")]
-        if let Some(c) = self.cpu_mut() {
-            return c.set_field_vec2(field, values);
+        if self.is_cpu() {
+            if let Some(c) = self.cpu_mut() {
+                c.set_field_vec2(field, values)?;
+            }
+            self.sync_cpu_render();
+            return Ok(());
         }
         let stride = self.model.state_layout.stride() as usize;
         let state_field = self

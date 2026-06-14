@@ -33,7 +33,7 @@ serde_json = "1.0"
 
 [features]
 default = []
-ui = ["dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger", "meshgen"]
+ui = ["dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger", "meshgen", "cpu"]
 meshgen = ["dep:ahash", "dep:rand", "dep:wide", "dep:rayon"]
 profiling = []
 dev-tests = []

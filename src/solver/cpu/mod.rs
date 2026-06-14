@@ -18,6 +18,7 @@
 pub mod interpreter;
 pub mod linalg;
 pub mod lowering;
+pub mod solver;
 
 /// Runtime-selectable execution mode for the CPU backend.
 ///

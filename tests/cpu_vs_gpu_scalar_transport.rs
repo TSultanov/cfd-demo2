@@ -46,10 +46,9 @@ fn source(x: f64, y: f64) -> f64 {
     ux * dtdx + uy * dtdy - k * lap
 }
 
-fn run_cpu(mesh: &Mesh, scheme: Scheme) -> Vec<f64> {
+fn run_cpu(mesh: &Mesh, scheme: Scheme, config: CpuBackendConfig) -> Vec<f64> {
     let model = scalar_transport_model().expect("model");
-    let mut s = CpuSolver::new(mesh, model, scheme, TimeScheme::Euler, CpuBackendConfig::default())
-        .expect("cpu solver");
+    let mut s = CpuSolver::new(mesh, model, scheme, TimeScheme::Euler, config).expect("cpu solver");
     s.set_outer_iters(2);
     s.set_dt(0.2);
     let fv = |f: u32| exact(mesh.face_cx[f as usize], mesh.face_cy[f as usize]) as f32;
@@ -109,37 +108,32 @@ fn run_gpu(mesh: &Mesh, scheme: Scheme) -> Vec<f64> {
 }
 
 #[test]
-fn cpu_matches_gpu_scalar_transport_upwind() {
-    for &n in &[16usize, 32] {
+fn cpu_matches_gpu_scalar_transport() {
+    // Validate every CPU computation option against the GPU for both schemes.
+    let configs = [
+        ("1t/scalar", CpuBackendConfig { threads: 1, simd: false }),
+        ("4t/simd", CpuBackendConfig { threads: 4, simd: true }),
+    ];
+    for scheme in [Scheme::Upwind, Scheme::SecondOrderUpwind] {
+        let n = 32;
         let mesh = unit_square(n);
-        let cpu = run_cpu(&mesh, Scheme::Upwind);
-        let gpu = run_gpu(&mesh, Scheme::Upwind);
-        assert_eq!(cpu.len(), gpu.len());
-        let max_diff = cpu
-            .iter()
-            .zip(&gpu)
-            .map(|(a, b)| (a - b).abs())
-            .fold(0.0f64, f64::max);
-        // L2 vs the analytic solution for context.
-        let l2 = |t: &[f64]| -> f64 {
-            let mut num = 0.0;
-            let mut den = 0.0;
-            for i in 0..mesh.num_cells() {
-                let e = t[i] - exact(mesh.cell_cx[i], mesh.cell_cy[i]);
-                num += e * e * mesh.cell_vol[i];
-                den += mesh.cell_vol[i];
-            }
-            (num / den).sqrt()
-        };
-        println!(
-            "[cpu-vs-gpu][upwind] n={n} max|cpu-gpu|={max_diff:.3e} l2_cpu={:.4e} l2_gpu={:.4e}",
-            l2(&cpu),
-            l2(&gpu)
-        );
-        // Same discrete system, different linear solver + f32/f64: agree tightly.
-        assert!(
-            max_diff < 2e-3,
-            "CPU and GPU steady fields diverge at n={n}: max|diff|={max_diff:.3e}"
-        );
+        let gpu = run_gpu(&mesh, scheme);
+        for (label, config) in configs {
+            let cpu = run_cpu(&mesh, scheme, config);
+            assert_eq!(cpu.len(), gpu.len());
+            let max_diff = cpu
+                .iter()
+                .zip(&gpu)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f64, f64::max);
+            println!(
+                "[cpu-vs-gpu] scheme={scheme:?} cpu={label} n={n} max|cpu-gpu|={max_diff:.3e}"
+            );
+            // Same discrete system, different linear solver + f32/f64: agree tightly.
+            assert!(
+                max_diff < 2e-3,
+                "CPU ({label}) vs GPU diverge for {scheme:?}: max|diff|={max_diff:.3e}"
+            );
+        }
     }
 }

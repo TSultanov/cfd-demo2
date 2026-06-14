@@ -21,7 +21,8 @@ pub use crate::solver::ir::LimiterSpec;
 pub use definitions::{
     all_models, buoyant_incompressible_mms_model, buoyant_incompressible_model,
     compressible_central_upwind_decl, compressible_generalized_wave_speed_sq,
-    compressible_mms_model, compressible_model, compressible_model_with_eos, compressible_system,
+    compressible_mms_biharmonic_model, compressible_mms_model, compressible_model,
+    compressible_model_with_eos, compressible_system,
     compressible_wave_speed_sq, generic_diffusion_demo_mms_dirichlet_model,
     generic_diffusion_demo_mms_model,
     generic_diffusion_demo_mms_neumann_model, generic_diffusion_demo_model,

@@ -143,6 +143,9 @@ pub fn compressible_central_upwind_decl() -> crate::solver::model::flux_schemes:
         .to_untyped(),
         wave_speed_sq: compressible_wave_speed_sq().to_untyped(),
         generalized_wave_speed_sq: compressible_generalized_wave_speed_sq().to_untyped(),
+        // Arc N4b biharmonic dissipation is OFF by default (byte-identical WGSL).
+        // The biharmonic model variant overrides this to `true`.
+        biharmonic: false,
     }
 }
 
@@ -314,7 +317,7 @@ pub fn compressible_model() -> Result<ModelSpec, String> {
 }
 
 pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> Result<ModelSpec, String> {
-    compressible_model_impl(eos, false)
+    compressible_model_impl(eos, false, false)
 }
 
 /// `compressible` plus manufactured source fields on the three conservation
@@ -329,12 +332,32 @@ pub fn compressible_mms_model() -> Result<ModelSpec, String> {
             temperature: 1.0,
         },
         true,
+        false,
+    )
+}
+
+/// Arc N4b: `compressible_mms` plus the k-selective biharmonic dissipation term.
+/// Appends the `lap_<conserved>` Laplacian-storage fields to the layout and switches
+/// on the biharmonic flux; the coefficient is the runtime `low_mach_params.eps4`
+/// uniform (default 0), so a single registered model serves any eps4 (tuned via
+/// `set_biharmonic_eps4`). Used by the periodic / minmod probes against the inviscid
+/// refinement-amplified mode; NOT a shipped default (production keeps biharmonic OFF).
+pub fn compressible_mms_biharmonic_model() -> Result<ModelSpec, String> {
+    compressible_model_impl(
+        crate::solver::model::eos::EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 1.0,
+            temperature: 1.0,
+        },
+        true,
+        true,
     )
 }
 
 fn compressible_model_impl(
     eos: crate::solver::model::eos::EosSpec,
     with_mms_sources: bool,
+    biharmonic: bool,
 ) -> Result<ModelSpec, String> {
     let fields = CompressibleFields::new();
     let system = build_compressible_system_impl(&fields, with_mms_sources);
@@ -362,6 +385,26 @@ fn compressible_model_impl(
         grad_u_x,
         grad_u_y,
     ];
+    if biharmonic {
+        // Arc N4b: undivided-Laplacian storage for the biharmonic dissipation flux,
+        // one scalar per conserved variable. The standalone `flux_module_gradients`
+        // kernel writes `lap_<conserved> = sum_faces(phi_neigh - phi_cell)` (it keys
+        // off these field names), and the central-upwind flux reads them. Present
+        // ONLY in this variant, so default models keep their stride and (with a
+        // distinct model id) their committed kernel sources.
+        layout_fields.push(vol_scalar_dim::<Dimensionless>("lap_rho"));
+        layout_fields.push(vol_scalar_dim::<Dimensionless>("lap_rho_u_x"));
+        layout_fields.push(vol_scalar_dim::<Dimensionless>("lap_rho_u_y"));
+        layout_fields.push(vol_scalar_dim::<Dimensionless>("lap_rho_e"));
+        // Arc N4b: per-cell interior mask (1.0 interior / 0.0 if the cell has any
+        // boundary face). The gradients kernel fills it; the flux zeros the biharmonic
+        // term where `own_mask*neigh_mask == 0`, so the dissipation acts only on
+        // interior-interior faces. Needed because the undivided Laplacian is O(h) (not
+        // O(h^2)) at boundary cells (asymmetric stencil), which would make the boundary
+        // biharmonic flux O(1) and destroy the Dirichlet MMS order; masking keeps it
+        // interior-only (consistent with the instability being interior).
+        layout_fields.push(vol_scalar_dim::<Dimensionless>("bih_mask"));
+    }
     if with_mms_sources {
         layout_fields.push(vol_scalar_dim::<RhoSourceUnit>(
             COMPRESSIBLE_MMS_SOURCE_RHO_FIELD,
@@ -662,12 +705,17 @@ fn compressible_model_impl(
             gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PackedState,
         },
     );
+    let mut central_upwind_decl = compressible_central_upwind_decl();
+    // Arc N4b: enable the biharmonic dissipation term (the layout above carries the
+    // matching `lap_<conserved>` fields; the coefficient is the runtime eps4 uniform).
+    // `false` leaves the decl default (term absent => byte-identical WGSL).
+    central_upwind_decl.biharmonic = biharmonic;
     let flux = crate::solver::model::flux_module::FluxModuleSpec::Scheme {
         gradients: Some(
             crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout,
         ),
         scheme: crate::solver::model::flux_module::FluxSchemeSpec::CentralUpwind(
-            compressible_central_upwind_decl(),
+            central_upwind_decl,
         ),
     };
     let primitives = crate::solver::model::primitives::PrimitiveDerivations::identity();
@@ -684,10 +732,15 @@ fn compressible_model_impl(
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
     Ok(ModelSpec {
-        id: if with_mms_sources {
-            "compressible_mms"
-        } else {
-            "compressible"
+        // The id keys committed-WGSL / pipeline lookup, so the biharmonic variants
+        // MUST get a distinct id — otherwise they reuse the stride-22/26 kernels of
+        // the plain model while their buffers are the larger (lap-extended) stride,
+        // misaligning every cell (gradients never land, the conserved state collapses).
+        id: match (with_mms_sources, biharmonic) {
+            (true, true) => "compressible_mms_biharmonic",
+            (true, false) => "compressible_mms",
+            (false, true) => "compressible_biharmonic",
+            (false, false) => "compressible",
         },
         // Route compressible through the generic coupled pipeline.
         system,

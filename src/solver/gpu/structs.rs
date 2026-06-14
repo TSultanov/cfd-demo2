@@ -57,7 +57,8 @@ pub struct GpuLowMachParams {
     pub model: u32,
     pub theta_floor: f32,
     pub pressure_coupling_alpha: f32,
-    pub _pad0: f32,
+    /// Arc N4b biharmonic dissipation coefficient (epsilon_4); formerly `_pad0`.
+    pub eps4: f32,
 }
 
 impl Default for GpuLowMachParams {
@@ -74,7 +75,8 @@ impl Default for GpuLowMachParams {
             // Alpha=1.0 corresponds to adding `ρ' = p'/c^2` into the dissipation state's
             // density reconstruction.
             pressure_coupling_alpha: 1.0,
-            _pad0: 0.0,
+            // Biharmonic dissipation OFF by default (the term, when present, is x0).
+            eps4: 0.0,
         }
     }
 }

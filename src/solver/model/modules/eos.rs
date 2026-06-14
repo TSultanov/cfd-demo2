@@ -29,6 +29,8 @@ pub fn eos_module(eos: EosSpec) -> KernelBundleModule {
             "low_mach.model",
             "low_mach.theta_floor",
             "low_mach.pressure_coupling_alpha",
+            // Arc N4b biharmonic dissipation coefficient (reuses the LowMachParams slot).
+            "low_mach.eps4",
         ];
 
         (port_manifest, named_params)

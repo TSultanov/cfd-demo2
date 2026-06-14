@@ -42,6 +42,7 @@ mod mms_support;
 use std::f64::consts::PI;
 
 use cfd2::solver::gpu::enums::GpuBoundaryType;
+use cfd2::solver::gpu::unified_solver::PlanParamValue;
 use cfd2::solver::mesh::{
     generate_structured_rect_mesh, generate_structured_rect_mesh_periodic, BoundarySides,
     BoundaryType, Mesh,
@@ -49,7 +50,7 @@ use cfd2::solver::mesh::{
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::SolverRuntimeParamsExt;
 use cfd2::solver::model::{
-    compressible_mms_model, COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD,
+    compressible_mms_biharmonic_model, compressible_mms_model, COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD,
     COMPRESSIBLE_MMS_SOURCE_RHO_FIELD, COMPRESSIBLE_MMS_SOURCE_RHO_U_FIELD,
 };
 use cfd2::solver::scheme::Scheme;
@@ -205,6 +206,29 @@ static PERIODIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 
 fn periodic() -> bool {
     PERIODIC.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// ARC N N4b toggle + coefficient: select the biharmonic-dissipation compressible
+/// MMS model and set the eps4 coefficient. When `BIHARMONIC` is set, `build_run_box`
+/// builds `compressible_mms_biharmonic_model(eps4_knob())` (which appends the
+/// `lap_<conserved>` fields and emits `+ eps4*c*(lap_neigh-lap_own)*area` on each
+/// conserved flux); otherwise the plain MMS model. Default OFF / eps4=0 (the model
+/// is rebuilt per run, so sweeping eps4 needs no recompile — the shader is
+/// regenerated at `UnifiedSolver::new`). The candidate cure for the interior
+/// grid-scale under-dissipation that no order-preserving limiter could fix.
+static BIHARMONIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static EPS4_BITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn biharmonic() -> bool {
+    BIHARMONIC.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn eps4_knob() -> f32 {
+    f64::from_bits(EPS4_BITS.load(std::sync::atomic::Ordering::Relaxed)) as f32
+}
+
+fn set_eps4(v: f64) {
+    EPS4_BITS.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Inflow on all four unit-box boundaries: u_x(0,·)=U0>0, u_x(1,·)=-U0,
@@ -601,7 +625,11 @@ fn build_run_box(
     } else {
         generate_structured_rect_mesh(nx, ny, lx, ly, sides)
     };
-    let model = compressible_mms_model().expect("model");
+    let model = if biharmonic() {
+        compressible_mms_biharmonic_model().expect("biharmonic model")
+    } else {
+        compressible_mms_model().expect("model")
+    };
     let eos = EosSpec::IdealGas {
         gamma: GAMMA,
         gas_constant: R_GAS,
@@ -642,6 +670,13 @@ fn build_run_box(
     solver.set_outer_iters(outer_iters).expect("outer_iters");
     solver.set_outer_tolerance(0.0).expect("outer_tol");
     solver.set_outer_tolerance_abs(0.0).expect("outer_tol_abs");
+    if biharmonic() {
+        // Arc N4b: set the runtime biharmonic coefficient (one registered model serves
+        // every eps4). Default 0 keeps the term inert.
+        solver
+            .set_named_param("low_mach.eps4", PlanParamValue::F32(eps4_knob()))
+            .expect("eps4");
+    }
     println!("[probe] config: nx={nx} ny={ny} lx={lx} ly={ly} mu={mu} dt={dt} outer_iters={outer_iters} (break pinned open)");
 
     // Per-face exact Dirichlet rho and u on the (all-Inlet) boundary; seed
@@ -1556,6 +1591,54 @@ fn probe_arcn_minmod() {
     set_amp_scale(1.0);
 }
 
+/// ARC N N4b: k-selective BIHARMONIC dissipation — the actual cure. Sweeps eps4
+/// on the boundary-free [0,2]^2 periodic box (the N3 instrument), small amplitude,
+/// mu=0, converged Picard, at the meshes where vanLeer AND minmod diverge.
+/// eps4=0 is the control (the lap machinery is on but the term is x0, so it must
+/// reproduce the vanLeer divergence). SUCCESS = an eps4>0 that drives the n>=64
+/// growth to bounded (rate <= 0 / u_l2 at the coarse-h scale, not 1e5..1e12)
+/// WITHOUT blowing up coarse h. A WRONG dissipation sign makes eps4>0 diverge
+/// HARDER than eps4=0 — the instrument catches that on the first row. The mu>0
+/// order gate (term must stay O(h^3) => order ~2) is `probe_arcn_biharmonic_order`.
+#[test]
+#[ignore]
+fn probe_arcn_biharmonic() {
+    use std::sync::atomic::Ordering;
+    let dt = 5.0e-3;
+    let steps = 600;
+    set_amp_scale(0.25);
+    PERIODIC.store(true, Ordering::Relaxed);
+    BIHARMONIC.store(true, Ordering::Relaxed);
+    let inlet = BoundarySides {
+        left: BoundaryType::Inlet,
+        right: BoundaryType::Inlet,
+        bottom: BoundaryType::Inlet,
+        top: BoundaryType::Inlet,
+    };
+    println!(
+        "[arcn-bih] amp=0.25 mu=0 [0,2]^2  {:>6} {:>6} {:>12} {:>9} {:>9}",
+        "h=1/n", "eps4", "growth %/tu", "u_l2", "rho_l2"
+    );
+    for &n in &[32usize, 48, 64, 96] {
+        let cells = 2 * n;
+        for &eps4 in &[0.0_f64, 0.1, 0.25, 0.5] {
+            set_eps4(eps4);
+            let mut run = build_run_box(
+                cells, cells, 2.0, 2.0, inlet, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2,
+            );
+            let (rate, _nyq, _bfrac, u_l2, rho_l2) = measure_growth(&mut run, dt, steps, 25);
+            println!(
+                "[arcn-bih] {:>6} {eps4:>6.2} {rate:12.2} {u_l2:9.2e} {rho_l2:9.2e}",
+                format!("1/{n}")
+            );
+        }
+    }
+    set_eps4(0.0);
+    BIHARMONIC.store(false, Ordering::Relaxed);
+    PERIODIC.store(false, Ordering::Relaxed);
+    set_amp_scale(1.0);
+}
+
 /// ARC N N4: minmod's mu>0 convergence order — the accuracy gate. Minmod can
 /// clip to first order at smooth extrema, so this measures whether KNP+minmod
 /// still reaches order ~2 (the bar vanLeer clears at 1.96/2.15/1.83/1.86).
@@ -1585,6 +1668,131 @@ fn probe_arcn_minmod_order() {
             errs[errs.len() - 1]
         );
     }
+}
+
+/// ARC N N4b: biharmonic's mu>0 convergence order — the ACCURACY gate. The
+/// undivided-Laplacian 4th-difference term is O(h^3) in the residual, so it must
+/// stay subdominant to the O(h^2) scheme and preserve order ~2 (vanLeer clears
+/// ~1.97/2.12/1.91/2.20). Sweeps a few eps4 so an over-large coefficient that
+/// pollutes coarse-h accuracy is visible. eps4=0 = the vanLeer control.
+#[test]
+#[ignore]
+fn probe_arcn_biharmonic_order() {
+    use std::sync::atomic::Ordering;
+    BIHARMONIC.store(true, Ordering::Relaxed);
+    let levels = [16usize, 24, 32, 48];
+    let fit = |hs: &[f64], errs: &[f64]| -> f64 {
+        let k = errs.len();
+        (errs[k - 2] / errs[k - 1]).ln() / (hs[k - 2] / hs[k - 1]).ln()
+    };
+    for &eps4 in &[0.0_f64, 0.1, 0.25] {
+        set_eps4(eps4);
+        let (hs, [rho_errs, u_errs, p_errs, t_errs]) =
+            order_study(EXTRA_SHEAR, MU, DT, &levels, "bih");
+        for (name, errs) in [
+            ("rho", &rho_errs),
+            ("u", &u_errs),
+            ("p", &p_errs),
+            ("T", &t_errs),
+        ] {
+            println!(
+                "[arcn-bih-order] eps4={eps4:.2} {name}: order={:.3} finest_err={:.3e}",
+                fit(&hs, errs),
+                errs[errs.len() - 1]
+            );
+        }
+    }
+    BIHARMONIC.store(false, Ordering::Relaxed);
+    set_eps4(0.0);
+}
+
+/// ARC N N4b: DISCRIMINATOR — biharmonic mu>0 order on the boundary-free PERIODIC
+/// box. The Dirichlet mu>0 order gate blows up for eps4>0; this isolates whether
+/// the cause is the boundary closure (then periodic should be order ~2 and a
+/// smooth boundary treatment is the fix) or a mu>0+biharmonic interaction (then
+/// periodic also blows up and a boundary fix won't help). Full amplitude, MU,
+/// march-to-plateau, same as the Dirichlet order study but on [0,2]^2 periodic.
+#[test]
+#[ignore]
+fn probe_arcn_biharmonic_periodic_order() {
+    use std::sync::atomic::Ordering;
+    PERIODIC.store(true, Ordering::Relaxed);
+    BIHARMONIC.store(true, Ordering::Relaxed);
+    let inlet = BoundarySides {
+        left: BoundaryType::Inlet,
+        right: BoundaryType::Inlet,
+        bottom: BoundaryType::Inlet,
+        top: BoundaryType::Inlet,
+    };
+    let levels = [16usize, 24, 32, 48];
+    let fit = |hs: &[f64], errs: &[f64]| -> f64 {
+        let k = errs.len();
+        (errs[k - 2] / errs[k - 1]).ln() / (hs[k - 2] / hs[k - 1]).ln()
+    };
+    for &eps4 in &[0.0_f64, 0.1] {
+        set_eps4(eps4);
+        let mut hs = Vec::new();
+        let mut rho_errs = Vec::new();
+        let mut u_errs = Vec::new();
+        for &n in &levels {
+            let cells = 2 * n; // h = 1/n on [0,2]^2
+            let mut run = build_run_box(
+                cells, cells, 2.0, 2.0, inlet, EXTRA_SHEAR, MU, DT, TimeScheme::BDF2, OUTER_ITERS,
+            );
+            march_to_plateau(&mut run.solver);
+            let (rho_err, u_err, _p, _t) = read_errors(&run);
+            hs.push(1.0 / n as f64);
+            rho_errs.push(rho_err);
+            u_errs.push(u_err);
+            println!("[arcn-bih-perord] eps4={eps4:.2} n={n} rho_l2={rho_err:.4e} u_l2={u_err:.4e}");
+        }
+        println!(
+            "[arcn-bih-perord] eps4={eps4:.2} ORDER rho={:.3} u={:.3}",
+            fit(&hs, &rho_errs),
+            fit(&hs, &u_errs)
+        );
+    }
+    BIHARMONIC.store(false, Ordering::Relaxed);
+    set_eps4(0.0);
+    PERIODIC.store(false, Ordering::Relaxed);
+}
+
+/// ARC N N4b: is the Dirichlet mu>0 biharmonic blow-up an EXPLICIT-stiffness
+/// problem? The term reads a frozen (lagged) `lap`, so it acts like an explicit
+/// 4th-difference (stability limit dt ~ h^4) — which OUTER_ITERS=1 + dt=0.01
+/// violates, worsening under refinement (the observed negative order). This
+/// varies outer-iterations and dt at eps4=0.1 on the Dirichlet box; if order
+/// recovers to ~2 with more outer / smaller dt, the fix is iteration/relaxation,
+/// not a boundary treatment.
+#[test]
+#[ignore]
+fn probe_arcn_biharmonic_stab() {
+    use std::sync::atomic::Ordering;
+    BIHARMONIC.store(true, Ordering::Relaxed);
+    set_eps4(0.1);
+    let levels = [16usize, 24, 32, 48];
+    let fit = |hs: &[f64], errs: &[f64]| -> f64 {
+        let k = errs.len();
+        (errs[k - 2] / errs[k - 1]).ln() / (hs[k - 2] / hs[k - 1]).ln()
+    };
+    for &(outer, dt) in &[(1usize, 0.01_f64), (8, 0.01), (1, 0.002)] {
+        let mut hs = Vec::new();
+        let mut u_errs = Vec::new();
+        for &n in &levels {
+            let mut run = build_run(n, EXTRA_SHEAR, MU, dt, TimeScheme::BDF2, outer);
+            march_to_plateau(&mut run.solver);
+            let (_rho, u_err, _p, _t) = read_errors(&run);
+            hs.push(1.0 / n as f64);
+            u_errs.push(u_err);
+            println!("[arcn-bih-stab] outer={outer} dt={dt} n={n} u_l2={u_err:.4e}");
+        }
+        println!(
+            "[arcn-bih-stab] outer={outer} dt={dt} ORDER u={:.3}",
+            fit(&hs, &u_errs)
+        );
+    }
+    BIHARMONIC.store(false, Ordering::Relaxed);
+    set_eps4(0.0);
 }
 
 /// ARC N S1: eigenmode dump — capture the growing inviscid mode's spatial

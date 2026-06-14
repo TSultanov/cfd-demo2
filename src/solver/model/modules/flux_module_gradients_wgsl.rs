@@ -234,6 +234,34 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
         ));
     }
 
+    // Arc N4b: scalar accumulator for the undivided Laplacian
+    // `lap = sum_faces(phi_other - phi_cell)` of each conserved variable that has a
+    // `lap_<component>` field. Drives the biharmonic dissipation flux. Emitted only when
+    // the layout carries the lap fields (biharmonic on); otherwise this loop is empty and
+    // the kernel is byte-identical.
+    for target in targets {
+        if target.lap_offset.is_some() {
+            stmts.push(dsl::var_typed_expr(
+                &format!("lap_acc_{}", target.component),
+                Type::F32,
+                Some(Expr::from(0.0)),
+            ));
+        }
+    }
+
+    // Arc N4b: per-cell interior mask. `bih_has_bdry` becomes 1 if the cell touches any
+    // boundary face; the written `bih_mask = 1 - bih_has_bdry` lets the flux confine the
+    // biharmonic dissipation to interior-interior faces (boundary-cell laps are O(h),
+    // not O(h^2), and would otherwise pollute the solution at O(1)).
+    let bih_mask_offset = targets.iter().find_map(|t| t.bih_mask_offset);
+    if bih_mask_offset.is_some() {
+        stmts.push(dsl::var_typed_expr(
+            "bih_has_bdry",
+            Type::F32,
+            Some(Expr::from(0.0)),
+        ));
+    }
+
     // Face loop.
     let face_loop_body = {
         let mut body = vec![
@@ -411,6 +439,17 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
                 }
             }
 
+            // Arc N4b: accumulate the undivided Laplacian `sum(phi_other - phi_cell)`
+            // for biharmonic targets, reusing the same `other_val` (post-BC, post-slip)
+            // and `cell_val` the gradient uses. Clone them since `phi_face` consumes them.
+            if target.lap_offset.is_some() {
+                body.push(dsl::assign_op_expr(
+                    AssignOp::Add,
+                    Expr::ident(format!("lap_acc_{}", target.component)),
+                    other_val.clone() - cell_val.clone(),
+                ));
+            }
+
             let phi_face =
                 cell_val * Expr::ident("lambda") + other_val * Expr::ident("lambda_other");
 
@@ -422,6 +461,17 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
                 AssignOp::Add,
                 Expr::ident(&acc_name),
                 contrib,
+            ));
+        }
+
+        // Arc N4b: flag the cell as a boundary cell if any of its faces is a boundary face.
+        if bih_mask_offset.is_some() {
+            body.push(dsl::assign_expr(
+                Expr::ident("bih_has_bdry"),
+                dsl::max(
+                    Expr::ident("bih_has_bdry"),
+                    dsl::select(Expr::from(0.0), Expr::from(1.0), Expr::ident("is_boundary")),
+                ),
             ));
         }
 
@@ -456,6 +506,26 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
                 out.clone().field(axis.suffix()),
             ));
         }
+    }
+
+    // Arc N4b: write the undivided Laplacian (NO volume division — the undivided
+    // `sum(phi_neigh - phi_cell)` carries the implicit h^2 that makes the downstream
+    // biharmonic flux O(h^3) on smooth modes and O(1/h) at the grid scale).
+    for target in targets {
+        if let Some(lap_off) = target.lap_offset {
+            stmts.push(dsl::assign_expr(
+                Expr::ident("state").index(Expr::ident("idx") * stride + lap_off),
+                Expr::ident(format!("lap_acc_{}", target.component)),
+            ));
+        }
+    }
+
+    // Arc N4b: write the per-cell interior mask (1.0 interior / 0.0 boundary cell).
+    if let Some(off) = bih_mask_offset {
+        stmts.push(dsl::assign_expr(
+            Expr::ident("state").index(Expr::ident("idx") * stride + off),
+            Expr::from(1.0) - Expr::ident("bih_has_bdry"),
+        ));
     }
 
     Block::new(stmts)

@@ -2141,6 +2141,7 @@ fn lower_scalar<'a>(expr: &'a FaceScalarExpr, ctx: &LowerCtx<'a>) -> Expr {
             LowMachParam::PressureCouplingAlpha => {
                 Expr::ident("low_mach_params").field("pressure_coupling_alpha")
             }
+            LowMachParam::Eps4 => Expr::ident("low_mach_params").field("eps4"),
         },
         FaceScalarExpr::State { side, name } => ctx.state_scalar(*side, name.as_str(), 0),
         FaceScalarExpr::Primitive { side, name } => {

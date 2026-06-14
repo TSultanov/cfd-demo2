@@ -147,6 +147,9 @@ pub enum LowMachParam {
     Model,
     ThetaFloor,
     PressureCouplingAlpha,
+    /// Arc N4b biharmonic dissipation coefficient (epsilon_4). Reuses the
+    /// formerly-padding slot of the LowMachParams uniform; default 0 (term off).
+    Eps4,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -261,6 +264,10 @@ impl FaceScalarExpr {
 
     pub fn low_mach_pressure_coupling_alpha() -> Self {
         FaceScalarExpr::LowMachParam(LowMachParam::PressureCouplingAlpha)
+    }
+
+    pub fn low_mach_eps4() -> Self {
+        FaceScalarExpr::LowMachParam(LowMachParam::Eps4)
     }
 
     pub fn primitive(side: FaceSide, name: impl Into<String>) -> Self {

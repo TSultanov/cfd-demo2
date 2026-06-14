@@ -15,6 +15,7 @@ pub(crate) fn handler_for_key(key: &'static str) -> Option<ProgramParamHandler> 
         "low_mach.pressure_coupling_alpha" => {
             Some(generic_coupled::param_low_mach_pressure_coupling_alpha)
         }
+        "low_mach.eps4" => Some(generic_coupled::param_low_mach_eps4),
         _ => None,
     }
 }

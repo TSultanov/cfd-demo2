@@ -635,7 +635,7 @@ fn diag_cpu_vs_gpu_march() {
     let mut g = setup_gpu(n, &mesh);
     let cells = mesh.num_cells();
     let mut step = 0usize;
-    for &upto in &[1usize, 20, 80, 160, 320, 600] {
+    for &upto in &[1usize, 5, 10, 20, 40, 80, 160] {
         while step < upto {
             c.step();
             g.step();
@@ -834,19 +834,31 @@ fn diag_compressible_trajectory() {
 ///  4. Warm-start — `x` is packed from the coupled unknowns in the initial state
 ///     so the first solve does not wander the rank-deficient null-space.
 ///
-/// REMAINING: the marched solution still diverges where the GPU saturates. The
-/// divergence is SOLVE-INVARIANT (identical under point/block Jacobi, tol 1e-4 vs
-/// 1e-8, and warm-start on/off) and OPERATOR-determined; yet every checkable
-/// assembly input matches the GPU (state grad fields exactly; bc_value to f32;
-/// grad_state is unused in reconstruction on both paths; fused and separate
-/// assemblies read the same state grad fields). This MMS is documented as
-/// MARGINALLY UNSTABLE on the GPU too (`mms_compressible_order_test`: refinement-
-/// amplified, ~49%/100 steps drift at n=48; the GPU runner accepts at a delta
-/// PLATEAU). The CPU's f32 discretization grows where the GPU's f32 path stays
-/// bounded — an f32-level operator difference amplified by the marginal mode.
-/// Definitive localization needs GPU matrix_values readback (not yet exposed) to
-/// diff the assembled block matrix cell-by-cell. Tracked as a follow-up; see the
-/// `diag_*` tests (incl. `diag_cpu_vs_gpu_march`) for the evidence.
+/// REMAINING (root cause localized to the linear-solve PRECISION):
+/// The assembled operator now matches the GPU to f32 — `diag_cpu_vs_gpu_matrix`
+/// (via the GPU matrix_values/rhs readback) shows the step-1 block matrix + rhs
+/// agree per equation to f32 (conserved rowsum diff 0.195 -> 0 after the BDF2
+/// Euler-startup fix; recovery rows exact). The block-Jacobi preconditioner uses
+/// the same Gauss-Jordan-with-pivoting algorithm as the GPU's `block_precond`.
+/// Yet the marched solution still diverges where the GPU saturates, and this is
+/// SOLVE-PRECISION-bound, not an operator/tolerance bug:
+///   • This MMS is documented MARGINALLY UNSTABLE on the GPU too
+///     (`mms_compressible_order_test`: refinement-amplified, ~49%/100 steps drift
+///     at n=48; the GPU runner accepts at a delta PLATEAU, not a fixed step).
+///   • The CPU solve is preconditioner-dominated (iters=1/step, rel_res ~4e-5):
+///     the per-step move is ~one block-Jacobi correction. The CPU Krylov runs in
+///     f64 (linalg.rs), the GPU in f32. On the marginal mode this matters: a
+///     LOOSE CPU tol (1e-2) freezes at the exact fixed point (no iterations,
+///     error ~7e-8 at all n -> order 0); the DEFAULT/TIGHT tol resolves and
+///     amplifies the unstable mode -> blow-up. There is no CPU tolerance that
+///     reproduces the GPU's f32 "drift to the discretization level" (order ~2).
+/// The plan anticipates exactly this: "CPU Krylov won't reproduce GPU iteration
+/// paths; target tolerance/order parity, not bit-exactness." On a STABLE problem
+/// that is fine (incompressible/buoyant MMS pass); this one marginally-unstable
+/// MMS is the pathological exception. The path to full parity here is an f32
+/// block-solve path (mirroring the GPU's f32 FGMRES/block_precond) — a
+/// cross-cutting linalg change deferred as a follow-up. See `diag_cpu_vs_gpu_*`
+/// (march, matrix, step1) for the evidence.
 #[ignore]
 #[test]
 fn cpu_compressible_mms_second_order() {

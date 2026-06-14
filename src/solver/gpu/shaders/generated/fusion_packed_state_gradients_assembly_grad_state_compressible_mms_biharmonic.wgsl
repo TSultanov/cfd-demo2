@@ -74,6 +74,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var grad_acc_5: vec2<f32> = vec2<f32>(0.0, 0.0);
         var grad_acc_6: vec2<f32> = vec2<f32>(0.0, 0.0);
         var grad_acc_7: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_8: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_9: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_10: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_11: vec2<f32> = vec2<f32>(0.0, 0.0);
         for (var k = start; k < end; k++) {
             let face_idx = cell_faces[k];
             let owner = face_owner[face_idx];
@@ -113,14 +117,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 lambda = d_neigh / total_dist;
             }
             let lambda_other = 1.0 - lambda;
-            grad_acc_0 += normal_vec * (state[idx * 31u + 0u] * lambda + select(state[other_idx * 31u + 0u], select(select(state[idx * 31u + 0u], bc_value[face_idx * 8u + 0u], bc_kind[face_idx * 8u + 0u] == 1u), state[idx * 31u + 0u] + bc_value[face_idx * 8u + 0u] * d_own, bc_kind[face_idx * 8u + 0u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_1 += normal_vec * (state[idx * 31u + 1u] * lambda + select(state[other_idx * 31u + 1u], select(select(state[idx * 31u + 1u], bc_value[face_idx * 8u + 1u], bc_kind[face_idx * 8u + 1u] == 1u), state[idx * 31u + 1u] + bc_value[face_idx * 8u + 1u] * d_own, bc_kind[face_idx * 8u + 1u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_2 += normal_vec * (state[idx * 31u + 2u] * lambda + select(state[other_idx * 31u + 2u], select(select(state[idx * 31u + 2u], bc_value[face_idx * 8u + 2u], bc_kind[face_idx * 8u + 2u] == 1u), state[idx * 31u + 2u] + bc_value[face_idx * 8u + 2u] * d_own, bc_kind[face_idx * 8u + 2u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_3 += normal_vec * (state[idx * 31u + 7u] * lambda + select(state[other_idx * 31u + 7u], select(select(state[idx * 31u + 7u], bc_value[face_idx * 8u + 3u], bc_kind[face_idx * 8u + 3u] == 1u), state[idx * 31u + 7u] + bc_value[face_idx * 8u + 3u] * d_own, bc_kind[face_idx * 8u + 3u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_4 += normal_vec * (state[idx * 31u + 10u] * lambda + select(state[other_idx * 31u + 10u], select(select(state[idx * 31u + 10u], bc_value[face_idx * 8u + 4u], bc_kind[face_idx * 8u + 4u] == 1u), state[idx * 31u + 10u] + bc_value[face_idx * 8u + 4u] * d_own, bc_kind[face_idx * 8u + 4u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_5 += normal_vec * (state[idx * 31u + 11u] * lambda + select(state[other_idx * 31u + 11u], select(select(state[idx * 31u + 11u], bc_value[face_idx * 8u + 5u], bc_kind[face_idx * 8u + 5u] == 1u), state[idx * 31u + 11u] + bc_value[face_idx * 8u + 5u] * d_own, bc_kind[face_idx * 8u + 5u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_6 += normal_vec * (state[idx * 31u + 8u] * lambda + select(state[other_idx * 31u + 8u], select(select(state[idx * 31u + 8u], bc_value[face_idx * 8u + 6u], bc_kind[face_idx * 8u + 6u] == 1u), state[idx * 31u + 8u] + bc_value[face_idx * 8u + 6u] * d_own, bc_kind[face_idx * 8u + 6u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_7 += normal_vec * (state[idx * 31u + 9u] * lambda + select(state[other_idx * 31u + 9u], select(select(state[idx * 31u + 9u], bc_value[face_idx * 8u + 7u], bc_kind[face_idx * 8u + 7u] == 1u), state[idx * 31u + 9u] + bc_value[face_idx * 8u + 7u] * d_own, bc_kind[face_idx * 8u + 7u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_0 += normal_vec * (state[idx * 31u + 0u] * lambda + select(state[other_idx * 31u + 0u], select(select(state[idx * 31u + 0u], bc_value[face_idx * 12u + 0u], bc_kind[face_idx * 12u + 0u] == 1u), state[idx * 31u + 0u] + bc_value[face_idx * 12u + 0u] * d_own, bc_kind[face_idx * 12u + 0u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_1 += normal_vec * (state[idx * 31u + 1u] * lambda + select(state[other_idx * 31u + 1u], select(select(state[idx * 31u + 1u], bc_value[face_idx * 12u + 1u], bc_kind[face_idx * 12u + 1u] == 1u), state[idx * 31u + 1u] + bc_value[face_idx * 12u + 1u] * d_own, bc_kind[face_idx * 12u + 1u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_2 += normal_vec * (state[idx * 31u + 2u] * lambda + select(state[other_idx * 31u + 2u], select(select(state[idx * 31u + 2u], bc_value[face_idx * 12u + 2u], bc_kind[face_idx * 12u + 2u] == 1u), state[idx * 31u + 2u] + bc_value[face_idx * 12u + 2u] * d_own, bc_kind[face_idx * 12u + 2u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_3 += normal_vec * (state[idx * 31u + 7u] * lambda + select(state[other_idx * 31u + 7u], select(select(state[idx * 31u + 7u], bc_value[face_idx * 12u + 3u], bc_kind[face_idx * 12u + 3u] == 1u), state[idx * 31u + 7u] + bc_value[face_idx * 12u + 3u] * d_own, bc_kind[face_idx * 12u + 3u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_4 += normal_vec * (state[idx * 31u + 10u] * lambda + select(state[other_idx * 31u + 10u], select(select(state[idx * 31u + 10u], bc_value[face_idx * 12u + 4u], bc_kind[face_idx * 12u + 4u] == 1u), state[idx * 31u + 10u] + bc_value[face_idx * 12u + 4u] * d_own, bc_kind[face_idx * 12u + 4u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_5 += normal_vec * (state[idx * 31u + 11u] * lambda + select(state[other_idx * 31u + 11u], select(select(state[idx * 31u + 11u], bc_value[face_idx * 12u + 5u], bc_kind[face_idx * 12u + 5u] == 1u), state[idx * 31u + 11u] + bc_value[face_idx * 12u + 5u] * d_own, bc_kind[face_idx * 12u + 5u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_6 += normal_vec * (state[idx * 31u + 8u] * lambda + select(state[other_idx * 31u + 8u], select(select(state[idx * 31u + 8u], bc_value[face_idx * 12u + 6u], bc_kind[face_idx * 12u + 6u] == 1u), state[idx * 31u + 8u] + bc_value[face_idx * 12u + 6u] * d_own, bc_kind[face_idx * 12u + 6u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_7 += normal_vec * (state[idx * 31u + 9u] * lambda + select(state[other_idx * 31u + 9u], select(select(state[idx * 31u + 9u], bc_value[face_idx * 12u + 7u], bc_kind[face_idx * 12u + 7u] == 1u), state[idx * 31u + 9u] + bc_value[face_idx * 12u + 7u] * d_own, bc_kind[face_idx * 12u + 7u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_8 += normal_vec * (state[idx * 31u + 22u] * lambda + select(state[other_idx * 31u + 22u], select(select(state[idx * 31u + 22u], bc_value[face_idx * 12u + 8u], bc_kind[face_idx * 12u + 8u] == 1u), state[idx * 31u + 22u] + bc_value[face_idx * 12u + 8u] * d_own, bc_kind[face_idx * 12u + 8u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_9 += normal_vec * (state[idx * 31u + 23u] * lambda + select(state[other_idx * 31u + 23u], select(select(state[idx * 31u + 23u], bc_value[face_idx * 12u + 9u], bc_kind[face_idx * 12u + 9u] == 1u), state[idx * 31u + 23u] + bc_value[face_idx * 12u + 9u] * d_own, bc_kind[face_idx * 12u + 9u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_10 += normal_vec * (state[idx * 31u + 24u] * lambda + select(state[other_idx * 31u + 24u], select(select(state[idx * 31u + 24u], bc_value[face_idx * 12u + 10u], bc_kind[face_idx * 12u + 10u] == 1u), state[idx * 31u + 24u] + bc_value[face_idx * 12u + 10u] * d_own, bc_kind[face_idx * 12u + 10u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_11 += normal_vec * (state[idx * 31u + 25u] * lambda + select(state[other_idx * 31u + 25u], select(select(state[idx * 31u + 25u], bc_value[face_idx * 12u + 11u], bc_kind[face_idx * 12u + 11u] == 1u), state[idx * 31u + 25u] + bc_value[face_idx * 12u + 11u] * d_own, bc_kind[face_idx * 12u + 11u] == 2u), is_boundary) * lambda_other) * area;
         }
         let grad_out_0: vec2<f32> = grad_acc_0 * 1.0 / max(vol, 0.000000000001);
         grad_state[idx * 31u + 0u].x = grad_out_0.x;
@@ -146,6 +154,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let grad_out_7: vec2<f32> = grad_acc_7 * 1.0 / max(vol, 0.000000000001);
         grad_state[idx * 31u + 9u].x = grad_out_7.x;
         grad_state[idx * 31u + 9u].y = grad_out_7.y;
+        let grad_out_8: vec2<f32> = grad_acc_8 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 31u + 22u].x = grad_out_8.x;
+        grad_state[idx * 31u + 22u].y = grad_out_8.y;
+        let grad_out_9: vec2<f32> = grad_acc_9 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 31u + 23u].x = grad_out_9.x;
+        grad_state[idx * 31u + 23u].y = grad_out_9.y;
+        let grad_out_10: vec2<f32> = grad_acc_10 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 31u + 24u].x = grad_out_10.x;
+        grad_state[idx * 31u + 24u].y = grad_out_10.y;
+        let grad_out_11: vec2<f32> = grad_acc_11 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 31u + 25u].x = grad_out_11.x;
+        grad_state[idx * 31u + 25u].y = grad_out_11.y;
     }
     // end fused segment: packed_state_gradients
     // begin fused segment: generic_coupled_assembly_grad_state
@@ -156,79 +176,163 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let k1_scalar_offset = scalar_row_offsets[idx];
     let k1_diag_rank = diagonal_indices[idx] - k1_scalar_offset;
     let k1_num_neighbors = scalar_row_offsets[idx + 1u] - k1_scalar_offset;
-    let k1_start_row_0 = k1_scalar_offset * 64u;
-    let k1_start_row_1 = k1_start_row_0 + k1_num_neighbors * 8u * 1u;
-    let k1_start_row_2 = k1_start_row_0 + k1_num_neighbors * 8u * 2u;
-    let k1_start_row_3 = k1_start_row_0 + k1_num_neighbors * 8u * 3u;
-    let k1_start_row_4 = k1_start_row_0 + k1_num_neighbors * 8u * 4u;
-    let k1_start_row_5 = k1_start_row_0 + k1_num_neighbors * 8u * 5u;
-    let k1_start_row_6 = k1_start_row_0 + k1_num_neighbors * 8u * 6u;
-    let k1_start_row_7 = k1_start_row_0 + k1_num_neighbors * 8u * 7u;
+    let k1_start_row_0 = k1_scalar_offset * 144u;
+    let k1_start_row_1 = k1_start_row_0 + k1_num_neighbors * 12u * 1u;
+    let k1_start_row_2 = k1_start_row_0 + k1_num_neighbors * 12u * 2u;
+    let k1_start_row_3 = k1_start_row_0 + k1_num_neighbors * 12u * 3u;
+    let k1_start_row_4 = k1_start_row_0 + k1_num_neighbors * 12u * 4u;
+    let k1_start_row_5 = k1_start_row_0 + k1_num_neighbors * 12u * 5u;
+    let k1_start_row_6 = k1_start_row_0 + k1_num_neighbors * 12u * 6u;
+    let k1_start_row_7 = k1_start_row_0 + k1_num_neighbors * 12u * 7u;
+    let k1_start_row_8 = k1_start_row_0 + k1_num_neighbors * 12u * 8u;
+    let k1_start_row_9 = k1_start_row_0 + k1_num_neighbors * 12u * 9u;
+    let k1_start_row_10 = k1_start_row_0 + k1_num_neighbors * 12u * 10u;
+    let k1_start_row_11 = k1_start_row_0 + k1_num_neighbors * 12u * 11u;
     for (var k1_rank = 0u; k1_rank < k1_num_neighbors; k1_rank++) {
-        matrix_values[k1_start_row_0 + k1_rank * 8u + 0u] = 0.0;
-        matrix_values[k1_start_row_0 + k1_rank * 8u + 1u] = 0.0;
-        matrix_values[k1_start_row_0 + k1_rank * 8u + 2u] = 0.0;
-        matrix_values[k1_start_row_0 + k1_rank * 8u + 3u] = 0.0;
-        matrix_values[k1_start_row_0 + k1_rank * 8u + 4u] = 0.0;
-        matrix_values[k1_start_row_0 + k1_rank * 8u + 5u] = 0.0;
-        matrix_values[k1_start_row_0 + k1_rank * 8u + 6u] = 0.0;
-        matrix_values[k1_start_row_0 + k1_rank * 8u + 7u] = 0.0;
-        matrix_values[k1_start_row_1 + k1_rank * 8u + 0u] = 0.0;
-        matrix_values[k1_start_row_1 + k1_rank * 8u + 1u] = 0.0;
-        matrix_values[k1_start_row_1 + k1_rank * 8u + 2u] = 0.0;
-        matrix_values[k1_start_row_1 + k1_rank * 8u + 3u] = 0.0;
-        matrix_values[k1_start_row_1 + k1_rank * 8u + 4u] = 0.0;
-        matrix_values[k1_start_row_1 + k1_rank * 8u + 5u] = 0.0;
-        matrix_values[k1_start_row_1 + k1_rank * 8u + 6u] = 0.0;
-        matrix_values[k1_start_row_1 + k1_rank * 8u + 7u] = 0.0;
-        matrix_values[k1_start_row_2 + k1_rank * 8u + 0u] = 0.0;
-        matrix_values[k1_start_row_2 + k1_rank * 8u + 1u] = 0.0;
-        matrix_values[k1_start_row_2 + k1_rank * 8u + 2u] = 0.0;
-        matrix_values[k1_start_row_2 + k1_rank * 8u + 3u] = 0.0;
-        matrix_values[k1_start_row_2 + k1_rank * 8u + 4u] = 0.0;
-        matrix_values[k1_start_row_2 + k1_rank * 8u + 5u] = 0.0;
-        matrix_values[k1_start_row_2 + k1_rank * 8u + 6u] = 0.0;
-        matrix_values[k1_start_row_2 + k1_rank * 8u + 7u] = 0.0;
-        matrix_values[k1_start_row_3 + k1_rank * 8u + 0u] = 0.0;
-        matrix_values[k1_start_row_3 + k1_rank * 8u + 1u] = 0.0;
-        matrix_values[k1_start_row_3 + k1_rank * 8u + 2u] = 0.0;
-        matrix_values[k1_start_row_3 + k1_rank * 8u + 3u] = 0.0;
-        matrix_values[k1_start_row_3 + k1_rank * 8u + 4u] = 0.0;
-        matrix_values[k1_start_row_3 + k1_rank * 8u + 5u] = 0.0;
-        matrix_values[k1_start_row_3 + k1_rank * 8u + 6u] = 0.0;
-        matrix_values[k1_start_row_3 + k1_rank * 8u + 7u] = 0.0;
-        matrix_values[k1_start_row_4 + k1_rank * 8u + 0u] = 0.0;
-        matrix_values[k1_start_row_4 + k1_rank * 8u + 1u] = 0.0;
-        matrix_values[k1_start_row_4 + k1_rank * 8u + 2u] = 0.0;
-        matrix_values[k1_start_row_4 + k1_rank * 8u + 3u] = 0.0;
-        matrix_values[k1_start_row_4 + k1_rank * 8u + 4u] = 0.0;
-        matrix_values[k1_start_row_4 + k1_rank * 8u + 5u] = 0.0;
-        matrix_values[k1_start_row_4 + k1_rank * 8u + 6u] = 0.0;
-        matrix_values[k1_start_row_4 + k1_rank * 8u + 7u] = 0.0;
-        matrix_values[k1_start_row_5 + k1_rank * 8u + 0u] = 0.0;
-        matrix_values[k1_start_row_5 + k1_rank * 8u + 1u] = 0.0;
-        matrix_values[k1_start_row_5 + k1_rank * 8u + 2u] = 0.0;
-        matrix_values[k1_start_row_5 + k1_rank * 8u + 3u] = 0.0;
-        matrix_values[k1_start_row_5 + k1_rank * 8u + 4u] = 0.0;
-        matrix_values[k1_start_row_5 + k1_rank * 8u + 5u] = 0.0;
-        matrix_values[k1_start_row_5 + k1_rank * 8u + 6u] = 0.0;
-        matrix_values[k1_start_row_5 + k1_rank * 8u + 7u] = 0.0;
-        matrix_values[k1_start_row_6 + k1_rank * 8u + 0u] = 0.0;
-        matrix_values[k1_start_row_6 + k1_rank * 8u + 1u] = 0.0;
-        matrix_values[k1_start_row_6 + k1_rank * 8u + 2u] = 0.0;
-        matrix_values[k1_start_row_6 + k1_rank * 8u + 3u] = 0.0;
-        matrix_values[k1_start_row_6 + k1_rank * 8u + 4u] = 0.0;
-        matrix_values[k1_start_row_6 + k1_rank * 8u + 5u] = 0.0;
-        matrix_values[k1_start_row_6 + k1_rank * 8u + 6u] = 0.0;
-        matrix_values[k1_start_row_6 + k1_rank * 8u + 7u] = 0.0;
-        matrix_values[k1_start_row_7 + k1_rank * 8u + 0u] = 0.0;
-        matrix_values[k1_start_row_7 + k1_rank * 8u + 1u] = 0.0;
-        matrix_values[k1_start_row_7 + k1_rank * 8u + 2u] = 0.0;
-        matrix_values[k1_start_row_7 + k1_rank * 8u + 3u] = 0.0;
-        matrix_values[k1_start_row_7 + k1_rank * 8u + 4u] = 0.0;
-        matrix_values[k1_start_row_7 + k1_rank * 8u + 5u] = 0.0;
-        matrix_values[k1_start_row_7 + k1_rank * 8u + 6u] = 0.0;
-        matrix_values[k1_start_row_7 + k1_rank * 8u + 7u] = 0.0;
+        matrix_values[k1_start_row_0 + k1_rank * 12u + 0u] = 0.0;
+        matrix_values[k1_start_row_0 + k1_rank * 12u + 1u] = 0.0;
+        matrix_values[k1_start_row_0 + k1_rank * 12u + 2u] = 0.0;
+        matrix_values[k1_start_row_0 + k1_rank * 12u + 3u] = 0.0;
+        matrix_values[k1_start_row_0 + k1_rank * 12u + 4u] = 0.0;
+        matrix_values[k1_start_row_0 + k1_rank * 12u + 5u] = 0.0;
+        matrix_values[k1_start_row_0 + k1_rank * 12u + 6u] = 0.0;
+        matrix_values[k1_start_row_0 + k1_rank * 12u + 7u] = 0.0;
+        matrix_values[k1_start_row_0 + k1_rank * 12u + 8u] = 0.0;
+        matrix_values[k1_start_row_0 + k1_rank * 12u + 9u] = 0.0;
+        matrix_values[k1_start_row_0 + k1_rank * 12u + 10u] = 0.0;
+        matrix_values[k1_start_row_0 + k1_rank * 12u + 11u] = 0.0;
+        matrix_values[k1_start_row_1 + k1_rank * 12u + 0u] = 0.0;
+        matrix_values[k1_start_row_1 + k1_rank * 12u + 1u] = 0.0;
+        matrix_values[k1_start_row_1 + k1_rank * 12u + 2u] = 0.0;
+        matrix_values[k1_start_row_1 + k1_rank * 12u + 3u] = 0.0;
+        matrix_values[k1_start_row_1 + k1_rank * 12u + 4u] = 0.0;
+        matrix_values[k1_start_row_1 + k1_rank * 12u + 5u] = 0.0;
+        matrix_values[k1_start_row_1 + k1_rank * 12u + 6u] = 0.0;
+        matrix_values[k1_start_row_1 + k1_rank * 12u + 7u] = 0.0;
+        matrix_values[k1_start_row_1 + k1_rank * 12u + 8u] = 0.0;
+        matrix_values[k1_start_row_1 + k1_rank * 12u + 9u] = 0.0;
+        matrix_values[k1_start_row_1 + k1_rank * 12u + 10u] = 0.0;
+        matrix_values[k1_start_row_1 + k1_rank * 12u + 11u] = 0.0;
+        matrix_values[k1_start_row_2 + k1_rank * 12u + 0u] = 0.0;
+        matrix_values[k1_start_row_2 + k1_rank * 12u + 1u] = 0.0;
+        matrix_values[k1_start_row_2 + k1_rank * 12u + 2u] = 0.0;
+        matrix_values[k1_start_row_2 + k1_rank * 12u + 3u] = 0.0;
+        matrix_values[k1_start_row_2 + k1_rank * 12u + 4u] = 0.0;
+        matrix_values[k1_start_row_2 + k1_rank * 12u + 5u] = 0.0;
+        matrix_values[k1_start_row_2 + k1_rank * 12u + 6u] = 0.0;
+        matrix_values[k1_start_row_2 + k1_rank * 12u + 7u] = 0.0;
+        matrix_values[k1_start_row_2 + k1_rank * 12u + 8u] = 0.0;
+        matrix_values[k1_start_row_2 + k1_rank * 12u + 9u] = 0.0;
+        matrix_values[k1_start_row_2 + k1_rank * 12u + 10u] = 0.0;
+        matrix_values[k1_start_row_2 + k1_rank * 12u + 11u] = 0.0;
+        matrix_values[k1_start_row_3 + k1_rank * 12u + 0u] = 0.0;
+        matrix_values[k1_start_row_3 + k1_rank * 12u + 1u] = 0.0;
+        matrix_values[k1_start_row_3 + k1_rank * 12u + 2u] = 0.0;
+        matrix_values[k1_start_row_3 + k1_rank * 12u + 3u] = 0.0;
+        matrix_values[k1_start_row_3 + k1_rank * 12u + 4u] = 0.0;
+        matrix_values[k1_start_row_3 + k1_rank * 12u + 5u] = 0.0;
+        matrix_values[k1_start_row_3 + k1_rank * 12u + 6u] = 0.0;
+        matrix_values[k1_start_row_3 + k1_rank * 12u + 7u] = 0.0;
+        matrix_values[k1_start_row_3 + k1_rank * 12u + 8u] = 0.0;
+        matrix_values[k1_start_row_3 + k1_rank * 12u + 9u] = 0.0;
+        matrix_values[k1_start_row_3 + k1_rank * 12u + 10u] = 0.0;
+        matrix_values[k1_start_row_3 + k1_rank * 12u + 11u] = 0.0;
+        matrix_values[k1_start_row_4 + k1_rank * 12u + 0u] = 0.0;
+        matrix_values[k1_start_row_4 + k1_rank * 12u + 1u] = 0.0;
+        matrix_values[k1_start_row_4 + k1_rank * 12u + 2u] = 0.0;
+        matrix_values[k1_start_row_4 + k1_rank * 12u + 3u] = 0.0;
+        matrix_values[k1_start_row_4 + k1_rank * 12u + 4u] = 0.0;
+        matrix_values[k1_start_row_4 + k1_rank * 12u + 5u] = 0.0;
+        matrix_values[k1_start_row_4 + k1_rank * 12u + 6u] = 0.0;
+        matrix_values[k1_start_row_4 + k1_rank * 12u + 7u] = 0.0;
+        matrix_values[k1_start_row_4 + k1_rank * 12u + 8u] = 0.0;
+        matrix_values[k1_start_row_4 + k1_rank * 12u + 9u] = 0.0;
+        matrix_values[k1_start_row_4 + k1_rank * 12u + 10u] = 0.0;
+        matrix_values[k1_start_row_4 + k1_rank * 12u + 11u] = 0.0;
+        matrix_values[k1_start_row_5 + k1_rank * 12u + 0u] = 0.0;
+        matrix_values[k1_start_row_5 + k1_rank * 12u + 1u] = 0.0;
+        matrix_values[k1_start_row_5 + k1_rank * 12u + 2u] = 0.0;
+        matrix_values[k1_start_row_5 + k1_rank * 12u + 3u] = 0.0;
+        matrix_values[k1_start_row_5 + k1_rank * 12u + 4u] = 0.0;
+        matrix_values[k1_start_row_5 + k1_rank * 12u + 5u] = 0.0;
+        matrix_values[k1_start_row_5 + k1_rank * 12u + 6u] = 0.0;
+        matrix_values[k1_start_row_5 + k1_rank * 12u + 7u] = 0.0;
+        matrix_values[k1_start_row_5 + k1_rank * 12u + 8u] = 0.0;
+        matrix_values[k1_start_row_5 + k1_rank * 12u + 9u] = 0.0;
+        matrix_values[k1_start_row_5 + k1_rank * 12u + 10u] = 0.0;
+        matrix_values[k1_start_row_5 + k1_rank * 12u + 11u] = 0.0;
+        matrix_values[k1_start_row_6 + k1_rank * 12u + 0u] = 0.0;
+        matrix_values[k1_start_row_6 + k1_rank * 12u + 1u] = 0.0;
+        matrix_values[k1_start_row_6 + k1_rank * 12u + 2u] = 0.0;
+        matrix_values[k1_start_row_6 + k1_rank * 12u + 3u] = 0.0;
+        matrix_values[k1_start_row_6 + k1_rank * 12u + 4u] = 0.0;
+        matrix_values[k1_start_row_6 + k1_rank * 12u + 5u] = 0.0;
+        matrix_values[k1_start_row_6 + k1_rank * 12u + 6u] = 0.0;
+        matrix_values[k1_start_row_6 + k1_rank * 12u + 7u] = 0.0;
+        matrix_values[k1_start_row_6 + k1_rank * 12u + 8u] = 0.0;
+        matrix_values[k1_start_row_6 + k1_rank * 12u + 9u] = 0.0;
+        matrix_values[k1_start_row_6 + k1_rank * 12u + 10u] = 0.0;
+        matrix_values[k1_start_row_6 + k1_rank * 12u + 11u] = 0.0;
+        matrix_values[k1_start_row_7 + k1_rank * 12u + 0u] = 0.0;
+        matrix_values[k1_start_row_7 + k1_rank * 12u + 1u] = 0.0;
+        matrix_values[k1_start_row_7 + k1_rank * 12u + 2u] = 0.0;
+        matrix_values[k1_start_row_7 + k1_rank * 12u + 3u] = 0.0;
+        matrix_values[k1_start_row_7 + k1_rank * 12u + 4u] = 0.0;
+        matrix_values[k1_start_row_7 + k1_rank * 12u + 5u] = 0.0;
+        matrix_values[k1_start_row_7 + k1_rank * 12u + 6u] = 0.0;
+        matrix_values[k1_start_row_7 + k1_rank * 12u + 7u] = 0.0;
+        matrix_values[k1_start_row_7 + k1_rank * 12u + 8u] = 0.0;
+        matrix_values[k1_start_row_7 + k1_rank * 12u + 9u] = 0.0;
+        matrix_values[k1_start_row_7 + k1_rank * 12u + 10u] = 0.0;
+        matrix_values[k1_start_row_7 + k1_rank * 12u + 11u] = 0.0;
+        matrix_values[k1_start_row_8 + k1_rank * 12u + 0u] = 0.0;
+        matrix_values[k1_start_row_8 + k1_rank * 12u + 1u] = 0.0;
+        matrix_values[k1_start_row_8 + k1_rank * 12u + 2u] = 0.0;
+        matrix_values[k1_start_row_8 + k1_rank * 12u + 3u] = 0.0;
+        matrix_values[k1_start_row_8 + k1_rank * 12u + 4u] = 0.0;
+        matrix_values[k1_start_row_8 + k1_rank * 12u + 5u] = 0.0;
+        matrix_values[k1_start_row_8 + k1_rank * 12u + 6u] = 0.0;
+        matrix_values[k1_start_row_8 + k1_rank * 12u + 7u] = 0.0;
+        matrix_values[k1_start_row_8 + k1_rank * 12u + 8u] = 0.0;
+        matrix_values[k1_start_row_8 + k1_rank * 12u + 9u] = 0.0;
+        matrix_values[k1_start_row_8 + k1_rank * 12u + 10u] = 0.0;
+        matrix_values[k1_start_row_8 + k1_rank * 12u + 11u] = 0.0;
+        matrix_values[k1_start_row_9 + k1_rank * 12u + 0u] = 0.0;
+        matrix_values[k1_start_row_9 + k1_rank * 12u + 1u] = 0.0;
+        matrix_values[k1_start_row_9 + k1_rank * 12u + 2u] = 0.0;
+        matrix_values[k1_start_row_9 + k1_rank * 12u + 3u] = 0.0;
+        matrix_values[k1_start_row_9 + k1_rank * 12u + 4u] = 0.0;
+        matrix_values[k1_start_row_9 + k1_rank * 12u + 5u] = 0.0;
+        matrix_values[k1_start_row_9 + k1_rank * 12u + 6u] = 0.0;
+        matrix_values[k1_start_row_9 + k1_rank * 12u + 7u] = 0.0;
+        matrix_values[k1_start_row_9 + k1_rank * 12u + 8u] = 0.0;
+        matrix_values[k1_start_row_9 + k1_rank * 12u + 9u] = 0.0;
+        matrix_values[k1_start_row_9 + k1_rank * 12u + 10u] = 0.0;
+        matrix_values[k1_start_row_9 + k1_rank * 12u + 11u] = 0.0;
+        matrix_values[k1_start_row_10 + k1_rank * 12u + 0u] = 0.0;
+        matrix_values[k1_start_row_10 + k1_rank * 12u + 1u] = 0.0;
+        matrix_values[k1_start_row_10 + k1_rank * 12u + 2u] = 0.0;
+        matrix_values[k1_start_row_10 + k1_rank * 12u + 3u] = 0.0;
+        matrix_values[k1_start_row_10 + k1_rank * 12u + 4u] = 0.0;
+        matrix_values[k1_start_row_10 + k1_rank * 12u + 5u] = 0.0;
+        matrix_values[k1_start_row_10 + k1_rank * 12u + 6u] = 0.0;
+        matrix_values[k1_start_row_10 + k1_rank * 12u + 7u] = 0.0;
+        matrix_values[k1_start_row_10 + k1_rank * 12u + 8u] = 0.0;
+        matrix_values[k1_start_row_10 + k1_rank * 12u + 9u] = 0.0;
+        matrix_values[k1_start_row_10 + k1_rank * 12u + 10u] = 0.0;
+        matrix_values[k1_start_row_10 + k1_rank * 12u + 11u] = 0.0;
+        matrix_values[k1_start_row_11 + k1_rank * 12u + 0u] = 0.0;
+        matrix_values[k1_start_row_11 + k1_rank * 12u + 1u] = 0.0;
+        matrix_values[k1_start_row_11 + k1_rank * 12u + 2u] = 0.0;
+        matrix_values[k1_start_row_11 + k1_rank * 12u + 3u] = 0.0;
+        matrix_values[k1_start_row_11 + k1_rank * 12u + 4u] = 0.0;
+        matrix_values[k1_start_row_11 + k1_rank * 12u + 5u] = 0.0;
+        matrix_values[k1_start_row_11 + k1_rank * 12u + 6u] = 0.0;
+        matrix_values[k1_start_row_11 + k1_rank * 12u + 7u] = 0.0;
+        matrix_values[k1_start_row_11 + k1_rank * 12u + 8u] = 0.0;
+        matrix_values[k1_start_row_11 + k1_rank * 12u + 9u] = 0.0;
+        matrix_values[k1_start_row_11 + k1_rank * 12u + 10u] = 0.0;
+        matrix_values[k1_start_row_11 + k1_rank * 12u + 11u] = 0.0;
     }
     var k1_diag_0: f32 = 0.0;
     var k1_rhs_0: f32 = 0.0;
@@ -246,6 +350,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var k1_rhs_6: f32 = 0.0;
     var k1_diag_7: f32 = 0.0;
     var k1_rhs_7: f32 = 0.0;
+    var k1_diag_8: f32 = 0.0;
+    var k1_rhs_8: f32 = 0.0;
+    var k1_diag_9: f32 = 0.0;
+    var k1_rhs_9: f32 = 0.0;
+    var k1_diag_10: f32 = 0.0;
+    var k1_rhs_10: f32 = 0.0;
+    var k1_diag_11: f32 = 0.0;
+    var k1_rhs_11: f32 = 0.0;
     let k1_dtau_safe = max(constants.dtau, 0.000000000001);
     let k1_global_dual_time_scale = k1_vol / max(constants.dtau, 0.000000000001);
     var k1_perimeter_sum: f32 = 0.0;
@@ -317,15 +429,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     k1_rhs_3 += state[idx * 31u + 30u] * k1_vol;
     k1_diag_4 -= -(state[idx * 31u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
     k1_diag_5 -= -(state[idx * 31u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
-    matrix_values[k1_start_row_4 + k1_diag_rank * 8u + 1u] -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
-    matrix_values[k1_start_row_5 + k1_diag_rank * 8u + 2u] -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
+    matrix_values[k1_start_row_4 + k1_diag_rank * 12u + 1u] -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
+    matrix_values[k1_start_row_5 + k1_diag_rank * 12u + 2u] -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
     k1_diag_6 -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
-    matrix_values[k1_start_row_6 + k1_diag_rank * 8u + 3u] -= -constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
-    matrix_values[k1_start_row_6 + k1_diag_rank * 8u + 0u] -= 0.5 * constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * dot(vec2<f32>(state[idx * 31u + 10u], state[idx * 31u + 11u]), vec2<f32>(state[idx * 31u + 10u], state[idx * 31u + 11u])) * k1_vol;
-    matrix_values[k1_start_row_6 + k1_diag_rank * 8u + 0u] -= -constants.eos_dp_drho * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
+    matrix_values[k1_start_row_6 + k1_diag_rank * 12u + 3u] -= -constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
+    matrix_values[k1_start_row_6 + k1_diag_rank * 12u + 0u] -= 0.5 * constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * dot(vec2<f32>(state[idx * 31u + 10u], state[idx * 31u + 11u]), vec2<f32>(state[idx * 31u + 10u], state[idx * 31u + 11u])) * k1_vol;
+    matrix_values[k1_start_row_6 + k1_diag_rank * 12u + 0u] -= -constants.eos_dp_drho * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
     k1_rhs_6 += -constants.eos_p_offset * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
     k1_diag_7 -= state[idx * 31u + 0u] * constants.eos_r * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
-    matrix_values[k1_start_row_7 + k1_diag_rank * 8u + 6u] -= -(1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
+    matrix_values[k1_start_row_7 + k1_diag_rank * 12u + 6u] -= -(1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
+    k1_diag_8 -= -1.0;
+    k1_diag_9 -= -1.0;
+    k1_diag_10 -= -1.0;
+    k1_diag_11 -= -1.0;
     for (var k1_k = k1_start; k1_k < k1_end; k1_k++) {
         let k1_face_idx = cell_faces[k1_k];
         let k1_owner = face_owner[k1_face_idx];
@@ -371,93 +487,221 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         let k1_scalar_mat_idx = cell_face_matrix_indices[k1_k];
         let k1_neighbor_rank = k1_scalar_mat_idx - k1_scalar_offset;
-        var k1_phi_0: f32 = fluxes[k1_face_idx * 8u + 0u];
+        let k1_diff_coeff_rho = select(-state[idx * 31u + 26u], -state[idx * 31u + 26u] * k1_lambda_f + -state[k1_other_idx * 31u + 26u] * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
+        if (!k1_is_boundary) {
+            matrix_values[k1_start_row_0 + k1_diag_rank * 12u + 8u] += k1_diff_coeff_rho;
+            matrix_values[k1_start_row_0 + k1_neighbor_rank * 12u + 8u] -= k1_diff_coeff_rho;
+        } else {
+            if (bc_kind[k1_face_idx * 12u + 8u] == 1u) {
+                matrix_values[k1_start_row_0 + k1_diag_rank * 12u + 8u] += k1_diff_coeff_rho;
+                k1_rhs_0 += k1_diff_coeff_rho * bc_value[k1_face_idx * 12u + 8u];
+            } else {
+                if (bc_kind[k1_face_idx * 12u + 8u] == 2u) {
+                    k1_rhs_0 += select(-state[idx * 31u + 26u], -state[idx * 31u + 26u] * k1_lambda_f + -state[k1_other_idx * 31u + 26u] * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 8u];
+                }
+            }
+        }
+        var k1_phi_0: f32 = fluxes[k1_face_idx * 12u + 0u];
         if (k1_owner != idx) {
             k1_phi_0 -= k1_phi_0 * 2.0;
         }
         k1_rhs_0 -= k1_phi_0;
-        let k1_diff_coeff_rho_u = select(constants.viscosity, constants.viscosity * k1_lambda_f + constants.viscosity * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
+        let k1_diff_coeff_rho_u_u = select(constants.viscosity, constants.viscosity * k1_lambda_f + constants.viscosity * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
         if (!k1_is_boundary) {
-            matrix_values[k1_start_row_1 + k1_diag_rank * 8u + 4u] += k1_diff_coeff_rho_u;
-            matrix_values[k1_start_row_1 + k1_neighbor_rank * 8u + 4u] -= k1_diff_coeff_rho_u;
+            matrix_values[k1_start_row_1 + k1_diag_rank * 12u + 4u] += k1_diff_coeff_rho_u_u;
+            matrix_values[k1_start_row_1 + k1_neighbor_rank * 12u + 4u] -= k1_diff_coeff_rho_u_u;
         } else {
             if (k1_boundary_type == 4u) {
-                matrix_values[k1_start_row_1 + k1_diag_rank * 8u + 4u] += k1_diff_coeff_rho_u;
-                k1_rhs_1 += k1_diff_coeff_rho_u * (state[idx * 31u + 10u] - (state[idx * 31u + 10u] * k1_normal.x + state[idx * 31u + 11u] * k1_normal.y) * k1_normal.x);
+                matrix_values[k1_start_row_1 + k1_diag_rank * 12u + 4u] += k1_diff_coeff_rho_u_u;
+                k1_rhs_1 += k1_diff_coeff_rho_u_u * (state[idx * 31u + 10u] - (state[idx * 31u + 10u] * k1_normal.x + state[idx * 31u + 11u] * k1_normal.y) * k1_normal.x);
             } else {
-                if (bc_kind[k1_face_idx * 8u + 4u] == 1u) {
-                    matrix_values[k1_start_row_1 + k1_diag_rank * 8u + 4u] += k1_diff_coeff_rho_u;
-                    k1_rhs_1 += k1_diff_coeff_rho_u * bc_value[k1_face_idx * 8u + 4u];
+                if (bc_kind[k1_face_idx * 12u + 4u] == 1u) {
+                    matrix_values[k1_start_row_1 + k1_diag_rank * 12u + 4u] += k1_diff_coeff_rho_u_u;
+                    k1_rhs_1 += k1_diff_coeff_rho_u_u * bc_value[k1_face_idx * 12u + 4u];
                 } else {
-                    if (bc_kind[k1_face_idx * 8u + 4u] == 2u) {
-                        k1_rhs_1 += select(constants.viscosity, constants.viscosity * k1_lambda_f + constants.viscosity * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 8u + 4u];
+                    if (bc_kind[k1_face_idx * 12u + 4u] == 2u) {
+                        k1_rhs_1 += select(constants.viscosity, constants.viscosity * k1_lambda_f + constants.viscosity * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 4u];
                     }
                 }
             }
         }
         if (!k1_is_boundary) {
-            matrix_values[k1_start_row_2 + k1_diag_rank * 8u + 5u] += k1_diff_coeff_rho_u;
-            matrix_values[k1_start_row_2 + k1_neighbor_rank * 8u + 5u] -= k1_diff_coeff_rho_u;
+            matrix_values[k1_start_row_2 + k1_diag_rank * 12u + 5u] += k1_diff_coeff_rho_u_u;
+            matrix_values[k1_start_row_2 + k1_neighbor_rank * 12u + 5u] -= k1_diff_coeff_rho_u_u;
         } else {
             if (k1_boundary_type == 4u) {
-                matrix_values[k1_start_row_2 + k1_diag_rank * 8u + 5u] += k1_diff_coeff_rho_u;
-                k1_rhs_2 += k1_diff_coeff_rho_u * (state[idx * 31u + 11u] - (state[idx * 31u + 10u] * k1_normal.x + state[idx * 31u + 11u] * k1_normal.y) * k1_normal.y);
+                matrix_values[k1_start_row_2 + k1_diag_rank * 12u + 5u] += k1_diff_coeff_rho_u_u;
+                k1_rhs_2 += k1_diff_coeff_rho_u_u * (state[idx * 31u + 11u] - (state[idx * 31u + 10u] * k1_normal.x + state[idx * 31u + 11u] * k1_normal.y) * k1_normal.y);
             } else {
-                if (bc_kind[k1_face_idx * 8u + 5u] == 1u) {
-                    matrix_values[k1_start_row_2 + k1_diag_rank * 8u + 5u] += k1_diff_coeff_rho_u;
-                    k1_rhs_2 += k1_diff_coeff_rho_u * bc_value[k1_face_idx * 8u + 5u];
+                if (bc_kind[k1_face_idx * 12u + 5u] == 1u) {
+                    matrix_values[k1_start_row_2 + k1_diag_rank * 12u + 5u] += k1_diff_coeff_rho_u_u;
+                    k1_rhs_2 += k1_diff_coeff_rho_u_u * bc_value[k1_face_idx * 12u + 5u];
                 } else {
-                    if (bc_kind[k1_face_idx * 8u + 5u] == 2u) {
-                        k1_rhs_2 += select(constants.viscosity, constants.viscosity * k1_lambda_f + constants.viscosity * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 8u + 5u];
+                    if (bc_kind[k1_face_idx * 12u + 5u] == 2u) {
+                        k1_rhs_2 += select(constants.viscosity, constants.viscosity * k1_lambda_f + constants.viscosity * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 5u];
                     }
                 }
             }
         }
-        var k1_phi_1: f32 = fluxes[k1_face_idx * 8u + 1u];
+        let k1_diff_coeff_rho_u_lap_rho_u = select(-state[idx * 31u + 26u], -state[idx * 31u + 26u] * k1_lambda_f + -state[k1_other_idx * 31u + 26u] * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
+        if (!k1_is_boundary) {
+            matrix_values[k1_start_row_1 + k1_diag_rank * 12u + 9u] += k1_diff_coeff_rho_u_lap_rho_u;
+            matrix_values[k1_start_row_1 + k1_neighbor_rank * 12u + 9u] -= k1_diff_coeff_rho_u_lap_rho_u;
+        } else {
+            if (bc_kind[k1_face_idx * 12u + 9u] == 1u) {
+                matrix_values[k1_start_row_1 + k1_diag_rank * 12u + 9u] += k1_diff_coeff_rho_u_lap_rho_u;
+                k1_rhs_1 += k1_diff_coeff_rho_u_lap_rho_u * bc_value[k1_face_idx * 12u + 9u];
+            } else {
+                if (bc_kind[k1_face_idx * 12u + 9u] == 2u) {
+                    k1_rhs_1 += select(-state[idx * 31u + 26u], -state[idx * 31u + 26u] * k1_lambda_f + -state[k1_other_idx * 31u + 26u] * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 9u];
+                }
+            }
+        }
+        if (!k1_is_boundary) {
+            matrix_values[k1_start_row_2 + k1_diag_rank * 12u + 10u] += k1_diff_coeff_rho_u_lap_rho_u;
+            matrix_values[k1_start_row_2 + k1_neighbor_rank * 12u + 10u] -= k1_diff_coeff_rho_u_lap_rho_u;
+        } else {
+            if (bc_kind[k1_face_idx * 12u + 10u] == 1u) {
+                matrix_values[k1_start_row_2 + k1_diag_rank * 12u + 10u] += k1_diff_coeff_rho_u_lap_rho_u;
+                k1_rhs_2 += k1_diff_coeff_rho_u_lap_rho_u * bc_value[k1_face_idx * 12u + 10u];
+            } else {
+                if (bc_kind[k1_face_idx * 12u + 10u] == 2u) {
+                    k1_rhs_2 += select(-state[idx * 31u + 26u], -state[idx * 31u + 26u] * k1_lambda_f + -state[k1_other_idx * 31u + 26u] * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 10u];
+                }
+            }
+        }
+        var k1_phi_1: f32 = fluxes[k1_face_idx * 12u + 1u];
         if (k1_owner != idx) {
             k1_phi_1 -= k1_phi_1 * 2.0;
         }
         k1_rhs_1 -= k1_phi_1;
-        var k1_phi_2: f32 = fluxes[k1_face_idx * 8u + 2u];
+        var k1_phi_2: f32 = fluxes[k1_face_idx * 12u + 2u];
         if (k1_owner != idx) {
             k1_phi_2 -= k1_phi_2 * 2.0;
         }
         k1_rhs_2 -= k1_phi_2;
-        let k1_diff_coeff_rho_e = select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * k1_lambda_f + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
+        let k1_diff_coeff_rho_e_T = select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * k1_lambda_f + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
         if (!k1_is_boundary) {
-            matrix_values[k1_start_row_3 + k1_diag_rank * 8u + 7u] += k1_diff_coeff_rho_e;
-            matrix_values[k1_start_row_3 + k1_neighbor_rank * 8u + 7u] -= k1_diff_coeff_rho_e;
+            matrix_values[k1_start_row_3 + k1_diag_rank * 12u + 7u] += k1_diff_coeff_rho_e_T;
+            matrix_values[k1_start_row_3 + k1_neighbor_rank * 12u + 7u] -= k1_diff_coeff_rho_e_T;
         } else {
-            if (bc_kind[k1_face_idx * 8u + 7u] == 1u) {
-                matrix_values[k1_start_row_3 + k1_diag_rank * 8u + 7u] += k1_diff_coeff_rho_e;
-                k1_rhs_3 += k1_diff_coeff_rho_e * bc_value[k1_face_idx * 8u + 7u];
+            if (bc_kind[k1_face_idx * 12u + 7u] == 1u) {
+                matrix_values[k1_start_row_3 + k1_diag_rank * 12u + 7u] += k1_diff_coeff_rho_e_T;
+                k1_rhs_3 += k1_diff_coeff_rho_e_T * bc_value[k1_face_idx * 12u + 7u];
             } else {
-                if (bc_kind[k1_face_idx * 8u + 7u] == 2u) {
-                    k1_rhs_3 += select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * k1_lambda_f + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 8u + 7u];
+                if (bc_kind[k1_face_idx * 12u + 7u] == 2u) {
+                    k1_rhs_3 += select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * k1_lambda_f + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 7u];
                 }
             }
         }
-        var k1_phi_3: f32 = fluxes[k1_face_idx * 8u + 3u];
+        let k1_diff_coeff_rho_e_lap_rho_e = select(-state[idx * 31u + 26u], -state[idx * 31u + 26u] * k1_lambda_f + -state[k1_other_idx * 31u + 26u] * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
+        if (!k1_is_boundary) {
+            matrix_values[k1_start_row_3 + k1_diag_rank * 12u + 11u] += k1_diff_coeff_rho_e_lap_rho_e;
+            matrix_values[k1_start_row_3 + k1_neighbor_rank * 12u + 11u] -= k1_diff_coeff_rho_e_lap_rho_e;
+        } else {
+            if (bc_kind[k1_face_idx * 12u + 11u] == 1u) {
+                matrix_values[k1_start_row_3 + k1_diag_rank * 12u + 11u] += k1_diff_coeff_rho_e_lap_rho_e;
+                k1_rhs_3 += k1_diff_coeff_rho_e_lap_rho_e * bc_value[k1_face_idx * 12u + 11u];
+            } else {
+                if (bc_kind[k1_face_idx * 12u + 11u] == 2u) {
+                    k1_rhs_3 += select(-state[idx * 31u + 26u], -state[idx * 31u + 26u] * k1_lambda_f + -state[k1_other_idx * 31u + 26u] * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 11u];
+                }
+            }
+        }
+        var k1_phi_3: f32 = fluxes[k1_face_idx * 12u + 3u];
         if (k1_owner != idx) {
             k1_phi_3 -= k1_phi_3 * 2.0;
         }
         k1_rhs_3 -= k1_phi_3;
+        let k1_diff_coeff_lap_rho = select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area / k1_dist;
+        if (!k1_is_boundary) {
+            matrix_values[k1_start_row_8 + k1_diag_rank * 12u + 0u] += k1_diff_coeff_lap_rho;
+            matrix_values[k1_start_row_8 + k1_neighbor_rank * 12u + 0u] -= k1_diff_coeff_lap_rho;
+        } else {
+            if (bc_kind[k1_face_idx * 12u + 0u] == 1u) {
+                matrix_values[k1_start_row_8 + k1_diag_rank * 12u + 0u] += k1_diff_coeff_lap_rho;
+                k1_rhs_8 += k1_diff_coeff_lap_rho * bc_value[k1_face_idx * 12u + 0u];
+            } else {
+                if (bc_kind[k1_face_idx * 12u + 0u] == 2u) {
+                    k1_rhs_8 += select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 0u];
+                }
+            }
+        }
+        let k1_diff_coeff_lap_rho_u = select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area / k1_dist;
+        if (!k1_is_boundary) {
+            matrix_values[k1_start_row_9 + k1_diag_rank * 12u + 1u] += k1_diff_coeff_lap_rho_u;
+            matrix_values[k1_start_row_9 + k1_neighbor_rank * 12u + 1u] -= k1_diff_coeff_lap_rho_u;
+        } else {
+            if (k1_boundary_type == 4u) {
+                matrix_values[k1_start_row_9 + k1_diag_rank * 12u + 1u] += k1_diff_coeff_lap_rho_u;
+                k1_rhs_9 += k1_diff_coeff_lap_rho_u * (state[idx * 31u + 1u] - (state[idx * 31u + 1u] * k1_normal.x + state[idx * 31u + 2u] * k1_normal.y) * k1_normal.x);
+            } else {
+                if (bc_kind[k1_face_idx * 12u + 1u] == 1u) {
+                    matrix_values[k1_start_row_9 + k1_diag_rank * 12u + 1u] += k1_diff_coeff_lap_rho_u;
+                    k1_rhs_9 += k1_diff_coeff_lap_rho_u * bc_value[k1_face_idx * 12u + 1u];
+                } else {
+                    if (bc_kind[k1_face_idx * 12u + 1u] == 2u) {
+                        k1_rhs_9 += select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 1u];
+                    }
+                }
+            }
+        }
+        if (!k1_is_boundary) {
+            matrix_values[k1_start_row_10 + k1_diag_rank * 12u + 2u] += k1_diff_coeff_lap_rho_u;
+            matrix_values[k1_start_row_10 + k1_neighbor_rank * 12u + 2u] -= k1_diff_coeff_lap_rho_u;
+        } else {
+            if (k1_boundary_type == 4u) {
+                matrix_values[k1_start_row_10 + k1_diag_rank * 12u + 2u] += k1_diff_coeff_lap_rho_u;
+                k1_rhs_10 += k1_diff_coeff_lap_rho_u * (state[idx * 31u + 2u] - (state[idx * 31u + 1u] * k1_normal.x + state[idx * 31u + 2u] * k1_normal.y) * k1_normal.y);
+            } else {
+                if (bc_kind[k1_face_idx * 12u + 2u] == 1u) {
+                    matrix_values[k1_start_row_10 + k1_diag_rank * 12u + 2u] += k1_diff_coeff_lap_rho_u;
+                    k1_rhs_10 += k1_diff_coeff_lap_rho_u * bc_value[k1_face_idx * 12u + 2u];
+                } else {
+                    if (bc_kind[k1_face_idx * 12u + 2u] == 2u) {
+                        k1_rhs_10 += select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 2u];
+                    }
+                }
+            }
+        }
+        let k1_diff_coeff_lap_rho_e = select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area / k1_dist;
+        if (!k1_is_boundary) {
+            matrix_values[k1_start_row_11 + k1_diag_rank * 12u + 3u] += k1_diff_coeff_lap_rho_e;
+            matrix_values[k1_start_row_11 + k1_neighbor_rank * 12u + 3u] -= k1_diff_coeff_lap_rho_e;
+        } else {
+            if (bc_kind[k1_face_idx * 12u + 3u] == 1u) {
+                matrix_values[k1_start_row_11 + k1_diag_rank * 12u + 3u] += k1_diff_coeff_lap_rho_e;
+                k1_rhs_11 += k1_diff_coeff_lap_rho_e * bc_value[k1_face_idx * 12u + 3u];
+            } else {
+                if (bc_kind[k1_face_idx * 12u + 3u] == 2u) {
+                    k1_rhs_11 += select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 3u];
+                }
+            }
+        }
     }
-    matrix_values[k1_start_row_0 + k1_diag_rank * 8u + 0u] += k1_diag_0;
-    rhs[idx * 8u + 0u] = k1_rhs_0;
-    matrix_values[k1_start_row_1 + k1_diag_rank * 8u + 1u] += k1_diag_1;
-    rhs[idx * 8u + 1u] = k1_rhs_1;
-    matrix_values[k1_start_row_2 + k1_diag_rank * 8u + 2u] += k1_diag_2;
-    rhs[idx * 8u + 2u] = k1_rhs_2;
-    matrix_values[k1_start_row_3 + k1_diag_rank * 8u + 3u] += k1_diag_3;
-    rhs[idx * 8u + 3u] = k1_rhs_3;
-    matrix_values[k1_start_row_4 + k1_diag_rank * 8u + 4u] += k1_diag_4;
-    rhs[idx * 8u + 4u] = k1_rhs_4;
-    matrix_values[k1_start_row_5 + k1_diag_rank * 8u + 5u] += k1_diag_5;
-    rhs[idx * 8u + 5u] = k1_rhs_5;
-    matrix_values[k1_start_row_6 + k1_diag_rank * 8u + 6u] += k1_diag_6;
-    rhs[idx * 8u + 6u] = k1_rhs_6;
-    matrix_values[k1_start_row_7 + k1_diag_rank * 8u + 7u] += k1_diag_7;
-    rhs[idx * 8u + 7u] = k1_rhs_7;
+    matrix_values[k1_start_row_0 + k1_diag_rank * 12u + 0u] += k1_diag_0;
+    rhs[idx * 12u + 0u] = k1_rhs_0;
+    matrix_values[k1_start_row_1 + k1_diag_rank * 12u + 1u] += k1_diag_1;
+    rhs[idx * 12u + 1u] = k1_rhs_1;
+    matrix_values[k1_start_row_2 + k1_diag_rank * 12u + 2u] += k1_diag_2;
+    rhs[idx * 12u + 2u] = k1_rhs_2;
+    matrix_values[k1_start_row_3 + k1_diag_rank * 12u + 3u] += k1_diag_3;
+    rhs[idx * 12u + 3u] = k1_rhs_3;
+    matrix_values[k1_start_row_4 + k1_diag_rank * 12u + 4u] += k1_diag_4;
+    rhs[idx * 12u + 4u] = k1_rhs_4;
+    matrix_values[k1_start_row_5 + k1_diag_rank * 12u + 5u] += k1_diag_5;
+    rhs[idx * 12u + 5u] = k1_rhs_5;
+    matrix_values[k1_start_row_6 + k1_diag_rank * 12u + 6u] += k1_diag_6;
+    rhs[idx * 12u + 6u] = k1_rhs_6;
+    matrix_values[k1_start_row_7 + k1_diag_rank * 12u + 7u] += k1_diag_7;
+    rhs[idx * 12u + 7u] = k1_rhs_7;
+    matrix_values[k1_start_row_8 + k1_diag_rank * 12u + 8u] += k1_diag_8;
+    rhs[idx * 12u + 8u] = k1_rhs_8;
+    matrix_values[k1_start_row_9 + k1_diag_rank * 12u + 9u] += k1_diag_9;
+    rhs[idx * 12u + 9u] = k1_rhs_9;
+    matrix_values[k1_start_row_10 + k1_diag_rank * 12u + 10u] += k1_diag_10;
+    rhs[idx * 12u + 10u] = k1_rhs_10;
+    matrix_values[k1_start_row_11 + k1_diag_rank * 12u + 11u] += k1_diag_11;
+    rhs[idx * 12u + 11u] = k1_rhs_11;
     // end fused segment: generic_coupled_assembly_grad_state
 }

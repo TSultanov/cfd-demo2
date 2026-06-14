@@ -49,6 +49,10 @@ pub struct DiscreteOp {
     /// `-div(coeff * dev2((grad field)^T))` from grad_state cell gradients
     /// (only meaningful on explicit Diffusion ops with Vector2 fields).
     pub transpose_dev2: bool,
+    /// Static implicit diagonal: an implicit `Source` op contributes `coeff`
+    /// to the matrix diagonal WITHOUT the `* V` cell-volume factor (see
+    /// `Term::static_diag`). Used for pointwise identity/constraint rows.
+    pub static_diag: bool,
     pub field: FieldRef,
     pub flux: Option<FluxRef>,
     pub coeff: Option<Coefficient>,
@@ -116,6 +120,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
         bounded: term.bounded,
         direction: term.direction.clone(),
         transpose_dev2: term.transpose_dev2,
+        static_diag: term.static_diag,
         field: term.field,
         flux: term.flux,
         coeff: term.coeff.clone(),

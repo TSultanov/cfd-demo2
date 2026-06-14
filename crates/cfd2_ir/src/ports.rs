@@ -153,14 +153,6 @@ pub struct ResolvedGradientTargetSpec {
     pub slip_vec2_x_offset: Option<u32>,
     /// SlipWall: y-offset of full vec2 field (for velocity fields)
     pub slip_vec2_y_offset: Option<u32>,
-    /// Arc N4b biharmonic dissipation: state-array offset of the `lap_<component>`
-    /// scalar field when present, so the gradients kernel also writes the undivided
-    /// Laplacian `sum(phi_neigh - phi_cell)` there. `None` (default) emits no
-    /// Laplacian code => byte-identical WGSL when biharmonic is off.
-    pub lap_offset: Option<u32>,
-    /// Arc N4b: state-array offset of the per-cell `bih_mask` field (1.0 interior /
-    /// 0.0 boundary cell). Same value on every target; `Some` only with biharmonic.
-    pub bih_mask_offset: Option<u32>,
 }
 
 /// IR-safe specification for resolved state slots.

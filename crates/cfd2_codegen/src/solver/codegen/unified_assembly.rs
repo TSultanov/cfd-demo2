@@ -301,7 +301,14 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             if source_op.discretization == Discretization::Implicit {
                 let val =
                     coefficient_value_expr(slots, source_op.coeff.as_ref(), "idx", 0.0.into());
-                let term = val * Expr::ident("vol");
+                // Static implicit diagonal (`sp`): the coefficient is the bare
+                // diagonal contribution, NOT volume-integrated like an ordinary
+                // implicit reaction source (`S_p * V`).
+                let term = if source_op.static_diag {
+                    val
+                } else {
+                    val * Expr::ident("vol")
+                };
                 if source_op.field.kind() != equation.target.kind() {
                     panic!(
                         "implicit source currently requires field.kind == target.kind (target={}, field={})",
@@ -639,10 +646,21 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                 .get(equation.target.name())
                 .expect("missing target offset");
 
-            if let Some(diff_op) = equation.ops.iter().find(|op| {
-                op.kind == DiscreteOpKind::Diffusion
-                    && op.discretization == Discretization::Implicit
-            }) {
+            // All implicit diffusion ops on this equation. Most equations have
+            // at most one (the viscous / heat-conduction Laplacian), but a
+            // conserved equation can carry a SECOND implicit diffusion — the
+            // biharmonic stabilizer `laplacian(eps4*c, lap_X)` diffusing the
+            // auxiliary undivided-Laplacian unknown into the conserved row.
+            let implicit_diffusion_ops: Vec<_> = equation
+                .ops
+                .iter()
+                .filter(|op| {
+                    op.kind == DiscreteOpKind::Diffusion
+                        && op.discretization == Discretization::Implicit
+                })
+                .collect();
+            let multiple_implicit_diffusion = implicit_diffusion_ops.len() > 1;
+            for diff_op in implicit_diffusion_ops {
                 if diff_op.field.kind() != equation.target.kind() {
                     panic!(
                         "implicit diffusion currently requires field.kind == target.kind (target={}, field={})",
@@ -675,7 +693,15 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     !Expr::ident("is_boundary"),
                 );
 
-                let diff_coeff_name = format!("diff_coeff_{}", equation.target.name());
+                // Keep the historical single-op name `diff_coeff_<target>`
+                // (preserves byte-identical WGSL for every existing model);
+                // disambiguate by field only when an equation carries more than
+                // one implicit diffusion op (e.g. viscous + biharmonic).
+                let diff_coeff_name = if multiple_implicit_diffusion {
+                    format!("diff_coeff_{}_{}", equation.target.name(), field_name)
+                } else {
+                    format!("diff_coeff_{}", equation.target.name())
+                };
                 body.push(dsl::let_expr(
                     &diff_coeff_name,
                     kappa.clone() * Expr::ident("area") / Expr::ident("dist"),

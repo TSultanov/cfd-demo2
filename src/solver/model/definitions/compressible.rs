@@ -36,6 +36,17 @@ type EnergyDensityGradient = DivDim<EnergyDensity, Length>;
 type PressureGradient = DivDim<Pressure, Length>;
 type TemperatureGradient = DivDim<Temperature, Length>;
 
+// Arc N4c implicit biharmonic. The auxiliary undivided-Laplacian unknowns
+// `lap_X = laplacian(X)` carry unit [X * Length]: the surface-integral
+// Laplacian `sum_faces(area/dist)*(X_neigh - X_own)` (the `laplacian(1, X)`
+// op's integrated unit is `X * Area/Length = X * Length`), so the static
+// identity row `sp(-1, lap_X) + laplacian(1, X) = 0` is unit-consistent and
+// `laplacian(bih_eps4, lap_X)` (bih_eps4 a velocity) lands on the conserved
+// equation's own unit.
+type LapDensity = MulDim<Density, Length>;
+type LapMomentumDensity = MulDim<MomentumDensity, Length>;
+type LapEnergyDensity = MulDim<EnergyDensity, Length>;
+
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
 /// Manufactured continuity source field on the `compressible_mms` variant (scalar).
@@ -143,19 +154,17 @@ pub fn compressible_central_upwind_decl() -> crate::solver::model::flux_schemes:
         .to_untyped(),
         wave_speed_sq: compressible_wave_speed_sq().to_untyped(),
         generalized_wave_speed_sq: compressible_generalized_wave_speed_sq().to_untyped(),
-        // Arc N4b biharmonic dissipation is OFF by default (byte-identical WGSL).
-        // The biharmonic model variant overrides this to `true`.
-        biharmonic: false,
     }
 }
 
 fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
-    build_compressible_system_impl(fields, false)
+    build_compressible_system_impl(fields, false, false)
 }
 
 fn build_compressible_system_impl(
     _fields: &CompressibleFields,
     with_mms_sources: bool,
+    biharmonic: bool,
 ) -> EquationSystem {
     // NOTE: This model uses typed builder APIs with explicit cast_to() calls to align
     // terms to canonical dimension types. Type-level dimension expressions are not normalized,
@@ -180,6 +189,19 @@ fn build_compressible_system_impl(
     // Build coefficients
     let mu_coeff = TypedCoeff::from_field(mu_typed);
 
+    // Arc N4c implicit biharmonic. Auxiliary undivided-Laplacian unknowns
+    // `lap_X` (one per conserved field) and the velocity-scaled coefficient
+    // field `bih_eps4` (= eps4 * acoustic speed), set uniformly at runtime like
+    // `mu`. `laplacian(-bih_eps4, lap_X)` on a conserved row assembles
+    // `+bih_eps4 * lap2_undiv(lap_X)` (the implicit diffusion operator is
+    // `-coeff * lap2`), i.e. the dissipative `-bih_eps4 * grad^4 X`.
+    let lap_rho_typed = TypedFieldRef::<LapDensity, Scalar>::new("lap_rho");
+    let lap_rho_u_typed = TypedFieldRef::<LapMomentumDensity, Vector2>::new("lap_rho_u");
+    let lap_rho_e_typed = TypedFieldRef::<LapEnergyDensity, Scalar>::new("lap_rho_e");
+    let neg_bih_eps4 = TypedCoeff::<Dimensionless>::constant(-1.0).multiply(
+        TypedCoeff::from_field(TypedFieldRef::<Velocity, Scalar>::new("bih_eps4")),
+    );
+
     // ========================================
     // Continuity equation: ddt(rho) + div(phi_rho, rho) = 0
     // ========================================
@@ -192,6 +214,10 @@ fn build_compressible_system_impl(
             COMPRESSIBLE_MMS_SOURCE_RHO_FIELD,
         ));
         rho_sum = rho_sum + typed_fvc::source_coeff(mms_rho, rho_typed).cast_to::<MassFlux>();
+    }
+    if biharmonic {
+        rho_sum = rho_sum
+            + typed_fvm::laplacian(neg_bih_eps4.clone(), lap_rho_typed).cast_to::<MassFlux>();
     }
     let rho_eqn = rho_sum.eqn(rho_typed);
 
@@ -211,6 +237,10 @@ fn build_compressible_system_impl(
         );
         rho_u_sum =
             rho_u_sum + typed_fvc::source_vector(mms_rho_u, rho_u_typed).cast_to::<Force>();
+    }
+    if biharmonic {
+        rho_u_sum = rho_u_sum
+            + typed_fvm::laplacian(neg_bih_eps4.clone(), lap_rho_u_typed).cast_to::<Force>();
     }
     let rho_u_eqn = rho_u_sum.eqn(rho_u_typed);
 
@@ -236,6 +266,10 @@ fn build_compressible_system_impl(
         ));
         rho_e_sum =
             rho_e_sum + typed_fvc::source_coeff(mms_rho_e, rho_e_typed).cast_to::<Power>();
+    }
+    if biharmonic {
+        rho_e_sum = rho_e_sum
+            + typed_fvm::laplacian(neg_bih_eps4, lap_rho_e_typed).cast_to::<Power>();
     }
     let rho_e_eqn = rho_e_sum.eqn(rho_e_typed);
 
@@ -294,6 +328,33 @@ fn build_compressible_system_impl(
     add_algebraic_equation(&mut system, &temperature_recovery)
         .expect("compressible temperature recovery failed algebraic lowering");
 
+    if biharmonic {
+        // Arc N4c: auxiliary undivided-Laplacian constraint rows, appended last
+        // so the lap unknowns occupy coupled slots 8..12 (matching
+        // `CompressibleBiharmonicAxis2D`). Each is the static identity
+        // `sp(-1, lap_X) + laplacian(1, X) = 0` ⟹ `lap_X = laplacian(X)`
+        // (the un-volumed `sp` diagonal balances the surface-flux Laplacian of X
+        // on the same row; RHS is zero, so the steady state is unchanged by the
+        // auxiliary block). rho_u is a Vector2, so `lap_rho_u` is per-component.
+        let one = TypedCoeff::<Dimensionless>::constant(1.0);
+        let minus_one = TypedCoeff::<Dimensionless>::constant(-1.0);
+        let lap_rho_eqn = (typed_fvm::sp(minus_one.clone(), lap_rho_typed)
+            .cast_to::<LapDensity>()
+            + typed_fvm::laplacian(one.clone(), rho_typed).cast_to::<LapDensity>())
+        .eqn(lap_rho_typed);
+        let lap_rho_u_eqn = (typed_fvm::sp(minus_one.clone(), lap_rho_u_typed)
+            .cast_to::<LapMomentumDensity>()
+            + typed_fvm::laplacian(one.clone(), rho_u_typed).cast_to::<LapMomentumDensity>())
+        .eqn(lap_rho_u_typed);
+        let lap_rho_e_eqn = (typed_fvm::sp(minus_one, lap_rho_e_typed)
+            .cast_to::<LapEnergyDensity>()
+            + typed_fvm::laplacian(one, rho_e_typed).cast_to::<LapEnergyDensity>())
+        .eqn(lap_rho_e_typed);
+        system.add_equation(lap_rho_eqn);
+        system.add_equation(lap_rho_u_eqn);
+        system.add_equation(lap_rho_e_eqn);
+    }
+
     // Validate units to ensure the system is consistent
     system
         .validate_units()
@@ -336,12 +397,23 @@ pub fn compressible_mms_model() -> Result<ModelSpec, String> {
     )
 }
 
-/// Arc N4b: `compressible_mms` plus the k-selective biharmonic dissipation term.
-/// Appends the `lap_<conserved>` Laplacian-storage fields to the layout and switches
-/// on the biharmonic flux; the coefficient is the runtime `low_mach_params.eps4`
-/// uniform (default 0), so a single registered model serves any eps4 (tuned via
-/// `set_biharmonic_eps4`). Used by the periodic / minmod probes against the inviscid
-/// refinement-amplified mode; NOT a shipped default (production keeps biharmonic OFF).
+/// Arc N4c: `compressible_mms` plus the IMPLICIT k-selective biharmonic
+/// dissipation. Promotes the auxiliary undivided-Laplacian unknowns `lap_X`
+/// to the coupled block (stride 8 -> 12) with the constraint rows
+/// `lap_X = laplacian(X)` and adds `laplacian(-bih_eps4, lap_X)` to each
+/// conserved equation, so the whole `-eps4*grad^4 X` dissipation lives in the
+/// matrix (no explicit flux term, no `dt <~ C*h^2` limit). The coefficient is
+/// the per-cell `bih_eps4` field (= eps4 * acoustic speed), set uniformly at
+/// runtime like `mu`, so one registered model serves any eps4. Used by the
+/// inviscid-mode probes; NOT a shipped default (production keeps biharmonic OFF).
+///
+/// STATUS (Arc N4c): the formulation is validated — at eps4=0 the model
+/// reproduces plain `compressible_mms` to order ~2, and on the periodic box
+/// eps4>0 cures the inviscid refinement-amplified divergence. The eps4>0
+/// bounded-domain MMS order is conditioning-limited: the implicit `grad^4`
+/// operator (condition ~h^-4) outruns the default Jacobi+FGMRES at fine mesh
+/// (a stronger preconditioner is the deferred follow-up). The large
+/// `max_iters` override below is what the eps4=0 limit needs; eps4>0 needs more.
 pub fn compressible_mms_biharmonic_model() -> Result<ModelSpec, String> {
     compressible_model_impl(
         crate::solver::model::eos::EosSpec::IdealGas {
@@ -360,7 +432,7 @@ fn compressible_model_impl(
     biharmonic: bool,
 ) -> Result<ModelSpec, String> {
     let fields = CompressibleFields::new();
-    let system = build_compressible_system_impl(&fields, with_mms_sources);
+    let system = build_compressible_system_impl(&fields, with_mms_sources, biharmonic);
     // Flux module reconstruction uses gradient fields in the state layout when enabled.
     // These are computed by the optional `flux_module_gradients` stage (Gauss gradients).
     let grad_rho = vol_vector_dim::<DivDim<Density, Length>>("grad_rho");
@@ -386,24 +458,20 @@ fn compressible_model_impl(
         grad_u_y,
     ];
     if biharmonic {
-        // Arc N4b: undivided-Laplacian storage for the biharmonic dissipation flux,
-        // one scalar per conserved variable. The standalone `flux_module_gradients`
-        // kernel writes `lap_<conserved> = sum_faces(phi_neigh - phi_cell)` (it keys
-        // off these field names), and the central-upwind flux reads them. Present
-        // ONLY in this variant, so default models keep their stride and (with a
-        // distinct model id) their committed kernel sources.
-        layout_fields.push(vol_scalar_dim::<Dimensionless>("lap_rho"));
-        layout_fields.push(vol_scalar_dim::<Dimensionless>("lap_rho_u_x"));
-        layout_fields.push(vol_scalar_dim::<Dimensionless>("lap_rho_u_y"));
-        layout_fields.push(vol_scalar_dim::<Dimensionless>("lap_rho_e"));
-        // Arc N4b: per-cell interior mask (1.0 interior / 0.0 if the cell has any
-        // boundary face). The gradients kernel fills it; the flux zeros the biharmonic
-        // term where `own_mask*neigh_mask == 0`, so the dissipation acts only on
-        // interior-interior faces. Needed because the undivided Laplacian is O(h) (not
-        // O(h^2)) at boundary cells (asymmetric stencil), which would make the boundary
-        // biharmonic flux O(1) and destroy the Dirichlet MMS order; masking keeps it
-        // interior-only (consistent with the instability being interior).
-        layout_fields.push(vol_scalar_dim::<Dimensionless>("bih_mask"));
+        // Arc N4c: the auxiliary undivided-Laplacian unknowns `lap_X` (solved by
+        // the coupled matrix via the `lap_X = laplacian(X)` constraint rows) plus
+        // the runtime coefficient field `bih_eps4`. `lap_rho_u` is a single Vector2
+        // (matching the Vector2 `rho_u` it diffuses, so the cross-field biharmonic
+        // diffusion is component-wise). Present ONLY in this variant; the distinct
+        // model id keeps default models on their committed (stride-22/26) kernels.
+        layout_fields.push(vol_scalar_dim::<LapDensity>("lap_rho"));
+        layout_fields.push(vol_vector_dim::<LapMomentumDensity>("lap_rho_u"));
+        layout_fields.push(vol_scalar_dim::<LapEnergyDensity>("lap_rho_e"));
+        // `bih_eps4` = eps4 * acoustic speed (velocity units), the coefficient of
+        // `laplacian(-bih_eps4, lap_X)`. A uniform-valued storage field (like `mu`),
+        // set at runtime via `set_field_scalar`, so one registered model serves any
+        // eps4 without recompiling the shader.
+        layout_fields.push(vol_scalar_dim::<Velocity>("bih_eps4"));
     }
     if with_mms_sources {
         layout_fields.push(vol_scalar_dim::<RhoSourceUnit>(
@@ -695,6 +763,43 @@ fn compressible_model_impl(
                 BoundaryCondition::zero_gradient_dim::<TemperatureGradient>(),
             ),
     );
+    if biharmonic {
+        // Arc N4c: the auxiliary lap unknowns get zero-gradient on every boundary.
+        // Two reasons: (1) every coupled unknown must appear in the boundary table
+        // or the boundary closure of the WHOLE coupled system is left ill-posed
+        // (an undeclared unknown corrupts the bounded-domain solve even at eps4=0);
+        // (2) zero-gradient makes the biharmonic flux through domain-boundary faces
+        // zero, keeping the dissipation interior (the implicit successor to the
+        // retired explicit `bih_mask`). The lap values at boundary cells are still
+        // pinned by the constraint `lap_X = laplacian(X)` via X's own BC.
+        let all_types = [
+            GpuBoundaryType::Inlet,
+            GpuBoundaryType::Outlet,
+            GpuBoundaryType::Wall,
+            GpuBoundaryType::SlipWall,
+            GpuBoundaryType::MovingWall,
+        ];
+        let mut lap_rho_bc = FieldBoundarySpec::new();
+        let mut lap_rho_u_bc = FieldBoundarySpec::new();
+        let mut lap_rho_e_bc = FieldBoundarySpec::new();
+        for t in all_types {
+            lap_rho_bc =
+                lap_rho_bc.set_uniform(t, 1, BoundaryCondition::zero_gradient_dim::<Density>());
+            lap_rho_u_bc = lap_rho_u_bc.set_uniform(
+                t,
+                2,
+                BoundaryCondition::zero_gradient_dim::<MomentumDensity>(),
+            );
+            lap_rho_e_bc = lap_rho_e_bc.set_uniform(
+                t,
+                1,
+                BoundaryCondition::zero_gradient_dim::<EnergyDensity>(),
+            );
+        }
+        boundaries.set_field("lap_rho", lap_rho_bc);
+        boundaries.set_field("lap_rho_u", lap_rho_u_bc);
+        boundaries.set_field("lap_rho_e", lap_rho_e_bc);
+    }
     let method = crate::solver::model::method::MethodSpec::Coupled(
         crate::solver::model::method::CoupledCapabilities {
             // Dual-time stepping can require under-relaxation to stabilize pseudo-time iterations
@@ -705,11 +810,7 @@ fn compressible_model_impl(
             gradient_storage: crate::solver::model::gpu_spec::GradientStorage::PackedState,
         },
     );
-    let mut central_upwind_decl = compressible_central_upwind_decl();
-    // Arc N4b: enable the biharmonic dissipation term (the layout above carries the
-    // matching `lap_<conserved>` fields; the coefficient is the runtime eps4 uniform).
-    // `false` leaves the decl default (term absent => byte-identical WGSL).
-    central_upwind_decl.biharmonic = biharmonic;
+    let central_upwind_decl = compressible_central_upwind_decl();
     let flux = crate::solver::model::flux_module::FluxModuleSpec::Scheme {
         gradients: Some(
             crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout,
@@ -765,8 +866,22 @@ fn compressible_model_impl(
                 m
             },
         ],
-        // Use global defaults.
-        linear_solver: None,
+        // The implicit biharmonic couples a 4th-order (condition ~ h^-4)
+        // operator into the block, so the per-step FGMRES needs a far larger
+        // iteration budget than the 200 the inexact-Picard default allots;
+        // without it the fine-mesh solve stalls (the conserved block is left
+        // under-resolved). Non-biharmonic models keep the global default.
+        linear_solver: if biharmonic {
+            Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
+                solver: crate::solver::model::linear_solver::ModelLinearSolverSettings {
+                    max_iters: 4000,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+        } else {
+            None
+        },
         primitives,
     })
 }

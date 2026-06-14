@@ -236,6 +236,82 @@ impl CoupledAxis for CompressibleAxis2D {
     }
 }
 
+/// 2D compressible system plus the four auxiliary undivided-Laplacian unknowns
+/// of the implicit biharmonic stabilizer (stride 12). The base eight unknowns
+/// keep their `CompressibleAxis2D` indices; `lap_rho`, `lap_rho_u_{x,y}`,
+/// `lap_rho_e` are appended (the constraint rows `lap_X = laplacian(X)`).
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum CompressibleBiharmonicAxis2D {
+    Rho,
+    RhoUx,
+    RhoUy,
+    RhoE,
+    Ux,
+    Uy,
+    P,
+    T,
+    LapRho,
+    LapRhoUx,
+    LapRhoUy,
+    LapRhoE,
+}
+
+impl CoupledAxis for CompressibleBiharmonicAxis2D {
+    const STRIDE: u32 = 12;
+
+    fn to_u8(self) -> u8 {
+        match self {
+            Self::Rho => 0,
+            Self::RhoUx => 1,
+            Self::RhoUy => 2,
+            Self::RhoE => 3,
+            Self::Ux => 4,
+            Self::Uy => 5,
+            Self::P => 6,
+            Self::T => 7,
+            Self::LapRho => 8,
+            Self::LapRhoUx => 9,
+            Self::LapRhoUy => 10,
+            Self::LapRhoE => 11,
+        }
+    }
+
+    fn from_u32(index: u32) -> Self {
+        match index {
+            0 => Self::Rho,
+            1 => Self::RhoUx,
+            2 => Self::RhoUy,
+            3 => Self::RhoE,
+            4 => Self::Ux,
+            5 => Self::Uy,
+            6 => Self::P,
+            7 => Self::T,
+            8 => Self::LapRho,
+            9 => Self::LapRhoUx,
+            10 => Self::LapRhoUy,
+            11 => Self::LapRhoE,
+            _ => panic!("CompressibleBiharmonicAxis2D::from_u32({index}): expected 0..12"),
+        }
+    }
+
+    fn all() -> &'static [Self] {
+        &[
+            Self::Rho,
+            Self::RhoUx,
+            Self::RhoUy,
+            Self::RhoE,
+            Self::Ux,
+            Self::Uy,
+            Self::P,
+            Self::T,
+            Self::LapRho,
+            Self::LapRhoUx,
+            Self::LapRhoUy,
+            Self::LapRhoE,
+        ]
+    }
+}
+
 /// Dispatch a function call by matching `coupled_stride` to the appropriate
 /// concrete `CoupledAxis` type. This is the monomorphization point: the
 /// `body` closure is instantiated for each supported stride.
@@ -250,8 +326,9 @@ pub fn dispatch_by_coupled_stride<R>(
         3 => Ok(body.call::<IncompressibleAxis2D>()),
         4 => Ok(body.call::<IncompressibleAxis3D>()),
         8 => Ok(body.call::<CompressibleAxis2D>()),
+        12 => Ok(body.call::<CompressibleBiharmonicAxis2D>()),
         _ => Err(format!(
-            "unsupported coupled_stride {coupled_stride}; expected 1, 3, 4, or 8"
+            "unsupported coupled_stride {coupled_stride}; expected 1, 3, 4, 8, or 12"
         )),
     }
 }

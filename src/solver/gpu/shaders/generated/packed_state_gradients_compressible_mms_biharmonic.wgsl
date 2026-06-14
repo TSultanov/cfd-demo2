@@ -62,6 +62,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var grad_acc_5: vec2<f32> = vec2<f32>(0.0, 0.0);
         var grad_acc_6: vec2<f32> = vec2<f32>(0.0, 0.0);
         var grad_acc_7: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_8: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_9: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_10: vec2<f32> = vec2<f32>(0.0, 0.0);
+        var grad_acc_11: vec2<f32> = vec2<f32>(0.0, 0.0);
         for (var k = start; k < end; k++) {
             let face_idx = cell_faces[k];
             let owner = face_owner[face_idx];
@@ -101,14 +105,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 lambda = d_neigh / total_dist;
             }
             let lambda_other = 1.0 - lambda;
-            grad_acc_0 += normal_vec * (state[idx * 31u + 0u] * lambda + select(state[other_idx * 31u + 0u], select(select(state[idx * 31u + 0u], bc_value[face_idx * 8u + 0u], bc_kind[face_idx * 8u + 0u] == 1u), state[idx * 31u + 0u] + bc_value[face_idx * 8u + 0u] * d_own, bc_kind[face_idx * 8u + 0u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_1 += normal_vec * (state[idx * 31u + 1u] * lambda + select(state[other_idx * 31u + 1u], select(select(state[idx * 31u + 1u], bc_value[face_idx * 8u + 1u], bc_kind[face_idx * 8u + 1u] == 1u), state[idx * 31u + 1u] + bc_value[face_idx * 8u + 1u] * d_own, bc_kind[face_idx * 8u + 1u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_2 += normal_vec * (state[idx * 31u + 2u] * lambda + select(state[other_idx * 31u + 2u], select(select(state[idx * 31u + 2u], bc_value[face_idx * 8u + 2u], bc_kind[face_idx * 8u + 2u] == 1u), state[idx * 31u + 2u] + bc_value[face_idx * 8u + 2u] * d_own, bc_kind[face_idx * 8u + 2u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_3 += normal_vec * (state[idx * 31u + 7u] * lambda + select(state[other_idx * 31u + 7u], select(select(state[idx * 31u + 7u], bc_value[face_idx * 8u + 3u], bc_kind[face_idx * 8u + 3u] == 1u), state[idx * 31u + 7u] + bc_value[face_idx * 8u + 3u] * d_own, bc_kind[face_idx * 8u + 3u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_4 += normal_vec * (state[idx * 31u + 10u] * lambda + select(state[other_idx * 31u + 10u], select(select(state[idx * 31u + 10u], bc_value[face_idx * 8u + 4u], bc_kind[face_idx * 8u + 4u] == 1u), state[idx * 31u + 10u] + bc_value[face_idx * 8u + 4u] * d_own, bc_kind[face_idx * 8u + 4u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_5 += normal_vec * (state[idx * 31u + 11u] * lambda + select(state[other_idx * 31u + 11u], select(select(state[idx * 31u + 11u], bc_value[face_idx * 8u + 5u], bc_kind[face_idx * 8u + 5u] == 1u), state[idx * 31u + 11u] + bc_value[face_idx * 8u + 5u] * d_own, bc_kind[face_idx * 8u + 5u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_6 += normal_vec * (state[idx * 31u + 8u] * lambda + select(state[other_idx * 31u + 8u], select(select(state[idx * 31u + 8u], bc_value[face_idx * 8u + 6u], bc_kind[face_idx * 8u + 6u] == 1u), state[idx * 31u + 8u] + bc_value[face_idx * 8u + 6u] * d_own, bc_kind[face_idx * 8u + 6u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_7 += normal_vec * (state[idx * 31u + 9u] * lambda + select(state[other_idx * 31u + 9u], select(select(state[idx * 31u + 9u], bc_value[face_idx * 8u + 7u], bc_kind[face_idx * 8u + 7u] == 1u), state[idx * 31u + 9u] + bc_value[face_idx * 8u + 7u] * d_own, bc_kind[face_idx * 8u + 7u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_0 += normal_vec * (state[idx * 31u + 0u] * lambda + select(state[other_idx * 31u + 0u], select(select(state[idx * 31u + 0u], bc_value[face_idx * 12u + 0u], bc_kind[face_idx * 12u + 0u] == 1u), state[idx * 31u + 0u] + bc_value[face_idx * 12u + 0u] * d_own, bc_kind[face_idx * 12u + 0u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_1 += normal_vec * (state[idx * 31u + 1u] * lambda + select(state[other_idx * 31u + 1u], select(select(state[idx * 31u + 1u], bc_value[face_idx * 12u + 1u], bc_kind[face_idx * 12u + 1u] == 1u), state[idx * 31u + 1u] + bc_value[face_idx * 12u + 1u] * d_own, bc_kind[face_idx * 12u + 1u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_2 += normal_vec * (state[idx * 31u + 2u] * lambda + select(state[other_idx * 31u + 2u], select(select(state[idx * 31u + 2u], bc_value[face_idx * 12u + 2u], bc_kind[face_idx * 12u + 2u] == 1u), state[idx * 31u + 2u] + bc_value[face_idx * 12u + 2u] * d_own, bc_kind[face_idx * 12u + 2u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_3 += normal_vec * (state[idx * 31u + 7u] * lambda + select(state[other_idx * 31u + 7u], select(select(state[idx * 31u + 7u], bc_value[face_idx * 12u + 3u], bc_kind[face_idx * 12u + 3u] == 1u), state[idx * 31u + 7u] + bc_value[face_idx * 12u + 3u] * d_own, bc_kind[face_idx * 12u + 3u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_4 += normal_vec * (state[idx * 31u + 10u] * lambda + select(state[other_idx * 31u + 10u], select(select(state[idx * 31u + 10u], bc_value[face_idx * 12u + 4u], bc_kind[face_idx * 12u + 4u] == 1u), state[idx * 31u + 10u] + bc_value[face_idx * 12u + 4u] * d_own, bc_kind[face_idx * 12u + 4u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_5 += normal_vec * (state[idx * 31u + 11u] * lambda + select(state[other_idx * 31u + 11u], select(select(state[idx * 31u + 11u], bc_value[face_idx * 12u + 5u], bc_kind[face_idx * 12u + 5u] == 1u), state[idx * 31u + 11u] + bc_value[face_idx * 12u + 5u] * d_own, bc_kind[face_idx * 12u + 5u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_6 += normal_vec * (state[idx * 31u + 8u] * lambda + select(state[other_idx * 31u + 8u], select(select(state[idx * 31u + 8u], bc_value[face_idx * 12u + 6u], bc_kind[face_idx * 12u + 6u] == 1u), state[idx * 31u + 8u] + bc_value[face_idx * 12u + 6u] * d_own, bc_kind[face_idx * 12u + 6u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_7 += normal_vec * (state[idx * 31u + 9u] * lambda + select(state[other_idx * 31u + 9u], select(select(state[idx * 31u + 9u], bc_value[face_idx * 12u + 7u], bc_kind[face_idx * 12u + 7u] == 1u), state[idx * 31u + 9u] + bc_value[face_idx * 12u + 7u] * d_own, bc_kind[face_idx * 12u + 7u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_8 += normal_vec * (state[idx * 31u + 22u] * lambda + select(state[other_idx * 31u + 22u], select(select(state[idx * 31u + 22u], bc_value[face_idx * 12u + 8u], bc_kind[face_idx * 12u + 8u] == 1u), state[idx * 31u + 22u] + bc_value[face_idx * 12u + 8u] * d_own, bc_kind[face_idx * 12u + 8u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_9 += normal_vec * (state[idx * 31u + 23u] * lambda + select(state[other_idx * 31u + 23u], select(select(state[idx * 31u + 23u], bc_value[face_idx * 12u + 9u], bc_kind[face_idx * 12u + 9u] == 1u), state[idx * 31u + 23u] + bc_value[face_idx * 12u + 9u] * d_own, bc_kind[face_idx * 12u + 9u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_10 += normal_vec * (state[idx * 31u + 24u] * lambda + select(state[other_idx * 31u + 24u], select(select(state[idx * 31u + 24u], bc_value[face_idx * 12u + 10u], bc_kind[face_idx * 12u + 10u] == 1u), state[idx * 31u + 24u] + bc_value[face_idx * 12u + 10u] * d_own, bc_kind[face_idx * 12u + 10u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_11 += normal_vec * (state[idx * 31u + 25u] * lambda + select(state[other_idx * 31u + 25u], select(select(state[idx * 31u + 25u], bc_value[face_idx * 12u + 11u], bc_kind[face_idx * 12u + 11u] == 1u), state[idx * 31u + 25u] + bc_value[face_idx * 12u + 11u] * d_own, bc_kind[face_idx * 12u + 11u] == 2u), is_boundary) * lambda_other) * area;
         }
         let grad_out_0: vec2<f32> = grad_acc_0 * 1.0 / max(vol, 0.000000000001);
         grad_state[idx * 31u + 0u].x = grad_out_0.x;
@@ -134,5 +142,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let grad_out_7: vec2<f32> = grad_acc_7 * 1.0 / max(vol, 0.000000000001);
         grad_state[idx * 31u + 9u].x = grad_out_7.x;
         grad_state[idx * 31u + 9u].y = grad_out_7.y;
+        let grad_out_8: vec2<f32> = grad_acc_8 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 31u + 22u].x = grad_out_8.x;
+        grad_state[idx * 31u + 22u].y = grad_out_8.y;
+        let grad_out_9: vec2<f32> = grad_acc_9 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 31u + 23u].x = grad_out_9.x;
+        grad_state[idx * 31u + 23u].y = grad_out_9.y;
+        let grad_out_10: vec2<f32> = grad_acc_10 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 31u + 24u].x = grad_out_10.x;
+        grad_state[idx * 31u + 24u].y = grad_out_10.y;
+        let grad_out_11: vec2<f32> = grad_acc_11 * 1.0 / max(vol, 0.000000000001);
+        grad_state[idx * 31u + 25u].x = grad_out_11.x;
+        grad_state[idx * 31u + 25u].y = grad_out_11.y;
     }
 }

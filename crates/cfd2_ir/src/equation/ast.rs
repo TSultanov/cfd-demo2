@@ -233,6 +233,18 @@ pub struct Term {
     /// from `grad_state` cell gradients, so declaring it forces the
     /// gradients pipeline on (see scheme_expansion / packed_state_gradients).
     pub transpose_dev2: bool,
+    /// Static implicit diagonal ("Sp" without the cell-volume factor): the
+    /// implicit `Source` coefficient contributes `coeff` to the matrix
+    /// diagonal directly, NOT `coeff * V`. The ordinary implicit source is a
+    /// volume-integrated reaction (`S_p * V`, matching the `ddt(..) * V`
+    /// rows it couples to); `static_diag` instead expresses a pointwise
+    /// identity/constraint row whose magnitude must NOT scale with cell
+    /// volume — e.g. the auxiliary-variable definition `lap_X = laplacian(X)`,
+    /// where the `lap_X` diagonal must balance the un-volumed surface-flux
+    /// Laplacian on the same row. Only meaningful on implicit `Source` terms;
+    /// it drops the `* VOLUME` factor from both the assembly and the
+    /// integrated unit.
+    pub static_diag: bool,
 }
 
 impl Term {
@@ -253,6 +265,7 @@ impl Term {
             bounded: false,
             direction: None,
             transpose_dev2: false,
+            static_diag: false,
         }
     }
 
@@ -278,6 +291,12 @@ impl Term {
     /// `transpose_dev2` field docs).
     pub fn with_transpose_dev2(mut self) -> Self {
         self.transpose_dev2 = true;
+        self
+    }
+
+    /// Declare the static implicit-diagonal form (see `static_diag` field docs).
+    pub fn with_static_diag(mut self) -> Self {
+        self.static_diag = true;
         self
     }
 
@@ -332,7 +351,12 @@ impl Term {
                     .map(|value| value.unit())
                     .unwrap_or(si::DIMENSIONLESS);
                 match self.discretization {
-                    // Implicit "source coefficient": S_p * phi.
+                    // Static implicit diagonal: pointwise `S_p * phi` with NO
+                    // volume factor (the `* V` is dropped in assembly too).
+                    Discretization::Implicit if self.static_diag => {
+                        Ok(coeff_unit * self.field.unit())
+                    }
+                    // Implicit "source coefficient": S_p * phi * V.
                     Discretization::Implicit => Ok(coeff_unit * self.field.unit() * si::VOLUME),
                     // Explicit "source term": S_u (independent of unknown state).
                     Discretization::Explicit => Ok(coeff_unit * si::VOLUME),

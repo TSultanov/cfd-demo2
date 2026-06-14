@@ -42,7 +42,6 @@ mod mms_support;
 use std::f64::consts::PI;
 
 use cfd2::solver::gpu::enums::GpuBoundaryType;
-use cfd2::solver::gpu::unified_solver::PlanParamValue;
 use cfd2::solver::mesh::{
     generate_structured_rect_mesh, generate_structured_rect_mesh_periodic, BoundarySides,
     BoundaryType, Mesh,
@@ -208,14 +207,16 @@ fn periodic() -> bool {
     PERIODIC.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// ARC N N4b toggle + coefficient: select the biharmonic-dissipation compressible
-/// MMS model and set the eps4 coefficient. When `BIHARMONIC` is set, `build_run_box`
-/// builds `compressible_mms_biharmonic_model(eps4_knob())` (which appends the
-/// `lap_<conserved>` fields and emits `+ eps4*c*(lap_neigh-lap_own)*area` on each
-/// conserved flux); otherwise the plain MMS model. Default OFF / eps4=0 (the model
-/// is rebuilt per run, so sweeping eps4 needs no recompile — the shader is
-/// regenerated at `UnifiedSolver::new`). The candidate cure for the interior
-/// grid-scale under-dissipation that no order-preserving limiter could fix.
+/// ARC N N4c toggle + coefficient: select the IMPLICIT biharmonic-dissipation
+/// compressible MMS model and set the eps4 coefficient. When `BIHARMONIC` is set,
+/// `build_run_box` builds `compressible_mms_biharmonic_model()` (stride-12: the
+/// `lap_X = laplacian(X)` constraint unknowns + `laplacian(-bih_eps4, lap_X)` on
+/// each conserved row) and fills the per-cell `bih_eps4` field with `eps4_knob()`;
+/// otherwise the plain MMS model. eps4 is a runtime field (no recompile to sweep).
+/// The cure for the interior grid-scale under-dissipation; the implicit form
+/// removes the explicit `dt <~ C*h^2` limit but the eps4>0 grad^4 operator is
+/// conditioning-limited at fine mesh with the default Jacobi+FGMRES (see the
+/// model doc / `probe_arcn_biharmonic_order` — deferred preconditioner work).
 static BIHARMONIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static EPS4_BITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -670,13 +671,6 @@ fn build_run_box(
     solver.set_outer_iters(outer_iters).expect("outer_iters");
     solver.set_outer_tolerance(0.0).expect("outer_tol");
     solver.set_outer_tolerance_abs(0.0).expect("outer_tol_abs");
-    if biharmonic() {
-        // Arc N4b: set the runtime biharmonic coefficient (one registered model serves
-        // every eps4). Default 0 keeps the term inert.
-        solver
-            .set_named_param("low_mach.eps4", PlanParamValue::F32(eps4_knob()))
-            .expect("eps4");
-    }
     println!("[probe] config: nx={nx} ny={ny} lx={lx} ly={ly} mu={mu} dt={dt} outer_iters={outer_iters} (break pinned open)");
 
     // Per-face exact Dirichlet rho and u on the (all-Inlet) boundary; seed
@@ -844,6 +838,15 @@ fn build_run_box(
     solver.set_field_scalar("p", &p0).expect("init p");
     solver.set_field_scalar("T", &t0).expect("init T");
     solver.set_field_vec2("u", &u0).expect("init u");
+    if biharmonic() {
+        // Arc N4c: the implicit biharmonic coefficient `bih_eps4` (= eps4 *
+        // acoustic-speed scale) is a uniform-valued storage field (like mu); one
+        // registered model serves any eps4 with no shader recompile. Default 0
+        // keeps the dissipation inert.
+        solver
+            .set_field_scalar("bih_eps4", &vec![eps4_knob() as f64; cells])
+            .expect("init bih_eps4");
+    }
     solver.initialize_history();
     SteadyRun { mesh, solver }
 }
@@ -1670,11 +1673,14 @@ fn probe_arcn_minmod_order() {
     }
 }
 
-/// ARC N N4b: biharmonic's mu>0 convergence order — the ACCURACY gate. The
-/// undivided-Laplacian 4th-difference term is O(h^3) in the residual, so it must
-/// stay subdominant to the O(h^2) scheme and preserve order ~2 (vanLeer clears
-/// ~1.97/2.12/1.91/2.20). Sweeps a few eps4 so an over-large coefficient that
-/// pollutes coarse-h accuracy is visible. eps4=0 = the vanLeer control.
+/// ARC N N4c: IMPLICIT biharmonic mu>0 convergence order. eps4=0 (control)
+/// reproduces plain `compressible_mms` to order ~2 (rho 1.80 / u 2.12 / p 2.28 /
+/// T 1.86, finest err ~5e-4) — proving the stride-12 mixed formulation is correct
+/// and the explicit `dt` limit is gone. eps4>0 is currently conditioning-limited:
+/// the implicit grad^4 (condition ~h^-4) outruns the default Jacobi+FGMRES at fine
+/// mesh, so the n=48 solve under-resolves (a stronger preconditioner is the
+/// deferred follow-up). NOTE: needs the model's large `max_iters` override; even
+/// so eps4=0 (~h^-2 Laplacian) needs ~thousands of FGMRES iters per step at n=48.
 #[test]
 #[ignore]
 fn probe_arcn_biharmonic_order() {

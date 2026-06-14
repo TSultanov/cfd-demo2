@@ -457,6 +457,11 @@ pub type SourceImplicitUnit<FieldD, CoeffD> = crate::dimensions::MulDim<
     crate::dimensions::Volume,
 >;
 
+/// Type-level computation for the static implicit-diagonal integrated unit:
+/// coeff * field_unit (the `sp` form drops the volume factor of the ordinary
+/// implicit source).
+pub type SourceStaticUnit<FieldD, CoeffD> = crate::dimensions::MulDim<CoeffD, FieldD>;
+
 /// Type-level computation for explicit source integrated unit: coeff * volume
 pub type SourceExplicitUnit<CoeffD> =
     crate::dimensions::MulDim<CoeffD, crate::dimensions::Volume>;
@@ -606,6 +611,32 @@ pub mod typed_fvm {
                 None,
                 Some(coeff.to_untyped()),
             ),
+            _dim: PhantomData,
+        }
+    }
+
+    /// Static implicit-diagonal source ("Sp"): contributes `coeff` to the
+    /// matrix diagonal of `field` directly, WITHOUT the cell-volume factor of
+    /// `source_coeff`. Use this for pointwise identity/constraint rows whose
+    /// magnitude must not scale with cell volume — e.g. defining an auxiliary
+    /// unknown `lap_X` via `(sp(-1, lap_X) + laplacian(1, X)).eqn(lap_X)`,
+    /// where the un-volumed diagonal must balance the surface-flux Laplacian
+    /// of `X` on the same row.
+    ///
+    /// Integrated unit: coeff * field_unit (no volume).
+    pub fn sp<FieldD: UnitDimension, CoeffD: UnitDimension, K: Kind>(
+        coeff: TypedCoeff<CoeffD>,
+        field: TypedFieldRef<FieldD, K>,
+    ) -> TypedTerm<SourceStaticUnit<FieldD, CoeffD>> {
+        TypedTerm {
+            inner: Term::new(
+                TermOp::Source,
+                Discretization::Implicit,
+                field.to_untyped(),
+                None,
+                Some(coeff.to_untyped()),
+            )
+            .with_static_diag(),
             _dim: PhantomData,
         }
     }

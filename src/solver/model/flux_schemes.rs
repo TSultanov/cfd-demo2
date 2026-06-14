@@ -40,15 +40,6 @@ pub struct CentralUpwindDecl {
     /// atoms: `pressure_field` (mapped to the reconstructed face pressure)
     /// and `density` (e.g. `gamma * p / rho + dp_drho`).
     pub generalized_wave_speed_sq: AlgExpr,
-    /// Arc N4b k-selective biharmonic dissipation. `false` (the default) emits NO
-    /// dissipation term => byte-identical WGSL. `true` adds, to each conserved flux,
-    ///   `+ eps4 * c_face * (lap_neigh - lap_own) * area`
-    /// where `eps4` is the runtime `low_mach_params.eps4` uniform (default 0, so the
-    /// machinery is inert until tuned) and `lap_<conserved>` are the undivided
-    /// Laplacian fields the gradients kernel writes (must be present in the layout).
-    /// The undivided Laplacian makes the term O(h^3) on smooth modes (order-preserving)
-    /// and O(1/h) at the grid scale (quenches the inviscid refinement-amplified mode).
-    pub biharmonic: bool,
 }
 
 /// Lower a (cell-)algebraic expression to a face expression by mapping its
@@ -1067,66 +1058,12 @@ fn derive_central_upwind(
         )
     };
 
-    // Arc N4b: k-selective biharmonic dissipation. Per conserved flux, add
-    //   + eps4 * c_face * (lap_neigh - lap_own) * area
-    // where `lap_<conserved>` is the undivided Laplacian `sum(phi_n - phi_c)` written by
-    // the gradients kernel and `c_face` is the mean cell acoustic speed. Dissipative sign:
-    // lap = +grad^2 U (undivided, eigenvalue < 0), so the (neigh - own) face difference
-    // nets to -eps4*c*grad^4 U in the residual => damps the high-k refinement-amplified
-    // inviscid mode while staying O(h^3) on smooth modes (order-preserving). `None` =>
-    // no term emitted => byte-identical WGSL when biharmonic is off.
-    let (phi, phi_up_x, phi_up_y, phi_ep) = if decl.biharmonic {
-        let biharmonic = |lap_name: String| -> S {
-            let lap_own = S::state(FaceSide::Owner, lap_name.clone());
-            let lap_neigh = S::state(FaceSide::Neighbor, lap_name);
-            let c_face = S::Mul(
-                Box::new(S::lit(0.5)),
-                Box::new(S::Add(
-                    Box::new(c_cell(FaceSide::Owner)),
-                    Box::new(c_cell(FaceSide::Neighbor)),
-                )),
-            );
-            let lap_jump = S::Sub(Box::new(lap_neigh), Box::new(lap_own));
-            // Interior-only mask: `own_mask * neigh_mask` is 0 unless BOTH cells are
-            // interior, so the biharmonic acts only on interior-interior faces (boundary
-            // cells have O(h) undivided Laplacians that would otherwise pollute at O(1)).
-            let mask = S::Mul(
-                Box::new(S::state(FaceSide::Owner, "bih_mask")),
-                Box::new(S::state(FaceSide::Neighbor, "bih_mask")),
-            );
-            // eps4 is the runtime `low_mach_params.eps4` uniform (default 0).
-            S::Mul(
-                Box::new(S::Mul(
-                    Box::new(S::Mul(
-                        Box::new(S::Mul(Box::new(S::low_mach_eps4()), Box::new(c_face))),
-                        Box::new(lap_jump),
-                    )),
-                    Box::new(mask),
-                )),
-                Box::new(S::area()),
-            )
-        };
-        (
-            S::Add(
-                Box::new(phi),
-                Box::new(biharmonic(format!("lap_{rho_name}"))),
-            ),
-            S::Add(
-                Box::new(phi_up_x),
-                Box::new(biharmonic(format!("lap_{rho_u_name}_x"))),
-            ),
-            S::Add(
-                Box::new(phi_up_y),
-                Box::new(biharmonic(format!("lap_{rho_u_name}_y"))),
-            ),
-            S::Add(
-                Box::new(phi_ep),
-                Box::new(biharmonic(format!("lap_{rho_e_name}"))),
-            ),
-        )
-    } else {
-        (phi, phi_up_x, phi_up_y, phi_ep)
-    };
+    // Arc N4c: the biharmonic dissipation is now treated IMPLICITLY in the
+    // matrix (the auxiliary `lap_<conserved>` unknowns + the `laplacian(bih_eps4,
+    // lap_X)` term on each conserved equation), so it no longer rides on the
+    // explicit flux. The explicit `+ eps4*c*(lap_neigh-lap_own)*area` term (Arc
+    // N4b) was retired with its `dt <~ C*h^2` stability limit; see
+    // `compressible::build_compressible_system_impl`.
 
     let mut flux = Vec::new();
     for name in &components {

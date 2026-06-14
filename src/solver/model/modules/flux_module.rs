@@ -47,13 +47,6 @@ pub struct ResolvedGradientTarget {
     pub slip_vec2_x_offset: Option<u32>,
     /// SlipWall: y-offset of full vec2 field (for velocity fields)
     pub slip_vec2_y_offset: Option<u32>,
-    /// Arc N4b biharmonic dissipation: state-array offset of the `lap_<component>`
-    /// scalar field when present (the gradients kernel writes the undivided
-    /// Laplacian there). `None` (default) emits no Laplacian code.
-    pub lap_offset: Option<u32>,
-    /// Arc N4b: state-array offset of the per-cell `bih_mask` field (1.0 interior /
-    /// 0.0 boundary cell). Same value on every target; `Some` only with biharmonic.
-    pub bih_mask_offset: Option<u32>,
 }
 
 /// Resolve gradient targets from state layout and flux layout.
@@ -124,16 +117,6 @@ fn build_resolved_targets(
 
     let mut registry = PortRegistry::new(layout.clone());
     let layout_meta = build_layout_metadata(layout);
-    // Arc N4b: the per-cell interior mask `bih_mask` is one global field (not per
-    // target); resolve it once and stamp the same offset on every target.
-    let bih_mask_offset = if layout_meta.fields_by_name.contains_key("bih_mask") {
-        let port = registry
-            .register_scalar_field::<AnyDimension>("bih_mask")
-            .map_err(|e| format!("flux_module_gradients: {e}"))?;
-        Some(port.offset())
-    } else {
-        None
-    };
     let mut targets = Vec::new();
 
     for (component, grad) in gradients {
@@ -194,20 +177,6 @@ fn build_resolved_targets(
 
         let bc_unknown_offset = flux_layout.offset_for(component);
 
-        // Arc N4b: resolve the optional `lap_<component>` scalar field for biharmonic
-        // dissipation. It exists only when the model enables biharmonic (the compressible
-        // model appends `lap_rho`/`lap_rho_u_x`/`lap_rho_u_y`/`lap_rho_e`); otherwise this
-        // is None and the gradients kernel emits no Laplacian code (byte-identical).
-        let lap_field = format!("lap_{component}");
-        let lap_offset = if layout_meta.fields_by_name.contains_key(&lap_field) {
-            let port = registry
-                .register_scalar_field::<AnyDimension>(lap_field.as_str())
-                .map_err(|e| format!("flux_module_gradients: {e}"))?;
-            Some(port.offset())
-        } else {
-            None
-        };
-
         // SlipWall offsets for velocity-like vec2 fields
         let (slip_vec2_x_offset, slip_vec2_y_offset) = match base_field.as_str() {
             "u" | "U" | "rho_u" | "rhoU" => {
@@ -236,8 +205,6 @@ fn build_resolved_targets(
             bc_unknown_offset,
             slip_vec2_x_offset,
             slip_vec2_y_offset,
-            lap_offset,
-            bih_mask_offset,
         });
     }
     Ok(targets)
@@ -339,8 +306,6 @@ pub fn flux_module_module(
                 bc_unknown_offset: t.bc_unknown_offset,
                 slip_vec2_x_offset: t.slip_vec2_x_offset,
                 slip_vec2_y_offset: t.slip_vec2_y_offset,
-                lap_offset: t.lap_offset,
-                bih_mask_offset: t.bih_mask_offset,
             })
             .collect();
     }
@@ -444,8 +409,6 @@ fn generate_flux_module_gradients_kernel_program_for_model(
             bc_unknown_offset: spec.bc_unknown_offset,
             slip_vec2_x_offset: spec.slip_vec2_x_offset,
             slip_vec2_y_offset: spec.slip_vec2_y_offset,
-            lap_offset: spec.lap_offset,
-            bih_mask_offset: spec.bih_mask_offset,
         })
         .collect();
 

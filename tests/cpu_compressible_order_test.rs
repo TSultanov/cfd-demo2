@@ -418,7 +418,25 @@ fn diag_cpu_vs_gpu_mms_step1() {
 
     // CPU.
     let (mut c, mesh) = setup(n, CpuBackendConfig::default());
+    let bc_before = c.debug_bc_value();
     for _ in 0..steps { c.step(); }
+    let bc_after = c.debug_bc_value();
+    // Did bc_expr refresh the rho_e (u_idx 3) / T (u_idx 7) ghosts at boundary faces?
+    {
+        let mut max_change_re = 0.0f32;
+        let mut max_change_t = 0.0f32;
+        let mut sample = String::new();
+        for f in 0..mesh.num_faces() {
+            if mesh.face_neighbor[f].is_some() { continue; }
+            let dre = (bc_after[f * 8 + 3] - bc_before[f * 8 + 3]).abs();
+            let dt = (bc_after[f * 8 + 7] - bc_before[f * 8 + 7]).abs();
+            if dre > max_change_re { max_change_re = dre; if sample.is_empty() {
+                sample = format!("face {f}: rho_e seed={:.5} refreshed={:.5}", bc_before[f*8+3], bc_after[f*8+3]);
+            } }
+            max_change_t = max_change_t.max(dt);
+        }
+        println!("[bc-refresh] CPU bc_value change after step: rho_e={max_change_re:.3e} T={max_change_t:.3e}; {sample}");
+    }
     let (crho, cu, cp) = (
         c.get_field_scalar("rho").unwrap(),
         c.get_field_vec2("u").unwrap(),
@@ -481,6 +499,31 @@ fn diag_cpu_vs_gpu_mms_step1() {
     let du = cu.iter().zip(&gu).map(|(a, b)| (a.0 - b.0).abs().max((a.1 - b.1).abs())).fold(0.0, f64::max);
     let dre = cp.iter().zip(&gre).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
     println!("[mms-step1] n={n} max|drho|={drho:.3e} max|du|={du:.3e} max|drho_e|={dre:.3e}");
+
+    // Compare the GRADIENT state fields (computed on the pre-update = exact
+    // state during the step). If these diverge, the gradient kernel is the
+    // bias source feeding the energy flux (conduction/viscous work).
+    let bdry: Vec<bool> = (0..cells)
+        .map(|i| {
+            let (s0, e0) = (mesh.cell_face_offsets[i], mesh.cell_face_offsets[i + 1]);
+            (s0..e0).any(|k| mesh.face_neighbor[mesh.cell_faces[k]].is_none())
+        })
+        .collect();
+    for f in ["grad_rho_e", "grad_T"] {
+        let cv = c.get_field_vec2(f).unwrap();
+        let gv = pollster::block_on(g.get_field_vec2(f)).unwrap();
+        let (mut wi, mut wd) = (0usize, 0.0);
+        let mut int_max = 0.0f64;
+        for i in 0..cells {
+            let d = (cv[i].0 - gv[i].0).abs().max((cv[i].1 - gv[i].1).abs());
+            if d > wd { wd = d; wi = i; }
+            if !bdry[i] { int_max = int_max.max(d); }
+        }
+        println!(
+            "[grad-loc] {f}: worst cell {wi} ({:.3},{:.3}) bdry_adj={} c={:?} g={:?} d={wd:.3e}; interior_max={int_max:.3e}",
+            mesh.cell_cx[wi], mesh.cell_cy[wi], bdry[wi], cv[wi], gv[wi]
+        );
+    }
 }
 
 #[ignore]

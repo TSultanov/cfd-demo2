@@ -533,30 +533,42 @@ impl CpuSolver {
         self.constants.time_scheme = self.time_scheme as u32;
         let ctx = constants_ctx(&self.constants, &self.low_mach);
 
-        // Group the scheduled kernels by execution role, preserving RECIPE
-        // ORDER within each group (the recipe schedule is already dependency-
-        // correct — e.g. compressible runs flux_module_gradients -> flux_module
-        // -> packed_state_gradients -> assembly, two distinct gradient passes
-        // feeding the flux and the assembly respectively, so re-sorting by phase
-        // would feed the flux the wrong gradients). Mirrors the GPU coupled
-        // backend: init_prepare (once) then per outer iteration the assembly
-        // group, the CPU linear solve, then the update group. Expression BCs
-        // (bc_expr) re-run every outer iteration.
-        let collect = |phases: &[KernelPhase]| -> Vec<String> {
-            self.schedule
-                .iter()
-                .filter(|s| phases.contains(&s.phase))
-                .map(|s| s.id.clone())
-                .collect()
-        };
-        let prep = collect(&[KernelPhase::Preparation]);
-        let bc_expr: Vec<String> = prep.iter().filter(|id| id.contains("bc_expr")).cloned().collect();
-        let assembly_group = collect(&[
-            KernelPhase::Gradients,
-            KernelPhase::FluxComputation,
-            KernelPhase::Assembly,
-        ]);
-        let update_group = collect(&[KernelPhase::Update, KernelPhase::PrimitiveRecovery]);
+        // Drive in RECIPE (schedule) ORDER, which is the order the GPU executes:
+        // the per-iteration kernels are the Gradients/FluxComputation/Assembly
+        // passes interleaved with the recurring `bc_expr` AT ITS SCHEDULED
+        // POSITION. This ordering is load-bearing: compressible schedules
+        // flux_module_gradients + flux_module BEFORE bc_expr, so those see the
+        // pre-refresh (seeded) boundary ghosts — exactly like the GPU; phase-
+        // grouping bc_expr first instead fed them the refreshed ghosts and
+        // biased the energy gradients (grad_rho_e/grad_T) at the boundary.
+        // Once-only Preparation kernels (e.g. rhie_chow dp_init) run before the
+        // loop; the CPU linear solve replaces the LinearSolve phase after
+        // assembly; Apply is monitor-only (skipped); Update/PrimitiveRecovery
+        // apply the solution.
+        let is_bc_expr = |id: &str| id.contains("bc_expr");
+        let per_iter: Vec<String> = self
+            .schedule
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.phase,
+                    KernelPhase::Gradients | KernelPhase::FluxComputation | KernelPhase::Assembly
+                ) || (s.phase == KernelPhase::Preparation && is_bc_expr(&s.id))
+            })
+            .map(|s| s.id.clone())
+            .collect();
+        let prep_once: Vec<String> = self
+            .schedule
+            .iter()
+            .filter(|s| s.phase == KernelPhase::Preparation && !is_bc_expr(&s.id))
+            .map(|s| s.id.clone())
+            .collect();
+        let update_group: Vec<String> = self
+            .schedule
+            .iter()
+            .filter(|s| matches!(s.phase, KernelPhase::Update | KernelPhase::PrimitiveRecovery))
+            .map(|s| s.id.clone())
+            .collect();
 
         let threads = self.config.threads;
         let engine = self.config.engine;
@@ -578,8 +590,8 @@ impl CpuSolver {
             );
         };
 
-        // Prepare once per step.
-        for id in &prep {
+        // Prepare once per step (non-bc_expr Preparation kernels).
+        for id in &prep_once {
             run(id);
         }
 
@@ -588,11 +600,10 @@ impl CpuSolver {
             let snap = self.buffers.f32_vec("state");
             self.buffers.copy_into_f32("state_iter", &snap);
 
-            // Expression-valued BCs read interior state: refresh each iteration.
-            for id in &bc_expr {
-                run(id);
-            }
-            for id in &assembly_group {
+            // Per-iteration kernels in schedule order (gradients/flux/bc_expr/
+            // assembly), then the CPU linear solve (replacing LinearSolve), then
+            // the update group.
+            for id in &per_iter {
                 run(id);
             }
             self.linear_solve();
@@ -661,6 +672,11 @@ impl CpuSolver {
             run(id);
         }
         (self.buffers.f32_vec("matrix_values"), self.buffers.f32_vec("rhs"))
+    }
+
+    /// Debug: read the per-face `bc_value` buffer (length `num_faces * S`).
+    pub fn debug_bc_value(&self) -> Vec<f32> {
+        self.buffers.f32_vec("bc_value")
     }
 
     /// Block-CSR topology accessors (for the MMS residual consistency check).

@@ -867,14 +867,21 @@ fn compressible_model_impl(
             },
         ],
         // The implicit biharmonic couples a 4th-order (condition ~ h^-4)
-        // operator into the block, so the per-step FGMRES needs a far larger
-        // iteration budget than the 200 the inexact-Picard default allots;
-        // without it the fine-mesh solve stalls (the conserved block is left
-        // under-resolved). Non-biharmonic models keep the global default.
+        // operator into the block. Arc N4d found the stiffness is dominated by
+        // the INTRA-CELL coupling (inv_dt-scaled recovery rows + the -I/+4
+        // auxiliary-Laplacian block); the per-cell block-Jacobi preconditioner
+        // (`PreconditionerType::BlockJacobi`, selected via SolverConfig — the
+        // 12-unknown stride fits MAX_BLOCK_JACOBI=16) resolves it and converges
+        // in ~80 FGMRES iters/step at n=48 with O(n) scaling. The default
+        // point-Jacobi stalls and needs thousands of iters, so a modest budget
+        // bump over the inexact-Picard default of 200 covers the transient and
+        // finer research meshes with headroom. Non-biharmonic models keep the
+        // global default. NOTE: callers MUST select BlockJacobi for this model;
+        // point-Jacobi is conditioning-limited at fine mesh.
         linear_solver: if biharmonic {
             Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
                 solver: crate::solver::model::linear_solver::ModelLinearSolverSettings {
-                    max_iters: 4000,
+                    max_iters: 1000,
                     ..Default::default()
                 },
                 ..Default::default()

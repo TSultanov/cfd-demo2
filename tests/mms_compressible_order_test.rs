@@ -214,9 +214,10 @@ fn periodic() -> bool {
 /// each conserved row) and fills the per-cell `bih_eps4` field with `eps4_knob()`;
 /// otherwise the plain MMS model. eps4 is a runtime field (no recompile to sweep).
 /// The cure for the interior grid-scale under-dissipation; the implicit form
-/// removes the explicit `dt <~ C*h^2` limit but the eps4>0 grad^4 operator is
-/// conditioning-limited at fine mesh with the default Jacobi+FGMRES (see the
-/// model doc / `probe_arcn_biharmonic_order` — deferred preconditioner work).
+/// removes the explicit `dt <~ C*h^2` limit, and Arc N4d cured the eps4>0 grad^4
+/// conditioning with `PreconditionerType::BlockJacobi` (the per-cell 12x12 block
+/// inverse, selected in `build_run_box`; the default point-Jacobi stalls at fine
+/// mesh). See the model doc / `probe_arcn_biharmonic_order`.
 static BIHARMONIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static EPS4_BITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -648,7 +649,20 @@ fn build_run_box(
                 Scheme::SecondOrderUpwindVanLeer
             },
             time_scheme,
-            preconditioner: PreconditionerType::Jacobi,
+            // Arc N4d: the implicit biharmonic couples a 4th-order (condition
+            // ~h^-4) block whose stiffness is dominated by the INTRA-CELL
+            // coupling (inv_dt-scaled recovery rows + the -I/+4 auxiliary-
+            // Laplacian block, diagonal entries spanning ~2000x). Point-Jacobi
+            // stalls at fine mesh (eps4=0.25 n=48 hits the 4000-iter cap as the
+            // march nears steady state); the per-cell 12x12 block inverse
+            // resolves that coupling exactly and converges in ~80 iters/step
+            // (O(n) scaling). Non-biharmonic runs keep point-Jacobi (byte-for-
+            // byte the prior behaviour).
+            preconditioner: if biharmonic() {
+                PreconditionerType::BlockJacobi
+            } else {
+                PreconditionerType::Jacobi
+            },
             stepping: SteppingMode::Implicit { outer_iters },
         },
         None,
@@ -1673,14 +1687,19 @@ fn probe_arcn_minmod_order() {
     }
 }
 
-/// ARC N N4c: IMPLICIT biharmonic mu>0 convergence order. eps4=0 (control)
-/// reproduces plain `compressible_mms` to order ~2 (rho 1.80 / u 2.12 / p 2.28 /
-/// T 1.86, finest err ~5e-4) — proving the stride-12 mixed formulation is correct
-/// and the explicit `dt` limit is gone. eps4>0 is currently conditioning-limited:
-/// the implicit grad^4 (condition ~h^-4) outruns the default Jacobi+FGMRES at fine
-/// mesh, so the n=48 solve under-resolves (a stronger preconditioner is the
-/// deferred follow-up). NOTE: needs the model's large `max_iters` override; even
-/// so eps4=0 (~h^-2 Laplacian) needs ~thousands of FGMRES iters per step at n=48.
+/// ARC N N4c/N4d: IMPLICIT biharmonic mu>0 convergence order. eps4=0 (control)
+/// reproduces plain `compressible_mms` to order ~2 (rho 2.02 / u 2.12 / p 2.03 /
+/// T 1.95, finest err ~5e-4) — proving the stride-12 mixed formulation is correct
+/// and the explicit `dt` limit is gone. Arc N4d CURED the eps4>0 conditioning: the
+/// implicit grad^4 stiffness is intra-cell-dominated (inv_dt-scaled recovery rows +
+/// the -I/+4 auxiliary-Laplacian block, diagonal span ~2000x), so
+/// `PreconditionerType::BlockJacobi` (the per-cell 12x12 inverse, selected in
+/// `build_run_box`) converges in ~80 FGMRES iters/step at n=48 to an EXACT discrete
+/// fixed point, where the default point-Jacobi stalled at the iteration cap. Orders
+/// are now positive (eps4=0.1: 1.68/1.57/1.42/1.98; eps4=0.25: 1.48/1.94/2.39/1.76,
+/// was -2.8/-1.96) — the sub-2 values are the biharmonic hyperviscosity consistency
+/// error (the -eps4*grad^4 term assembles as ~eps4*h^2*grad^4 U, an O(h^2)
+/// inconsistency with the non-biharmonic MMS sources), trending to 2 under refinement.
 #[test]
 #[ignore]
 fn probe_arcn_biharmonic_order() {
@@ -1796,6 +1815,99 @@ fn probe_arcn_biharmonic_stab() {
             "[arcn-bih-stab] outer={outer} dt={dt} ORDER u={:.3}",
             fit(&hs, &u_errs)
         );
+    }
+    BIHARMONIC.store(false, Ordering::Relaxed);
+    set_eps4(0.0);
+}
+
+/// ARC N4d DIAGNOSTIC (throwaway): per-step FGMRES telemetry for the implicit
+/// biharmonic solve, to classify the linear-solve failure mode and compare
+/// preconditioners. Prints, for each (eps4, n), per-step (iterations, residual,
+/// converged/diverged) plus a SUMMARY with total iterations, wall time, and the
+/// plateau-free short-march errors. Env knobs (ONE compile, many runs):
+///   BIH_DIAG_PRECOND  = jacobi|block|amg     (default jacobi)
+///   BIH_DIAG_RESTART  = <usize>              (<= build-time capacity 60; default model)
+///   BIH_DIAG_MAXITERS = <u32>                (default model 4000)
+///   BIH_DIAG_TOL      = <f32>                (default model 1e-4)
+///   BIH_DIAG_EPS4     = "0,0.25"             (comma list)
+///   BIH_DIAG_N        = "16,32"              (comma list)
+///   BIH_DIAG_STEPS    = <usize>              (default 8)
+#[test]
+#[ignore]
+fn probe_arcn_biharmonic_diag() {
+    use cfd2::solver::gpu::unified_solver::PlanParamValue;
+    use std::sync::atomic::Ordering;
+    BIHARMONIC.store(true, Ordering::Relaxed);
+
+    let precond_name = std::env::var("BIH_DIAG_PRECOND").unwrap_or_else(|_| "jacobi".into());
+    let precond = match precond_name.as_str() {
+        "block" => PreconditionerType::BlockJacobi,
+        "amg" => PreconditionerType::Amg,
+        _ => PreconditionerType::Jacobi,
+    };
+    let restart: Option<usize> = std::env::var("BIH_DIAG_RESTART").ok().and_then(|s| s.parse().ok());
+    let max_iters: Option<u32> = std::env::var("BIH_DIAG_MAXITERS").ok().and_then(|s| s.parse().ok());
+    let tol: Option<f32> = std::env::var("BIH_DIAG_TOL").ok().and_then(|s| s.parse().ok());
+    let parse_list_f64 = |s: String| -> Vec<f64> {
+        s.split(',').filter_map(|x| x.trim().parse().ok()).collect()
+    };
+    let parse_list_usize = |s: String| -> Vec<usize> {
+        s.split(',').filter_map(|x| x.trim().parse().ok()).collect()
+    };
+    let eps4s = std::env::var("BIH_DIAG_EPS4").ok().map(parse_list_f64).unwrap_or_else(|| vec![0.0, 0.25]);
+    let ns = std::env::var("BIH_DIAG_N").ok().map(parse_list_usize).unwrap_or_else(|| vec![16, 32]);
+    let steps: usize = std::env::var("BIH_DIAG_STEPS").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
+
+    println!(
+        "[bih-diag] precond={precond_name} restart={restart:?} max_iters={max_iters:?} tol={tol:?} eps4s={eps4s:?} ns={ns:?} steps={steps}"
+    );
+    for &eps4 in &eps4s {
+        set_eps4(eps4);
+        for &n in &ns {
+            let mut run = build_run(n, EXTRA_SHEAR, MU, DT, TimeScheme::BDF2, OUTER_ITERS);
+            run.solver.set_preconditioner(precond);
+            if let Some(r) = restart {
+                run.solver
+                    .set_named_param("linear_solver.max_restart", PlanParamValue::Usize(r))
+                    .expect("set max_restart");
+            }
+            if let Some(mi) = max_iters {
+                run.solver
+                    .set_named_param("linear_solver.max_iters", PlanParamValue::U32(mi))
+                    .expect("set max_iters");
+            }
+            if let Some(t) = tol {
+                run.solver
+                    .set_named_param("linear_solver.tolerance", PlanParamValue::F32(t))
+                    .expect("set tolerance");
+            }
+            let mut total_iters = 0u64;
+            let mut any_diverged = false;
+            let t0 = std::time::Instant::now();
+            for s in 0..steps {
+                // step_with_stats returns (first, best, last) across the step's
+                // outer iterations; OUTER_ITERS=1 makes them identical, so the
+                // representative single solve is the first entry.
+                let stats = run.solver.step_with_stats().expect("step_with_stats");
+                let st = stats.first().copied().unwrap_or_default();
+                total_iters += st.iterations as u64;
+                any_diverged |= st.diverged;
+                println!(
+                    "[bih-diag] eps4={eps4:.2} n={n} step={s} iters={} resid={:.3e} conv={} div={} t={:.1}ms",
+                    st.iterations,
+                    st.residual,
+                    st.converged,
+                    st.diverged,
+                    st.time.as_secs_f64() * 1e3
+                );
+            }
+            let (rho_err, u_err, p_err, t_err) = read_errors(&run);
+            println!(
+                "[bih-diag] SUMMARY eps4={eps4:.2} n={n} precond={precond_name} steps={steps} total_iters={total_iters} avg_iters={:.0} wall={:.2}s diverged={any_diverged} rho_l2={rho_err:.3e} u_l2={u_err:.3e} p_l2={p_err:.3e} t_l2={t_err:.3e}",
+                total_iters as f64 / steps as f64,
+                t0.elapsed().as_secs_f64()
+            );
+        }
     }
     BIHARMONIC.store(false, Ordering::Relaxed);
     set_eps4(0.0);

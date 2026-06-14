@@ -151,7 +151,13 @@ impl CpuSolver {
 
         // Flux (one value per face), gradients, linear system, solution.
         buffers.insert_f32("fluxes", vec![0.0; num_faces]);
-        buffers.insert_vec2("grad_state", vec![0.0; num_cells * 2]);
+        // grad_state mirrors the state layout: one Vector2 gradient per state slot
+        // (indexed `grad_state[cell * stride + component]`), so it holds
+        // `num_cells * stride` Vector2 elements (× 2 floats each).
+        buffers.insert_vec2(
+            "grad_state",
+            vec![0.0; num_cells * state_stride as usize * 2],
+        );
         buffers.insert_f32("matrix_values", vec![0.0; nnz]);
         buffers.insert_f32("rhs", vec![0.0; num_cells]);
         buffers.insert_f32("x", vec![0.0; num_cells]);
@@ -698,5 +704,28 @@ mod tests {
             (0.6..=1.6).contains(&order),
             "implausible order {order:.3} for upwind advection-diffusion"
         );
+    }
+
+    #[test]
+    fn cpu_scalar_transport_sou_converges() {
+        // Second-order upwind exercises the gradient path (packed_state_gradients
+        // + generic_coupled_assembly_grad_state). Expect ~2nd order.
+        let levels = [8usize, 16, 32, 64];
+        let mut hs = Vec::new();
+        let mut errs = Vec::new();
+        for &n in &levels {
+            let (mesh, t) = solve_steady(n, Scheme::SecondOrderUpwind);
+            let e = l2_error(&mesh, &t);
+            println!("[cpu-mms][sou] n={n} l2={e:.3e}");
+            hs.push(1.0 / n as f64);
+            errs.push(e);
+        }
+        let order = fit_order(&hs, &errs);
+        println!("[cpu-mms][sou] observed order = {order:.3}");
+        assert!(
+            (1.6..=2.4).contains(&order),
+            "implausible SOU order {order:.3} (expected ~2)"
+        );
+        assert!(*errs.last().unwrap() < 1e-3, "finest SOU error too large: {errs:?}");
     }
 }

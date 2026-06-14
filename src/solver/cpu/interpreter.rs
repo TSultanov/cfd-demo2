@@ -481,12 +481,26 @@ impl<'a> Interpreter<'a> {
             }
             ExprNode::Field { base, field } => {
                 let axis = axis_of(field).expect("struct-field store unsupported");
-                let name = ident_name(base).expect("component store on non-local");
-                let mut cur = frame
-                    .get(name)
-                    .unwrap_or_else(|| panic!("component store on undefined local `{name}`"));
-                cur.set_component(axis, val.as_f32());
-                frame.locals.insert(name.to_string(), cur);
+                match base.node() {
+                    // Local vector component: `n.x = ...`.
+                    ExprNode::Ident(name) => {
+                        let mut cur = frame.get(name).unwrap_or_else(|| {
+                            panic!("component store on undefined local `{name}`")
+                        });
+                        cur.set_component(axis, val.as_f32());
+                        frame.locals.insert(name.to_string(), cur);
+                    }
+                    // Buffer element component: `grad_state[idx].x = ...`.
+                    ExprNode::Index { base: bbase, index } => {
+                        let buf = ident_name(bbase)
+                            .expect("component store into non-buffer element");
+                        let i = self.eval(index, frame).as_index();
+                        let mut cur = self.buffers.load(buf, i);
+                        cur.set_component(axis, val.as_f32());
+                        self.buffers.store(buf, i, cur);
+                    }
+                    other => panic!("unsupported component-store base {other:?}"),
+                }
             }
             other => panic!("unsupported assignment target {other:?}"),
         }

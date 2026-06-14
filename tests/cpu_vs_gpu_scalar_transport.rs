@@ -4,7 +4,7 @@
 //! the `cpu` backend and the `dev-tests` (GPU MMS harness) features.
 #![cfg(all(feature = "cpu", feature = "dev-tests"))]
 
-use cfd2::solver::cpu::{CpuBackendConfig, CpuSolver};
+use cfd2::solver::cpu::{CpuBackendConfig, CpuEngine, CpuSolver};
 use cfd2::solver::gpu::enums::GpuBoundaryType;
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
 use cfd2::solver::model::helpers::SolverRuntimeParamsExt;
@@ -111,8 +111,18 @@ fn run_gpu(mesh: &Mesh, scheme: Scheme) -> Vec<f64> {
 fn cpu_matches_gpu_scalar_transport() {
     // Validate every CPU computation option against the GPU for both schemes.
     let configs = [
-        ("1t/scalar", CpuBackendConfig { threads: 1, simd: false }),
-        ("4t/simd", CpuBackendConfig { threads: 4, simd: true }),
+        (
+            "interp/1t",
+            CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false },
+        ),
+        (
+            "interp/4t/simd",
+            CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 4, simd: true },
+        ),
+        (
+            "transpiled/4t/simd",
+            CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 4, simd: true },
+        ),
     ];
     for scheme in [Scheme::Upwind, Scheme::SecondOrderUpwind] {
         let n = 32;

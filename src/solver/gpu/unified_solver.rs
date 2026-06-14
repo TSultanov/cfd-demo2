@@ -927,6 +927,24 @@ impl GpuUnifiedSolver {
         debug.get_linear_solution().await
     }
 
+    /// Read back the assembled block-CSR matrix values (length = num_nonzeros).
+    /// Debug-only: CPU↔GPU matrix-level isolation (the assembled system from the
+    /// most recent step / `set_linear_system`).
+    pub async fn get_linear_matrix(&mut self) -> Result<Vec<f32>, String> {
+        let Some(debug) = self.plan_mut().linear_system_debug() else {
+            return Err("plan does not support linear system debug operations".into());
+        };
+        debug.get_linear_matrix().await
+    }
+
+    /// Read back the assembled right-hand side (length = num_dofs). Debug-only.
+    pub async fn get_linear_rhs(&mut self) -> Result<Vec<f32>, String> {
+        let Some(debug) = self.plan_mut().linear_system_debug() else {
+            return Err("plan does not support linear system debug operations".into());
+        };
+        debug.get_linear_rhs().await
+    }
+
     pub fn coupled_unknowns(&self) -> Result<u32, String> {
         Ok(self.num_cells() * self.model.system.unknowns_per_cell())
     }

@@ -635,7 +635,7 @@ fn diag_cpu_vs_gpu_march() {
     let mut g = setup_gpu(n, &mesh);
     let cells = mesh.num_cells();
     let mut step = 0usize;
-    for &upto in &[1usize, 5, 10, 20, 40, 80, 160] {
+    for &upto in &[1usize, 20, 80, 160, 320, 600] {
         while step < upto {
             c.step();
             g.step();
@@ -651,6 +651,134 @@ fn diag_cpu_vs_gpu_march() {
         let g_err = l2_scalar(&mesh, &gre, exact_rho_e);
         let _ = cells;
         println!("[march] step={step} | CPU-GPU: rho={dr:.3e} rho_e={dre:.3e} | rho_e_L2_vs_exact: cpu={c_err:.3e} gpu={g_err:.3e}");
+    }
+}
+
+/// Matrix-level isolation: compare the CPU's assembled block-CSR matrix + rhs to
+/// the GPU's at the EXACT state (step 1, outer_iters=1 — the only assembly). The
+/// block-CSR layout is identical on both backends (start_row_0 = scalar_offset*S²,
+/// start_row_r += num_neighbors*S*r; block (r,c) for neighbour rank at
+/// start_row_r + rank*S + c), so values are comparable element-wise IF the
+/// neighbour ordering matches (verified by the per-equation A*x_exact residual
+/// being O(h²) for the GPU matrix read through the CPU topology). Pinpoints
+/// whether the marched divergence is a genuine operator (matrix/rhs) difference
+/// or f32-noise on a structurally-identical operator.
+#[ignore]
+#[cfg(feature = "dev-tests")]
+#[test]
+fn diag_cpu_vs_gpu_matrix() {
+    let n = 16;
+    // CPU assembly at the exact state.
+    let (mut c, mesh) = setup(n, CpuBackendConfig::default());
+    let (matrix_cpu, rhs_cpu) = c.debug_assemble();
+    let (sro, col, diag_idx, ss) = c.debug_topology();
+    let cells = mesh.num_cells();
+
+    // GPU assembly at the exact state: one step (outer_iters=1) leaves the
+    // assembled system in the linear buffers (the solve only reads them).
+    let mut g = setup_gpu(n, &mesh);
+    g.step();
+    let matrix_gpu = pollster::block_on(g.get_linear_matrix()).unwrap();
+    let rhs_gpu = pollster::block_on(g.get_linear_rhs()).unwrap();
+
+    let names = ["rho", "rho_u_x", "rho_u_y", "rho_e", "u_x", "u_y", "p", "T"];
+    let bdry: Vec<bool> = (0..cells)
+        .map(|i| {
+            let (s0, e0) = (mesh.cell_face_offsets[i], mesh.cell_face_offsets[i + 1]);
+            (s0..e0).any(|k| mesh.face_neighbor[mesh.cell_faces[k]].is_none())
+        })
+        .collect();
+
+    // Sizes.
+    println!(
+        "[mat] sizes: matrix cpu={} gpu={}; rhs cpu={} gpu={}",
+        matrix_cpu.len(), matrix_gpu.len(), rhs_cpu.len(), rhs_gpu.len()
+    );
+    if matrix_cpu.len() != matrix_gpu.len() || rhs_cpu.len() != rhs_gpu.len() {
+        println!("[mat] SIZE MISMATCH — topology differs; aborting element compare");
+        return;
+    }
+
+    // rhs diff per equation (layout cell*S+r — backend-independent).
+    print!("[mat] max|rhs_cpu - rhs_gpu| per eq:");
+    for u in 0..ss {
+        let m = (0..cells)
+            .map(|i| (rhs_cpu[i * ss + u] as f64 - rhs_gpu[i * ss + u] as f64).abs())
+            .fold(0.0, f64::max);
+        print!(" {}={m:.2e}", names[u]);
+    }
+    println!();
+
+    // matrix row-sum diff per equation-row (sum over ALL block entries in the
+    // row — order-independent, so valid even if the neighbour column ordering
+    // differs between backends). A real operator difference shows here.
+    print!("[mat] max|rowsum(A_cpu) - rowsum(A_gpu)| per row-eq:");
+    for rrow in 0..ss {
+        let mut m = 0.0f64;
+        for i in 0..cells {
+            let so = sro[i] as usize;
+            let nn = sro[i + 1] as usize - so;
+            let start = so * ss * ss + nn * ss * rrow;
+            let (mut sc, mut sg) = (0.0f64, 0.0f64);
+            for e in 0..nn * ss {
+                sc += matrix_cpu[start + e] as f64;
+                sg += matrix_gpu[start + e] as f64;
+            }
+            let d = (sc - sg).abs();
+            if d > m { m = d; }
+        }
+        print!(" {}={m:.2e}", names[rrow]);
+    }
+    println!();
+
+    // Per-equation A*x_exact residual for the GPU matrix read through the CPU
+    // topology: if O(h²), the neighbour ordering matches and the compare is valid.
+    let mut xe = vec![0.0f64; cells * ss];
+    for i in 0..cells {
+        let (x, y) = (mesh.cell_cx[i], mesh.cell_cy[i]);
+        let (ux, uy) = exact_u(x, y);
+        let r = exact_rho(x, y);
+        xe[i * ss + 0] = r;
+        xe[i * ss + 1] = r * ux;
+        xe[i * ss + 2] = r * uy;
+        xe[i * ss + 3] = exact_rho_e(x, y);
+        xe[i * ss + 4] = ux;
+        xe[i * ss + 5] = uy;
+        xe[i * ss + 6] = exact_p(x, y);
+        xe[i * ss + 7] = exact_t(x, y);
+    }
+    let resid = |matrix: &[f32], rhs: &[f32]| -> Vec<f64> {
+        let mut res = vec![0.0f64; cells * ss];
+        for i in 0..cells {
+            let so = sro[i] as usize;
+            let nn = sro[i + 1] as usize - so;
+            for rrow in 0..ss {
+                let start = so * ss * ss + nn * ss * rrow;
+                let mut ax = 0.0f64;
+                for rank in 0..nn {
+                    let j = col[so + rank] as usize;
+                    for cc in 0..ss {
+                        ax += matrix[start + rank * ss + cc] as f64 * xe[j * ss + cc];
+                    }
+                }
+                res[i * ss + rrow] = rhs[i * ss + rrow] as f64 - ax;
+            }
+        }
+        res
+    };
+    let _ = &diag_idx;
+    let rc = resid(&matrix_cpu, &rhs_cpu);
+    let rg = resid(&matrix_gpu, &rhs_gpu);
+    for (label, res) in [("cpu", &rc), ("gpu", &rg)] {
+        print!("[mat] {label} interior A*x_exact residual per eq:");
+        for u in 0..ss {
+            let m = (0..cells)
+                .filter(|&i| !bdry[i])
+                .map(|i| res[i * ss + u].abs())
+                .fold(0.0, f64::max);
+            print!(" {}={m:.2e}", names[u]);
+        }
+        println!();
     }
 }
 

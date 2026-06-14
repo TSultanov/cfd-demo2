@@ -865,6 +865,40 @@ impl PlanLinearSystemDebug for GenericCoupledProgramResources {
             Ok(bytemuck::cast_slice(&raw).to_vec())
         })
     }
+
+    fn get_linear_matrix(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
+        Box::pin(async move {
+            let raw = self
+                .runtime
+                .common
+                .read_buffer(
+                    self.runtime
+                        .linear_port_space
+                        .buffer(self.runtime.linear_ports.values),
+                    (self.runtime.num_nonzeros as u64) * 4,
+                    "GenericCoupled matrix_values readback",
+                )
+                .await;
+            Ok(bytemuck::cast_slice(&raw).to_vec())
+        })
+    }
+
+    fn get_linear_rhs(&self) -> PlanFuture<'_, Result<Vec<f32>, String>> {
+        Box::pin(async move {
+            let raw = self
+                .runtime
+                .common
+                .read_buffer(
+                    self.runtime
+                        .linear_port_space
+                        .buffer(self.runtime.linear_ports.rhs),
+                    (self.runtime.num_dofs as u64) * 4,
+                    "GenericCoupled rhs readback",
+                )
+                .await;
+            Ok(bytemuck::cast_slice(&raw).to_vec())
+        })
+    }
 }
 
 fn res(plan: &GpuProgramPlan) -> &GenericCoupledProgramResources {

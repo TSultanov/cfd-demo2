@@ -94,6 +94,10 @@ pub struct CpuSolver {
     dtau: f32,
     time: f32,
     time_scheme: TimeScheme,
+    /// Number of committed steps. Drives the BDF2 Euler startup (the first step,
+    /// step_count == 0, falls back to Euler — there is no valid two-steps-ago
+    /// state yet — exactly as the GPU's generic-coupled program does).
+    step_count: u64,
     #[allow(dead_code)]
     config: CpuBackendConfig,
 }
@@ -332,6 +336,7 @@ impl CpuSolver {
             dtau: 0.0,
             time: 0.0,
             time_scheme,
+            step_count: 0,
             config,
         })
     }
@@ -356,6 +361,16 @@ impl CpuSolver {
     pub fn set_time_scheme(&mut self, scheme: TimeScheme) {
         self.time_scheme = scheme;
         self.constants.time_scheme = scheme as u32;
+    }
+    /// The time scheme actually applied to the current step's assembly: BDF2
+    /// falls back to Euler on the very first step (no valid two-steps-ago state),
+    /// matching the GPU generic-coupled program's OpenFOAM-style backward startup.
+    fn effective_time_scheme(&self) -> TimeScheme {
+        if self.time_scheme == TimeScheme::BDF2 && self.step_count == 0 {
+            TimeScheme::Euler
+        } else {
+            self.time_scheme
+        }
     }
     pub fn set_advection_scheme(&mut self, scheme: Scheme) {
         self.constants.scheme = scheme.gpu_id();
@@ -573,7 +588,7 @@ impl CpuSolver {
         self.constants.dtau = self.dtau;
         self.time += self.dt;
         self.constants.time = self.time;
-        self.constants.time_scheme = self.time_scheme as u32;
+        self.constants.time_scheme = self.effective_time_scheme() as u32;
         let ctx = constants_ctx(&self.constants, &self.low_mach);
 
         // Drive in RECIPE (schedule) ORDER, which is the order the GPU executes.
@@ -681,6 +696,7 @@ impl CpuSolver {
         }
 
         self.dt_old = self.dt;
+        self.step_count += 1;
     }
 
     /// Debug: run prepare + the assembly group (gradients, flux, assembly) at the
@@ -692,7 +708,7 @@ impl CpuSolver {
         self.constants.dt_old = self.dt_old;
         self.constants.dtau = self.dtau;
         self.constants.time = self.time;
-        self.constants.time_scheme = self.time_scheme as u32;
+        self.constants.time_scheme = self.effective_time_scheme() as u32;
         let ctx = constants_ctx(&self.constants, &self.low_mach);
         let collect = |phases: &[KernelPhase]| -> Vec<String> {
             self.schedule
@@ -701,7 +717,14 @@ impl CpuSolver {
                 .map(|s| s.id.clone())
                 .collect()
         };
-        let prep = collect(&[KernelPhase::Preparation]);
+        // Exclude bc_expr: like a real step-1 outer iteration, the boundary
+        // closure refresh runs at the END (it prepares the NEXT iter), so the
+        // assembly sees the SEEDED ghosts. Including it here would assemble
+        // against refreshed ghosts and disagree with the marched step.
+        let prep: Vec<String> = collect(&[KernelPhase::Preparation])
+            .into_iter()
+            .filter(|id| !id.contains("bc_expr"))
+            .collect();
         let assembly_group = collect(&[
             KernelPhase::Gradients,
             KernelPhase::FluxComputation,

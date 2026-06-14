@@ -20,6 +20,7 @@ pub mod linalg;
 pub mod lowering;
 pub mod parallel;
 pub mod solver;
+pub mod transpile;
 
 pub use solver::CpuSolver;
 

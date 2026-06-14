@@ -22,6 +22,7 @@
 //! recipe-driven schedule is the next step.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use cfd2_ir::ast::{
     AssignOp, BinaryOp, Block, Expr, ExprNode, ForInit, ForStep, Literal, Stmt, Type, UnaryOp,
@@ -140,16 +141,28 @@ impl Value {
 /// scalar arrays (`array<f32>`/`array<u32>`/`array<i32>`) or arrays of small
 /// structs (`array<Vector2>`), the latter stored interleaved with a component
 /// stride. `arrayLength(&b)` returns the *element* count (floats/stride).
-#[derive(Debug, Clone)]
+///
+/// Storage is relaxed-atomic (`AtomicU32`, f32/i32 via bit-reinterpretation) so
+/// the interpreter can hold `&Buffers` (shared) and run dispatch invocations in
+/// parallel: kernels write disjoint per-cell/face slots, and atomics make any
+/// access sound without a `&mut` borrow. On x86/ARM relaxed load/store compile to
+/// plain loads/stores, so single-threaded performance is unaffected.
+#[derive(Debug)]
 enum Store {
     /// `comps == 1` → `array<f32>`; `comps == 2` → `array<Vector2>`, etc.
-    F32 { data: Vec<f32>, comps: usize },
-    U32(Vec<u32>),
-    I32(Vec<i32>),
+    F32 { data: Vec<AtomicU32>, comps: usize },
+    U32(Vec<AtomicU32>),
+    I32(Vec<AtomicU32>),
+}
+
+const ORD: Ordering = Ordering::Relaxed;
+
+fn atomics_from<T, F: Fn(T) -> u32>(src: Vec<T>, f: F) -> Vec<AtomicU32> {
+    src.into_iter().map(|v| AtomicU32::new(f(v))).collect()
 }
 
 /// Named CPU buffers, the runtime stand-in for wgpu storage buffers.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct Buffers {
     map: HashMap<String, Store>,
 }
@@ -161,49 +174,69 @@ impl Buffers {
 
     /// Insert a flat `array<f32>` buffer.
     pub fn insert_f32(&mut self, name: impl Into<String>, data: Vec<f32>) {
-        self.map
-            .insert(name.into(), Store::F32 { data, comps: 1 });
+        let data = atomics_from(data, f32::to_bits);
+        self.map.insert(name.into(), Store::F32 { data, comps: 1 });
     }
 
     /// Insert an `array<Vector2>` buffer (interleaved x,y,x,y,...).
     pub fn insert_vec2(&mut self, name: impl Into<String>, data: Vec<f32>) {
         debug_assert!(data.len() % 2 == 0, "Vector2 buffer must have even length");
-        self.map
-            .insert(name.into(), Store::F32 { data, comps: 2 });
+        let data = atomics_from(data, f32::to_bits);
+        self.map.insert(name.into(), Store::F32 { data, comps: 2 });
     }
 
     pub fn insert_u32(&mut self, name: impl Into<String>, data: Vec<u32>) {
-        self.map.insert(name.into(), Store::U32(data));
+        self.map
+            .insert(name.into(), Store::U32(atomics_from(data, |v| v)));
     }
 
     pub fn insert_i32(&mut self, name: impl Into<String>, data: Vec<i32>) {
-        self.map.insert(name.into(), Store::I32(data));
+        self.map
+            .insert(name.into(), Store::I32(atomics_from(data, |v| v as u32)));
     }
 
     pub fn contains(&self, name: &str) -> bool {
         self.map.contains_key(name)
     }
 
-    /// Read back a flat `f32` buffer (also works for Vector2 as interleaved data).
-    pub fn f32_slice(&self, name: &str) -> &[f32] {
+    /// Snapshot a flat `f32` buffer (also interleaved Vector2 data) into a `Vec`.
+    pub fn f32_vec(&self, name: &str) -> Vec<f32> {
         match self.map.get(name) {
-            Some(Store::F32 { data, .. }) => data,
+            Some(Store::F32 { data, .. }) => {
+                data.iter().map(|a| f32::from_bits(a.load(ORD))).collect()
+            }
             _ => panic!("`{name}` is not an f32 buffer"),
         }
     }
 
-    pub fn f32_slice_mut(&mut self, name: &str) -> &mut [f32] {
-        match self.map.get_mut(name) {
-            Some(Store::F32 { data, .. }) => data,
-            _ => panic!("`{name}` is not an f32 buffer"),
-        }
-    }
-
-    pub fn u32_slice(&self, name: &str) -> &[u32] {
+    pub fn u32_vec(&self, name: &str) -> Vec<u32> {
         match self.map.get(name) {
-            Some(Store::U32(data)) => data,
+            Some(Store::U32(d)) => d.iter().map(|a| a.load(ORD)).collect(),
             _ => panic!("`{name}` is not a u32 buffer"),
         }
+    }
+
+    /// Bulk-store a flat `f32` slice into a buffer (length must match).
+    pub fn copy_into_f32(&self, name: &str, src: &[f32]) {
+        match self.map.get(name) {
+            Some(Store::F32 { data, .. }) => {
+                assert_eq!(data.len(), src.len(), "copy_into_f32 length mismatch for `{name}`");
+                for (a, &v) in data.iter().zip(src) {
+                    a.store(v.to_bits(), ORD);
+                }
+            }
+            _ => panic!("`{name}` is not an f32 buffer"),
+        }
+    }
+
+    /// Set one element of a flat `array<f32>` buffer.
+    pub fn set_f32(&self, name: &str, idx: usize, v: f32) {
+        self.store(name, idx, Value::F32(v));
+    }
+
+    /// Get one element of a flat `array<f32>` buffer.
+    pub fn get_f32(&self, name: &str, idx: usize) -> f32 {
+        self.load(name, idx).as_f32()
     }
 
     /// Element count — the value of `arrayLength(&name)`.
@@ -219,34 +252,41 @@ impl Buffers {
     fn load(&self, name: &str, idx: usize) -> Value {
         match self.map.get(name) {
             Some(Store::F32 { data, comps }) => match comps {
-                1 => Value::F32(data[idx]),
-                2 => Value::Vec2([data[2 * idx], data[2 * idx + 1]]),
-                3 => Value::Vec3([data[3 * idx], data[3 * idx + 1], data[3 * idx + 2]]),
+                1 => Value::F32(f32::from_bits(data[idx].load(ORD))),
+                2 => Value::Vec2([
+                    f32::from_bits(data[2 * idx].load(ORD)),
+                    f32::from_bits(data[2 * idx + 1].load(ORD)),
+                ]),
+                3 => Value::Vec3([
+                    f32::from_bits(data[3 * idx].load(ORD)),
+                    f32::from_bits(data[3 * idx + 1].load(ORD)),
+                    f32::from_bits(data[3 * idx + 2].load(ORD)),
+                ]),
                 n => panic!("unsupported buffer comps {n}"),
             },
-            Some(Store::U32(d)) => Value::U32(d[idx]),
-            Some(Store::I32(d)) => Value::I32(d[idx]),
+            Some(Store::U32(d)) => Value::U32(d[idx].load(ORD)),
+            Some(Store::I32(d)) => Value::I32(d[idx].load(ORD) as i32),
             None => panic!("read of unknown buffer `{name}`"),
         }
     }
 
-    fn store(&mut self, name: &str, idx: usize, v: Value) {
-        match self.map.get_mut(name) {
+    fn store(&self, name: &str, idx: usize, v: Value) {
+        match self.map.get(name) {
             Some(Store::F32 { data, comps }) => match comps {
-                1 => data[idx] = v.as_f32(),
+                1 => data[idx].store(v.as_f32().to_bits(), ORD),
                 2 => {
-                    data[2 * idx] = v.component(0);
-                    data[2 * idx + 1] = v.component(1);
+                    data[2 * idx].store(v.component(0).to_bits(), ORD);
+                    data[2 * idx + 1].store(v.component(1).to_bits(), ORD);
                 }
                 3 => {
-                    data[3 * idx] = v.component(0);
-                    data[3 * idx + 1] = v.component(1);
-                    data[3 * idx + 2] = v.component(2);
+                    data[3 * idx].store(v.component(0).to_bits(), ORD);
+                    data[3 * idx + 1].store(v.component(1).to_bits(), ORD);
+                    data[3 * idx + 2].store(v.component(2).to_bits(), ORD);
                 }
                 n => panic!("unsupported buffer comps {n}"),
             },
-            Some(Store::U32(d)) => d[idx] = v.as_u32(),
-            Some(Store::I32(d)) => d[idx] = v.as_i32(),
+            Some(Store::U32(d)) => d[idx].store(v.as_u32(), ORD),
+            Some(Store::I32(d)) => d[idx].store(v.as_i32() as u32, ORD),
             None => panic!("write of unknown buffer `{name}`"),
         }
     }
@@ -311,14 +351,16 @@ impl Frame {
     }
 }
 
-/// The interpreter: borrows the shared buffer store and per-invocation context.
+/// The interpreter: borrows the shared (interior-mutable) buffer store and the
+/// per-invocation context. Holding `&Buffers` (not `&mut`) lets many thread-local
+/// interpreters run concurrently over disjoint dispatch indices.
 pub struct Interpreter<'a> {
-    buffers: &'a mut Buffers,
+    buffers: &'a Buffers,
     ctx: &'a Ctx,
 }
 
 impl<'a> Interpreter<'a> {
-    pub fn new(buffers: &'a mut Buffers, ctx: &'a Ctx) -> Self {
+    pub fn new(buffers: &'a Buffers, ctx: &'a Ctx) -> Self {
         Self { buffers, ctx }
     }
 
@@ -1071,7 +1113,7 @@ mod tests {
         };
         let mut frame = Frame::new();
         run(&[loop_stmt], &mut buffers, &ctx, &mut frame);
-        assert_eq!(buffers.f32_slice("out"), &[21.0, 41.0, 61.0]);
+        assert_eq!(buffers.f32_vec("out"), vec![21.0, 41.0, 61.0]);
     }
 
     #[test]
@@ -1127,7 +1169,7 @@ mod tests {
         let mut frame = Frame::new();
         run(&stmts, &mut buffers, &ctx, &mut frame);
         assert_eq!(frame.get("old"), Some(Value::F32(5.0)));
-        assert_eq!(buffers.f32_slice("acc"), &[8.0]);
+        assert_eq!(buffers.f32_vec("acc"), vec![8.0]);
     }
 
     #[test]

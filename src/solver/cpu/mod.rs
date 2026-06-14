@@ -18,6 +18,7 @@
 pub mod interpreter;
 pub mod linalg;
 pub mod lowering;
+pub mod parallel;
 pub mod solver;
 
 pub use solver::CpuSolver;

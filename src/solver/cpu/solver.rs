@@ -226,9 +226,8 @@ impl CpuSolver {
             .offset_for(field)
             .ok_or_else(|| format!("unknown field `{field}`"))? as usize;
         let stride = self.state_stride as usize;
-        let state = self.buffers.f32_slice_mut("state");
         for (i, &v) in values.iter().enumerate() {
-            state[i * stride + off] = v as f32;
+            self.buffers.set_f32("state", i * stride + off, v as f32);
         }
         Ok(())
     }
@@ -243,10 +242,9 @@ impl CpuSolver {
             .offset_for(field)
             .ok_or_else(|| format!("unknown field `{field}`"))? as usize;
         let stride = self.state_stride as usize;
-        let state = self.buffers.f32_slice_mut("state");
         for (i, &(x, y)) in values.iter().enumerate() {
-            state[i * stride + off] = x as f32;
-            state[i * stride + off + 1] = y as f32;
+            self.buffers.set_f32("state", i * stride + off, x as f32);
+            self.buffers.set_f32("state", i * stride + off + 1, y as f32);
         }
         Ok(())
     }
@@ -257,9 +255,8 @@ impl CpuSolver {
             .offset_for(field)
             .ok_or_else(|| format!("unknown field `{field}`"))? as usize;
         let stride = self.state_stride as usize;
-        let state = self.buffers.f32_slice("state");
         Ok((0..self.num_cells)
-            .map(|i| state[i * stride + off] as f64)
+            .map(|i| self.buffers.get_f32("state", i * stride + off) as f64)
             .collect())
     }
 
@@ -279,9 +276,9 @@ impl CpuSolver {
             .get(bidx)
             .ok_or_else(|| format!("invalid boundary index {bidx}"))?
             .clone();
-        let bc_value = self.buffers.f32_slice_mut("bc_value");
         for face in faces {
-            bc_value[face as usize * stride + component as usize] = value_for_face(face);
+            self.buffers
+                .set_f32("bc_value", face as usize * stride + component as usize, value_for_face(face));
         }
         Ok(())
     }
@@ -298,24 +295,18 @@ impl CpuSolver {
     // ── stepping ──────────────────────────────────────────────────────────
 
     pub fn initialize_history(&mut self) {
-        let state = self.buffers.f32_slice("state").to_vec();
-        self.buffers
-            .f32_slice_mut("state_old")
-            .copy_from_slice(&state);
-        self.buffers
-            .f32_slice_mut("state_old_old")
-            .copy_from_slice(&state);
-        self.buffers.f32_slice_mut("state_iter").copy_from_slice(&state);
+        let state = self.buffers.f32_vec("state");
+        self.buffers.copy_into_f32("state_old", &state);
+        self.buffers.copy_into_f32("state_old_old", &state);
+        self.buffers.copy_into_f32("state_iter", &state);
     }
 
     pub fn step(&mut self) {
         // Rotate time history: old_old <- old, old <- current state.
-        let old = self.buffers.f32_slice("state_old").to_vec();
-        self.buffers
-            .f32_slice_mut("state_old_old")
-            .copy_from_slice(&old);
-        let cur = self.buffers.f32_slice("state").to_vec();
-        self.buffers.f32_slice_mut("state_old").copy_from_slice(&cur);
+        let old = self.buffers.f32_vec("state_old");
+        self.buffers.copy_into_f32("state_old_old", &old);
+        let cur = self.buffers.f32_vec("state");
+        self.buffers.copy_into_f32("state_old", &cur);
 
         self.constants.dt = self.dt;
         self.constants.dt_old = self.dt_old;
@@ -324,8 +315,12 @@ impl CpuSolver {
         self.constants.time_scheme = self.time_scheme as u32;
         let ctx = constants_ctx(&self.constants);
 
+        let threads = self.config.threads;
+        let nf = self.num_faces;
+        let nc = self.num_cells;
+
         // Advective flux from the (frozen) advecting velocity — once per step.
-        run_kernel(&mut self.buffers, &ctx, &self.kernels, "flux_module", self.num_faces, self.num_cells);
+        run_kernel(&self.buffers, &ctx, &self.kernels, "flux_module", nf, nc, threads);
 
         let assembly_id = if self.needs_gradients {
             "generic_coupled_assembly_grad_state"
@@ -335,38 +330,33 @@ impl CpuSolver {
 
         for _ in 0..self.outer_iters {
             // Snapshot current iterate (used only when dual-time is active).
-            let cur = self.buffers.f32_slice("state").to_vec();
-            self.buffers.f32_slice_mut("state_iter").copy_from_slice(&cur);
+            let cur = self.buffers.f32_vec("state");
+            self.buffers.copy_into_f32("state_iter", &cur);
 
             if self.needs_gradients {
                 run_kernel(
-                    &mut self.buffers,
+                    &self.buffers,
                     &ctx,
                     &self.kernels,
                     "packed_state_gradients",
-                    self.num_cells,
-                    self.num_cells,
+                    nf,
+                    nc,
+                    threads,
                 );
             }
 
-            run_kernel(
-                &mut self.buffers,
-                &ctx,
-                &self.kernels,
-                assembly_id,
-                self.num_cells,
-                self.num_cells,
-            );
+            run_kernel(&self.buffers, &ctx, &self.kernels, assembly_id, nf, nc, threads);
 
             self.linear_solve();
 
             run_kernel(
-                &mut self.buffers,
+                &self.buffers,
                 &ctx,
                 &self.kernels,
                 "generic_coupled_update",
-                self.num_cells,
-                self.num_cells,
+                nf,
+                nc,
+                threads,
             );
         }
 
@@ -379,13 +369,13 @@ impl CpuSolver {
         // Initial guess = current T.
         let stride = self.state_stride as usize;
         let off = self.t_offset as usize;
-        let state = self.buffers.f32_slice("state");
+        let state = self.buffers.f32_vec("state");
         let mut x: Vec<f32> = (0..self.num_cells)
             .map(|i| state[i * stride + off])
             .collect();
 
-        let matrix = self.buffers.f32_slice("matrix_values").to_vec();
-        let rhs = self.buffers.f32_slice("rhs").to_vec();
+        let matrix = self.buffers.f32_vec("matrix_values");
+        let rhs = self.buffers.f32_vec("rhs");
         let a = CsrView {
             row_offsets: &self.row_offsets,
             col_indices: &self.col_indices,
@@ -393,19 +383,20 @@ impl CpuSolver {
         };
         bicgstab(&a, &rhs, &mut x, LINEAR_MAX_ITERS, LINEAR_TOL);
 
-        self.buffers.f32_slice_mut("x").copy_from_slice(&x);
+        self.buffers.copy_into_f32("x", &x);
     }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
 fn run_kernel(
-    buffers: &mut Buffers,
+    buffers: &Buffers,
     ctx: &Ctx,
     kernels: &HashMap<String, CpuKernel>,
     id: &str,
     num_faces: usize,
     num_cells: usize,
+    threads: usize,
 ) {
     let kernel = kernels
         .get(id)
@@ -415,7 +406,8 @@ fn run_kernel(
         DispatchDomain::Cells => num_cells,
         DispatchDomain::Custom(_) => panic!("custom dispatch domain unsupported on CPU"),
     };
-    for idx in 0..domain {
+    let stmts = &kernel.stmts;
+    crate::solver::cpu::parallel::parallel_for(domain, threads, |idx| {
         // The launch wrapper's `let idx = <invocation_index_expr>;` and the
         // `if (idx >= bound) return;` guard are synthesized by the WGSL emitter
         // from LaunchSemantics, not stored in the kernel body. On CPU we own the
@@ -425,8 +417,8 @@ fn run_kernel(
         let mut frame = Frame::new()
             .with_local("idx", Value::U32(idx as u32))
             .with_local("global_id", Value::Vec3([idx as f32, 0.0, 0.0]));
-        Interpreter::new(buffers, ctx).run(&kernel.stmts, &mut frame);
-    }
+        Interpreter::new(buffers, ctx).run(stmts, &mut frame);
+    });
 }
 
 /// Build the constants uniform as an interpreter struct value (`constants.field`).
@@ -627,16 +619,14 @@ mod tests {
     }
 
     fn solve_steady(n: usize, scheme: Scheme) -> (Mesh, Vec<f64>) {
+        solve_steady_cfg(n, scheme, CpuBackendConfig::default())
+    }
+
+    fn solve_steady_cfg(n: usize, scheme: Scheme, config: CpuBackendConfig) -> (Mesh, Vec<f64>) {
         let mesh = unit_square(n);
         let model = scalar_transport_model().expect("model");
-        let mut solver = CpuSolver::new(
-            &mesh,
-            model,
-            scheme,
-            TimeScheme::Euler,
-            CpuBackendConfig::default(),
-        )
-        .expect("create cpu solver");
+        let mut solver = CpuSolver::new(&mesh, model, scheme, TimeScheme::Euler, config)
+            .expect("create cpu solver");
         solver.set_outer_iters(2);
         solver.set_dt(0.2);
 
@@ -727,5 +717,25 @@ mod tests {
             "implausible SOU order {order:.3} (expected ~2)"
         );
         assert!(*errs.last().unwrap() < 1e-3, "finest SOU error too large: {errs:?}");
+    }
+
+    #[test]
+    fn cpu_multithread_matches_singlethread() {
+        // Runtime-switchable multithreading must not change results: relaxed-atomic
+        // buffers + disjoint per-cell writes make the parallel run deterministic and
+        // identical to the serial run.
+        let n = 32;
+        let (_, t1) = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { threads: 1, simd: false });
+        let (_, t4) = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { threads: 4, simd: false });
+        let max_diff = t1
+            .iter()
+            .zip(&t4)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f64, f64::max);
+        println!("[cpu-mt] n={n} max|1thread - 4thread| = {max_diff:.3e}");
+        assert!(
+            max_diff == 0.0,
+            "multithreaded result differs from serial: max|diff|={max_diff:.3e}"
+        );
     }
 }

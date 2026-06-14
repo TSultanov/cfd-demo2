@@ -37,6 +37,9 @@ ui = ["dep:egui", "dep:eframe", "dep:egui_plot", "dep:env_logger", "meshgen"]
 meshgen = ["dep:ahash", "dep:rand", "dep:wide", "dep:rayon"]
 profiling = []
 dev-tests = []
+# Experimental CPU backend: executes the same kernel IR the WGSL emitter consumes,
+# on the CPU (no wgpu). Phase 1 is a tree-walking interpreter (this feature alone).
+cpu = []
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [] }
 

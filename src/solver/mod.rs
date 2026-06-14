@@ -2,6 +2,8 @@ pub use cfd2_codegen::compiler;
 pub use cfd2_codegen::solver::codegen;
 pub mod dimensions;
 pub mod gpu;
+#[cfg(feature = "cpu")]
+pub mod cpu;
 pub(crate) mod ir;
 pub mod kernels;
 pub mod mesh;

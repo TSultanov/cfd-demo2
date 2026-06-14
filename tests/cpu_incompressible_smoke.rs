@@ -4,7 +4,7 @@
 //! corrector loop, and converges toward the manufactured solution.
 #![cfg(feature = "cpu")]
 
-use cfd2::solver::cpu::{CpuBackendConfig, CpuSolver};
+use cfd2::solver::cpu::{CpuBackendConfig, CpuEngine, CpuSolver};
 use cfd2::solver::gpu::enums::GpuBoundaryType;
 use cfd2::solver::gpu::recipe::SteppingMode;
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, Mesh};
@@ -89,6 +89,24 @@ fn cpu_incompressible_taylor_green_converges() {
     println!("[cpu-inc] n={n} u_l2={e:.4e} finite={finite}");
     assert!(finite, "U went non-finite");
     assert!(e < 5e-2, "U error too large (saddle-point solve not converging): {e:.4e}");
+}
+
+/// The transpiled engine (compiled-Rust kernels, with interpreter fallback for
+/// the few unsupported kernels) must agree with the interpreter on the coupled
+/// saddle-point path. Short run (cost-bounded); agreement to ~f32 round-off.
+#[test]
+fn cpu_incompressible_engines_agree() {
+    let n = 8;
+    let (m, u_i) = solve(n, 10, CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false });
+    let (_m, u_t) = solve(n, 10, CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 1, simd: false });
+    let d = u_i
+        .iter()
+        .zip(&u_t)
+        .map(|(a, b)| (a.0 - b.0).abs().max((a.1 - b.1).abs()))
+        .fold(0.0, f64::max);
+    let _ = &m;
+    println!("[cpu-inc-engines] n={n} max|interp-transpiled|={d:.3e}");
+    assert!(d < 1e-4, "transpiled vs interpreter diverge: {d:.3e}");
 }
 
 /// Velocity convergence order through the full coupled saddle-point path

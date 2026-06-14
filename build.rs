@@ -1360,14 +1360,14 @@ fn emit_transpiled_cpu_kernels(
     use solver::model::kernel::ModelKernelArtifact;
     use solver::model::module::ModelModule;
 
-    let supported = |id: &str| id == "scalar_transport" || id == "scalar_transport_sou";
-
+    // Transpile EVERY model's DslProgram kernels. Each emission is wrapped in
+    // catch_unwind so a kernel using a construct the Rust emitter can't yet
+    // handle is skipped (its `lookup` returns None -> the runtime falls back to
+    // the interpreter), keeping the build robust. The interpreter remains the
+    // correctness oracle; transpiled kernels are a speed path.
     let mut fns = String::new();
     let mut entries: Vec<(String, String, String)> = Vec::new();
     for model in models {
-        if !supported(model.id) {
-            continue;
-        }
         for module in &model.modules {
             let module: &dyn ModelModule = module;
             for spec in module.kernel_generators() {
@@ -1384,9 +1384,21 @@ fn emit_transpiled_cpu_kernels(
                     if entries.iter().any(|(_, _, f)| f == &fn_name) {
                         continue;
                     }
-                    let src = cfd2_codegen::solver::codegen::rust_emit::emit_kernel_fn(
-                        &fn_name, &program,
-                    );
+                    let emitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        cfd2_codegen::solver::codegen::rust_emit::emit_kernel_fn(&fn_name, &program)
+                    }));
+                    let Ok(src) = emitted else {
+                        // Emitter panicked on an unsupported construct; skip
+                        // this kernel (interpreter fallback covers it).
+                        continue;
+                    };
+                    // Skip kernels that reference uniforms not yet threaded into
+                    // the transpiled function signature (only `constants` is
+                    // available); e.g. `low_mach_params` in the compressible KT
+                    // flux. These fall back to the interpreter.
+                    if src.contains("low_mach_params") {
+                        continue;
+                    }
                     fns.push_str(&src);
                     fns.push('\n');
                     entries.push((

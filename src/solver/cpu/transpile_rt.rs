@@ -94,6 +94,16 @@ macro_rules! vec_ops {
             #[inline(always)]
             fn mul(self, o: $T) -> $T { $T { $($f: self.$f * o.$f),+ } }
         }
+        impl std::ops::Div<f32> for $T {
+            type Output = $T;
+            #[inline(always)]
+            fn div(self, s: f32) -> $T { $T { $($f: self.$f / s),+ } }
+        }
+        impl std::ops::Div for $T {
+            type Output = $T;
+            #[inline(always)]
+            fn div(self, o: $T) -> $T { $T { $($f: self.$f / o.$f),+ } }
+        }
     };
 }
 vec_ops!(Vec2 { x, y });
@@ -185,6 +195,32 @@ pub fn st2(b: &[AtomicU32], i: usize, v: Vec2) {
 #[inline(always)]
 pub fn st2c(b: &[AtomicU32], i: usize, comp: usize, v: f32) {
     stf(b, 2 * i + comp, v);
+}
+
+/// Boundary ghost value for face reconstruction (model kernel helper; mirrors
+/// the WGSL `bc_neighbor_scalar` and the interpreter intrinsic). Dirichlet
+/// (kind 1) returns the prescribed value, Neumann (kind 2) extrapolates by the
+/// outward gradient, otherwise zero-gradient (owner); interior faces pass
+/// `interior` through.
+#[inline(always)]
+pub fn bc_neighbor_scalar(
+    interior: f32,
+    owner: f32,
+    kind: u32,
+    value: f32,
+    d_own: f32,
+    is_boundary: bool,
+) -> f32 {
+    let boundary = match kind {
+        1 => value,
+        2 => owner + value * d_own,
+        _ => owner,
+    };
+    if is_boundary {
+        boundary
+    } else {
+        interior
+    }
 }
 
 /// Atomic read-modify-write add on an f32 buffer element (CAS loop).

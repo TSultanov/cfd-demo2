@@ -868,7 +868,7 @@ fn diag_biharmonic_march() {
 /// `eps4` sets the biharmonic dissipation field (`bih_eps4`). Used to isolate the
 /// interior compressible operator from the boundary closure.
 #[allow(clippy::type_complexity)]
-fn setup_periodic(n: usize, eps4: f32) -> (CpuSolver, Mesh) {
+fn setup_periodic(n: usize, eps4: f32, mu: f64) -> (CpuSolver, Mesh) {
     let mesh = generate_structured_rect_mesh_periodic(n, n, 2.0, 2.0);
     let model = compressible_mms_biharmonic_model().expect("biharmonic model");
     let cells = mesh.num_cells();
@@ -883,7 +883,7 @@ fn setup_periodic(n: usize, eps4: f32) -> (CpuSolver, Mesh) {
     .expect("cpu solver");
     s.set_dt(DT as f32);
     s.set_dtau(0.0);
-    s.set_viscosity(MU as f32);
+    s.set_viscosity(mu as f32);
     s.set_density(RHO0 as f32);
     s.set_outer_iters(1);
     s.set_outer_tolerance(0.0);
@@ -897,11 +897,11 @@ fn setup_periodic(n: usize, eps4: f32) -> (CpuSolver, Mesh) {
     };
     let mut src_rho: Vec<f64> = (0..cells).map(|i| source_rho(mesh.cell_cx[i], mesh.cell_cy[i])).collect();
     proj(&mut src_rho);
-    let src_ru: Vec<(f64, f64)> = (0..cells).map(|i| source_rho_u(mesh.cell_cx[i], mesh.cell_cy[i], MU)).collect();
+    let src_ru: Vec<(f64, f64)> = (0..cells).map(|i| source_rho_u(mesh.cell_cx[i], mesh.cell_cy[i], mu)).collect();
     let (mut rux, mut ruy): (Vec<f64>, Vec<f64>) = src_ru.iter().copied().unzip();
     proj(&mut rux);
     proj(&mut ruy);
-    let mut src_re: Vec<f64> = (0..cells).map(|i| source_rho_e(mesh.cell_cx[i], mesh.cell_cy[i], MU)).collect();
+    let mut src_re: Vec<f64> = (0..cells).map(|i| source_rho_e(mesh.cell_cx[i], mesh.cell_cy[i], mu)).collect();
     proj(&mut src_re);
     s.set_field_scalar(COMPRESSIBLE_MMS_SOURCE_RHO_FIELD, &src_rho).unwrap();
     s.set_field_vec2(COMPRESSIBLE_MMS_SOURCE_RHO_U_FIELD, &(0..cells).map(|i| (rux[i], ruy[i])).collect::<Vec<_>>()).unwrap();
@@ -928,7 +928,7 @@ fn setup_periodic(n: usize, eps4: f32) -> (CpuSolver, Mesh) {
 #[test]
 fn diag_periodic_biharmonic_march() {
     for eps4 in [0.0_f32, 0.1, 0.25] {
-        let (mut s, mesh) = setup_periodic(16, eps4);
+        let (mut s, mesh) = setup_periodic(16, eps4, MU);
         let mut step = 0usize;
         for &upto in &[1usize, 40, 160, 320, 600] {
             while step < upto {
@@ -949,22 +949,30 @@ fn diag_periodic_biharmonic_march() {
 /// FINDING (2026-06-15): unlike the all-inlet box (which BLOWS UP), the periodic
 /// march stays BOUNDED — so the CPU's interior compressible operator is stable in
 /// the sense the Dirichlet one is not, confirming the all-inlet blow-up is a
-/// BOUNDARY-closure instability. BUT the periodic error does not yet converge at
-/// design order: at mu=0.05 the interior carries a refinement-amplified marginal
-/// limit cycle (rho 4.6e-2 @ n=16 -> 7.2e-2 @ n=32, eps4=0), and the biharmonic ∇⁴
-/// dissipation ADDS error on the CPU (eps4=0.1/0.25 raise it) instead of damping
-/// the mode the way the GPU's does — a CPU biharmonic-cure correctness gap (the
-/// lap-constraint / static-diagonal machinery), the next concrete target. Printed,
-/// not asserted (the GPU's periodic biharmonic is likewise an `#[ignore]` probe).
+/// BOUNDARY-closure instability. BUT the periodic error does not converge at
+/// design order; measured orders are negative (error grows with n):
+///   - mu=0.05 eps4=0:    rho 4.6e-2@n16 -> 7.2e-2@n32 (order -0.64)
+///   - mu=0.05 eps4=0.10: higher (-0.62) — eps4 ADDS error, doesn't cure
+///   - mu=0.2  eps4=0:    higher still (-0.97) — more viscosity doesn't rescue it
+/// i.e. a refinement-amplified marginal interior mode (matching the GPU's periodic
+/// probe, which shows the instability is interior). Two reasons a clean order
+/// needs more work: (1) eps4>0 here lacks the consistent `+eps4*∇⁴X_exact` source
+/// term, so the biharmonic perturbs the MMS instead of curing it (the GPU
+/// biharmonic MMS carries that term); (2) the CPU's implicit lap-constraint /
+/// static-diagonal machinery may not damp identically to the GPU. Printed, not
+/// asserted (the GPU's periodic biharmonic order is likewise an `#[ignore]` probe).
 #[ignore]
 #[test]
 fn diag_cpu_compressible_periodic_order() {
     let steps = 300;
-    for eps4 in [0.0_f32, 0.1] {
+    // mu=0.05 = the MMS const (marginal interior); mu=0.2 = a viscosity-stable
+    // regime where the interior mode is physically damped, so the CPU interior
+    // operator should show design order with no biharmonic.
+    for (eps4, mu) in [(0.0_f32, MU), (0.1_f32, MU), (0.0_f32, 0.2_f64)] {
         let levels = [16usize, 32];
         let mut errs: [Vec<f64>; 4] = [vec![], vec![], vec![], vec![]];
         for &n in &levels {
-            let (mut s, mesh) = setup_periodic(n, eps4);
+            let (mut s, mesh) = setup_periodic(n, eps4, mu);
             for _ in 0..steps {
                 s.step();
             }
@@ -984,7 +992,7 @@ fn diag_cpu_compressible_periodic_order() {
                 }
                 (num / den).sqrt()
             };
-            println!("[periodic-order] eps4={eps4:.2} n={n} rho={er:.4e} u={eu:.4e} p={ep:.4e} T={et:.4e}");
+            println!("[periodic-order] mu={mu} eps4={eps4:.2} n={n} rho={er:.4e} u={eu:.4e} p={ep:.4e} T={et:.4e}");
             errs[0].push(er);
             errs[1].push(eu);
             errs[2].push(ep);
@@ -992,7 +1000,7 @@ fn diag_cpu_compressible_periodic_order() {
         }
         let order = |e: &[f64]| (e[0] / e[1]).log2(); // levels double
         println!(
-            "[periodic-order] eps4={eps4:.2} orders rho={:.3} u={:.3} p={:.3} T={:.3}",
+            "[periodic-order] mu={mu} eps4={eps4:.2} orders rho={:.3} u={:.3} p={:.3} T={:.3}",
             order(&errs[0]), order(&errs[1]), order(&errs[2]), order(&errs[3])
         );
         assert!(

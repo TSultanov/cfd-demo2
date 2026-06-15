@@ -12,7 +12,10 @@
 use cfd2::solver::cpu::{CpuBackendConfig, CpuSolver};
 use cfd2::solver::gpu::enums::GpuBoundaryType;
 use cfd2::solver::gpu::recipe::SteppingMode;
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
+use cfd2::solver::mesh::{
+    generate_structured_rect_mesh, generate_structured_rect_mesh_periodic, BoundarySides,
+    BoundaryType, Mesh,
+};
 use cfd2::solver::model::{
     compressible_mms_biharmonic_model, compressible_mms_model,
     COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD, COMPRESSIBLE_MMS_SOURCE_RHO_FIELD,
@@ -856,6 +859,146 @@ fn diag_biharmonic_march() {
             let finite = rho_e.iter().all(|v| v.is_finite());
             println!("[bihar-march] eps4={eps4:.2} step={step} rho_e_L2={e:.3e} finite={finite}");
         }
+    }
+}
+
+/// Build a CPU compressible solver on a fully-PERIODIC [0,2]² box (the
+/// manufactured solution is periodic there). Zero boundary faces ⇒ no BCs; the
+/// manufactured sources are mean-projected to zero (the closed-system constraint).
+/// `eps4` sets the biharmonic dissipation field (`bih_eps4`). Used to isolate the
+/// interior compressible operator from the boundary closure.
+#[allow(clippy::type_complexity)]
+fn setup_periodic(n: usize, eps4: f32) -> (CpuSolver, Mesh) {
+    let mesh = generate_structured_rect_mesh_periodic(n, n, 2.0, 2.0);
+    let model = compressible_mms_biharmonic_model().expect("biharmonic model");
+    let cells = mesh.num_cells();
+    let mut s = CpuSolver::with_stepping(
+        &mesh,
+        model,
+        Scheme::SecondOrderUpwindVanLeer,
+        TimeScheme::BDF2,
+        SteppingMode::Implicit { outer_iters: 1 },
+        CpuBackendConfig::default(),
+    )
+    .expect("cpu solver");
+    s.set_dt(DT as f32);
+    s.set_dtau(0.0);
+    s.set_viscosity(MU as f32);
+    s.set_density(RHO0 as f32);
+    s.set_outer_iters(1);
+    s.set_outer_tolerance(0.0);
+
+    let vol_total: f64 = mesh.cell_vol.iter().sum();
+    let proj = |src: &mut [f64]| {
+        let mean: f64 = (0..cells).map(|i| src[i] * mesh.cell_vol[i]).sum::<f64>() / vol_total;
+        for v in src.iter_mut() {
+            *v -= mean;
+        }
+    };
+    let mut src_rho: Vec<f64> = (0..cells).map(|i| source_rho(mesh.cell_cx[i], mesh.cell_cy[i])).collect();
+    proj(&mut src_rho);
+    let src_ru: Vec<(f64, f64)> = (0..cells).map(|i| source_rho_u(mesh.cell_cx[i], mesh.cell_cy[i], MU)).collect();
+    let (mut rux, mut ruy): (Vec<f64>, Vec<f64>) = src_ru.iter().copied().unzip();
+    proj(&mut rux);
+    proj(&mut ruy);
+    let mut src_re: Vec<f64> = (0..cells).map(|i| source_rho_e(mesh.cell_cx[i], mesh.cell_cy[i], MU)).collect();
+    proj(&mut src_re);
+    s.set_field_scalar(COMPRESSIBLE_MMS_SOURCE_RHO_FIELD, &src_rho).unwrap();
+    s.set_field_vec2(COMPRESSIBLE_MMS_SOURCE_RHO_U_FIELD, &(0..cells).map(|i| (rux[i], ruy[i])).collect::<Vec<_>>()).unwrap();
+    s.set_field_scalar(COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD, &src_re).unwrap();
+
+    let rho0: Vec<f64> = (0..cells).map(|i| exact_rho(mesh.cell_cx[i], mesh.cell_cy[i])).collect();
+    let u0: Vec<(f64, f64)> = (0..cells).map(|i| exact_u(mesh.cell_cx[i], mesh.cell_cy[i])).collect();
+    s.set_field_scalar("rho", &rho0).unwrap();
+    s.set_field_vec2("rho_u", &(0..cells).map(|i| (rho0[i] * u0[i].0, rho0[i] * u0[i].1)).collect::<Vec<_>>()).unwrap();
+    s.set_field_scalar("rho_e", &(0..cells).map(|i| exact_rho_e(mesh.cell_cx[i], mesh.cell_cy[i])).collect::<Vec<_>>()).unwrap();
+    s.set_field_scalar("p", &(0..cells).map(|i| exact_p(mesh.cell_cx[i], mesh.cell_cy[i])).collect::<Vec<_>>()).unwrap();
+    s.set_field_scalar("T", &(0..cells).map(|i| exact_t(mesh.cell_cx[i], mesh.cell_cy[i])).collect::<Vec<_>>()).unwrap();
+    s.set_field_vec2("u", &u0).unwrap();
+    s.set_field_scalar("bih_eps4", &vec![eps4 as f64; cells]).unwrap();
+    s.initialize_history();
+    (s, mesh)
+}
+
+/// PERIODIC march: the all-inlet (Dirichlet) box's blow-up is documented as a
+/// BOUNDARY-closure instability; a periodic box isolates the interior operator.
+/// If THIS march stays BOUNDED where the Dirichlet one blows up, the CPU's
+/// interior compressible operator is stable and matches the GPU.
+#[ignore]
+#[test]
+fn diag_periodic_biharmonic_march() {
+    for eps4 in [0.0_f32, 0.1, 0.25] {
+        let (mut s, mesh) = setup_periodic(16, eps4);
+        let mut step = 0usize;
+        for &upto in &[1usize, 40, 160, 320, 600] {
+            while step < upto {
+                s.step();
+                step += 1;
+            }
+            let rho_e = s.get_field_scalar("rho_e").unwrap();
+            let e = l2_scalar(&mesh, &rho_e, exact_rho_e);
+            let finite = rho_e.iter().all(|v| v.is_finite());
+            println!("[periodic-bih] eps4={eps4:.2} step={step} rho_e_L2={e:.3e} finite={finite}");
+        }
+    }
+}
+
+/// CPU compressible PERIODIC-box order DIAGNOSTIC: marches the interior operator
+/// (boundary closure excluded) and reports the error/order across n + eps4.
+///
+/// FINDING (2026-06-15): unlike the all-inlet box (which BLOWS UP), the periodic
+/// march stays BOUNDED — so the CPU's interior compressible operator is stable in
+/// the sense the Dirichlet one is not, confirming the all-inlet blow-up is a
+/// BOUNDARY-closure instability. BUT the periodic error does not yet converge at
+/// design order: at mu=0.05 the interior carries a refinement-amplified marginal
+/// limit cycle (rho 4.6e-2 @ n=16 -> 7.2e-2 @ n=32, eps4=0), and the biharmonic ∇⁴
+/// dissipation ADDS error on the CPU (eps4=0.1/0.25 raise it) instead of damping
+/// the mode the way the GPU's does — a CPU biharmonic-cure correctness gap (the
+/// lap-constraint / static-diagonal machinery), the next concrete target. Printed,
+/// not asserted (the GPU's periodic biharmonic is likewise an `#[ignore]` probe).
+#[ignore]
+#[test]
+fn diag_cpu_compressible_periodic_order() {
+    let steps = 300;
+    for eps4 in [0.0_f32, 0.1] {
+        let levels = [16usize, 32];
+        let mut errs: [Vec<f64>; 4] = [vec![], vec![], vec![], vec![]];
+        for &n in &levels {
+            let (mut s, mesh) = setup_periodic(n, eps4);
+            for _ in 0..steps {
+                s.step();
+            }
+            let rho = s.get_field_scalar("rho").unwrap();
+            let p = s.get_field_scalar("p").unwrap();
+            let t = s.get_field_scalar("T").unwrap();
+            let u = s.get_field_vec2("u").unwrap();
+            let er = l2_scalar(&mesh, &rho, exact_rho);
+            let ep = l2_scalar(&mesh, &p, exact_p);
+            let et = l2_scalar(&mesh, &t, exact_t);
+            let eu = {
+                let (mut num, mut den) = (0.0, 0.0);
+                for i in 0..mesh.num_cells() {
+                    let (ex, ey) = exact_u(mesh.cell_cx[i], mesh.cell_cy[i]);
+                    num += ((u[i].0 - ex).powi(2) + (u[i].1 - ey).powi(2)) * mesh.cell_vol[i];
+                    den += mesh.cell_vol[i];
+                }
+                (num / den).sqrt()
+            };
+            println!("[periodic-order] eps4={eps4:.2} n={n} rho={er:.4e} u={eu:.4e} p={ep:.4e} T={et:.4e}");
+            errs[0].push(er);
+            errs[1].push(eu);
+            errs[2].push(ep);
+            errs[3].push(et);
+        }
+        let order = |e: &[f64]| (e[0] / e[1]).log2(); // levels double
+        println!(
+            "[periodic-order] eps4={eps4:.2} orders rho={:.3} u={:.3} p={:.3} T={:.3}",
+            order(&errs[0]), order(&errs[1]), order(&errs[2]), order(&errs[3])
+        );
+        assert!(
+            errs.iter().all(|e| e.iter().all(|v| v.is_finite())),
+            "periodic compressible march went non-finite (interior must stay bounded)"
+        );
     }
 }
 

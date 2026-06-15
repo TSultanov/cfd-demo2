@@ -120,6 +120,13 @@ pub struct GpuUnifiedSolver {
     model: ModelSpec,
     plan: GpuProgramPlan,
     config: SolverConfig,
+    /// Post-step State-Redistribution pass for cut-cell small cells. `None`
+    /// unless the mesh carries sliver cut cells (so it is inert — and not even
+    /// built — on structured / graded meshes; see [`crate::solver::gpu::srd`]).
+    srd: Option<crate::solver::gpu::srd::SrdGpu>,
+    /// Runtime toggle for the SRD pass (default on; only meaningful when `srd`
+    /// is `Some`). Exposed for the GPU-vs-CPU cross-check and diagnostics.
+    srd_enabled: bool,
 }
 
 impl GpuUnifiedSolver {
@@ -150,11 +157,71 @@ impl GpuUnifiedSolver {
         )
         .await?;
 
-        Ok(Self {
+        let mut solver = Self {
             model,
             plan,
             config,
-        })
+            srd: None,
+            srd_enabled: true,
+        };
+
+        // Build the cut-cell State-Redistribution operator from the mesh. This
+        // is `None` (a true no-op, never dispatched) unless the mesh carries
+        // sliver cut cells, so structured / graded references are untouched.
+        let ports = solver.ui_ports();
+        if let Some(u_offset) = ports.u_offset {
+            if let Some(csr) = crate::solver::gpu::srd::build_srd_operator(mesh) {
+                solver.srd = Some(crate::solver::gpu::srd::SrdGpu::new(
+                    &solver.plan.context.device,
+                    &csr,
+                    u_offset,
+                    ports.stride,
+                    mesh.num_cells() as u32,
+                ));
+            }
+        }
+
+        Ok(solver)
+    }
+
+    /// Apply the post-step SRD pass to the live velocity field, if built and
+    /// enabled. A no-op when the mesh has no slivers (`self.srd` is `None`).
+    fn apply_srd(&self) {
+        if !self.srd_enabled {
+            return;
+        }
+        if let Some(srd) = self.srd.as_ref() {
+            srd.apply(
+                &self.plan.context.device,
+                &self.plan.context.queue,
+                self.plan.state_buffer(),
+            );
+        }
+    }
+
+    /// Whether a cut-cell SRD operator was built for this solver's mesh.
+    pub fn srd_active(&self) -> bool {
+        self.srd.is_some()
+    }
+
+    /// Enable/disable the post-step SRD pass (default on). Only meaningful when
+    /// [`Self::srd_active`] — exposed for the GPU-vs-CPU cross-check and
+    /// divergence diagnostics.
+    pub fn set_srd_enabled(&mut self, enabled: bool) {
+        self.srd_enabled = enabled;
+    }
+
+    /// Manually run one SRD pass over the current velocity field, ignoring the
+    /// enable toggle. Normally SRD runs automatically after each step; this is
+    /// for tests that apply `S` to a known field without stepping.
+    pub fn apply_srd_pass(&self) {
+        if let Some(srd) = self.srd.as_ref() {
+            srd.apply(
+                &self.plan.context.device,
+                &self.plan.context.queue,
+                self.plan.state_buffer(),
+            );
+        }
     }
 
     pub fn model(&self) -> &ModelSpec {
@@ -379,10 +446,13 @@ impl GpuUnifiedSolver {
 
     pub fn step(&mut self) {
         self.plan.step();
+        self.apply_srd();
     }
 
     pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
-        self.plan.step_with_stats()
+        let stats = self.plan.step_with_stats()?;
+        self.apply_srd();
+        Ok(stats)
     }
 
     pub fn initialize_history(&self) {

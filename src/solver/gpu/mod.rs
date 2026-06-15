@@ -18,6 +18,7 @@ pub mod readback;
 pub mod recipe;
 pub(crate) mod runtime;
 pub(crate) mod runtime_common;
+pub mod srd;
 pub mod structs;
 pub mod submission_counter;
 pub mod unified_solver;

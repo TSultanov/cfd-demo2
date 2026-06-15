@@ -387,13 +387,13 @@ fn gui_default_incompressible_backstep_bounded() {
     assert_bounded("incompressible/backstep", &res, -1e6, 1e6, 0.5, 2.0);
 }
 
-// IGNORED pending a proper solver-level small-cell stabilization: the cut-cell
-// channel-obstacle has slivers (cells ~1/4 nominal) that destabilize the implicit
-// coupled solve. The mesh-level small-cell merge that fixed this was reverted (it
-// distorted the geometry around the cylinder); the geometry-preserving solver fix
-// (state/flux redistribution) is the follow-up.
+// The cut-cell channel-obstacle has slivers (cells down to ~2% nominal) that
+// destabilize the implicit coupled solve. This is now stabilized by the
+// post-step GPU State-Redistribution pass (`solver::gpu::srd`): a conservative,
+// geometry-preserving (non-merging) operator built automatically from the mesh,
+// inert on sliver-free meshes. The earlier mesh-level merge (geometry-distorting)
+// and viscosity floor (unphysical) were both rejected/reverted.
 #[test]
-#[ignore]
 fn gui_default_incompressible_obstacle_bounded() {
     std::env::set_var("CFD2_QUIET", "1");
     let air = air();
@@ -418,9 +418,224 @@ fn gui_default_compressible_backstep_bounded_and_smooth() {
     assert_bounded("compressible/backstep", &res, 0.5 * p0, 4.0 * p0, 0.1 * air.density, 10.0 * air.density);
 }
 
+/// The GPU State-Redistribution pass must match the CPU operator exactly (to
+/// f32 precision) on a known velocity field: applying `S` on-device through the
+/// solver reproduces `SrdCsr::apply_cpu` on the same input.
+#[test]
+fn srd_gpu_matches_cpu_reference() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let d = gui_defaults_for("incompressible_momentum");
+    let mesh = channel_obstacle_mesh();
+    let mut solver = build_incompressible(&d, &air, &mesh);
+    assert!(
+        solver.srd_active(),
+        "obstacle mesh must have an SRD operator built"
+    );
+
+    // A known, spatially varying velocity field (rounded to f32 to match the
+    // device's storage precision, so the only remaining difference is f32
+    // arithmetic ordering inside the operator).
+    let n = mesh.num_cells();
+    let u0: Vec<(f64, f64)> = (0..n)
+        .map(|c| {
+            let x = (0.5 * mesh.cell_cx[c]).sin() as f32 as f64;
+            let y = (0.3 * mesh.cell_cy[c]).cos() as f32 as f64;
+            (x, y)
+        })
+        .collect();
+    solver.set_u(&u0);
+
+    // GPU apply (through the solver), then read back.
+    solver.apply_srd_pass();
+    let gpu = pollster::block_on(solver.get_u());
+
+    // CPU reference with the same precomputed operator.
+    let csr = cfd2::solver::gpu::srd::build_srd_operator(&mesh).expect("operator");
+    let mut cpu = u0.clone();
+    csr.apply_cpu(&mut cpu);
+
+    let mut max_diff = 0.0_f64;
+    for c in 0..n {
+        max_diff = max_diff
+            .max((gpu[c].0 - cpu[c].0).abs())
+            .max((gpu[c].1 - cpu[c].1).abs());
+    }
+    eprintln!("[srd-xcheck] cells={n} max|gpu-cpu|={max_diff:.3e}");
+    assert!(
+        max_diff < 1e-5,
+        "GPU SRD diverges from CPU reference: {max_diff:e}"
+    );
+}
+
 // --------------------------------------------------------------------------
 // Tuning aids (run with --ignored)
 // --------------------------------------------------------------------------
+
+/// Build State-Redistribution (Berger & Giuliani 2021) neighborhoods for a mesh:
+/// every cell has a neighborhood N_i (itself); cells below `threshold` grow N_i by
+/// adding the largest face-adjacent cells until the neighborhood volume reaches
+/// `target`. Returns (neighborhoods, theta) where theta_j = # neighborhoods
+/// containing j (overlap count, >=1).
+fn srd_neighborhoods(mesh: &Mesh, threshold: f64, target: f64) -> (Vec<Vec<usize>>, Vec<usize>) {
+    use std::collections::HashSet;
+    let n = mesh.num_cells();
+    let other = |fi: usize, c: usize| -> Option<usize> {
+        if mesh.face_owner[fi] == c { mesh.face_neighbor[fi] } else { Some(mesh.face_owner[fi]) }
+    };
+    let mut neigh: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
+    for i in 0..n {
+        if mesh.cell_vol[i] >= threshold {
+            continue;
+        }
+        let mut members = vec![i];
+        let mut set: HashSet<usize> = HashSet::from([i]);
+        let mut vol = mesh.cell_vol[i];
+        while vol < target {
+            let mut best: Option<(f64, usize)> = None;
+            for &m in &members {
+                for &fi in &mesh.cell_faces[mesh.cell_face_offsets[m]..mesh.cell_face_offsets[m + 1]] {
+                    if let Some(o) = other(fi, m) {
+                        if !set.contains(&o) && best.map_or(true, |(bv, _)| mesh.cell_vol[o] > bv) {
+                            best = Some((mesh.cell_vol[o], o));
+                        }
+                    }
+                }
+            }
+            match best {
+                Some((v, nb)) => { members.push(nb); set.insert(nb); vol += v; }
+                None => break,
+            }
+        }
+        neigh[i] = members;
+    }
+    let mut theta = vec![0usize; n];
+    for ni in &neigh {
+        for &j in ni {
+            theta[j] += 1;
+        }
+    }
+    (neigh, theta)
+}
+
+/// Apply one SRD pass to a vector field `u` (conservative partition-of-unity
+/// averaging). Modifies `u` in place.
+fn srd_apply(u: &mut [(f64, f64)], mesh: &Mesh, neigh: &[Vec<usize>], theta: &[usize], inv: &[Vec<usize>]) {
+    let n = mesh.num_cells();
+    // gather: Q_hat_i = sum_{j in N_i} (V_j/theta_j) u_j / M_i
+    let mut qhat = vec![(0.0f64, 0.0f64); n];
+    for (i, ni) in neigh.iter().enumerate() {
+        let (mut nx, mut ny, mut m) = (0.0, 0.0, 0.0);
+        for &j in ni {
+            let w = mesh.cell_vol[j] / theta[j] as f64;
+            nx += w * u[j].0;
+            ny += w * u[j].1;
+            m += w;
+        }
+        qhat[i] = (nx / m, ny / m);
+    }
+    // scatter: u_new_j = (1/theta_j) sum_{i : j in N_i} Q_hat_i
+    for j in 0..n {
+        let (mut sx, mut sy) = (0.0, 0.0);
+        for &i in &inv[j] {
+            sx += qhat[i].0;
+            sy += qhat[i].1;
+        }
+        u[j] = (sx / theta[j] as f64, sy / theta[j] as f64);
+    }
+}
+
+/// CPU prototype: does post-step State Redistribution stabilize the true-geometry
+/// obstacle? Validates the method before the GPU implementation.
+#[test]
+#[ignore]
+fn prototype_srd_stabilizes_obstacle() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let d = gui_defaults_for("incompressible_momentum");
+    let mesh = channel_obstacle_mesh();
+    let nominal = 0.025 * 0.025;
+    let (neigh, theta) = srd_neighborhoods(&mesh, 0.5 * nominal, nominal);
+    let n = mesh.num_cells();
+    let mut inv: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, ni) in neigh.iter().enumerate() {
+        for &j in ni {
+            inv[j].push(i);
+        }
+    }
+    let stabilized = neigh.iter().filter(|ni| ni.len() > 1).count();
+    eprintln!("[srd] {stabilized} small cells get neighborhoods; max |N_i|={}",
+        neigh.iter().map(|ni| ni.len()).max().unwrap());
+
+    let mut solver = build_incompressible(&d, &air, &mesh);
+    let min_cell = actual_min_cell(&mesh);
+    let mut prev_max = 0.0;
+    let mut max_seen = 0.0f64;
+    for step in 0..200 {
+        let cur = solver.dt() as f64;
+        let next = adaptive_next_dt(&d, prev_max, air.density, &air.eos, false, min_cell, cur);
+        solver.set_dt(next as f32);
+        solver.step_with_stats().expect("step");
+        let mut u = pollster::block_on(solver.get_u());
+        srd_apply(&mut u, &mesh, &neigh, &theta, &inv);
+        solver.set_u(&u);
+        let mv = u.iter().map(|(x, y)| (x * x + y * y).sqrt()).fold(0.0_f64, f64::max);
+        prev_max = mv;
+        max_seen = max_seen.max(mv);
+        if step % 20 == 0 || mv > 5.0 {
+            eprintln!("[srd] step {step} max|u|={mv:.4e}");
+        }
+        assert!(mv.is_finite() && mv < 5.0, "SRD failed: max|u|={mv:.3e} at step {step}");
+    }
+    eprintln!("[srd] SUCCESS: bounded over 200 steps, max|u|={max_seen:.4e}");
+}
+
+/// Diagnose WHERE/WHY the true-geometry (un-merged) obstacle blows up: report the
+/// worst-|u| cell's volume, position relative to the cylinder, and face count each
+/// step, to identify the small-cell failure mode for a proper solver fix.
+#[test]
+#[ignore]
+fn diagnose_obstacle_blowup() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let d = gui_defaults_for("incompressible_momentum");
+    let mesh = channel_obstacle_mesh();
+    let nominal = 0.025 * 0.025;
+    let min_vol = mesh.cell_vol.iter().cloned().fold(f64::INFINITY, f64::min);
+    let n_sliver = mesh.cell_vol.iter().filter(|&&v| v < 0.5 * nominal).count();
+    eprintln!(
+        "[diag] cells={} nominal_vol={:.3e} min_vol={:.3e} ({:.1}% nom) slivers<50%={}",
+        mesh.num_cells(), nominal, min_vol, 100.0 * min_vol / nominal, n_sliver
+    );
+    let cyl = (1.0_f64, 0.51_f64);
+    let mut solver = build_incompressible(&d, &air, &mesh);
+    let min_cell = actual_min_cell(&mesh);
+    let mut prev_max = 0.0;
+    for step in 0..50 {
+        let cur = solver.dt() as f64;
+        let next = adaptive_next_dt(&d, prev_max, air.density, &air.eos, false, min_cell, cur);
+        solver.set_dt(next as f32);
+        solver.step_with_stats().expect("step");
+        let u = pollster::block_on(solver.get_u());
+        let (mut mv, mut am) = (0.0_f64, 0usize);
+        for (c, (x, y)) in u.iter().enumerate() {
+            let v = (x * x + y * y).sqrt();
+            if v.is_finite() && v > mv { mv = v; am = c; }
+        }
+        prev_max = mv;
+        if step % 3 == 0 || mv > 5.0 {
+            let vol = mesh.cell_vol[am];
+            let (cx, cy) = (mesh.cell_cx[am], mesh.cell_cy[am]);
+            let dcyl = ((cx - cyl.0).powi(2) + (cy - cyl.1).powi(2)).sqrt() - 0.1;
+            let nf = mesh.cell_face_offsets[am + 1] - mesh.cell_face_offsets[am];
+            eprintln!(
+                "[diag] step {:>3} dt={:.2e} max|u|={:.3e} @cell {} vol={:.2e}({:.0}%nom) pos=({:.3},{:.3}) gap_to_cyl={:.3} faces={}",
+                step, next, mv, am, vol, 100.0 * vol / nominal, cx, cy, dcyl, nf
+            );
+        }
+        if mv > 100.0 { eprintln!("[diag] DIVERGED at step {step}"); break; }
+    }
+}
 
 /// Decisive check: does the runtime advection scheme actually change GPU output?
 /// (Memory claims the GPU bakes the scheme; the generated assembly WGSL branches

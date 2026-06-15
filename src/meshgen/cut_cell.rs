@@ -476,7 +476,19 @@ pub fn generate_cut_cell_mesh(
         }
     }
 
-    let mesh = builder.build();
+    let mut mesh = builder.build();
+
+    // Immersed-boundary (embedded geometry) faces are interior boundary faces:
+    // they have no neighbor and `classify_boundary` left them untagged (they are
+    // not on the rectangular domain edge). Treat them as no-slip walls so the
+    // solver enforces the wall BC on the embedded surface — without this the
+    // immersed boundary acts as a free-slip hole (no boundary layer) and leaves
+    // the tiny cut cells' tangential velocity unconstrained.
+    for f in 0..mesh.num_faces() {
+        if mesh.face_neighbor[f].is_none() && mesh.face_boundary[f].is_none() {
+            mesh.face_boundary[f] = Some(crate::solver::mesh::BoundaryType::Wall);
+        }
+    }
 
     let mut min_vol = f64::MAX;
     let mut max_vol = f64::MIN;

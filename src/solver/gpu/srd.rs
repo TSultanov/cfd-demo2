@@ -11,6 +11,14 @@
 //! the true geometry and every degree of freedom (no merging, no mesh edit, no
 //! viscosity floor).
 //!
+//! **Status: opt-in, OFF by default.** The cut-cell small-cell instability is
+//! properly cured by the immersed no-slip wall BC on the embedded geometry (see
+//! `generate_cut_cell_mesh`), which both stabilizes the tiny cut cells — a
+//! no-slip face adds a `mu/dist` wall-shear damping that grows as cells shrink —
+//! and produces the physical boundary layer SRD's averaging would smear. SRD is
+//! retained as an opt-in stabilizer (`GpuUnifiedSolver::set_srd_enabled`); it is
+//! built when slivers exist but not applied unless enabled.
+//!
 //! `S` is conservative by construction: `sum_j V_j (S u)_j == sum_j V_j u_j`
 //! (proven in `conservation_error` / the unit tests).
 //!

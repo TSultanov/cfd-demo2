@@ -120,12 +120,15 @@ pub struct GpuUnifiedSolver {
     model: ModelSpec,
     plan: GpuProgramPlan,
     config: SolverConfig,
-    /// Post-step State-Redistribution pass for cut-cell small cells. `None`
-    /// unless the mesh carries sliver cut cells (so it is inert — and not even
-    /// built — on structured / graded meshes; see [`crate::solver::gpu::srd`]).
+    /// Post-step State-Redistribution operator for cut-cell small cells. `None`
+    /// unless the mesh carries sliver cut cells (see [`crate::solver::gpu::srd`]).
+    /// Built but **not applied by default**: the cut-cell small-cell instability
+    /// is properly fixed by the immersed no-slip wall BC (see
+    /// `generate_cut_cell_mesh`), which also produces the physical boundary
+    /// layer. SRD is retained as an opt-in (`set_srd_enabled`) stabilizer.
     srd: Option<crate::solver::gpu::srd::SrdGpu>,
-    /// Runtime toggle for the SRD pass (default on; only meaningful when `srd`
-    /// is `Some`). Exposed for the GPU-vs-CPU cross-check and diagnostics.
+    /// Runtime toggle for the SRD pass (**default off**; only meaningful when
+    /// `srd` is `Some`). Opt-in via [`Self::set_srd_enabled`].
     srd_enabled: bool,
 }
 
@@ -162,12 +165,14 @@ impl GpuUnifiedSolver {
             plan,
             config,
             srd: None,
-            srd_enabled: true,
+            srd_enabled: false,
         };
 
-        // Build the cut-cell State-Redistribution operator from the mesh. This
-        // is `None` (a true no-op, never dispatched) unless the mesh carries
-        // sliver cut cells, so structured / graded references are untouched.
+        // Build the cut-cell State-Redistribution operator from the mesh (kept
+        // available as an opt-in stabilizer; NOT applied by default — the
+        // immersed no-slip wall BC is the primary small-cell fix). `None` unless
+        // the mesh carries sliver cut cells, so structured/graded meshes are
+        // untouched.
         let ports = solver.ui_ports();
         if let Some(u_offset) = ports.u_offset {
             if let Some(csr) = crate::solver::gpu::srd::build_srd_operator(mesh) {
@@ -204,9 +209,11 @@ impl GpuUnifiedSolver {
         self.srd.is_some()
     }
 
-    /// Enable/disable the post-step SRD pass (default on). Only meaningful when
-    /// [`Self::srd_active`] — exposed for the GPU-vs-CPU cross-check and
-    /// divergence diagnostics.
+    /// Enable/disable the post-step SRD pass (**default off**). Only meaningful
+    /// when [`Self::srd_active`]. Opt-in stabilizer for cut-cell slivers; the
+    /// immersed no-slip wall BC is the primary fix, so this is normally left off
+    /// (it slightly smooths the near-wall boundary layer). Also used by the
+    /// GPU-vs-CPU cross-check and the boundary-layer diagnostic.
     pub fn set_srd_enabled(&mut self, enabled: bool) {
         self.srd_enabled = enabled;
     }

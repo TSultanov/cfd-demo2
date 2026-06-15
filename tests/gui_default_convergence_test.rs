@@ -387,12 +387,13 @@ fn gui_default_incompressible_backstep_bounded() {
     assert_bounded("incompressible/backstep", &res, -1e6, 1e6, 0.5, 2.0);
 }
 
-// The cut-cell channel-obstacle has slivers (cells down to ~2% nominal) that
-// destabilize the implicit coupled solve. This is now stabilized by the
-// post-step GPU State-Redistribution pass (`solver::gpu::srd`): a conservative,
-// geometry-preserving (non-merging) operator built automatically from the mesh,
-// inert on sliver-free meshes. The earlier mesh-level merge (geometry-distorting)
-// and viscosity floor (unphysical) were both rejected/reverted.
+// The cut-cell channel-obstacle has slivers (cells down to ~2% nominal). The
+// root-cause fix is the immersed no-slip wall BC on the cylinder (see
+// `generate_cut_cell_mesh`): it produces the physical boundary layer AND
+// stabilizes the tiny cut cells (the no-slip wall-shear damping grows as cells
+// shrink), so this stays bounded with SRD OFF (the default). The earlier
+// mesh-level merge (geometry-distorting) and viscosity floor (unphysical) were
+// both rejected/reverted; SRD is retained only as an opt-in stabilizer.
 #[test]
 fn gui_default_incompressible_obstacle_bounded() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -634,6 +635,80 @@ fn diagnose_obstacle_blowup() {
             );
         }
         if mv > 100.0 { eprintln!("[diag] DIVERGED at step {step}"); break; }
+    }
+}
+
+/// Diagnose the obstacle boundary layer: run to a developed state and report the
+/// velocity profile binned by distance from the cylinder surface, plus whether
+/// the run stayed bounded — separately for SRD on and off. A physical no-slip
+/// wall shows |u| rising from ~0 at the surface to the free-stream value.
+#[test]
+#[ignore]
+fn diagnose_obstacle_boundary_layer() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let d = gui_defaults_for("incompressible_momentum");
+    let mesh = channel_obstacle_mesh();
+    let cyl = (1.0_f64, 0.51_f64);
+    let radius = 0.1_f64;
+    let h = 0.025_f64;
+    let n_wall_faces = mesh
+        .face_boundary
+        .iter()
+        .zip(mesh.face_neighbor.iter())
+        .filter(|(b, nb)| nb.is_none() && matches!(b, Some(cfd2::solver::mesh::BoundaryType::Wall)))
+        .count();
+    eprintln!("[bl] cells={} wall_faces(incl. immersed)={n_wall_faces}", mesh.num_cells());
+
+    for srd_on in [true, false] {
+        let mut solver = build_incompressible(&d, &air, &mesh);
+        solver.set_srd_enabled(srd_on);
+        let min_cell = actual_min_cell(&mesh);
+        let mut prev_max = 0.0;
+        let mut max_seen = 0.0f64;
+        let mut diverged = false;
+        for _ in 0..120 {
+            let cur = solver.dt() as f64;
+            let next = adaptive_next_dt(&d, prev_max, air.density, &air.eos, false, min_cell, cur);
+            solver.set_dt(next as f32);
+            solver.step_with_stats().expect("step");
+            let u = pollster::block_on(solver.get_u());
+            let mv = u.iter().map(|(x, y)| (x * x + y * y).sqrt()).fold(0.0_f64, f64::max);
+            prev_max = mv;
+            max_seen = max_seen.max(mv);
+            if !mv.is_finite() || mv > 50.0 {
+                diverged = true;
+                break;
+            }
+        }
+        // Radial bins (in units of h) from the cylinder surface.
+        let u = pollster::block_on(solver.get_u());
+        let edges = [0.0, 1.0, 2.0, 3.0, 5.0, 8.0];
+        let mut sum = [0.0f64; 5];
+        let mut cnt = [0usize; 5];
+        for (c, (x, y)) in u.iter().enumerate() {
+            let dist = ((mesh.cell_cx[c] - cyl.0).powi(2) + (mesh.cell_cy[c] - cyl.1).powi(2)).sqrt()
+                - radius;
+            let band = dist / h;
+            if !(0.0..edges[5]).contains(&band) {
+                continue;
+            }
+            let speed = (x * x + y * y).sqrt();
+            for b in 0..5 {
+                if band >= edges[b] && band < edges[b + 1] {
+                    sum[b] += speed;
+                    cnt[b] += 1;
+                    break;
+                }
+            }
+        }
+        eprintln!(
+            "[bl] srd={srd_on} diverged={diverged} max|u|={max_seen:.3e} radial mean|u| by gap/h:"
+        );
+        for b in 0..5 {
+            let mean = if cnt[b] > 0 { sum[b] / cnt[b] as f64 } else { f64::NAN };
+            eprintln!("[bl]   gap [{:.0},{:.0})h: n={:>3} mean|u|={:.4e}", edges[b], edges[b + 1], cnt[b], mean);
+        }
     }
 }
 

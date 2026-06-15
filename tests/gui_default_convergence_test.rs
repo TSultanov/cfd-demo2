@@ -33,6 +33,11 @@ use cfd2::ui::model_defaults::{gui_defaults_for, ModelGuiDefaults};
 use nalgebra::{Point2, Vector2};
 
 const N_STEPS: usize = 150;
+/// Compressible gate horizon: long enough to surface the slow low-Mach inlet
+/// blow-up (unfixed: bounded for ~1000 steps, then max|u| rockets past the cap by
+/// ~step 1300). 2000 steps clears that with margin; the fixed default holds at
+/// the freestream (max|u| ~ inlet) the whole way.
+const COMPRESSIBLE_STEPS: usize = 2000;
 const READBACK_EVERY: usize = 5;
 /// With the laminar low inlet speeds the physical max |u| is small (a few x the
 /// inlet, ~10^-2). Any genuine instability — checkerboard or divergence — is a
@@ -146,13 +151,14 @@ fn drive(
     supports_sound_speed: bool,
     read_rho: bool,
     min_cell: f64,
+    n_steps: usize,
 ) -> DriveResult {
     let mut prev_max_vel = 0.0_f64;
     let mut samples = Vec::new();
     let mut diverged = false;
     let mut diverge_step = None;
 
-    for step in 0..N_STEPS {
+    for step in 0..n_steps {
         if d.adaptive_dt {
             let current_dt = solver.dt() as f64;
             let next_dt =
@@ -169,7 +175,7 @@ fn drive(
         }
         let outer = solver.step_stats().outer_iterations.unwrap_or(0);
 
-        let do_read = step % READBACK_EVERY == 0 || step == N_STEPS - 1;
+        let do_read = step % READBACK_EVERY == 0 || step == n_steps - 1;
         if !do_read {
             continue;
         }
@@ -339,7 +345,9 @@ fn build_compressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> Unifi
 
     solver.set_collect_convergence_stats(d.outer_auto_converge);
     solver.set_dt(d.timestep as f32);
-    solver.set_dtau(0.0).ok();
+    // Pseudo-transient continuation when the model default enables it (the
+    // compressible low-Mach stabilizer); `0.0` (time-accurate) otherwise.
+    solver.set_dtau(if d.dual_time { d.dtau as f32 } else { 0.0 }).ok();
     solver.set_eos(&eos).unwrap();
     solver
         .set_viscosity(fluid.viscosity as f32)
@@ -354,7 +362,10 @@ fn build_compressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> Unifi
     solver
         .set_compressible_inlet_isothermal_x(rho0 as f32, d.inlet_velocity, &eos)
         .unwrap();
-    solver.set_uniform_state(rho0 as f32, [0.0, 0.0], p0 as f32);
+    // Initialize at the uniform freestream matching the inlet (NOT rest) — the
+    // app does the same. From rest the inlet-injected momentum has no convective
+    // transport and seeds the low-Mach inlet instability.
+    solver.set_uniform_state(rho0 as f32, [d.inlet_velocity, 0.0], p0 as f32);
     solver.initialize_history();
     solver
 }
@@ -362,13 +373,17 @@ fn build_compressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> Unifi
 fn run_incompressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> DriveResult {
     let min_cell = actual_min_cell(mesh);
     let mut solver = build_incompressible(d, fluid, mesh);
-    drive(&mut solver, d, fluid.density, &fluid.eos, false, false, min_cell)
+    drive(&mut solver, d, fluid.density, &fluid.eos, false, false, min_cell, N_STEPS)
 }
 
+/// Compressible runs need a LONG horizon: the low-Mach inlet instability this
+/// gate guards against is slow — it stays under the cap for ~1000 steps before
+/// blowing past it (the old 150-step gate passed straight through the blow-up).
+/// `COMPRESSIBLE_STEPS` is well past where the unfixed default diverges.
 fn run_compressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> DriveResult {
     let min_cell = actual_min_cell(mesh);
     let mut solver = build_compressible(d, fluid, mesh);
-    drive(&mut solver, d, fluid.density, &fluid.eos, true, true, min_cell)
+    drive(&mut solver, d, fluid.density, &fluid.eos, true, true, min_cell, COMPRESSIBLE_STEPS)
 }
 
 // --------------------------------------------------------------------------
@@ -839,6 +854,255 @@ fn sweep_compressible_backstep() {
             last.map(|s| s.max_vel).unwrap_or(f64::NAN),
             last.map(|s| s.dt).unwrap_or(f64::NAN),
         );
+    }
+}
+
+/// Long-run probe of the compressible GUI default on EITHER default geometry, on
+/// whatever backend `CFD2_BACKEND` selects (gpu default; `cpu` routes to the CPU
+/// solver). Prints the trajectory every 100 steps and the divergence step (if
+/// any). This is the instrument that surfaced the low-Mach inlet blow-up the
+/// 150-step gate missed (see [[cfd2-compressible-gui-divergence]]); with the
+/// shipped defaults (uniform IC + `dtau`) it holds at the freestream.
+///
+/// Env knobs (each OVERRIDES the model default for one-recompile sweeps):
+/// `CFD2_PROBE_STEPS` (default 3000), `CFD2_PROBE_GEO` (`backstep`|`obstacle`),
+/// `CFD2_PROBE_SCHEME` (`upwind`|`sou`|else VanLeer), `CFD2_PROBE_VISC_MULT`,
+/// `CFD2_PROBE_THETA`, `CFD2_PROBE_PCA`, `CFD2_PROBE_U` (inlet speed),
+/// `CFD2_PROBE_OUTER`, `CFD2_PROBE_DT`, `CFD2_PROBE_DTAU` (pseudo-time; absent ⇒
+/// model default), `CFD2_PROBE_INITU` (uniform-freestream IC u_x; absent ⇒ the
+/// `build_compressible` default IC).
+#[test]
+#[ignore]
+fn diag_compressible_default_long() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let mut air = air();
+    let mut d = gui_defaults_for("compressible");
+    // Stabilizer-sweep knobs (one recompile, many experiments).
+    if let Ok(s) = std::env::var("CFD2_PROBE_SCHEME") {
+        d.advection_scheme = match s.as_str() {
+            "upwind" => cfd2::solver::scheme::Scheme::Upwind,
+            "sou" => cfd2::solver::scheme::Scheme::SecondOrderUpwind,
+            _ => cfd2::solver::scheme::Scheme::SecondOrderUpwindVanLeer,
+        };
+    }
+    let env_f64 = |k: &str| std::env::var(k).ok().and_then(|s| s.parse::<f64>().ok());
+    let env_f32 = |k: &str| std::env::var(k).ok().and_then(|s| s.parse::<f32>().ok());
+    if let Some(m) = env_f64("CFD2_PROBE_VISC_MULT") { air.viscosity *= m; }
+    if let Some(t) = env_f32("CFD2_PROBE_THETA") { d.low_mach_theta_floor = t; }
+    if let Some(p) = env_f32("CFD2_PROBE_PCA") { d.low_mach_pressure_coupling_alpha = p; }
+    if let Some(u) = env_f32("CFD2_PROBE_U") { d.inlet_velocity = u; }
+    if let Some(o) = std::env::var("CFD2_PROBE_OUTER").ok().and_then(|s| s.parse().ok()) { d.outer_iters = o; }
+    if let Some(dtv) = env_f64("CFD2_PROBE_DT") { d.timestep = dtv; }
+    let steps: usize = std::env::var("CFD2_PROBE_STEPS").ok().and_then(|s| s.parse().ok()).unwrap_or(3000);
+    let geo = std::env::var("CFD2_PROBE_GEO").unwrap_or_else(|_| "backstep".into());
+    // `CFD2_PROBE_DTAU` OVERRIDES the model default; absent, the model default
+    // (compressible: dual_time + 1e-3) is what `build_compressible` applies.
+    let dtau_override = env_f32("CFD2_PROBE_DTAU");
+    let eff_dtau = dtau_override.unwrap_or(if d.dual_time { d.dtau as f32 } else { 0.0 });
+    let mesh = if geo == "obstacle" { channel_obstacle_mesh() } else { backstep_mesh() };
+    let min_cell = actual_min_cell(&mesh);
+    eprintln!(
+        "[compressible/{geo} long] cells={} min_cell={:.4e} steps={steps} dt={:.1e} adaptive={} scheme={:?} visc={:.3e} theta={:.1e} pca={:.3} dtau={:.1e}",
+        mesh.num_cells(), min_cell, d.timestep, d.adaptive_dt, d.advection_scheme, air.viscosity, d.low_mach_theta_floor, d.low_mach_pressure_coupling_alpha, eff_dtau
+    );
+    let mut solver = build_compressible(&d, &air, &mesh);
+    if let Some(dt) = dtau_override { solver.set_dtau(dt).ok(); }
+    // Initialize at a UNIFORM FLOW matching the inlet (physical freestream IC, as the OpenFOAM
+    // reference does) instead of rest — from rest the inlet-injected momentum has no convective
+    // transport and piles up at the inlet. CFD2_PROBE_INITU sets the freestream u_x.
+    if let Some(uinit) = std::env::var("CFD2_PROBE_INITU").ok().and_then(|s| s.parse::<f32>().ok()) {
+        let rho0 = air.density as f32;
+        let p0i = air.eos.pressure_for_density(air.density) as f32;
+        solver.set_uniform_state(rho0, [uinit, 0.0], p0i);
+        solver.initialize_history();
+    }
+
+    let p0 = air.eos.pressure_for_density(air.density);
+    let mut prev_max_vel = 0.0_f64;
+    let mut diverged_at: Option<usize> = None;
+    for step in 0..steps {
+        if d.adaptive_dt {
+            let current_dt = solver.dt() as f64;
+            let next_dt = adaptive_next_dt(&d, prev_max_vel, air.density, &air.eos, true, min_cell, current_dt);
+            solver.set_dt(next_dt as f32);
+        } else {
+            solver.set_dt(d.timestep as f32);
+        }
+        if solver.step_with_stats().is_err() {
+            eprintln!("  step {step}: step_with_stats ERROR");
+            diverged_at = Some(step);
+            break;
+        }
+        let report = step % 100 == 0 || step == steps - 1;
+        if !report {
+            continue;
+        }
+        let u = pollster::block_on(solver.get_u());
+        let p = pollster::block_on(solver.get_p());
+        let rho = pollster::block_on(solver.get_rho());
+        let mut max_vel = 0.0_f64;
+        let mut nonfinite = 0usize;
+        for (vx, vy) in &u {
+            if !(vx.is_finite() && vy.is_finite()) { nonfinite += 1; continue; }
+            max_vel = max_vel.max((vx * vx + vy * vy).sqrt());
+        }
+        let p_min = p.iter().cloned().fold(f64::INFINITY, f64::min);
+        let p_max = p.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let rho_min = rho.iter().cloned().fold(f64::INFINITY, f64::min);
+        let rho_max = rho.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        prev_max_vel = if max_vel.is_finite() { max_vel } else { 0.0 };
+        eprintln!(
+            "  step {:>5} dt={:.2e} max|u|={:.4e} nf_u={} p=[{:.4e},{:.4e}] rho=[{:.4e},{:.4e}]",
+            step, solver.dt(), max_vel, nonfinite, p_min, p_max, rho_min, rho_max
+        );
+        let bad = nonfinite > 0 || !max_vel.is_finite() || max_vel > 50.0
+            || !p_min.is_finite() || !p_max.is_finite()
+            || p_min < 0.1 * p0 || p_max > 10.0 * p0
+            || rho_min < 0.05 * air.density || rho_max > 20.0 * air.density;
+        if bad {
+            eprintln!("  step {step}: DIVERGED / unphysical");
+            diverged_at = Some(step);
+            break;
+        }
+    }
+    eprintln!("[compressible/{geo} long] diverged_at={diverged_at:?}");
+}
+
+/// Jet-like colormap for a normalized value in [0,1].
+fn jet(t: f64) -> [u8; 3] {
+    let t = t.clamp(0.0, 1.0);
+    let r = (1.5 - (4.0 * t - 3.0).abs()).clamp(0.0, 1.0);
+    let g = (1.5 - (4.0 * t - 2.0).abs()).clamp(0.0, 1.0);
+    let b = (1.5 - (4.0 * t - 1.0).abs()).clamp(0.0, 1.0);
+    [(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8]
+}
+
+/// Rasterize a per-cell scalar field over the mesh to a PNG by splatting each
+/// cell centroid to a small pixel block. Auto-scales to [min,max] (printed) so the
+/// spatial structure is visible regardless of magnitude.
+fn save_field_png(path: &str, mesh: &Mesh, values: &[f64], px_per_unit: f64, label: &str) {
+    let xmax = mesh.cell_cx.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let ymax = mesh.cell_cy.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let w = (xmax * px_per_unit).ceil() as u32 + 8;
+    let h = (ymax * px_per_unit).ceil() as u32 + 8;
+    let finite: Vec<f64> = values.iter().cloned().filter(|v| v.is_finite()).collect();
+    let vmin = finite.iter().cloned().fold(f64::INFINITY, f64::min);
+    let vmax = finite.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let span = (vmax - vmin).max(1e-30);
+    let mut img = image::RgbImage::from_pixel(w, h, image::Rgb([20, 20, 20]));
+    let r = (0.6 * px_per_unit * 0.025).ceil().max(2.0) as i32;
+    for c in 0..mesh.num_cells() {
+        let px = (mesh.cell_cx[c] * px_per_unit) as i32 + 4;
+        let py = h as i32 - 4 - (mesh.cell_cy[c] * px_per_unit) as i32;
+        let color = if values[c].is_finite() {
+            image::Rgb(jet((values[c] - vmin) / span))
+        } else {
+            image::Rgb([255, 0, 255]) // magenta = non-finite
+        };
+        for dy in -r..=r {
+            for dx in -r..=r {
+                let (x, y) = (px + dx, py + dy);
+                if x >= 0 && y >= 0 && (x as u32) < w && (y as u32) < h {
+                    img.put_pixel(x as u32, y as u32, color);
+                }
+            }
+        }
+    }
+    img.save(path).expect("save png");
+    eprintln!("[viz] {label}: {path}  range=[{vmin:.4e}, {vmax:.4e}]");
+}
+
+/// Render the compressible GUI-default flow fields at several checkpoints to PNGs
+/// in /tmp/cfd_viz so the *nature* of the slow blow-up is visible (checkerboard vs
+/// boundary-localized vs smooth large-scale). Honors `CFD2_BACKEND`. Env:
+/// `CFD2_VIZ_GEO` (backstep|obstacle), `CFD2_VIZ_STEPS` (comma list of checkpoints).
+/// Print the inlet-adjacent cell columns (smallest few x) over time, sorted by y,
+/// to reveal whether the inlet blow-up is a checkerboard (sign alternation between
+/// vertically-adjacent cells) or a smooth growing boundary layer, and which
+/// variable leads. Honors `CFD2_BACKEND`.
+#[test]
+#[ignore]
+fn diag_compressible_inlet_profile() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let d = gui_defaults_for("compressible");
+    let mesh = backstep_mesh();
+    // Inlet-adjacent cells: the two smallest distinct x-bands.
+    let mut xs: Vec<f64> = mesh.cell_cx.clone();
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let x_thresh = xs[0] + 0.03; // ~first column (cell ~0.025)
+    let mut inlet_cells: Vec<usize> = (0..mesh.num_cells()).filter(|&c| mesh.cell_cx[c] < x_thresh).collect();
+    inlet_cells.sort_by(|&a, &b| mesh.cell_cy[a].partial_cmp(&mesh.cell_cy[b]).unwrap());
+    eprintln!("[inlet] {} inlet-column cells (x<{:.3})", inlet_cells.len(), x_thresh);
+
+    let mut solver = build_compressible(&d, &air, &mesh);
+    let p0 = air.eos.pressure_for_density(air.density);
+    let checks = [0usize, 300, 1000, 2000];
+    let mut done = 0usize;
+    for step in 0..=*checks.last().unwrap() {
+        if step == checks[done] {
+            let u = pollster::block_on(solver.get_u());
+            let p = pollster::block_on(solver.get_p());
+            let rho = pollster::block_on(solver.get_rho());
+            eprintln!("--- step {step} ---  (y, u_x, u_y, p-p0, rho)");
+            for &c in &inlet_cells {
+                eprintln!(
+                    "  y={:.3}  u=({:+.4e},{:+.4e})  dp={:+.4e}  rho={:.5}",
+                    mesh.cell_cy[c], u[c].0, u[c].1, p[c] - p0, rho[c]
+                );
+            }
+            done += 1;
+            if done >= checks.len() { break; }
+        }
+        solver.set_dt(d.timestep as f32);
+        if solver.step_with_stats().is_err() { break; }
+    }
+}
+
+#[test]
+#[ignore]
+fn viz_compressible_default_fields() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let mut d = gui_defaults_for("compressible");
+    let geo = std::env::var("CFD2_VIZ_GEO").unwrap_or_else(|_| "backstep".into());
+    let checkpoints: Vec<usize> = std::env::var("CFD2_VIZ_STEPS")
+        .unwrap_or_else(|_| "200,800,1500,2500".into())
+        .split(',').filter_map(|s| s.trim().parse().ok()).collect();
+    let dtau: f32 = std::env::var("CFD2_VIZ_DTAU").ok().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    if let Some(u) = std::env::var("CFD2_PROBE_U").ok().and_then(|s| s.parse::<f32>().ok()) {
+        d.inlet_velocity = u;
+    }
+    let mesh = if geo == "obstacle" { channel_obstacle_mesh() } else { backstep_mesh() };
+    std::fs::create_dir_all("/tmp/cfd_viz").ok();
+    let mut solver = build_compressible(&d, &air, &mesh);
+    if dtau > 0.0 { solver.set_dtau(dtau).ok(); }
+    if let Some(uinit) = std::env::var("CFD2_PROBE_INITU").ok().and_then(|s| s.parse::<f32>().ok()) {
+        let rho0 = air.density as f32;
+        let p0i = air.eos.pressure_for_density(air.density) as f32;
+        solver.set_uniform_state(rho0, [uinit, 0.0], p0i);
+        solver.initialize_history();
+    }
+    let tag = if dtau > 0.0 { format!("{geo}_dtau") } else { geo.clone() };
+    let last = *checkpoints.last().unwrap();
+    let mut next = 0usize;
+    for step in 0..=last {
+        if step == checkpoints[next] {
+            let u = pollster::block_on(solver.get_u());
+            let p = pollster::block_on(solver.get_p());
+            let umag: Vec<f64> = u.iter().map(|(x, y)| (x * x + y * y).sqrt()).collect();
+            let max_u = umag.iter().cloned().fold(0.0, f64::max);
+            eprintln!("[viz] {tag} step {step}: max|u|={max_u:.4e}");
+            save_field_png(&format!("/tmp/cfd_viz/{tag}_umag_{step:05}.png"), &mesh, &umag, 220.0, &format!("|u| @ {step}"));
+            save_field_png(&format!("/tmp/cfd_viz/{tag}_p_{step:05}.png"), &mesh, &p, 220.0, &format!("p @ {step}"));
+            next += 1;
+            if next >= checkpoints.len() { break; }
+        }
+        solver.set_dt(d.timestep as f32);
+        if solver.step_with_stats().is_err() {
+            eprintln!("[viz] step {step}: ERROR");
+            break;
+        }
     }
 }
 

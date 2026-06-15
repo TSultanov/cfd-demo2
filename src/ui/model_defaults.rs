@@ -51,6 +51,20 @@ pub struct ModelGuiDefaults {
     /// checkerboard-free recipe; the adaptive low-Mach dt inflation is unstable
     /// at a single outer iteration).
     pub adaptive_dt: bool,
+    /// Enable pseudo-transient continuation (dual time, `dtau > 0`). On for the
+    /// compressible default: at Air's near-zero Mach the time-accurate
+    /// density-based solver is marginally unstable on the collocated cut-cell
+    /// mesh — an inlet-seeded odd/even pressure mode grows without bound. The
+    /// pseudo-transient term damps that marginal mode and relaxes the flow toward
+    /// the (quasi-steady) solution, which is the physically meaningful state for
+    /// such a slow flow. Paired with the uniform-freestream initial condition
+    /// (see `App` worker init): from rest the inlet-injected momentum has no
+    /// convective transport and piles up at the inlet, so the freestream IC is
+    /// what makes the low-Mach default both stable and non-trivial.
+    pub dual_time: bool,
+    /// Pseudo-time step for `dual_time`. Comfortably inside the stable band
+    /// (stable for `dtau <~ 1e-2`, diverges by `~1e-1`); 1e-3 leaves ~10x margin.
+    pub dtau: f64,
     pub low_mach_model: GpuLowMachPrecondModel,
     /// `f32` to match the GUI state and the `set_precond_*` solver setters.
     pub low_mach_theta_floor: f32,
@@ -89,6 +103,8 @@ const INCOMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     target_cfl: 0.9,
     timestep: 0.02,
     adaptive_dt: true,
+    dual_time: false,
+    dtau: 1e-5,
     low_mach_model: GpuLowMachPrecondModel::Off,
     low_mach_theta_floor: 1e-6,
     low_mach_pressure_coupling_alpha: 1.0,
@@ -101,19 +117,30 @@ const INCOMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
 /// Compressible (density-based, implicit) defaults.
 ///
 /// Van Leer reconstruction, a single outer iteration, Weiss-Smith low-Mach
-/// preconditioning, and a low inlet speed. Two failure modes have to be avoided:
+/// preconditioning, a low inlet speed, and — the stabilizer — **pseudo-transient
+/// continuation** (`dual_time`) started from a **uniform-freestream** initial
+/// condition. Two failure modes have to be avoided:
 ///
 /// * **Turbulence** — Air at 1 m/s is Re ~ 10^4 here too, so the low inlet speed
 ///   (laminar Re) is needed for the compressible solver just as for the
 ///   incompressible one.
-/// * **Low-Mach checkerboard** — collocated density-based solvers decouple
-///   odd/even pressure at low Mach; `low_mach_theta_floor` / `target_cfl` /
-///   `low_mach_pressure_coupling_alpha` are the levers (tuned by the gate). The
-///   adaptive timestep stays acoustic-CFL-limited (the low-Mach dt inflation is
-///   unstable at a single outer iteration).
+/// * **Low-Mach inlet instability** — at Air's near-zero Mach, the time-accurate
+///   density-based solver started from REST on the collocated cut-cell mesh is
+///   unstable: the inlet injects momentum that, with no convective transport from
+///   rest, piles up on the inlet-carrying cells and grows an odd/even pressure
+///   mode without bound (it blows up slowly on the GPU and freezes the
+///   deterministic f64 CPU solve). It is *not* fixed by the advection scheme,
+///   `low_mach_theta_floor`, or `low_mach_pressure_coupling_alpha` (all verified
+///   inert here). The fix is two ingredients that are each physically standard
+///   and touch no solver code: (1) initialize at the uniform freestream so
+///   convection is established everywhere (the through-flow IC the OpenFOAM
+///   reference uses), and (2) `dual_time` (`dtau > 0`) to damp the residual
+///   marginal mode and relax toward the quasi-steady solution.
 ///
-/// The physical timestep is acoustically small, so a low-Mach flow develops
-/// slowly — but it stays bounded and smooth, which is what a default must do.
+/// The flow is genuinely slow (Mach ~ 1e-5), so it develops gradually toward the
+/// steady recirculation; it stays bounded and smooth, which is what a default
+/// must do. The validated MMS / lid / OpenFOAM-reference cases set their own
+/// `dtau`/IC and are unaffected by these GUI defaults.
 const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     advection_scheme: Scheme::SecondOrderUpwindVanLeer,
     time_scheme: GpuTimeScheme::BDF2,
@@ -125,6 +152,10 @@ const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     target_cfl: 0.3,
     timestep: 1e-5,
     adaptive_dt: false,
+    // Pseudo-transient continuation: the low-Mach stabilizer for the cut-cell
+    // through-flow default (see the field doc on `dual_time`).
+    dual_time: true,
+    dtau: 1e-3,
     low_mach_model: GpuLowMachPrecondModel::WeissSmith,
     low_mach_theta_floor: 1e-8,
     low_mach_pressure_coupling_alpha: 0.01,
@@ -163,6 +194,22 @@ mod tests {
         assert!(d.target_cfl <= 0.5, "acoustic CFL must be conservative");
         assert_eq!(d.advection_scheme, Scheme::SecondOrderUpwindVanLeer);
         assert_eq!(d.outer_iters, 1);
+    }
+
+    #[test]
+    fn compressible_enables_pseudo_transient_stabilizer() {
+        // The low-Mach inlet instability is cured by pseudo-transient continuation
+        // (paired with the uniform-freestream IC the app applies), not by the
+        // scheme or low-Mach knobs. A `dtau` in the stable band is the contract.
+        let d = gui_defaults_for("compressible");
+        assert!(d.dual_time, "compressible default must run pseudo-transient");
+        assert!(
+            d.dtau > 0.0 && d.dtau <= 1e-2,
+            "dtau {} must be in the stable band (<= ~1e-2)",
+            d.dtau
+        );
+        // Incompressible stays time-accurate (no pseudo-transient).
+        assert!(!gui_defaults_for("incompressible_momentum").dual_time);
     }
 
     #[test]

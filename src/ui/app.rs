@@ -509,6 +509,10 @@ impl CFDApp {
         self.target_cfl = d.target_cfl;
         self.timestep = d.timestep;
         self.adaptive_dt = d.adaptive_dt;
+        // Pseudo-transient continuation: the low-Mach stabilizer for the
+        // compressible default (see model_defaults). Off for incompressible.
+        self.dual_time = d.dual_time;
+        self.dtau = d.dtau;
         self.low_mach_model = d.low_mach_model;
         self.low_mach_theta_floor = d.low_mach_theta_floor;
         self.low_mach_pressure_coupling_alpha = d.low_mach_pressure_coupling_alpha;
@@ -1317,12 +1321,23 @@ impl CFDApp {
                 request.inlet_velocity,
                 &request.current_fluid.eos,
             );
+            // Initialize at the UNIFORM FREESTREAM matching the inlet, not rest.
+            // The density-based solver at Air's near-zero Mach is unstable when
+            // started from rest on the collocated cut-cell mesh: the inlet-injected
+            // momentum has no convective transport from rest and piles up on the
+            // inlet cells, growing an odd/even pressure mode (blow-up on the GPU,
+            // a frozen f64 solve on the CPU). Starting from the established
+            // freestream gives convection everywhere and, with pseudo-transient
+            // continuation (the compressible default `dtau > 0`), the flow stays
+            // bounded and relaxes to the quasi-steady solution. The validated
+            // references seed their own ICs and are unaffected.
+            let u0 = request.inlet_velocity;
             gpu_solver.set_uniform_state(
                 request.current_fluid.density as f32,
-                [0.0, 0.0],
+                [u0, 0.0],
                 p_ref as f32,
             );
-            (vec![(0.0, 0.0); n_cells], vec![p_ref; n_cells])
+            (vec![(u0 as f64, 0.0); n_cells], vec![p_ref; n_cells])
         } else {
             let _ = gpu_solver.set_density(request.current_fluid.density as f32);
             let _ = gpu_solver.set_alpha_u(request.alpha_u as f32);

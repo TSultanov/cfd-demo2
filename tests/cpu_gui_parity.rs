@@ -184,6 +184,127 @@ fn cpu_gui_unified_backend_runs_coupled_and_compressible() {
     std::env::remove_var("CFD2_CPU_ENGINE");
 }
 
+/// The GUI render bridge: when the worker steps the CPU solver and calls
+/// `copy_state_to_buffer` into a GPU viz buffer (then the GUI renders it), the
+/// uploaded data must (a) reflect an EVOLVED field (not the frozen IC — otherwise
+/// the user sees nothing) and (b) equal the solver's current state. This guards
+/// the path behind "Run does nothing visible on CPU" (the upload now flushes via
+/// an explicit submit, matching the GPU copy). Needs a GPU adapter for the
+/// render-mirror device (the GUI supplies eframe's); skips if none is available.
+#[test]
+fn cpu_render_bridge_uploads_evolved_state() {
+    let ctx = match pollster::block_on(cfd2::solver::gpu::context::GpuContext::new(None, None)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[gui-parity] no GPU adapter ({e}); skipping render-bridge test");
+            return;
+        }
+    };
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    std::env::set_var("CFD2_CPU_ENGINE", "interpreter");
+
+    let n = 16;
+    let mesh = generate_structured_rect_mesh(n, n, 1.0, 1.0, BoundarySides::wall());
+    let model = incompressible_momentum_mms_model().expect("model");
+    let config = SolverConfig {
+        advection_scheme: Scheme::SecondOrderUpwind,
+        time_scheme: TimeScheme::BDF2,
+        stepping: SteppingMode::Coupled,
+        ..SolverConfig::default()
+    };
+    // Pass a real device+queue, exactly like the GUI — this enables the CPU render
+    // bridge (cpu_render). Without it, copy_state_to_buffer/state_buffer panic.
+    let mut solver = pollster::block_on(UnifiedSolver::new(
+        &mesh,
+        model,
+        config,
+        Some(ctx.device.clone()),
+        Some(ctx.queue.clone()),
+    ))
+    .expect("solver");
+    assert!(solver.is_cpu(), "expected the CPU backend");
+    solver.set_dt(0.05);
+    solver.set_density(1.0);
+    solver.set_viscosity(1.0);
+    solver.set_alpha_u(0.7);
+    solver.set_alpha_p(0.3);
+    solver.set_outer_iters(25).expect("outer_iters");
+    let (fx, fy) = (mesh.face_cx.clone(), mesh.face_cy.clone());
+    for c in 0..2u32 {
+        let (fx, fy) = (fx.clone(), fy.clone());
+        let wall = move |i: u32| {
+            let (ux, uy) = tg_u(fx[i as usize], fy[i as usize]);
+            (if c == 0 { ux } else { uy }) as f32
+        };
+        solver
+            .set_boundary_values_per_face(GpuBoundaryType::Wall, "U", c, &wall)
+            .expect("wall bc");
+    }
+    let src: Vec<(f64, f64)> = (0..mesh.num_cells())
+        .map(|i| tg_source(mesh.cell_cx[i], mesh.cell_cy[i]))
+        .collect();
+    solver.set_field_vec2(INCOMPRESSIBLE_MMS_SOURCE_FIELD, &src).expect("src");
+    solver.set_field_vec2("U", &vec![(0.0, 0.0); mesh.num_cells()]).expect("U0");
+    solver.set_field_scalar("p", &vec![0.0; mesh.num_cells()]).expect("p0");
+    solver.initialize_history();
+    for _ in 0..30 {
+        solver.step();
+    }
+
+    // GUI render path: upload the state into a viz buffer, then read it back.
+    let size = solver.state_size_bytes();
+    let viz = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("test:viz"),
+        size: size.max(4),
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+    solver.copy_state_to_buffer(&viz);
+    let staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("test:staging"),
+        size: size.max(4),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = ctx
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    enc.copy_buffer_to_buffer(&viz, 0, &staging, 0, size);
+    let idx = ctx.queue.submit(Some(enc.finish()));
+    let slice = staging.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    let _ = ctx.device.poll(wgpu::PollType::Wait {
+        submission_index: Some(idx),
+        timeout: None,
+    });
+    let mirror: Vec<f32> = slice
+        .get_mapped_range()
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+    staging.unmap();
+
+    // (a) The solve evolved away from the zero IC — the GUI would show motion.
+    let u = pollster::block_on(solver.get_field_vec2("U")).expect("read U");
+    let max_u = u.iter().map(|(a, b)| a.abs().max(b.abs())).fold(0.0, f64::max);
+    println!("[gui-parity][render-bridge] max|u|={max_u:.3e} mirror_len={}", mirror.len());
+    assert!(
+        max_u > 0.1,
+        "CPU solve did not evolve (max|u|={max_u:.3e}); the GUI would render a frozen field"
+    );
+    // (b) The render-mirror buffer equals the solver's current state.
+    let host = pollster::block_on(solver.read_state_f32());
+    assert_eq!(mirror.len(), host.len(), "render-mirror size mismatch");
+    let maxd = mirror
+        .iter()
+        .zip(&host)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    assert!(maxd < 1e-5, "render-mirror state diverged from solver state: {maxd:.3e}");
+}
+
 /// EOS runtime tuning routes to the CPU constants the assembly reads (mirrors the
 /// GPU `set_eos`). Recognized `eos.*` fields apply; anything else is ignored.
 #[test]

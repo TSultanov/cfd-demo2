@@ -501,6 +501,12 @@ impl GpuUnifiedSolver {
             let n = (size_bytes as usize / 4).min(bytes.len());
             r.queue
                 .write_buffer(dst, 0, bytemuck::cast_slice(&bytes[..n]));
+            // Flush the upload now (an empty submit drains the staging belt), so the
+            // GUI render thread sees the new state this frame. The GPU branch below
+            // submits its copy explicitly; without this, the CPU write_buffer would
+            // only flush at egui's next submit — racy across the worker/render
+            // threads, which manifested as "Run does nothing visible" on CPU.
+            r.queue.submit(std::iter::empty());
             return;
         }
 

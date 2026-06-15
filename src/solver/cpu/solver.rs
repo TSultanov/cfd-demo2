@@ -98,6 +98,9 @@ pub struct CpuSolver {
     /// step_count == 0, falls back to Euler — there is no valid two-steps-ago
     /// state yet — exactly as the GPU's generic-coupled program does).
     step_count: u64,
+    /// Relative per-step state change |x_n - x_{n-1}| / |x_n| from the last step,
+    /// used for GUI steady-state auto-pause parity (see `should_stop`).
+    last_rel_delta: f64,
     #[allow(dead_code)]
     config: CpuBackendConfig,
 }
@@ -337,6 +340,7 @@ impl CpuSolver {
             time: 0.0,
             time_scheme,
             step_count: 0,
+            last_rel_delta: f64::INFINITY,
             config,
         })
     }
@@ -380,6 +384,22 @@ impl CpuSolver {
     }
     pub fn set_density(&mut self, rho: f32) {
         self.constants.density = rho;
+    }
+    /// Update an EOS runtime constant by its `eos.<field>` param name, mirroring
+    /// the GPU `set_eos` (which writes the same constants the assembly reads). Lets
+    /// the GUI's fluid/EOS tuning take effect on the CPU backend too. Returns
+    /// whether the name was a recognized EOS field.
+    pub fn set_eos_param(&mut self, name: &str, v: f32) -> bool {
+        match name {
+            "eos.gamma" => self.constants.eos_gamma = v,
+            "eos.gm1" => self.constants.eos_gm1 = v,
+            "eos.r" => self.constants.eos_r = v,
+            "eos.dp_drho" => self.constants.eos_dp_drho = v,
+            "eos.p_offset" => self.constants.eos_p_offset = v,
+            "eos.theta_ref" => self.constants.eos_theta_ref = v,
+            _ => return false,
+        }
+        true
     }
     pub fn set_alpha_u(&mut self, alpha: f32) {
         self.constants.alpha_u = alpha;
@@ -701,8 +721,31 @@ impl CpuSolver {
             }
         }
 
+        // Per-step relative state change, for the GUI steady-state auto-pause
+        // (`should_stop`). `state_old` holds the pre-step state (rotated in at the
+        // top of this step), so this is |x_n - x_{n-1}| / |x_n|.
+        {
+            let cur = self.buffers.f32_vec("state");
+            let old = self.buffers.f32_vec("state_old");
+            let (mut maxd, mut maxs) = (0.0f64, 0.0f64);
+            for i in 0..cur.len().min(old.len()) {
+                maxd = maxd.max((cur[i] - old[i]).abs() as f64);
+                maxs = maxs.max(cur[i].abs() as f64);
+            }
+            self.last_rel_delta = maxd / (maxs + 1e-30);
+        }
+
         self.dt_old = self.dt;
         self.step_count += 1;
+    }
+
+    /// Steady-state auto-pause for the GUI, mirroring the GPU's convergence-monitor
+    /// `should_stop` (which is only active under pseudo-transient continuation):
+    /// when `dtau > 0` and the per-step relative state change has fallen below a
+    /// small threshold after a few steps, the run is steady and the GUI may pause.
+    /// With `dtau == 0` (plain transient) it never fires, matching the GPU.
+    pub fn should_stop(&self) -> bool {
+        self.dtau > 0.0 && self.step_count >= 5 && self.last_rel_delta < 1e-6
     }
 
     /// Debug: run prepare + the assembly group (gradients, flux, assembly) at the

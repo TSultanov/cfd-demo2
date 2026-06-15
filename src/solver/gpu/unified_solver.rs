@@ -162,11 +162,17 @@ impl GpuUnifiedSolver {
     ) -> Result<Self, String> {
         #[cfg(feature = "cpu")]
         if let Some(cpu_cfg) = cpu_backend_from_env() {
-            let cpu = crate::solver::cpu::CpuSolver::new(
+            // Honor the requested stepping mode (config.stepping) exactly like the
+            // GPU path below — the GUI selects Implicit for compressible and Coupled
+            // for the saddle-point models, so the CPU backend must use the same to
+            // match the GPU's outer-loop behavior (was hardcoded Coupled via
+            // CpuSolver::new, which mis-stepped compressible in the GUI).
+            let cpu = crate::solver::cpu::CpuSolver::with_stepping(
                 mesh,
                 model.clone(),
                 config.advection_scheme,
                 config.time_scheme,
+                config.stepping,
                 cpu_cfg,
             )?;
             // Optional GUI render mirror (the GUI supplies device+queue).
@@ -418,8 +424,13 @@ impl GpuUnifiedSolver {
 
     pub fn step_stats(&self) -> PlanStepStats {
         #[cfg(feature = "cpu")]
-        if self.is_cpu() {
-            return PlanStepStats::default();
+        if let Some(c) = self.cpu_ref() {
+            // CPU has no GPU convergence monitor / per-graph telemetry, but it can
+            // report steady-state auto-pause (should_stop) so the GUI behaves like
+            // the GPU under pseudo-transient continuation.
+            let mut stats = PlanStepStats::default();
+            stats.should_stop = Some(c.should_stop());
+            return stats;
         }
         self.plan().step_stats()
     }
@@ -1005,8 +1016,16 @@ fn cpu_set_param(c: &mut crate::solver::cpu::CpuSolver, name: &str, value: PlanP
         ("time_scheme", PlanParamValue::TimeScheme(s)) => c.set_time_scheme(s),
         ("outer_iters", PlanParamValue::Usize(n)) => c.set_outer_iters(n),
         ("outer_iters", PlanParamValue::U32(n)) => c.set_outer_iters(n as usize),
-        // outer_tol_abs / fixed-iteration / batched modes: no CPU analogue
-        // (the CPU driver runs the requested outer_iters with a relative break).
+        // EOS runtime tuning (compressible): gamma/gm1/r/dp_drho/p_offset/theta_ref.
+        // Mirrors the GPU `set_eos` so the GUI's fluid controls affect the CPU too.
+        (n, PlanParamValue::F32(v)) if n.starts_with("eos.") => {
+            c.set_eos_param(n, v);
+        }
+        // outer_tol_abs / fixed-iteration / batched modes, low_mach.* preconditioner
+        // tuning, nonconverged_* retry policy, and the `preconditioner` selector have
+        // no CPU analogue: the CPU driver runs the requested outer_iters with a
+        // relative break and uses model-owned preconditioners (Schur / block-Jacobi),
+        // so these GPU-solver-internal knobs are intentionally ignored.
         _ => {}
     }
 }

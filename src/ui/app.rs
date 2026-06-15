@@ -2464,7 +2464,13 @@ impl eframe::App for CFDApp {
 
                         ui.separator();
                         ui.label("Compute Backend");
-                        ui.checkbox(&mut self.cpu_backend, "CPU backend (scalar_transport)");
+                        ui.checkbox(&mut self.cpu_backend, "CPU backend (all models)")
+                            .on_hover_text(
+                                "Run the selected model on the CPU (no GPU adapter). \
+                                 All models are supported at parity with the GPU; \
+                                 GPU-only telemetry (profiling, per-graph timings) is \
+                                 unavailable.",
+                            );
                         if self.cpu_backend {
                             ui.checkbox(
                                 &mut self.cpu_engine_transpiled,

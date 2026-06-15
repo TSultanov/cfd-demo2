@@ -275,6 +275,11 @@ fn setup_g(n: usize, cfg: CpuBackendConfig, biharmonic: bool, eps4: f32) -> (Cpu
     s.set_field_scalar("p", &p0v).unwrap();
     s.set_field_scalar("T", &t0v).unwrap();
     s.set_field_vec2("u", &u0).unwrap();
+    if biharmonic {
+        // The reworked implicit biharmonic reads its coefficient from the per-cell
+        // `bih_eps4` storage field (uniform-valued, like mu) — NOT `low_mach.eps4`.
+        s.set_field_scalar("bih_eps4", &vec![eps4 as f64; cells]).unwrap();
+    }
     s.initialize_history();
     (s, mesh)
 }

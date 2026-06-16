@@ -1,5 +1,7 @@
 #[cfg(feature = "meshgen")]
 pub mod meshgen;
+#[cfg(feature = "meshgen")]
+pub mod sim;
 pub mod solver;
 pub mod trace;
 #[cfg(feature = "ui")]

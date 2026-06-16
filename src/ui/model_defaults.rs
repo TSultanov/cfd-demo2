@@ -19,6 +19,8 @@
 //! headless convergence gate (`tests/gui_default_convergence_test.rs`) tunes the
 //! same numbers the GUI ships.
 
+use crate::sim::RuntimeParams;
+use crate::solver::model::eos::EosSpec;
 use crate::solver::scheme::Scheme;
 use crate::solver::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme as GpuTimeScheme};
 
@@ -76,6 +78,50 @@ pub struct ModelGuiDefaults {
     /// leaves the step count to develop unchanged (the adaptive dt grows as
     /// 1/speed, so it is CFL-limited either way); only the magnitudes shrink.
     pub inlet_velocity: f32,
+}
+
+impl ModelGuiDefaults {
+    /// Canonical `ModelGuiDefaults` → [`RuntimeParams`] mapping: the composition of
+    /// the GUI's `apply_model_defaults` (defaults → app state) and
+    /// `current_runtime_params` (app state → runtime bag). Having it in one place
+    /// means the GUI startup and the headless gate build the *identical* bag the
+    /// shared [`crate::sim::SolverDriver`] consumes.
+    ///
+    /// Fluid properties are passed as primitives — the driver is `ui`-independent
+    /// and never sees the `ui`-gated `Fluid`. `inlet_velocity` is taken from the
+    /// defaults (`self.inlet_velocity`); headless sweeps that vary the inlet speed
+    /// mutate the `ModelGuiDefaults` before calling this. `log_convergence` /
+    /// `log_every_steps` default to the non-logging GUI worker values.
+    pub fn to_runtime_params(&self, density: f32, viscosity: f32, eos: EosSpec) -> RuntimeParams {
+        RuntimeParams {
+            adaptive_dt: self.adaptive_dt,
+            target_cfl: self.target_cfl,
+            requested_dt: self.timestep as f32,
+            // Pseudo-transient continuation only when the model enables dual time
+            // (mirrors `current_runtime_params`).
+            dtau: if self.dual_time {
+                self.dtau.max(0.0) as f32
+            } else {
+                0.0
+            },
+            log_convergence: false,
+            log_every_steps: 50,
+            advection_scheme: self.advection_scheme,
+            time_scheme: self.time_scheme,
+            preconditioner: self.preconditioner,
+            outer_iters: self.outer_iters.max(1),
+            outer_auto_converge: self.outer_auto_converge,
+            low_mach_model: self.low_mach_model,
+            low_mach_theta_floor: self.low_mach_theta_floor,
+            low_mach_pressure_coupling_alpha: self.low_mach_pressure_coupling_alpha,
+            alpha_u: self.alpha_u as f32,
+            alpha_p: self.alpha_p as f32,
+            inlet_velocity: self.inlet_velocity,
+            density,
+            viscosity,
+            eos,
+        }
+    }
 }
 
 /// Incompressible momentum (coupled SIMPLE) defaults.

@@ -1,14 +1,20 @@
 #![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
+//! Smoke test: the desktop GUI's incompressible-default construction + step loop,
+//! built through the shared [`SolverDriver`] **without the `ui` feature** (primitives
+//! only — no `Fluid`, no `model_defaults`). This is the load-bearing proof that the
+//! driver is `ui`-independent: it lives under `meshgen` + `dev-tests` and never names
+//! a `ui`-gated type. The richer convergence gate
+//! (`tests/gui_default_convergence_test.rs`) tunes the real shipped defaults.
+
+use cfd2::sim::{DriverBuild, RuntimeParams, SolverDriver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
-use cfd2::solver::model::helpers::{
-    SolverFieldAliasesExt, SolverIncompressibleControlsExt, SolverInletVelocityExt,
-    SolverRuntimeParamsExt,
-};
+use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
-use cfd2::solver::{SolverConfig, TimeScheme, UnifiedSolver};
+use cfd2::solver::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
 use nalgebra::Vector2;
+use std::ops::ControlFlow;
 
 #[test]
 fn ui_incompressible_air_smoke_does_not_blow_up_immediately() {
@@ -21,82 +27,68 @@ fn ui_incompressible_air_smoke_does_not_blow_up_immediately() {
         height_outlet: 1.0,
         step_x: 0.5,
     };
-
-    let min_cell_size = 0.025;
-    let max_cell_size = 0.025;
-    let mut mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, 1.2, domain_size);
+    let mut mesh = generate_cut_cell_mesh(&geo, 0.025, 0.025, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
+    let n = mesh.num_cells();
 
-    let mut solver = pollster::block_on(UnifiedSolver::new(
+    // GUI-like incompressible (coupled SIMPLE) runtime knobs for Air, as primitives.
+    let params = RuntimeParams {
+        adaptive_dt: false,
+        target_cfl: 0.9,
+        requested_dt: 0.001,
+        dtau: 0.0,
+        log_convergence: false,
+        log_every_steps: 50,
+        advection_scheme: Scheme::Upwind,
+        time_scheme: TimeScheme::BDF2,
+        preconditioner: PreconditionerType::Jacobi,
+        outer_iters: 8,
+        outer_auto_converge: false,
+        low_mach_model: GpuLowMachPrecondModel::Off,
+        low_mach_theta_floor: 1e-6,
+        low_mach_pressure_coupling_alpha: 1.0,
+        alpha_u: 0.7,
+        alpha_p: 0.3,
+        inlet_velocity: 1.0,
+        density: 1.225,
+        viscosity: 1.81e-5,
+        eos: EosSpec::Constant,
+    };
+
+    // Construct through the driver (config/stepping derivation, phase-1 setters, IC/BC)
+    // + phase-2 `apply_params` — the same path the GUI worker runs.
+    let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
         &mesh,
         incompressible_momentum_model().expect("model"),
-        SolverConfig {
-            advection_scheme: Scheme::Upwind,
-            time_scheme: TimeScheme::BDF2,
-            ..Default::default()
-        },
+        &params,
+        &vec![(0.0, 0.0); n],
+        &vec![0.0; n],
         None,
         None,
     ))
-    .expect("solver init");
+    .expect("driver build");
+    driver.apply_params(&params);
 
-    // Clear full state to avoid uninitialized auxiliary fields (d_p, grad_p, etc).
-    let stride = solver.model().state_layout.stride() as usize;
-    solver
-        .write_state_f32(&vec![0.0f32; mesh.num_cells() * stride])
-        .expect("clear state");
-
-    // Air preset.
-    solver.set_density(1.225).unwrap();
-    solver.set_viscosity(1.81e-5).unwrap();
-
-    // Conservative under-relaxation (the UI defaults should keep this stable).
-    solver.set_alpha_u(0.7).unwrap();
-    solver.set_alpha_p(0.3).unwrap();
-
-    // Initial conditions.
-    let n_cells = mesh.num_cells();
-    solver.set_u(&vec![(0.0, 0.0); n_cells]);
-    solver.set_p(&vec![0.0; n_cells]);
-    solver.initialize_history();
-
-    // Boundary conditions.
-    solver.set_inlet_velocity(1.0).unwrap();
-    solver.set_dt(0.001);
-    solver.incompressible_set_should_stop(false);
-
-    for step in 0..10 {
-        let stats = solver.step_with_stats().expect("step with stats");
-        if let Some(last) = stats.last() {
+    // Drive 10 steps via the shared loop, asserting no blow-up each step.
+    let result = driver.run_steps(10, 1, |step, outcome| {
+        if let Some(reason) = &outcome.diverged {
+            panic!("step {step}: diverged: {reason:?}");
+        }
+        if let Some(rb) = &outcome.readback {
+            let fs = &rb.stats;
+            assert_eq!(fs.nonfinite_u, 0, "step {step}: non-finite u");
+            assert!(fs.p_finite, "step {step}: non-finite p");
             assert!(
-                last.residual.is_finite() && last.residual < 1e20,
-                "step {step}: linear residual blew up: {:?}",
-                last
-            );
-            assert!(
-                !last.diverged,
-                "step {step}: linear solver diverged: {last:?}"
+                fs.max_vel < 1e6,
+                "step {step}: velocity magnitude blew up: {:e}",
+                fs.max_vel
             );
         }
-
-        let u = pollster::block_on(solver.get_u());
-        let p = pollster::block_on(solver.get_p());
-
-        let mut max_vel = 0.0f64;
-        for (vx, vy) in &u {
-            assert!(
-                vx.is_finite() && vy.is_finite(),
-                "step {step}: non-finite u"
-            );
-            let v = (vx * vx + vy * vy).sqrt();
-            max_vel = max_vel.max(v);
-        }
-        for pv in &p {
-            assert!(pv.is_finite(), "step {step}: non-finite p");
-        }
-        assert!(
-            max_vel < 1e6,
-            "step {step}: velocity magnitude blew up: {max_vel:e}"
-        );
-    }
+        ControlFlow::Continue(())
+    });
+    assert!(
+        result.diverged.is_none(),
+        "incompressible smoke diverged at step {:?}",
+        result.stop_step
+    );
 }

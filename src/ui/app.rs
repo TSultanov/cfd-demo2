@@ -2,17 +2,13 @@ use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
     ChannelWithObstacle, Mesh,
 };
-use crate::solver::model::helpers::{
-    SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
-    SolverIncompressibleStatsExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
-};
 use crate::solver::model::{
     all_models, compressible_model_with_eos, ModelPreconditionerSpec, ModelSpec,
 };
 use crate::solver::scheme::Scheme;
 use crate::solver::{
     GpuLowMachPrecondModel, LinearSolverStats, OuterStepStatus, PreconditionerType,
-    SolverConfig, SteppingMode, TimeScheme as GpuTimeScheme, UiPortSet, UnifiedSolver,
+    TimeScheme as GpuTimeScheme, UiPortSet,
 };
 use crate::trace as tracefmt;
 use crate::ui::{cfd_renderer, fluid::Fluid};
@@ -23,29 +19,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
-#[derive(Clone, Copy)]
-struct RuntimeParams {
-    adaptive_dt: bool,
-    target_cfl: f64,
-    requested_dt: f32,
-    dtau: f32,
-    log_convergence: bool,
-    log_every_steps: u32,
-    advection_scheme: Scheme,
-    time_scheme: GpuTimeScheme,
-    preconditioner: PreconditionerType,
-    outer_iters: u32,
-    outer_auto_converge: bool,
-    low_mach_model: GpuLowMachPrecondModel,
-    low_mach_theta_floor: f32,
-    low_mach_pressure_coupling_alpha: f32,
-    alpha_u: f32,
-    alpha_p: f32,
-    inlet_velocity: f32,
-    density: f32,
-    viscosity: f32,
-    eos: crate::solver::model::eos::EosSpec,
-}
+use crate::sim::{DivergeReason, DriverBuild, RuntimeParams, SolverDriver};
 
 /// Rendering mode for the mesh visualization
 #[derive(PartialEq, Clone, Copy)]
@@ -125,21 +99,17 @@ struct SolverInitRequest {
     min_cell_size: f64,
     max_cell_size: f64,
     growth_rate: f64,
-    timestep: f64,
-    selected_scheme: Scheme,
-    time_scheme: GpuTimeScheme,
-    alpha_u: f64,
-    alpha_p: f64,
-    inlet_velocity: f32,
-    selected_preconditioner: PreconditionerType,
+    // Per-knob solver settings now travel as a single `RuntimeParams` snapshot
+    // (built via `current_runtime_params`) that the shared `SolverDriver` consumes.
     current_fluid: Fluid,
+    params: RuntimeParams,
     wgpu_device: Option<wgpu::Device>,
     wgpu_queue: Option<wgpu::Queue>,
     target_format: wgpu::TextureFormat,
 }
 
 struct SolverInitOutcome {
-    solver: UnifiedSolver,
+    driver: SolverDriver,
     mesh: Mesh,
     cached_cells: Vec<Vec<[f64; 2]>>,
     actual_min_cell_size: f64,
@@ -183,8 +153,7 @@ struct CachedGpuStats {
 
 enum SolverWorkerCommand {
     SetSolver {
-        solver: UnifiedSolver,
-        min_cell_size: f64,
+        driver: SolverDriver,
         viz_field: Option<VizFieldBuffers>,
     },
     ClearSolver,
@@ -711,14 +680,8 @@ impl CFDApp {
             min_cell_size: self.min_cell_size,
             max_cell_size: self.max_cell_size,
             growth_rate: self.growth_rate,
-            timestep: self.timestep,
-            selected_scheme: self.selected_scheme,
-            time_scheme: self.time_scheme,
-            alpha_u: self.alpha_u,
-            alpha_p: self.alpha_p,
-            inlet_velocity: self.inlet_velocity,
-            selected_preconditioner: self.selected_preconditioner,
             current_fluid: self.current_fluid.clone(),
+            params: self.current_runtime_params(),
             wgpu_device: self.wgpu_device.clone(),
             wgpu_queue: self.wgpu_queue.clone(),
             target_format: self.target_format,
@@ -1113,7 +1076,7 @@ impl CFDApp {
 
     fn apply_init_outcome(&mut self, outcome: SolverInitOutcome) {
         let SolverInitOutcome {
-            solver,
+            driver,
             mesh,
             cached_cells,
             actual_min_cell_size,
@@ -1152,8 +1115,7 @@ impl CFDApp {
         self.cached_message = None;
 
         self.solver_worker.send(SolverWorkerCommand::SetSolver {
-            solver,
-            min_cell_size: self.actual_min_cell_size,
+            driver,
             viz_field,
         });
         self.sync_worker_params();
@@ -1202,20 +1164,8 @@ impl CFDApp {
                 .ok_or_else(|| format!("unknown model id '{}'", request.model_id))?
         };
 
-        const UI_MAX_BLOCK_JACOBI: u32 = 16;
         let named_params = model.named_param_keys();
         let supports_preconditioner = named_params.iter().any(|&k| k == "preconditioner");
-        let mut selected_preconditioner = request.selected_preconditioner;
-        if matches!(selected_preconditioner, PreconditionerType::BlockJacobi)
-            && model.system.unknowns_per_cell() > UI_MAX_BLOCK_JACOBI
-        {
-            selected_preconditioner = PreconditionerType::Jacobi;
-        }
-        let effective_preconditioner = if supports_preconditioner {
-            selected_preconditioner
-        } else {
-            PreconditionerType::Jacobi
-        };
 
         // Build initial model_caps from layout (will be updated after solver creation
         // to use PortRegistry-based ui_ports when available)
@@ -1241,23 +1191,22 @@ impl CFDApp {
             supports_eos_tuning: named_params.iter().any(|&k| k == "eos.gamma"),
         };
 
-        let config = SolverConfig {
-            advection_scheme: request.selected_scheme,
-            time_scheme: request.time_scheme,
-            preconditioner: effective_preconditioner,
-            stepping: if model_caps.supports_eos_tuning {
-                SteppingMode::Implicit { outer_iters: 1 }
-            } else {
-                SteppingMode::Coupled
-            },
-        };
-
+        // The shared driver derives the `SolverConfig` (stepping mode + effective
+        // preconditioner), constructs the solver, and applies the phase-1 setters +
+        // initial / boundary conditions. Phase-2 knobs arrive via `sync_worker_params`
+        // (→ `apply_params`) after `SetSolver`, exactly as before.
         let solver_start = std::time::Instant::now();
         let init_guard = tracefmt::install_init_collector(&mut trace_init_events);
-        let mut gpu_solver = pollster::block_on(UnifiedSolver::new(
+        let DriverBuild {
+            driver,
+            cached_u,
+            cached_p,
+        } = pollster::block_on(SolverDriver::build(
             &mesh,
             model,
-            config,
+            &request.params,
+            &initial_u,
+            &initial_p,
             request.wgpu_device.clone(),
             request.wgpu_queue.clone(),
         ))?;
@@ -1269,103 +1218,13 @@ impl CFDApp {
             Some(format!("model_id={} cells={}", request.model_id, n_cells)),
         );
 
-        // Update model_caps from gpu_solver.ui_ports() (prefers PortRegistry over StateLayout)
-        let ui_ports = gpu_solver.ui_ports();
+        // Update model_caps from the solver's ui_ports() (prefers PortRegistry over StateLayout)
+        let ui_ports = driver.solver().ui_ports();
         model_caps.plot_stride = ui_ports.stride;
         model_caps.plot_u_offset = ui_ports.u_offset.unwrap_or(0);
         model_caps.plot_p_offset = ui_ports.p_offset.unwrap_or(0);
         model_caps.plot_has_u = ui_ports.u_offset.is_some();
         model_caps.plot_has_p = ui_ports.p_offset.is_some();
-
-        let solver_setup_start = std::time::Instant::now();
-        let stride = gpu_solver.model().state_layout.stride() as usize;
-        let _ = gpu_solver.write_state_f32(&vec![0.0f32; n_cells * stride]);
-        gpu_solver.set_dt(request.timestep as f32);
-        let _ = gpu_solver.set_viscosity(request.current_fluid.viscosity as f32);
-        gpu_solver.set_advection_scheme(request.selected_scheme);
-        gpu_solver.set_time_scheme(request.time_scheme);
-        let _ = gpu_solver.set_eos(&request.current_fluid.eos);
-        if supports_preconditioner {
-            gpu_solver.set_preconditioner(effective_preconditioner);
-        }
-        CFDApp::push_trace_init_event(
-            &mut trace_init_events,
-            "solver.setup",
-            solver_setup_start.elapsed(),
-            None,
-        );
-
-        let model = gpu_solver.model();
-        let mut has_rho = false;
-        let mut has_rho_u = false;
-        let mut has_rho_e = false;
-        let mut has_u = false;
-        for eqn in model.system.equations() {
-            match eqn.target().name() {
-                "rho" => has_rho = true,
-                "rho_u" => has_rho_u = true,
-                "rho_e" => has_rho_e = true,
-                "u" => has_u = true,
-                _ => {}
-            }
-        }
-
-        let initial_state_start = std::time::Instant::now();
-        let (cached_u, cached_p) = if has_rho && has_rho_u && has_rho_e && has_u {
-            let p_ref = request
-                .current_fluid
-                .pressure_for_density(request.current_fluid.density);
-            let _ = gpu_solver.set_density(request.current_fluid.density as f32);
-            let _ = gpu_solver.set_compressible_inlet_isothermal_x(
-                request.current_fluid.density as f32,
-                request.inlet_velocity,
-                &request.current_fluid.eos,
-            );
-            // Initialize at the UNIFORM FREESTREAM matching the inlet, not rest.
-            // The density-based solver at Air's near-zero Mach is unstable when
-            // started from rest on the collocated cut-cell mesh: the inlet-injected
-            // momentum has no convective transport from rest and piles up on the
-            // inlet cells, growing an odd/even pressure mode (blow-up on the GPU,
-            // a frozen f64 solve on the CPU). Starting from the established
-            // freestream gives convection everywhere and, with pseudo-transient
-            // continuation (the compressible default `dtau > 0`), the flow stays
-            // bounded and relaxes to the quasi-steady solution. The validated
-            // references seed their own ICs and are unaffected.
-            let u0 = request.inlet_velocity;
-            gpu_solver.set_uniform_state(
-                request.current_fluid.density as f32,
-                [u0, 0.0],
-                p_ref as f32,
-            );
-            (vec![(u0 as f64, 0.0); n_cells], vec![p_ref; n_cells])
-        } else {
-            let _ = gpu_solver.set_density(request.current_fluid.density as f32);
-            let _ = gpu_solver.set_alpha_u(request.alpha_u as f32);
-            let _ = gpu_solver.set_alpha_p(request.alpha_p as f32);
-            let _ = gpu_solver.set_inlet_velocity(request.inlet_velocity);
-            gpu_solver.set_u(&initial_u);
-            gpu_solver.set_p(&initial_p);
-            (initial_u, initial_p)
-        };
-        CFDApp::push_trace_init_event(
-            &mut trace_init_events,
-            "solver.initial_state",
-            initial_state_start.elapsed(),
-            Some(if has_rho && has_rho_u && has_rho_e && has_u {
-                "compressible".to_string()
-            } else {
-                "incompressible".to_string()
-            }),
-        );
-
-        let history_start = std::time::Instant::now();
-        gpu_solver.initialize_history();
-        CFDApp::push_trace_init_event(
-            &mut trace_init_events,
-            "solver.initialize_history",
-            history_start.elapsed(),
-            None,
-        );
 
         let cache_start = std::time::Instant::now();
         let cached_cells = CFDApp::cache_cells(&mesh);
@@ -1404,21 +1263,21 @@ impl CFDApp {
                     label: Some("cfd_viz:init_copy_state"),
                 });
                 encoder.copy_buffer_to_buffer(
-                    gpu_solver.state_buffer(),
+                    driver.solver().state_buffer(),
                     0,
                     &viz_buffer,
                     0,
                     state_size_bytes,
                 );
                 encoder.copy_buffer_to_buffer(
-                    gpu_solver.state_buffer(),
+                    driver.solver().state_buffer(),
                     0,
                     &viz_buffer_1,
                     0,
                     state_size_bytes,
                 );
                 encoder.copy_buffer_to_buffer(
-                    gpu_solver.state_buffer(),
+                    driver.solver().state_buffer(),
                     0,
                     &viz_buffer_2,
                     0,
@@ -1480,7 +1339,7 @@ impl CFDApp {
         );
 
         Ok(SolverInitOutcome {
-            solver: gpu_solver,
+            driver,
             mesh,
             cached_cells,
             actual_min_cell_size,
@@ -2603,83 +2462,6 @@ impl eframe::App for CFDApp {
     }
 }
 
-fn solver_worker_apply_params(solver: &mut UnifiedSolver, params: RuntimeParams) {
-    // Outer-convergence monitoring drives the GUI residual readout and the
-    // opportunistic per-step break; enable it from the model default (on by
-    // default) OR when the user turns on console convergence logging.
-    solver.set_collect_convergence_stats(params.outer_auto_converge || params.log_convergence);
-    solver.set_dt(params.requested_dt);
-    let named_params = solver.model().named_param_keys();
-    let has_param = |key: &str| named_params.iter().any(|&k| k == key);
-
-    if has_param("dtau") {
-        let _ = solver.set_dtau(params.dtau);
-    }
-    if has_param("density") {
-        let _ = solver.set_density(params.density);
-    }
-    if has_param("viscosity") {
-        let _ = solver.set_viscosity(params.viscosity);
-    }
-    if has_param("eos.gamma") {
-        let _ = solver.set_eos(&params.eos);
-    }
-    if has_param("outer_iters") {
-        let _ = solver.set_outer_iters(params.outer_iters as usize);
-    }
-    if has_param("low_mach.model") {
-        let _ = solver.set_precond_model(params.low_mach_model);
-    }
-    if has_param("low_mach.theta_floor") {
-        let _ = solver.set_precond_theta_floor(params.low_mach_theta_floor);
-    }
-    if has_param("low_mach.pressure_coupling_alpha") {
-        let _ = solver.set_precond_pressure_coupling_alpha(params.low_mach_pressure_coupling_alpha);
-    }
-
-    if has_param("advection_scheme") {
-        solver.set_advection_scheme(params.advection_scheme);
-    }
-    if has_param("time_scheme") {
-        solver.set_time_scheme(params.time_scheme);
-    }
-    if has_param("preconditioner") {
-        solver.set_preconditioner(params.preconditioner);
-    }
-
-    if has_param("alpha_u") {
-        let _ = solver.set_alpha_u(params.alpha_u);
-    }
-    if has_param("alpha_p") {
-        let _ = solver.set_alpha_p(params.alpha_p);
-    }
-
-    let model = solver.model();
-    let mut has_rho = false;
-    let mut has_rho_u = false;
-    let mut has_rho_e = false;
-    let mut has_u = false;
-    for eqn in model.system.equations() {
-        match eqn.target().name() {
-            "rho" => has_rho = true,
-            "rho_u" => has_rho_u = true,
-            "rho_e" => has_rho_e = true,
-            "u" => has_u = true,
-            _ => {}
-        }
-    }
-
-    if has_rho && has_rho_u && has_rho_e && has_u {
-        let _ = solver.set_compressible_inlet_isothermal_x(
-            params.density,
-            params.inlet_velocity,
-            &params.eos,
-        );
-    } else {
-        let _ = solver.set_inlet_velocity(params.inlet_velocity);
-    }
-}
-
 fn trace_runtime_params_from_worker(params: RuntimeParams) -> tracefmt::TraceRuntimeParams {
     tracefmt::TraceRuntimeParams {
         adaptive_dt: params.adaptive_dt,
@@ -2704,13 +2486,13 @@ fn trace_runtime_params_from_worker(params: RuntimeParams) -> tracefmt::TraceRun
 
 fn solver_worker_stop_trace(
     trace: &mut Option<SolverTraceSession>,
-    solver: &mut Option<UnifiedSolver>,
+    driver: &mut Option<SolverDriver>,
 ) {
     let Some(mut session) = trace.take() else {
         return;
     };
 
-    if let Some(s) = solver.as_mut() {
+    if let Some(s) = driver.as_mut().map(|d| d.solver_mut()) {
         s.set_collect_trace(false);
         let _ = s.enable_detailed_profiling(false);
         if session.profiling_enabled {
@@ -2835,11 +2617,9 @@ fn solver_worker_main(
     cmd_rx: mpsc::Receiver<SolverWorkerCommand>,
     evt_tx: mpsc::Sender<SolverWorkerEvent>,
 ) {
-    let mut solver: Option<UnifiedSolver> = None;
+    let mut driver: Option<SolverDriver> = None;
     let mut trace: Option<SolverTraceSession> = None;
     let mut model_id: &'static str = "<uninitialized>";
-    let mut supports_sound_speed = false;
-    let mut min_cell_size = 0.0_f64;
     let mut viz_field: Option<VizFieldBuffers> = None;
     let mut params = RuntimeParams {
         adaptive_dt: false,
@@ -2866,7 +2646,6 @@ fn solver_worker_main(
 
     let mut running = false;
     let mut step_idx: u64 = 0;
-    let mut prev_max_vel = 0.0_f64;
     let mut last_stats_publish = std::time::Instant::now();
     let mut last_snapshot_publish = std::time::Instant::now();
     let stats_publish_interval = std::time::Duration::from_millis(33);
@@ -2876,16 +2655,13 @@ fn solver_worker_main(
         while let Ok(cmd) = cmd_rx.try_recv() {
             if !solver_worker_handle_cmd(
                 cmd,
-                &mut solver,
+                &mut driver,
                 &mut trace,
                 &mut model_id,
-                &mut supports_sound_speed,
-                &mut min_cell_size,
                 &mut viz_field,
                 &mut params,
                 &mut running,
                 &mut step_idx,
-                &mut prev_max_vel,
                 &mut last_stats_publish,
                 &mut last_snapshot_publish,
                 &evt_tx,
@@ -2899,16 +2675,13 @@ fn solver_worker_main(
                 Ok(cmd) => {
                     if !solver_worker_handle_cmd(
                         cmd,
-                        &mut solver,
+                        &mut driver,
                         &mut trace,
                         &mut model_id,
-                        &mut supports_sound_speed,
-                        &mut min_cell_size,
                         &mut viz_field,
                         &mut params,
                         &mut running,
                         &mut step_idx,
-                        &mut prev_max_vel,
                         &mut last_stats_publish,
                         &mut last_snapshot_publish,
                         &evt_tx,
@@ -2922,7 +2695,7 @@ fn solver_worker_main(
             continue;
         }
 
-        let Some(solver) = solver.as_mut() else {
+        let Some(driver) = driver.as_mut() else {
             running = false;
             let _ = evt_tx.send(SolverWorkerEvent::Error(
                 "solver worker entered running state without an initialized solver".to_string(),
@@ -2931,53 +2704,27 @@ fn solver_worker_main(
             continue;
         };
 
-        if params.adaptive_dt {
-            let sound_speed = if supports_sound_speed {
-                params.eos.sound_speed(params.density as f64)
-            } else {
-                0.0
-            };
-            let adv_speed = prev_max_vel.max(params.inlet_velocity.abs() as f64);
-            let effective_sound_speed = match params.low_mach_model {
-                GpuLowMachPrecondModel::Off => sound_speed,
-                GpuLowMachPrecondModel::Legacy => sound_speed.min(adv_speed),
-                GpuLowMachPrecondModel::WeissSmith => {
-                    let theta = (params.low_mach_theta_floor as f64).max(0.0);
-                    let c_floor = sound_speed * theta.sqrt();
-                    sound_speed.min(adv_speed.max(c_floor))
-                }
-            };
-            // Even in dual-time mode, keep the physical timestep tied to the wave speed of the
-            // *preconditioned* system. Low-Mach preconditioning reduces `effective_sound_speed`
-            // so low-Mach flows can take acoustic CFL >> 1 without making `dt` so large that the
-            // pseudo-time iterations destabilize.
-            let wave_speed = adv_speed + effective_sound_speed;
-            if min_cell_size > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
-                let current_dt = solver.dt() as f64;
-                let mut next_dt = params.target_cfl * min_cell_size / wave_speed;
-                if next_dt > current_dt * 1.2 {
-                    next_dt = current_dt * 1.2;
-                }
-                next_dt = next_dt.clamp(1e-9, 100.0);
-                solver.set_dt(next_dt as f32);
-            }
-        } else {
-            solver.set_dt(params.requested_dt);
-        }
+        // Logging / readback cadence (depends on the current step index + timers).
+        let log_every_steps = params.log_every_steps.max(1) as u64;
+        let should_log = params.log_convergence && (step_idx % log_every_steps == 0);
+        let should_readback = step_idx == 0
+            || last_snapshot_publish.elapsed() >= snapshot_publish_interval
+            || should_log;
 
-        let start = std::time::Instant::now();
-        let step_linear_stats = match solver.step_with_stats() {
-            Ok(stats) => stats,
-            Err(err) => {
-                running = false;
-                let _ = evt_tx.send(SolverWorkerEvent::Error(format!(
-                    "solver step failed: {err}"
-                )));
-                let _ = evt_tx.send(SolverWorkerEvent::Running(false));
-                continue;
-            }
-        };
-        let step_time_ms = start.elapsed().as_secs_f32() * 1000.0;
+        // Acoustic-aware adaptive timestep + one step + divergence / steady-state
+        // detection all live in the shared driver now (was an inline adaptive-dt
+        // block + `step_with_stats` + readback). GUI-only concerns — viz upload,
+        // publishing, trace — stay here.
+        let outcome = driver.step(should_readback);
+        if let Some(DivergeReason::StepError(err)) = &outcome.diverged {
+            running = false;
+            let _ =
+                evt_tx.send(SolverWorkerEvent::Error(format!("solver step failed: {err}")));
+            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            continue;
+        }
+        let solver = driver.solver();
+        let step_time_ms = outcome.step_time_ms;
 
         if let Some(viz_field) = viz_field.as_ref() {
             if viz_field.size_bytes > 0 {
@@ -3001,19 +2748,15 @@ fn solver_worker_main(
             }
         }
 
-        if solver.incompressible_should_stop() {
+        if outcome.should_stop {
             running = false;
             let _ = evt_tx.send(SolverWorkerEvent::Running(false));
             continue;
         }
 
-        let linear_solves = step_linear_stats.len() as u32;
-        let linear_last = step_linear_stats.last().copied().unwrap_or_default();
-        let linear_diverged = step_linear_stats
-            .iter()
-            .any(|s| s.diverged || !s.residual.is_finite() || s.residual > 1e12);
-
-        if linear_diverged {
+        let linear_solves = outcome.linear_stats.len() as u32;
+        let linear_last = outcome.linear_stats.last().copied().unwrap_or_default();
+        if matches!(outcome.diverged, Some(DivergeReason::LinearSolver)) {
             running = false;
             let _ = evt_tx.send(SolverWorkerEvent::Error(
                 "divergence detected (linear solver)".to_string(),
@@ -3047,54 +2790,21 @@ fn solver_worker_main(
         stats.positivity_pressure_undershoots = step_stats
             .positivity_pressure_undershoot_count
             .unwrap_or(0);
-        let log_every_steps = params.log_every_steps.max(1) as u64;
-        let should_log = params.log_convergence && (step_idx % log_every_steps == 0);
-
-        let should_readback = step_idx == 0
-            || last_snapshot_publish.elapsed() >= snapshot_publish_interval
-            || should_log;
 
         let mut trace_max_u: Option<f64> = None;
         let mut trace_p_min: Option<f64> = None;
         let mut trace_p_max: Option<f64> = None;
 
-        if should_readback {
+        if let Some(rb) = outcome.readback {
             let now = std::time::Instant::now();
             last_snapshot_publish = now;
             last_stats_publish = now;
-            let u = pollster::block_on(solver.get_u());
-            let p = pollster::block_on(solver.get_p());
+            let fs = rb.stats;
+            trace_max_u = Some(fs.max_vel);
+            trace_p_min = Some(fs.p_min);
+            trace_p_max = Some(fs.p_max);
 
-            let mut max_vel = 0.0f64;
-            let mut nonfinite_u = 0usize;
-            for (vx, vy) in &u {
-                if !(vx.is_finite() && vy.is_finite()) {
-                    nonfinite_u += 1;
-                    continue;
-                }
-                let v = (vx.powi(2) + vy.powi(2)).sqrt();
-                if v > max_vel {
-                    max_vel = v;
-                }
-            }
-            prev_max_vel = max_vel;
-            trace_max_u = Some(max_vel);
-
-            let mut min_p = f64::INFINITY;
-            let mut max_p = f64::NEG_INFINITY;
-            let mut nonfinite_p = 0usize;
-            for &pv in &p {
-                if !pv.is_finite() {
-                    nonfinite_p += 1;
-                    continue;
-                }
-                min_p = min_p.min(pv);
-                max_p = max_p.max(pv);
-            }
-            trace_p_min = Some(min_p);
-            trace_p_max = Some(max_p);
-
-            if should_log || nonfinite_u > 0 || nonfinite_p > 0 {
+            if should_log || fs.nonfinite_u > 0 || fs.nonfinite_p > 0 {
                 let step_stats = solver.step_stats();
                 let outer_str = step_stats
                     .outer_iterations
@@ -3143,37 +2853,43 @@ fn solver_worker_main(
                     step_idx,
                     solver.time(),
                     solver.dt(),
-                    max_vel,
-                    min_p,
-                    max_p,
+                    fs.max_vel,
+                    fs.p_min,
+                    fs.p_max,
                     linear_solves,
                     linear_last.iterations,
                     linear_last.residual,
                     linear_last.converged,
                     linear_last.diverged,
                     outer_str,
-                    nonfinite_u,
-                    nonfinite_p,
+                    fs.nonfinite_u,
+                    fs.nonfinite_p,
                 );
             }
 
-            if nonfinite_u > 0 || nonfinite_p > 0 {
+            if fs.nonfinite_u > 0 || fs.nonfinite_p > 0 {
                 running = false;
                 let _ = evt_tx.send(SolverWorkerEvent::Error(format!(
-                    "divergence detected (nonfinite u={nonfinite_u}, p={nonfinite_p})"
+                    "divergence detected (nonfinite u={}, p={})",
+                    fs.nonfinite_u, fs.nonfinite_p
                 )));
                 let _ = evt_tx.send(SolverWorkerEvent::Running(false));
                 continue;
             }
 
-            let _ = evt_tx.send(SolverWorkerEvent::Snapshot { u, p, stats });
+            let _ = evt_tx.send(SolverWorkerEvent::Snapshot {
+                u: rb.u,
+                p: rb.p,
+                stats,
+            });
         } else if step_idx == 0 || last_stats_publish.elapsed() >= stats_publish_interval {
             last_stats_publish = std::time::Instant::now();
             let _ = evt_tx.send(SolverWorkerEvent::Stats { stats });
         }
 
         if let Some(trace) = trace.as_mut() {
-            let linear_solves = step_linear_stats
+            let linear_solves = outcome
+                .linear_stats
                 .iter()
                 .copied()
                 .map(tracefmt::TraceLinearSolverStats::from)
@@ -3224,58 +2940,47 @@ fn solver_worker_main(
 
 fn solver_worker_handle_cmd(
     cmd: SolverWorkerCommand,
-    solver: &mut Option<UnifiedSolver>,
+    driver: &mut Option<SolverDriver>,
     trace: &mut Option<SolverTraceSession>,
     model_id: &mut &'static str,
-    supports_sound_speed: &mut bool,
-    min_cell_size: &mut f64,
     viz_field: &mut Option<VizFieldBuffers>,
     params: &mut RuntimeParams,
     running: &mut bool,
     step_idx: &mut u64,
-    prev_max_vel: &mut f64,
     last_stats_publish: &mut std::time::Instant,
     last_snapshot_publish: &mut std::time::Instant,
     evt_tx: &mpsc::Sender<SolverWorkerEvent>,
 ) -> bool {
     match cmd {
         SolverWorkerCommand::SetSolver {
-            solver: next,
-            min_cell_size: next_min_cell_size,
+            driver: next,
             viz_field: next_viz_field,
         } => {
             if trace.is_some() {
-                solver_worker_stop_trace(trace, solver);
+                solver_worker_stop_trace(trace, driver);
             }
-            *model_id = next.model().id;
-            *supports_sound_speed = next
-                .model()
-                .named_param_keys()
-                .iter()
-                .any(|&k| k == "eos.gamma");
-            *solver = Some(next);
-            *min_cell_size = next_min_cell_size;
+            *model_id = next.solver().model().id;
+            *driver = Some(next);
             *viz_field = next_viz_field;
             *running = false;
             *step_idx = 0;
-            *prev_max_vel = 0.0;
             let now = std::time::Instant::now();
             *last_stats_publish = now;
             *last_snapshot_publish = now;
             let _ = evt_tx.send(SolverWorkerEvent::Running(false));
 
-            if let Some(s) = solver.as_mut() {
-                solver_worker_apply_params(s, *params);
+            // Phase-2 parameter application (was `solver_worker_apply_params`), in
+            // the same order as before: build sets phase 1, this sets phase 2.
+            if let Some(d) = driver.as_mut() {
+                d.apply_params(params);
             }
         }
         SolverWorkerCommand::ClearSolver => {
-            solver_worker_stop_trace(trace, solver);
-            *solver = None;
+            solver_worker_stop_trace(trace, driver);
+            *driver = None;
             *model_id = "<uninitialized>";
-            *supports_sound_speed = false;
             *running = false;
             *step_idx = 0;
-            *prev_max_vel = 0.0;
             *viz_field = None;
             let now = std::time::Instant::now();
             *last_stats_publish = now;
@@ -3283,7 +2988,7 @@ fn solver_worker_handle_cmd(
             let _ = evt_tx.send(SolverWorkerEvent::Running(false));
         }
         SolverWorkerCommand::SetRunning(next_running) => {
-            if next_running && solver.is_none() {
+            if next_running && driver.is_none() {
                 let _ = evt_tx.send(SolverWorkerEvent::Error(
                     "cannot start solver: no solver is initialized".to_string(),
                 ));
@@ -3302,20 +3007,20 @@ fn solver_worker_handle_cmd(
         }
         SolverWorkerCommand::UpdateParams(next_params) => {
             *params = next_params;
-            if let Some(s) = solver.as_mut() {
-                solver_worker_apply_params(s, *params);
+            if let Some(d) = driver.as_mut() {
+                d.apply_params(params);
             }
-            if let (Some(trace), Some(s)) = (trace.as_mut(), solver.as_ref()) {
+            if let (Some(trace), Some(d)) = (trace.as_mut(), driver.as_ref()) {
                 let event = tracefmt::TraceEvent::Params(tracefmt::TraceParamsEvent {
                     step: *step_idx,
-                    sim_time: s.time(),
+                    sim_time: d.solver().time(),
                     params: trace_runtime_params_from_worker(*params),
                 });
                 let _ = trace.writer.write_event(&event);
             }
         }
         SolverWorkerCommand::StartTrace { path, header } => {
-            solver_worker_stop_trace(trace, solver);
+            solver_worker_stop_trace(trace, driver);
 
             match tracefmt::TraceWriter::create(&path) {
                 Ok(mut writer) => {
@@ -3323,7 +3028,7 @@ fn solver_worker_handle_cmd(
                     let event = tracefmt::TraceEvent::Header(Box::new(header));
                     let _ = writer.write_event(&event);
 
-                    if let Some(s) = solver.as_mut() {
+                    if let Some(s) = driver.as_mut().map(|d| d.solver_mut()) {
                         s.set_collect_trace(true);
                         let _ = s.enable_detailed_profiling(profiling_enabled);
                         if profiling_enabled {
@@ -3352,7 +3057,7 @@ fn solver_worker_handle_cmd(
             }
         }
         SolverWorkerCommand::StopTrace => {
-            solver_worker_stop_trace(trace, solver);
+            solver_worker_stop_trace(trace, driver);
         }
         SolverWorkerCommand::Shutdown => return false,
     }

@@ -20,17 +20,18 @@
 
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
+use cfd2::sim::{DriverBuild, SolverDriver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep, ChannelWithObstacle, Mesh};
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
-    SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
-    SolverIncompressibleControlsExt, SolverInletVelocityExt, SolverRuntimeParamsExt,
+    SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverRuntimeParamsExt,
 };
 use cfd2::solver::model::{compressible_model_with_eos, incompressible_momentum_model};
-use cfd2::solver::{GpuLowMachPrecondModel, SolverConfig, SteppingMode, UnifiedSolver};
+use cfd2::solver::{GpuLowMachPrecondModel, UnifiedSolver};
 use cfd2::ui::fluid::Fluid;
 use cfd2::ui::model_defaults::{gui_defaults_for, ModelGuiDefaults};
 use nalgebra::{Point2, Vector2};
+use std::ops::ControlFlow;
 
 const N_STEPS: usize = 150;
 /// Compressible gate horizon: long enough to surface the slow low-Mach inlet
@@ -141,99 +142,44 @@ fn adaptive_next_dt(
     }
 }
 
-/// Drives `solver` for `N_STEPS`, mirroring the GUI worker. Records (never panics
-/// on) divergence so the gate and the sweeps can react.
-fn drive(
-    solver: &mut UnifiedSolver,
-    d: &ModelGuiDefaults,
-    density: f64,
-    eos: &EosSpec,
-    supports_sound_speed: bool,
-    read_rho: bool,
-    min_cell: f64,
-    n_steps: usize,
-) -> DriveResult {
-    let mut prev_max_vel = 0.0_f64;
+/// Drives the shared [`SolverDriver`] for `n_steps` and records samples. This is now
+/// a thin adapter over `SolverDriver::run_steps` (the *same* adaptive-dt + step +
+/// divergence path the GUI worker runs), so the gate exercises the production loop
+/// rather than a hand-copy. The driver flags hard divergence (non-finite / step
+/// error); the gate adds its own unphysical-`VEL_CAP` policy via the callback.
+fn drive(driver: &mut SolverDriver, n_steps: usize) -> DriveResult {
     let mut samples = Vec::new();
-    let mut diverged = false;
-    let mut diverge_step = None;
-
-    for step in 0..n_steps {
-        if d.adaptive_dt {
-            let current_dt = solver.dt() as f64;
-            let next_dt =
-                adaptive_next_dt(d, prev_max_vel, density, eos, supports_sound_speed, min_cell, current_dt);
-            solver.set_dt(next_dt as f32);
-        } else {
-            solver.set_dt(d.timestep as f32);
-        }
-
-        if solver.step_with_stats().is_err() {
-            diverged = true;
-            diverge_step = Some(step);
-            break;
-        }
-        let outer = solver.step_stats().outer_iterations.unwrap_or(0);
-
-        let do_read = step % READBACK_EVERY == 0 || step == n_steps - 1;
-        if !do_read {
-            continue;
-        }
-
-        let u = pollster::block_on(solver.get_u());
-        let p = pollster::block_on(solver.get_p());
-
-        let mut max_vel = 0.0_f64;
-        let mut nonfinite_u = 0usize;
-        for (vx, vy) in &u {
-            if !(vx.is_finite() && vy.is_finite()) {
-                nonfinite_u += 1;
-                continue;
-            }
-            let v = (vx * vx + vy * vy).sqrt();
-            if v > max_vel {
-                max_vel = v;
-            }
-        }
-        prev_max_vel = if max_vel.is_finite() { max_vel } else { 0.0 };
-
-        let p_finite = p.iter().all(|x| x.is_finite());
-        let p_min = p.iter().cloned().fold(f64::INFINITY, f64::min);
-        let p_max = p.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let (rho_min, rho_max) = if read_rho {
-            let rho = pollster::block_on(solver.get_rho());
-            (
-                rho.iter().cloned().fold(f64::INFINITY, f64::min),
-                rho.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
-            )
-        } else {
-            (1.0, 1.0)
+    let result = driver.run_steps(n_steps, READBACK_EVERY, |step, outcome| {
+        let Some(rb) = &outcome.readback else {
+            return ControlFlow::Continue(());
         };
-
+        let fs = &rb.stats;
+        let (rho_min, rho_max) = fs.rho.unwrap_or((1.0, 1.0));
         samples.push(Sample {
             step,
-            dt: solver.dt() as f64,
-            max_vel,
-            nonfinite_u,
-            p_finite,
-            p_min,
-            p_max,
+            dt: outcome.dt as f64,
+            max_vel: fs.max_vel,
+            nonfinite_u: fs.nonfinite_u,
+            p_finite: fs.p_finite,
+            p_min: fs.p_min,
+            p_max: fs.p_max,
             rho_min,
             rho_max,
-            outer_iters: outer,
+            outer_iters: outcome.outer_iters.unwrap_or(0),
         });
-
-        if nonfinite_u > 0 || !p_finite || !max_vel.is_finite() || max_vel > VEL_CAP {
-            diverged = true;
-            diverge_step = Some(step);
-            break;
+        // Gate policy: a non-finite field or an unphysical max velocity is divergence
+        // (the driver already stops the loop on its own hard-divergence detection).
+        if fs.nonfinite_u > 0 || !fs.p_finite || !fs.max_vel.is_finite() || fs.max_vel > VEL_CAP {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
         }
-    }
+    });
 
     DriveResult {
         samples,
-        diverged,
-        diverge_step,
+        diverged: result.diverged.is_some() || result.stopped_by_caller,
+        diverge_step: result.stop_step,
     }
 }
 
@@ -279,101 +225,60 @@ fn assert_bounded(label: &str, res: &DriveResult, p_lo: f64, p_hi: f64, rho_lo: 
     }
 }
 
-fn build_incompressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> UnifiedSolver {
-    let mut solver = pollster::block_on(UnifiedSolver::new(
+/// Build the incompressible solver through the shared driver — the *same*
+/// construction (config / stepping derivation, phase-1 setters, IC/BC) + phase-2
+/// `apply_params` the GUI runs. The model-default → `RuntimeParams` mapping is the
+/// canonical `ModelGuiDefaults::to_runtime_params` the app startup also uses.
+fn build_incompressible_driver(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> SolverDriver {
+    let params = d.to_runtime_params(fluid.density as f32, fluid.viscosity as f32, fluid.eos);
+    let n = mesh.num_cells();
+    let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
         mesh,
         incompressible_momentum_model().expect("incompressible model"),
-        SolverConfig {
-            advection_scheme: d.advection_scheme,
-            time_scheme: d.time_scheme,
-            preconditioner: d.preconditioner,
-            stepping: SteppingMode::Coupled,
-        },
+        &params,
+        &vec![(0.0, 0.0); n],
+        &vec![0.0; n],
         None,
         None,
     ))
-    .expect("solver init");
+    .expect("driver build");
+    driver.apply_params(&params);
+    driver
+}
 
-    let stride = solver.model().state_layout.stride() as usize;
-    solver
-        .write_state_f32(&vec![0.0f32; mesh.num_cells() * stride])
-        .expect("clear state");
+/// Build the compressible solver through the shared driver. The uniform-freestream
+/// initial condition + inlet BC are applied inside `SolverDriver::build` (compressible
+/// branch); `initial_u`/`initial_p` are ignored there.
+fn build_compressible_driver(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> SolverDriver {
+    let params = d.to_runtime_params(fluid.density as f32, fluid.viscosity as f32, fluid.eos);
+    let n = mesh.num_cells();
+    let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
+        mesh,
+        compressible_model_with_eos(fluid.eos).expect("compressible model"),
+        &params,
+        &vec![(0.0, 0.0); n],
+        &vec![0.0; n],
+        None,
+        None,
+    ))
+    .expect("driver build");
+    driver.apply_params(&params);
+    driver
+}
 
-    solver.set_collect_convergence_stats(d.outer_auto_converge);
-    solver.set_dt(d.timestep as f32);
-    solver.set_dtau(0.0).ok();
-    solver.set_density(fluid.density as f32).unwrap();
-    solver
-        .set_viscosity(fluid.viscosity as f32)
-        .unwrap();
-    solver.set_alpha_u(d.alpha_u as f32).unwrap();
-    solver.set_alpha_p(d.alpha_p as f32).unwrap();
-    solver.set_outer_iters(d.outer_iters as usize).unwrap();
-    solver.set_inlet_velocity(d.inlet_velocity).unwrap();
-    solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
-    solver.set_p(&vec![0.0; mesh.num_cells()]);
-    solver.incompressible_set_should_stop(false);
-    solver.initialize_history();
-    solver
+/// Raw-solver builders for the diagnostic helpers below (custom per-step loops):
+/// construct through the driver, then hand back the configured `UnifiedSolver`.
+fn build_incompressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> UnifiedSolver {
+    build_incompressible_driver(d, fluid, mesh).into_solver()
 }
 
 fn build_compressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> UnifiedSolver {
-    let eos = fluid.eos;
-    let mut solver = pollster::block_on(UnifiedSolver::new(
-        mesh,
-        compressible_model_with_eos(eos).expect("compressible model"),
-        SolverConfig {
-            advection_scheme: d.advection_scheme,
-            time_scheme: d.time_scheme,
-            preconditioner: d.preconditioner,
-            stepping: SteppingMode::Implicit {
-                outer_iters: d.outer_iters as usize,
-            },
-        },
-        None,
-        None,
-    ))
-    .expect("solver init");
-
-    let stride = solver.model().state_layout.stride() as usize;
-    solver
-        .write_state_f32(&vec![0.0f32; mesh.num_cells() * stride])
-        .expect("clear state");
-
-    let rho0 = fluid.density;
-    let p0 = eos.pressure_for_density(rho0);
-
-    solver.set_collect_convergence_stats(d.outer_auto_converge);
-    solver.set_dt(d.timestep as f32);
-    // Pseudo-transient continuation when the model default enables it (the
-    // compressible low-Mach stabilizer); `0.0` (time-accurate) otherwise.
-    solver.set_dtau(if d.dual_time { d.dtau as f32 } else { 0.0 }).ok();
-    solver.set_eos(&eos).unwrap();
-    solver
-        .set_viscosity(fluid.viscosity as f32)
-        .unwrap();
-    solver.set_density(rho0 as f32).unwrap();
-    solver.set_outer_iters(d.outer_iters as usize).unwrap();
-    solver.set_precond_model(d.low_mach_model).unwrap();
-    solver.set_precond_theta_floor(d.low_mach_theta_floor).unwrap();
-    solver
-        .set_precond_pressure_coupling_alpha(d.low_mach_pressure_coupling_alpha)
-        .unwrap();
-    solver
-        .set_compressible_inlet_isothermal_x(rho0 as f32, d.inlet_velocity, &eos)
-        .unwrap();
-    // Initialize at the uniform freestream matching the inlet (NOT rest) — the
-    // app does the same. From rest the inlet-injected momentum has no convective
-    // transport and seeds the low-Mach inlet instability.
-    solver.set_uniform_state(rho0 as f32, [d.inlet_velocity, 0.0], p0 as f32);
-    solver.initialize_history();
-    solver
+    build_compressible_driver(d, fluid, mesh).into_solver()
 }
 
 fn run_incompressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> DriveResult {
-    let min_cell = actual_min_cell(mesh);
-    let mut solver = build_incompressible(d, fluid, mesh);
-    drive(&mut solver, d, fluid.density, &fluid.eos, false, false, min_cell, N_STEPS)
+    let mut driver = build_incompressible_driver(d, fluid, mesh);
+    drive(&mut driver, N_STEPS)
 }
 
 /// Compressible runs need a LONG horizon: the low-Mach inlet instability this
@@ -381,9 +286,8 @@ fn run_incompressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> Drive
 /// blowing past it (the old 150-step gate passed straight through the blow-up).
 /// `COMPRESSIBLE_STEPS` is well past where the unfixed default diverges.
 fn run_compressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> DriveResult {
-    let min_cell = actual_min_cell(mesh);
-    let mut solver = build_compressible(d, fluid, mesh);
-    drive(&mut solver, d, fluid.density, &fluid.eos, true, true, min_cell, COMPRESSIBLE_STEPS)
+    let mut driver = build_compressible_driver(d, fluid, mesh);
+    drive(&mut driver, COMPRESSIBLE_STEPS)
 }
 
 // --------------------------------------------------------------------------

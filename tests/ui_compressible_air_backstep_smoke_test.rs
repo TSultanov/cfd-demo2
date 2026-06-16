@@ -1,15 +1,20 @@
 #![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
+//! Smoke test: the desktop GUI's compressible-default construction (uniform-freestream
+//! IC + inlet BC + acoustic-aware adaptive timestep) + step loop, built through the
+//! shared [`SolverDriver`] **without the `ui` feature** (primitives only — no `Fluid`,
+//! no `model_defaults`). The load-bearing proof that the driver is `ui`-independent for
+//! the compressible path too. The full shipped-default behavior (low-Mach + dual-time)
+//! is tuned by `tests/gui_default_convergence_test.rs`.
+
+use cfd2::sim::{DriverBuild, RuntimeParams, SolverDriver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
 use cfd2::solver::model::compressible_model_with_eos;
 use cfd2::solver::model::eos::EosSpec;
-use cfd2::solver::model::helpers::{
-    SolverCompressibleIdealGasExt, SolverCompressibleInletExt, SolverFieldAliasesExt,
-    SolverRuntimeParamsExt,
-};
 use cfd2::solver::scheme::Scheme;
-use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
+use cfd2::solver::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
 use nalgebra::Vector2;
+use std::ops::ControlFlow;
 
 #[test]
 fn ui_compressible_air_backstep_smoke() {
@@ -22,105 +27,67 @@ fn ui_compressible_air_backstep_smoke() {
         height_outlet: 1.0,
         step_x: 0.5,
     };
-
-    let min_cell_size = 0.025;
-    let max_cell_size = 0.025;
-    let mut mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, 1.2, domain_size);
+    let mut mesh = generate_cut_cell_mesh(&geo, 0.025, 0.025, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
+    let n = mesh.num_cells();
 
-    let density = 1.225f32;
-    let viscosity = 1.81e-5f32;
-    let inlet_u = 1.0f32;
     let eos = EosSpec::IdealGas {
         gamma: 1.4,
         gas_constant: 287.0,
         temperature: 300.0,
     };
+    // GUI-like compressible runtime knobs for Air, as primitives. `adaptive_dt` with
+    // `low_mach_model: Off` reproduces the original smoke test's full-sound-speed
+    // acoustic CFL update; the driver applies the uniform-freestream IC internally.
+    let params = RuntimeParams {
+        adaptive_dt: true,
+        target_cfl: 0.95,
+        requested_dt: 0.001,
+        dtau: 0.0,
+        log_convergence: false,
+        log_every_steps: 50,
+        advection_scheme: Scheme::Upwind,
+        time_scheme: TimeScheme::BDF2,
+        preconditioner: PreconditionerType::Jacobi,
+        outer_iters: 1,
+        outer_auto_converge: false,
+        low_mach_model: GpuLowMachPrecondModel::Off,
+        low_mach_theta_floor: 1e-6,
+        low_mach_pressure_coupling_alpha: 1.0,
+        alpha_u: 1.0,
+        alpha_p: 1.0,
+        inlet_velocity: 1.0,
+        density: 1.225,
+        viscosity: 1.81e-5,
+        eos,
+    };
 
-    let mut solver = pollster::block_on(UnifiedSolver::new(
+    let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
         &mesh,
         compressible_model_with_eos(eos).expect("model"),
-        SolverConfig {
-            advection_scheme: Scheme::Upwind,
-            time_scheme: TimeScheme::BDF2,
-            preconditioner: PreconditionerType::Jacobi,
-            stepping: SteppingMode::Implicit { outer_iters: 1 },
-        },
+        &params,
+        &vec![(0.0, 0.0); n],
+        &vec![0.0; n],
         None,
         None,
     ))
-    .expect("solver init");
+    .expect("driver build");
+    driver.apply_params(&params);
 
-    // Clear full state to avoid uninitialized auxiliary fields.
-    let stride = solver.model().state_layout.stride() as usize;
-    solver
-        .write_state_f32(&vec![0.0f32; mesh.num_cells() * stride])
-        .expect("clear state");
-
-    // Initial dt matches the UI slider default, but we apply a CFL-based update
-    // before stepping (mirrors the UI adaptive-dt behavior).
-    solver.set_dt(0.001);
-
-    solver.set_density(density).unwrap();
-    solver.set_viscosity(viscosity).unwrap();
-    solver.set_eos(&eos).unwrap();
-    solver
-        .set_compressible_inlet_isothermal_x(density, inlet_u, &eos)
-        .unwrap();
-
-    let p_ref = eos.pressure_for_density(density as f64) as f32;
-    solver.set_uniform_state(density, [0.0, 0.0], p_ref);
-    solver.initialize_history();
-
-    let actual_min_cell_size = mesh
-        .cell_vol
-        .iter()
-        .map(|&v| v.sqrt())
-        .fold(f64::INFINITY, f64::min);
-    let sound_speed = eos.sound_speed(density as f64);
-    let target_cfl = 0.95f64;
-
-    let mut prev_max_vel = 0.0f64;
-    for step in 0..10 {
-        let wave_speed = prev_max_vel + sound_speed;
-        if wave_speed.is_finite() && wave_speed > 1e-12 {
-            let current_dt = solver.dt() as f64;
-            let mut next_dt = target_cfl * actual_min_cell_size / wave_speed;
-            if next_dt > current_dt * 1.2 {
-                next_dt = current_dt * 1.2;
-            }
-            next_dt = next_dt.clamp(1e-9, 100.0);
-            solver.set_dt(next_dt as f32);
+    let result = driver.run_steps(10, 1, |step, outcome| {
+        if let Some(reason) = &outcome.diverged {
+            panic!("step {step}: diverged: {reason:?}");
         }
-
-        let stats = solver.step_with_stats().expect("step with stats");
-        if let Some(last) = stats.last() {
-            assert!(
-                last.residual.is_finite() && last.residual < 1e12,
-                "step {step}: linear residual blew up: {:?}",
-                last
-            );
-            assert!(
-                !last.diverged,
-                "step {step}: linear solver diverged: {last:?}"
-            );
+        if let Some(rb) = &outcome.readback {
+            let fs = &rb.stats;
+            assert_eq!(fs.nonfinite_u, 0, "step {step}: non-finite u");
+            assert!(fs.p_finite, "step {step}: non-finite p");
         }
-
-        let u = pollster::block_on(solver.get_u());
-        let p = pollster::block_on(solver.get_p());
-
-        let mut max_vel = 0.0f64;
-        for (vx, vy) in &u {
-            assert!(
-                vx.is_finite() && vy.is_finite(),
-                "step {step}: non-finite u"
-            );
-            let v = (vx * vx + vy * vy).sqrt();
-            max_vel = max_vel.max(v);
-        }
-        for pv in &p {
-            assert!(pv.is_finite(), "step {step}: non-finite p");
-        }
-        prev_max_vel = max_vel;
-    }
+        ControlFlow::Continue(())
+    });
+    assert!(
+        result.diverged.is_none(),
+        "compressible smoke diverged at step {:?}",
+        result.stop_step
+    );
 }

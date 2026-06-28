@@ -40,11 +40,14 @@ use crate::solver::model::backend::typed_ast::{
     typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
 use crate::solver::model::ports::PortRegistry;
+use crate::solver::model::primitives::PrimitiveDerivations;
 use cfd2_codegen::solver::codegen::dsl::XY;
+use cfd2_ir::ast::Expr;
 use cfd2_ir::dimensions::{
-    Density, DivDim, DynamicViscosity, Force, InvTime, Length, MassFlux, Pressure, Time, Velocity,
-    Volume,
+    Density, DivDim, DynamicViscosity, Force, InvTime, Length, MassFlux, MulDim, Pressure,
+    Temperature, Time, Velocity, Volume,
 };
+use std::collections::HashMap;
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
@@ -55,6 +58,37 @@ type Compressibility = DivDim<Density, Pressure>;
 pub const ALLMACH_MMS_SOURCE_U_FIELD: &str = "mms_src_U";
 /// Manufactured continuity/pressure source (Scalar, MassFlux/Volume).
 pub const ALLMACH_MMS_SOURCE_P_FIELD: &str = "mms_src_p";
+/// Manufactured temperature source on the thermal `_mms` variant (Scalar).
+pub const ALLMACH_MMS_SOURCE_T_FIELD: &str = "mms_src_T";
+
+/// Solved temperature field of the thermal all-Mach variant.
+pub const ALLMACH_TEMPERATURE_FIELD: &str = "T";
+/// Constant `rho_ref * T_ref` field (unit Density*Temperature) of the thermal
+/// variant. The EOS density is recovered on-device as
+/// `rho = rho_t_ref / T + psi*p` (ideal-gas `rho = p_ref/(R*T)` written
+/// f32-safely: the dominant thermal part `rho_t_ref/T` is full precision, the
+/// acoustic `psi*p` is the small perturbation). At `T = T_ref` this reduces
+/// exactly to the barotropic `rho = rho_ref + psi*p`. MUST be seeded to
+/// `density * T_ref` (an unseeded 0 field makes `rho` blow up).
+pub const ALLMACH_RHO_T_REF_FIELD: &str = "rho_t_ref";
+
+/// Reference temperature of the thermal EOS linearization. The canonical value
+/// the MMS manufactured solution and the GUI default are derived from; seeders
+/// set `rho_t_ref = density * ALLMACH_T_REF`.
+pub const ALLMACH_T_REF: f64 = 1.0;
+/// Thermal conduction coefficient divided by specific heat (`k / cp`, i.e.
+/// `rho * thermal_diffusivity`). Baked as a typed constant for now; promote to
+/// a runtime uniform param when GUI tuning is needed.
+pub const ALLMACH_K_OVER_CP: f64 = 1.0e-2;
+
+/// Unit of the temperature equation (declared divided by cp): Density*Temperature*Volume/Time.
+type TEquationUnit = DivDim<MulDim<MulDim<Density, Temperature>, Volume>, Time>;
+/// Unit of the manufactured temperature source: Density*Temperature/Time.
+type TSourceUnit = DivDim<MulDim<Density, Temperature>, Time>;
+/// Unit of the `k/cp` conduction coefficient (matches the buoyant model).
+type KOverCpUnit = DivDim<MulDim<Density, Volume>, MulDim<Length, Time>>;
+/// Unit of the constant `rho_ref * T_ref` recovery field: Density*Temperature.
+type RhoTRefUnit = MulDim<Density, Temperature>;
 
 #[derive(Debug, Clone)]
 pub struct AllMachPressureFields {
@@ -105,7 +139,11 @@ impl Default for AllMachPressureFields {
 /// byte-comparable to `incompressible_momentum`.
 const USE_FULL_DEV2: bool = true;
 
-fn build_allmach_system(_fields: &AllMachPressureFields, with_mms_source: bool) -> EquationSystem {
+fn build_allmach_system(
+    _fields: &AllMachPressureFields,
+    with_mms_source: bool,
+    thermal: bool,
+) -> EquationSystem {
     let u_typed = TypedFieldRef::<Velocity, Vector2>::new("U");
     let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
     let phi_typed = TypedFluxRef::<MassFlux, Scalar>::new("phi");
@@ -168,6 +206,32 @@ fn build_allmach_system(_fields: &AllMachPressureFields, with_mms_source: bool) 
     system.add_equation(momentum_eqn);
     system.add_equation(pressure_eqn);
 
+    // ----- Temperature transport (thermal variant only) -----
+    // Low-Mach energy, declared divided by cp (so all terms share unit
+    // Density*Temperature*Volume/Time): ddt(rho,T) + div(phi,T) - lap(k/cp,T).
+    // T is advected by the SOLVED Rhie–Chow mass flux phi (same as buoyant),
+    // and rho is the EOS density recovered from (p,T) each outer iteration.
+    if thermal {
+        let t_typed = TypedFieldRef::<Temperature, Scalar>::new(ALLMACH_TEMPERATURE_FIELD);
+        let rho_coeff_t = TypedCoeff::from_field(rho_typed);
+        let t_ddt = typed_fvm::ddt_coeff(rho_coeff_t, t_typed);
+        let t_div = typed_fvm::div(phi_typed, t_typed);
+        let k_over_cp: TypedCoeff<KOverCpUnit> = TypedCoeff::constant(ALLMACH_K_OVER_CP);
+        let t_lap = typed_fvm::laplacian(k_over_cp, t_typed);
+
+        let mut t_sum = t_ddt.cast_to::<TEquationUnit>()
+            + t_div.cast_to::<TEquationUnit>()
+            + t_lap.cast_to::<TEquationUnit>();
+        if with_mms_source {
+            let mms_src_t =
+                TypedCoeff::from_field(TypedFieldRef::<TSourceUnit, Scalar>::new(
+                    ALLMACH_MMS_SOURCE_T_FIELD,
+                ));
+            t_sum = t_sum + typed_fvc::source_coeff(mms_src_t, t_typed).cast_to::<TEquationUnit>();
+        }
+        system.add_equation(t_sum.eqn(t_typed));
+    }
+
     system
         .validate_units()
         .expect("allmach_pressure system failed unit validation");
@@ -177,22 +241,37 @@ fn build_allmach_system(_fields: &AllMachPressureFields, with_mms_source: bool) 
 
 pub fn allmach_pressure_system() -> EquationSystem {
     let fields = AllMachPressureFields::new();
-    build_allmach_system(&fields, false)
+    build_allmach_system(&fields, false, false)
 }
 
 pub fn allmach_pressure_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(false)
+    allmach_pressure_model_impl(false, false)
 }
 
 /// `allmach_pressure` plus manufactured momentum + continuity source fields for
 /// MMS order tests.
 pub fn allmach_pressure_mms_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(true)
+    allmach_pressure_model_impl(true, false)
 }
 
-fn allmach_pressure_model_impl(with_mms_source: bool) -> Result<ModelSpec, String> {
+/// Thermal all-Mach: `allmach_pressure` + a temperature transport equation and
+/// an on-device ideal-gas density recovery `rho = rho_t_ref/T + psi*p` (declared
+/// as a `PrimitiveDerivations` math expression, lowered to the coupled Update
+/// kernel — no hand-written kernel). The barotropic model is the `T = T_ref`
+/// limit.
+pub fn allmach_thermal_model() -> Result<ModelSpec, String> {
+    allmach_pressure_model_impl(false, true)
+}
+
+/// `allmach_thermal` plus manufactured momentum + continuity + temperature
+/// source fields for MMS order tests.
+pub fn allmach_thermal_mms_model() -> Result<ModelSpec, String> {
+    allmach_pressure_model_impl(true, true)
+}
+
+fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<ModelSpec, String> {
     let fields = AllMachPressureFields::new();
-    let system = build_allmach_system(&fields, with_mms_source);
+    let system = build_allmach_system(&fields, with_mms_source, thermal);
 
     // Keep U,p,d_p,grad_p,grad_p_old at the same offsets as incompressible
     // (0,2,3,4,6); append psi (and any MMS sources) after.
@@ -211,6 +290,12 @@ fn allmach_pressure_model_impl(with_mms_source: bool) -> Result<ModelSpec, Strin
         // (`rho = rho_ref + psi*p`) each outer iteration.
         fields.rho,
     ];
+    if thermal {
+        // Solved temperature, plus the constant `rho_ref * T_ref` recovery
+        // field (seeded to `density * T_ref`; never an equation target).
+        layout_fields.push(vol_scalar_dim::<Temperature>(ALLMACH_TEMPERATURE_FIELD));
+        layout_fields.push(vol_scalar_dim::<RhoTRefUnit>(ALLMACH_RHO_T_REF_FIELD));
+    }
     if with_mms_source {
         layout_fields.push(vol_vector_dim::<DivDim<Force, Volume>>(
             ALLMACH_MMS_SOURCE_U_FIELD,
@@ -218,6 +303,9 @@ fn allmach_pressure_model_impl(with_mms_source: bool) -> Result<ModelSpec, Strin
         layout_fields.push(vol_scalar_dim::<DivDim<MassFlux, Volume>>(
             ALLMACH_MMS_SOURCE_P_FIELD,
         ));
+        if thermal {
+            layout_fields.push(vol_scalar_dim::<TSourceUnit>(ALLMACH_MMS_SOURCE_T_FIELD));
+        }
     }
     let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
 
@@ -253,6 +341,20 @@ fn allmach_pressure_model_impl(with_mms_source: bool) -> Result<ModelSpec, Strin
             .full_offset();
         let p = p_port.offset();
         (u0, u1, p)
+    };
+
+    // Schur velocity-block indices are COUPLED-SYSTEM RANKS, not state offsets.
+    // For U_x,U_y,p the rank equals the state offset (first fields), so the
+    // barotropic case reuses (u0,u1). The thermal variant adds T to the u-block
+    // (like buoyant_incompressible) at T's coupled rank (offset_for = rank).
+    let schur_u: Vec<u32> = if thermal {
+        let fl = crate::solver::model::FluxLayout::from_system(&system);
+        let t_rank = fl
+            .offset_for(ALLMACH_TEMPERATURE_FIELD)
+            .ok_or_else(|| "T not found in coupled layout".to_string())?;
+        vec![u0, u1, t_rank]
+    } else {
+        vec![u0, u1]
     };
 
     let mut boundaries = BoundarySpec::default();
@@ -315,6 +417,40 @@ fn allmach_pressure_model_impl(with_mms_source: bool) -> Result<ModelSpec, Strin
                 BoundaryCondition::dirichlet_dim::<Pressure>(0.0),
             ),
     );
+    if thermal {
+        // T defaults: Inlet/Outlet/MovingWall isothermal (Dirichlet, values set
+        // per-face by the seeder/MMS), Wall/SlipWall adiabatic (zero-gradient).
+        let t_ref = ALLMACH_T_REF;
+        boundaries.set_field(
+            ALLMACH_TEMPERATURE_FIELD,
+            FieldBoundarySpec::new()
+                .set_uniform(
+                    GpuBoundaryType::Inlet,
+                    1,
+                    BoundaryCondition::dirichlet_dim::<Temperature>(t_ref),
+                )
+                .set_uniform(
+                    GpuBoundaryType::Outlet,
+                    1,
+                    BoundaryCondition::dirichlet_dim::<Temperature>(t_ref),
+                )
+                .set_uniform(
+                    GpuBoundaryType::Wall,
+                    1,
+                    BoundaryCondition::zero_gradient_dim::<DivDim<Temperature, Length>>(),
+                )
+                .set_uniform(
+                    GpuBoundaryType::SlipWall,
+                    1,
+                    BoundaryCondition::zero_gradient_dim::<DivDim<Temperature, Length>>(),
+                )
+                .set_uniform(
+                    GpuBoundaryType::MovingWall,
+                    1,
+                    BoundaryCondition::dirichlet_dim::<Temperature>(t_ref),
+                ),
+        );
+    }
 
     let method = crate::solver::model::method::MethodSpec::Coupled(
         crate::solver::model::method::CoupledCapabilities {
@@ -328,7 +464,23 @@ fn allmach_pressure_model_impl(with_mms_source: bool) -> Result<ModelSpec, Strin
         gradients: Some(crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout),
         kernel: derived_rhie_chow.flux_kernel,
     };
-    let primitives = crate::solver::model::primitives::PrimitiveDerivations::identity();
+    // Thermal variant: recover the EOS density on-device from the solved (p,T)
+    // every outer iteration, declared as a math expression (lowered to the
+    // coupled Update kernel by the codegen — see PrimitiveDerivations). Units
+    // stay consistent for the unit-checked resolver: rho_t_ref (Density*Temp) / T
+    // (Temp) = Density, psi (Density/Pressure) * p (Pressure) = Density. The
+    // barotropic model keeps identity primitives (host-side refresh).
+    let primitives = if thermal {
+        let mut derivations = HashMap::new();
+        derivations.insert(
+            "rho".to_string(),
+            Expr::ident(ALLMACH_RHO_T_REF_FIELD) / Expr::ident(ALLMACH_TEMPERATURE_FIELD)
+                + Expr::ident("psi") * Expr::ident("p"),
+        );
+        PrimitiveDerivations { derivations }
+    } else {
+        PrimitiveDerivations::identity()
+    };
 
     let layout_for_flux = layout.clone();
     let flux_module_module = crate::solver::model::modules::flux_module::flux_module_module(
@@ -340,10 +492,11 @@ fn allmach_pressure_model_impl(with_mms_source: bool) -> Result<ModelSpec, Strin
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
     Ok(ModelSpec {
-        id: if with_mms_source {
-            "allmach_pressure_mms"
-        } else {
-            "allmach_pressure"
+        id: match (thermal, with_mms_source) {
+            (true, true) => "allmach_thermal_mms",
+            (true, false) => "allmach_thermal",
+            (false, true) => "allmach_pressure_mms",
+            (false, false) => "allmach_pressure",
         },
         system,
         state_layout: layout,
@@ -360,7 +513,7 @@ fn allmach_pressure_model_impl(with_mms_source: bool) -> Result<ModelSpec, Strin
             preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
                 omega: 1.0,
                 layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(
-                    &[u0, u1],
+                    &schur_u,
                     p,
                 )
                 .map_err(|e| format!("invalid SchurBlockLayout: {e}"))?,

@@ -683,7 +683,9 @@ pub use incompressible_momentum::{
 #[allow(unused_imports)]
 pub use allmach_pressure::{
     allmach_pressure_mms_model, allmach_pressure_model, allmach_pressure_system,
-    AllMachPressureFields, ALLMACH_MMS_SOURCE_P_FIELD, ALLMACH_MMS_SOURCE_U_FIELD,
+    allmach_thermal_mms_model, allmach_thermal_model, AllMachPressureFields, ALLMACH_K_OVER_CP,
+    ALLMACH_MMS_SOURCE_P_FIELD, ALLMACH_MMS_SOURCE_T_FIELD, ALLMACH_MMS_SOURCE_U_FIELD,
+    ALLMACH_RHO_T_REF_FIELD, ALLMACH_TEMPERATURE_FIELD, ALLMACH_T_REF,
 };
 #[allow(unused_imports)]
 pub use scalar_transport::{
@@ -701,6 +703,8 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
         incompressible_momentum_mms_model()?,
         allmach_pressure_model()?,
         allmach_pressure_mms_model()?,
+        allmach_thermal_model()?,
+        allmach_thermal_mms_model()?,
         buoyant_incompressible_model()?,
         buoyant_incompressible_mms_model()?,
         compressible_model()?,

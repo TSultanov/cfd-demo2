@@ -161,8 +161,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         diag_3 += state[idx * 14u + 10u] * dual_time_scale;
         rhs_3 += state[idx * 14u + 10u] * dual_time_scale * state_iter[idx * 14u + 11u];
     }
+    matrix_values[start_row_3 + diag_rank * 4u + 2u] += vol * -0.4 * state[idx * 14u + 8u] / select(constants.dt, state[idx * 14u + 9u], state[idx * 14u + 9u] > 0.0);
+    rhs_3 += vol * -0.4 * state[idx * 14u + 8u] / select(constants.dt, state[idx * 14u + 9u], state[idx * 14u + 9u] > 0.0) * state_old[idx * 14u + 2u];
     var bounded_sum_phi_0: f32 = 0.0;
     var bounded_sum_phi_1: f32 = 0.0;
+    var bounded_sum_phi_3: f32 = 0.0;
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
         let owner = face_owner[face_idx];
@@ -324,6 +327,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (owner != idx) {
             phi_3 -= phi_3 * 2.0;
         }
+        bounded_sum_phi_3 += phi_3;
         if (!is_boundary) {
             diag_3 += max(phi_3, 0.0);
             matrix_values[start_row_3 + neighbor_rank * 4u + 3u] += min(phi_3, 0.0);
@@ -339,6 +343,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     diag_0 -= bounded_sum_phi_0;
     diag_1 -= bounded_sum_phi_1;
+    diag_3 -= bounded_sum_phi_3;
     matrix_values[start_row_0 + diag_rank * 4u + 0u] += diag_0;
     rhs[idx * 4u + 0u] = rhs_0;
     matrix_values[start_row_1 + diag_rank * 4u + 1u] += diag_1;

@@ -91,6 +91,10 @@ pub const ALLMACH_T_REF: f64 = 1.0;
 /// a runtime uniform param when GUI tuning is needed.
 pub const ALLMACH_K_OVER_CP: f64 = 1.0e-2;
 
+/// Ratio of specific heats (diatomic / air). Sets the compression-heating
+/// coefficient and the isentropic exponent (gamma-1)/gamma.
+pub const ALLMACH_GAMMA: f64 = 1.4;
+
 /// Unit of the temperature equation (declared divided by cp): Density*Temperature*Volume/Time.
 type TEquationUnit = DivDim<MulDim<MulDim<Density, Temperature>, Volume>, Time>;
 /// Unit of the manufactured temperature source: Density*Temperature/Time.
@@ -245,13 +249,41 @@ fn build_allmach_system(
         let t_typed = TypedFieldRef::<Temperature, Scalar>::new(ALLMACH_TEMPERATURE_FIELD);
         let rho_coeff_t = TypedCoeff::from_field(rho_typed);
         let t_ddt = typed_fvm::ddt_coeff(rho_coeff_t, t_typed);
-        let t_div = typed_fvm::div(phi_typed, t_typed);
+        // Production (compressible) uses BOUNDED convection so the energy is a clean
+        // rho*DT/Dt: the .bounded() form subtracts T*div(phi) = +T*d(rho)/dt, which
+        // cancels the conservative-form defect (ddt(rho,T)+div(phi,T) = rho*DT/Dt -
+        // T*d(rho)/dt). The steady _mms variant keeps the validated conservative form
+        // (compression terms are zero at steady state, so it stays byte-identical).
+        let t_div = if with_mms_source {
+            typed_fvm::div(phi_typed, t_typed)
+        } else {
+            typed_fvm::div(phi_typed, t_typed).bounded()
+        };
         let k_over_cp: TypedCoeff<KOverCpUnit> = TypedCoeff::constant(ALLMACH_K_OVER_CP);
         let t_lap = typed_fvm::laplacian(k_over_cp, t_typed);
 
         let mut t_sum = t_ddt.cast_to::<TEquationUnit>()
             + t_div.cast_to::<TEquationUnit>()
             + t_lap.cast_to::<TEquationUnit>();
+
+        // Compression heating (production only): the energy gains -(1/cp)*Dp/Dt so the
+        // gas heats under compression (stagnation / weak-shock T-rise) — the enabling
+        // physics for transonic flow. This first increment adds the dp/dt half as an
+        // implicit T<-p cross-ddt (rides the cross-variable ddt path in
+        // time_integration.rs). inv_cp = (gamma-1)*T_ref*psi keeps it consistent with
+        // the EOS (psi = 1/c^2) so the isentropic relation T/T0 = (p/p0)^((g-1)/g)
+        // emerges. SIGN (subtract) certified empirically by the uniform-fill test:
+        // a positive dp/dt must drive dT/dt > 0.
+        if !with_mms_source {
+            let inv_cp_const: TypedCoeff<Temperature> =
+                TypedCoeff::constant(-(ALLMACH_GAMMA - 1.0) * ALLMACH_T_REF);
+            let inv_cp = inv_cp_const.multiply(TypedCoeff::from_field(
+                TypedFieldRef::<Compressibility, Scalar>::new("psi"),
+            ));
+            let comp_ddt = typed_fvm::ddt_coeff(inv_cp, p_typed);
+            t_sum = t_sum + comp_ddt.cast_to::<TEquationUnit>();
+        }
+
         if with_mms_source {
             let mms_src_t =
                 TypedCoeff::from_field(TypedFieldRef::<TSourceUnit, Scalar>::new(

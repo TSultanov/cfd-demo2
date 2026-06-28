@@ -82,6 +82,11 @@ pub const ALLMACH_RHO_T_REF_FIELD: &str = "rho_t_ref";
 /// high-Mach compressible heating. Thermal variant only.
 pub const ALLMACH_RHO_DT_FIELD: &str = "rho_dT";
 
+/// On-device pressure-advection field `u_dot_grad_p = U . grad_p` (Pressure/Time),
+/// recovered from the velocity and the stored Rhie–Chow pressure gradient. It is
+/// the `U.grad(p)` half of the compression-heating source `-(1/cp)*Dp/Dt`.
+pub const ALLMACH_U_DOT_GRAD_P_FIELD: &str = "u_dot_grad_p";
+
 /// Reference temperature of the thermal EOS linearization. The canonical value
 /// the MMS manufactured solution and the GUI default are derived from; seeders
 /// set `rho_t_ref = density * ALLMACH_T_REF`.
@@ -105,6 +110,9 @@ type KOverCpUnit = DivDim<MulDim<Density, Volume>, MulDim<Length, Time>>;
 type RhoTRefUnit = MulDim<Density, Temperature>;
 /// Unit of the thermal-expansion coefficient `rho_dT = d(rho)/dT`: Density/Temperature.
 type RhoDtUnit = DivDim<Density, Temperature>;
+/// Unit of the on-device `u_dot_grad_p = U . grad_p` field: Velocity *
+/// PressureGradient = (Length/Time)*(Pressure/Length) = Pressure/Time.
+type PressureRateUnit = DivDim<Pressure, Time>;
 
 #[derive(Debug, Clone)]
 pub struct AllMachPressureFields {
@@ -275,6 +283,7 @@ fn build_allmach_system(
         // emerges. SIGN (subtract) certified empirically by the uniform-fill test:
         // a positive dp/dt must drive dT/dt > 0.
         if !with_mms_source {
+            // (T1) dp/dt half: implicit T<-p cross-ddt, coefficient -inv_cp.
             let inv_cp_const: TypedCoeff<Temperature> =
                 TypedCoeff::constant(-(ALLMACH_GAMMA - 1.0) * ALLMACH_T_REF);
             let inv_cp = inv_cp_const.multiply(TypedCoeff::from_field(
@@ -282,6 +291,33 @@ fn build_allmach_system(
             ));
             let comp_ddt = typed_fvm::ddt_coeff(inv_cp, p_typed);
             t_sum = t_sum + comp_ddt.cast_to::<TEquationUnit>();
+
+            // (T2) U.grad(p) half: explicit source for the pressure-advection part of
+            // -(1/cp)*Dp/Dt. u_dot_grad_p (=U.grad_p) is recovered on-device; using
+            // the stored grad_p makes it Picard-lagged by one outer iteration
+            // (vanishes at convergence). Coeff unit: Temperature * (Density/Pressure)
+            // * (Pressure/Time) = Density*Temp/Time = TSourceUnit, so source_coeff(.,T)
+            // integrates to TEquationUnit.
+            //
+            // SIGN: +inv_cp here, the OPPOSITE source-code sign to the T1 dp/dt half
+            // (-inv_cp), even though both represent the same -(1/cp)Dp/Dt. The reason
+            // is the codegen convention: an implicit cross-ddt nets a sign flip via its
+            // matrix term (so ddt_coeff(-inv_cp,p) forces T by +inv_cp*dp/dt, heating),
+            // whereas an explicit source goes straight to the RHS unflipped (so
+            // source_coeff(c,T) forces T by +c). To get the SAME +inv_cp*U.grad(p)
+            // heating we therefore need c=+inv_cp. Certified empirically (a wrong sign
+            // cools under compression — verified to reduce, not add, the box T-rise).
+            let inv_cp_src: TypedCoeff<Temperature> =
+                TypedCoeff::constant((ALLMACH_GAMMA - 1.0) * ALLMACH_T_REF);
+            let comp_adv_coeff = inv_cp_src
+                .multiply(TypedCoeff::from_field(
+                    TypedFieldRef::<Compressibility, Scalar>::new("psi"),
+                ))
+                .multiply(TypedCoeff::from_field(
+                    TypedFieldRef::<PressureRateUnit, Scalar>::new(ALLMACH_U_DOT_GRAD_P_FIELD),
+                ));
+            t_sum =
+                t_sum + typed_fvc::source_coeff(comp_adv_coeff, t_typed).cast_to::<TEquationUnit>();
         }
 
         if with_mms_source {
@@ -361,6 +397,8 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
         // Only present where the term is (production, not the steady `_mms` variant).
         if !with_mms_source {
             layout_fields.push(vol_scalar_dim::<RhoDtUnit>(ALLMACH_RHO_DT_FIELD));
+            // U.grad(p), recovered on-device for the compression-heating source.
+            layout_fields.push(vol_scalar_dim::<PressureRateUnit>(ALLMACH_U_DOT_GRAD_P_FIELD));
         }
     }
     if with_mms_source {
@@ -555,6 +593,15 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
                 -(Expr::ident(ALLMACH_RHO_T_REF_FIELD)
                     / (Expr::ident(ALLMACH_TEMPERATURE_FIELD)
                         * Expr::ident(ALLMACH_TEMPERATURE_FIELD))),
+            );
+            // u_dot_grad_p = U . grad_p (vector-component access via the `_x`/`_y`
+            // suffixes the recovery resolver understands). Resolver units:
+            // Velocity * (Pressure/Length) = Pressure/Time per term, Add of equal
+            // units -> no panic. This is the U.grad(p) half of -(1/cp)*Dp/Dt.
+            derivations.insert(
+                ALLMACH_U_DOT_GRAD_P_FIELD.to_string(),
+                Expr::ident("U_x") * Expr::ident("grad_p_x")
+                    + Expr::ident("U_y") * Expr::ident("grad_p_y"),
             );
         }
         PrimitiveDerivations { derivations }

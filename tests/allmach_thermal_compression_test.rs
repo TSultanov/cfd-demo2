@@ -140,7 +140,7 @@ fn compression_heating_raises_temperature() {
     // adiabatic walls and no other heat source, the bulk can ONLY warm via the
     // -(1/cp)*Dp/Dt term. A clear local rise + net warming certify presence + sign.
     assert!(
-        max_t > ALLMACH_T_REF * 1.01,
+        max_t > ALLMACH_T_REF * 1.05,
         "compression heating absent/too weak: max T = {max_t:.5} (T_ref={ALLMACH_T_REF})"
     );
     assert!(

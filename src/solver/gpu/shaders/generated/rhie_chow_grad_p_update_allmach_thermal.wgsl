@@ -40,8 +40,8 @@ struct Constants {
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
-    if (idx >= (arrayLength(&state) / 14u)) { return; }
-    let base = idx * 14u;
+    if (idx >= (arrayLength(&state) / 15u)) { return; }
+    let base = idx * 15u;
     let cell_center = cell_centers[idx];
     let cell_center_vec: vec2<f32> = vec2<f32>(cell_center.x, cell_center.y);
     let vol = cell_vols[idx];
@@ -81,7 +81,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         let lambda_other = 1.0 - lambda;
         let _unused_boundary_type = boundary_type;
-        grad_acc_p += normal_vec * (state[base + 2u] * lambda + select(state[other_idx * 14u + 2u], select(select(state[base + 2u], bc_value[face_idx * 4u + 2u], bc_kind[face_idx * 4u + 2u] == 1u), state[base + 2u] + bc_value[face_idx * 4u + 2u] * d_own, bc_kind[face_idx * 4u + 2u] == 2u), is_boundary) * lambda_other) * area;
+        grad_acc_p += normal_vec * (state[base + 2u] * lambda + select(state[other_idx * 15u + 2u], select(select(state[base + 2u], bc_value[face_idx * 4u + 2u], bc_kind[face_idx * 4u + 2u] == 1u), state[base + 2u] + bc_value[face_idx * 4u + 2u] * d_own, bc_kind[face_idx * 4u + 2u] == 2u), is_boundary) * lambda_other) * area;
     }
     let grad_out_p: vec2<f32> = grad_acc_p / max(vol, 0.000000000001);
     state[base + 4u] = grad_out_p.x;

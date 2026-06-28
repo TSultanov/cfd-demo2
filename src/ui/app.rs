@@ -275,6 +275,10 @@ pub struct CFDApp {
     low_mach_theta_floor: f32,
     low_mach_pressure_coupling_alpha: f32,
     inlet_velocity: f32,
+    /// All-Mach compressibility `psi = 1/c^2` for the `allmach_pressure` model. Set
+    /// from the per-model default on model switch; live-editable via the GUI slider
+    /// (the all-Mach group), which `sync_worker_params` pushes into the driver.
+    compressibility_psi: f32,
     selected_preconditioner: PreconditionerType,
     model_id: &'static str,
     model_caps: ModelUiCaps,
@@ -411,6 +415,7 @@ impl CFDApp {
             low_mach_theta_floor: 1e-6,
             low_mach_pressure_coupling_alpha: 1.0,
             inlet_velocity: 1.0,
+            compressibility_psi: 0.0,
             selected_preconditioner: PreconditionerType::Jacobi,
             model_id: "incompressible_momentum",
             model_caps: ModelUiCaps::default(),
@@ -453,6 +458,7 @@ impl CFDApp {
             density: self.current_fluid.density as f32,
             viscosity: self.current_fluid.viscosity as f32,
             eos: self.current_fluid.eos,
+            compressibility_psi: self.compressibility_psi,
         }
     }
 
@@ -486,6 +492,9 @@ impl CFDApp {
         self.low_mach_theta_floor = d.low_mach_theta_floor;
         self.low_mach_pressure_coupling_alpha = d.low_mach_pressure_coupling_alpha;
         self.inlet_velocity = d.inlet_velocity;
+        // All-Mach compressibility (0 for the other models); user-tunable via the
+        // all-Mach slider once the model is selected.
+        self.compressibility_psi = d.compressibility_psi;
     }
 
     fn current_trace_runtime_params(&self) -> tracefmt::TraceRuntimeParams {
@@ -597,13 +606,28 @@ impl CFDApp {
         match model_id {
             "incompressible_momentum" => "Incompressible momentum",
             "compressible" => "Compressible",
+            "allmach_pressure" => "All-Mach (pressure-based)",
             other => other,
         }
     }
 
+    /// The physical models the GUI Model dropdown offers. `all_models()` also
+    /// contains MMS / biharmonic / demo *verification* variants which carry the
+    /// velocity+pressure ports (so `UiPortSet::is_complete()` alone would expose
+    /// them) but only ever reproduce a manufactured solution — never a physical
+    /// flow a user would want to run. The dropdown is therefore restricted to the
+    /// genuine flow models; the completeness check is kept as a secondary guard.
     fn supported_ui_models() -> Vec<(&'static str, &'static str)> {
+        // Only physical-flow models belong in the GUI (these are exactly the ones
+        // `model_label` names). Verification variants (`*_mms*`, `*biharmonic*`,
+        // `*demo*`) are excluded.
+        const GUI_PHYSICAL_MODELS: &[&str] =
+            &["incompressible_momentum", "compressible", "allmach_pressure"];
         let mut out = Vec::new();
         for model in all_models().expect("failed to build model definitions") {
+            if !GUI_PHYSICAL_MODELS.contains(&model.id) {
+                continue;
+            }
             // Use UiPortSet to check for required fields (validates types too)
             let ui_ports = UiPortSet::from_layout(&model.state_layout);
             if !ui_ports.is_complete() {
@@ -1812,6 +1836,37 @@ impl eframe::App for CFDApp {
                             self.update_gpu_inlet_velocity();
                         }
 
+                        // All-Mach compressibility knob: only the pressure-based
+                        // all-Mach model reads `psi`. Sliding it sweeps the
+                        // incompressible (psi=0) → compressible range; the live Mach
+                        // readout makes the regime explicit.
+                        if self.model_id == "allmach_pressure" {
+                            let mut psi = self.compressibility_psi;
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut psi, 0.0..=200.0)
+                                        .text("Compressibility ψ = 1/c² (s²/m²)"),
+                                )
+                                .on_hover_text(
+                                    "All-Mach: ψ = dρ/dp = 1/c². 0 ⇒ incompressible; \
+                                     larger ψ lowers the sound speed (c = 1/√ψ), \
+                                     raising the Mach number and the density variation.",
+                                )
+                                .changed()
+                            {
+                                self.compressibility_psi = psi;
+                                self.sync_worker_params();
+                            }
+                            let mach =
+                                self.inlet_velocity.abs() as f64 * (self.compressibility_psi.max(0.0) as f64).sqrt();
+                            let c = if self.compressibility_psi > 0.0 {
+                                1.0 / (self.compressibility_psi as f64).sqrt()
+                            } else {
+                                f64::INFINITY
+                            };
+                            ui.label(format!("Sound speed c ≈ {c:.3} m/s · inlet Mach ≈ {mach:.3}"));
+                        }
+
                         // Reynolds Number Estimation
                         let char_length = 1.0; // Characteristic length (channel height)
                         let re = self.current_fluid.density
@@ -2642,6 +2697,7 @@ fn solver_worker_main(
         density: 1.0,
         viscosity: 0.0,
         eos: crate::solver::model::eos::EosSpec::Constant,
+        compressibility_psi: 0.0,
     };
 
     let mut running = false;

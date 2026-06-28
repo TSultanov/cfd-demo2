@@ -47,6 +47,16 @@ pub struct SolverDriver {
     supports_sound_speed: bool,
     /// The model carries `rho`/`rho_u`/`rho_e`/`u` (density-based compressible).
     compressible: bool,
+    /// The model is `allmach_pressure` (pressure-based all-Mach): it carries the
+    /// extra `psi`/`rho`/`dt_local` state fields this driver seeds at build, keeps
+    /// `psi` live in [`apply_params`](SolverDriver::apply_params), and refreshes
+    /// `rho = rho_ref + psi*p` from the gauge pressure on each *readback* — i.e. at the
+    /// caller's readback cadence (the GUI's ~100ms snapshot interval, not every step),
+    /// with history-preserving current-buffer writes. Between refreshes `rho` lags `p`;
+    /// that is a bounded low-Mach approximation (constant `rho` was independently
+    /// validated stable — the stabilization is the implicit `ddt(psi,p)` diagonal, not
+    /// the density coupling). The proper fix is an on-device `rho` refresh kernel.
+    allmach: bool,
     /// Last observed max velocity (from a readback); feeds the adaptive timestep.
     prev_max_vel: f64,
 }
@@ -148,6 +158,9 @@ impl SolverDriver {
             }
         }
         let compressible = has_rho && has_rho_u && has_rho_e && has_u;
+        // All-Mach pressure-based model: runs in the incompressible (Coupled) branch
+        // but carries extra `psi`/`rho`/`dt_local` state fields to seed.
+        let allmach = solver.model().id == "allmach_pressure";
 
         let (cached_u, cached_p) = if compressible {
             let p_ref = params.eos.pressure_for_density(params.density as f64);
@@ -170,6 +183,21 @@ impl SolverDriver {
             let _ = solver.set_inlet_velocity(params.inlet_velocity);
             solver.set_u(initial_u);
             solver.set_p(initial_p);
+            // All-Mach: seed the extra state fields the bare incompressible path has
+            // no concept of. `psi` (compressibility = 1/c^2) activates the
+            // `ddt(psi,p)` term and sets the Mach regime; `rho` MUST start at the
+            // reference density (0 would break the Rhie–Chow mass flux and the
+            // `ddt(rho,U)` coefficient — it is then refreshed to `rho_ref + psi*p`
+            // each readback); `dt_local = 0` selects the global (time-accurate) dt.
+            // `set_field_scalar` (initial-condition semantics, writes all history
+            // buffers) is intentional HERE — this is the IC, and `initialize_history`
+            // below re-propagates it; the mid-run refreshes use `_current` instead.
+            if allmach {
+                let psi = params.compressibility_psi.max(0.0) as f64;
+                let _ = solver.set_field_scalar("psi", &vec![psi; n_cells]);
+                let _ = solver.set_field_scalar("rho", &vec![params.density as f64; n_cells]);
+                let _ = solver.set_field_scalar("dt_local", &vec![0.0; n_cells]);
+            }
             (initial_u.to_vec(), initial_p.to_vec())
         };
         solver.initialize_history();
@@ -188,6 +216,7 @@ impl SolverDriver {
                 min_cell_size,
                 supports_sound_speed,
                 compressible,
+                allmach,
                 prev_max_vel: 0.0,
             },
             cached_u,
@@ -259,6 +288,18 @@ impl SolverDriver {
             );
         } else {
             let _ = solver.set_inlet_velocity(params.inlet_velocity);
+        }
+
+        // All-Mach: keep the compressibility `psi` live so the GUI slider takes
+        // effect without a rebuild. `_current` (not set_field_scalar) updates only the
+        // current buffer, preserving the BDF2 history — `psi` is the ddt(psi,p)
+        // coefficient at the current time, never read from history. `rho` is refreshed
+        // from the new `psi` on the next readback (≤ one snapshot interval); `dt_local`
+        // stays 0 (global time-accurate dt).
+        if self.allmach {
+            let n = solver.num_cells() as usize;
+            let psi = params.compressibility_psi.max(0.0) as f64;
+            let _ = solver.set_field_scalar_current("psi", &vec![psi; n]);
         }
     }
 
@@ -390,7 +431,30 @@ impl SolverDriver {
             p_max = p_max.max(pv);
         }
 
-        let rho = if self.compressible {
+        let rho = if self.allmach {
+            // Barotropic density from the gauge pressure: `rho = rho_ref + psi*p`,
+            // floored positive (a non-positive density would break the viscous /
+            // flux terms). Refresh the per-cell `rho` the Rhie–Chow flux and the
+            // `ddt(rho,U)` coefficient read, and report its spread — the
+            // compressibility signature the GUI density view and the gate observe.
+            let psi = self.params.compressibility_psi.max(0.0) as f64;
+            let rho_ref = self.params.density as f64;
+            let floor = 0.05 * rho_ref;
+            let rho_vals: Vec<f64> = p.iter().map(|&pv| (rho_ref + psi * pv).max(floor)).collect();
+            let lo = rho_vals.iter().cloned().fold(f64::INFINITY, f64::min);
+            let hi = rho_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            // `_current` (NOT set_field_scalar): write rho into the CURRENT buffer only,
+            // preserving the BDF2 time history. set_field_scalar writes all three
+            // ping-pong buffers (initial-condition semantics) — mid-run that would reset
+            // U/p history (old = current) on every readback, zeroing the velocity
+            // time-derivative, making the GUI transient non-deterministic (readback is
+            // wall-clock throttled) and divergent between the GPU (history reset) and CPU
+            // (history preserved) backends. rho is a coefficient sampled at the current
+            // time (ddt(rho,U) uses U_old, never rho_old), so a current-only update is
+            // exact and backend-consistent.
+            let _ = self.solver.set_field_scalar_current("rho", &rho_vals);
+            Some((lo, hi))
+        } else if self.compressible {
             let rho = pollster::block_on(self.solver.get_rho());
             Some((
                 rho.iter().cloned().fold(f64::INFINITY, f64::min),

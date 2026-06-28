@@ -53,6 +53,7 @@ fn ui_incompressible_air_smoke_does_not_blow_up_immediately() {
         density: 1.225,
         viscosity: 1.81e-5,
         eos: EosSpec::Constant,
+        compressibility_psi: 0.0,
     };
 
     // Construct through the driver (config/stepping derivation, phase-1 setters, IC/BC)

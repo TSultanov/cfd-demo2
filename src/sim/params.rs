@@ -36,4 +36,8 @@ pub struct RuntimeParams {
     pub density: f32,
     pub viscosity: f32,
     pub eos: EosSpec,
+    /// All-Mach compressibility `psi = d(rho)/d(p) = 1/c^2` (units Density/Pressure).
+    /// Only the `allmach_pressure` model reads it (seeded into its per-cell `psi`
+    /// state field); `0.0` is the incompressible limit. Other models ignore it.
+    pub compressibility_psi: f32,
 }

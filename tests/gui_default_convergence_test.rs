@@ -26,7 +26,9 @@ use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::helpers::{
     SolverCompressibleIdealGasExt, SolverFieldAliasesExt, SolverRuntimeParamsExt,
 };
-use cfd2::solver::model::{compressible_model_with_eos, incompressible_momentum_model};
+use cfd2::solver::model::{
+    allmach_pressure_model, compressible_model_with_eos, incompressible_momentum_model,
+};
 use cfd2::solver::{GpuLowMachPrecondModel, UnifiedSolver};
 use cfd2::ui::fluid::Fluid;
 use cfd2::ui::model_defaults::{gui_defaults_for, ModelGuiDefaults};
@@ -266,6 +268,27 @@ fn build_compressible_driver(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -
     driver
 }
 
+/// Build the all-Mach pressure-based solver through the shared driver — the GUI's
+/// exact default path. `SolverDriver::build` seeds the `psi`/`rho`/`dt_local` state
+/// fields (incompressible branch), and the per-step readback refreshes
+/// `rho = rho_ref + psi*p`, so this exercises the production GUI wiring end-to-end.
+fn build_allmach_driver(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> SolverDriver {
+    let params = d.to_runtime_params(fluid.density as f32, fluid.viscosity as f32, fluid.eos);
+    let n = mesh.num_cells();
+    let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
+        mesh,
+        allmach_pressure_model().expect("allmach_pressure model"),
+        &params,
+        &vec![(0.0, 0.0); n],
+        &vec![0.0; n],
+        None,
+        None,
+    ))
+    .expect("driver build");
+    driver.apply_params(&params);
+    driver
+}
+
 /// Raw-solver builders for the diagnostic helpers below (custom per-step loops):
 /// construct through the driver, then hand back the configured `UnifiedSolver`.
 fn build_incompressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> UnifiedSolver {
@@ -325,6 +348,263 @@ fn gui_default_incompressible_obstacle_bounded() {
     assert_bounded("incompressible/obstacle", &res, -1e6, 1e6, 0.5, 2.0);
 }
 
+/// The all-Mach pressure-based default, driven through the GUI's exact default path
+/// (dropdown → `gui_defaults_for("allmach_pressure")` → `SolverDriver`). It must (a)
+/// stay bounded and finite like the incompressible default, AND (b) be GENUINELY
+/// compressible — the barotropic density `rho = rho_ref + psi*p` varies measurably
+/// across the wake. That density variation at this low Mach is exactly what the f32
+/// density-based `compressible` model cannot resolve (its absolute-pressure state
+/// buries the signal below f32 epsilon), so it is the property worth gating.
+#[test]
+fn gui_default_allmach_obstacle_bounded_and_compressible() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let d = gui_defaults_for("allmach_pressure");
+    let mesh = channel_obstacle_mesh();
+    let psi = d.compressibility_psi as f64;
+    eprintln!(
+        "[allmach/obstacle] cells={} min_cell={:.4e} psi={psi} (c={:.3} inlet-Mach~{:.3})",
+        mesh.num_cells(),
+        actual_min_cell(&mesh),
+        1.0 / psi.sqrt(),
+        d.inlet_velocity as f64 * psi.sqrt(),
+    );
+    let mut driver = build_allmach_driver(&d, &air, &mesh);
+    // Longer than the incompressible 150-step gate: the compressibility term damps
+    // the transient, so give the variable-density wake room to develop.
+    let res = drive(&mut driver, 400);
+    print_trace("allmach/obstacle", &res);
+    // (a) Bounded + finite + physical density (rho stays well inside [0.5, 2.0]).
+    assert_bounded("allmach/obstacle", &res, -1e6, 1e6, 0.5, 2.0);
+
+    // (b) Genuinely compressible: the density varies across the wake by the end of
+    // the run (validated ~7.5% in `allmach_variable_density_compressible`; require a
+    // clear margin above "numerically uniform").
+    let last = res.samples.last().expect("samples");
+    let spread = (last.rho_max - last.rho_min) / air.density;
+    let max_seen = res.samples.iter().map(|s| s.max_vel).fold(0.0_f64, f64::max);
+    eprintln!(
+        "[allmach/obstacle] final rho=[{:.4},{:.4}] spread={:.3e} of rho_ref, max|u| seen={:.3e}",
+        last.rho_min, last.rho_max, spread, max_seen
+    );
+    assert!(
+        spread > 1e-3,
+        "all-Mach default is not compressible: density spread {spread:.2e} (rho nearly uniform)"
+    );
+    // The flow must develop (not freeze at the inlet): max|u| exceeds the inlet.
+    assert!(
+        max_seen > 1.2 * d.inlet_velocity as f64,
+        "all-Mach wake did not develop: max|u|={max_seen:.3e} vs inlet {:.3e}",
+        d.inlet_velocity
+    );
+}
+
+/// Drive the obstacle from rest with the shipped defaults and sample the
+/// transverse velocity `u_y` at a wake probe (x=1.5, y=0.5, ~2.5 D downstream of
+/// the cylinder). Returns `(max|u| over the run, the u_y time series sampled every
+/// `sample_every` steps, diverged?)`. Shared by the shedding gate and the `--ignored`
+/// Strouhal/PNG diagnostic so they exercise the same path.
+fn drive_obstacle_wake_probe(
+    d: &ModelGuiDefaults,
+    air: &Fluid,
+    mesh: &Mesh,
+    steps: usize,
+    sample_every: usize,
+) -> (f64, Vec<f64>, bool) {
+    let min_cell = actual_min_cell(mesh);
+    let probe = (0..mesh.num_cells())
+        .min_by(|&a, &b| {
+            let da = (mesh.cell_cx[a] - 1.5).powi(2) + (mesh.cell_cy[a] - 0.5).powi(2);
+            let db = (mesh.cell_cx[b] - 1.5).powi(2) + (mesh.cell_cy[b] - 0.5).powi(2);
+            da.partial_cmp(&db).unwrap()
+        })
+        .unwrap();
+    let mut solver = build_incompressible(d, air, mesh);
+    let mut prev_max = 0.0;
+    let mut max_seen = 0.0f64;
+    let mut uy: Vec<f64> = Vec::new();
+    let mut diverged = false;
+    for step in 0..steps {
+        let cur = solver.dt() as f64;
+        let next = adaptive_next_dt(d, prev_max, air.density, &air.eos, false, min_cell, cur);
+        solver.set_dt(next as f32);
+        if solver.step_with_stats().is_err() {
+            diverged = true;
+            break;
+        }
+        if step % sample_every != 0 && step != steps - 1 {
+            continue;
+        }
+        let u = pollster::block_on(solver.get_u());
+        let mv = u
+            .iter()
+            .filter(|(x, y)| x.is_finite() && y.is_finite())
+            .map(|(x, y)| (x * x + y * y).sqrt())
+            .fold(0.0_f64, f64::max);
+        prev_max = mv;
+        max_seen = max_seen.max(mv);
+        uy.push(u[probe].1);
+        if !mv.is_finite() || mv > VEL_CAP {
+            diverged = true;
+            break;
+        }
+    }
+    // Optional: rasterize the final |u| and u_y fields so the street is visible.
+    if std::env::var("CFD2_OBS_VIZ").map(|v| v == "1").unwrap_or(false) {
+        std::fs::create_dir_all("/tmp/cfd_viz").ok();
+        let u = pollster::block_on(solver.get_u());
+        let umag: Vec<f64> = u.iter().map(|(x, y)| (x * x + y * y).sqrt()).collect();
+        let uyf: Vec<f64> = u.iter().map(|(_, y)| *y).collect();
+        save_field_png("/tmp/cfd_viz/obstacle_shedding_umag.png", mesh, &umag, 300.0, "|u| obstacle");
+        save_field_png("/tmp/cfd_viz/obstacle_shedding_uy.png", mesh, &uyf, 300.0, "u_y obstacle");
+    }
+    (max_seen, uy, diverged)
+}
+
+/// Oscillation statistics of a wake `u_y` series over its second half (the
+/// post-transient tail): `(std, sign_changes_around_mean, tail_min, tail_max)`.
+fn wake_oscillation_stats(uy: &[f64]) -> (f64, usize, f64, f64) {
+    let half = uy.len() / 2;
+    let tail = &uy[half..];
+    if tail.len() < 2 {
+        return (0.0, 0, 0.0, 0.0);
+    }
+    let mean = tail.iter().sum::<f64>() / tail.len() as f64;
+    let var = tail.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / tail.len() as f64;
+    let std = var.sqrt();
+    let mut sign_changes = 0usize;
+    for w in tail.windows(2) {
+        if (w[0] - mean).signum() != (w[1] - mean).signum() {
+            sign_changes += 1;
+        }
+    }
+    let tmin = tail.iter().cloned().fold(f64::INFINITY, f64::min);
+    let tmax = tail.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    (std, sign_changes, tmin, tmax)
+}
+
+/// HEADLINE: the channel-with-obstacle default must shed a **Kármán vortex street**,
+/// not freeze into a steady wake. With the shipped defaults (Van Leer + Re≈150) the
+/// wake develops a self-sustained transverse oscillation; first-order Upwind or a
+/// sub-critical Reynolds number (the old `inlet_velocity`) would smear/decay it into
+/// a steady blob (the wake `u_y` would sit dead-constant — verified: the Re≈27
+/// baseline gives std/U ~ 1e-5).
+///
+/// We assert the two qualitative features that define the street: it stays **bounded**
+/// (a limit cycle, not a blow-up) AND the wake `u_y` **sustains an oscillation**
+/// (non-trivial std + repeated sign reversals about its mean). ~1000 steps from rest
+/// is enough for the limit cycle to form and reverse several times.
+#[test]
+fn gui_default_incompressible_obstacle_sheds_vortex_street() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let d = gui_defaults_for("incompressible_momentum");
+    let mesh = channel_obstacle_mesh();
+    let nu = air.viscosity / air.density;
+    let re = d.inlet_velocity as f64 * 0.2 / nu;
+    eprintln!(
+        "[obstacle/shedding] cells={} U={:.4e} Re={:.0} scheme={:?}",
+        mesh.num_cells(), d.inlet_velocity, re, d.advection_scheme
+    );
+    let (max_u, uy, diverged) = drive_obstacle_wake_probe(&d, &air, &mesh, 1000, 8);
+    let (std, sign_changes, uy_min, uy_max) = wake_oscillation_stats(&uy);
+    let u_in = d.inlet_velocity as f64;
+    eprintln!(
+        "[obstacle/shedding] diverged={diverged} max|u|={max_u:.4e} ({:.2}xU) | wake u_y tail: std={std:.4e} ({:.3}xU) span=[{:+.3}, {:+.3}]xU sign_changes={sign_changes}",
+        max_u / u_in, std / u_in, uy_min / u_in, uy_max / u_in
+    );
+    assert!(!diverged, "obstacle wake diverged / went unphysical (max|u|={max_u:.3e})");
+    assert!(
+        max_u < VEL_CAP && max_u < 10.0 * u_in,
+        "obstacle wake unbounded: max|u|={max_u:.3e} ({:.1}xU) — a vortex street is a bounded limit cycle",
+        max_u / u_in
+    );
+    // The defining signature of a Kármán street: a strong, self-sustained transverse
+    // oscillation in the wake that swings the probe's `u_y` to BOTH signs (a steady
+    // or merely biased wake would sit one-signed near zero). The Re≈27 / Upwind
+    // baseline gives std/U ~ 1e-5 and no sign change, so these thresholds (std > 5%
+    // of U, and a ±5%-of-U bidirectional swing) cleanly separate shedding from a
+    // smeared/steady wake while being robust to the still-saturating mean drift at
+    // 1000 steps (which made a fixed sign-change count fragile).
+    assert!(
+        std > 0.05 * u_in,
+        "wake u_y too steady (std={std:.3e}, {:.4}xU): no vortex street — the flow is not shedding (Upwind/sub-critical Re regression?)",
+        std / u_in
+    );
+    assert!(
+        uy_max > 0.05 * u_in && uy_min < -0.05 * u_in,
+        "wake u_y does not reverse sign (span [{:+.3},{:+.3}]xU): a vortex street swings the wake to both sides; this looks like a steady/biased wake",
+        uy_min / u_in, uy_max / u_in
+    );
+}
+
+/// Diagnostic: does the backward-step default develop a sensible laminar
+/// recirculation bubble (reverse flow behind the step)? Reports the count of
+/// reverse-flow (`u_x < 0`) cells in the recirculation zone behind the step and the
+/// most-negative `u_x`, and saves |u| / u_x PNGs to /tmp/cfd_viz. Env: `CFD2_BS_U`
+/// (inlet speed override), `CFD2_BS_STEPS` (default 600).
+#[test]
+#[ignore]
+fn diag_incompressible_backstep_recirc() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let mut d = gui_defaults_for("incompressible_momentum");
+    if let Some(u) = std::env::var("CFD2_BS_U").ok().and_then(|s| s.parse::<f32>().ok()) {
+        d.inlet_velocity = u;
+    }
+    let steps: usize = std::env::var("CFD2_BS_STEPS").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
+    let mesh = backstep_mesh();
+    let min_cell = actual_min_cell(&mesh);
+    let nu = air.viscosity / air.density;
+    let re_step = d.inlet_velocity as f64 * 0.5 / nu; // step height = 0.5
+    eprintln!(
+        "[backstep/recirc] cells={} U={:.4e} Re_step={:.0} scheme={:?} steps={steps}",
+        mesh.num_cells(), d.inlet_velocity, re_step, d.advection_scheme
+    );
+    let mut solver = build_incompressible(&d, &air, &mesh);
+    let mut prev_max = 0.0;
+    let mut max_seen = 0.0f64;
+    for step in 0..steps {
+        let cur = solver.dt() as f64;
+        let next = adaptive_next_dt(&d, prev_max, air.density, &air.eos, false, min_cell, cur);
+        solver.set_dt(next as f32);
+        if solver.step_with_stats().is_err() {
+            eprintln!("[backstep/recirc] ERROR at step {step}");
+            break;
+        }
+        if step % 5 == 0 || step == steps - 1 {
+            let u = pollster::block_on(solver.get_u());
+            let mv = u.iter().map(|(x, y)| (x * x + y * y).sqrt()).fold(0.0_f64, f64::max);
+            prev_max = mv;
+            max_seen = max_seen.max(mv);
+        }
+    }
+    let u = pollster::block_on(solver.get_u());
+    // Recirculation zone: behind the step, x in (0.5, 2.5), y < 0.5 (below the inlet
+    // channel that the step exposes). A laminar backstep separates here -> u_x < 0.
+    let (mut nrev, mut nz) = (0usize, 0usize);
+    let mut min_ux = 0.0f64;
+    for (c, (ux, _)) in u.iter().enumerate() {
+        let (x, y) = (mesh.cell_cx[c], mesh.cell_cy[c]);
+        if x > 0.5 && x < 2.5 && y < 0.5 {
+            nz += 1;
+            if *ux < 0.0 {
+                nrev += 1;
+            }
+            min_ux = min_ux.min(*ux);
+        }
+    }
+    eprintln!(
+        "[backstep/recirc] max|u|={max_seen:.4e} | recirc zone: {nrev}/{nz} cells reverse-flow (u_x<0), min u_x={min_ux:.4e} ({:.3}xU)",
+        min_ux / d.inlet_velocity as f64
+    );
+    std::fs::create_dir_all("/tmp/cfd_viz").ok();
+    let umag: Vec<f64> = u.iter().map(|(x, y)| (x * x + y * y).sqrt()).collect();
+    let ux: Vec<f64> = u.iter().map(|(x, _)| *x).collect();
+    save_field_png("/tmp/cfd_viz/backstep_umag.png", &mesh, &umag, 300.0, "|u| backstep");
+    save_field_png("/tmp/cfd_viz/backstep_ux.png", &mesh, &ux, 300.0, "u_x backstep");
+}
+
 #[test]
 fn gui_default_compressible_backstep_bounded_and_smooth() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -336,6 +616,26 @@ fn gui_default_compressible_backstep_bounded_and_smooth() {
     print_trace("compressible/backstep", &res);
     let p0 = air.eos.pressure_for_density(air.density);
     assert_bounded("compressible/backstep", &res, 0.5 * p0, 4.0 * p0, 0.1 * air.density, 10.0 * air.density);
+}
+
+/// The compressible model is also selectable on the channel-with-obstacle geometry,
+/// which (unlike the backstep) has cut-cell slivers. With the shipped compressible
+/// defaults it must stay bounded and smooth there too (no slow low-Mach blow-up on
+/// the slivers, no pressure/density excursion). The flow itself is a slow low-Mach
+/// near-incompressible wake (genuine vortex shedding is impractical for the
+/// density-based solver at Air's near-zero Mach — see the model notes); "sensible"
+/// here means bounded + smooth, not a street.
+#[test]
+fn gui_default_compressible_obstacle_bounded_and_smooth() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let d = gui_defaults_for("compressible");
+    let mesh = channel_obstacle_mesh();
+    eprintln!("[compressible/obstacle] cells={} min_cell={:.4e}", mesh.num_cells(), actual_min_cell(&mesh));
+    let res = run_compressible(&d, &air, &mesh);
+    print_trace("compressible/obstacle", &res);
+    let p0 = air.eos.pressure_for_density(air.density);
+    assert_bounded("compressible/obstacle", &res, 0.5 * p0, 4.0 * p0, 0.1 * air.density, 10.0 * air.density);
 }
 
 /// The GPU State-Redistribution pass must match the CPU operator exactly (to
@@ -973,9 +1273,14 @@ fn viz_compressible_default_fields() {
     let checkpoints: Vec<usize> = std::env::var("CFD2_VIZ_STEPS")
         .unwrap_or_else(|_| "200,800,1500,2500".into())
         .split(',').filter_map(|s| s.trim().parse().ok()).collect();
-    let dtau: f32 = std::env::var("CFD2_VIZ_DTAU").ok().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let dtau: f32 = std::env::var("CFD2_VIZ_DTAU").ok()
+        .or_else(|| std::env::var("CFD2_PROBE_DTAU").ok())
+        .and_then(|s| s.parse().ok()).unwrap_or(0.0);
     if let Some(u) = std::env::var("CFD2_PROBE_U").ok().and_then(|s| s.parse::<f32>().ok()) {
         d.inlet_velocity = u;
+    }
+    if let Some(dt) = std::env::var("CFD2_PROBE_DT").ok().and_then(|s| s.parse::<f64>().ok()) {
+        d.timestep = dt;
     }
     let mesh = if geo == "obstacle" { channel_obstacle_mesh() } else { backstep_mesh() };
     std::fs::create_dir_all("/tmp/cfd_viz").ok();
@@ -1007,6 +1312,131 @@ fn viz_compressible_default_fields() {
             eprintln!("[viz] step {step}: ERROR");
             break;
         }
+    }
+}
+
+/// Diagnostic: does the incompressible obstacle default produce a Karman vortex
+/// street? Sweeps (scheme, inlet speed -> Reynolds) via env knobs (one recompile,
+/// many runs) and reports, for a probe in the wake (x=1.5, y=0.5):
+///   - boundedness (max|u| over the run)
+///   - wake unsteadiness: std-dev and peak-to-peak of transverse velocity u_y over
+///     the last half of the run (a steady flow -> ~0; a vortex street -> sustained
+///     oscillation), plus a sign-change count to estimate the shedding cadence.
+/// Saves |u| and u_y PNGs of the final field to /tmp/cfd_viz so the street is
+/// visible (u_y alternating sign downstream is the signature).
+///
+/// Env knobs: CFD2_OBS_U (inlet speed; Re = U*0.2/1.478e-5), CFD2_OBS_SCHEME
+/// (upwind|sou|vanleer), CFD2_OBS_STEPS (default 2000), CFD2_OBS_CFL,
+/// CFD2_OBS_OUTER, CFD2_OBS_VIZ (1 to write PNGs).
+#[test]
+#[ignore]
+fn diag_incompressible_obstacle_shedding() {
+    std::env::set_var("CFD2_QUIET", "1");
+    let air = air();
+    let mut d = gui_defaults_for("incompressible_momentum");
+    let env_f32 = |k: &str| std::env::var(k).ok().and_then(|s| s.parse::<f32>().ok());
+    let env_f64 = |k: &str| std::env::var(k).ok().and_then(|s| s.parse::<f64>().ok());
+    if let Some(u) = env_f32("CFD2_OBS_U") { d.inlet_velocity = u; }
+    if let Some(c) = env_f64("CFD2_OBS_CFL") { d.target_cfl = c; }
+    if let Some(o) = std::env::var("CFD2_OBS_OUTER").ok().and_then(|s| s.parse().ok()) { d.outer_iters = o; }
+    if let Ok(s) = std::env::var("CFD2_OBS_SCHEME") {
+        d.advection_scheme = match s.as_str() {
+            "upwind" => cfd2::solver::scheme::Scheme::Upwind,
+            "sou" => cfd2::solver::scheme::Scheme::SecondOrderUpwind,
+            _ => cfd2::solver::scheme::Scheme::SecondOrderUpwindVanLeer,
+        };
+    }
+    let steps: usize = std::env::var("CFD2_OBS_STEPS").ok().and_then(|s| s.parse().ok()).unwrap_or(2000);
+    let sample_every: usize = std::env::var("CFD2_OBS_SAMPLE").ok().and_then(|s| s.parse().ok()).unwrap_or(25);
+    let viz = std::env::var("CFD2_OBS_VIZ").map(|v| v == "1").unwrap_or(false);
+
+    let mesh = channel_obstacle_mesh();
+    let min_cell = actual_min_cell(&mesh);
+    // Wake probe: nearest cell to (1.5, 0.5), half a domain-height downstream of the
+    // cylinder (center x=1.0, D=0.2).
+    let probe = (0..mesh.num_cells())
+        .min_by(|&a, &b| {
+            let da = (mesh.cell_cx[a] - 1.5).powi(2) + (mesh.cell_cy[a] - 0.5).powi(2);
+            let db = (mesh.cell_cx[b] - 1.5).powi(2) + (mesh.cell_cy[b] - 0.5).powi(2);
+            da.partial_cmp(&db).unwrap()
+        })
+        .unwrap();
+    let nu = air.viscosity / air.density;
+    let re = d.inlet_velocity as f64 * 0.2 / nu;
+    eprintln!(
+        "[shed] cells={} min_cell={:.4e} U={:.4e} Re={:.1} scheme={:?} cfl={} outer={} steps={} probe@({:.3},{:.3})",
+        mesh.num_cells(), min_cell, d.inlet_velocity, re, d.advection_scheme, d.target_cfl, d.outer_iters, steps,
+        mesh.cell_cx[probe], mesh.cell_cy[probe]
+    );
+
+    let mut solver = build_incompressible(&d, &air, &mesh);
+    let mut prev_max = 0.0;
+    let mut max_seen = 0.0f64;
+    let mut uy_series: Vec<f64> = Vec::with_capacity(steps);
+    let mut t_series: Vec<f64> = Vec::with_capacity(steps);
+    let mut t = 0.0f64;
+    let wall = std::time::Instant::now();
+    for step in 0..steps {
+        let cur = solver.dt() as f64;
+        let next = adaptive_next_dt(&d, prev_max, air.density, &air.eos, false, min_cell, cur);
+        solver.set_dt(next as f32);
+        t += next;
+        if solver.step_with_stats().is_err() {
+            eprintln!("[shed] step {step}: ERROR");
+            break;
+        }
+        if step % sample_every != 0 && step != steps - 1 {
+            continue;
+        }
+        let u = pollster::block_on(solver.get_u());
+        let mv = u.iter().filter(|(x, y)| x.is_finite() && y.is_finite())
+            .map(|(x, y)| (x * x + y * y).sqrt()).fold(0.0_f64, f64::max);
+        prev_max = mv;
+        max_seen = max_seen.max(mv);
+        uy_series.push(u[probe].1);
+        t_series.push(t);
+        if !mv.is_finite() || mv > 5.0 {
+            eprintln!("[shed] DIVERGED at step {step}: max|u|={mv:.3e}");
+            break;
+        }
+        let rate = (step + 1) as f64 / wall.elapsed().as_secs_f64();
+        eprintln!(
+            "[shed] step {step:>4} dt={next:.2e} t={t:.2e} max|u|={mv:.4e} uy_probe={:+.4e} ({rate:.1} st/s)",
+            u[probe].1
+        );
+    }
+    // Unsteadiness over the last half (post-transient).
+    let n = uy_series.len();
+    let half = n / 2;
+    let tail = &uy_series[half..];
+    if !tail.is_empty() {
+        let mean = tail.iter().sum::<f64>() / tail.len() as f64;
+        let var = tail.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / tail.len() as f64;
+        let std = var.sqrt();
+        let pk = tail.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+            - tail.iter().cloned().fold(f64::INFINITY, f64::min);
+        // Sign changes around the tail mean -> ~2 per shedding period.
+        let mut sign_changes = 0usize;
+        for w in tail.windows(2) {
+            if (w[0] - mean).signum() != (w[1] - mean).signum() { sign_changes += 1; }
+        }
+        let t_tail = t_series[n - 1] - t_series[half];
+        let period = if sign_changes > 0 { 2.0 * t_tail / sign_changes as f64 } else { f64::INFINITY };
+        let st = if period.is_finite() { 0.2 / (d.inlet_velocity as f64 * period) } else { 0.0 };
+        eprintln!(
+            "[shed] RESULT Re={:.1} scheme={:?}: max|u|={:.4e} | wake u_y tail: mean={:+.3e} std={:.4e} pk-pk={:.4e} | sign_changes={} est_period={:.3e} St~{:.3} | shedding={}",
+            re, d.advection_scheme, max_seen, mean, std, pk, sign_changes, period, st,
+            if std > 0.05 * d.inlet_velocity as f64 && sign_changes >= 4 { "YES" } else { "no/weak" }
+        );
+    }
+    if viz {
+        std::fs::create_dir_all("/tmp/cfd_viz").ok();
+        let u = pollster::block_on(solver.get_u());
+        let umag: Vec<f64> = u.iter().map(|(x, y)| (x * x + y * y).sqrt()).collect();
+        let uy: Vec<f64> = u.iter().map(|(_, y)| *y).collect();
+        let tag = format!("obstacle_Re{:.0}_{:?}", re, d.advection_scheme);
+        save_field_png(&format!("/tmp/cfd_viz/{tag}_umag.png"), &mesh, &umag, 300.0, &format!("|u| {tag}"));
+        save_field_png(&format!("/tmp/cfd_viz/{tag}_uy.png"), &mesh, &uy, 300.0, &format!("u_y {tag}"));
     }
 }
 
@@ -1043,6 +1473,41 @@ fn sweep_incompressible_obstacle() {
             label, res.diverged, res.diverge_step,
             last.map(|s| s.max_vel).unwrap_or(f64::NAN),
             last.map(|s| s.dt).unwrap_or(f64::NAN),
+        );
+    }
+}
+
+/// Guards the GUI Model dropdown contents. The dropdown (`supported_ui_models`) is
+/// `all_models()` filtered to an explicit allowlist of physical-flow models, because
+/// `UiPortSet::is_complete()` (velocity+pressure present) ALONE also matches the
+/// MMS / biharmonic / demo *verification* variants — which only reproduce a
+/// manufactured solution, never a physical flow a user would run. This test
+/// documents which models completeness alone would leak, and asserts the two
+/// physical models are present and valid (so the dropdown is neither broken/empty
+/// nor polluted).
+#[test]
+fn gui_model_dropdown_only_exposes_physical_models() {
+    let complete: Vec<&'static str> = cfd2::solver::model::all_models()
+        .expect("all_models")
+        .into_iter()
+        .filter(|m| cfd2::solver::UiPortSet::from_layout(&m.state_layout).is_complete())
+        .map(|m| m.id)
+        .collect();
+    eprintln!("[ui-models] pass UiPortSet completeness (U+p): {complete:?}");
+
+    // The GUI dropdown allowlist (must mirror `supported_ui_models`).
+    const GUI_PHYSICAL: &[&str] =
+        &["incompressible_momentum", "compressible", "allmach_pressure"];
+    let leaked: Vec<&&str> = complete.iter().filter(|id| !GUI_PHYSICAL.contains(id)).collect();
+    eprintln!(
+        "[ui-models] completeness ALSO matches these non-physical variants (excluded by the dropdown allowlist): {leaked:?}"
+    );
+
+    // Both physical models must exist and be complete, or the dropdown is broken.
+    for id in GUI_PHYSICAL {
+        assert!(
+            complete.contains(id),
+            "physical GUI model '{id}' is missing or lacks U/p ports — the Model dropdown would be broken"
         );
     }
 }

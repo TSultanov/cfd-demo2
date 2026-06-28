@@ -78,6 +78,11 @@ pub struct ModelGuiDefaults {
     /// leaves the step count to develop unchanged (the adaptive dt grows as
     /// 1/speed, so it is CFL-limited either way); only the magnitudes shrink.
     pub inlet_velocity: f32,
+    /// All-Mach compressibility `psi = 1/c^2` seeded into the `allmach_pressure`
+    /// model's per-cell `psi` field. `0.0` (the incompressible/compressible
+    /// defaults) is the incompressible limit; the all-Mach default uses a positive
+    /// value so the GUI shows a genuinely compressible (variable-density) flow.
+    pub compressibility_psi: f32,
 }
 
 impl ModelGuiDefaults {
@@ -120,20 +125,41 @@ impl ModelGuiDefaults {
             density,
             viscosity,
             eos,
+            compressibility_psi: self.compressibility_psi,
         }
     }
 }
 
 /// Incompressible momentum (coupled SIMPLE) defaults.
 ///
-/// Two levers: a low fixed outer cap (`outer_iters`) for cost — Ghia shows ~5
-/// under-relaxed sweeps per step already give correct results, so a low cap
-/// marches correctly at a fraction of the old fixed-50 cost — and a low
-/// `inlet_velocity` so the *real* Air viscosity yields a laminar Reynolds number
-/// (Air at 1 m/s is Re ~ 10^4-10^5 = turbulent, which a 2D laminar coarse-mesh
-/// solver cannot represent and genuinely diverges on the obstacle wake).
+/// Three levers, all chosen so the **default** flow is both stable AND physically
+/// interesting (the channel-obstacle case sheds a Kármán vortex street, the
+/// headline demo):
+///
+/// * **Van Leer (TVD) advection** instead of first-order Upwind. On the coarse
+///   cut-cell mesh (~8 cells across the cylinder) Upwind's numerical diffusion is
+///   ~10x the real Air viscosity, which collapses the *effective* Reynolds number
+///   below the shedding threshold and freezes the wake into a steady blob. Van Leer
+///   is 2nd-order in the smooth wake, so the effective Re tracks the physical one
+///   and the vortex street actually forms. Van Leer is TVD (bounded), and it is
+///   verified stable on the cut-cell slivers (the no-slip immersed-wall BC supplies
+///   the damping; see `generate_cut_cell_mesh`).
+/// * A **laminar-but-shedding inlet speed**. Re = U·D/ν with D = 0.2, ν = μ/ρ ≈
+///   1.48e-5 ⇒ U = 0.011 gives Re ≈ 150 — comfortably in the 2D-laminar
+///   vortex-shedding band (onset ≈ 47, 3D transition ≈ 190). The coarse-mesh /
+///   Van Leer numerical diffusion pulls the *effective* Re down to ≈ 110, the
+///   textbook clean-street regime. (Air at 1 m/s would be Re ~ 10^4-10^5 =
+///   turbulent, which a 2D laminar coarse-mesh solver cannot represent.) The same
+///   speed keeps the backward-step laminar (channel Re ≈ 750, step Re ≈ 375; both
+///   well below the ≈ 1200 step-flow transition) with a longer, more visible
+///   recirculation bubble.
+/// * A **low fixed outer cap** (`outer_iters`) for cost — Ghia shows ~5
+///   under-relaxed SIMPLE sweeps per step already march correctly, so a low cap is
+///   a fraction of the old fixed-50 cost.
 const INCOMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
-    advection_scheme: Scheme::Upwind,
+    // TVD Van Leer: low enough numerical diffusion that the coarse-mesh effective
+    // Reynolds number stays in the shedding regime (Upwind smears the street away).
+    advection_scheme: Scheme::SecondOrderUpwindVanLeer,
     time_scheme: GpuTimeScheme::BDF2,
     preconditioner: PreconditionerType::Jacobi,
     alpha_u: 0.7,
@@ -154,10 +180,13 @@ const INCOMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     low_mach_model: GpuLowMachPrecondModel::Off,
     low_mach_theta_floor: 1e-6,
     low_mach_pressure_coupling_alpha: 1.0,
-    // Real Air viscosity + a low inlet speed -> laminar Re (~25 on the obstacle),
-    // honest and stable. The small velocity magnitudes are physically correct for
-    // slow Air; the step count to develop is unchanged (CFL-limited).
-    inlet_velocity: 0.002,
+    // Real Air viscosity + this inlet speed -> Re ≈ 150 on the cylinder (D = 0.2):
+    // the 2D-laminar vortex-shedding band. Honest (no viscosity floor), bounded
+    // (verified on the cut-cell slivers), and physically interesting by default.
+    inlet_velocity: 0.011,
+    // Incompressible: no compressibility (psi = 0 => the all-Mach pressure eqn
+    // reduces exactly to incompressible; irrelevant for this model anyway).
+    compressibility_psi: 0.0,
 };
 
 /// Compressible (density-based, implicit) defaults.
@@ -206,6 +235,49 @@ const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     low_mach_theta_floor: 1e-8,
     low_mach_pressure_coupling_alpha: 0.01,
     inlet_velocity: 0.002,
+    // Density-based compressible carries its own EOS; the all-Mach `psi` knob is
+    // not used here.
+    compressibility_psi: 0.0,
+};
+
+/// All-Mach pressure-based (`allmach_pressure`) defaults.
+///
+/// This model is the incompressible coupled solver (gauge pressure, Rhie–Chow,
+/// Schur) plus a `ddt(psi,p)` compressibility term and a per-cell variable density
+/// `rho = rho_ref + psi*p`. It runs in the **incompressible** branch of the driver
+/// (no `eos.gamma` → Coupled stepping), so the stable, validated incompressible
+/// knobs apply verbatim — Van Leer TVD advection, the laminar inlet speed, the
+/// convective adaptive dt, a low outer cap. The single addition is a **positive
+/// compressibility** `psi`: at `psi = 0` it would be byte-identical to
+/// incompressible (no reason to expose it), so the default uses `psi = 50`
+/// (sound speed c = 1/sqrt(psi) ≈ 0.14 m/s ⇒ inlet Mach ≈ 0.08), which the
+/// `allmach_variable_density_compressible` validation runs bounded with a ~7.5%
+/// density variation across the obstacle wake. The GUI exposes `psi` as a live
+/// slider so the user can sweep the incompressible→compressible range.
+const ALLMACH: ModelGuiDefaults = ModelGuiDefaults {
+    advection_scheme: Scheme::SecondOrderUpwindVanLeer,
+    time_scheme: GpuTimeScheme::BDF2,
+    preconditioner: PreconditionerType::Jacobi,
+    alpha_u: 0.7,
+    alpha_p: 0.3,
+    outer_iters: 8,
+    outer_auto_converge: true,
+    target_cfl: 0.9,
+    timestep: 0.02,
+    adaptive_dt: true,
+    // Coupled (incompressible-branch) stepping; no pseudo-transient — the gauge
+    // pressure has no low-Mach inlet instability (that pathology is specific to the
+    // density-based compressible solver's absolute-pressure state).
+    dual_time: false,
+    dtau: 1e-5,
+    low_mach_model: GpuLowMachPrecondModel::Off,
+    low_mach_theta_floor: 1e-6,
+    low_mach_pressure_coupling_alpha: 1.0,
+    inlet_velocity: 0.011,
+    // Positive compressibility so the default is genuinely compressible (variable
+    // density). c = 1/sqrt(50) ≈ 0.14 m/s ⇒ inlet Mach ≈ 0.08; validated bounded
+    // with ~7.5% density variation (`allmach_variable_density_compressible`).
+    compressibility_psi: 50.0,
 };
 
 /// GUI solver defaults for `model_id`.
@@ -215,6 +287,7 @@ const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
 pub fn gui_defaults_for(model_id: &str) -> ModelGuiDefaults {
     match model_id {
         "compressible" => COMPRESSIBLE,
+        "allmach_pressure" => ALLMACH,
         _ => INCOMPRESSIBLE,
     }
 }
@@ -230,7 +303,29 @@ mod tests {
         assert!(d.outer_iters <= 10, "outer cap should be low");
         assert!(d.outer_iters > 1, "cap must allow the break to fire");
         assert_eq!(d.low_mach_model, GpuLowMachPrecondModel::Off);
-        assert_eq!(d.advection_scheme, Scheme::Upwind);
+    }
+
+    #[test]
+    fn incompressible_defaults_to_vortex_shedding_regime() {
+        // The headline obstacle demo must SHED a vortex street, which needs both a
+        // low-diffusion (TVD) advection scheme — Upwind's numerical diffusion on the
+        // coarse cut-cell mesh smears the street into a steady blob — and an inlet
+        // speed that puts the cylinder (D = 0.2, ν ≈ 1.48e-5) in the 2D-laminar
+        // shedding band (Re ≈ 47..190). Re = U·D/ν.
+        let d = gui_defaults_for("incompressible_momentum");
+        assert_eq!(
+            d.advection_scheme,
+            Scheme::SecondOrderUpwindVanLeer,
+            "obstacle vortex street needs a TVD (Van Leer) scheme, not first-order Upwind"
+        );
+        let nu = 1.81e-5_f64 / 1.225; // Air μ/ρ
+        let re = d.inlet_velocity as f64 * 0.2 / nu;
+        assert!(
+            (47.0..190.0).contains(&re),
+            "inlet speed {} gives cylinder Re {:.0}, outside the 2D-laminar shedding band [47,190]",
+            d.inlet_velocity,
+            re
+        );
     }
 
     #[test]
@@ -278,5 +373,30 @@ mod tests {
             gui_defaults_for("nonexistent"),
             gui_defaults_for("incompressible_momentum")
         );
+    }
+
+    #[test]
+    fn allmach_default_is_genuinely_compressible_but_incompressible_branch() {
+        // The all-Mach default must run a genuinely compressible (positive psi)
+        // flow, otherwise exposing it adds nothing over incompressible. It still
+        // runs in the incompressible (Coupled, no pseudo-transient, TVD) branch.
+        let d = gui_defaults_for("allmach_pressure");
+        assert!(
+            d.compressibility_psi > 0.0,
+            "all-Mach default must be compressible (psi > 0), got {}",
+            d.compressibility_psi
+        );
+        // Inlet Mach = U * sqrt(psi) (c = 1/sqrt(psi)); keep it subsonic and in the
+        // validated low-Mach band.
+        let mach = d.inlet_velocity as f64 * (d.compressibility_psi as f64).sqrt();
+        assert!(
+            (0.01..0.5).contains(&mach),
+            "all-Mach default inlet Mach {mach:.3} should be a low-but-nontrivial subsonic value"
+        );
+        // Incompressible-branch knobs (no eos => Coupled; gauge pressure => no
+        // pseudo-transient low-Mach stabilizer needed).
+        assert!(!d.dual_time, "all-Mach uses gauge pressure: no pseudo-transient");
+        assert_eq!(d.low_mach_model, GpuLowMachPrecondModel::Off);
+        assert_eq!(d.advection_scheme, Scheme::SecondOrderUpwindVanLeer);
     }
 }

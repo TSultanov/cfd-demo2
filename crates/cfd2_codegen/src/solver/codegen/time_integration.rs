@@ -200,6 +200,22 @@ pub fn emit_ddt_contributions(
 ) -> Vec<Stmt> {
     let mut stmts = local_dual_time_scale_setup();
 
+    // Local Time Stepping (steady-state acceleration): if the model carries a
+    // per-cell `dt_local` field, use it as the effective physical timestep when it
+    // has been filled (> 0), otherwise fall back to the global `constants.dt`.
+    // Models without the field emit the global `dt` verbatim — byte-identical.
+    let dt_eff = match slots.slots.iter().find(|s| s.name == "dt_local") {
+        Some(dt_local_slot) => {
+            let dtl = state_component_slot(slots.stride, "state", "idx", dt_local_slot, 0);
+            dsl::select(
+                Expr::ident("constants").field("dt"),
+                dtl.clone(),
+                dtl.gt(0.0),
+            )
+        }
+        None => Expr::ident("constants").field("dt"),
+    };
+
     for equation in &system.equations {
         let Some(ddt_op) = equation.ops.iter().find(|op| {
             op.kind == DiscreteOpKind::TimeDerivative
@@ -212,8 +228,7 @@ pub fn emit_ddt_contributions(
             .get(equation.target.name())
             .expect("missing target offset");
         let rho_expr = coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
-        let base_coeff =
-            Expr::ident("vol") * rho_expr.clone() / Expr::ident("constants").field("dt");
+        let base_coeff = Expr::ident("vol") * rho_expr.clone() / dt_eff.clone();
         let dual_time_coeff = rho_expr * Expr::ident("dual_time_scale");
 
         for component in 0..equation.target.kind().component_count() as u32 {

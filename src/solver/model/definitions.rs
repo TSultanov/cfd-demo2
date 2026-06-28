@@ -647,6 +647,8 @@ mod compressible;
 mod generic_diffusion_demo;
 #[path = "definitions/incompressible_momentum.rs"]
 mod incompressible_momentum;
+#[path = "definitions/allmach_pressure.rs"]
+mod allmach_pressure;
 #[path = "definitions/buoyant_incompressible.rs"]
 mod buoyant_incompressible;
 #[path = "definitions/scalar_transport.rs"]
@@ -679,6 +681,11 @@ pub use incompressible_momentum::{
     INCOMPRESSIBLE_MMS_SOURCE_FIELD,
 };
 #[allow(unused_imports)]
+pub use allmach_pressure::{
+    allmach_pressure_mms_model, allmach_pressure_model, allmach_pressure_system,
+    AllMachPressureFields, ALLMACH_MMS_SOURCE_P_FIELD, ALLMACH_MMS_SOURCE_U_FIELD,
+};
+#[allow(unused_imports)]
 pub use scalar_transport::{
     scalar_transport_model, scalar_transport_sou_model, ADVECTING_VELOCITY_FIELD,
     KAPPA as SCALAR_TRANSPORT_KAPPA, MMS_SOURCE_FIELD as SCALAR_TRANSPORT_MMS_SOURCE_FIELD,
@@ -692,6 +699,8 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
     Ok(vec![
         incompressible_momentum_model()?,
         incompressible_momentum_mms_model()?,
+        allmach_pressure_model()?,
+        allmach_pressure_mms_model()?,
         buoyant_incompressible_model()?,
         buoyant_incompressible_mms_model()?,
         compressible_model()?,

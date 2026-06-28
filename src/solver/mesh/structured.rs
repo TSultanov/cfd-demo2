@@ -790,3 +790,63 @@ pub fn generate_structured_trapezoid_mesh(
 
     generate_structured_mesh_from_vertex_grid(nx, ny, vx, vy, |_i, _j| true, boundaries)
 }
+
+/// Smooth converging–diverging channel height profile at normalized position
+/// `xi in [0,1]`: `h_in` at the inlet, the minimum `h_throat` at `throat_frac`,
+/// then `h_exit` at the outlet. Cosine blends give zero wall slope at the throat
+/// (no spurious corner shock). A diverging exit (`h_exit > h_throat`) is what lets
+/// the flow keep accelerating past M=1.
+fn nozzle_height(xi: f64, h_in: f64, h_throat: f64, throat_frac: f64, h_exit: f64) -> f64 {
+    use std::f64::consts::PI;
+    if xi <= throat_frac {
+        let t = if throat_frac > 0.0 { xi / throat_frac } else { 1.0 };
+        // cos(0)=1 -> h_in ; cos(PI)=-1 -> h_throat
+        h_throat + (h_in - h_throat) * 0.5 * (1.0 + (PI * t).cos())
+    } else {
+        let t = (xi - throat_frac) / (1.0 - throat_frac).max(1e-12);
+        // t=0 -> h_throat ; t=1 -> h_exit
+        h_throat + (h_exit - h_throat) * 0.5 * (1.0 - (PI * t).cos())
+    }
+}
+
+/// Converging–diverging nozzle channel: flat bottom (y=0), shaped top wall at
+/// `y = nozzle_height(x)`. The channel narrows from `height` at the inlet to
+/// `throat_height` at `throat_frac*length`, then widens to `exit_height` — the
+/// classic CD-nozzle geometry for accelerating a subsonic inflow through a sonic
+/// throat into supersonic flow in the diverging section.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_structured_nozzle_mesh(
+    nx: usize,
+    ny: usize,
+    length: f64,
+    height: f64,
+    throat_height: f64,
+    throat_frac: f64,
+    exit_height: f64,
+    boundaries: BoundarySides,
+) -> Mesh {
+    assert!(nx > 0 && ny > 0);
+    assert!(length > 0.0 && height > 0.0);
+    assert!(throat_height > 0.0 && throat_height <= height);
+    assert!(exit_height > 0.0 && exit_height <= height);
+    assert!(throat_frac > 0.0 && throat_frac < 1.0);
+
+    let num_vertices = (nx + 1) * (ny + 1);
+    let mut vx = vec![0.0; num_vertices];
+    let mut vy = vec![0.0; num_vertices];
+    let vid = |i: usize, j: usize| -> usize { j * (nx + 1) + i };
+
+    for j in 0..=ny {
+        let eta = j as f64 / ny as f64;
+        for i in 0..=nx {
+            let xi = i as f64 / nx as f64;
+            let x = xi * length;
+            let h = nozzle_height(xi, height, throat_height, throat_frac, exit_height);
+            let v = vid(i, j);
+            vx[v] = x;
+            vy[v] = eta * h;
+        }
+    }
+
+    generate_structured_mesh_from_vertex_grid(nx, ny, vx, vy, |_i, _j| true, boundaries)
+}

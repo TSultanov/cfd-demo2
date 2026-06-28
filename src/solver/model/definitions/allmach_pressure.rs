@@ -72,6 +72,16 @@ pub const ALLMACH_TEMPERATURE_FIELD: &str = "T";
 /// `density * T_ref` (an unseeded 0 field makes `rho` blow up).
 pub const ALLMACH_RHO_T_REF_FIELD: &str = "rho_t_ref";
 
+/// Thermal-expansion coefficient `rho_dT = d(rho)/dT = -rho_t_ref/T^2` (unit
+/// Density/Temperature, always negative: density falls as temperature rises).
+/// Recovered on-device from `T` each outer iteration (alongside `rho`), it is the
+/// coefficient of the `rho_dT * dT/dt` thermal-expansion term in the continuity/
+/// pressure equation (the `dT/dt` half of `d(rho)/dt = psi*dp/dt + rho_dT*dT/dt`).
+/// The term vanishes at steady state (`dT/dt -> 0`), so every steady validation is
+/// unchanged; it is the acoustic-thermal coupling that matters for transient and
+/// high-Mach compressible heating. Thermal variant only.
+pub const ALLMACH_RHO_DT_FIELD: &str = "rho_dT";
+
 /// Reference temperature of the thermal EOS linearization. The canonical value
 /// the MMS manufactured solution and the GUI default are derived from; seeders
 /// set `rho_t_ref = density * ALLMACH_T_REF`.
@@ -89,6 +99,8 @@ type TSourceUnit = DivDim<MulDim<Density, Temperature>, Time>;
 type KOverCpUnit = DivDim<MulDim<Density, Volume>, MulDim<Length, Time>>;
 /// Unit of the constant `rho_ref * T_ref` recovery field: Density*Temperature.
 type RhoTRefUnit = MulDim<Density, Temperature>;
+/// Unit of the thermal-expansion coefficient `rho_dT = d(rho)/dT`: Density/Temperature.
+type RhoDtUnit = DivDim<Density, Temperature>;
 
 #[derive(Debug, Clone)]
 pub struct AllMachPressureFields {
@@ -192,6 +204,24 @@ fn build_allmach_system(
     let mut pressure_sum = compressibility_term.cast_to::<MassFlux>()
         + p_laplacian_term.cast_to::<MassFlux>()
         + p_div_flux_term.cast_to::<MassFlux>();
+    // Thermal expansion in continuity: d(rho)/dt = psi*dp/dt + rho_dT*dT/dt.
+    // `compressibility_term` is the psi*dp/dt half; this adds the rho_dT*dT/dt half
+    // (a p<-T cross-coupling). rho_dT = d(rho)/dT = -rho_t_ref/T^2 < 0 is recovered
+    // on-device. Units: ddt_coeff(rho_dT,T) = rho_dT*T*Vol/Time =
+    // (Density/Temp)*Temp*Vol/Time = Density*Vol/Time = MassFlux. ✓
+    // It is a TRANSIENT term (zero at steady state, dT/dt -> 0), so it is OMITTED
+    // from the `_mms` variant: the steady manufactured-solution order test measures
+    // spatial-operator accuracy, to which this term contributes nothing, and
+    // including it only stalls the fully-pinned closed-box march. It is validated
+    // for real (open) flows by the functional + transient tests. Production
+    // (`allmach_thermal`) always carries it.
+    if thermal && !with_mms_source {
+        let t_typed_p = TypedFieldRef::<Temperature, Scalar>::new(ALLMACH_TEMPERATURE_FIELD);
+        let rho_dt_coeff =
+            TypedCoeff::from_field(TypedFieldRef::<RhoDtUnit, Scalar>::new(ALLMACH_RHO_DT_FIELD));
+        let thermal_expansion_term = typed_fvm::ddt_coeff(rho_dt_coeff, t_typed_p);
+        pressure_sum = pressure_sum + thermal_expansion_term.cast_to::<MassFlux>();
+    }
     if with_mms_source {
         // Scalar continuity source: mms_src_p (MassFlux/Volume) * V = MassFlux.
         let mms_src_p_typed =
@@ -295,6 +325,11 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
         // field (seeded to `density * T_ref`; never an equation target).
         layout_fields.push(vol_scalar_dim::<Temperature>(ALLMACH_TEMPERATURE_FIELD));
         layout_fields.push(vol_scalar_dim::<RhoTRefUnit>(ALLMACH_RHO_T_REF_FIELD));
+        // Thermal-expansion coefficient d(rho)/dT, recovered on-device from T.
+        // Only present where the term is (production, not the steady `_mms` variant).
+        if !with_mms_source {
+            layout_fields.push(vol_scalar_dim::<RhoDtUnit>(ALLMACH_RHO_DT_FIELD));
+        }
     }
     if with_mms_source {
         layout_fields.push(vol_vector_dim::<DivDim<Force, Volume>>(
@@ -477,6 +512,19 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
             Expr::ident(ALLMACH_RHO_T_REF_FIELD) / Expr::ident(ALLMACH_TEMPERATURE_FIELD)
                 + Expr::ident("psi") * Expr::ident("p"),
         );
+        // Thermal-expansion coefficient rho_dT = d(rho)/dT = -rho_t_ref/T^2,
+        // recovered on-device alongside rho (resolver: Mul/Div combine units,
+        // Negate preserves them -> Density/Temperature, no Add/Sub so no unit
+        // panic). Coefficient of the rho_dT*dT/dt continuity term — recovered only
+        // where that term exists (production, not the steady `_mms` variant).
+        if !with_mms_source {
+            derivations.insert(
+                ALLMACH_RHO_DT_FIELD.to_string(),
+                -(Expr::ident(ALLMACH_RHO_T_REF_FIELD)
+                    / (Expr::ident(ALLMACH_TEMPERATURE_FIELD)
+                        * Expr::ident(ALLMACH_TEMPERATURE_FIELD))),
+            );
+        }
         PrimitiveDerivations { derivations }
     } else {
         PrimitiveDerivations::identity()

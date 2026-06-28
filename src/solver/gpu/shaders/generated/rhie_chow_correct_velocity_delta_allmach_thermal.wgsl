@@ -23,8 +23,8 @@ struct Constants {
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
-    if (idx >= (arrayLength(&state) / 13u)) { return; }
-    let base = idx * 13u;
+    if (idx >= (arrayLength(&state) / 14u)) { return; }
+    let base = idx * 14u;
     let d_p = state[base + 3u];
     let grad_px = state[base + 4u];
     let grad_py = state[base + 5u];

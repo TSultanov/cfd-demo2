@@ -8,7 +8,7 @@
 use super::coupled_common::coefficient_value_expr;
 use super::dsl::CoupledAccumulators;
 use super::state_access::state_component_slot;
-use super::wgsl_ast::{Expr, Stmt};
+use super::wgsl_ast::{AssignOp, Expr, Stmt};
 use super::wgsl_dsl as dsl;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
 use crate::solver::ir::Discretization;
@@ -217,53 +217,123 @@ pub fn emit_ddt_contributions(
     };
 
     for equation in &system.equations {
-        let Some(ddt_op) = equation.ops.iter().find(|op| {
+        // Every implicit time-derivative op on this equation. Normally there is
+        // exactly one and its field is the equation's own target (the diagonal
+        // d/dt). A model may additionally declare a CROSS-variable ddt — a ddt of
+        // a DIFFERENT field inside this equation (e.g. the thermal-expansion
+        // `rho_dT * dT/dt` in the continuity/pressure row of `allmach_thermal`,
+        // where d(rho)/dt = psi*dp/dt + rho_dT*dT/dt). The own-variable ddt keeps
+        // the full implicit BDF1/BDF2/dual-time treatment; a cross-variable ddt is
+        // emitted as an EXPLICIT lagged source (the per-cell diagonal accumulators
+        // cannot carry an off-diagonal p<-T entry here).
+        for ddt_op in equation.ops.iter().filter(|op| {
             op.kind == DiscreteOpKind::TimeDerivative
                 && op.discretization == Discretization::Implicit
-        }) else {
-            continue;
-        };
+        }) {
+            if ddt_op.field.name() == equation.target.name() {
+                // ---- own-variable d/dt: implicit (unchanged for every model) ----
+                let base_offset = *offsets
+                    .get(equation.target.name())
+                    .expect("missing target offset");
+                let rho_expr =
+                    coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
+                let base_coeff = Expr::ident("vol") * rho_expr.clone() / dt_eff.clone();
+                let dual_time_coeff = rho_expr * Expr::ident("dual_time_scale");
 
-        let base_offset = *offsets
-            .get(equation.target.name())
-            .expect("missing target offset");
-        let rho_expr = coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
-        let base_coeff = Expr::ident("vol") * rho_expr.clone() / dt_eff.clone();
-        let dual_time_coeff = rho_expr * Expr::ident("dual_time_scale");
+                for component in 0..equation.target.kind().component_count() as u32 {
+                    let u_idx = base_offset + component;
+                    let target_slot = slots
+                        .slots
+                        .iter()
+                        .find(|s| s.name == equation.target.name())
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "missing field '{}' in resolved state slots",
+                                equation.target.name()
+                            )
+                        });
+                    let phi_n = state_component_slot(
+                        slots.stride,
+                        "state_old",
+                        "idx",
+                        target_slot,
+                        component,
+                    );
+                    let phi_nm1 = state_component_slot(
+                        slots.stride,
+                        "state_old_old",
+                        "idx",
+                        target_slot,
+                        component,
+                    );
+                    let phi_iter = state_component_slot(
+                        slots.stride,
+                        "state_iter",
+                        "idx",
+                        target_slot,
+                        component,
+                    );
 
-        for component in 0..equation.target.kind().component_count() as u32 {
-            let u_idx = base_offset + component;
-            let target_slot = slots
-                .slots
-                .iter()
-                .find(|s| s.name == equation.target.name())
-                .unwrap_or_else(|| {
-                    panic!(
-                        "missing field '{}' in resolved state slots",
-                        equation.target.name()
-                    )
-                });
-            let phi_n =
-                state_component_slot(slots.stride, "state_old", "idx", target_slot, component);
-            let phi_nm1 = state_component_slot(
-                slots.stride,
-                "state_old_old",
-                "idx",
-                target_slot,
-                component,
-            );
-            let phi_iter =
-                state_component_slot(slots.stride, "state_iter", "idx", target_slot, component);
+                    stmts.extend(integrator.emit_component(
+                        acc,
+                        u_idx,
+                        base_coeff.clone(),
+                        dual_time_coeff.clone(),
+                        phi_n,
+                        phi_nm1,
+                        phi_iter,
+                    ));
+                }
+            } else {
+                // ---- cross-variable d/dt: IMPLICIT off-diagonal coupling ----
+                // ddt(coeff, field) with field != target (e.g. the thermal-
+                // expansion rho_dT*dT/dt in the continuity/pressure row). BDF1
+                // implicit: the field_new coefficient goes to the within-cell
+                // off-diagonal matrix block [eqn_row, field_col], and the field_old
+                // part to the equation RHS — so the residual carries
+                // coeff*(field_new - field_old)/dt with the p<-T coupling living in
+                // the Jacobian/Schur block. Implicit (NOT a Picard lag), so it
+                // does not stall in a fully-pinned closed box and stays stable at
+                // finite compressibility. Requires the coupled-assembly context
+                // (matrix_values, diag_rank, start_row_*), which is in scope
+                // wherever a cross-variable ddt is declared. Scalar fields only.
+                let eqn_offset = *offsets
+                    .get(equation.target.name())
+                    .expect("missing target offset");
+                let field_col = *offsets
+                    .get(ddt_op.field.name())
+                    .expect("missing cross-ddt field offset");
+                let rho_expr =
+                    coefficient_value_expr(slots, ddt_op.coeff.as_ref(), "idx", 1.0.into());
+                let base_coeff = Expr::ident("vol") * rho_expr / dt_eff.clone();
+                let field_slot = slots
+                    .slots
+                    .iter()
+                    .find(|s| s.name == ddt_op.field.name())
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "missing cross-ddt field '{}' in resolved state slots",
+                            ddt_op.field.name()
+                        )
+                    });
+                let field_old =
+                    state_component_slot(slots.stride, "state_old", "idx", field_slot, 0);
 
-            stmts.extend(integrator.emit_component(
-                acc,
-                u_idx,
-                base_coeff.clone(),
-                dual_time_coeff.clone(),
-                phi_n,
-                phi_nm1,
-                phi_iter,
-            ));
+                // matrix_values[start_row_{eqn} + diag_rank*coupled_stride + field_col] += base_coeff
+                let entry_index = acc.start_row(eqn_offset)
+                    + dsl::linear_index(
+                        Expr::ident("diag_rank"),
+                        acc.coupled_stride,
+                        field_col,
+                    );
+                stmts.push(dsl::assign_op_expr(
+                    AssignOp::Add,
+                    dsl::array_access("matrix_values", entry_index),
+                    base_coeff.clone(),
+                ));
+                // RHS += base_coeff * field_old  (BDF1 old-time part).
+                stmts.push(acc.add_rhs(eqn_offset, base_coeff * field_old));
+            }
         }
     }
 

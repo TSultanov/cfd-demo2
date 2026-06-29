@@ -114,6 +114,7 @@ pub struct TraceCase {
 pub enum TraceGeometry {
     BackwardsStep,
     ChannelObstacle,
+    Nozzle,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

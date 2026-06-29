@@ -1,6 +1,6 @@
 use crate::solver::mesh::{
-    generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
-    ChannelWithObstacle, Mesh,
+    generate_cut_cell_mesh, generate_delaunay_mesh, generate_structured_nozzle_mesh,
+    generate_voronoi_mesh, BackwardsStep, BoundarySides, BoundaryType, ChannelWithObstacle, Mesh,
 };
 use crate::solver::model::{
     all_models, compressible_model_with_eos, ModelPreconditionerSpec, ModelSpec,
@@ -34,6 +34,10 @@ enum RenderMode {
 enum GeometryType {
     BackwardsStep,
     ChannelObstacle,
+    /// Converging–diverging nozzle (structured, no cut cells). Paired with an
+    /// all-Mach model + a sub-critical outlet back-pressure it drives the
+    /// supersonic demo (subsonic inflow → choked throat → supersonic exit).
+    Nozzle,
 }
 
 impl Default for GeometryType {
@@ -279,6 +283,10 @@ pub struct CFDApp {
     /// from the per-model default on model switch; live-editable via the GUI slider
     /// (the all-Mach group), which `sync_worker_params` pushes into the driver.
     compressibility_psi: f32,
+    /// Gauge back-pressure pinned at the outlet (all-Mach models). `0.0` is the
+    /// standard outlet; the supersonic-nozzle demo sets a negative value to pull the
+    /// diverging section past Mach 1. Applied per-case via the GUI defaults.
+    outlet_back_pressure: f32,
     selected_preconditioner: PreconditionerType,
     model_id: &'static str,
     model_caps: ModelUiCaps,
@@ -416,6 +424,7 @@ impl CFDApp {
             low_mach_pressure_coupling_alpha: 1.0,
             inlet_velocity: 1.0,
             compressibility_psi: 0.0,
+            outlet_back_pressure: 0.0,
             selected_preconditioner: PreconditionerType::Jacobi,
             model_id: "incompressible_momentum",
             model_caps: ModelUiCaps::default(),
@@ -459,6 +468,7 @@ impl CFDApp {
             viscosity: self.current_fluid.viscosity as f32,
             eos: self.current_fluid.eos,
             compressibility_psi: self.compressibility_psi,
+            outlet_back_pressure: self.outlet_back_pressure,
         }
     }
 
@@ -473,7 +483,17 @@ impl CFDApp {
     /// changes, so the incompressible and compressible solvers each get sane,
     /// non-diverging knobs instead of one shared set tuned for neither.
     fn apply_model_defaults(&mut self) {
-        let d = crate::ui::model_defaults::gui_defaults_for(self.model_id);
+        // The supersonic-nozzle demo is the composition (all-Mach model + nozzle
+        // geometry): override the per-model defaults with the tuned nozzle case
+        // (choking inlet speed + sub-critical outlet back-pressure) so selecting the
+        // nozzle "just works" as a supersonic case. Every other case keeps a 0
+        // back-pressure (standard outlet).
+        let is_allmach = self.model_id == "allmach_pressure" || self.model_id == "allmach_thermal";
+        let d = if self.selected_geometry == GeometryType::Nozzle && is_allmach {
+            crate::ui::model_defaults::ALLMACH_THERMAL_NOZZLE
+        } else {
+            crate::ui::model_defaults::gui_defaults_for(self.model_id)
+        };
         self.selected_scheme = d.advection_scheme;
         self.time_scheme = d.time_scheme;
         self.selected_preconditioner = d.preconditioner;
@@ -495,6 +515,8 @@ impl CFDApp {
         // All-Mach compressibility (0 for the other models); user-tunable via the
         // all-Mach slider once the model is selected.
         self.compressibility_psi = d.compressibility_psi;
+        // Outlet back-pressure: negative only for the supersonic-nozzle case (above).
+        self.outlet_back_pressure = d.outlet_back_pressure;
     }
 
     fn current_trace_runtime_params(&self) -> tracefmt::TraceRuntimeParams {
@@ -529,6 +551,7 @@ impl CFDApp {
         let geometry = match self.selected_geometry {
             GeometryType::BackwardsStep => tracefmt::TraceGeometry::BackwardsStep,
             GeometryType::ChannelObstacle => tracefmt::TraceGeometry::ChannelObstacle,
+            GeometryType::Nozzle => tracefmt::TraceGeometry::Nozzle,
         };
         let mesh_type = match self.mesh_type {
             MeshType::CutCell => tracefmt::TraceMeshType::CutCell,
@@ -607,6 +630,7 @@ impl CFDApp {
             "incompressible_momentum" => "Incompressible momentum",
             "compressible" => "Compressible",
             "allmach_pressure" => "All-Mach (pressure-based)",
+            "allmach_thermal" => "All-Mach (pressure-based, thermal)",
             other => other,
         }
     }
@@ -621,8 +645,12 @@ impl CFDApp {
         // Only physical-flow models belong in the GUI (these are exactly the ones
         // `model_label` names). Verification variants (`*_mms*`, `*biharmonic*`,
         // `*demo*`) are excluded.
-        const GUI_PHYSICAL_MODELS: &[&str] =
-            &["incompressible_momentum", "compressible", "allmach_pressure"];
+        const GUI_PHYSICAL_MODELS: &[&str] = &[
+            "incompressible_momentum",
+            "compressible",
+            "allmach_pressure",
+            "allmach_thermal",
+        ];
         let mut out = Vec::new();
         for model in all_models().expect("failed to build model definitions") {
             if !GUI_PHYSICAL_MODELS.contains(&model.id) {
@@ -781,6 +809,7 @@ impl CFDApp {
             match geometry {
                 GeometryType::BackwardsStep => "backwards_step",
                 GeometryType::ChannelObstacle => "channel_obstacle",
+                GeometryType::Nozzle => "nozzle",
             }
         }
 
@@ -914,6 +943,51 @@ impl CFDApp {
 
                 mesh
             }
+            GeometryType::Nozzle => {
+                // Converging–diverging nozzle: a smooth structured channel (no cut
+                // cells), area ratio exit/throat = 2, matching the validated
+                // `allmach_thermal_supersonic_test`. The mesh-type radio is ignored
+                // (structured only). Resolution is derived from the cell-size slider
+                // but clamped so the throat is always resolved enough to choke.
+                let length = 3.0;
+                let height = 1.0;
+                let throat_h = 0.40;
+                let throat_frac = 0.40;
+                let exit_h = 0.80;
+                let nx = ((length / max_cell_size).round() as usize).clamp(64, 192);
+                let ny = ((height / max_cell_size).round() as usize).clamp(24, 64);
+
+                let gen_start = std::time::Instant::now();
+                let mesh = generate_structured_nozzle_mesh(
+                    nx,
+                    ny,
+                    length,
+                    height,
+                    throat_h,
+                    throat_frac,
+                    exit_h,
+                    BoundarySides {
+                        left: BoundaryType::Inlet,
+                        right: BoundaryType::Outlet,
+                        bottom: BoundaryType::Wall,
+                        top: BoundaryType::Wall,
+                    },
+                );
+                CFDApp::push_trace_init_event(
+                    trace_init_events,
+                    format!("mesh.generate.{geometry}.structured"),
+                    gen_start.elapsed(),
+                    Some(format!(
+                        "nx={nx} ny={ny} area_ratio={:.2} cells={} faces={} vertices={}",
+                        exit_h / throat_h,
+                        mesh.num_cells(),
+                        mesh.num_faces(),
+                        mesh.num_vertices()
+                    )),
+                );
+
+                mesh
+            }
         };
 
         CFDApp::push_trace_init_event(
@@ -964,7 +1038,15 @@ impl CFDApp {
         mesh: &Mesh,
         selected_geometry: GeometryType,
         max_cell_size: f64,
+        inlet_velocity: f32,
     ) -> Vec<(f64, f64)> {
+        // Nozzle: seed a uniform freestream (the through-flow IC the supersonic test
+        // uses). From rest the inlet-injected momentum has no convective transport
+        // and piles up; the freestream IC establishes convection everywhere so the
+        // throat chokes cleanly.
+        if selected_geometry == GeometryType::Nozzle {
+            return vec![(inlet_velocity as f64, 0.0); mesh.num_cells()];
+        }
         let mut u = vec![(0.0, 0.0); mesh.num_cells()];
         for (i, _vel) in u.iter_mut().enumerate() {
             let cx = mesh.cell_cx[i];
@@ -979,6 +1061,9 @@ impl CFDApp {
                     }
                     GeometryType::ChannelObstacle => {
                         // Inlet handled by shader
+                    }
+                    GeometryType::Nozzle => {
+                        // Handled by the uniform-freestream early return above.
                     }
                 }
             }
@@ -1170,6 +1255,7 @@ impl CFDApp {
             &mesh,
             request.selected_geometry,
             request.max_cell_size,
+            request.params.inlet_velocity,
         );
         let initial_p = vec![0.0; n_cells];
         CFDApp::push_trace_init_event(
@@ -1737,16 +1823,50 @@ impl eframe::App for CFDApp {
                     ui.add_enabled_ui(!is_initializing, |ui| {
                     ui.group(|ui| {
                         ui.label("Geometry");
-                        ui.radio_value(
-                            &mut self.selected_geometry,
-                            GeometryType::BackwardsStep,
-                            "Backwards Step",
-                        );
-                        ui.radio_value(
-                            &mut self.selected_geometry,
-                            GeometryType::ChannelObstacle,
-                            "Channel w/ Obstacle",
-                        );
+                        let mut geom_changed = false;
+                        geom_changed |= ui
+                            .radio_value(
+                                &mut self.selected_geometry,
+                                GeometryType::BackwardsStep,
+                                "Backwards Step",
+                            )
+                            .changed();
+                        geom_changed |= ui
+                            .radio_value(
+                                &mut self.selected_geometry,
+                                GeometryType::ChannelObstacle,
+                                "Channel w/ Obstacle",
+                            )
+                            .changed();
+                        geom_changed |= ui
+                            .radio_value(
+                                &mut self.selected_geometry,
+                                GeometryType::Nozzle,
+                                "Supersonic Nozzle",
+                            )
+                            .on_hover_text(
+                                "Converging–diverging nozzle. Selecting it switches to the \
+                                 All-Mach thermal model and a sub-critical outlet \
+                                 back-pressure, driving a subsonic inflow through a choked \
+                                 throat to a SUPERSONIC exit (with expansion cooling).",
+                            )
+                            .changed();
+                        if geom_changed {
+                            // The nozzle is meaningless without compressibility: when it is
+                            // picked, switch to the supersonic-capable thermal model (unless
+                            // already on an all-Mach model). Then re-seed the per-case
+                            // defaults (the nozzle override sets the choking inlet speed +
+                            // sub-critical back-pressure) and rebuild — mirroring the Model
+                            // dropdown's apply-defaults-then-reinit behaviour.
+                            if self.selected_geometry == GeometryType::Nozzle
+                                && self.model_id != "allmach_pressure"
+                                && self.model_id != "allmach_thermal"
+                            {
+                                self.model_id = "allmach_thermal";
+                            }
+                            self.apply_model_defaults();
+                            self.init_solver();
+                        }
                     });
 
                     ui.group(|ui| {
@@ -1836,11 +1956,13 @@ impl eframe::App for CFDApp {
                             self.update_gpu_inlet_velocity();
                         }
 
-                        // All-Mach compressibility knob: only the pressure-based
-                        // all-Mach model reads `psi`. Sliding it sweeps the
-                        // incompressible (psi=0) → compressible range; the live Mach
-                        // readout makes the regime explicit.
-                        if self.model_id == "allmach_pressure" {
+                        // All-Mach compressibility knob: the pressure-based all-Mach
+                        // models (barotropic + thermal) read `psi`. Sliding it sweeps
+                        // the incompressible (psi=0) → compressible range; the live
+                        // Mach readout makes the regime explicit.
+                        if self.model_id == "allmach_pressure"
+                            || self.model_id == "allmach_thermal"
+                        {
                             let mut psi = self.compressibility_psi;
                             if ui
                                 .add(
@@ -1865,6 +1987,36 @@ impl eframe::App for CFDApp {
                                 f64::INFINITY
                             };
                             ui.label(format!("Sound speed c ≈ {c:.3} m/s · inlet Mach ≈ {mach:.3}"));
+                        }
+
+                        // Supersonic-nozzle driver: a sub-critical (negative gauge)
+                        // outlet back-pressure pulls the diverging section past Mach 1.
+                        // Live (no rebuild) via `apply_params`, so the user can drag
+                        // from 0 (subsonic) toward the stable floor and watch the exit
+                        // go supersonic. Shown only for the all-Mach nozzle case; the
+                        // floor (≈ −0.05) stays inside the gauge-EOS envelope (below it
+                        // the outlet density crosses zero and the solve diverges).
+                        if self.selected_geometry == GeometryType::Nozzle
+                            && (self.model_id == "allmach_pressure"
+                                || self.model_id == "allmach_thermal")
+                        {
+                            let mut p_back = self.outlet_back_pressure;
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut p_back, -0.05..=0.0)
+                                        .text("Outlet back-pressure (gauge)"),
+                                )
+                                .on_hover_text(
+                                    "Drives the converging–diverging nozzle. 0 ⇒ subsonic \
+                                     exit; lowering it past the critical value pulls the \
+                                     diverging section SUPERSONIC (M_exit up to ≈ 1.07 at \
+                                     the stable floor).",
+                                )
+                                .changed()
+                            {
+                                self.outlet_back_pressure = p_back;
+                                self.sync_worker_params();
+                            }
                         }
 
                         // Reynolds Number Estimation
@@ -2698,6 +2850,7 @@ fn solver_worker_main(
         viscosity: 0.0,
         eos: crate::solver::model::eos::EosSpec::Constant,
         compressibility_psi: 0.0,
+        outlet_back_pressure: 0.0,
     };
 
     let mut running = false;

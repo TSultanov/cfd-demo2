@@ -83,6 +83,11 @@ pub struct ModelGuiDefaults {
     /// defaults) is the incompressible limit; the all-Mach default uses a positive
     /// value so the GUI shows a genuinely compressible (variable-density) flow.
     pub compressibility_psi: f32,
+    /// Gauge back-pressure pinned at the outlet. `0.0` for every standard case; the
+    /// supersonic-nozzle demo uses a negative value to pull the diverging section
+    /// past Mach 1 (the standard way a CD nozzle is driven). Applied to the
+    /// gauge-pressure (`allmach_*`) models only.
+    pub outlet_back_pressure: f32,
 }
 
 impl ModelGuiDefaults {
@@ -126,6 +131,7 @@ impl ModelGuiDefaults {
             viscosity,
             eos,
             compressibility_psi: self.compressibility_psi,
+            outlet_back_pressure: self.outlet_back_pressure,
         }
     }
 }
@@ -187,6 +193,8 @@ const INCOMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     // Incompressible: no compressibility (psi = 0 => the all-Mach pressure eqn
     // reduces exactly to incompressible; irrelevant for this model anyway).
     compressibility_psi: 0.0,
+    // Standard outlet (reference gauge pressure).
+    outlet_back_pressure: 0.0,
 };
 
 /// Compressible (density-based, implicit) defaults.
@@ -238,6 +246,7 @@ const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     // Density-based compressible carries its own EOS; the all-Mach `psi` knob is
     // not used here.
     compressibility_psi: 0.0,
+    outlet_back_pressure: 0.0,
 };
 
 /// All-Mach pressure-based (`allmach_pressure`) defaults.
@@ -278,6 +287,50 @@ const ALLMACH: ModelGuiDefaults = ModelGuiDefaults {
     // density). c = 1/sqrt(50) ≈ 0.14 m/s ⇒ inlet Mach ≈ 0.08; validated bounded
     // with ~7.5% density variation (`allmach_variable_density_compressible`).
     compressibility_psi: 50.0,
+    // Standard outlet for the channel/backstep cases (the nozzle demo overrides this).
+    outlet_back_pressure: 0.0,
+};
+
+/// All-Mach thermal **supersonic nozzle** demo defaults.
+///
+/// Same gauge-pressure (incompressible-branch) knobs as [`ALLMACH`], but tuned for
+/// the converging–diverging nozzle geometry to demonstrate SUPERSONIC throughflow:
+///
+/// * `inlet_velocity = 0.09` ≈ the natural choking inlet speed for the bundled
+///   nozzle (`generate_structured_nozzle_mesh`, area ratio exit/throat = 2): the
+///   inflow enters subsonic (inlet Mach ≈ 0.64·c… actually ≈ 0.09/0.1414 ≈ 0.64),
+///   accelerates through the sonic throat (M ≈ 1), and continues into the diverging
+///   section.
+/// * `outlet_back_pressure = -0.045` (gauge) is the supersonic driver: lowering the
+///   outlet pressure below critical pulls the diverging-section flow to a
+///   SUPERSONIC exit (M_exit ≈ 1.07, validated in
+///   `tests/allmach_thermal_supersonic_test.rs`). This is the stable edge of the
+///   envelope — the gauge-pressure EOS hits its near-vacuum floor below ≈ −0.06.
+/// * `psi = 50` ⇒ sound speed c = 1/√50 ≈ 0.1414 m/s.
+///
+/// Paired with the `allmach_thermal` model so the demo also shows the EXPANSION
+/// COOLING (the `T` field drops to ≈ 0.75·T_ref as the gas accelerates).
+pub const ALLMACH_THERMAL_NOZZLE: ModelGuiDefaults = ModelGuiDefaults {
+    advection_scheme: Scheme::SecondOrderUpwindVanLeer,
+    time_scheme: GpuTimeScheme::BDF2,
+    preconditioner: PreconditionerType::Jacobi,
+    alpha_u: 0.7,
+    alpha_p: 0.3,
+    outer_iters: 8,
+    outer_auto_converge: true,
+    target_cfl: 0.9,
+    timestep: 0.02,
+    adaptive_dt: true,
+    dual_time: false,
+    dtau: 1e-5,
+    low_mach_model: GpuLowMachPrecondModel::Off,
+    low_mach_theta_floor: 1e-6,
+    low_mach_pressure_coupling_alpha: 1.0,
+    // Near the natural choking inlet speed for the bundled nozzle.
+    inlet_velocity: 0.09,
+    compressibility_psi: 50.0,
+    // The supersonic driver: a sub-critical (negative gauge) back-pressure.
+    outlet_back_pressure: -0.045,
 };
 
 /// GUI solver defaults for `model_id`.
@@ -287,7 +340,10 @@ const ALLMACH: ModelGuiDefaults = ModelGuiDefaults {
 pub fn gui_defaults_for(model_id: &str) -> ModelGuiDefaults {
     match model_id {
         "compressible" => COMPRESSIBLE,
-        "allmach_pressure" => ALLMACH,
+        // The thermal variant shares the gauge-pressure (incompressible-branch)
+        // knobs; the supersonic-nozzle case overrides inlet speed + back-pressure
+        // via `ALLMACH_THERMAL_NOZZLE` when the nozzle geometry is selected.
+        "allmach_pressure" | "allmach_thermal" => ALLMACH,
         _ => INCOMPRESSIBLE,
     }
 }

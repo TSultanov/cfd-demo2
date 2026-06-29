@@ -61,6 +61,7 @@ fn ui_compressible_air_backstep_smoke() {
         viscosity: 1.81e-5,
         eos,
         compressibility_psi: 0.0,
+        outlet_back_pressure: 0.0,
     };
 
     let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(

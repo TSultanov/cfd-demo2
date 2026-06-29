@@ -40,4 +40,11 @@ pub struct RuntimeParams {
     /// Only the `allmach_pressure` model reads it (seeded into its per-cell `psi`
     /// state field); `0.0` is the incompressible limit. Other models ignore it.
     pub compressibility_psi: f32,
+    /// Gauge back-pressure pinned at the outlet (units Pressure). `0.0` is the
+    /// default (outlet at reference pressure — the validated incompressible/all-Mach
+    /// behaviour). A NEGATIVE value drives a converging–diverging nozzle SUPERSONIC:
+    /// lowering the outlet pressure below critical pulls the diverging-section flow
+    /// past Mach 1 (see the supersonic-nozzle demo). Applied by the driver to the
+    /// gauge-pressure (`allmach_*`) models only.
+    pub outlet_back_pressure: f32,
 }

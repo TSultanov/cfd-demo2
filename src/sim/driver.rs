@@ -158,9 +158,13 @@ impl SolverDriver {
             }
         }
         let compressible = has_rho && has_rho_u && has_rho_e && has_u;
-        // All-Mach pressure-based model: runs in the incompressible (Coupled) branch
-        // but carries extra `psi`/`rho`/`dt_local` state fields to seed.
-        let allmach = solver.model().id == "allmach_pressure";
+        // All-Mach pressure-based models: run in the incompressible (Coupled) branch
+        // but carry extra `psi`/`rho`/`dt_local` state fields to seed. The `thermal`
+        // variant additionally carries a temperature `T` and its EOS reference
+        // `rho_t_ref` (the on-device density recovery `rho = rho_t_ref/T + psi*p`).
+        let model_id = solver.model().id;
+        let allmach = model_id == "allmach_pressure" || model_id == "allmach_thermal";
+        let thermal = model_id == "allmach_thermal";
 
         let (cached_u, cached_p) = if compressible {
             let p_ref = params.eos.pressure_for_density(params.density as f64);
@@ -197,6 +201,17 @@ impl SolverDriver {
                 let _ = solver.set_field_scalar("psi", &vec![psi; n_cells]);
                 let _ = solver.set_field_scalar("rho", &vec![params.density as f64; n_cells]);
                 let _ = solver.set_field_scalar("dt_local", &vec![0.0; n_cells]);
+                // Thermal variant: seed the temperature at the reference and the
+                // constant EOS reference `rho_t_ref = rho_ref * T_ref`. The density
+                // is recovered on-device as `rho = rho_t_ref/T + psi*p`; an unseeded
+                // (0) `rho_t_ref` would make `rho` blow up. Matches the manual seeding
+                // in the thermal validation tests.
+                if thermal {
+                    let t_ref = crate::solver::model::ALLMACH_T_REF;
+                    let _ = solver
+                        .set_field_scalar("rho_t_ref", &vec![params.density as f64 * t_ref; n_cells]);
+                    let _ = solver.set_field_scalar("T", &vec![t_ref; n_cells]);
+                }
             }
             (initial_u.to_vec(), initial_p.to_vec())
         };
@@ -300,6 +315,15 @@ impl SolverDriver {
             let n = solver.num_cells() as usize;
             let psi = params.compressibility_psi.max(0.0) as f64;
             let _ = solver.set_field_scalar_current("psi", &vec![psi; n]);
+            // Outlet gauge back-pressure: pins the outlet `p` Dirichlet value. `0.0`
+            // is the standard outlet (reference pressure); a negative value drives a
+            // converging–diverging nozzle supersonic. Live so the GUI slider / a
+            // per-case default takes effect without a rebuild.
+            let _ = solver.set_boundary_scalar(
+                crate::solver::gpu::enums::GpuBoundaryType::Outlet,
+                "p",
+                params.outlet_back_pressure,
+            );
         }
     }
 

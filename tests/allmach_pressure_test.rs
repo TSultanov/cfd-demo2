@@ -89,6 +89,13 @@ fn build_allmach(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh, psi: f64) -> 
     solver
         .set_field_scalar("psi", &vec![psi; n])
         .expect("set psi field");
+    // The pressure-row ddt reads the decoupled `psi_precond` (low-Mach preconditioning is
+    // a driver-only transient device). This raw-solver test drives the solver directly and
+    // pins the compressibility itself, so seed psi_precond = psi to keep the acoustic time
+    // term at the intended psi (byte-identical to the pre-preconditioning behaviour).
+    solver
+        .set_field_scalar("psi_precond", &vec![psi; n])
+        .expect("set psi_precond field");
     // `rho` is now a state-layout field (variable-density support); the driver's
     // `set_density` only sets the uniform constant, so initialise the per-cell field
     // to rho_ref here. With no refresh it stays constant (== the incompressible

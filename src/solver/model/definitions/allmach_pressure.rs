@@ -126,6 +126,17 @@ pub struct AllMachPressureFields {
     pub grad_p_old: FieldRef,
     /// Compressibility psi = 1/c^2 (runtime field; 0 => incompressible).
     pub psi: FieldRef,
+    /// Preconditioned pseudo-compressibility used ONLY by the pressure-row `ddt`
+    /// time term (the acoustic/time coupling). Decoupled from the physical `psi`
+    /// (=1/c^2), which still drives every density recovery and the thermal
+    /// compression-heating coefficient. The driver seeds it per-cell as
+    /// `max(psi, 1/beta^2)` with `beta = max(|U|, k*U_inlet)` — a low-Mach
+    /// preconditioner (Turkel) that rescales the pseudo sound speed toward the
+    /// local velocity so a convective timestep is acoustically stable, while the
+    /// real `psi` keeps the density near-incompressible. At steady state `dp/dt -> 0`
+    /// so this term vanishes and the converged solution is the real-`psi` physics.
+    /// Defaults equal to `psi` until the driver seeds it (see `allmach_psi_precond`).
+    pub psi_precond: FieldRef,
     /// Per-cell local pseudo-time step for steady-state acceleration (Local Time
     /// Stepping). When 0 (default), the assembly falls back to the global
     /// `constants.dt` (time-accurate, byte-identical to a model without this
@@ -146,6 +157,7 @@ impl AllMachPressureFields {
             grad_p: vol_vector_dim::<DivDim<Pressure, Length>>("grad_p"),
             grad_p_old: vol_vector_dim::<DivDim<Pressure, Length>>("grad_p_old"),
             psi: vol_scalar_dim::<Compressibility>("psi"),
+            psi_precond: vol_scalar_dim::<Compressibility>("psi_precond"),
             dt_local: vol_scalar_dim::<Time>("dt_local"),
         }
     }
@@ -174,13 +186,16 @@ fn build_allmach_system(
     let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
     let mu_typed = TypedFieldRef::<DynamicViscosity, Scalar>::new("mu");
     let d_p_typed = TypedFieldRef::<cfd2_ir::dimensions::D_P, Scalar>::new("d_p");
-    let psi_typed = TypedFieldRef::<Compressibility, Scalar>::new("psi");
+    let psi_precond_typed = TypedFieldRef::<Compressibility, Scalar>::new("psi_precond");
 
     let rho_coeff = TypedCoeff::from_field(rho_typed);
     let mu_coeff = TypedCoeff::from_field(mu_typed);
     let rho_dp_coeff =
         TypedCoeff::from_field(rho_typed).multiply(TypedCoeff::from_field(d_p_typed));
-    let psi_coeff = TypedCoeff::from_field(psi_typed);
+    // The pressure-row ddt uses the LOW-MACH PRECONDITIONED compressibility (not the
+    // physical psi). The thermal compression-heating terms below build their own
+    // physical-`psi` refs inline (real thermodynamics, not the pseudo time scale).
+    let psi_precond_coeff = TypedCoeff::from_field(psi_precond_typed);
 
     // ----- Momentum equation (identical to incompressible_momentum) -----
     let ddt_term = typed_fvm::ddt_coeff(rho_coeff, u_typed);
@@ -206,10 +221,14 @@ fn build_allmach_system(
     }
     let momentum_eqn = momentum_sum.eqn(u_typed);
 
-    // ----- Continuity/pressure equation: incompressible terms + ddt(psi,p) -----
-    // ddt(psi,p) integrates to: psi * p * Vol / Time = (Density/Pressure) * Pressure * Vol/Time
-    //                         = Density * Vol / Time = Mass/Time = MassFlux. ✓
-    let compressibility_term = typed_fvm::ddt_coeff(psi_coeff, p_typed);
+    // ----- Continuity/pressure equation: incompressible terms + ddt(psi_precond,p) -----
+    // ddt(psi_precond,p) integrates to: psi_precond * p * Vol / Time =
+    //   (Density/Pressure) * Pressure * Vol/Time = Density * Vol / Time = MassFlux. ✓
+    // The coefficient is the LOW-MACH PRECONDITIONED compressibility (not the physical
+    // psi): it sets only the pseudo-acoustic time scale and vanishes at steady state
+    // (dp/dt -> 0), so the converged solution is the real-psi physics. The physical psi
+    // still drives the density recovery (host) and the thermal compression heating below.
+    let compressibility_term = typed_fvm::ddt_coeff(psi_precond_coeff, p_typed);
     let p_laplacian_term = typed_fvm::laplacian(rho_dp_coeff, p_typed);
     let p_div_flux_term = typed_fvm::div_flux(phi_typed, p_typed);
 
@@ -380,6 +399,7 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
         fields.grad_p,
         fields.grad_p_old,
         fields.psi,
+        fields.psi_precond,
         fields.dt_local,
         // Variable density: when `rho` is a state-layout field, the Rhie–Chow flux
         // deriver and the ddt(rho,U) coefficient read it per-cell (instead of the

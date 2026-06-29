@@ -81,4 +81,11 @@ impl Fluid {
     pub fn sound_speed(&self) -> f64 {
         self.eos.sound_speed(self.density)
     }
+
+    /// Physical all-Mach compressibility `psi = 1/c^2` derived from this material's
+    /// EOS + density (see [`EosSpec::compressibility`]). `0.0` for an incompressible
+    /// (`Constant`) EOS. Air ~ 8.3e-6, Water ~ 4.5e-7 (s^2/m^2).
+    pub fn compressibility(&self) -> f64 {
+        self.eos.compressibility(self.density)
+    }
 }

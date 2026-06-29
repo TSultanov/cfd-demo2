@@ -36,9 +36,13 @@ pub struct RuntimeParams {
     pub density: f32,
     pub viscosity: f32,
     pub eos: EosSpec,
-    /// All-Mach compressibility `psi = d(rho)/d(p) = 1/c^2` (units Density/Pressure).
-    /// Only the `allmach_pressure` model reads it (seeded into its per-cell `psi`
-    /// state field); `0.0` is the incompressible limit. Other models ignore it.
+    /// All-Mach compressibility `psi = d(rho)/d(p) = 1/c^2` (units Density/Pressure),
+    /// seeded into the `allmach_*` models' per-cell `psi` field. This is now
+    /// **EOS-derived**: the GUI fills it as `(1/c^2) * exaggeration`, where `1/c^2`
+    /// comes from the fluid's real sound speed (`Fluid::compressibility`) and
+    /// `exaggeration` is the dimensionless GUI factor (×1 = real physics). `0.0` is the
+    /// incompressible limit (an incompressible `Constant` EOS gives `1/c^2 = 0`). Other
+    /// models ignore it.
     pub compressibility_psi: f32,
     /// Gauge back-pressure pinned at the outlet (units Pressure). `0.0` is the
     /// default (outlet at reference pressure — the validated incompressible/all-Mach

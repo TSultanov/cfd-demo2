@@ -83,6 +83,23 @@ impl EosSpec {
         }
     }
 
+    /// Isentropic compressibility `psi = d(rho)/d(p) = 1/c^2` [s^2/m^2] — the
+    /// physical value of the all-Mach `psi` field, derived from the material's real
+    /// thermodynamics instead of an artificial constant. For `IdealGas` this is
+    /// `1/(gamma*R*T)`; for `LinearCompressibility` it is `rho/K = 1/dp_drho`.
+    ///
+    /// Returns `0.0` for the `Constant` (incompressible) EOS — exactly the `psi = 0`
+    /// limit at which the all-Mach pressure equation reduces to incompressible — so a
+    /// `Constant`-EOS fluid stays byte-identical to the incompressible solver.
+    pub fn compressibility(&self, rho: f64) -> f64 {
+        let c = self.sound_speed(rho);
+        if c > 0.0 {
+            1.0 / (c * c)
+        } else {
+            0.0
+        }
+    }
+
     pub fn runtime_params(&self) -> EosRuntimeParams {
         match *self {
             EosSpec::IdealGas {

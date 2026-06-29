@@ -70,6 +70,43 @@ pub struct DriverBuild {
     pub cached_p: Vec<f64>,
 }
 
+/// Pseudo sound-speed floor multiplier on the convective scale (`k` in
+/// `beta_min = k * U_inlet`): holds the step-0 / quiescent-region acoustic CFL near
+/// `k * target_cfl ~ O(1)` instead of the unpreconditioned `c * dt / h ~ 667`.
+const ALLMACH_PRECOND_MACH_K: f64 = 2.0;
+
+/// Low-Mach preconditioned pseudo-compressibility for the all-Mach pressure model.
+///
+/// Returns the per-cell `psi_precond` the pressure-row `ddt` term consumes, decoupled
+/// from the physical `psi` (=1/c^2) that drives the density recovery. The pseudo sound
+/// speed is rescaled toward the local velocity (Turkel-style low-Mach preconditioning):
+///
+/// ```text
+///   beta^2      = max(|U|^2, (k*U_ref)^2)     // pseudo-sound-speed^2 (a velocity^2)
+///   psi_precond = max(real_psi, 1/beta^2)     // >= physical psi (never less compressible)
+/// ```
+///
+/// Because `beta >= |U|` the pseudo-Mach is <= 1, so the acoustic CFL tracks the
+/// (bounded) convective CFL and a convective timestep is acoustically stable — curing
+/// the real-`psi` step-0 blow-up (acoustic CFL ~667). The `max` self-disables it where
+/// the REAL Mach >= 1 (`1/|U|^2 <= real_psi` => `psi_precond = real_psi` => full physical
+/// acoustics). When `real_psi == 0` (incompressible limit) it returns 0, keeping the
+/// model byte-identical to the incompressible solver (the acoustic term vanishes).
+fn allmach_psi_precond(u: &[(f64, f64)], real_psi: f64, u_ref: f64) -> Vec<f64> {
+    if real_psi <= 0.0 {
+        return vec![0.0; u.len()];
+    }
+    let conv_floor2 = (ALLMACH_PRECOND_MACH_K * u_ref.abs()).powi(2);
+    u.iter()
+        .map(|&(vx, vy)| {
+            // 1e-12 only guards beta->0 in the degenerate closed-box (U_ref=0, |U|=0) case;
+            // for every inlet-driven demo the convective floor dominates.
+            let beta2 = (vx * vx + vy * vy).max(conv_floor2).max(1e-12);
+            real_psi.max(1.0 / beta2)
+        })
+        .collect()
+}
+
 impl SolverDriver {
     /// Build a configured solver (phase 1).
     ///
@@ -199,6 +236,13 @@ impl SolverDriver {
             if allmach {
                 let psi = params.compressibility_psi.max(0.0) as f64;
                 let _ = solver.set_field_scalar("psi", &vec![psi; n_cells]);
+                // Low-Mach preconditioned pseudo-compressibility (ddt-only), seeded from
+                // the IC velocity floored at k*U_inlet so step 0 is acoustic-CFL ~O(1),
+                // not ~667 — the cure for the real-psi step-0 blow-up. `set_field_scalar`
+                // (IC semantics) matches the other seeds here; readback refreshes per-cell.
+                let psi_precond =
+                    allmach_psi_precond(initial_u, psi, params.inlet_velocity.abs() as f64);
+                let _ = solver.set_field_scalar("psi_precond", &psi_precond);
                 let _ = solver.set_field_scalar("rho", &vec![params.density as f64; n_cells]);
                 let _ = solver.set_field_scalar("dt_local", &vec![0.0; n_cells]);
                 // Thermal variant: seed the temperature at the reference and the
@@ -315,6 +359,12 @@ impl SolverDriver {
             let n = solver.num_cells() as usize;
             let psi = params.compressibility_psi.max(0.0) as f64;
             let _ = solver.set_field_scalar_current("psi", &vec![psi; n]);
+            // Keep psi_precond consistent with the new psi using the last-known velocity
+            // scale (uniform); the next readback refreshes it per-cell. Ensures the ddt
+            // coefficient stays >= the physical psi after a slider change.
+            let psi_precond =
+                allmach_psi_precond(&vec![(self.prev_max_vel, 0.0); n], psi, params.inlet_velocity.abs() as f64);
+            let _ = solver.set_field_scalar_current("psi_precond", &psi_precond);
             // Outlet gauge back-pressure: pins the outlet `p` Dirichlet value. `0.0`
             // is the standard outlet (reference pressure); a negative value drives a
             // converging–diverging nozzle supersonic. Live so the GUI slider / a
@@ -477,6 +527,13 @@ impl SolverDriver {
             // time (ddt(rho,U) uses U_old, never rho_old), so a current-only update is
             // exact and backend-consistent.
             let _ = self.solver.set_field_scalar_current("rho", &rho_vals);
+            // Refresh the preconditioned pseudo-compressibility from the live velocity
+            // (one-snapshot lag, same discipline + correctness argument as `rho`: a
+            // current-time coefficient never read from BDF history). Tracks the wake so
+            // the pseudo-Mach stays ~<=1 as the flow develops.
+            let psi_precond =
+                allmach_psi_precond(&u, psi, self.params.inlet_velocity.abs() as f64);
+            let _ = self.solver.set_field_scalar_current("psi_precond", &psi_precond);
             Some((lo, hi))
         } else if self.compressible {
             let rho = pollster::block_on(self.solver.get_rho());

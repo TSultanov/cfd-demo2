@@ -349,53 +349,76 @@ fn gui_default_incompressible_obstacle_bounded() {
 }
 
 /// The all-Mach pressure-based default, driven through the GUI's exact default path
-/// (dropdown → `gui_defaults_for("allmach_pressure")` → `SolverDriver`). It must (a)
-/// stay bounded and finite like the incompressible default, AND (b) be GENUINELY
-/// compressible — the barotropic density `rho = rho_ref + psi*p` varies measurably
-/// across the wake. That density variation at this low Mach is exactly what the f32
-/// density-based `compressible` model cannot resolve (its absolute-pressure state
-/// buries the signal below f32 epsilon), so it is the property worth gating.
+/// (dropdown → `gui_defaults_for("allmach_pressure")` → `SolverDriver`). The
+/// compressibility is now **EOS-derived** (`psi = 1/c^2` from the fluid's real sound
+/// speed) times a GUI exaggeration factor (default ×1 = real physics), not a hardcoded
+/// constant. This gate asserts the honest two-regime behaviour:
+///   (a) DEFAULT (×1): `psi` equals the fluid's real `1/c^2` (Air ≈ 8.3e-6), so the
+///       flow is honestly near-incompressible — bounded, finite, and the wake still
+///       develops (the all-Mach model reduces to the validated incompressible street).
+///   (b) EXAGGERATED: cranking the factor to the effective `psi ≈ 50` regime restores
+///       a GENUINELY compressible flow — measurable barotropic density variation
+///       `rho = rho_ref + psi*p` across the wake (the teaching slider, on the solver).
 #[test]
-fn gui_default_allmach_obstacle_bounded_and_compressible() {
+fn gui_default_allmach_obstacle_eos_derived_and_exaggeratable() {
     std::env::set_var("CFD2_QUIET", "1");
     let air = air();
     let d = gui_defaults_for("allmach_pressure");
     let mesh = channel_obstacle_mesh();
-    let psi = d.compressibility_psi as f64;
-    eprintln!(
-        "[allmach/obstacle] cells={} min_cell={:.4e} psi={psi} (c={:.3} inlet-Mach~{:.3})",
-        mesh.num_cells(),
-        actual_min_cell(&mesh),
-        1.0 / psi.sqrt(),
-        d.inlet_velocity as f64 * psi.sqrt(),
-    );
-    let mut driver = build_allmach_driver(&d, &air, &mesh);
-    // Longer than the incompressible 150-step gate: the compressibility term damps
-    // the transient, so give the variable-density wake room to develop.
-    let res = drive(&mut driver, 400);
-    print_trace("allmach/obstacle", &res);
-    // (a) Bounded + finite + physical density (rho stays well inside [0.5, 2.0]).
-    assert_bounded("allmach/obstacle", &res, -1e6, 1e6, 0.5, 2.0);
 
-    // (b) Genuinely compressible: the density varies across the wake by the end of
-    // the run (validated ~7.5% in `allmach_variable_density_compressible`; require a
-    // clear margin above "numerically uniform").
-    let last = res.samples.last().expect("samples");
-    let spread = (last.rho_max - last.rho_min) / air.density;
-    let max_seen = res.samples.iter().map(|s| s.max_vel).fold(0.0_f64, f64::max);
+    // (a) The DEFAULT wire psi is the fluid's real EOS 1/c^2 — not the artificial 50.
+    let psi_phys = air.compressibility();
+    let psi_default = d
+        .to_runtime_params(air.density as f32, air.viscosity as f32, air.eos)
+        .compressibility_psi as f64;
     eprintln!(
-        "[allmach/obstacle] final rho=[{:.4},{:.4}] spread={:.3e} of rho_ref, max|u| seen={:.3e}",
-        last.rho_min, last.rho_max, spread, max_seen
+        "[allmach/obstacle] EOS-derived psi_default={psi_default:.3e} (real 1/c^2={psi_phys:.3e}, \
+         real c={:.0} m/s)",
+        air.sound_speed()
     );
     assert!(
-        spread > 1e-3,
-        "all-Mach default is not compressible: density spread {spread:.2e} (rho nearly uniform)"
+        (psi_default - psi_phys).abs() / psi_phys < 1e-4,
+        "default psi must be the EOS-derived 1/c^2, got {psi_default:.3e} vs {psi_phys:.3e}"
     );
-    // The flow must develop (not freeze at the inlet): max|u| exceeds the inlet.
+    assert!(
+        psi_default < 1e-4,
+        "real Air is near-incompressible (psi ~8.3e-6), got {psi_default:.3e}"
+    );
+    let mut driver = build_allmach_driver(&d, &air, &mesh);
+    let res = drive(&mut driver, 400);
+    print_trace("allmach/obstacle(x1)", &res);
+    assert_bounded("allmach/obstacle(x1)", &res, -1e6, 1e6, 0.5, 2.0);
+    let max_seen = res.samples.iter().map(|s| s.max_vel).fold(0.0_f64, f64::max);
     assert!(
         max_seen > 1.2 * d.inlet_velocity as f64,
         "all-Mach wake did not develop: max|u|={max_seen:.3e} vs inlet {:.3e}",
         d.inlet_velocity
+    );
+
+    // (b) Cranking the EXAGGERATION (the GUI slider) to effective psi ~50 makes the
+    // SAME default path genuinely compressible — measurable density variation.
+    let mut d_ex = d;
+    d_ex.compressibility_exaggeration = (50.0 / psi_phys) as f32; // effective psi ~50
+    let psi_ex = d_ex
+        .to_runtime_params(air.density as f32, air.viscosity as f32, air.eos)
+        .compressibility_psi as f64;
+    assert!(
+        (48.0..52.0).contains(&psi_ex),
+        "exaggerated effective psi {psi_ex:.2} should be ~50"
+    );
+    let mut driver_ex = build_allmach_driver(&d_ex, &air, &mesh);
+    let res_ex = drive(&mut driver_ex, 400);
+    print_trace("allmach/obstacle(exag)", &res_ex);
+    assert_bounded("allmach/obstacle(exag)", &res_ex, -1e6, 1e6, 0.5, 2.0);
+    let last = res_ex.samples.last().expect("samples");
+    let spread = (last.rho_max - last.rho_min) / air.density;
+    eprintln!(
+        "[allmach/obstacle] exaggerated final rho=[{:.4},{:.4}] spread={:.3e} of rho_ref",
+        last.rho_min, last.rho_max, spread
+    );
+    assert!(
+        spread > 1e-3,
+        "exaggerated all-Mach must be compressible: density spread {spread:.2e} (rho nearly uniform)"
     );
 }
 

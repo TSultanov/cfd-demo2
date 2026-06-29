@@ -79,9 +79,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             lambda = d_neigh / total_dist;
         }
         let lambda_other = 1.0 - lambda;
-        grad_acc_p += normal_vec * (state[idx * 15u + 2u] * lambda + select(state[other_idx * 15u + 2u], select(select(state[idx * 15u + 2u], bc_value[face_idx * 4u + 2u], bc_kind[face_idx * 4u + 2u] == 1u), state[idx * 15u + 2u] + bc_value[face_idx * 4u + 2u] * d_own, bc_kind[face_idx * 4u + 2u] == 2u), is_boundary) * lambda_other) * area;
+        grad_acc_p += normal_vec * (state[idx * 16u + 2u] * lambda + select(state[other_idx * 16u + 2u], select(select(state[idx * 16u + 2u], bc_value[face_idx * 4u + 2u], bc_kind[face_idx * 4u + 2u] == 1u), state[idx * 16u + 2u] + bc_value[face_idx * 4u + 2u] * d_own, bc_kind[face_idx * 4u + 2u] == 2u), is_boundary) * lambda_other) * area;
     }
     let grad_out_p: vec2<f32> = grad_acc_p * 1.0 / max(vol, 0.000000000001);
-    state[idx * 15u + 4u] = grad_out_p.x;
-    state[idx * 15u + 5u] = grad_out_p.y;
+    state[idx * 16u + 4u] = grad_out_p.x;
+    state[idx * 16u + 5u] = grad_out_p.y;
 }

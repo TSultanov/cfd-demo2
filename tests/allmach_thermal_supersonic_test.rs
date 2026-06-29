@@ -79,6 +79,11 @@ fn build_nozzle(fluid: &Fluid, mesh: &Mesh, psi: f64, inlet_v: f64) -> UnifiedSo
     let mut solver = driver.into_solver();
     let rho_ref = fluid.density as f64;
     solver.set_field_scalar("psi", &vec![psi; n]).expect("psi");
+    // Pressure-row ddt reads the decoupled `psi_precond` (preconditioning is a driver-only
+    // transient device); this raw-solver test pins the compressibility, so seed it = psi.
+    solver
+        .set_field_scalar("psi_precond", &vec![psi; n])
+        .expect("psi_precond");
     solver.set_field_scalar("rho", &vec![rho_ref; n]).expect("rho");
     solver
         .set_field_scalar("rho_t_ref", &vec![rho_ref * ALLMACH_T_REF; n])

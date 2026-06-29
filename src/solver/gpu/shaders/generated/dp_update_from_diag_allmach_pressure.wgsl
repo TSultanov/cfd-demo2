@@ -23,8 +23,8 @@ struct Constants {
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
-    if (idx >= (arrayLength(&state) / 11u)) { return; }
-    let base = idx * 11u;
+    if (idx >= (arrayLength(&state) / 12u)) { return; }
+    let base = idx * 12u;
     let rho = max(constants.density, 0.000000000001);
     let dt = max(constants.dt, 0.0);
     let d_p = constants.alpha_u * dt / rho;

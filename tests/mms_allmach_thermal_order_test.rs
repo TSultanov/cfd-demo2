@@ -210,6 +210,13 @@ fn solve(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, Vec<f64>) {
     let n_cells = mesh.num_cells();
     // EOS aux fields (see the on-device recovery rho = rho_t_ref/T + psi*p).
     solver.set_field_scalar("psi", &vec![PSI; n_cells]).expect("psi");
+    // The pressure-row ddt now reads the decoupled `psi_precond`; seed it equal to PSI
+    // (=0 here) so the manufactured-solution residual is byte-identical to the physical
+    // psi (the term vanishes at steady state regardless, this just removes buffer-init
+    // dependence). Preconditioning is a driver-only transient device, inert under MMS.
+    solver
+        .set_field_scalar("psi_precond", &vec![PSI; n_cells])
+        .expect("psi_precond");
     solver
         .set_field_scalar("rho_t_ref", &vec![RHO_T_REF; n_cells])
         .expect("rho_t_ref");

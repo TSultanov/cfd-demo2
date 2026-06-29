@@ -82,6 +82,18 @@ pub const ALLMACH_RHO_T_REF_FIELD: &str = "rho_t_ref";
 /// high-Mach compressible heating. Thermal variant only.
 pub const ALLMACH_RHO_DT_FIELD: &str = "rho_dT";
 
+/// EOS density floor (unit Density), seeded by the driver to `psi * ABS_PRESSURE_FLOOR`
+/// — the density at the absolute-pressure floor, since `rho = psi * P_abs` for the
+/// barotropic model. The on-device thermal recovery clamps `rho = max(rho_t_ref/T +
+/// psi*p, rho_floor)` so a transient gauge-pressure undershoot below `-P_REF` (which
+/// would drive `P_abs < 0` and hence `rho <= 0`, breaking the momentum/flux terms that
+/// divide by density) is held at a small positive density instead of blowing up. A
+/// constant per-cell field (never an equation target), seeded like `rho_t_ref`; the
+/// non-thermal model applies the same floor on the host. Production thermal variant only
+/// (the steady `_mms` variant never approaches vacuum, so it is omitted to stay
+/// byte-identical). The clamp vanishes wherever the EOS is well-posed.
+pub const ALLMACH_RHO_FLOOR_FIELD: &str = "rho_floor";
+
 /// On-device pressure-advection field `u_dot_grad_p = U . grad_p` (Pressure/Time),
 /// recovered from the velocity and the stored Rhie–Chow pressure gradient. It is
 /// the `U.grad(p)` half of the compression-heating source `-(1/cp)*Dp/Dt`.
@@ -419,6 +431,10 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
             layout_fields.push(vol_scalar_dim::<RhoDtUnit>(ALLMACH_RHO_DT_FIELD));
             // U.grad(p), recovered on-device for the compression-heating source.
             layout_fields.push(vol_scalar_dim::<PressureRateUnit>(ALLMACH_U_DOT_GRAD_P_FIELD));
+            // EOS density floor (= psi * absolute-pressure floor), seeded by the driver.
+            // Clamps the on-device density recovery positive against transient pressure
+            // undershoot through vacuum (see ALLMACH_RHO_FLOOR_FIELD).
+            layout_fields.push(vol_scalar_dim::<Density>(ALLMACH_RHO_FLOOR_FIELD));
         }
     }
     if with_mms_source {
@@ -597,11 +613,21 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
     // barotropic model keeps identity primitives (host-side refresh).
     let primitives = if thermal {
         let mut derivations = HashMap::new();
-        derivations.insert(
-            "rho".to_string(),
-            Expr::ident(ALLMACH_RHO_T_REF_FIELD) / Expr::ident(ALLMACH_TEMPERATURE_FIELD)
-                + Expr::ident("psi") * Expr::ident("p"),
-        );
+        // EOS density recovery rho = rho_t_ref/T + psi*p. In production, clamp it at
+        // `rho_floor` (= psi * absolute-pressure floor) so a transient gauge-pressure
+        // undershoot below -P_REF cannot drive rho non-positive (which divides through
+        // the momentum/Rhie-Chow terms and blows up); the floor is inert wherever the
+        // EOS is well-posed. The steady `_mms` variant omits it (never near vacuum, and
+        // it has no `rho_floor` field) to stay byte-identical for the order test.
+        let rho_recovery = Expr::ident(ALLMACH_RHO_T_REF_FIELD)
+            / Expr::ident(ALLMACH_TEMPERATURE_FIELD)
+            + Expr::ident("psi") * Expr::ident("p");
+        let rho_recovery = if with_mms_source {
+            rho_recovery
+        } else {
+            Expr::call_named("max", vec![rho_recovery, Expr::ident(ALLMACH_RHO_FLOOR_FIELD)])
+        };
+        derivations.insert("rho".to_string(), rho_recovery);
         // Thermal-expansion coefficient rho_dT = d(rho)/dT = -rho_t_ref/T^2,
         // recovered on-device alongside rho (resolver: Mul/Div combine units,
         // Negate preserves them -> Density/Temperature, no Add/Sub so no unit

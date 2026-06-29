@@ -119,12 +119,18 @@ fn run(air: &Fluid, mesh: &Mesh, psi: f64, inlet_v: f64, p_back: f64, steps: usi
 
 /// EVIDENCE (not a gate — `#[ignore]`'d; intentionally DIVERGES): documents WHY the
 /// supersonic-nozzle demo keeps an exaggerated (low effective sound speed) regime
-/// instead of real Air units. At real `c≈347`, even with adaptive dt (velocity
-/// bounded ~Mach 0.7) the gauge-pressure field undershoots through the vacuum floor
-/// into NEGATIVE density (`rho_min` ~ -33) — on top of being turbulent (Re≈4.5e7).
-/// So real-units strong-supersonic is not a viable laminar default; the EOS-derived
-/// `psi=1/c^2` is exaggerated back to the stable effective psi≈50 regime.
-/// Run with `cargo test ... -- --ignored --nocapture` to reproduce.
+/// instead of real Air units, and that the EOS absolute-pressure floor does NOT rescue
+/// it. At real `c≈347`, P_REF = rho/psi ≈ 1.48e5 Pa, so driving the nozzle supersonic
+/// pulls the gauge pressure toward -P_REF (absolute vacuum). The abs-pressure floor
+/// (P_abs ≥ 1e-5 Pa) now does its job — it clamps the density NON-NEGATIVE (`rho_min`
+/// 0.0, was ~-33 before the floor) — but at real Air that floor density is psi*1e-5 ≈
+/// 8e-11 (near-perfect vacuum), and `U ~ momentum/rho` with rho≈0 still explodes
+/// (`M_exit` ~ 1e9). So the floor cures the *negative-density* failure mode exactly as
+/// designed, yet near-vacuum density is independently degenerate — on top of the flow
+/// being turbulent (Re≈4.5e7). Real-units strong-supersonic therefore remains non-viable
+/// at this regime; the EOS-derived `psi=1/c^2` is exaggerated back to the stable
+/// effective psi≈50 (where P_REF≈0.025, so the operating pressures sit far above the
+/// vacuum floor). Run with `cargo test ... -- --ignored --nocapture` to reproduce.
 #[test]
 #[ignore]
 fn real_units_nozzle_supersonic_probe() {

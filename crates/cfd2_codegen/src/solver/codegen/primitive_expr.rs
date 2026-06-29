@@ -121,6 +121,30 @@ pub fn resolve_field_refs_dyn(
                         resolve_field_refs_dyn(&args[0], slots, cell_idx, state_array);
                     return inner_dyn.sqrt().expect("sqrt operation failed");
                 }
+                // `max`/`min` PRESERVE units: clamping a quantity to a floor/ceiling of
+                // the SAME unit yields that unit (unlike the dimensionless fallback below,
+                // which would reject e.g. an EOS density floor `max(rho, rho_floor)`).
+                // Both operands must share a unit — but a dimensionless operand (a bare
+                // literal, e.g. `max(x, 0.0)`) adopts the other's unit, so a literal floor
+                // of zero still type-checks.
+                if (name == "max" || name == "min") && args.len() == 2 {
+                    let lhs = resolve_field_refs_dyn(&args[0], slots, cell_idx.clone(), state_array);
+                    let rhs = resolve_field_refs_dyn(&args[1], slots, cell_idx, state_array);
+                    let unit = if lhs.unit == rhs.unit {
+                        lhs.unit.clone()
+                    } else if lhs.unit == UnitDim::dimensionless() {
+                        rhs.unit.clone()
+                    } else if rhs.unit == UnitDim::dimensionless() {
+                        lhs.unit.clone()
+                    } else {
+                        panic!(
+                            "{name}() operands must share a unit (got {:?} vs {:?})",
+                            lhs.unit, rhs.unit
+                        );
+                    };
+                    let combined = Expr::call_named(name, vec![lhs.expr, rhs.expr]);
+                    return DynExpr::new(combined, lhs.ty, unit);
+                }
             }
             // For other calls, resolve args but treat as dimensionless
             let resolved_args: Vec<Expr> = args
@@ -270,6 +294,29 @@ mod tests {
         let dyn_expr = resolve_field_refs_dyn(&expr, &slots, cell_idx, "state");
 
         assert_eq!(dyn_expr.unit, MomentumDensity::UNIT);
+    }
+
+    #[test]
+    fn expr_dyn_max_preserves_units() {
+        // max(rho, rho_floor) must stay Density (not collapse to dimensionless) so an
+        // on-device EOS density floor type-checks. Both operands are Density fields.
+        let slots = test_slots_from_fields(vec![
+            ("rho", PortFieldKind::Scalar, Density::UNIT),
+            ("rho_floor", PortFieldKind::Scalar, Density::UNIT),
+        ]);
+        let expr = Expr::call_named("max", vec![Expr::ident("rho"), Expr::ident("rho_floor")]);
+        let dyn_expr = resolve_field_refs_dyn(&expr, &slots, Expr::ident("i"), "state");
+        assert_eq!(dyn_expr.unit, Density::UNIT);
+        assert!(dyn_expr.expr.to_string().starts_with("max("));
+    }
+
+    #[test]
+    fn expr_dyn_max_with_dimensionless_literal_adopts_field_unit() {
+        // A bare literal floor (dimensionless) adopts the field's unit.
+        let slots = test_slots_from_fields(vec![("rho", PortFieldKind::Scalar, Density::UNIT)]);
+        let expr = Expr::call_named("max", vec![Expr::ident("rho"), Expr::lit_f32(0.0)]);
+        let dyn_expr = resolve_field_refs_dyn(&expr, &slots, Expr::ident("i"), "state");
+        assert_eq!(dyn_expr.unit, Density::UNIT);
     }
 
     #[test]

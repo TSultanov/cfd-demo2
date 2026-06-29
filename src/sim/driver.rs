@@ -75,6 +75,16 @@ pub struct DriverBuild {
 /// `k * target_cfl ~ O(1)` instead of the unpreconditioned `c * dt / h ~ 667`.
 const ALLMACH_PRECOND_MACH_K: f64 = 2.0;
 
+/// Absolute-pressure floor for the all-Mach EOS (Pascals, gauge-referenced as
+/// `P_abs = P_REF + p`). The barotropic density is `rho = psi * P_abs`, so a transient
+/// gauge-pressure undershoot below `-P_REF` would drive `P_abs < 0` and `rho <= 0`,
+/// breaking every term that divides by density. Clamping `P_abs >= ABS_PRESSURE_FLOOR`
+/// (equivalently `rho >= psi * ABS_PRESSURE_FLOOR`) holds the EOS at a tiny positive
+/// density so a temporary negative-pressure numerical artifact stays well-posed and the
+/// solve can recover, rather than blowing up. A near-vacuum floor (1e-5 Pa): inert
+/// wherever the pressure is physical.
+const ALLMACH_ABS_PRESSURE_FLOOR: f64 = 1.0e-5;
+
 /// Low-Mach preconditioned pseudo-compressibility for the all-Mach pressure model.
 ///
 /// Returns the per-cell `psi_precond` the pressure-row `ddt` term consumes, decoupled
@@ -255,6 +265,14 @@ impl SolverDriver {
                     let _ = solver
                         .set_field_scalar("rho_t_ref", &vec![params.density as f64 * t_ref; n_cells]);
                     let _ = solver.set_field_scalar("T", &vec![t_ref; n_cells]);
+                    // EOS density floor = psi * absolute-pressure floor (rho = psi*P_abs),
+                    // so the on-device recovery clamps rho positive against a transient
+                    // gauge-pressure undershoot through vacuum. Constant field; refreshed
+                    // on a psi (slider) change in apply_params.
+                    let _ = solver.set_field_scalar(
+                        "rho_floor",
+                        &vec![psi * ALLMACH_ABS_PRESSURE_FLOOR; n_cells],
+                    );
                 }
             }
             (initial_u.to_vec(), initial_p.to_vec())
@@ -365,6 +383,12 @@ impl SolverDriver {
             let psi_precond =
                 allmach_psi_precond(&vec![(self.prev_max_vel, 0.0); n], psi, params.inlet_velocity.abs() as f64);
             let _ = solver.set_field_scalar_current("psi_precond", &psi_precond);
+            // Keep the EOS density floor (= psi * absolute-pressure floor) consistent with
+            // the new psi. A no-op for non-thermal / non-allmach (no `rho_floor` field).
+            let _ = solver.set_field_scalar_current(
+                "rho_floor",
+                &vec![psi * ALLMACH_ABS_PRESSURE_FLOOR; n],
+            );
             // Outlet gauge back-pressure: pins the outlet `p` Dirichlet value. `0.0`
             // is the standard outlet (reference pressure); a negative value drives a
             // converging–diverging nozzle supersonic. Live so the GUI slider / a
@@ -513,7 +537,11 @@ impl SolverDriver {
             // compressibility signature the GUI density view and the gate observe.
             let psi = self.params.compressibility_psi.max(0.0) as f64;
             let rho_ref = self.params.density as f64;
-            let floor = 0.05 * rho_ref;
+            // Absolute-pressure floor: rho = psi*P_abs, so clamping rho >= psi*P_FLOOR
+            // holds P_abs >= P_FLOOR (a tiny positive floor) against a transient gauge
+            // pressure undershoot below -P_REF (which would give rho <= 0 and blow up).
+            // Mirrors the on-device `rho_floor` clamp used by the thermal recovery.
+            let floor = psi * ALLMACH_ABS_PRESSURE_FLOOR;
             let rho_vals: Vec<f64> = p.iter().map(|&pv| (rho_ref + psi * pv).max(floor)).collect();
             let lo = rho_vals.iter().cloned().fold(f64::INFINITY, f64::min);
             let hi = rho_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);

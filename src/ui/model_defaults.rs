@@ -347,6 +347,12 @@ const NOZZLE_EXAGGERATION: f32 = 6.027e6; // 50 / (1/347.2^2)
 ///   SUPERSONIC exit (M_exit ≈ 1.07, validated in
 ///   `tests/allmach_thermal_supersonic_test.rs`). This is the stable edge of the
 ///   envelope — the gauge-pressure EOS hits its near-vacuum floor below ≈ −0.06.
+///   NB: −0.045 is a *soft* Dirichlet target — the solved field relaxes well above it,
+///   so the realized outlet absolute pressure stays POSITIVE (P_abs ≈ +0.007, never
+///   vacuum) even though P_REF + p_back = −0.0205 is sub-vacuum on paper. The clean
+///   accelerating-supersonic exit needs this pull; choking harder to raise the spec
+///   above vacuum over-expands into a shock (throat M > exit M). Probed in
+///   `tests/nozzle_interior_vacuum_probe.rs`.
 /// * `compressibility_exaggeration = NOZZLE_EXAGGERATION` ⇒ effective `psi ≈ 50`,
 ///   effective sound speed `c ≈ 0.1414 m/s` — a stable, laminar, visible-supersonic
 ///   regime (real Air `c ≈ 347 m/s` would be turbulent AND numerically unstable; see

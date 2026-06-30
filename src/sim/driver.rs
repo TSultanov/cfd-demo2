@@ -293,6 +293,9 @@ impl SolverDriver {
                     let _ = solver
                         .set_field_scalar("rho_t_ref", &vec![params.density as f64 * t_ref; n_cells]);
                     let _ = solver.set_field_scalar("T", &vec![t_ref; n_cells]);
+                    // Reference-temperature field for the REAL T-varying compressibility in
+                    // the density recovery (gamma*psi*t_ref/T). Constant = T_ref.
+                    let _ = solver.set_field_scalar("t_ref", &vec![t_ref; n_cells]);
                     // EOS density floor = psi * absolute-pressure floor (rho = psi*P_abs),
                     // so the on-device recovery clamps rho positive against a transient
                     // gauge-pressure undershoot through vacuum. Constant field; refreshed

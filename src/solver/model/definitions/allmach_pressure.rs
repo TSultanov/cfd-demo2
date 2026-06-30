@@ -99,6 +99,11 @@ pub const ALLMACH_RHO_FLOOR_FIELD: &str = "rho_floor";
 /// the `U.grad(p)` half of the compression-heating source `-(1/cp)*Dp/Dt`.
 pub const ALLMACH_U_DOT_GRAD_P_FIELD: &str = "u_dot_grad_p";
 
+/// Reference-temperature field (= [`ALLMACH_T_REF`], Temperature), seeded by the
+/// driver. Present only to keep the `psi_real = gamma*psi*t_ref/T` and `rho_dT`
+/// recoveries unit-clean (a Temperature factor the resolver can track).
+pub const ALLMACH_T_REF_FIELD: &str = "t_ref";
+
 /// Reference temperature of the thermal EOS linearization. The canonical value
 /// the MMS manufactured solution and the GUI default are derived from; seeders
 /// set `rho_t_ref = density * ALLMACH_T_REF`.
@@ -486,6 +491,13 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
             // Clamps the on-device density recovery positive against transient pressure
             // undershoot through vacuum (see ALLMACH_RHO_FLOOR_FIELD).
             layout_fields.push(vol_scalar_dim::<Density>(ALLMACH_RHO_FLOOR_FIELD));
+            // Reference-temperature field (= T_REF), seeded by the driver. The density
+            // recovery uses the REAL T-VARYING ideal-gas compressibility
+            // `d(rho)/d(p)|_T = gamma*psi*T_ref/T` (= 1/(R*T) at the effective scale): as
+            // the gas cools (accelerates), the compressibility rises (c falls), so the
+            // continuity stiffens correctly — the coupling the constant-psi model lacked.
+            // `t_ref` is the Temperature factor that keeps that recovery unit-clean.
+            layout_fields.push(vol_scalar_dim::<Temperature>(ALLMACH_T_REF_FIELD));
         }
     }
     if with_mms_source {
@@ -664,30 +676,52 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
     // barotropic model keeps identity primitives (host-side refresh).
     let primitives = if thermal {
         let mut derivations = HashMap::new();
-        // EOS density recovery rho = rho_t_ref/T + psi*p. In production, clamp it at
-        // `rho_floor` (= psi * absolute-pressure floor) so a transient gauge-pressure
-        // undershoot below -P_REF cannot drive rho non-positive (which divides through
-        // the momentum/Rhie-Chow terms and blows up); the floor is inert wherever the
-        // EOS is well-posed. The steady `_mms` variant omits it (never near vacuum, and
-        // it has no `rho_floor` field) to stay byte-identical for the order test.
+        // EOS density recovery rho = rho_t_ref/T + (compressibility)*p. The pressure-
+        // compressibility term differs by variant:
+        //  - MMS (`with_mms_source`): the CONSTANT `psi*p` — the steady order test
+        //    isolates the 1/T density and never activates the real-EOS path, so this
+        //    keeps the validated barotropic-in-p form.
+        //  - PRODUCTION: the REAL T-VARYING ideal-gas compressibility
+        //    d(rho)/d(p)|_T = gamma*psi*t_ref/T, i.e. the term is gamma*psi*t_ref*p/T
+        //    (= p/(R*T) at the effective scale). This is what makes the solver a genuine
+        //    pressure-based COMPRESSIBLE solver: density now responds to pressure through
+        //    the local temperature, so as the gas accelerates and cools the compressibility
+        //    rises (sound speed falls) and the supersonic area-Mach coupling can form.
+        // Units stay clean: gamma (dimensionless) * psi (Density/Pressure) * t_ref (Temp)
+        // * p (Pressure) / T (Temp) = Density, matching rho_t_ref/T (Density).
+        // In production, clamp at `rho_floor` (= psi * absolute-pressure floor) so a
+        // transient gauge undershoot below -P_REF cannot drive rho non-positive.
+        let p_compr = if with_mms_source {
+            Expr::ident("psi") * Expr::ident("p")
+        } else {
+            Expr::lit_f32(ALLMACH_GAMMA as f32)
+                * Expr::ident("psi")
+                * Expr::ident(ALLMACH_T_REF_FIELD)
+                * Expr::ident("p")
+                / Expr::ident(ALLMACH_TEMPERATURE_FIELD)
+        };
         let rho_recovery = Expr::ident(ALLMACH_RHO_T_REF_FIELD)
             / Expr::ident(ALLMACH_TEMPERATURE_FIELD)
-            + Expr::ident("psi") * Expr::ident("p");
+            + p_compr;
         let rho_recovery = if with_mms_source {
             rho_recovery
         } else {
             Expr::call_named("max", vec![rho_recovery, Expr::ident(ALLMACH_RHO_FLOOR_FIELD)])
         };
         derivations.insert("rho".to_string(), rho_recovery);
-        // Thermal-expansion coefficient rho_dT = d(rho)/dT = -rho_t_ref/T^2,
-        // recovered on-device alongside rho (resolver: Mul/Div combine units,
-        // Negate preserves them -> Density/Temperature, no Add/Sub so no unit
-        // panic). Coefficient of the rho_dT*dT/dt continuity term — recovered only
-        // where that term exists (production, not the steady `_mms` variant).
+        // Thermal-expansion coefficient rho_dT = d(rho)/dT, recovered on-device. With the
+        // real T-varying compressibility, rho = (rho_t_ref + gamma*psi*t_ref*p)/T, so
+        // rho_dT = -(rho_t_ref + gamma*psi*t_ref*p)/T^2 (= -rho/T). Units: (Density*Temp)/
+        // T^2 = Density/Temperature; the Add is Density*Temp + Density*Temp (no panic).
         if !with_mms_source {
+            let rho_numer = Expr::ident(ALLMACH_RHO_T_REF_FIELD)
+                + Expr::lit_f32(ALLMACH_GAMMA as f32)
+                    * Expr::ident("psi")
+                    * Expr::ident(ALLMACH_T_REF_FIELD)
+                    * Expr::ident("p");
             derivations.insert(
                 ALLMACH_RHO_DT_FIELD.to_string(),
-                -(Expr::ident(ALLMACH_RHO_T_REF_FIELD)
+                -(rho_numer
                     / (Expr::ident(ALLMACH_TEMPERATURE_FIELD)
                         * Expr::ident(ALLMACH_TEMPERATURE_FIELD))),
             );

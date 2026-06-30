@@ -11,7 +11,7 @@ use crate::solver::ir::{
 };
 use crate::solver::model::backend::ast::EquationSystem;
 use crate::solver::model::backend::state_layout::StateLayout;
-use crate::solver::model::ports::dimensions::{Density, Velocity};
+use crate::solver::model::ports::dimensions::{Density, Temperature, Velocity};
 use crate::solver::model::ports::PortRegistry;
 
 // ============================================================================
@@ -108,10 +108,51 @@ fn derive_rhie_chow_flux(
         // otherwise fall back to the global constant density uniform.
         // Use PortRegistry validation to check for existence, kind, and dimension.
         match registry.validate_scalar_field::<Density>("derive_rhie_chow", "rho") {
-            Ok(()) => Ok(S::Lerp(
-                Box::new(S::state(FaceSide::Owner, "rho")),
-                Box::new(S::state(FaceSide::Neighbor, "rho")),
-            )),
+            Ok(()) => {
+                let rho_o = S::state(FaceSide::Owner, "rho");
+                let rho_n = S::state(FaceSide::Neighbor, "rho");
+                // Density UPWINDING for the real-compressibility (pressure-based
+                // COMPRESSIBLE) model, gated on the presence of the Stage-B real-EOS
+                // marker field `t_ref`. For transonic/supersonic robustness the face
+                // density must be upwinded by the face-normal velocity sign: central
+                // averaging is dispersive and over-expands the diverging section
+                // (M_throat > M_exit). Models without `t_ref` — incompressible, the
+                // non-thermal/MMS all-Mach variants — keep the central `Lerp`,
+                // byte-identical, so the MMS order test is unaffected.
+                let upwind = registry
+                    .validate_scalar_field::<Temperature>("derive_rhie_chow", "t_ref")
+                    .is_ok();
+                if !upwind {
+                    return Ok(S::Lerp(Box::new(rho_o), Box::new(rho_n)));
+                }
+                // sgn(u_n) = u_n / max(|u_n|, eps),  u_n = U_face . n  (central face U).
+                let u_face = V::Lerp(
+                    Box::new(V::state_vec2(FaceSide::Owner, "U")),
+                    Box::new(V::state_vec2(FaceSide::Neighbor, "U")),
+                );
+                let u_n = S::Dot(Box::new(u_face), Box::new(V::normal()));
+                let sgn = S::Div(
+                    Box::new(u_n.clone()),
+                    Box::new(S::Max(
+                        Box::new(S::Abs(Box::new(u_n))),
+                        Box::new(S::lit(1.0e-12)),
+                    )),
+                );
+                // rho_f = 0.5*(rho_o+rho_n) + 0.5*sgn*(rho_o-rho_n)
+                //       = rho_o if u_n>=0 (owner is upwind), rho_n if u_n<0.
+                let avg = S::Mul(
+                    Box::new(S::lit(0.5)),
+                    Box::new(S::Add(Box::new(rho_o.clone()), Box::new(rho_n.clone()))),
+                );
+                let half_diff = S::Mul(
+                    Box::new(S::lit(0.5)),
+                    Box::new(S::Sub(Box::new(rho_o), Box::new(rho_n))),
+                );
+                Ok(S::Add(
+                    Box::new(avg),
+                    Box::new(S::Mul(Box::new(sgn), Box::new(half_diff))),
+                ))
+            }
             Err(crate::solver::model::ports::PortValidationError::MissingField { .. }) => {
                 // rho is not in state layout; fall back to uniform density
                 Ok(S::constant("density"))

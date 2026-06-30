@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 9ed2d46cb095b817497a7581b2ffdfbffa71b3ae855023cc07f9ac419588d742
+// SourceHash: b8edb767366a3db4d491bbbf3b0f60a88bf27ec17fed282d4717f3503c165ccd
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -24365,36 +24365,57 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e507 = state[((_e500 * 18u) + 11u)];
     let _e514 = state[((owner_1 * 18u) + 11u)];
     let s_neigh_rho = select(_e507, _e514, is_boundary_1);
-    let _e522 = lambda;
-    let _e527 = lambda;
-    let _e533 = lambda;
-    let _e550 = lambda;
-    let _e556 = normal_vec;
-    let _e560 = lambda;
-    let _e564 = lambda;
-    fluxes[((idx * 4u) + 0u)] = (((((s_own_rho * _e522) + (s_neigh_rho * lambda_other)) * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e527) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e533) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e550) + (s_neigh_d_p * lambda_other)))), _e556)) * area) - ((((((s_own_rho * _e560) + (s_neigh_rho * lambda_other)) * ((s_own_d_p * _e564) + (s_neigh_d_p * lambda_other))) * (_e499 - _e282)) / dist) * area));
-    let _e580 = lambda;
-    let _e585 = lambda;
-    let _e591 = lambda;
-    let _e608 = lambda;
-    let _e614 = normal_vec;
-    let _e618 = lambda;
-    let _e622 = lambda;
-    fluxes[((idx * 4u) + 1u)] = (((((s_own_rho * _e580) + (s_neigh_rho * lambda_other)) * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e585) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e591) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e608) + (s_neigh_d_p * lambda_other)))), _e614)) * area) - ((((((s_own_rho * _e618) + (s_neigh_rho * lambda_other)) * ((s_own_d_p * _e622) + (s_neigh_d_p * lambda_other))) * (_e499 - _e282)) / dist) * area));
-    let _e638 = lambda;
-    let _e643 = lambda;
-    let _e649 = lambda;
-    let _e666 = lambda;
-    let _e672 = normal_vec;
-    fluxes[((idx * 4u) + 2u)] = ((((s_own_rho * _e638) + (s_neigh_rho * lambda_other)) * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e643) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e649) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e666) + (s_neigh_d_p * lambda_other)))), _e672)) * area);
-    let _e682 = lambda;
-    let _e687 = lambda;
-    let _e693 = lambda;
-    let _e710 = lambda;
-    let _e716 = normal_vec;
-    let _e720 = lambda;
-    let _e724 = lambda;
-    fluxes[((idx * 4u) + 3u)] = (((((s_own_rho * _e682) + (s_neigh_rho * lambda_other)) * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e687) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e693) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e710) + (s_neigh_d_p * lambda_other)))), _e716)) * area) - ((((((s_own_rho * _e720) + (s_neigh_rho * lambda_other)) * ((s_own_d_p * _e724) + (s_neigh_d_p * lambda_other))) * (_e499 - _e282)) / dist) * area));
+    let _e526 = lambda;
+    let _e531 = normal_vec;
+    let _e534 = lambda;
+    let _e539 = normal_vec;
+    let _e551 = lambda;
+    let _e557 = lambda;
+    let _e574 = lambda;
+    let _e580 = normal_vec;
+    let _e588 = lambda;
+    let _e593 = normal_vec;
+    let _e596 = lambda;
+    let _e601 = normal_vec;
+    let _e612 = lambda;
+    fluxes[((idx * 4u) + 0u)] = (((((0.5f * (s_own_rho + s_neigh_rho)) + (((dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e526) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e531) / max(abs(dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e534) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e539)), 0.000000000001f)) * 0.5f) * (s_own_rho - s_neigh_rho))) * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e551) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e557) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e574) + (s_neigh_d_p * lambda_other)))), _e580)) * area) - ((((((0.5f * (s_own_rho + s_neigh_rho)) + (((dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e588) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e593) / max(abs(dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e596) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e601)), 0.000000000001f)) * 0.5f) * (s_own_rho - s_neigh_rho))) * ((s_own_d_p * _e612) + (s_neigh_d_p * lambda_other))) * (_e499 - _e282)) / dist) * area));
+    let _e632 = lambda;
+    let _e637 = normal_vec;
+    let _e640 = lambda;
+    let _e645 = normal_vec;
+    let _e657 = lambda;
+    let _e663 = lambda;
+    let _e680 = lambda;
+    let _e686 = normal_vec;
+    let _e694 = lambda;
+    let _e699 = normal_vec;
+    let _e702 = lambda;
+    let _e707 = normal_vec;
+    let _e718 = lambda;
+    fluxes[((idx * 4u) + 1u)] = (((((0.5f * (s_own_rho + s_neigh_rho)) + (((dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e632) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e637) / max(abs(dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e640) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e645)), 0.000000000001f)) * 0.5f) * (s_own_rho - s_neigh_rho))) * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e657) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e663) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e680) + (s_neigh_d_p * lambda_other)))), _e686)) * area) - ((((((0.5f * (s_own_rho + s_neigh_rho)) + (((dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e694) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e699) / max(abs(dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e702) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e707)), 0.000000000001f)) * 0.5f) * (s_own_rho - s_neigh_rho))) * ((s_own_d_p * _e718) + (s_neigh_d_p * lambda_other))) * (_e499 - _e282)) / dist) * area));
+    let _e738 = lambda;
+    let _e743 = normal_vec;
+    let _e746 = lambda;
+    let _e751 = normal_vec;
+    let _e763 = lambda;
+    let _e769 = lambda;
+    let _e786 = lambda;
+    let _e792 = normal_vec;
+    fluxes[((idx * 4u) + 2u)] = ((((0.5f * (s_own_rho + s_neigh_rho)) + (((dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e738) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e743) / max(abs(dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e746) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e751)), 0.000000000001f)) * 0.5f) * (s_own_rho - s_neigh_rho))) * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e763) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e769) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e786) + (s_neigh_d_p * lambda_other)))), _e792)) * area);
+    let _e806 = lambda;
+    let _e811 = normal_vec;
+    let _e814 = lambda;
+    let _e819 = normal_vec;
+    let _e831 = lambda;
+    let _e837 = lambda;
+    let _e854 = lambda;
+    let _e860 = normal_vec;
+    let _e868 = lambda;
+    let _e873 = normal_vec;
+    let _e876 = lambda;
+    let _e881 = normal_vec;
+    let _e892 = lambda;
+    fluxes[((idx * 4u) + 3u)] = (((((0.5f * (s_own_rho + s_neigh_rho)) + (((dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e806) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e811) / max(abs(dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e814) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e819)), 0.000000000001f)) * 0.5f) * (s_own_rho - s_neigh_rho))) * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e831) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e837) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e854) + (s_neigh_d_p * lambda_other)))), _e860)) * area) - ((((((0.5f * (s_own_rho + s_neigh_rho)) + (((dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e868) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e873) / max(abs(dot(((vec2<f32>(s_own_U_x, s_own_U_y) * _e876) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)), _e881)), 0.000000000001f)) * 0.5f) * (s_own_rho - s_neigh_rho))) * ((s_own_d_p * _e892) + (s_neigh_d_p * lambda_other))) * (_e499 - _e282)) / dist) * area));
     return;
 }
 "#;

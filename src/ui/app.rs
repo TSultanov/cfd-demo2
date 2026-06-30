@@ -1870,9 +1870,10 @@ impl eframe::App for CFDApp {
                             )
                             .on_hover_text(
                                 "Converging–diverging nozzle. Selecting it switches to the \
-                                 All-Mach thermal model and a sub-critical outlet \
-                                 back-pressure, driving a subsonic inflow through a choked \
-                                 throat to a SUPERSONIC exit (with expansion cooling).",
+                                 All-Mach thermal model with a PRESSURE INLET + supersonic \
+                                 outlet (toggle in Solver Parameters), driving the flow \
+                                 through a choked throat to a SUPERSONIC exit (with \
+                                 expansion cooling).",
                             )
                             .changed();
                         if geom_changed {
@@ -2042,6 +2043,27 @@ impl eframe::App for CFDApp {
                             && (self.model_id == "allmach_pressure"
                                 || self.model_id == "allmach_thermal")
                         {
+                            // Driving-mode toggle. Flipping it changes the Inlet/Outlet
+                            // boundary KINDS (baked at build via `apply_pressure_inlet_nozzle_bcs`),
+                            // so it must REBUILD the solver — unlike the pressure sliders below,
+                            // which are live via `apply_params`. `init_solver` rebuilds from the
+                            // current params (which carry the toggled `pressure_inlet`); we do NOT
+                            // call `apply_model_defaults` here, which would reset the toggle.
+                            let mut pin = self.pressure_inlet;
+                            if ui
+                                .checkbox(&mut pin, "Pressure inlet + supersonic outlet")
+                                .on_hover_text(
+                                    "ON: pin the inlet gauge pressure (gauge anchored upstream) \
+                                     and let the outlet float — the physically-correct \
+                                     supersonic-outlet driving. OFF: velocity inlet + a \
+                                     sub-critical outlet back-pressure. Changing this REBUILDS \
+                                     the solver (it flips the inlet/outlet boundary kinds).",
+                                )
+                                .changed()
+                            {
+                                self.pressure_inlet = pin;
+                                self.init_solver();
+                            }
                             if self.pressure_inlet {
                                 // Pressure-inlet nozzle: tune the pinned inlet gauge
                                 // pressure (the gauge anchor). The outlet floats —

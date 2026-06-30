@@ -398,6 +398,57 @@ pub fn allmach_thermal_mms_model() -> Result<ModelSpec, String> {
     allmach_pressure_model_impl(true, true)
 }
 
+/// In-place flip of an all-Mach model's Inlet/Outlet boundary KINDS to the
+/// physically-correct CD-nozzle driving: a **pressure inlet** + a **supersonic
+/// (fully-extrapolated) outlet**.
+///
+/// The shipping model pins the gauge at the OUTLET (`p` Dirichlet there) and drives
+/// the flow with an inlet VELOCITY. This moves the single gauge anchor UPSTREAM and
+/// lets the outlet float:
+/// - `U` Inlet: Dirichlet(velocity) -> [ZeroGradient (axial speed develops with the
+///   pressure drop), Dirichlet(0) (transverse pinned — blocks corner backflow)];
+/// - `p` Inlet: ZeroGradient -> **Dirichlet** (the NEW gauge anchor; value set at
+///   runtime via `set_boundary_scalar(Inlet, "p", inlet_pressure)`);
+/// - `p` Outlet: Dirichlet(0) -> **ZeroGradient** (no back-pressure; extrapolate);
+/// - `T` Outlet (thermal only): Dirichlet(T_ref) -> ZeroGradient (a supersonic outlet
+///   must let the gas cool, not pin the reservoir temperature).
+///
+/// The pressure-Dirichlet face count is unchanged (one boundary's worth moves from
+/// Outlet to Inlet), so the discrete pressure operator stays non-singular. BC kind is
+/// a runtime `bc_table` (not baked into kernels), so the model id / committed kernels
+/// are untouched — only the table differs. Validated stable + vacuum-free in
+/// `tests/nozzle_pressure_inlet_probe.rs`; NB this driving is over-expanded in the
+/// artificial-compressibility model (throat over-chokes, diverging section diffuses).
+pub fn apply_pressure_inlet_nozzle_bcs(model: &mut ModelSpec) {
+    use cfd2_ir::dimensions::{DivDim, InvTime, Length, Pressure, Temperature, Velocity};
+
+    if let Some(u) = model.boundaries.fields.get_mut("U") {
+        u.by_boundary.insert(
+            GpuBoundaryType::Inlet,
+            vec![
+                BoundaryCondition::zero_gradient_dim::<InvTime>(), // U_x develops with the drop
+                BoundaryCondition::dirichlet_dim::<Velocity>(0.0), // U_y pinned axial
+            ],
+        );
+    }
+    if let Some(p) = model.boundaries.fields.get_mut("p") {
+        p.by_boundary.insert(
+            GpuBoundaryType::Inlet,
+            vec![BoundaryCondition::dirichlet_dim::<Pressure>(0.0)],
+        );
+        p.by_boundary.insert(
+            GpuBoundaryType::Outlet,
+            vec![BoundaryCondition::zero_gradient_dim::<DivDim<Pressure, Length>>()],
+        );
+    }
+    if let Some(t) = model.boundaries.fields.get_mut(ALLMACH_TEMPERATURE_FIELD) {
+        t.by_boundary.insert(
+            GpuBoundaryType::Outlet,
+            vec![BoundaryCondition::zero_gradient_dim::<DivDim<Temperature, Length>>()],
+        );
+    }
+}
+
 fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<ModelSpec, String> {
     let fields = AllMachPressureFields::new();
     let system = build_allmach_system(&fields, with_mms_source, thermal);

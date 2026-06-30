@@ -136,7 +136,7 @@ impl SolverDriver {
     #[allow(clippy::too_many_arguments)]
     pub async fn build(
         mesh: &Mesh,
-        model: ModelSpec,
+        mut model: ModelSpec,
         params: &RuntimeParams,
         initial_u: &[(f64, f64)],
         initial_p: &[f64],
@@ -175,6 +175,14 @@ impl SolverDriver {
                 SteppingMode::Coupled
             },
         };
+
+        // Pressure-inlet CD nozzle: flip the all-Mach Inlet/Outlet boundary KINDS to a
+        // pressure inlet + supersonic (extrapolated) outlet BEFORE the solver bakes the
+        // bc_table. The model id / committed kernels are untouched (BC kind is a runtime
+        // table, not a kernel). Only the all-Mach nozzle preset sets this.
+        if params.pressure_inlet {
+            crate::solver::model::apply_pressure_inlet_nozzle_bcs(&mut model);
+        }
 
         let mut solver = UnifiedSolver::new(mesh, model, config, device, queue).await?;
 
@@ -234,6 +242,26 @@ impl SolverDriver {
             let _ = solver.set_inlet_velocity(params.inlet_velocity);
             solver.set_u(initial_u);
             solver.set_p(initial_p);
+            if params.pressure_inlet {
+                // Pressure-inlet nozzle: seed a linear gauge-pressure ramp
+                // inlet_pressure -> 0 (inlet -> outlet) so step 0 already carries the
+                // driving gradient, instead of launching an acoustic pulse from a flat
+                // field. Uniform-axial U (set_u above, from the caller's IC) completes
+                // the near-steady start. Cuts the start-up transient (validated in the
+                // pressure-inlet probe).
+                let x_min = mesh.cell_cx.iter().cloned().fold(f64::INFINITY, f64::min);
+                let x_max = mesh
+                    .cell_cx
+                    .iter()
+                    .cloned()
+                    .fold(f64::NEG_INFINITY, f64::max);
+                let span = (x_max - x_min).max(1e-12);
+                let p0 = params.inlet_pressure as f64;
+                let ramp: Vec<f64> = (0..n_cells)
+                    .map(|c| p0 * (1.0 - (mesh.cell_cx[c] - x_min) / span))
+                    .collect();
+                let _ = solver.set_field_scalar("p", &ramp);
+            }
             // All-Mach: seed the extra state fields the bare incompressible path has
             // no concept of. `psi` (compressibility = 1/c^2) activates the
             // `ddt(psi,p)` term and sets the Mach regime; `rho` MUST start at the
@@ -389,15 +417,26 @@ impl SolverDriver {
                 "rho_floor",
                 &vec![psi * ALLMACH_ABS_PRESSURE_FLOOR; n],
             );
-            // Outlet gauge back-pressure: pins the outlet `p` Dirichlet value. `0.0`
-            // is the standard outlet (reference pressure); a negative value drives a
-            // converging–diverging nozzle supersonic. Live so the GUI slider / a
-            // per-case default takes effect without a rebuild.
-            let _ = solver.set_boundary_scalar(
-                crate::solver::gpu::enums::GpuBoundaryType::Outlet,
-                "p",
-                params.outlet_back_pressure,
-            );
+            if params.pressure_inlet {
+                // Pressure-inlet nozzle: pin the INLET gauge pressure (the gauge anchor
+                // moved upstream by `apply_pressure_inlet_nozzle_bcs`). The outlet `p` is
+                // now ZeroGradient, so it floats (supersonic outlet, no back-pressure).
+                let _ = solver.set_boundary_scalar(
+                    crate::solver::gpu::enums::GpuBoundaryType::Inlet,
+                    "p",
+                    params.inlet_pressure,
+                );
+            } else {
+                // Outlet gauge back-pressure: pins the outlet `p` Dirichlet value. `0.0`
+                // is the standard outlet (reference pressure); a negative value drives a
+                // converging–diverging nozzle supersonic. Live so the GUI slider / a
+                // per-case default takes effect without a rebuild.
+                let _ = solver.set_boundary_scalar(
+                    crate::solver::gpu::enums::GpuBoundaryType::Outlet,
+                    "p",
+                    params.outlet_back_pressure,
+                );
+            }
         }
     }
 

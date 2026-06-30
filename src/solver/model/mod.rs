@@ -30,7 +30,7 @@ pub use definitions::{
     incompressible_momentum_model, incompressible_momentum_system, scalar_transport_model,
     scalar_transport_sou_model,
     allmach_pressure_mms_model, allmach_pressure_model, allmach_pressure_system,
-    allmach_thermal_mms_model, allmach_thermal_model,
+    allmach_thermal_mms_model, allmach_thermal_model, apply_pressure_inlet_nozzle_bcs,
     BcValue, BoundaryCondition, BoundarySpec, CompressibleFields, FieldBoundarySpec,
     GenericCoupledFields,
     AllMachPressureFields, IncompressibleMomentumFields, ModelSpec, ADVECTING_VELOCITY_FIELD,

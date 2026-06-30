@@ -51,4 +51,16 @@ pub struct RuntimeParams {
     /// past Mach 1 (see the supersonic-nozzle demo). Applied by the driver to the
     /// gauge-pressure (`allmach_*`) models only.
     pub outlet_back_pressure: f32,
+    /// Drive the all-Mach CD nozzle with a PRESSURE INLET + SUPERSONIC (extrapolated)
+    /// OUTLET instead of the default velocity-inlet / pressure-outlet. When true, the
+    /// driver flips the Inlet/Outlet boundary KINDS (via
+    /// `apply_pressure_inlet_nozzle_bcs`): pins the inlet gauge pressure
+    /// ([`Self::inlet_pressure`], the new gauge anchor) and lets the outlet float
+    /// (no back-pressure). The throughflow speed is then a RESULT of the pressure drop;
+    /// [`Self::inlet_velocity`] is kept only as the preconditioner / CFL scale. Applied
+    /// to the `allmach_*` models only; ignored otherwise.
+    pub pressure_inlet: bool,
+    /// Inlet gauge pressure pinned when [`Self::pressure_inlet`] is set (units Pressure).
+    /// Higher → stronger drop → faster throughflow. (Ignored unless `pressure_inlet`.)
+    pub inlet_pressure: f32,
 }

@@ -291,6 +291,11 @@ pub struct CFDApp {
     /// standard outlet; the supersonic-nozzle demo sets a negative value to pull the
     /// diverging section past Mach 1. Applied per-case via the GUI defaults.
     outlet_back_pressure: f32,
+    /// Drive the CD nozzle with a pressure inlet + supersonic outlet (see
+    /// `RuntimeParams::pressure_inlet`). Set per-case via the GUI defaults.
+    pressure_inlet: bool,
+    /// Inlet gauge pressure pinned when `pressure_inlet` is set.
+    inlet_pressure: f32,
     selected_preconditioner: PreconditionerType,
     model_id: &'static str,
     model_caps: ModelUiCaps,
@@ -430,6 +435,8 @@ impl CFDApp {
             compressibility_psi: 0.0,
             compressibility_exaggeration: 1.0,
             outlet_back_pressure: 0.0,
+            pressure_inlet: false,
+            inlet_pressure: 0.0,
             selected_preconditioner: PreconditionerType::Jacobi,
             model_id: "incompressible_momentum",
             model_caps: ModelUiCaps::default(),
@@ -474,6 +481,8 @@ impl CFDApp {
             eos: self.current_fluid.eos,
             compressibility_psi: self.compressibility_psi,
             outlet_back_pressure: self.outlet_back_pressure,
+            pressure_inlet: self.pressure_inlet,
+            inlet_pressure: self.inlet_pressure,
         }
     }
 
@@ -525,6 +534,8 @@ impl CFDApp {
             (self.current_fluid.compressibility() * d.compressibility_exaggeration as f64) as f32;
         // Outlet back-pressure: negative only for the supersonic-nozzle case (above).
         self.outlet_back_pressure = d.outlet_back_pressure;
+        self.pressure_inlet = d.pressure_inlet;
+        self.inlet_pressure = d.inlet_pressure;
     }
 
     fn current_trace_runtime_params(&self) -> tracefmt::TraceRuntimeParams {
@@ -2031,22 +2042,46 @@ impl eframe::App for CFDApp {
                             && (self.model_id == "allmach_pressure"
                                 || self.model_id == "allmach_thermal")
                         {
-                            let mut p_back = self.outlet_back_pressure;
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut p_back, -0.05..=0.0)
-                                        .text("Outlet back-pressure (gauge)"),
-                                )
-                                .on_hover_text(
-                                    "Drives the converging–diverging nozzle. 0 ⇒ subsonic \
-                                     exit; lowering it past the critical value pulls the \
-                                     diverging section SUPERSONIC (M_exit up to ≈ 1.07 at \
-                                     the stable floor).",
-                                )
-                                .changed()
-                            {
-                                self.outlet_back_pressure = p_back;
-                                self.sync_worker_params();
+                            if self.pressure_inlet {
+                                // Pressure-inlet nozzle: tune the pinned inlet gauge
+                                // pressure (the gauge anchor). The outlet floats —
+                                // supersonic outlet, no back-pressure.
+                                let mut p_in = self.inlet_pressure;
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut p_in, 0.0..=0.12)
+                                            .text("Inlet pressure (gauge)"),
+                                    )
+                                    .on_hover_text(
+                                        "Pressure-inlet CD nozzle: pins the inlet gauge \
+                                         pressure (the gauge anchor); the outlet floats \
+                                         (supersonic, no back-pressure). Higher ⇒ stronger \
+                                         drop ⇒ supersonic exit (M_exit ≈ 1.07 at 0.07). \
+                                         Over-expanded here (the throat over-chokes).",
+                                    )
+                                    .changed()
+                                {
+                                    self.inlet_pressure = p_in;
+                                    self.sync_worker_params();
+                                }
+                            } else {
+                                let mut p_back = self.outlet_back_pressure;
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut p_back, -0.05..=0.0)
+                                            .text("Outlet back-pressure (gauge)"),
+                                    )
+                                    .on_hover_text(
+                                        "Drives the converging–diverging nozzle. 0 ⇒ subsonic \
+                                         exit; lowering it past the critical value pulls the \
+                                         diverging section SUPERSONIC (M_exit up to ≈ 1.07 at \
+                                         the stable floor).",
+                                    )
+                                    .changed()
+                                {
+                                    self.outlet_back_pressure = p_back;
+                                    self.sync_worker_params();
+                                }
                             }
                         }
 
@@ -2882,6 +2917,8 @@ fn solver_worker_main(
         eos: crate::solver::model::eos::EosSpec::Constant,
         compressibility_psi: 0.0,
         outlet_back_pressure: 0.0,
+        pressure_inlet: false,
+        inlet_pressure: 0.0,
     };
 
     let mut running = false;

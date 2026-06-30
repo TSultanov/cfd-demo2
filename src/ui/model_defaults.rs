@@ -94,6 +94,13 @@ pub struct ModelGuiDefaults {
     /// past Mach 1 (the standard way a CD nozzle is driven). Applied to the
     /// gauge-pressure (`allmach_*`) models only.
     pub outlet_back_pressure: f32,
+    /// Drive the CD nozzle with a PRESSURE INLET + SUPERSONIC (extrapolated) OUTLET
+    /// instead of the velocity-inlet / pressure-outlet default. See
+    /// [`RuntimeParams::pressure_inlet`]. `false` for every standard case.
+    pub pressure_inlet: bool,
+    /// Inlet gauge pressure pinned when [`Self::pressure_inlet`] is set. (Ignored
+    /// otherwise.)
+    pub inlet_pressure: f32,
 }
 
 impl ModelGuiDefaults {
@@ -142,6 +149,8 @@ impl ModelGuiDefaults {
             compressibility_psi: (eos.compressibility(density as f64)
                 * self.compressibility_exaggeration as f64) as f32,
             outlet_back_pressure: self.outlet_back_pressure,
+            pressure_inlet: self.pressure_inlet,
+            inlet_pressure: self.inlet_pressure,
         }
     }
 }
@@ -205,6 +214,8 @@ const INCOMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     compressibility_exaggeration: 0.0,
     // Standard outlet (reference gauge pressure).
     outlet_back_pressure: 0.0,
+    pressure_inlet: false,
+    inlet_pressure: 0.0,
 };
 
 /// Compressible (density-based, implicit) defaults.
@@ -257,6 +268,8 @@ const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     // not used here (factor 0 ⇒ psi 0).
     compressibility_exaggeration: 0.0,
     outlet_back_pressure: 0.0,
+    pressure_inlet: false,
+    inlet_pressure: 0.0,
 };
 
 /// All-Mach pressure-based (`allmach_pressure`) defaults.
@@ -314,6 +327,8 @@ const ALLMACH: ModelGuiDefaults = ModelGuiDefaults {
     compressibility_exaggeration: 1.0,
     // Standard outlet for the channel/backstep cases (the nozzle demo overrides this).
     outlet_back_pressure: 0.0,
+    pressure_inlet: false,
+    inlet_pressure: 0.0,
 };
 
 /// Exaggeration factor for the supersonic-nozzle demo, tuned for **Air**. Real Air
@@ -383,6 +398,14 @@ pub const ALLMACH_THERMAL_NOZZLE: ModelGuiDefaults = ModelGuiDefaults {
     compressibility_exaggeration: NOZZLE_EXAGGERATION,
     // The supersonic driver: a sub-critical (negative gauge) back-pressure.
     outlet_back_pressure: -0.045,
+    // Ship the PHYSICALLY-CORRECT nozzle driving: a pressure inlet + supersonic
+    // (extrapolated) outlet. The gauge anchors at the inlet; the outlet floats (no
+    // back-pressure). `outlet_back_pressure` above is the velocity-inlet fallback if
+    // this is toggled off in the GUI. NB this driving is over-expanded in the
+    // artificial-compressibility model (throat over-chokes, diverging section diffuses);
+    // see tests/nozzle_pressure_inlet_gate.rs.
+    pressure_inlet: true,
+    inlet_pressure: 0.07,
 };
 
 /// GUI solver defaults for `model_id`.

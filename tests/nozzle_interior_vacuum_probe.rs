@@ -2,26 +2,24 @@
 //!
 //! The all-Mach gauge-pressure EOS has absolute pressure `P_abs = P_REF + p`, with
 //! `P_REF = rho_ref / psi` (≈ 0.0245 at the demo's effective psi ≈ 50). VACUUM is
-//! `P_abs = 0`, i.e. gauge `p = -P_REF`. The GUI nozzle demo pins the OUTLET back-
-//! pressure at `-0.045 < -P_REF`, which on paper *specifies* a sub-vacuum
-//! (negative-absolute) outlet. This gate settles — and then LOCKS IN — the empirical
-//! fact that the outlet Dirichlet is a SOFT target: the solved field relaxes well above
-//! it, so the realized absolute pressure stays strictly POSITIVE everywhere (interior
-//! AND the outlet region), and the density never approaches the EOS floor. The demo
-//! never realizes vacuum even though it names a sub-vacuum back-pressure.
+//! `P_abs = 0`, i.e. gauge `p = -P_REF`. The shipping nozzle is now driven by a
+//! PRESSURE INLET + SUPERSONIC (extrapolated) OUTLET (`ALLMACH_THERMAL_NOZZLE`):
+//! the inlet gauge pressure is pinned POSITIVE (P_abs ≈ +0.09) and the outlet FLOATS —
+//! there is no specified back-pressure at all, so there is not even a sub-vacuum
+//! *target* anywhere. This gate LOCKS IN the empirical fact that the realized absolute
+//! pressure stays strictly POSITIVE everywhere (interior AND outlet region), and the
+//! density never approaches the EOS floor — the demo never realizes vacuum.
 //!
-//! Why the demo keeps the sub-vacuum *target*: it is load-bearing for the clean
-//! accelerating-supersonic exit. Raising the spec to positive-absolute either drops the
-//! exit subsonic (clamp at the vacuum floor → M_exit ≈ 0.95) or over-expands into a
-//! shock if the throat is choked harder to compensate (M_throat > M_exit); see the
-//! evidence sweep in `tests/nozzle_backpressure_sweep_probe.rs`. The shipped density
-//! floor (`rho ≥ psi·1e-5`, commit 2e62297) independently guarantees positive density.
-//! So there is no vacuum and no EOS-safety hazard to fix — only this gate to prove it
-//! stays that way.
+//! (Historical note: an earlier velocity-inlet demo pinned a sub-vacuum *target*
+//! `-0.045` at the outlet that the solution always relaxed above; that "soft target"
+//! finding is preserved in `tests/nozzle_backpressure_sweep_probe.rs`. The pressure-inlet
+//! driving removes the sub-vacuum specification entirely; see
+//! `tests/nozzle_pressure_inlet_probe.rs`.) The shipped density floor
+//! (`rho ≥ psi·1e-5`, commit 2e62297) independently guarantees positive density.
 //!
 //! Build: the bundled CD nozzle (`generate_structured_nozzle_mesh`) driven with the
-//! `ALLMACH_THERMAL_NOZZLE` GUI defaults (inlet 0.09, back-pressure -0.045, effective
-//! psi ≈ 50), exactly as the shipping demo, via the shared `SolverDriver`.
+//! `ALLMACH_THERMAL_NOZZLE` GUI defaults (pressure inlet, effective psi ≈ 50), exactly
+//! as the shipping demo, via the shared `SolverDriver`.
 
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
@@ -103,7 +101,7 @@ fn nozzle_interior_vacuum_probe() {
     let air = air();
     let mesh = nozzle(96, 32);
     let n = mesh.num_cells();
-    let back_pressure = ALLMACH_THERMAL_NOZZLE.outlet_back_pressure as f64; // -0.045
+    let inlet_pressure = ALLMACH_THERMAL_NOZZLE.inlet_pressure as f64; // pressure-inlet drive
     let (mut solver, psi) = build_nozzle(&air, &mesh);
 
     let steps = 350;
@@ -160,7 +158,7 @@ fn nozzle_interior_vacuum_probe() {
     println!("=== NOZZLE INTERIOR VACUUM PROBE (allmach_thermal, GUI default) ===");
     println!(
         "psi={psi:.4}  rho_ref={rho_ref:.4}  P_REF=rho_ref/psi={p_ref:.6}  \
-         back_pressure(gauge)={back_pressure:+.6}  p_vacuum(gauge)={p_vacuum:+.6}"
+         inlet_pressure(gauge)={inlet_pressure:+.6}  p_vacuum(gauge)={p_vacuum:+.6}"
     );
     println!("steps={steps}  cells={n}  outlet_cut_x={outlet_cut:.4} (cx>cut = outlet region)");
     println!(
@@ -183,8 +181,8 @@ fn nozzle_interior_vacuum_probe() {
          OUTLET region min P_abs = {outlet_min_pabs:+.6}"
     );
     println!(
-        "VERDICT: realized field stays ABOVE vacuum despite the {back_pressure:+.3} sub-vacuum \
-         *target*; the Dirichlet outlet is a soft pull."
+        "VERDICT: realized field stays ABOVE vacuum; pressure-inlet drive (p_in={inlet_pressure:+.3}) \
+         pins a POSITIVE inlet gauge and the outlet floats — no sub-vacuum spec anywhere."
     );
 
     // GATE. The demo NEVER reaches vacuum: absolute pressure is strictly positive over

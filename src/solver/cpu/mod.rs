@@ -16,6 +16,7 @@
 //! Multithreading ([`parallel`]) and the linear-solve SIMD path ([`linalg`]) are
 //! selected at runtime via [`CpuBackendConfig`].
 
+pub mod amg;
 pub mod generated;
 pub mod interpreter;
 pub mod linalg;

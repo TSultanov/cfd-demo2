@@ -43,6 +43,21 @@ where
     });
 }
 
+/// Minimum output elements per worker for the fine-grained (BLAS-1 style)
+/// parallel helpers. Below this, thread-spawn latency exceeds the memory-bound
+/// work itself, so the helpers scale the worker count down (bit-exactness is
+/// unaffected: every element is still produced by identical arithmetic).
+/// 64k f64 ≈ 512 KB per worker ≈ the measured break-even for scoped-thread
+/// spawn+join (~20-30 µs/worker) against ~10 GB/s-per-core streaming.
+const MIN_ELEMS_PER_WORKER: usize = 64 * 1024;
+
+#[inline]
+fn effective_workers(threads: usize, total_elems: usize) -> usize {
+    threads
+        .min(total_elems.div_ceil(MIN_ELEMS_PER_WORKER))
+        .max(1)
+}
+
 /// Run `f(chunk_start_cell, y_chunk)` over contiguous cell ranges, where the
 /// output `y` (length `num_cells * width`) is split into disjoint per-range
 /// mutable sub-slices. Each worker owns `y[start*width .. end*width]` and no
@@ -77,6 +92,118 @@ where
     });
 }
 
+/// Like [`parallel_cell_chunks_mut`], but splits TWO output slices (with
+/// per-cell widths `w1`, `w2`) over the SAME contiguous cell ranges, so a single
+/// pass can produce two disjoint per-cell outputs (e.g. the Schur velocity
+/// predict `z` and the Schur RHS `gp`). Same determinism guarantee: each output
+/// element is written by exactly one worker with identical arithmetic.
+pub fn parallel_cell_chunks_mut2<F>(
+    num_cells: usize,
+    w1: usize,
+    w2: usize,
+    threads: usize,
+    y1: &mut [f64],
+    y2: &mut [f64],
+    f: F,
+) where
+    F: Fn(usize, &mut [f64], &mut [f64]) + Sync,
+{
+    debug_assert_eq!(y1.len(), num_cells * w1, "y1 must be num_cells*w1");
+    debug_assert_eq!(y2.len(), num_cells * w2, "y2 must be num_cells*w2");
+    if threads <= 1 || num_cells <= 1 {
+        f(0, y1, y2);
+        return;
+    }
+    let workers = effective_workers(threads, num_cells * (w1 + w2)).min(num_cells);
+    if workers <= 1 {
+        f(0, y1, y2);
+        return;
+    }
+    let chunk = num_cells.div_ceil(workers);
+    std::thread::scope(|s| {
+        let mut rest1: &mut [f64] = y1;
+        let mut rest2: &mut [f64] = y2;
+        let mut start = 0usize;
+        while start < num_cells {
+            let end = (start + chunk).min(num_cells);
+            let (head1, tail1) = rest1.split_at_mut((end - start) * w1);
+            let (head2, tail2) = rest2.split_at_mut((end - start) * w2);
+            rest1 = tail1;
+            rest2 = tail2;
+            let fr = &f;
+            s.spawn(move || fr(start, head1, head2));
+            start = end;
+        }
+    });
+}
+
+/// Deterministic parallel dot product. The summation is FIXED-CHUNKED: partial
+/// sums are computed per `DOT_CHUNK`-element chunk (4-wide SIMD within a chunk)
+/// and then reduced serially in chunk order. The result depends only on the
+/// input (and the fixed chunk size) — NOT on `threads` — so the linear solvers
+/// stay bit-identical across thread counts while the O(n) reduction runs on all
+/// cores. (This is a different summation ORDER from a plain serial loop, i.e. a
+/// one-time rounding-level change, validated by the tolerance-based suites.)
+pub fn par_dot(threads: usize, a: &[f64], b: &[f64]) -> f64 {
+    const DOT_CHUNK: usize = 8192;
+    debug_assert_eq!(a.len(), b.len());
+    let n = a.len();
+    let nchunks = n.div_ceil(DOT_CHUNK).max(1);
+    let chunk_partial = |c: usize| -> f64 {
+        let s = c * DOT_CHUNK;
+        let e = (s + DOT_CHUNK).min(n);
+        dot_simd_range(&a[s..e], &b[s..e])
+    };
+    let workers = effective_workers(threads, n);
+    if workers <= 1 || nchunks == 1 {
+        return (0..nchunks).map(chunk_partial).sum();
+    }
+    let mut partials = vec![0.0f64; nchunks];
+    let per = nchunks.div_ceil(workers);
+    std::thread::scope(|s| {
+        let mut rest: &mut [f64] = &mut partials;
+        let mut c0 = 0usize;
+        while c0 < nchunks {
+            let c1 = (c0 + per).min(nchunks);
+            let (head, tail) = rest.split_at_mut(c1 - c0);
+            rest = tail;
+            let cp = &chunk_partial;
+            s.spawn(move || {
+                for (li, o) in head.iter_mut().enumerate() {
+                    *o = cp(c0 + li);
+                }
+            });
+            c0 = c1;
+        }
+    });
+    // Serial reduction in fixed chunk order — deterministic.
+    partials.iter().sum()
+}
+
+/// 4-wide f64 SIMD dot over one chunk (the per-chunk kernel of [`par_dot`]).
+/// FP summation is non-associative, so this fixed lane/tail order is part of
+/// the determinism contract.
+#[inline]
+fn dot_simd_range(a: &[f64], b: &[f64]) -> f64 {
+    use wide::f64x4;
+    let n = a.len();
+    let mut acc = f64x4::splat(0.0);
+    let mut i = 0;
+    while i + 4 <= n {
+        let va = f64x4::from([a[i], a[i + 1], a[i + 2], a[i + 3]]);
+        let vb = f64x4::from([b[i], b[i + 1], b[i + 2], b[i + 3]]);
+        acc += va * vb;
+        i += 4;
+    }
+    let lanes = acc.to_array();
+    let mut s = lanes[0] + lanes[1] + lanes[2] + lanes[3];
+    while i < n {
+        s += a[i] * b[i];
+        i += 1;
+    }
+    s
+}
+
 /// Parallel elementwise map-into: `out[i] = f(i)` for every `i`, over contiguous
 /// disjoint index chunks. Each element is produced by exactly one worker with the
 /// same arithmetic, so the result is BIT-IDENTICAL to the serial loop regardless
@@ -87,6 +214,7 @@ where
     F: Fn(usize) -> f64 + Sync,
 {
     let n = out.len();
+    let threads = effective_workers(threads, n);
     if threads <= 1 || n <= 1 {
         for (i, o) in out.iter_mut().enumerate() {
             *o = f(i);
@@ -122,6 +250,7 @@ where
     F: Fn(usize, &mut f64) + Sync,
 {
     let n = out.len();
+    let threads = effective_workers(threads, n);
     if threads <= 1 || n <= 1 {
         for (i, o) in out.iter_mut().enumerate() {
             f(i, o);
@@ -192,6 +321,46 @@ mod tests {
                 }
             });
             assert_eq!(y, expect, "threads={threads}");
+        }
+    }
+
+    #[test]
+    fn par_dot_thread_count_invariant() {
+        // par_dot's fixed-chunk summation must be BIT-IDENTICAL across thread
+        // counts (including 1): the chunk partials and their reduction order are
+        // independent of the worker split.
+        for &n in &[1usize, 100, 8192, 8193, 100_000, 1_000_000] {
+            let a: Vec<f64> = (0..n).map(|i| ((i % 97) as f64) * 0.37 - 1.0).collect();
+            let b: Vec<f64> = (0..n).map(|i| ((i % 89) as f64) * -0.21 + 0.5).collect();
+            let ref_v = par_dot(1, &a, &b);
+            for &threads in &[2usize, 3, 8, 16] {
+                let v = par_dot(threads, &a, &b);
+                assert!(
+                    v.to_bits() == ref_v.to_bits(),
+                    "n={n} threads={threads}: {v:e} != {ref_v:e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cell_chunks_mut2_covers_and_matches_serial() {
+        let (num_cells, w1, w2) = (5000usize, 3usize, 1usize);
+        let e1: Vec<f64> = (0..num_cells * w1).map(|k| k as f64).collect();
+        let e2: Vec<f64> = (0..num_cells * w2).map(|k| (k * 2) as f64).collect();
+        for &threads in &[1usize, 4, 16] {
+            let mut y1 = vec![-1.0f64; num_cells * w1];
+            let mut y2 = vec![-1.0f64; num_cells * w2];
+            parallel_cell_chunks_mut2(num_cells, w1, w2, threads, &mut y1, &mut y2, |c0, a, b| {
+                for (li, slot) in a.iter_mut().enumerate() {
+                    *slot = (c0 * w1 + li) as f64;
+                }
+                for (li, slot) in b.iter_mut().enumerate() {
+                    *slot = ((c0 * w2 + li) * 2) as f64;
+                }
+            });
+            assert_eq!(y1, e1, "threads={threads}");
+            assert_eq!(y2, e2, "threads={threads}");
         }
     }
 

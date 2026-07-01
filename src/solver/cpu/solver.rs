@@ -31,7 +31,10 @@ use crate::solver::model::ModelSpec;
 use crate::solver::scheme::Scheme;
 use crate::solver::TimeScheme;
 
-/// Linear-solve budget per outer iteration.
+/// Linear-solve budget per outer iteration (scalar/BiCGSTAB path only; the
+/// block/FGMRES path uses the model's `linear_solver.max_iters` — the same
+/// budget the GPU enforces, which caps pathological from-rest solves instead of
+/// letting them burn thousands of iterations the GPU would never run).
 const LINEAR_MAX_ITERS: usize = 5000;
 /// Fallback relative tolerance for the CPU linear solve (scalar path); the block
 /// path uses the model's `linear_solver.tolerance` (the GPU inexact-Picard 1e-4).
@@ -83,12 +86,23 @@ pub struct CpuSolver {
     /// CPU linear-solve relative tolerance (block path; GPU inexact-Picard).
     linear_tol: f64,
     linear_restart: usize,
+    /// Block-path iteration budget per solve (the model/GPU `max_iters`).
+    linear_max_iters: usize,
     /// Block-system preconditioner choice (mirrors the recipe/runtime config).
     precond: PreconditionerType,
     /// Model-owned Schur preconditioner spec, when present: (velocity unknown
     /// indices, pressure unknown index, omega). Saddle-point models
     /// (incompressible/buoyant) use the CPU Schur preconditioner.
     schur: Option<(Vec<usize>, usize, f32)>,
+    /// AMG hierarchy for the Schur pressure block, built lazily on first use
+    /// (aggregation seeded by that solve's pressure-block values; the pattern
+    /// never changes).
+    amg_hier: std::cell::OnceCell<crate::solver::cpu::amg::AmgHierarchy>,
+    /// Adaptive inner-solve mode for the Schur pressure block: starts cheap
+    /// (Jacobi-BiCGSTAB) and flips ONE-WAY to AMG once inner solves fail to
+    /// converge (mesh too fine for the Jacobi inner solve). Overridable via
+    /// `CFD2_CPU_SCHUR_AMG=0|1`.
+    schur_amg_active: std::cell::Cell<bool>,
     dt: f32,
     dt_old: f32,
     dtau: f32,
@@ -332,8 +346,11 @@ impl CpuSolver {
                 crate::solver::gpu::recipe::LinearSolverType::Fgmres { max_restart } => max_restart,
                 crate::solver::gpu::recipe::LinearSolverType::Cg => 60,
             },
+            linear_max_iters: (recipe.linear_solver.max_iters as usize).max(1),
             precond: recipe.linear_solver.preconditioner,
             schur,
+            amg_hier: std::cell::OnceCell::new(),
+            schur_amg_active: std::cell::Cell::new(false),
             dt: 0.01,
             dt_old: 0.01,
             dtau: 0.0,
@@ -686,6 +703,8 @@ impl CpuSolver {
         // step wall time to the parallel dispatch groups vs. the (serial) CPU
         // linear solve, so the parallel/serial split is visible directly.
         let profile = std::env::var("CFD2_CPU_PROFILE").is_ok();
+        crate::solver::cpu::linalg::prof::ENABLED
+            .store(profile, std::sync::atomic::Ordering::Relaxed);
         let (mut t_prep, mut t_asm, mut t_lin, mut t_upd, mut t_bc) = (
             std::time::Duration::ZERO,
             std::time::Duration::ZERO,
@@ -764,6 +783,10 @@ impl CpuSolver {
                 self.step_count, self.config.threads, ms(tot),
                 ms(t_asm), pct(t_asm), ms(t_lin), pct(t_lin), ms(t_upd), pct(t_upd),
                 ms(t_bc), pct(t_bc), ms(t_prep), pct(t_prep),
+            );
+            eprintln!(
+                "[cpu-profile]   linsolve: {}",
+                crate::solver::cpu::linalg::prof::report_and_reset()
             );
         }
 
@@ -872,11 +895,14 @@ impl CpuSolver {
     /// mirrors the GPU FGMRES(restart); the scalar (`S==1`) path keeps the
     /// validated BiCGSTAB.
     fn linear_solve(&self) {
+        use crate::solver::cpu::linalg::prof;
         let s = self.unknowns_per_cell;
         let n = self.num_cells * s;
         // The assembled matrix is the largest buffer (nnz_blocks * S*S entries);
         // marshal it out of the atomic store in parallel. `rhs`/`x` are O(n), small.
-        let matrix = self.buffers.f32_vec_threaded("matrix_values", self.config.threads);
+        let matrix = prof::time(&prof::MARSHAL, || {
+            self.buffers.f32_vec_threaded("matrix_values", self.config.threads)
+        });
         let rhs = self.buffers.f32_vec("rhs");
         // Warm-start from the persisted `x` buffer (the previous solve's
         // solution, which the update kernel keeps in sync with the state). The
@@ -918,34 +944,78 @@ impl CpuSolver {
             // so the inexact solve drifts and the marginally-stable MMS march
             // diverges where the block-Jacobi GPU saturates. Point-Jacobi is kept
             // only as a debug toggle (CFD2_CPU_POINT_JACOBI).
-            let block_pc: Box<dyn Preconditioner> = match &self.schur {
-                Some((u_idx, p, omega)) => {
-                    Box::new(SchurPrecond::new(a, u_idx, *p, *omega as f64, self.config.simd))
-                }
-                None => {
-                    if std::env::var("CFD2_CPU_POINT_JACOBI").is_ok() {
-                        Box::new(PointJacobi::new(&a))
-                    } else {
-                        Box::new(BlockJacobi::new(&a))
-                    }
-                }
-            };
             let _ = self.precond;
-            let precond = block_pc.as_ref();
             let tol = std::env::var("CFD2_CPU_LINTOL")
                 .ok()
                 .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(self.linear_tol);
-            let stats = fgmres(
-                &a,
-                &rhs,
-                &mut x,
-                precond,
-                self.linear_restart,
-                LINEAR_MAX_ITERS,
-                tol,
-                self.config.simd,
-            );
+            let stats = match &self.schur {
+                Some((u_idx, p, omega)) => {
+                    // Adaptive inner solve for the Schur pressure block: start
+                    // with the cheap Jacobi-BiCGSTAB (wins when the block is
+                    // easy, e.g. the nozzle); flip ONE-WAY to the AMG-
+                    // preconditioned inner solve once inner solves fail to
+                    // converge (fine-mesh Poisson blocks, where Jacobi inner
+                    // iteration counts grow ~h^-2). `CFD2_CPU_SCHUR_AMG=0|1`
+                    // forces the mode.
+                    let amg_mode = std::env::var("CFD2_CPU_SCHUR_AMG").ok();
+                    let use_amg = match amg_mode.as_deref() {
+                        Some("0") => false,
+                        Some(_) => true,
+                        None => self.schur_amg_active.get(),
+                    };
+                    let amg_hier = if use_amg {
+                        Some(self.amg_hier.get_or_init(|| {
+                            crate::solver::cpu::amg::AmgHierarchy::build(
+                                &self.scalar_row_offsets,
+                                &self.col_indices,
+                                &crate::solver::cpu::linalg::extract_p_values(&a, *p),
+                            )
+                        }))
+                    } else {
+                        None
+                    };
+                    let pc = prof::time(&prof::PC_BUILD, || {
+                        SchurPrecond::new(a, u_idx, *p, *omega as f64, self.config.simd, amg_hier)
+                    });
+                    let stats = fgmres(
+                        &a,
+                        &rhs,
+                        &mut x,
+                        &pc,
+                        self.linear_restart,
+                        self.linear_max_iters,
+                        tol,
+                        self.config.simd,
+                    );
+                    if amg_mode.is_none() && !use_amg {
+                        let (applies, failures) = pc.inner_outcomes();
+                        if applies > 0 && failures * 2 >= applies {
+                            self.schur_amg_active.set(true);
+                        }
+                    }
+                    stats
+                }
+                None => {
+                    let block_pc: Box<dyn Preconditioner> = prof::time(&prof::PC_BUILD, || {
+                        if std::env::var("CFD2_CPU_POINT_JACOBI").is_ok() {
+                            Box::new(PointJacobi::new(&a)) as Box<dyn Preconditioner>
+                        } else {
+                            Box::new(BlockJacobi::new(&a))
+                        }
+                    });
+                    fgmres(
+                        &a,
+                        &rhs,
+                        &mut x,
+                        block_pc.as_ref(),
+                        self.linear_restart,
+                        self.linear_max_iters,
+                        tol,
+                        self.config.simd,
+                    )
+                }
+            };
             if std::env::var("CFD2_CPU_DEBUG_SOLVE").is_ok() {
                 eprintln!(
                     "[cpu-solve] block S={s} n={n} iters={} rel_res={:.3e} conv={}",
@@ -954,7 +1024,7 @@ impl CpuSolver {
             }
         }
 
-        self.buffers.copy_into_f32("x", &x);
+        prof::time(&prof::MARSHAL, || self.buffers.copy_into_f32("x", &x));
     }
 }
 

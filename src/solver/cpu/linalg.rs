@@ -10,7 +10,76 @@
 //! values are `f32`; results are compared to references at tolerance, not
 //! bit-exactly against the GPU.
 
-use crate::solver::cpu::parallel::{par_map_into, par_update};
+use crate::solver::cpu::parallel::{
+    par_dot, par_map_into, par_update, parallel_cell_chunks_mut, parallel_cell_chunks_mut2,
+};
+
+/// Fine-grained linear-solve profiling (enabled by `CFD2_CPU_PROFILE` via
+/// `CpuSolver::step`). Global atomic accumulators: the linear solve runs once
+/// per outer iteration on the solver thread, so plain relaxed adds are enough.
+/// The coarse step profile attributes the whole solve to one bucket; these
+/// split it into marshal / preconditioner build+apply / spmv / dots / axpys so
+/// the serial-vs-parallel and bandwidth-vs-latency structure is visible.
+pub mod prof {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+
+    pub static ENABLED: AtomicBool = AtomicBool::new(false);
+    /// Atomic-store → Vec marshalling (matrix/rhs/x in, x out).
+    pub static MARSHAL: AtomicU64 = AtomicU64::new(0);
+    /// Preconditioner construction (SchurPrecond::new / BlockJacobi::new).
+    pub static PC_BUILD: AtomicU64 = AtomicU64::new(0);
+    /// FGMRES-level block spmv.
+    pub static SPMV: AtomicU64 = AtomicU64::new(0);
+    /// FGMRES-level dot/norm reductions (serial by design).
+    pub static DOT: AtomicU64 = AtomicU64::new(0);
+    /// FGMRES-level elementwise vector ops (parallel, bit-exact).
+    pub static AXPY: AtomicU64 = AtomicU64::new(0);
+    /// Whole preconditioner application (includes the Schur sub-phases below).
+    pub static PC_APPLY: AtomicU64 = AtomicU64::new(0);
+    /// Schur apply: velocity predict + Schur RHS (serial cell loop).
+    pub static SCHUR_PRE: AtomicU64 = AtomicU64::new(0);
+    /// Schur apply: inner pressure BiCGSTAB.
+    pub static SCHUR_SOLVE: AtomicU64 = AtomicU64::new(0);
+    /// Schur apply: velocity correction (serial cell loop).
+    pub static SCHUR_POST: AtomicU64 = AtomicU64::new(0);
+    /// Outer FGMRES iterations this step.
+    pub static FGMRES_ITERS: AtomicU64 = AtomicU64::new(0);
+    /// Inner (Schur pressure) BiCGSTAB iterations this step.
+    pub static INNER_ITERS: AtomicU64 = AtomicU64::new(0);
+
+    #[inline]
+    pub fn time<T>(acc: &AtomicU64, f: impl FnOnce() -> T) -> T {
+        if !ENABLED.load(Relaxed) {
+            return f();
+        }
+        let t = std::time::Instant::now();
+        let r = f();
+        acc.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
+        r
+    }
+
+    /// Format the accumulated breakdown and reset all counters.
+    pub fn report_and_reset() -> String {
+        let take = |a: &AtomicU64| a.swap(0, Relaxed);
+        let ms = |v: u64| v as f64 / 1e6;
+        format!(
+            "marshal={:.0}ms pc_build={:.0}ms spmv={:.0}ms dot={:.0}ms axpy={:.0}ms \
+             pc_apply={:.0}ms (schur pre={:.0}ms solve={:.0}ms post={:.0}ms) \
+             iters fgmres={} inner={}",
+            ms(take(&MARSHAL)),
+            ms(take(&PC_BUILD)),
+            ms(take(&SPMV)),
+            ms(take(&DOT)),
+            ms(take(&AXPY)),
+            ms(take(&PC_APPLY)),
+            ms(take(&SCHUR_PRE)),
+            ms(take(&SCHUR_SOLVE)),
+            ms(take(&SCHUR_POST)),
+            take(&FGMRES_ITERS),
+            take(&INNER_ITERS),
+        )
+    }
+}
 
 /// A borrowed CSR matrix (single scalar unknown per row).
 pub struct CsrView<'a> {
@@ -74,40 +143,18 @@ impl CsrView<'_> {
 }
 
 /// Upper bound on the block size S (unknowns per cell) for stack-allocated
-/// per-cell scratch. Coupled models here are S <= 4 (U.x,U.y,p,T); 8 leaves head-room
-/// while keeping the fixed array small enough to live in registers/L1.
-const MAX_BLOCK_S: usize = 8;
+/// per-cell scratch. The biharmonic-compressible model carries S = 12
+/// (4 conserved + 8 `lap_*` unknowns) — 8 was too small and made the release
+/// build panic on the `acc[..s]` slice (the debug_assert only fires in debug).
+/// 16 keeps the fixed array at 128 bytes: still registers/L1-friendly.
+const MAX_BLOCK_S: usize = 16;
 
-fn dot(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| x * y).sum()
-}
-
-/// SIMD dot product (4-wide f64). FP reductions don't auto-vectorise (summation
-/// is non-associative), so this is the meaningful manual-SIMD path; it differs
-/// from the scalar dot only in summation order (matches to rounding).
-fn dot_simd(a: &[f64], b: &[f64]) -> f64 {
-    use wide::f64x4;
-    let n = a.len();
-    let mut acc = f64x4::splat(0.0);
-    let mut i = 0;
-    while i + 4 <= n {
-        let va = f64x4::from([a[i], a[i + 1], a[i + 2], a[i + 3]]);
-        let vb = f64x4::from([b[i], b[i + 1], b[i + 2], b[i + 3]]);
-        acc += va * vb;
-        i += 4;
-    }
-    let lanes = acc.to_array();
-    let mut s = lanes[0] + lanes[1] + lanes[2] + lanes[3];
-    while i < n {
-        s += a[i] * b[i];
-        i += 1;
-    }
-    s
-}
-
-fn norm(a: &[f64]) -> f64 {
-    dot(a, a).sqrt()
-}
+// Dot products / norms in the solvers below go through `par_dot`
+// (parallel.rs): a FIXED-CHUNK deterministic reduction — bit-identical across
+// thread counts, 4-wide SIMD within chunks, multi-core across chunks. The
+// historical `simd` knob on `fgmres`/`bicgstab` is accepted but no longer
+// changes the reduction (the chunked kernel is strictly better and equally
+// deterministic).
 
 // ── Block-CSR (coupled systems, unknowns_per_cell = S) ──────────────────────
 //
@@ -256,7 +303,8 @@ impl BlockCsr<'_> {
 /// Invert an `s`×`s` row-major matrix in place into `inv` via Gauss–Jordan with
 /// partial pivoting. Falls back to the identity-scaled diagonal if singular so
 /// the preconditioner stays defined (it only needs to be an approximation).
-fn invert_dense(s: usize, src: &[f64], inv: &mut [f64]) {
+/// (Also used by `cpu::amg` for the coarsest-level dense solve.)
+pub(crate) fn invert_dense(s: usize, src: &[f64], inv: &mut [f64]) {
     // Working augmented copy [A | I].
     let mut a = src.to_vec();
     // Initialise inv = I.
@@ -316,6 +364,24 @@ fn invert_dense(s: usize, src: &[f64], inv: &mut [f64]) {
 /// A left preconditioner `z = M^{-1} r`.
 pub trait Preconditioner {
     fn apply(&self, r: &[f64], z: &mut [f64]);
+}
+
+/// Extract the pressure-pressure scalar-CSR values (`A_pp`) from an assembled
+/// block matrix; the scalar topology is the block topology
+/// (`scalar_row_offsets`/`col_indices`). Used to seed the AMG hierarchy's
+/// strength-of-connection aggregation.
+pub fn extract_p_values(a: &BlockCsr, p: usize) -> Vec<f32> {
+    let s = a.s;
+    let mut p_values = vec![0.0f32; a.col_indices.len()];
+    for cell in 0..a.num_cells() {
+        let scalar_offset = a.scalar_offset(cell);
+        let num_neighbors = a.num_neighbors(cell);
+        let srp = a.start_row(cell, p);
+        for rank in 0..num_neighbors {
+            p_values[scalar_offset + rank] = a.values[srp + rank * s + p];
+        }
+    }
+    p_values
 }
 
 /// Block-Jacobi: per-cell S×S diagonal-block inverse.
@@ -431,28 +497,44 @@ pub struct SchurPrecond<'a> {
     u_idx: Vec<usize>,
     p: usize,
     diag_u_inv: Vec<f64>, // num_cells * u_len
-    diag_p_inv: Vec<f64>, // num_cells
     p_values: Vec<f32>,   // A_pp scalar-CSR values (topology = scalar_row_offsets/col_indices)
-    simd: bool,
+    /// Inner pressure-solve budget/tolerance (env-overridable experiment knobs:
+    /// `CFD2_CPU_SCHUR_INNER_ITERS` / `CFD2_CPU_SCHUR_INNER_TOL`).
+    inner_iters: usize,
+    inner_tol: f64,
+    /// Experiment (`CFD2_CPU_SCHUR_INNER=vcycle`): apply `inner_vcycles` raw
+    /// V-cycles as the pressure solve instead of the Krylov inner solve —
+    /// fixed work per apply, no reductions (the GPU-style shape).
+    inner_vcycle_only: bool,
+    /// AMG operator for the pressure block (assembled from `p_values` when the
+    /// caller supplies a hierarchy): preconditions the inner BiCGSTAB so its
+    /// iteration count stays mesh-independent instead of growing ~h^-2.
+    amg: Option<crate::solver::cpu::amg::AmgSolver<'a>>,
+    /// Inner-solve outcome counters for the caller's adaptive AMG policy:
+    /// (applies, applies that failed to converge — cap-out or stagnation).
+    applies: std::cell::Cell<u32>,
+    inner_failures: std::cell::Cell<u32>,
 }
 
 impl<'a> SchurPrecond<'a> {
-    pub fn new(a: BlockCsr<'a>, u_idx: &[usize], p: usize, _omega: f64, simd: bool) -> Self {
+    pub fn new(
+        a: BlockCsr<'a>,
+        u_idx: &[usize],
+        p: usize,
+        _omega: f64,
+        _simd: bool,
+        amg_hier: Option<&'a crate::solver::cpu::amg::AmgHierarchy>,
+    ) -> Self {
         let s = a.s;
         let cells = a.num_cells();
         let u_len = u_idx.len();
         let mut diag_u_inv = vec![0.0f64; cells * u_len];
-        let mut diag_p_inv = vec![0.0f64; cells];
         let nnz = a.col_indices.len();
         let mut p_values = vec![0.0f32; nnz];
         for cell in 0..cells {
             let scalar_offset = a.scalar_offset(cell);
             let num_neighbors = a.num_neighbors(cell);
             let diag_rank = a.diagonal_indices[cell] as usize - scalar_offset;
-            // diag(A_pp)
-            let base_p = a.start_row(cell, p) + diag_rank * s;
-            let dp = a.values[base_p + p] as f64;
-            diag_p_inv[cell] = if dp.abs() > 1e-30 { 1.0 / dp } else { 0.0 };
             // diag(A_uu) per velocity component
             for (i, &u) in u_idx.iter().enumerate() {
                 let base_u = a.start_row(cell, u) + diag_rank * s;
@@ -465,7 +547,44 @@ impl<'a> SchurPrecond<'a> {
                 p_values[scalar_offset + rank] = a.values[srp + rank * s + p];
             }
         }
-        Self { a, u_idx: u_idx.to_vec(), p, diag_u_inv, diag_p_inv, p_values, simd }
+        let inner_iters = std::env::var("CFD2_CPU_SCHUR_INNER_ITERS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(40);
+        // 1e-1 measured best on BOTH benchmark cases (obstacle 2.19→1.59s,
+        // nozzle 2.49→2.17s warm step): the apply is a preconditioner, so a
+        // loose pressure solve suffices; the outer FGMRES count barely moves
+        // while inner iterations halve. (1e-2 was the pre-AMG default.)
+        let inner_tol = std::env::var("CFD2_CPU_SCHUR_INNER_TOL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1e-1);
+        let inner_vcycle_only = std::env::var("CFD2_CPU_SCHUR_INNER")
+            .map(|v| v.eq_ignore_ascii_case("vcycle"))
+            .unwrap_or(false);
+        // (Counted under PC_BUILD via the caller's wrap around `new`.)
+        let amg = amg_hier.map(|h| {
+            crate::solver::cpu::amg::AmgSolver::assemble(h, &p_values, a.threads.max(1))
+        });
+        Self {
+            a,
+            u_idx: u_idx.to_vec(),
+            p,
+            diag_u_inv,
+            p_values,
+            inner_iters,
+            inner_tol,
+            inner_vcycle_only,
+            amg,
+            applies: std::cell::Cell::new(0),
+            inner_failures: std::cell::Cell::new(0),
+        }
+    }
+
+    /// (inner applies, inner applies that failed to converge) so far — drives
+    /// the solver's adaptive Jacobi→AMG switch for the pressure block.
+    pub fn inner_outcomes(&self) -> (u32, u32) {
+        (self.applies.get(), self.inner_failures.get())
     }
 }
 
@@ -476,27 +595,47 @@ impl Preconditioner for SchurPrecond<'_> {
         let u_len = self.u_idx.len();
         let p = self.p;
 
-        // 1. predict velocity + 2. form Schur RHS g_p.
+        // 1. predict velocity + 2. form Schur RHS g_p. Each cell writes only its
+        // own z/gp slots (neighbour data is read-only `r`/`values`), so the pass
+        // parallelizes over disjoint cell chunks bit-exactly. (Fields are
+        // hoisted into locals so the Sync closure doesn't capture `self`, which
+        // holds non-Sync outcome counters.)
         z.copy_from_slice(r);
         let mut gp = vec![0.0f64; cells];
-        for cell in 0..cells {
-            for (i, &u) in self.u_idx.iter().enumerate() {
-                z[cell * s + u] = self.diag_u_inv[cell * u_len + i] * r[cell * s + u];
-            }
-            z[cell * s + p] = 0.0;
-            let scalar_offset = self.a.scalar_offset(cell);
-            let num_neighbors = self.a.num_neighbors(cell);
-            let srp = self.a.start_row(cell, p);
-            let mut g = r[cell * s + p];
-            for rank in 0..num_neighbors {
-                let col_cell = self.a.col_indices[scalar_offset + rank] as usize;
-                for (i, &u) in self.u_idx.iter().enumerate() {
-                    let a_pu = self.a.values[srp + rank * s + u] as f64;
-                    g -= a_pu * self.diag_u_inv[col_cell * u_len + i] * r[col_cell * s + u];
-                }
-            }
-            gp[cell] = g;
-        }
+        let (aa, u_idx, diag_u_inv) = (&self.a, &self.u_idx, &self.diag_u_inv);
+        prof::time(&prof::SCHUR_PRE, || {
+            parallel_cell_chunks_mut2(
+                cells,
+                s,
+                1,
+                aa.threads,
+                z,
+                &mut gp,
+                |cell0, zc, gpc| {
+                    for li in 0..gpc.len() {
+                        let cell = cell0 + li;
+                        for (i, &u) in u_idx.iter().enumerate() {
+                            zc[li * s + u] = diag_u_inv[cell * u_len + i] * r[cell * s + u];
+                        }
+                        zc[li * s + p] = 0.0;
+                        let scalar_offset = aa.scalar_offset(cell);
+                        let num_neighbors = aa.num_neighbors(cell);
+                        let srp = aa.start_row(cell, p);
+                        let mut g = r[cell * s + p];
+                        for rank in 0..num_neighbors {
+                            let col_cell = aa.col_indices[scalar_offset + rank] as usize;
+                            for (i, &u) in u_idx.iter().enumerate() {
+                                let a_pu = aa.values[srp + rank * s + u] as f64;
+                                g -= a_pu
+                                    * diag_u_inv[col_cell * u_len + i]
+                                    * r[col_cell * s + u];
+                            }
+                        }
+                        gpc[li] = g;
+                    }
+                },
+            );
+        });
 
         // 3. pressure solve A_pp p = g_p (scalar CSR; topology = block topology).
         let pa = CsrView {
@@ -510,25 +649,83 @@ impl Preconditioner for SchurPrecond<'_> {
         // Cheap APPROXIMATE pressure solve — this is a preconditioner, and FGMRES
         // is flexible, so a loose inner solve (few iterations) keeps each outer
         // iteration cheap (mirrors the GPU's fixed smoother sweeps).
-        bicgstab(&pa, &gp_f32, &mut psol, 40, 1e-2, self.simd);
+        // Both inner paths run with the stagnation early-exit: this is a
+        // preconditioner apply (FGMRES is flexible), so bailing on a stalled
+        // block beats burning the budget; failures feed the adaptive AMG switch.
+        let stats = prof::time(&prof::SCHUR_SOLVE, || match &self.amg {
+            Some(amg) if self.inner_vcycle_only => {
+                // Fixed-work apply: z_p = V-cycle(g_p) (optionally repeated as
+                // a Richardson iteration when CFD2_CPU_SCHUR_INNER_ITERS > 1).
+                let gp64: Vec<f64> = gp_f32.iter().map(|&v| v as f64).collect();
+                let n = gp64.len();
+                let mut z64 = vec![0.0f64; n];
+                amg.vcycle(&gp64, &mut z64);
+                for i in 0..n {
+                    psol[i] = z64[i] as f32;
+                }
+                SolveStats { iters: 1, rel_residual: f64::NAN, converged: true }
+            }
+            Some(amg) => bicgstab_pc_opts(
+                &pa,
+                &gp_f32,
+                &mut psol,
+                self.inner_iters,
+                self.inner_tol,
+                &|r, z| amg.vcycle(r, z),
+                true,
+            ),
+            None => {
+                let threads = pa.threads.max(1);
+                let diag = pa.diagonal();
+                let minv = move |v: &[f64], out: &mut [f64]| {
+                    par_map_into(threads, out, |i| {
+                        if diag[i] != 0.0 {
+                            v[i] / diag[i]
+                        } else {
+                            v[i]
+                        }
+                    });
+                };
+                bicgstab_pc_opts(
+                    &pa,
+                    &gp_f32,
+                    &mut psol,
+                    self.inner_iters,
+                    self.inner_tol,
+                    &minv,
+                    true,
+                )
+            }
+        });
+        self.applies.set(self.applies.get() + 1);
+        if !stats.converged {
+            self.inner_failures.set(self.inner_failures.get() + 1);
+        }
+        prof::INNER_ITERS.fetch_add(stats.iters as u64, std::sync::atomic::Ordering::Relaxed);
         let psol: Vec<f64> = psol.iter().map(|&v| v as f64).collect();
 
-        // 4. correct velocity, write pressure.
-        for cell in 0..cells {
-            let scalar_offset = self.a.scalar_offset(cell);
-            let num_neighbors = self.a.num_neighbors(cell);
-            for (i, &u) in self.u_idx.iter().enumerate() {
-                let sru = self.a.start_row(cell, u);
-                let mut corr = 0.0f64;
-                for rank in 0..num_neighbors {
-                    let col_cell = self.a.col_indices[scalar_offset + rank] as usize;
-                    let a_up = self.a.values[sru + rank * s + p] as f64;
-                    corr += a_up * psol[col_cell];
+        // 4. correct velocity, write pressure. Cell-disjoint writes into z;
+        // parallel over cell chunks, bit-exact.
+        prof::time(&prof::SCHUR_POST, || {
+            parallel_cell_chunks_mut(cells, s, aa.threads, z, |cell0, zc| {
+                for li in 0..zc.len() / s {
+                    let cell = cell0 + li;
+                    let scalar_offset = aa.scalar_offset(cell);
+                    let num_neighbors = aa.num_neighbors(cell);
+                    for (i, &u) in u_idx.iter().enumerate() {
+                        let sru = aa.start_row(cell, u);
+                        let mut corr = 0.0f64;
+                        for rank in 0..num_neighbors {
+                            let col_cell = aa.col_indices[scalar_offset + rank] as usize;
+                            let a_up = aa.values[sru + rank * s + p] as f64;
+                            corr += a_up * psol[col_cell];
+                        }
+                        zc[li * s + u] -= diag_u_inv[cell * u_len + i] * corr;
+                    }
+                    zc[li * s + p] = psol[cell];
                 }
-                z[cell * s + u] -= self.diag_u_inv[cell * u_len + i] * corr;
-            }
-            z[cell * s + p] = psol[cell];
-        }
+            });
+        });
     }
 }
 
@@ -555,8 +752,10 @@ pub fn fgmres(
     let m = restart.max(1);
     let threads = a.threads.max(1);
 
-    let vdot = |u: &[f64], w: &[f64]| if simd { dot_simd(u, w) } else { dot(u, w) };
+    let _ = simd;
+    let vdot = |u: &[f64], w: &[f64]| prof::time(&prof::DOT, || par_dot(threads, u, w));
     let vnorm = |u: &[f64]| vdot(u, u).sqrt();
+    let spmv = |x: &[f64], y: &mut [f64]| prof::time(&prof::SPMV, || a.block_spmv(x, y));
 
     let bf: Vec<f64> = b.iter().map(|&v| v as f64).collect();
     let bnorm = vnorm(&bf).max(1e-300);
@@ -581,26 +780,28 @@ pub fn fgmres(
     // Reused residual buffer (was reallocated each restart).
     let mut r = vec![0.0f64; n];
     let mut total_iters = 0usize;
-    let mut res = {
-        a.block_spmv(&xf, &mut ax);
-        par_map_into(threads, &mut r, |i| bf[i] - ax[i]);
-        vnorm(&r)
-    };
+    let mut res;
 
-    while total_iters < max_iter {
-        // r0 = b - A x
-        a.block_spmv(&xf, &mut ax);
-        par_map_into(threads, &mut r, |i| bf[i] - ax[i]);
+    loop {
+        // r0 = b - A x. This head residual doubles as the restart-cycle
+        // convergence/budget guard, so each cycle costs exactly ONE true
+        // residual evaluation (the historical shape recomputed it up to three
+        // times per cycle: before the loop, at the head, and after the
+        // restarted update).
+        spmv(&xf, &mut ax);
+        prof::time(&prof::AXPY, || par_map_into(threads, &mut r, |i| bf[i] - ax[i]));
         let beta = vnorm(&r);
         res = beta;
-        if beta / bnorm <= tol {
+        if beta / bnorm <= tol || total_iters >= max_iter {
             break;
         }
         let inv_beta = 1.0 / beta;
         if vbasis.is_empty() {
             vbasis.push(vec![0.0; n]);
         }
-        par_map_into(threads, &mut vbasis[0], |i| r[i] * inv_beta);
+        prof::time(&prof::AXPY, || {
+            par_map_into(threads, &mut vbasis[0], |i| r[i] * inv_beta)
+        });
         for v in g.iter_mut() {
             *v = 0.0;
         }
@@ -612,17 +813,20 @@ pub fn fgmres(
             if zbasis.len() <= j {
                 zbasis.push(vec![0.0; n]);
             }
-            precond.apply(&vbasis[j], &mut zbasis[j]);
-            a.block_spmv(&zbasis[j], &mut ax);
+            prof::time(&prof::PC_APPLY, || precond.apply(&vbasis[j], &mut zbasis[j]));
+            spmv(&zbasis[j], &mut ax);
             w.copy_from_slice(&ax);
-            // Modified Gram-Schmidt against v_0..v_j. The dot (reduction) stays
-            // serial to keep the scalar path bit-identical across thread counts;
-            // the axpy update is elementwise, so it parallelizes bit-exactly.
+            // Modified Gram-Schmidt against v_0..v_j. The dot goes through
+            // `par_dot` (fixed-chunk deterministic reduction — thread-count
+            // invariant); the axpy update is elementwise, so it parallelizes
+            // bit-exactly.
             for i in 0..=j {
                 let hij = vdot(&w, &vbasis[i]);
                 h[j][i] = hij;
                 let vi = &vbasis[i];
-                par_update(threads, &mut w, |k, wk| *wk -= hij * vi[k]);
+                prof::time(&prof::AXPY, || {
+                    par_update(threads, &mut w, |k, wk| *wk -= hij * vi[k])
+                });
             }
             let hnext = vnorm(&w);
             h[j][j + 1] = hnext;
@@ -659,7 +863,9 @@ pub fn fgmres(
             if vbasis.len() <= j + 1 {
                 vbasis.push(vec![0.0; n]);
             }
-            par_map_into(threads, &mut vbasis[j + 1], |k| w[k] * inv_h);
+            prof::time(&prof::AXPY, || {
+                par_map_into(threads, &mut vbasis[j + 1], |k| w[k] * inv_h)
+            });
         }
 
         // Back-substitute H[0..jfin,0..jfin] y = g[0..jfin].
@@ -680,19 +886,16 @@ pub fn fgmres(
             let yj = y[j];
             if yj != 0.0 {
                 let zj = &zbasis[j];
-                par_update(threads, &mut xf, |k, xk| *xk += yj * zj[k]);
+                prof::time(&prof::AXPY, || {
+                    par_update(threads, &mut xf, |k, xk| *xk += yj * zj[k])
+                });
             }
         }
-
-        // Recompute residual at the restarted iterate for the loop guard.
-        a.block_spmv(&xf, &mut ax);
-        par_map_into(threads, &mut r, |i| bf[i] - ax[i]);
-        res = vnorm(&r);
-        if res / bnorm <= tol {
-            break;
-        }
+        // Loop back: the head recomputes the true residual at the restarted
+        // iterate and applies the convergence/budget guard.
     }
 
+    prof::FGMRES_ITERS.fetch_add(total_iters as u64, std::sync::atomic::Ordering::Relaxed);
     for i in 0..n {
         x[i] = xf[i] as f32;
     }
@@ -712,8 +915,9 @@ pub struct SolveStats {
     pub converged: bool,
 }
 
-/// Solve `A x = b` with preconditioned BiCGSTAB. `x` is used as the initial guess
-/// and overwritten with the solution. Returns convergence statistics.
+/// Solve `A x = b` with Jacobi-preconditioned BiCGSTAB. `x` is used as the
+/// initial guess and overwritten with the solution. Returns convergence
+/// statistics.
 pub fn bicgstab(
     a: &CsrView,
     b: &[f32],
@@ -722,21 +926,55 @@ pub fn bicgstab(
     tol: f64,
     simd: bool,
 ) -> SolveStats {
+    let _ = simd;
+    let threads = a.threads.max(1);
+    let diag = a.diagonal();
+    let minv = move |v: &[f64], out: &mut [f64]| {
+        // Jacobi; guard a (pathological) zero diagonal. Elementwise → parallel
+        // bit-exactly.
+        par_map_into(threads, out, |i| if diag[i] != 0.0 { v[i] / diag[i] } else { v[i] });
+    };
+    bicgstab_pc(a, b, x, max_iter, tol, &minv)
+}
+
+/// BiCGSTAB with a caller-supplied left preconditioner `minv(r, z)` (e.g. the
+/// AMG V-cycle for the Schur pressure block).
+pub fn bicgstab_pc(
+    a: &CsrView,
+    b: &[f32],
+    x: &mut [f32],
+    max_iter: usize,
+    tol: f64,
+    minv: &dyn Fn(&[f64], &mut [f64]),
+) -> SolveStats {
+    bicgstab_pc_opts(a, b, x, max_iter, tol, minv, false)
+}
+
+/// [`bicgstab_pc`] with a stagnation early-exit option. When `stagnation_exit`
+/// is set and the residual stops improving (two consecutive iterations with
+/// less than 2% reduction over the best seen), the solve returns early with
+/// the current iterate. ONLY safe for preconditioner-apply usage (the Schur
+/// inner solve): the caller (flexible FGMRES) tolerates an approximate z, and
+/// bailing beats burning the full budget on an unconvergeable block (e.g. the
+/// from-rest step-0 pressure system). Deterministic: the residual norms that
+/// drive the exit come from `par_dot`.
+#[allow(clippy::too_many_arguments)]
+pub fn bicgstab_pc_opts(
+    a: &CsrView,
+    b: &[f32],
+    x: &mut [f32],
+    max_iter: usize,
+    tol: f64,
+    minv: &dyn Fn(&[f64], &mut [f64]),
+    stagnation_exit: bool,
+) -> SolveStats {
     let n = a.n();
     assert_eq!(b.len(), n);
     assert_eq!(x.len(), n);
+    let threads = a.threads.max(1);
 
-    // The SIMD switch only changes the dot/norm reduction implementation.
-    let vdot = |a: &[f64], b: &[f64]| if simd { dot_simd(a, b) } else { dot(a, b) };
+    let vdot = |a: &[f64], b: &[f64]| par_dot(threads, a, b);
     let vnorm = |a: &[f64]| vdot(a, a).sqrt();
-
-    let diag = a.diagonal();
-    let minv = |v: &[f64], out: &mut [f64]| {
-        for i in 0..n {
-            // Jacobi; guard a (pathological) zero diagonal.
-            out[i] = if diag[i] != 0.0 { v[i] / diag[i] } else { v[i] };
-        }
-    };
 
     let bf: Vec<f64> = b.iter().map(|&v| v as f64).collect();
     let bnorm = vnorm(&bf).max(1e-300);
@@ -746,7 +984,8 @@ pub fn bicgstab(
     // r = b - A x
     let mut ax = vec![0.0f64; n];
     a.spmv(&xf, &mut ax);
-    let mut r: Vec<f64> = (0..n).map(|i| bf[i] - ax[i]).collect();
+    let mut r = vec![0.0f64; n];
+    par_map_into(threads, &mut r, |i| bf[i] - ax[i]);
 
     let finish = |xf: &[f64], x: &mut [f32], iters: usize, res: f64, conv: bool| -> SolveStats {
         for i in 0..n {
@@ -771,6 +1010,11 @@ pub fn bicgstab(
     let mut v = vec![0.0f64; n];
     let mut p = vec![0.0f64; n];
     let (mut phat, mut shat, mut t) = (vec![0.0f64; n], vec![0.0f64; n], vec![0.0f64; n]);
+    // Hoisted s-vector (was a fresh allocation every iteration).
+    let mut sv = vec![0.0f64; n];
+    // Stagnation tracking (see `stagnation_exit`).
+    let mut best_res = res;
+    let mut stalled = 0u32;
 
     for iter in 1..=max_iter {
         let rho_new = vdot(&rhat, &r);
@@ -779,35 +1023,39 @@ pub fn bicgstab(
             return finish(&xf, x, iter, res, res / bnorm <= tol);
         }
         let beta = (rho_new / rho) * (alpha / omega);
-        for i in 0..n {
-            p[i] = r[i] + beta * (p[i] - omega * v[i]);
+        {
+            let (r, v) = (&r, &v);
+            par_update(threads, &mut p, |i, pi| *pi = r[i] + beta * (*pi - omega * v[i]));
         }
         minv(&p, &mut phat);
         a.spmv(&phat, &mut v);
         let rhat_v = vdot(&rhat, &v);
         alpha = rho_new / rhat_v;
 
-        // s = r - alpha v  (reuse r as s after recording)
-        let mut s = vec![0.0f64; n];
-        for i in 0..n {
-            s[i] = r[i] - alpha * v[i];
+        // s = r - alpha v
+        {
+            let (r, v) = (&r, &v);
+            par_map_into(threads, &mut sv, |i| r[i] - alpha * v[i]);
         }
-        let snorm = vnorm(&s);
+        let snorm = vnorm(&sv);
         if snorm / bnorm <= tol {
-            for i in 0..n {
-                xf[i] += alpha * phat[i];
-            }
+            let phat = &phat;
+            par_update(threads, &mut xf, |i, xi| *xi += alpha * phat[i]);
             return finish(&xf, x, iter, snorm, true);
         }
 
-        minv(&s, &mut shat);
+        minv(&sv, &mut shat);
         a.spmv(&shat, &mut t);
         let tt = vdot(&t, &t).max(1e-300);
-        omega = vdot(&t, &s) / tt;
+        omega = vdot(&t, &sv) / tt;
 
-        for i in 0..n {
-            xf[i] += alpha * phat[i] + omega * shat[i];
-            r[i] = s[i] - omega * t[i];
+        {
+            let (phat, shat) = (&phat, &shat);
+            par_update(threads, &mut xf, |i, xi| *xi += alpha * phat[i] + omega * shat[i]);
+        }
+        {
+            let (sv, t) = (&sv, &t);
+            par_map_into(threads, &mut r, |i| sv[i] - omega * t[i]);
         }
         res = vnorm(&r);
         if res / bnorm <= tol {
@@ -815,6 +1063,17 @@ pub fn bicgstab(
         }
         if omega.abs() < 1e-300 {
             return finish(&xf, x, iter, res, res / bnorm <= tol);
+        }
+        if stagnation_exit {
+            if res > 0.98 * best_res {
+                stalled += 1;
+                if stalled >= 2 {
+                    return finish(&xf, x, iter, res, false);
+                }
+            } else {
+                stalled = 0;
+            }
+            best_res = best_res.min(res);
         }
         rho = rho_new;
     }

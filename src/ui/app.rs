@@ -1051,12 +1051,14 @@ impl CFDApp {
         max_cell_size: f64,
         inlet_velocity: f32,
     ) -> Vec<(f64, f64)> {
-        // Nozzle: seed a uniform freestream (the through-flow IC the supersonic test
-        // uses). From rest the inlet-injected momentum has no convective transport
-        // and piles up; the freestream IC establishes convection everywhere so the
-        // throat chokes cleanly.
+        // Nozzle: develop FROM REST (zero velocity). No seeded freestream — the flow
+        // accelerates purely from the rocket-scale inlet pressure drop. The large
+        // pressure ratio (1 MPa gauge, see `ALLMACH_THERMAL_NOZZLE`) forces the throat
+        // to choke, so the supersonic branch forms from scratch; the old low-pressure
+        // case needed a freestream IC to avoid settling on the subsonic diffuser branch.
         if selected_geometry == GeometryType::Nozzle {
-            return vec![(inlet_velocity as f64, 0.0); mesh.num_cells()];
+            let _ = inlet_velocity; // no longer used to seed the nozzle IC
+            return vec![(0.0, 0.0); mesh.num_cells()];
         }
         let mut u = vec![(0.0, 0.0); mesh.num_cells()];
         for (i, _vel) in u.iter_mut().enumerate() {

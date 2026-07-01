@@ -339,9 +339,14 @@ pub const ALLMACH_THERMAL_NOZZLE: ModelGuiDefaults = ModelGuiDefaults {
     low_mach_model: GpuLowMachPrecondModel::Off,
     low_mach_theta_floor: 1e-6,
     low_mach_pressure_coupling_alpha: 1.0,
-    // Throughflow scale (preconditioner + CFL) for the REAL-c nozzle: the Bernoulli
-    // speed √(2·inlet_pressure/ρ) for the pressure ratio below (≈313 m/s at 6e4 gauge,
-    // ρ_air=1.225). No exaggeration — this is the physical c≈347 m/s regime.
+    // Low-Mach preconditioner / startup-CFL scale — NOT a prescribed inlet velocity.
+    // The flow develops entirely from the pressure drop (the inlet U is zero-gradient,
+    // see `apply_pressure_inlet_nozzle_bcs`), so there is no inherent inlet velocity;
+    // this value only sets the acoustic-damping preconditioner floor and the step-0 dt
+    // while the flow is still at rest. It deliberately UNDER-estimates the developed
+    // throughflow (~660–820 m/s at 1 MPa): a lower scale means a stronger pseudo-
+    // compressibility floor, which damps the from-rest acoustic transient (a higher,
+    // Bernoulli-sized scale preconditions less and is less stable at ignition).
     inlet_velocity: 313.0,
     // The velocity-inlet fallback back-pressure (gauge). The default driving is the
     // pressure inlet below.
@@ -351,12 +356,19 @@ pub const ALLMACH_THERMAL_NOZZLE: ModelGuiDefaults = ModelGuiDefaults {
     // anchors at the inlet; the outlet floats. The elliptic pressure row is made
     // well-posed at the supersonic exit by the pressure-flux Newton linearization
     // ([[cfd2-hyperbolic-pressure-row]]); without it this real-c drive ran the exit
-    // to vacuum. `inlet_pressure` = 6e4 Pa gauge gives the classic CD-nozzle profile
-    // (subsonic throat M≈0.95 → supersonic exit M≈1.7, M_exit > M_throat, vacuum-free);
-    // `outlet_back_pressure` above is the velocity-inlet fallback if this is toggled
-    // off in the GUI. Retuned from `tests/nozzle_real_c_pseudolaminar_probe.rs`.
+    // to vacuum.
+    //
+    // `inlet_pressure` = 1 MPa gauge (~14 bar absolute) — a physical rocket-chamber
+    // pressure in Pascals. The large pressure ratio FORCES the throat to choke, so the
+    // nozzle reaches its supersonic branch (M_throat≈1.1, M_exit≈1.9) even when the
+    // flow DEVELOPS FROM REST (u=0, flat gauge p=0) — no seeded freestream. At the old
+    // 6e4 the from-rest flow only reaches the subsonic diffuser branch (M_throat≈0.5,
+    // M_exit≈0); the rocket-scale drop is what makes "develop from scratch" go
+    // supersonic. `outlet_back_pressure` above is the velocity-inlet fallback if the
+    // pressure inlet is toggled off in the GUI. Validated in
+    // `tests/nozzle_from_rest_probe.rs` and the `gui_supersonic_nozzle_demo`.
     pressure_inlet: true,
-    inlet_pressure: 6.0e4,
+    inlet_pressure: 1.0e6,
 };
 
 /// GUI solver defaults for `model_id`.

@@ -242,26 +242,12 @@ impl SolverDriver {
             let _ = solver.set_inlet_velocity(params.inlet_velocity);
             solver.set_u(initial_u);
             solver.set_p(initial_p);
-            if params.pressure_inlet {
-                // Pressure-inlet nozzle: seed a linear gauge-pressure ramp
-                // inlet_pressure -> 0 (inlet -> outlet) so step 0 already carries the
-                // driving gradient, instead of launching an acoustic pulse from a flat
-                // field. Uniform-axial U (set_u above, from the caller's IC) completes
-                // the near-steady start. Cuts the start-up transient (validated in the
-                // pressure-inlet probe).
-                let x_min = mesh.cell_cx.iter().cloned().fold(f64::INFINITY, f64::min);
-                let x_max = mesh
-                    .cell_cx
-                    .iter()
-                    .cloned()
-                    .fold(f64::NEG_INFINITY, f64::max);
-                let span = (x_max - x_min).max(1e-12);
-                let p0 = params.inlet_pressure as f64;
-                let ramp: Vec<f64> = (0..n_cells)
-                    .map(|c| p0 * (1.0 - (mesh.cell_cx[c] - x_min) / span))
-                    .collect();
-                let _ = solver.set_field_scalar("p", &ramp);
-            }
+            // Pressure-inlet nozzle: DEVELOP FROM SCRATCH. The IC is a quiescent field
+            // (rest velocity from the caller + flat gauge p=0 from `set_p` above); the
+            // flow accelerates purely from the pinned inlet pressure (applied in
+            // `apply_params`). We deliberately do NOT seed a spatial pressure ramp or a
+            // freestream velocity: at the rocket-scale drop the throat chokes and the
+            // supersonic branch forms from rest (validated in `nozzle_from_rest_probe`).
             // All-Mach: seed the extra state fields the bare incompressible path has
             // no concept of. `psi` (compressibility = 1/c^2) activates the
             // `ddt(psi,p)` term and sets the Mach regime; `rho` MUST start at the

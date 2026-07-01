@@ -106,6 +106,9 @@ pub struct FgmresCore<'a> {
     pub b_indirect_args: &'a wgpu::Buffer,
     pub b_params: &'a wgpu::Buffer,
     pub b_iter_params: &'a wgpu::Buffer,
+    /// Dedicated Reduce-Final params/iter-params (see `bg_params_reduce`).
+    pub b_params_reduce: &'a wgpu::Buffer,
+    pub b_iter_params_hess: &'a wgpu::Buffer,
     pub b_params_table_iter: &'a wgpu::Buffer,
     pub b_params_table_reduce: &'a wgpu::Buffer,
     pub b_iter_table_j: &'a wgpu::Buffer,
@@ -124,6 +127,8 @@ pub struct FgmresCore<'a> {
     pub bg_matrix: &'a wgpu::BindGroup,
     pub bg_precond: &'a wgpu::BindGroup,
     pub bg_params: &'a wgpu::BindGroup,
+    /// Reduce-Final group-3 bind group (dedicated reduce/hessenberg buffers).
+    pub bg_params_reduce: &'a wgpu::BindGroup,
     pub bg_logic: &'a wgpu::BindGroup,
     pub bg_logic_params: &'a wgpu::BindGroup,
     pub bg_cgs: &'a wgpu::BindGroup,
@@ -179,6 +184,10 @@ pub struct FgmresWorkspace {
     b_indirect_args: wgpu::Buffer,
     b_params: wgpu::Buffer,
     b_iter_params: wgpu::Buffer,
+    /// Dedicated params/iter-params for the Reduce-Final pass, so the inner loop
+    /// never swaps `b_params`/`b_iter_params` mid-iteration (see `bg_params_reduce`).
+    b_params_reduce: wgpu::Buffer,
+    b_iter_params_hess: wgpu::Buffer,
     b_params_table_iter: wgpu::Buffer,
     b_params_table_reduce: wgpu::Buffer,
     b_iter_table_j: wgpu::Buffer,
@@ -204,6 +213,9 @@ pub struct FgmresWorkspace {
     bg_matrix: wgpu::BindGroup,
     bg_precond: wgpu::BindGroup,
     bg_params: wgpu::BindGroup,
+    /// Group-3 bind group for the Reduce-Final pass, binding the dedicated
+    /// `b_params_reduce` / `b_iter_params_hess` (same layout as `bg_params`).
+    bg_params_reduce: wgpu::BindGroup,
     bg_logic: wgpu::BindGroup,
     bg_logic_params: wgpu::BindGroup,
     bg_cgs: wgpu::BindGroup,
@@ -383,6 +395,25 @@ impl FgmresWorkspace {
             mapped_at_creation: false,
         });
 
+        // Dedicated per-iteration param buffers for the Reduce-Final pass, so the
+        // inner loop never has to swap b_params (iter <-> reduce) or b_iter_params
+        // (j <-> hessenberg-index) mid-iteration. Holding each distinct value in
+        // its own buffer lets all four table-select copies batch at the iteration
+        // top (one blit section instead of three) — see the inner loop and the
+        // `bg_params_reduce` bind group below.
+        let b_params_reduce = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES params (reduce)")),
+            size: std::mem::size_of::<RawFgmresParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let b_iter_params_hess = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label_prefix} FGMRES iter params (hessenberg)")),
+            size: std::mem::size_of::<IterParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let table_capacity = max_restart.max(1) as u64;
         let b_params_table_iter = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label_prefix} FGMRES params table iter")),
@@ -557,6 +588,29 @@ impl FgmresWorkspace {
             .map_err(|e| format!("FGMRES params BG creation failed: {e}"))?
         };
 
+        // Same group-3 layout as `bg_params`, but with the params/iter_params
+        // uniforms bound to the dedicated reduce/hessenberg buffers. Only the
+        // Reduce-Final pass uses it (see the inner loop); scalars/hessenberg/y_sol
+        // are bound to the identical buffers so it still writes hessenberg and reads
+        // scalars exactly as `bg_params` does.
+        let bg_params_reduce = {
+            let registry = ResourceRegistry::new()
+                .with_buffer("params", &b_params_reduce)
+                .with_buffer("scalars", &b_scalars)
+                .with_buffer("iter_params", &b_iter_params_hess)
+                .with_buffer("hessenberg", &b_hessenberg)
+                .with_buffer("y_sol", &b_y);
+            wgsl_reflect::create_bind_group_from_bindings(
+                device,
+                &format!("{label_prefix} FGMRES params BG (reduce)"),
+                &bgl_params,
+                ops_bindings,
+                3,
+                |name| registry.resolve(name),
+            )
+            .map_err(|e| format!("FGMRES params (reduce) BG creation failed: {e}"))?
+        };
+
         let logic_update_src = kernel_registry::kernel_source_by_id(
             "",
             KernelId::GMRES_LOGIC_UPDATE_HESSENBERG_GIVENS,
@@ -698,6 +752,8 @@ impl FgmresWorkspace {
             b_indirect_args,
             b_params,
             b_iter_params,
+            b_params_reduce,
+            b_iter_params_hess,
             b_params_table_iter,
             b_params_table_reduce,
             b_iter_table_j,
@@ -718,6 +774,7 @@ impl FgmresWorkspace {
             bg_matrix,
             bg_precond,
             bg_params,
+            bg_params_reduce,
             bg_logic,
             bg_logic_params,
             bg_cgs,
@@ -763,6 +820,8 @@ impl FgmresWorkspace {
             b_indirect_args: &self.b_indirect_args,
             b_params: &self.b_params,
             b_iter_params: &self.b_iter_params,
+            b_params_reduce: &self.b_params_reduce,
+            b_iter_params_hess: &self.b_iter_params_hess,
             b_params_table_iter: &self.b_params_table_iter,
             b_params_table_reduce: &self.b_params_table_reduce,
             b_iter_table_j: &self.b_iter_table_j,
@@ -777,6 +836,7 @@ impl FgmresWorkspace {
             bg_matrix: &self.bg_matrix,
             bg_precond: &self.bg_precond,
             bg_params: &self.bg_params,
+            bg_params_reduce: &self.bg_params_reduce,
             bg_logic: &self.bg_logic,
             bg_logic_params: &self.bg_logic_params,
             bg_cgs: &self.bg_cgs,
@@ -2344,12 +2404,41 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         let params_offset = (j as u64) * FGMRES_PARAMS_STRIDE_BYTES;
         let iter_offset = (j as u64) * FGMRES_ITER_PARAMS_STRIDE_BYTES;
 
+        // Select this column's params into their dedicated buffers in ONE batched
+        // blit section at the iteration top. Because each distinct concurrently-live
+        // value now has its own buffer (b_params=iter, b_params_reduce=reduce,
+        // b_iter_params=j, b_iter_params_hess=hessenberg-index), nothing has to be
+        // swapped or restored mid-iteration, so all the compute passes below run as
+        // one uninterrupted compute-encoder run (3 blit sections -> 1). Byte-identical:
+        // every pass reads the same table row it read before (only the reduce-final
+        // pass rebinds to the dedicated buffers via `bg_params_reduce`).
         encoder.copy_buffer_to_buffer(
             core.b_params_table_iter,
             params_offset,
             core.b_params,
             0,
             FGMRES_PARAMS_STRIDE_BYTES,
+        );
+        encoder.copy_buffer_to_buffer(
+            core.b_params_table_reduce,
+            params_offset,
+            core.b_params_reduce,
+            0,
+            FGMRES_PARAMS_STRIDE_BYTES,
+        );
+        encoder.copy_buffer_to_buffer(
+            core.b_iter_table_j,
+            iter_offset,
+            core.b_iter_params,
+            0,
+            FGMRES_ITER_PARAMS_STRIDE_BYTES,
+        );
+        encoder.copy_buffer_to_buffer(
+            core.b_iter_table_hessenberg,
+            iter_offset,
+            core.b_iter_params_hess,
+            0,
+            FGMRES_ITER_PARAMS_STRIDE_BYTES,
         );
 
         let z_buf = z_storage_binding(core.b_z_storage, core.z_stride, vector_bytes, j);
@@ -2453,20 +2542,10 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         // Cached column-independent bind group `(vec_x=dot_partial, vec_y=temp, vec_z=temp)`.
         let reduce_bg = core.reduce_bg;
 
-        encoder.copy_buffer_to_buffer(
-            core.b_params_table_reduce,
-            params_offset,
-            core.b_params,
-            0,
-            FGMRES_PARAMS_STRIDE_BYTES,
-        );
-        encoder.copy_buffer_to_buffer(
-            core.b_iter_table_hessenberg,
-            iter_offset,
-            core.b_iter_params,
-            0,
-            FGMRES_ITER_PARAMS_STRIDE_BYTES,
-        );
+        // Reduce-Final reads the *reduce* params (n=num_dot_groups) and the
+        // hessenberg-index iter_params — supplied by `bg_params_reduce`, which binds
+        // the dedicated `b_params_reduce` / `b_iter_params_hess` buffers written at
+        // the loop top. (Was: two mid-iteration copies clobbering b_params/b_iter_params.)
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("FGMRES Reduce Final & Finish Norm"),
@@ -2476,7 +2555,7 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
             pass.set_bind_group(0, reduce_bg, &[]);
             pass.set_bind_group(1, core.bg_matrix, &[]);
             pass.set_bind_group(2, core.bg_precond, &[]);
-            pass.set_bind_group(3, core.bg_params, &[]);
+            pass.set_bind_group(3, core.bg_params_reduce, &[]);
             pass.dispatch_workgroups(1, 1, 1);
         }
 
@@ -2484,20 +2563,10 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         // `(vec_x=w, vec_y=basis[j+1], vec_z=temp)` built inline before.
         let scale_bg = &core.scale_bgs[j];
 
-        encoder.copy_buffer_to_buffer(
-            core.b_params_table_iter,
-            params_offset,
-            core.b_params,
-            0,
-            FGMRES_PARAMS_STRIDE_BYTES,
-        );
-        encoder.copy_buffer_to_buffer(
-            core.b_iter_table_j,
-            iter_offset,
-            core.b_iter_params,
-            0,
-            FGMRES_ITER_PARAMS_STRIDE_BYTES,
-        );
+        // Normalize reads b_params.n = n (iter value) — still live from the loop-top
+        // copy (b_params was never clobbered because the reduce pass used its own
+        // buffer), and b_iter_params = j (also from the loop top). Both mid-iteration
+        // "restore" copies that used to sit here are now gone.
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("FGMRES Normalize & Copy"),

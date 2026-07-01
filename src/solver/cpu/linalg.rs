@@ -442,14 +442,6 @@ impl Preconditioner for SchurPrecond<'_> {
     }
 }
 
-/// Identity preconditioner (unpreconditioned Krylov).
-pub struct IdentityPrecond;
-impl Preconditioner for IdentityPrecond {
-    fn apply(&self, r: &[f64], z: &mut [f64]) {
-        z.copy_from_slice(r);
-    }
-}
-
 /// Restarted, flexible GMRES — FGMRES(`restart`) — over a block-CSR matrix with
 /// a pluggable (possibly nonlinear/iterative) preconditioner. Mirrors the GPU's
 /// FGMRES(60) so a variable preconditioner (the Schur complement smoother in

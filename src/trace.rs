@@ -122,6 +122,8 @@ pub enum TraceMeshType {
     CutCell,
     Delaunay,
     Voronoi,
+    /// Body-fitted curvilinear structured grid (nozzle-only).
+    Fitted,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

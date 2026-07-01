@@ -210,6 +210,88 @@ impl Geometry for BackwardsStep {
     }
 }
 
+/// Converging–diverging nozzle: a channel with a flat bottom wall at `y = 0` and
+/// a shaped top wall at `y = nozzle_height(x)`. The channel narrows from `height`
+/// at the inlet to `throat_height` at `throat_frac * length`, then widens to
+/// `exit_height`. This is the same wall profile the body-fitted structured mesh
+/// (`generate_structured_nozzle_mesh`) uses, so cut-cell / Delaunay / Voronoi
+/// meshes conform to an identical geometry.
+///
+/// The bounding box is `[0, length] × [0, height]` (the inlet is the tallest
+/// section), which is what `MeshgenTolerances::classify_boundary` expects: the
+/// left edge is tagged `Inlet`, the right edge `Outlet`, and the flat bottom
+/// `Wall`. The curved top wall sits below `y = height` everywhere except the
+/// inlet, so it is left untagged by `classify_boundary` and must be closed as a
+/// no-slip wall by the caller (cut-cell does this internally; see
+/// `generate_cut_cell_mesh`).
+pub struct Nozzle {
+    pub length: f64,
+    /// Inlet height, and the bounding-box height.
+    pub height: f64,
+    pub throat_height: f64,
+    pub throat_frac: f64,
+    pub exit_height: f64,
+}
+
+impl Nozzle {
+    /// Top-wall height at absolute position `x` (delegates to the shared profile
+    /// so the SDF matches the structured mesh exactly).
+    fn top(&self, x: f64) -> f64 {
+        let xi = (x / self.length).clamp(0.0, 1.0);
+        crate::solver::mesh::structured::nozzle_height(
+            xi,
+            self.height,
+            self.throat_height,
+            self.throat_frac,
+            self.exit_height,
+        )
+    }
+}
+
+impl Geometry for Nozzle {
+    fn is_inside(&self, p: &Point2<f64>) -> bool {
+        self.sdf(p) < 0.0
+    }
+
+    fn sdf(&self, p: &Point2<f64>) -> f64 {
+        // Intersection of four half-spaces: x>=0, x<=length, y>=0, y<=top(x).
+        // Each term is a signed distance (negative inside), and the intersection
+        // SDF is their max. The top term uses the vertical gap to the wall — an
+        // approximation for the (gently sloped) curved wall, exact elsewhere.
+        let d_left = -p.x;
+        let d_right = p.x - self.length;
+        let d_bottom = -p.y;
+        let d_top = p.y - self.top(p.x);
+        d_left.max(d_right).max(d_bottom).max(d_top)
+    }
+
+    fn get_boundary_points(&self, spacing: f64) -> Vec<Point2<f64>> {
+        let mut points = Vec::new();
+
+        // Bottom (flat) and top (curved) walls, sampled along x.
+        let nx = (self.length / spacing).ceil().max(1.0) as usize;
+        for i in 0..=nx {
+            let x = (i as f64 * spacing).min(self.length);
+            points.push(Point2::new(x, 0.0));
+            points.push(Point2::new(x, self.top(x)));
+        }
+
+        // Inlet (left, full height) and outlet (right, exit height) edges.
+        let n_in = (self.height / spacing).ceil().max(1.0) as usize;
+        for i in 0..=n_in {
+            let y = (i as f64 * spacing).min(self.height);
+            points.push(Point2::new(0.0, y));
+        }
+        let n_out = (self.exit_height / spacing).ceil().max(1.0) as usize;
+        for i in 0..=n_out {
+            let y = (i as f64 * spacing).min(self.exit_height);
+            points.push(Point2::new(self.length, y));
+        }
+
+        points
+    }
+}
+
 pub struct RectangularChannel {
     pub length: f64,
     pub height: f64,

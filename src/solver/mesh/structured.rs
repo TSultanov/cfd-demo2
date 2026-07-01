@@ -796,7 +796,7 @@ pub fn generate_structured_trapezoid_mesh(
 /// then `h_exit` at the outlet. Cosine blends give zero wall slope at the throat
 /// (no spurious corner shock). A diverging exit (`h_exit > h_throat`) is what lets
 /// the flow keep accelerating past M=1.
-fn nozzle_height(xi: f64, h_in: f64, h_throat: f64, throat_frac: f64, h_exit: f64) -> f64 {
+pub fn nozzle_height(xi: f64, h_in: f64, h_throat: f64, throat_frac: f64, h_exit: f64) -> f64 {
     use std::f64::consts::PI;
     if xi <= throat_frac {
         let t = if throat_frac > 0.0 { xi / throat_frac } else { 1.0 };

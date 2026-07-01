@@ -1,6 +1,7 @@
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_delaunay_mesh, generate_structured_nozzle_mesh,
     generate_voronoi_mesh, BackwardsStep, BoundarySides, BoundaryType, ChannelWithObstacle, Mesh,
+    Nozzle,
 };
 use crate::solver::model::{
     all_models, compressible_model_with_eos, ModelPreconditionerSpec, ModelSpec,
@@ -51,6 +52,37 @@ enum MeshType {
     CutCell,
     Delaunay,
     Voronoi,
+    /// Body-fitted curvilinear structured grid. Only meaningful — and only
+    /// offered in the UI — for the converging–diverging nozzle geometry, whose
+    /// walls it conforms to exactly (see `generate_structured_nozzle_mesh`).
+    Fitted,
+}
+
+impl MeshType {
+    /// The fitted (structured) mesh is a uniform curvilinear grid: it has no
+    /// local refinement or grading, so only a single target cell size applies.
+    /// The unstructured meshers honour the full min/max/growth sizing controls.
+    fn supports_size_grading(self) -> bool {
+        !matches!(self, MeshType::Fitted)
+    }
+}
+
+/// Build a slider whose range expands to include the current value and which
+/// never snaps a hand-typed value back to an end (`SliderClamping::Never`).
+///
+/// The user can type any value into the drag-value field — finer or coarser than
+/// the nominal `base` range — and it stays put; the visible track adapts around it
+/// so the handle stays reachable. Dragging the handle is still bounded to the
+/// (adapted) track. Consumers add `.text(…)`, `.logarithmic(…)`, etc. as usual.
+fn adaptive_slider<Num: egui::emath::Numeric>(
+    value: &mut Num,
+    base: std::ops::RangeInclusive<Num>,
+) -> egui::Slider<'_> {
+    let current = value.to_f64();
+    let lo = (*base.start()).to_f64().min(current);
+    let hi = (*base.end()).to_f64().max(current);
+    egui::Slider::new(value, Num::from_f64(lo)..=Num::from_f64(hi))
+        .clamping(egui::SliderClamping::Never)
 }
 
 impl Default for MeshType {
@@ -568,6 +600,7 @@ impl CFDApp {
             MeshType::CutCell => tracefmt::TraceMeshType::CutCell,
             MeshType::Delaunay => tracefmt::TraceMeshType::Delaunay,
             MeshType::Voronoi => tracefmt::TraceMeshType::Voronoi,
+            MeshType::Fitted => tracefmt::TraceMeshType::Fitted,
         };
 
         let stepping_mode = if self.model_caps.supports_eos_tuning {
@@ -808,11 +841,39 @@ impl CFDApp {
         growth_rate: f64,
         trace_init_events: &mut Vec<tracefmt::TraceInitEvent>,
     ) -> Mesh {
+        // The sizing sliders accept any hand-typed value (`SliderClamping::Never`),
+        // so sanitise before the values reach the mesh generators: sizes must be
+        // finite and positive, `min <= max`, and the growth rate at least 1. This
+        // keeps the UI free while preventing a NaN/∞/divide-by-zero, and — crucially
+        // for the UNSTRUCTURED meshers — bounding the base grid. `generate_cut_cell_mesh`
+        // et al. build an uncapped `(domain/max_cell_size)^2` base grid, so a tiny
+        // hand-typed size would OOM; the `MIN_CELL_SIZE` floor matches the old
+        // Always-clamped slider minimum (base grid ≲ few·1e6 cells on these domains).
+        // The fitted structured grid is unaffected: its resolution is bounded by the
+        // nx/ny clamp (≈5.9e-3 cell), coarser than this floor, so the floor never binds.
+        const MIN_CELL_SIZE: f64 = 1e-3;
+        let max_cell_size = if max_cell_size.is_finite() {
+            max_cell_size.max(MIN_CELL_SIZE)
+        } else {
+            0.05
+        };
+        let min_cell_size = if min_cell_size.is_finite() {
+            min_cell_size.clamp(MIN_CELL_SIZE, max_cell_size)
+        } else {
+            max_cell_size
+        };
+        let growth_rate = if growth_rate.is_finite() {
+            growth_rate.max(1.0)
+        } else {
+            1.2
+        };
+
         fn mesh_type_id(mesh_type: MeshType) -> &'static str {
             match mesh_type {
                 MeshType::CutCell => "cutcell",
                 MeshType::Delaunay => "delaunay",
                 MeshType::Voronoi => "voronoi",
+                MeshType::Fitted => "fitted",
             }
         }
 
@@ -844,8 +905,10 @@ impl CFDApp {
                 };
 
                 let gen_start = std::time::Instant::now();
+                // `Fitted` is a nozzle-only option; it never reaches this geometry
+                // from the UI, so fall back to the cut-cell mesher if it does.
                 let mut mesh = match mesh_type {
-                    MeshType::CutCell => generate_cut_cell_mesh(
+                    MeshType::CutCell | MeshType::Fitted => generate_cut_cell_mesh(
                         &geo,
                         min_cell_size,
                         max_cell_size,
@@ -902,8 +965,10 @@ impl CFDApp {
                 };
 
                 let gen_start = std::time::Instant::now();
+                // `Fitted` is a nozzle-only option; it never reaches this geometry
+                // from the UI, so fall back to the cut-cell mesher if it does.
                 let mut mesh = match mesh_type {
-                    MeshType::CutCell => generate_cut_cell_mesh(
+                    MeshType::CutCell | MeshType::Fitted => generate_cut_cell_mesh(
                         &geo,
                         min_cell_size,
                         max_cell_size,
@@ -939,7 +1004,7 @@ impl CFDApp {
                 );
 
                 let smooth_iters = match mesh_type {
-                    MeshType::CutCell => 100,
+                    MeshType::CutCell | MeshType::Fitted => 100,
                     MeshType::Delaunay | MeshType::Voronoi => 50,
                 };
 
@@ -955,49 +1020,135 @@ impl CFDApp {
                 mesh
             }
             GeometryType::Nozzle => {
-                // Converging–diverging nozzle: a smooth structured channel (no cut
-                // cells), area ratio exit/throat = 2, matching the validated
-                // `allmach_thermal_supersonic_test`. The mesh-type radio is ignored
-                // (structured only). Resolution is derived from the cell-size slider
-                // but clamped so the throat is always resolved enough to choke.
+                // Converging–diverging nozzle, area ratio exit/throat = 2, matching
+                // the validated `allmach_thermal_supersonic_test`. `Fitted` builds
+                // the body-fitted structured grid (the validated default); the
+                // unstructured mesh types conform to the same wall profile via the
+                // `Nozzle` SDF geometry and honour the full sizing controls.
                 let length = 3.0;
                 let height = 1.0;
                 let throat_h = 0.40;
                 let throat_frac = 0.40;
                 let exit_h = 0.80;
-                let nx = ((length / max_cell_size).round() as usize).clamp(64, 192);
-                let ny = ((height / max_cell_size).round() as usize).clamp(24, 64);
 
-                let gen_start = std::time::Instant::now();
-                let mesh = generate_structured_nozzle_mesh(
-                    nx,
-                    ny,
-                    length,
-                    height,
-                    throat_h,
-                    throat_frac,
-                    exit_h,
-                    BoundarySides {
-                        left: BoundaryType::Inlet,
-                        right: BoundaryType::Outlet,
-                        bottom: BoundaryType::Wall,
-                        top: BoundaryType::Wall,
-                    },
-                );
-                CFDApp::push_trace_init_event(
-                    trace_init_events,
-                    format!("mesh.generate.{geometry}.structured"),
-                    gen_start.elapsed(),
-                    Some(format!(
-                        "nx={nx} ny={ny} area_ratio={:.2} cells={} faces={} vertices={}",
-                        exit_h / throat_h,
-                        mesh.num_cells(),
-                        mesh.num_faces(),
-                        mesh.num_vertices()
-                    )),
-                );
+                match mesh_type {
+                    MeshType::Fitted => {
+                        // Uniform curvilinear structured grid. Resolution is derived
+                        // from the (target) cell-size slider. The lower clamp keeps the
+                        // throat resolved enough to choke; the upper clamp lets the user
+                        // drive the mesh much finer than before (down to ~0.006) while
+                        // still bounding a hand-typed size so it can't blow up memory.
+                        let nx = ((length / max_cell_size).round() as usize).clamp(64, 512);
+                        let ny = ((height / max_cell_size).round() as usize).clamp(24, 192);
 
-                mesh
+                        let gen_start = std::time::Instant::now();
+                        let mesh = generate_structured_nozzle_mesh(
+                            nx,
+                            ny,
+                            length,
+                            height,
+                            throat_h,
+                            throat_frac,
+                            exit_h,
+                            BoundarySides {
+                                left: BoundaryType::Inlet,
+                                right: BoundaryType::Outlet,
+                                bottom: BoundaryType::Wall,
+                                top: BoundaryType::Wall,
+                            },
+                        );
+                        CFDApp::push_trace_init_event(
+                            trace_init_events,
+                            format!("mesh.generate.{geometry}.{mesh_kind}"),
+                            gen_start.elapsed(),
+                            Some(format!(
+                                "nx={nx} ny={ny} area_ratio={:.2} cells={} faces={} vertices={}",
+                                exit_h / throat_h,
+                                mesh.num_cells(),
+                                mesh.num_faces(),
+                                mesh.num_vertices()
+                            )),
+                        );
+
+                        mesh
+                    }
+                    MeshType::CutCell | MeshType::Delaunay | MeshType::Voronoi => {
+                        // Unstructured mesh conforming to the nozzle SDF. The bounding
+                        // box is the inlet-height rectangle; the mesher tags the left
+                        // edge Inlet, the right edge Outlet, and the flat bottom Wall.
+                        let domain_size = Vector2::new(length, height);
+                        let geo = Nozzle {
+                            length,
+                            height,
+                            throat_height: throat_h,
+                            throat_frac,
+                            exit_height: exit_h,
+                        };
+
+                        let gen_start = std::time::Instant::now();
+                        let mut mesh = match mesh_type {
+                            MeshType::Delaunay => generate_delaunay_mesh(
+                                &geo,
+                                min_cell_size,
+                                max_cell_size,
+                                growth_rate,
+                                domain_size,
+                            ),
+                            MeshType::Voronoi => generate_voronoi_mesh(
+                                &geo,
+                                min_cell_size,
+                                max_cell_size,
+                                growth_rate,
+                                domain_size,
+                            ),
+                            // CutCell (and the unreachable Fitted, already handled).
+                            _ => generate_cut_cell_mesh(
+                                &geo,
+                                min_cell_size,
+                                max_cell_size,
+                                growth_rate,
+                                domain_size,
+                            ),
+                        };
+                        CFDApp::push_trace_init_event(
+                            trace_init_events,
+                            format!("mesh.generate.{geometry}.{mesh_kind}"),
+                            gen_start.elapsed(),
+                            Some(format!(
+                                "min={min_cell_size:.4e} max={max_cell_size:.4e} growth={growth_rate:.3} cells={} faces={} vertices={}",
+                                mesh.num_cells(),
+                                mesh.num_faces(),
+                                mesh.num_vertices()
+                            )),
+                        );
+
+                        let smooth_iters = match mesh_type {
+                            MeshType::Delaunay | MeshType::Voronoi => 50,
+                            _ => 100,
+                        };
+                        let smooth_start = std::time::Instant::now();
+                        mesh.smooth(&geo, 0.3, smooth_iters);
+                        CFDApp::push_trace_init_event(
+                            trace_init_events,
+                            format!("mesh.smooth.{geometry}.{mesh_kind}"),
+                            smooth_start.elapsed(),
+                            Some(format!("factor=0.3 iters={smooth_iters}")),
+                        );
+
+                        // The curved top wall lies below the bounding-box top, so
+                        // `classify_boundary` leaves it untagged. Cut-cell closes such
+                        // faces internally, but Delaunay/Voronoi do not — tag every
+                        // remaining open (no-neighbour, untyped) face as a no-slip
+                        // wall so the nozzle contour is a solid boundary.
+                        for f in 0..mesh.num_faces() {
+                            if mesh.face_neighbor[f].is_none() && mesh.face_boundary[f].is_none() {
+                                mesh.face_boundary[f] = Some(BoundaryType::Wall);
+                            }
+                        }
+
+                        mesh
+                    }
+                }
             }
         };
 
@@ -1876,11 +2027,19 @@ impl eframe::App for CFDApp {
                             // defaults (the nozzle override sets the choking inlet speed +
                             // sub-critical back-pressure) and rebuild — mirroring the Model
                             // dropdown's apply-defaults-then-reinit behaviour.
-                            if self.selected_geometry == GeometryType::Nozzle
-                                && self.model_id != "allmach_pressure"
-                                && self.model_id != "allmach_thermal"
-                            {
-                                self.model_id = "allmach_thermal";
+                            if self.selected_geometry == GeometryType::Nozzle {
+                                if self.model_id != "allmach_pressure"
+                                    && self.model_id != "allmach_thermal"
+                                {
+                                    self.model_id = "allmach_thermal";
+                                }
+                                // Default the nozzle to the body-fitted structured
+                                // grid (the validated configuration). The user can
+                                // still switch to an unstructured mesh below.
+                                self.mesh_type = MeshType::Fitted;
+                            } else if self.mesh_type == MeshType::Fitted {
+                                // `Fitted` is nozzle-only; fall back for other shapes.
+                                self.mesh_type = MeshType::CutCell;
                             }
                             self.apply_model_defaults();
                             self.init_solver();
@@ -1889,19 +2048,63 @@ impl eframe::App for CFDApp {
 
                     ui.group(|ui| {
                         ui.label("Mesh Parameters");
-                        ui.add(
-                            egui::Slider::new(&mut self.min_cell_size, 0.001..=self.max_cell_size)
+                        // The fitted (structured) mesh is a uniform grid: only a single
+                        // target cell size applies, so hide the min-size / growth-rate
+                        // controls it does not honour.
+                        let show_grading = self.mesh_type.supports_size_grading();
+                        if show_grading {
+                            ui.add(
+                                adaptive_slider(
+                                    &mut self.min_cell_size,
+                                    0.001..=self.max_cell_size,
+                                )
                                 .text("Min Cell Size"),
-                        );
+                            );
+                        }
+                        // For the fitted grid the sole control is the target cell
+                        // size; give it a low floor (and see the raised nx/ny clamp in
+                        // `build_mesh_with`) so the user can drive the mesh much finer
+                        // than the old 0.025 lower bound — and finer still by typing.
+                        let cell_size_base = if show_grading {
+                            self.min_cell_size..=0.5
+                        } else {
+                            0.002..=0.5
+                        };
                         ui.add(
-                            egui::Slider::new(&mut self.max_cell_size, self.min_cell_size..=0.5)
-                                .text("Max Cell Size"),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut self.growth_rate, 1.0..=2.0).text("Growth Rate"),
-                        );
+                            adaptive_slider(&mut self.max_cell_size, cell_size_base).text(
+                                if show_grading {
+                                    "Max Cell Size"
+                                } else {
+                                    "Cell Size"
+                                },
+                            ),
+                        )
+                        .on_hover_text(if show_grading {
+                            "Upper bound on cell size (coarse regions). Type any value \
+                             to go beyond the slider ends."
+                        } else {
+                            "Target cell size for the structured grid (sets resolution). \
+                             Type any value to go finer than the slider end."
+                        });
+                        if show_grading {
+                            ui.add(
+                                adaptive_slider(&mut self.growth_rate, 1.0..=2.0)
+                                    .text("Growth Rate"),
+                            );
+                        }
                         ui.separator();
                         ui.label("Mesh Type");
+                        // The body-fitted structured grid is only meaningful for the
+                        // nozzle (it conforms to the CD-nozzle walls), so offer it only
+                        // there. The unstructured meshers work for every geometry.
+                        if self.selected_geometry == GeometryType::Nozzle {
+                            ui.radio_value(&mut self.mesh_type, MeshType::Fitted, "Fitted")
+                                .on_hover_text(
+                                    "Body-fitted curvilinear structured grid conforming to \
+                                     the nozzle walls. The validated configuration — \
+                                     recommended for this case.",
+                                );
+                        }
                         ui.radio_value(&mut self.mesh_type, MeshType::CutCell, "CutCell");
                         ui.radio_value(&mut self.mesh_type, MeshType::Delaunay, "Delaunay");
                         ui.radio_value(&mut self.mesh_type, MeshType::Voronoi, "Voronoi");
@@ -1929,7 +2132,7 @@ impl eframe::App for CFDApp {
                         let mut density = self.current_fluid.density;
                         if ui
                             .add(
-                                egui::Slider::new(&mut density, 0.1..=20000.0)
+                                adaptive_slider(&mut density, 0.1..=20000.0)
                                     .text("Density (kg/m³)"),
                             )
                             .changed()
@@ -1949,7 +2152,7 @@ impl eframe::App for CFDApp {
                         let mut viscosity = self.current_fluid.viscosity;
                         if ui
                             .add(
-                                egui::Slider::new(&mut viscosity, 1e-6..=0.1)
+                                adaptive_slider(&mut viscosity, 1e-6..=0.1)
                                     .logarithmic(true)
                                     .text("Viscosity (Pa·s)"),
                             )
@@ -1966,7 +2169,7 @@ impl eframe::App for CFDApp {
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut self.inlet_velocity, 0.0..=10.0)
+                                adaptive_slider(&mut self.inlet_velocity, 0.0..=10.0)
                                     .text("Inlet Velocity (m/s)"),
                             )
                             .changed()
@@ -2032,7 +2235,7 @@ impl eframe::App for CFDApp {
                                 let mut p_in = self.inlet_pressure;
                                 if ui
                                     .add(
-                                        egui::Slider::new(&mut p_in, 0.0..=0.12)
+                                        adaptive_slider(&mut p_in, 0.0..=0.12)
                                             .text("Inlet pressure (gauge)"),
                                     )
                                     .on_hover_text(
@@ -2051,7 +2254,7 @@ impl eframe::App for CFDApp {
                                 let mut p_back = self.outlet_back_pressure;
                                 if ui
                                     .add(
-                                        egui::Slider::new(&mut p_back, -0.05..=0.0)
+                                        adaptive_slider(&mut p_back, -0.05..=0.0)
                                             .text("Outlet back-pressure (gauge)"),
                                     )
                                     .on_hover_text(
@@ -2129,7 +2332,7 @@ impl eframe::App for CFDApp {
 
                         if ui
                             .add(
-                                egui::Slider::new(&mut self.timestep, 0.0001..=0.1)
+                                adaptive_slider(&mut self.timestep, 0.0001..=0.1)
                                     .text("Timestep (s)"),
                             )
                             .changed()
@@ -2146,7 +2349,7 @@ impl eframe::App for CFDApp {
                         if self.adaptive_dt {
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut self.target_cfl, 0.1..=1.0)
+                                    adaptive_slider(&mut self.target_cfl, 0.1..=1.0)
                                         .text("Target CFL"),
                                 )
                                 .changed()
@@ -2164,7 +2367,7 @@ impl eframe::App for CFDApp {
                             if self.model_caps.supports_outer_iters
                                 && ui
                                     .add(
-                                        egui::Slider::new(&mut self.outer_iters, 1..=100)
+                                        adaptive_slider(&mut self.outer_iters, 1..=100)
                                             .text("Outer Iterations"),
                                     )
                                     .changed()
@@ -2198,7 +2401,7 @@ impl eframe::App for CFDApp {
                                 ui.add_enabled_ui(self.dual_time, |ui| {
                                     if ui
                                         .add(
-                                            egui::Slider::new(&mut self.dtau, 1e-8..=0.1)
+                                            adaptive_slider(&mut self.dtau, 1e-8..=0.1)
                                                 .logarithmic(true)
                                                 .text("dtau (s)"),
                                         )
@@ -2253,7 +2456,7 @@ impl eframe::App for CFDApp {
                                 ui.add_enabled_ui(theta_enabled, |ui| {
                                     if ui
                                         .add(
-                                            egui::Slider::new(
+                                            adaptive_slider(
                                                 &mut self.low_mach_theta_floor,
                                                 1e-8f32..=1e-2f32,
                                             )
@@ -2276,7 +2479,7 @@ impl eframe::App for CFDApp {
                                 ui.add_enabled_ui(coupling_enabled, |ui| {
                                     if ui
                                         .add(
-                                            egui::Slider::new(
+                                            adaptive_slider(
                                                 &mut self.low_mach_pressure_coupling_alpha,
                                                 0.0f32..=1.0f32,
                                             )
@@ -2314,7 +2517,7 @@ impl eframe::App for CFDApp {
                         ui.add_enabled_ui(self.log_convergence, |ui| {
                             if ui
                                 .add(
-                                    egui::Slider::new(&mut self.log_every_steps, 1..=200)
+                                    adaptive_slider(&mut self.log_every_steps, 1..=200)
                                         .text("Log every N steps"),
                                 )
                                 .changed()
@@ -2517,7 +2720,7 @@ impl eframe::App for CFDApp {
                             if self.model_caps.supports_alpha_u
                                 && ui
                                     .add(
-                                        egui::Slider::new(&mut self.alpha_u, 0.1..=1.0)
+                                        adaptive_slider(&mut self.alpha_u, 0.1..=1.0)
                                             .text("α_U (Velocity)"),
                                     )
                                     .changed()
@@ -2534,7 +2737,7 @@ impl eframe::App for CFDApp {
                                     ui.label("α_P (Pressure): 1.0 (locked)");
                                 } else if ui
                                     .add(
-                                        egui::Slider::new(&mut self.alpha_p, 0.1..=1.0)
+                                        adaptive_slider(&mut self.alpha_p, 0.1..=1.0)
                                             .text("α_P (Pressure)"),
                                     )
                                     .changed()
@@ -2607,7 +2810,7 @@ impl eframe::App for CFDApp {
                                 "Transpiled (compiled) kernels",
                             );
                             ui.add(
-                                egui::Slider::new(&mut self.cpu_threads, 1..=16).text("Threads"),
+                                adaptive_slider(&mut self.cpu_threads, 1..=16).text("Threads"),
                             );
                             ui.checkbox(&mut self.cpu_simd, "SIMD linear-solve");
                             ui.label("Applied on Initialize / Reset.");

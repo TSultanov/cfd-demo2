@@ -39,7 +39,7 @@ fn air_eos() -> EosSpec {
 
 /// The shipped incompressible GUI default (`ui::model_defaults::INCOMPRESSIBLE`),
 /// reconstructed as a `RuntimeParams` so this harness needs no `ui` feature.
-fn incompressible_default_params() -> RuntimeParams {
+fn incompressible_default_params(outer_iters: u32) -> RuntimeParams {
     RuntimeParams {
         adaptive_dt: true,
         target_cfl: 0.9,
@@ -51,7 +51,7 @@ fn incompressible_default_params() -> RuntimeParams {
         time_scheme: TimeScheme::BDF2,
         // Model forces Schur internally; this is the GUI's default selection value.
         preconditioner: PreconditionerType::Jacobi,
-        outer_iters: 8,
+        outer_iters,
         outer_auto_converge: true,
         low_mach_model: GpuLowMachPrecondModel::Off,
         low_mach_theta_floor: 1e-6,
@@ -111,19 +111,22 @@ fn build_driver(mesh: &Mesh, params: &RuntimeParams) -> SolverDriver {
     driver
 }
 
-fn profile_case(name: &str, mesh: Mesh, steps: usize) {
-    let params = incompressible_default_params();
+fn profile_case(name: &str, mesh: Mesh, steps: usize, outer_iters: u32) {
+    let params = incompressible_default_params(outer_iters);
     let cells = mesh.num_cells();
     let mut driver = build_driver(&mesh, &params);
 
     println!("\n================================================================");
-    println!("  CASE: {name}  ({cells} cells, incompressible default)");
+    println!("  CASE: {name}  ({cells} cells, outer_iters={outer_iters})");
     println!("================================================================");
 
     // Warm up (compiles pipelines, settles adaptive dt).
     for i in 0..20 {
         driver.step(i % 5 == 0);
     }
+
+    // Shedding signature: max|u| at each readback (oscillates at the shedding freq).
+    let mut max_vels: Vec<f64> = Vec::new();
 
     // ---- Phase A: true per-step timing (no profiling overhead) --------------
     let mut solver_ms = 0.0f64;
@@ -141,11 +144,40 @@ fn profile_case(name: &str, mesh: Mesh, steps: usize) {
             lin_iter_sum += s.iterations as u64;
             lin_solves += 1;
         }
+        if let Some(rb) = &o.readback {
+            max_vels.push(rb.stats.max_vel);
+        }
         if o.readback.is_some() {
             last_readback = o.readback;
         }
     }
     let wall = wall.elapsed();
+
+    // Shedding statistics over the SECOND HALF of the run (past the startup
+    // transient): mean, std (oscillation amplitude), min/max, and a zero-crossing
+    // count of (max_vel - mean) as a crude shedding-frequency proxy.
+    if max_vels.len() >= 8 {
+        let tail = &max_vels[max_vels.len() / 2..];
+        let mean = tail.iter().sum::<f64>() / tail.len() as f64;
+        let var = tail.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / tail.len() as f64;
+        let std = var.sqrt();
+        let mn = tail.iter().cloned().fold(f64::INFINITY, f64::min);
+        let mx = tail.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let crossings = tail
+            .windows(2)
+            .filter(|w| (w[0] - mean).signum() != (w[1] - mean).signum())
+            .count();
+        println!(
+            "     SHED max|u| (tail n={}): mean={:.5e} std={:.3e} ({:.2}%) min={:.5e} max={:.5e} crossings={}",
+            tail.len(),
+            mean,
+            std,
+            100.0 * std / mean.abs().max(1e-30),
+            mn,
+            mx,
+            crossings
+        );
+    }
     let n = steps as f64;
     println!("\n  -- true timing ({steps} steps, unprofiled) --");
     println!("     wall/step        : {:.3} ms", wall.as_secs_f64() * 1e3 / n);
@@ -216,12 +248,20 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let case = args.get(1).map(|s| s.as_str()).unwrap_or("all");
     let steps: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(60);
+    // Optional arg 3: outer_iters override (default 8, the shipped value) for
+    // sweeping the outer-iteration count.
+    let outer_iters: u32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(8);
 
     if case == "backstep" || case == "all" {
-        profile_case("backstep (startup default)", backstep_mesh(), steps);
+        profile_case("backstep (startup default)", backstep_mesh(), steps, outer_iters);
     }
     if case == "obstacle" || case == "all" {
-        profile_case("channel-obstacle (vortex street)", obstacle_mesh(), steps);
+        profile_case(
+            "channel-obstacle (vortex street)",
+            obstacle_mesh(),
+            steps,
+            outer_iters,
+        );
     }
     let _ = std::io::stdout().flush();
 }

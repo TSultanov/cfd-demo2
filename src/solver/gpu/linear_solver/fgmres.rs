@@ -131,6 +131,14 @@ pub struct FgmresCore<'a> {
     pub bgl_vectors: &'a wgpu::BindGroupLayout,
     vector_bindings: &'static [wgsl_reflect::WgslBindingDesc],
 
+    /// Precomputed per-Arnoldi-column vector bind groups (see [`VectorBgCache`]).
+    /// The inner restart loop indexes these by column `j` instead of rebuilding
+    /// one bind group per iteration — the CPU hot spot of the coupled solve.
+    spmv_bgs: &'a [wgpu::BindGroup],
+    scale_bgs: &'a [wgpu::BindGroup],
+    norm_bg: &'a wgpu::BindGroup,
+    reduce_bg: &'a wgpu::BindGroup,
+
     pub pipeline_spmv: &'a wgpu::ComputePipeline,
     pub pipeline_axpby: &'a wgpu::ComputePipeline,
     pub pipeline_scale: &'a wgpu::ComputePipeline,
@@ -186,6 +194,9 @@ pub struct FgmresWorkspace {
 
     bgl_vectors: wgpu::BindGroupLayout,
     vector_bindings: &'static [wgsl_reflect::WgslBindingDesc],
+    /// Per-Arnoldi-column vector bind groups, built once at construction and
+    /// reused by every solve (see [`VectorBgCache`]).
+    vector_bg_cache: VectorBgCache,
     bgl_matrix: wgpu::BindGroupLayout,
     bgl_precond: wgpu::BindGroupLayout,
     bgl_params: wgpu::BindGroupLayout,
@@ -653,6 +664,23 @@ impl FgmresWorkspace {
             .map_err(|e| format!("FGMRES cgs BG creation failed: {e}"))?
         };
 
+        // Precompute the per-column vector bind groups once (see `VectorBgCache`),
+        // so the inner restart loop never rebuilds them.
+        let vector_bg_cache = build_vector_bg_cache(
+            device,
+            &bgl_vectors,
+            ops_bindings,
+            &b_basis,
+            &b_z_storage,
+            &b_w,
+            &b_temp,
+            &b_dot_partial,
+            basis_stride,
+            z_stride,
+            n,
+            max_restart,
+        );
+
         Ok(Self {
             max_restart,
             n,
@@ -683,6 +711,7 @@ impl FgmresWorkspace {
             b_x_snapshot,
             bgl_vectors,
             vector_bindings: ops_bindings,
+            vector_bg_cache,
             bgl_matrix,
             bgl_precond,
             bgl_params,
@@ -753,6 +782,10 @@ impl FgmresWorkspace {
             bg_cgs: &self.bg_cgs,
             bgl_vectors: &self.bgl_vectors,
             vector_bindings: self.vector_bindings,
+            spmv_bgs: &self.vector_bg_cache.spmv,
+            scale_bgs: &self.vector_bg_cache.scale,
+            norm_bg: &self.vector_bg_cache.norm,
+            reduce_bg: &self.vector_bg_cache.reduce,
             pipeline_spmv: &self.pipeline_spmv,
             pipeline_axpby: &self.pipeline_axpby,
             pipeline_scale: &self.pipeline_scale,
@@ -1418,6 +1451,96 @@ fn create_vector_bind_group<'a>(
         }
     })
     .unwrap_or_else(|e| panic!("{label} creation failed: {e}"))
+}
+
+/// Per-iteration vector bind groups, precomputed once at workspace construction
+/// and reused across every FGMRES solve.
+///
+/// The inner restart loop needs, for each Arnoldi column `j`, four `bgl_vectors`
+/// bind groups (SpMV input, norm-partial, norm-reduce, basis-normalize). Every one
+/// binds only workspace-owned buffers (`basis`, `z_storage`, `w`, `temp`,
+/// `dot_partial`) at fixed offsets, so they are identical on every solve. Building
+/// them per iteration was the dominant CPU cost of the coupled solve (~4 reflection
+/// `device.create_bind_group` calls × ~hundreds of iterations per step). Because a
+/// `wgpu::BindGroup` is an owned Arc handle (not a Rust borrow) these can live on
+/// the workspace and be indexed by `j` in the hot loop instead.
+struct VectorBgCache {
+    /// SpMV input `(vec_x=z_storage[j], vec_y=w, vec_z=temp)`, one per column `j`.
+    spmv: Vec<wgpu::BindGroup>,
+    /// Basis normalize/copy `(vec_x=w, vec_y=basis[j+1], vec_z=temp)`, per column `j`.
+    scale: Vec<wgpu::BindGroup>,
+    /// Norm-partial (column-independent): `(vec_x=w, vec_y=temp, vec_z=dot_partial)`.
+    norm: wgpu::BindGroup,
+    /// Norm-reduce (column-independent): `(vec_x=dot_partial, vec_y=temp, vec_z=temp)`.
+    reduce: wgpu::BindGroup,
+}
+
+/// Build the [`VectorBgCache`]. The `(vec_x, vec_y, vec_z)` operand order for each
+/// bind group MUST match the inner loop in
+/// [`encode_fgmres_solve_once_with_preconditioner`] exactly, so the cached bind
+/// groups are byte-for-byte substitutes for the ones that loop used to build.
+#[allow(clippy::too_many_arguments)]
+fn build_vector_bg_cache(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    bindings: &'static [wgsl_reflect::WgslBindingDesc],
+    b_basis: &wgpu::Buffer,
+    b_z_storage: &wgpu::Buffer,
+    b_w: &wgpu::Buffer,
+    b_temp: &wgpu::Buffer,
+    b_dot_partial: &wgpu::Buffer,
+    basis_stride: u64,
+    z_stride: u64,
+    n: u32,
+    max_restart: usize,
+) -> VectorBgCache {
+    let vector_bytes = (n as u64) * 4;
+    let mut spmv = Vec::with_capacity(max_restart);
+    let mut scale = Vec::with_capacity(max_restart);
+    for j in 0..max_restart {
+        spmv.push(create_vector_bind_group(
+            device,
+            layout,
+            bindings,
+            z_storage_binding(b_z_storage, z_stride, vector_bytes, j),
+            b_w.as_entire_binding(),
+            b_temp.as_entire_binding(),
+            "FGMRES SpMV BG (cached)",
+        ));
+        scale.push(create_vector_bind_group(
+            device,
+            layout,
+            bindings,
+            b_w.as_entire_binding(),
+            basis_binding(b_basis, basis_stride, vector_bytes, j + 1),
+            b_temp.as_entire_binding(),
+            "FGMRES Normalize Basis BG (cached)",
+        ));
+    }
+    let norm = create_vector_bind_group(
+        device,
+        layout,
+        bindings,
+        b_w.as_entire_binding(),
+        b_temp.as_entire_binding(),
+        b_dot_partial.as_entire_binding(),
+        "FGMRES Norm BG (cached)",
+    );
+    let reduce = create_vector_bind_group(
+        device,
+        layout,
+        bindings,
+        b_dot_partial.as_entire_binding(),
+        b_temp.as_entire_binding(),
+        b_temp.as_entire_binding(),
+        "FGMRES Reduce BG (cached)",
+    );
+    VectorBgCache {
+        spmv,
+        scale,
+        norm,
+        reduce,
+    }
 }
 
 pub fn dispatch_vector_pipeline(
@@ -2234,22 +2357,16 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
 
         precondition(j, encoder, vj, z_buf.clone());
 
-        let spmv_bg = create_vector_bind_group(
-            core.device,
-            core.bgl_vectors,
-            core.vector_bindings,
-            z_buf,
-            core.b_w.as_entire_binding(),
-            core.b_temp.as_entire_binding(),
-            "FGMRES SpMV BG",
-        );
+        // Cached per-column bind group: identical to
+        // `(vec_x=z_storage[j], vec_y=w, vec_z=temp)` built inline before.
+        let spmv_bg = &core.spmv_bgs[j];
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("FGMRES SpMV"),
                 timestamp_writes: None,
             });
             pass.set_pipeline(core.pipeline_spmv);
-            pass.set_bind_group(0, &spmv_bg, &[]);
+            pass.set_bind_group(0, spmv_bg, &[]);
             pass.set_bind_group(1, core.bg_matrix, &[]);
             pass.set_bind_group(2, core.bg_precond, &[]);
             pass.set_bind_group(3, core.bg_params, &[]);
@@ -2318,37 +2435,23 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
             }
         }
 
-        let norm_bg = create_vector_bind_group(
-            core.device,
-            core.bgl_vectors,
-            core.vector_bindings,
-            core.b_w.as_entire_binding(),
-            core.b_temp.as_entire_binding(),
-            core.b_dot_partial.as_entire_binding(),
-            "FGMRES Norm BG",
-        );
+        // Cached column-independent bind group `(vec_x=w, vec_y=temp, vec_z=dot_partial)`.
+        let norm_bg = core.norm_bg;
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("FGMRES Norm Partial"),
                 timestamp_writes: None,
             });
             pass.set_pipeline(core.pipeline_norm_sq);
-            pass.set_bind_group(0, &norm_bg, &[]);
+            pass.set_bind_group(0, norm_bg, &[]);
             pass.set_bind_group(1, core.bg_matrix, &[]);
             pass.set_bind_group(2, core.bg_precond, &[]);
             pass.set_bind_group(3, core.bg_params, &[]);
             pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
         }
 
-        let reduce_bg = create_vector_bind_group(
-            core.device,
-            core.bgl_vectors,
-            core.vector_bindings,
-            core.b_dot_partial.as_entire_binding(),
-            core.b_temp.as_entire_binding(),
-            core.b_temp.as_entire_binding(),
-            "FGMRES Reduce BG",
-        );
+        // Cached column-independent bind group `(vec_x=dot_partial, vec_y=temp, vec_z=temp)`.
+        let reduce_bg = core.reduce_bg;
 
         encoder.copy_buffer_to_buffer(
             core.b_params_table_reduce,
@@ -2370,23 +2473,16 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
                 timestamp_writes: None,
             });
             pass.set_pipeline(core.pipeline_reduce_final_and_finish_norm);
-            pass.set_bind_group(0, &reduce_bg, &[]);
+            pass.set_bind_group(0, reduce_bg, &[]);
             pass.set_bind_group(1, core.bg_matrix, &[]);
             pass.set_bind_group(2, core.bg_precond, &[]);
             pass.set_bind_group(3, core.bg_params, &[]);
             pass.dispatch_workgroups(1, 1, 1);
         }
 
-        let v_next = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j + 1);
-        let scale_bg = create_vector_bind_group(
-            core.device,
-            core.bgl_vectors,
-            core.vector_bindings,
-            core.b_w.as_entire_binding(),
-            v_next,
-            core.b_temp.as_entire_binding(),
-            "FGMRES Normalize Basis BG",
-        );
+        // Cached per-column bind group: identical to
+        // `(vec_x=w, vec_y=basis[j+1], vec_z=temp)` built inline before.
+        let scale_bg = &core.scale_bgs[j];
 
         encoder.copy_buffer_to_buffer(
             core.b_params_table_iter,
@@ -2408,7 +2504,7 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
                 timestamp_writes: None,
             });
             pass.set_pipeline(core.pipeline_scale);
-            pass.set_bind_group(0, &scale_bg, &[]);
+            pass.set_bind_group(0, scale_bg, &[]);
             pass.set_bind_group(1, core.bg_matrix, &[]);
             pass.set_bind_group(2, core.bg_precond, &[]);
             pass.set_bind_group(3, core.bg_params, &[]);

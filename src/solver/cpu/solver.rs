@@ -702,9 +702,13 @@ impl CpuSolver {
         // Optional per-phase wall-time profiling (CFD2_CPU_PROFILE=1). Attributes
         // step wall time to the parallel dispatch groups vs. the (serial) CPU
         // linear solve, so the parallel/serial split is visible directly.
-        let profile = std::env::var("CFD2_CPU_PROFILE").is_ok();
+        let profile_env = std::env::var("CFD2_CPU_PROFILE").ok();
+        let profile = profile_env.is_some();
+        // CFD2_CPU_PROFILE=2 additionally reports per-kernel wall time.
+        let profile_kernels = profile_env.as_deref() == Some("2");
         crate::solver::cpu::linalg::prof::ENABLED
             .store(profile, std::sync::atomic::Ordering::Relaxed);
+        let mut kernel_times: Vec<(String, std::time::Duration)> = Vec::new();
         let (mut t_prep, mut t_asm, mut t_lin, mut t_upd, mut t_bc) = (
             std::time::Duration::ZERO,
             std::time::Duration::ZERO,
@@ -725,10 +729,22 @@ impl CpuSolver {
             }};
         }
 
+        macro_rules! run_t {
+            ($id:expr) => {{
+                if profile_kernels {
+                    let _t0 = std::time::Instant::now();
+                    run($id);
+                    kernel_times.push(($id.clone(), _t0.elapsed()));
+                } else {
+                    run($id);
+                }
+            }};
+        }
+
         // Prepare once per step (non-bc_expr Preparation kernels).
         timed!(t_prep, {
             for id in &prep_once {
-                run(id);
+                run_t!(id);
             }
         });
 
@@ -743,18 +759,18 @@ impl CpuSolver {
             // prepares the ghosts for the next iteration/step.
             timed!(t_asm, {
                 for id in &per_iter {
-                    run(id);
+                    run_t!(id);
                 }
             });
             timed!(t_lin, self.linear_solve());
             timed!(t_upd, {
                 for id in &update_group {
-                    run(id);
+                    run_t!(id);
                 }
             });
             timed!(t_bc, {
                 for id in &bc_expr_ids {
-                    run(id);
+                    run_t!(id);
                 }
             });
 
@@ -788,6 +804,26 @@ impl CpuSolver {
                 "[cpu-profile]   linsolve: {}",
                 crate::solver::cpu::linalg::prof::report_and_reset()
             );
+            if profile_kernels {
+                // Aggregate per-kernel wall time across the step, sorted desc.
+                let mut agg: Vec<(String, std::time::Duration, u32)> = Vec::new();
+                for (id, d) in kernel_times.drain(..) {
+                    match agg.iter_mut().find(|(a, _, _)| *a == id) {
+                        Some((_, total, count)) => {
+                            *total += d;
+                            *count += 1;
+                        }
+                        None => agg.push((id, d, 1)),
+                    }
+                }
+                agg.sort_by(|a, b| b.1.cmp(&a.1));
+                for (id, total, count) in agg.iter().take(12) {
+                    eprintln!(
+                        "[cpu-profile]   kernel {:>7.1}ms x{count} {id}",
+                        total.as_secs_f64() * 1e3,
+                    );
+                }
+            }
         }
 
         // Per-step relative state change, for the GUI steady-state auto-pause

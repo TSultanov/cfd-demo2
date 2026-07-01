@@ -130,14 +130,19 @@ fn profile_case(name: &str, mesh: Mesh, steps: usize) {
     let mut outer_sum = 0u64;
     let mut lin_iter_sum = 0u64;
     let mut lin_solves = 0u64;
+    let mut last_readback = None;
     let wall = Instant::now();
     for i in 0..steps {
-        let o = driver.step(i % 5 == 0);
+        // Force a readback on the final step so we can fingerprint the exact final state.
+        let o = driver.step(i % 5 == 0 || i == steps - 1);
         solver_ms += o.step_time_ms as f64;
         outer_sum += o.outer_iters.unwrap_or(0) as u64;
         for s in &o.linear_stats {
             lin_iter_sum += s.iterations as u64;
             lin_solves += 1;
+        }
+        if o.readback.is_some() {
+            last_readback = o.readback;
         }
     }
     let wall = wall.elapsed();
@@ -151,6 +156,33 @@ fn profile_case(name: &str, mesh: Mesh, steps: usize) {
             "     linear solves/step: {:.2}   iters/solve: {:.1}",
             lin_solves as f64 / n,
             lin_iter_sum as f64 / lin_solves as f64
+        );
+    }
+
+    // Deterministic bit-level fingerprint of the final state — for byte-identical
+    // regression checks across solver refactors (the GPU solve is deterministic, so
+    // identical ops => identical bits). FNV-1a over the raw f64 bits of u and p.
+    if let Some(rb) = &last_readback {
+        let mut h: u64 = 0xcbf29ce484222325;
+        let mut mix = |bits: u64| {
+            for chunk in [bits as u32 as u64, bits >> 32] {
+                h ^= chunk;
+                h = h.wrapping_mul(0x100000001b3);
+            }
+        };
+        for (vx, vy) in &rb.u {
+            mix(vx.to_bits());
+            mix(vy.to_bits());
+        }
+        for &pv in &rb.p {
+            mix(pv.to_bits());
+        }
+        println!(
+            "     STATE_FINGERPRINT: {:016x}  (cells={}, |u|={}, |p|={})",
+            h,
+            cells,
+            rb.u.len(),
+            rb.p.len()
         );
     }
 

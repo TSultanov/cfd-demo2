@@ -237,6 +237,19 @@ impl<D: UnitDimension> TypedTerm<D> {
         self
     }
 
+    /// Declare the deferred-correction Newton linearization of this `DivFlux`
+    /// mass-flux term against the pressure, with `coeff` the flux's
+    /// pressure-sensitivity `d(rho_face)/dp` (the physical compressibility).
+    /// See `Term::linearize_pressure_flux` for the full semantics. Only
+    /// meaningful on implicit `DivFlux` terms whose target is the pressure.
+    pub fn with_pressure_flux_linearization<CoeffD: UnitDimension>(
+        mut self,
+        coeff: TypedCoeff<CoeffD>,
+    ) -> Self {
+        self.inner = self.inner.with_pressure_flux_linearization(coeff.to_untyped());
+        self
+    }
+
     /// Create an equation from this single term.
     ///
     /// The target field is the unknown being solved for. Its dimension can be

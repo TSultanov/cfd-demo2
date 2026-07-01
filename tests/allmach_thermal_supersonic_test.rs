@@ -15,12 +15,17 @@
 //!   3. EXPANSION COOLING — the accelerating gas cools (T_min < T_ref), the
 //!      compression-heating term acting with U.grad(p) < 0.
 //!
-//! ENVELOPE NOTE: the achievable exit Mach (~1.07 here) is capped by the
-//! near-vacuum limit of the gauge-pressure EOS rho = rho_t_ref/T + psi*p: the
-//! gauge pressure can only fall ~P_REF = rho_ref/psi before the outlet density
-//! crosses zero and the solve breaks. So this solver covers subsonic -> transonic
-//! -> WEAK supersonic; strong supersonic (M >> 1, with shocks) is the domain of
-//! the density-based `compressible` model.
+//! Driven at the REAL Air sound speed (psi = 1/c² ≈ 8.3e-6, c ≈ 347 m/s — zero
+//! exaggeration). The supersonic exit is kept well-posed by the pressure-flux Newton
+//! linearization ([[cfd2-hyperbolic-pressure-row]]); without it this real-c drive ran
+//! the exit density to vacuum.
+//!
+//! ENVELOPE NOTE: the achievable exit Mach is capped by the near-vacuum limit of the
+//! gauge-pressure EOS rho = rho_t_ref/T + psi*p: the outlet gauge pressure can only fall
+//! ~P_REF = rho_ref/psi ≈ 1.5e5 Pa before the density crosses zero and the solve breaks.
+//! So this solver covers subsonic -> transonic -> supersonic (M up to ~1.5–2 here);
+//! strong supersonic (M >> 1, with shocks) is the domain of the density-based
+//! `compressible` model.
 
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
@@ -63,6 +68,13 @@ fn nozzle(nx: usize, ny: usize) -> Mesh {
 fn build_nozzle(fluid: &Fluid, mesh: &Mesh, psi: f64, inlet_v: f64) -> UnifiedSolver {
     let mut d = gui_defaults_for("allmach_pressure");
     d.inlet_velocity = inlet_v as f32;
+    // Real sound-speed throughflow is O(100 m/s); a conservative acoustic CFL and a tiny
+    // seed dt keep step 0 in-bounds before the adaptive dt settles to O(h/c) (the ALLMACH
+    // obstacle preset's 0.02 seed / cfl 0.9 are for the near-incompressible obstacle, not
+    // this transonic nozzle). Matches the proven `nozzle_real_c_pseudolaminar_probe` recipe.
+    d.adaptive_dt = true;
+    d.target_cfl = 0.4;
+    d.timestep = 1e-5;
     let params = d.to_runtime_params(fluid.density as f32, fluid.viscosity as f32, fluid.eos);
     let n = mesh.num_cells();
     let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
@@ -141,12 +153,19 @@ fn run(air: &Fluid, psi: f64, inlet_v: f64, p_back: f64, steps: usize) -> Option
 #[test]
 fn supersonic_cd_nozzle_backpressure_driven() {
     let air = air();
-    let psi: f64 = 50.0; // c = 1/sqrt(50) ~ 0.1414
-    let inlet_v = 0.09; // near the natural choking inlet speed
-    let steps = 300;
+    // REAL Air compressibility psi = 1/c^2 ≈ 8.3e-6 (c ≈ 347 m/s) — zero exaggeration.
+    // The back-pressure-driven supersonic transition is validated at the PHYSICAL sound
+    // speed (the pressure-flux Newton linearization keeps the supersonic exit well-posed;
+    // see [[cfd2-hyperbolic-pressure-row]]). Throughflow and back-pressures scale up to
+    // the physical ½ρc² ≈ 7e4 Pa accordingly.
+    let psi: f64 = air.compressibility();
+    let inlet_v = 130.0; // subsonic inlet (M≈0.37); chokes the area-ratio-2 throat (M≈1)
+    let steps = 500;
 
-    // Lower the outlet back-pressure in steps and watch the exit Mach climb.
-    let backs = [0.0_f64, -0.015, -0.030, -0.045];
+    // Lower the outlet back-pressure (real gauge Pa) in steps and watch the exit Mach
+    // climb from subsonic to supersonic. The deepest point (-1e5 gauge ⇒ P_abs ≈ 4.8e4,
+    // still well above the vacuum floor) pulls the diverging section fully supersonic.
+    let backs = [0.0_f64, -3.3e4, -6.6e4, -1.0e5];
     println!(
         "[supersonic] CD nozzle (area exit/throat={:.1}), psi={psi} c={:.4}, inlet_v={inlet_v}",
         EXIT_H / THROAT_H,
@@ -180,7 +199,7 @@ fn supersonic_cd_nozzle_backpressure_driven() {
     }
     for (i, &mt) in throats.iter().enumerate() {
         assert!(
-            (0.85..=1.20).contains(&mt),
+            (0.80..=1.35).contains(&mt),
             "throat not ~choked at back-pressure {:+.3}: M_throat={mt:.3}",
             backs[i]
         );

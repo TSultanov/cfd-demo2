@@ -1166,6 +1166,105 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             None,
                         ));
                         body.push(acc.sub_rhs(u_idx, acc.phi(u_idx)));
+
+                        // Deferred-correction Newton linearization of this
+                        // mass-flux divergence against the pressure (see
+                        // `Term::linearize_pressure_flux`). The face mass flux
+                        // `phi = rho_f * (U.n) * A` depends on p through the EOS
+                        // density `rho_f = rho_ref + psi*p`, so its Jacobian is
+                        //   a_f = d(phi)/dp = psi_f * (U.n) * A = phi * psi/rho.
+                        // We add an implicit upwind convection of p by `a_f` to
+                        // the matrix AND the same operator applied to the FROZEN
+                        // state pressure to the RHS: the two cancel at outer
+                        // convergence (so the converged solution is untouched —
+                        // low-Mach and steady-MMS results are unchanged), while
+                        // the implicit coupling damps the transonic/supersonic
+                        // iteration that the explicit `div(rho_f U)` feedback
+                        // would otherwise run to vacuum. `acc.phi(u_idx)` here is
+                        // already the OUTWARD-from-`idx` mass flux, so `a_f`
+                        // inherits the correct upwind sign for free.
+                        if let Some(lin_coeff) = &conv_op.linearize_pressure_flux {
+                            let p_slot = slots
+                                .slots
+                                .iter()
+                                .find(|s| s.name == equation.target.name())
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "linearize_pressure_flux: missing pressure field '{}' in state slots",
+                                        equation.target.name()
+                                    )
+                                });
+                            let rho_slot = slots
+                                .slots
+                                .iter()
+                                .find(|s| s.name == "rho")
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "linearize_pressure_flux requires a 'rho' state field"
+                                    )
+                                });
+                            let psi_own = coefficient_value_expr(
+                                slots,
+                                Some(lin_coeff),
+                                "idx",
+                                Expr::from(0.0),
+                            );
+                            let rho_own = dsl::max(
+                                state_component_slot(slots.stride, "state", "idx", rho_slot, 0),
+                                1.0e-30,
+                            );
+                            // a_f = phi * psi_own / rho_own (Jacobian d(div phi)/dp,
+                            // owner-cell approximation — exact value only affects the
+                            // damped iteration path, not the converged solution).
+                            let a_name = format!("a_lin_{u_idx}");
+                            body.push(dsl::var_typed_expr(
+                                &a_name,
+                                Type::F32,
+                                Some(acc.phi(u_idx) * psi_own / rho_own),
+                            ));
+                            let a_f = Expr::ident(&a_name);
+                            let flux_pos = dsl::max(a_f.clone(), 0.0);
+                            let flux_neg = dsl::min(a_f, 0.0);
+                            let p_own_state =
+                                state_component_slot(slots.stride, "state", "idx", p_slot, 0);
+                            let p_neigh_state =
+                                state_component_slot(slots.stride, "state", "other_idx", p_slot, 0);
+
+                            // Interior face: full upwind stencil (diagonal +
+                            // neighbor coupling) with the frozen-state deferred RHS.
+                            let interior_lin = dsl::block(vec![
+                                acc.add_diag(u_idx, flux_pos.clone()),
+                                dsl::assign_op_expr(
+                                    AssignOp::Add,
+                                    block_matrix
+                                        .entry(
+                                            &Expr::ident("neighbor_rank"),
+                                            typed::block_row::<Ax>(u_idx),
+                                            typed::block_col::<Ax>(u_idx),
+                                        )
+                                        .expr,
+                                    flux_neg.clone(),
+                                ),
+                                acc.add_rhs(
+                                    u_idx,
+                                    flux_pos.clone() * p_own_state.clone()
+                                        + flux_neg * p_neigh_state,
+                                ),
+                            ]);
+                            // Boundary face: no valid neighbor. Pin only the
+                            // OUTFLOW (diagonal) part — this is exactly the
+                            // upwind supersonic-outlet closure that anchors the
+                            // extrapolated exit pressure to the interior.
+                            let boundary_lin = dsl::block(vec![
+                                acc.add_diag(u_idx, flux_pos.clone()),
+                                acc.add_rhs(u_idx, flux_pos * p_own_state),
+                            ]);
+                            body.push(dsl::if_block_expr(
+                                !Expr::ident("is_boundary"),
+                                interior_lin,
+                                Some(boundary_lin),
+                            ));
+                        }
                     }
                 } else {
                     // Reconstruct field at face (scalar convection operator)

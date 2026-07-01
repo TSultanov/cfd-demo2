@@ -380,6 +380,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             k1_phi_2 -= k1_phi_2 * 2.0;
         }
         k1_rhs_2 -= k1_phi_2;
+        var k1_a_lin_2: f32 = k1_phi_2 * state[idx * 18u + 8u] / max(state[idx * 18u + 11u], 0.000000000000000000000000000001);
+        if (!k1_is_boundary) {
+            k1_diag_2 += max(k1_a_lin_2, 0.0);
+            matrix_values[k1_start_row_2 + k1_neighbor_rank * 4u + 2u] += min(k1_a_lin_2, 0.0);
+            k1_rhs_2 += max(k1_a_lin_2, 0.0) * state[idx * 18u + 2u] + min(k1_a_lin_2, 0.0) * state[k1_other_idx * 18u + 2u];
+        } else {
+            k1_diag_2 += max(k1_a_lin_2, 0.0);
+            k1_rhs_2 += max(k1_a_lin_2, 0.0) * state[idx * 18u + 2u];
+        }
         let k1_diff_coeff_T = select(0.01, 0.01 * k1_lambda_f + 0.01 * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
         if (!k1_is_boundary) {
             k1_diag_3 += k1_diff_coeff_T;

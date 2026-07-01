@@ -345,6 +345,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             k1_phi_2 -= k1_phi_2 * 2.0;
         }
         k1_rhs_2 -= k1_phi_2;
+        var k1_a_lin_2: f32 = k1_phi_2 * state[idx * 12u + 8u] / max(state[idx * 12u + 11u], 0.000000000000000000000000000001);
+        if (!k1_is_boundary) {
+            k1_diag_2 += max(k1_a_lin_2, 0.0);
+            matrix_values[k1_start_row_2 + k1_neighbor_rank * 3u + 2u] += min(k1_a_lin_2, 0.0);
+            k1_rhs_2 += max(k1_a_lin_2, 0.0) * state[idx * 12u + 2u] + min(k1_a_lin_2, 0.0) * state[k1_other_idx * 12u + 2u];
+        } else {
+            k1_diag_2 += max(k1_a_lin_2, 0.0);
+            k1_rhs_2 += max(k1_a_lin_2, 0.0) * state[idx * 12u + 2u];
+        }
     }
     k1_diag_0 -= k1_bounded_sum_phi_0;
     k1_diag_1 -= k1_bounded_sum_phi_1;

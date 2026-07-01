@@ -17,7 +17,7 @@
 
 use cfd2::sim::{DriverBuild, SolverDriver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle, Mesh};
-use cfd2::solver::model::{allmach_thermal_model, ALLMACH_T_REF};
+use cfd2::solver::model::{allmach_thermal_model, ALLMACH_GAMMA, ALLMACH_T_REF};
 use cfd2::solver::UnifiedSolver;
 use cfd2::ui::fluid::Fluid;
 use cfd2::ui::model_defaults::gui_defaults_for;
@@ -122,11 +122,14 @@ fn allmach_thermal_recovery_tracks_temperature() {
     assert!(t.iter().all(|v| v.is_finite() && *v > 0.0), "T non-finite/non-positive");
     assert!(max_rho < 5.0 * rho_ref, "rho blew up: {max_rho}");
 
-    // The core check: on-device recovery `rho == rho_t_ref/T + psi*p` to f32 precision.
+    // The core check: on-device recovery to f32 precision against the REAL ideal-gas EOS
+    // `rho = rho_t_ref/T + (gamma*psi*t_ref/T)*p` (= p_abs/(R*T); the Stage-B T-varying
+    // compressibility, d(rho)/dp|_T = gamma*psi*t_ref/T rising as the gas cools). At
+    // T = T_ref this reduces to the barotropic `rho_t_ref/T + psi*p`.
     let rho_t_ref = rho_ref * ALLMACH_T_REF;
     let mut worst = 0.0_f64;
     for c in 0..n {
-        let expect = rho_t_ref / t[c] + psi * p[c];
+        let expect = rho_t_ref / t[c] + (ALLMACH_GAMMA * psi * ALLMACH_T_REF / t[c]) * p[c];
         worst = worst.max((rho[c] - expect).abs() / rho_ref);
     }
     assert!(

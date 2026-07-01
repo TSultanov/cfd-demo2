@@ -34,7 +34,7 @@ pub use definitions::{
     BcValue, BoundaryCondition, BoundarySpec, CompressibleFields, FieldBoundarySpec,
     GenericCoupledFields,
     AllMachPressureFields, IncompressibleMomentumFields, ModelSpec, ADVECTING_VELOCITY_FIELD,
-    ALLMACH_K_OVER_CP, ALLMACH_MMS_SOURCE_P_FIELD, ALLMACH_MMS_SOURCE_T_FIELD,
+    ALLMACH_GAMMA, ALLMACH_K_OVER_CP, ALLMACH_MMS_SOURCE_P_FIELD, ALLMACH_MMS_SOURCE_T_FIELD,
     ALLMACH_MMS_SOURCE_U_FIELD, ALLMACH_RHO_DT_FIELD, ALLMACH_RHO_T_REF_FIELD,
     ALLMACH_TEMPERATURE_FIELD, ALLMACH_T_REF,
     BUOYANT_BETA_G,

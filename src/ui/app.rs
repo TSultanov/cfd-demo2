@@ -280,13 +280,9 @@ pub struct CFDApp {
     low_mach_pressure_coupling_alpha: f32,
     inlet_velocity: f32,
     /// All-Mach compressibility `psi = 1/c^2` (the wire value). DERIVED, not stored:
-    /// `psi = current_fluid.compressibility() * compressibility_exaggeration`,
-    /// recomputed whenever the fluid, model, or exaggeration changes.
+    /// the REAL `current_fluid.compressibility()`, recomputed whenever the fluid or
+    /// model changes. No exaggeration — always physical.
     compressibility_psi: f32,
-    /// Dimensionless exaggeration of the EOS-derived compressibility (the GUI slider).
-    /// `1.0` = real physics (`psi = 1/c^2` from the fluid's sound speed); larger lowers
-    /// the *effective* sound speed to make compressibility visible at laminar speeds.
-    compressibility_exaggeration: f32,
     /// Gauge back-pressure pinned at the outlet (all-Mach models). `0.0` is the
     /// standard outlet; the supersonic-nozzle demo sets a negative value to pull the
     /// diverging section past Mach 1. Applied per-case via the GUI defaults.
@@ -433,7 +429,6 @@ impl CFDApp {
             low_mach_pressure_coupling_alpha: 1.0,
             inlet_velocity: 1.0,
             compressibility_psi: 0.0,
-            compressibility_exaggeration: 1.0,
             outlet_back_pressure: 0.0,
             pressure_inlet: false,
             inlet_pressure: 0.0,
@@ -526,12 +521,9 @@ impl CFDApp {
         self.low_mach_theta_floor = d.low_mach_theta_floor;
         self.low_mach_pressure_coupling_alpha = d.low_mach_pressure_coupling_alpha;
         self.inlet_velocity = d.inlet_velocity;
-        // All-Mach compressibility: the per-model default carries an EXAGGERATION
-        // factor (×1 = real EOS physics); the wire `psi` is `1/c^2` of the current
-        // fluid times that factor. Recomputed here (model switch) and on fluid change.
-        self.compressibility_exaggeration = d.compressibility_exaggeration;
-        self.compressibility_psi =
-            (self.current_fluid.compressibility() * d.compressibility_exaggeration as f64) as f32;
+        // All-Mach compressibility: the REAL `psi = 1/c^2` of the current fluid, no
+        // exaggeration. Recomputed here (model switch) and on fluid change.
+        self.compressibility_psi = self.current_fluid.compressibility() as f32;
         // Outlet back-pressure: negative only for the supersonic-nozzle case (above).
         self.outlet_back_pressure = d.outlet_back_pressure;
         self.pressure_inlet = d.pressure_inlet;
@@ -1568,11 +1560,10 @@ impl CFDApp {
     }
 
     fn update_gpu_fluid(&mut self) {
-        // The fluid's EOS sets the sound speed, so the EOS-derived compressibility
-        // `psi = (1/c^2) * exaggeration` must be recomputed when the fluid (preset,
-        // density, or viscosity) changes.
-        self.compressibility_psi =
-            (self.current_fluid.compressibility() * self.compressibility_exaggeration as f64) as f32;
+        // The fluid's EOS sets the sound speed, so the REAL compressibility
+        // `psi = 1/c^2` must be recomputed when the fluid (preset, density, or
+        // viscosity) changes. No exaggeration.
+        self.compressibility_psi = self.current_fluid.compressibility() as f32;
         self.sync_worker_params();
     }
 
@@ -1981,54 +1972,22 @@ impl eframe::App for CFDApp {
                             self.update_gpu_inlet_velocity();
                         }
 
-                        // All-Mach compressibility: ψ = 1/c² is DERIVED from the
-                        // fluid's real EOS (sound speed). The slider is a dimensionless
-                        // EXAGGERATION factor: ×1 is real physics; larger lowers the
-                        // *effective* sound speed so compressibility becomes visible at
-                        // the solver's stable laminar speeds (at the real sound speed
-                        // these flows are ~incompressible and, at high Mach, turbulent
-                        // and numerically unstable). The dual readout makes both the
-                        // real and the shown regime explicit.
+                        // All-Mach compressibility: ψ = 1/c² is the REAL value from the
+                        // fluid's EOS (sound speed) — no exaggeration. Read-only physical
+                        // readout of the regime (ψ, sound speed, inlet Mach).
                         if self.model_id == "allmach_pressure"
                             || self.model_id == "allmach_thermal"
                         {
-                            let psi_phys = self.current_fluid.compressibility(); // 1/c², EOS
-                            let mut x = self.compressibility_exaggeration;
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut x, 1.0..=1.0e7)
-                                        .logarithmic(true)
-                                        .text("Compressibility exaggeration ×"),
-                                )
-                                .on_hover_text(
-                                    "×1 = real physics: ψ = 1/c² from the fluid's EOS \
-                                     sound speed. At the real sound speed these flows are \
-                                     ~incompressible (Mach ~1e-4); exaggerate to lower the \
-                                     effective sound speed and visualize density variation, \
-                                     acoustics, or a supersonic nozzle at laminar speeds.",
-                                )
-                                .changed()
-                            {
-                                self.compressibility_exaggeration = x;
-                                self.compressibility_psi = (psi_phys * x as f64) as f32;
-                                self.sync_worker_params();
-                            }
                             let c_phys = self.current_fluid.sound_speed();
-                            let psi_eff = self.compressibility_psi.max(0.0) as f64;
-                            let c_eff = if psi_eff > 0.0 {
-                                1.0 / psi_eff.sqrt()
-                            } else {
-                                f64::INFINITY
-                            };
                             let mach_real = if c_phys > 0.0 {
                                 self.inlet_velocity.abs() as f64 / c_phys
                             } else {
                                 0.0
                             };
-                            let mach_eff = self.inlet_velocity.abs() as f64 * psi_eff.sqrt();
                             ui.label(format!(
-                                "Real c = {c_phys:.0} m/s (Mach {mach_real:.1e}) · \
-                                 shown c ≈ {c_eff:.3} m/s (Mach ≈ {mach_eff:.3})"
+                                "Compressibility ψ = 1/c² = {:.2e} (real EOS) · c = {c_phys:.0} m/s \
+                                 · inlet Mach ≈ {mach_real:.2e}",
+                                self.current_fluid.compressibility()
                             ));
                         }
 

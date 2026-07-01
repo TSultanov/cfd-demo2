@@ -394,32 +394,6 @@ fn gui_default_allmach_obstacle_eos_derived_and_exaggeratable() {
         "all-Mach wake did not develop: max|u|={max_seen:.3e} vs inlet {:.3e}",
         d.inlet_velocity
     );
-
-    // (b) Cranking the EXAGGERATION (the GUI slider) to effective psi ~50 makes the
-    // SAME default path genuinely compressible — measurable density variation.
-    let mut d_ex = d;
-    d_ex.compressibility_exaggeration = (50.0 / psi_phys) as f32; // effective psi ~50
-    let psi_ex = d_ex
-        .to_runtime_params(air.density as f32, air.viscosity as f32, air.eos)
-        .compressibility_psi as f64;
-    assert!(
-        (48.0..52.0).contains(&psi_ex),
-        "exaggerated effective psi {psi_ex:.2} should be ~50"
-    );
-    let mut driver_ex = build_allmach_driver(&d_ex, &air, &mesh);
-    let res_ex = drive(&mut driver_ex, 400);
-    print_trace("allmach/obstacle(exag)", &res_ex);
-    assert_bounded("allmach/obstacle(exag)", &res_ex, -1e6, 1e6, 0.5, 2.0);
-    let last = res_ex.samples.last().expect("samples");
-    let spread = (last.rho_max - last.rho_min) / air.density;
-    eprintln!(
-        "[allmach/obstacle] exaggerated final rho=[{:.4},{:.4}] spread={:.3e} of rho_ref",
-        last.rho_min, last.rho_max, spread
-    );
-    assert!(
-        spread > 1e-3,
-        "exaggerated all-Mach must be compressible: density spread {spread:.2e} (rho nearly uniform)"
-    );
 }
 
 /// Drive the obstacle from rest with the shipped defaults and sample the

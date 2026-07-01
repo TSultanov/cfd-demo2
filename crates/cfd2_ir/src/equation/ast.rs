@@ -245,6 +245,21 @@ pub struct Term {
     /// it drops the `* VOLUME` factor from both the assembly and the
     /// integrated unit.
     pub static_diag: bool,
+    /// Deferred-correction Newton linearization of a `DivFlux` mass-flux term
+    /// with respect to the equation's (pressure) field. `Some(coeff)` attaches
+    /// the flux's pressure-sensitivity `coeff = d(rho_face)/dp` (the physical
+    /// compressibility `psi`): assembly additionally emits an implicit upwind
+    /// convection of the pressure by the flux `a_f = coeff_face * (U_f.n) * A`
+    /// (the Jacobian `d(div phi)/dp`), while adding the SAME operator applied to
+    /// the frozen state pressure to the RHS. The two cancel exactly at outer
+    /// convergence, so the converged solution — and hence every low-Mach and
+    /// steady-MMS result — is unchanged; only the ITERATION is damped, which is
+    /// what makes the elliptic pressure row well-posed (hyperbolic/upwind) at a
+    /// supersonic outlet where the explicit `div(rho_f U)` feedback otherwise
+    /// runs the exit density to vacuum. Only meaningful on implicit `DivFlux`
+    /// terms whose target is the pressure; the `_mms` variants omit it to stay
+    /// byte-identical (their steady solution never approaches the runaway).
+    pub linearize_pressure_flux: Option<Coefficient>,
 }
 
 impl Term {
@@ -266,6 +281,7 @@ impl Term {
             direction: None,
             transpose_dev2: false,
             static_diag: false,
+            linearize_pressure_flux: None,
         }
     }
 
@@ -297,6 +313,13 @@ impl Term {
     /// Declare the static implicit-diagonal form (see `static_diag` field docs).
     pub fn with_static_diag(mut self) -> Self {
         self.static_diag = true;
+        self
+    }
+
+    /// Declare the deferred-correction Newton linearization of a `DivFlux`
+    /// mass-flux term against the pressure (see `linearize_pressure_flux` docs).
+    pub fn with_pressure_flux_linearization(mut self, coeff: Coefficient) -> Self {
+        self.linearize_pressure_flux = Some(coeff);
         self
     }
 

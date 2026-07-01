@@ -53,6 +53,13 @@ pub struct DiscreteOp {
     /// to the matrix diagonal WITHOUT the `* V` cell-volume factor (see
     /// `Term::static_diag`). Used for pointwise identity/constraint rows.
     pub static_diag: bool,
+    /// Deferred-correction Newton linearization of a `DivFlux` mass-flux term
+    /// against the pressure: `Some(coeff)` carries the flux pressure-sensitivity
+    /// `d(rho_face)/dp` (the compressibility). Assembly emits an implicit upwind
+    /// convection of the pressure by `coeff_face * (U.n) * A` plus a deferred
+    /// RHS correction (frozen-state pressure) that cancels it at convergence
+    /// (see `Term::linearize_pressure_flux`).
+    pub linearize_pressure_flux: Option<Coefficient>,
     pub field: FieldRef,
     pub flux: Option<FluxRef>,
     pub coeff: Option<Coefficient>,
@@ -121,6 +128,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
         direction: term.direction.clone(),
         transpose_dev2: term.transpose_dev2,
         static_diag: term.static_diag,
+        linearize_pressure_flux: term.linearize_pressure_flux.clone(),
         field: term.field,
         flux: term.flux,
         coeff: term.coeff.clone(),

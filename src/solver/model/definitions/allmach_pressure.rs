@@ -207,6 +207,11 @@ fn build_allmach_system(
 
     let rho_coeff = TypedCoeff::from_field(rho_typed);
     let mu_coeff = TypedCoeff::from_field(mu_typed);
+    // Pressure-Laplacian coefficient `rho_dp = rho * d_p` (the elliptic pressure
+    // coupling). The transonic/supersonic robustness comes from the pressure-flux
+    // Newton linearization attached to the `div_flux` term below (an implicit,
+    // upwinded hyperbolic coupling that stays diagonally dominant as the gas
+    // expands), not from the d_p formulation.
     let rho_dp_coeff =
         TypedCoeff::from_field(rho_typed).multiply(TypedCoeff::from_field(d_p_typed));
     // The pressure-row ddt uses the LOW-MACH PRECONDITIONED compressibility (not the
@@ -247,7 +252,30 @@ fn build_allmach_system(
     // still drives the density recovery (host) and the thermal compression heating below.
     let compressibility_term = typed_fvm::ddt_coeff(psi_precond_coeff, p_typed);
     let p_laplacian_term = typed_fvm::laplacian(rho_dp_coeff, p_typed);
-    let p_div_flux_term = typed_fvm::div_flux(phi_typed, p_typed);
+    // The predicted mass-flux divergence `div(phi_pred)` is the explicit source
+    // of the pressure equation. On its own it is elliptic-only (the implicit
+    // p-coupling lives entirely in the Laplacian above), so at a SUPERSONIC
+    // outlet — where the pressure is extrapolated and the Laplacian contributes
+    // no constraint — the lagged `phi = rho_f * U_f` feedback runs the exit
+    // density to vacuum. Attaching the deferred-correction Newton linearization
+    // (Jacobian `d(div phi)/dp = psi * U.n * A`, upwinded) makes the pressure
+    // row well-posed there without touching the converged solution: the implicit
+    // damping and its frozen-state RHS correction cancel at convergence, so every
+    // low-Mach and steady result is unchanged, while the transonic/supersonic
+    // iteration stops diverging. Omitted on the `_mms` variant (byte-identical
+    // steady order test; its pinned box never approaches the runaway) and when
+    // `psi = 0` the term is identically zero (incompressible limit is unaffected).
+    let p_div_flux_term = {
+        let term = typed_fvm::div_flux(phi_typed, p_typed);
+        if with_mms_source {
+            term
+        } else {
+            let psi_lin = TypedCoeff::from_field(TypedFieldRef::<Compressibility, Scalar>::new(
+                "psi",
+            ));
+            term.with_pressure_flux_linearization(psi_lin)
+        }
+    };
 
     let mut pressure_sum = compressibility_term.cast_to::<MassFlux>()
         + p_laplacian_term.cast_to::<MassFlux>()
@@ -513,6 +541,11 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
     }
     let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
 
+    // Historical ClosedForm d_p (= α_u·dt/ρ_ref): preserves the manufactured-solution
+    // order (the SIMPLEC `FromAssembledRowSum` row-sum d_p was tried for the supersonic
+    // runaway but degraded the coupled MMS u-order to ~1.6 < 1.65 — the runaway is now
+    // cured structurally by the pressure-flux Newton linearization instead, which does
+    // not touch the spatial operator / MMS order).
     let derived_rhie_chow =
         crate::solver::model::flux_derivation::derive_rhie_chow(&system, &layout)
             .map_err(|e| format!("failed to derive Rhie–Chow flux: {e}"))?;

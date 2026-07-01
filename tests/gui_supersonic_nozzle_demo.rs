@@ -9,12 +9,13 @@
 //! The shipping nozzle is driven by a PRESSURE INLET + SUPERSONIC (extrapolated)
 //! OUTLET (`ALLMACH_THERMAL_NOZZLE.pressure_inlet = true`): the driver flips the
 //! Inlet/Outlet boundary kinds, pins the inlet gauge pressure (the gauge anchor), and
-//! lets the outlet float (no back-pressure). The flow reaches a supersonic exit with
-//! expansion cooling. NB this driving is OVER-EXPANDED in the artificial-compressibility
-//! model — the throat over-chokes and the diverging section diffuses, so M_throat
-//! (~1.30) > M_exit (~1.07); that's expected, not a bug (see
-//! `tests/nozzle_pressure_inlet_probe.rs` for why a positive-absolute pressure inlet
-//! can't avoid it here).
+//! lets the outlet float (no back-pressure). At the REAL Air sound speed (c≈347 m/s,
+//! zero exaggeration) the flow reaches a supersonic exit with expansion cooling. The
+//! extrapolated supersonic-outlet pressure row is kept well-posed by the pressure-flux
+//! Newton linearization ([[cfd2-hyperbolic-pressure-row]]) — without it the real-c
+//! drive ran the exit density to vacuum. The profile is now a CLASSIC CD nozzle:
+//! subsonic throat (M≈0.95) accelerating to a supersonic exit (M≈1.7), i.e.
+//! M_exit > M_throat (the earlier over-expansion inversion is gone).
 //!
 //! The whole point of this test is that it does NO manual field seeding: unlike the
 //! lower-level `allmach_thermal_supersonic_test`, it relies ENTIRELY on the driver to
@@ -71,8 +72,9 @@ fn gui_supersonic_nozzle_demo_reaches_mach_1() {
     // Air preset, exactly as the GUI fluid dropdown supplies it.
     let air = Fluid::presets()[1].clone();
 
-    // The per-case GUI defaults → runtime params (pressure-inlet nozzle:
-    // compressibility_psi = 50, pressure_inlet = true, inlet_pressure ≈ 0.07).
+    // The per-case GUI defaults → runtime params (pressure-inlet nozzle at the REAL
+    // Air sound speed: compressibility_psi ≈ 8.3e-6 (c≈347 m/s), pressure_inlet = true,
+    // inlet_pressure = 6e4 Pa gauge — zero exaggeration).
     let params = ALLMACH_THERMAL_NOZZLE.to_runtime_params(
         air.density as f32,
         air.viscosity as f32,
@@ -107,7 +109,10 @@ fn gui_supersonic_nozzle_demo_reaches_mach_1() {
     driver.apply_params(&params);
 
     let mut solver = driver.into_solver();
-    for _ in 0..300 {
+    // 500 steps to reach the developed CD-nozzle profile at the real sound speed (the
+    // throat Mach settles from a transient overshoot toward ~0.95 while the diverging
+    // section builds its supersonic exit; matches `nozzle_real_c_pseudolaminar_probe`).
+    for _ in 0..500 {
         solver
             .step_with_stats()
             .expect("nozzle demo step diverged — the GUI default must stay bounded");
@@ -134,9 +139,13 @@ fn gui_supersonic_nozzle_demo_reaches_mach_1() {
     );
 
     // The driver flipped the BCs, seeded the EOS fields + pressure ramp, and pinned the
-    // inlet pressure purely from the params: the GUI demo reaches a SUPERSONIC exit with
-    // expansion cooling. The throat over-chokes (over-expanded; M_throat > M_exit), which
-    // is the known artificial-compressibility behavior — so the throat bound is loose.
+    // inlet pressure purely from the params: at the REAL sound speed the GUI demo reaches
+    // a SUPERSONIC exit with expansion cooling. With the pressure-flux Newton
+    // linearization ([[cfd2-hyperbolic-pressure-row]]) making the exit well-posed, the
+    // profile is now a CLASSIC converging–diverging nozzle — subsonic throat (M≈0.95)
+    // accelerating to a supersonic exit (M≈1.7), i.e. M_exit > M_throat (the earlier
+    // over-expansion inversion is gone). The throat bound stays loose (the choke point
+    // drifts slightly with the pressure ratio).
     assert!(
         (0.85..=1.50).contains(&m_throat),
         "throat Mach out of band: M_throat={m_throat:.3} (driver seeding may be wrong)"
@@ -144,6 +153,11 @@ fn gui_supersonic_nozzle_demo_reaches_mach_1() {
     assert!(
         m_exit > 1.0,
         "GUI nozzle demo did not reach supersonic exit: M_exit={m_exit:.3}"
+    );
+    assert!(
+        m_exit > m_throat,
+        "expected a proper CD-nozzle profile (supersonic diverging section): \
+         M_exit={m_exit:.3} should exceed M_throat={m_throat:.3}"
     );
     assert!(
         t_min < 0.95,

@@ -78,17 +78,6 @@ pub struct ModelGuiDefaults {
     /// leaves the step count to develop unchanged (the adaptive dt grows as
     /// 1/speed, so it is CFL-limited either way); only the magnitudes shrink.
     pub inlet_velocity: f32,
-    /// Dimensionless exaggeration of the **EOS-derived** all-Mach compressibility.
-    /// The wire value is `psi = (1/c^2) * compressibility_exaggeration`, where
-    /// `1/c^2 = Fluid::compressibility()` comes from the material's real EOS (sound
-    /// speed). `1.0` = real physics; `0.0` forces the incompressible limit
-    /// (`psi = 0`) regardless of the fluid. Values `>> 1` lower the *effective* sound
-    /// speed so compressibility/supersonic become visible at the solver's stable
-    /// laminar (low-velocity) operating point — at the real sound speed (~347 m/s for
-    /// Air) these flows would need turbulent velocities, and the gauge-pressure field
-    /// is numerically unstable (pressure undershoot through vacuum) at that scale.
-    /// The multiply happens in `to_runtime_params` (which has the fluid's EOS).
-    pub compressibility_exaggeration: f32,
     /// Gauge back-pressure pinned at the outlet. `0.0` for every standard case; the
     /// supersonic-nozzle demo uses a negative value to pull the diverging section
     /// past Mach 1 (the standard way a CD nozzle is driven). Applied to the
@@ -143,11 +132,10 @@ impl ModelGuiDefaults {
             density,
             viscosity,
             eos,
-            // EOS-derived compressibility: psi = (1/c^2) * exaggeration. `1/c^2` is
-            // the material's real isentropic compressibility (0 for an incompressible
-            // `Constant` EOS, so those models stay byte-identical at psi=0).
-            compressibility_psi: (eos.compressibility(density as f64)
-                * self.compressibility_exaggeration as f64) as f32,
+            // REAL compressibility psi = 1/c^2 straight from the material EOS — no
+            // exaggeration. 0 for an incompressible `Constant` EOS (so the all-Mach model
+            // recovers incompressible from the material, not a knob), real 1/c^2 for a gas.
+            compressibility_psi: eos.compressibility(density as f64) as f32,
             outlet_back_pressure: self.outlet_back_pressure,
             pressure_inlet: self.pressure_inlet,
             inlet_pressure: self.inlet_pressure,
@@ -209,9 +197,6 @@ const INCOMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     // the 2D-laminar vortex-shedding band. Honest (no viscosity floor), bounded
     // (verified on the cut-cell slivers), and physically interesting by default.
     inlet_velocity: 0.011,
-    // Incompressible: force psi = 0 (the all-Mach pressure eqn reduces exactly to
-    // incompressible; irrelevant for this model anyway). Factor 0 ⇒ psi 0 for any fluid.
-    compressibility_exaggeration: 0.0,
     // Standard outlet (reference gauge pressure).
     outlet_back_pressure: 0.0,
     pressure_inlet: false,
@@ -264,9 +249,6 @@ const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     low_mach_theta_floor: 1e-8,
     low_mach_pressure_coupling_alpha: 0.01,
     inlet_velocity: 0.002,
-    // Density-based compressible carries its own EOS; the all-Mach `psi` knob is
-    // not used here (factor 0 ⇒ psi 0).
-    compressibility_exaggeration: 0.0,
     outlet_back_pressure: 0.0,
     pressure_inlet: false,
     inlet_pressure: 0.0,
@@ -280,9 +262,8 @@ const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
 /// (no `eos.gamma` → Coupled stepping), so the stable, validated incompressible
 /// knobs apply verbatim — Van Leer TVD advection, the laminar inlet speed, the
 /// convective adaptive dt, a low outer cap. The single addition is a **positive
-/// compressibility** `psi`, now **derived from the fluid's real EOS**
-/// (`psi = 1/c^2 = Fluid::compressibility()`) rather than a hardcoded constant. The
-/// default `compressibility_exaggeration = 1.0` is honest physics — for Air
+/// compressibility** `psi`, **derived from the fluid's real EOS**
+/// (`psi = 1/c^2 = Fluid::compressibility()`) — always REAL, no exaggeration. For Air
 /// (c ≈ 347 m/s) `psi ≈ 8.3e-6`, so the default obstacle flow is near-incompressible
 /// (inlet Mach ≈ 3e-5), exactly the validated incompressible Kármán street the
 /// all-Mach model reduces to at small `psi`.
@@ -293,12 +274,8 @@ const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
 /// decoupled pseudo-compressibility `psi_precond = max(psi, 1/(k·U_inlet)²)` that ONLY
 /// the pressure-row time term reads (the density keeps the real `psi`), rescaling the
 /// pseudo sound speed toward the local velocity so a convective dt is stable. It
-/// vanishes at steady state, so the converged solution is the real-`psi` physics. This
-/// is what makes `×1` a genuine, stable default rather than an exaggeration.
-///
-/// The GUI still exposes a **compressibility exaggeration** slider (×1 = real) so the
-/// user can RAISE the real `psi` to visualize density variation / acoustics — the
-/// regime that, at the real sound speed, would require turbulent velocities.
+/// vanishes at steady state, so the converged solution is the real-`psi` physics — a
+/// genuine, stable, fully physical default.
 const ALLMACH: ModelGuiDefaults = ModelGuiDefaults {
     advection_scheme: Scheme::SecondOrderUpwindVanLeer,
     time_scheme: GpuTimeScheme::BDF2,
@@ -322,59 +299,26 @@ const ALLMACH: ModelGuiDefaults = ModelGuiDefaults {
     // REAL EOS physics (×1): psi = 1/c^2 from the fluid's sound speed. For Air
     // (c≈347 m/s) this is psi≈8.3e-6 ⇒ inlet Mach≈3e-5: the obstacle/backstep default
     // is honestly near-incompressible (the all-Mach model reduces to the validated
-    // incompressible Kármán-street case). The GUI "compressibility exaggeration"
-    // slider walks this up to visualize density variation — no artificial default.
-    compressibility_exaggeration: 1.0,
+    // incompressible Kármán-street case) — the REAL physics, no exaggeration.
     // Standard outlet for the channel/backstep cases (the nozzle demo overrides this).
     outlet_back_pressure: 0.0,
     pressure_inlet: false,
     inlet_pressure: 0.0,
 };
 
-/// Exaggeration factor for the supersonic-nozzle demo, tuned for **Air**. Real Air
-/// compressibility is `1/c^2 ≈ 8.3e-6`; this factor restores the validated effective
-/// `psi ≈ 50` (effective `c ≈ 0.14 m/s`) at which the nozzle reaches a *stable*,
-/// visible supersonic exit at laminar inlet speeds.
+/// All-Mach thermal **supersonic nozzle** demo defaults — fully PHYSICAL (real Air
+/// sound speed `c ≈ 347 m/s`, `psi = 1/c² ≈ 8.3e-6`, NO exaggeration).
 ///
-/// Unlike the obstacle (where low-Mach preconditioning makes the real `psi` stable),
-/// the nozzle's exaggeration is load-bearing for a SEPARATE, physical reason that
-/// preconditioning does NOT cure: at real `psi` the gauge-pressure EOS floor sits at
-/// `p = -rho_ref/psi = -P_REF ≈ -1.5e5`, and driving a CHOKED nozzle supersonic pushes
-/// the gauge pressure through that vacuum floor into NEGATIVE density (probed in
-/// `allmach_real_units_nozzle_probe`) — an EOS-positivity limit, not an acoustic one.
-/// The real-units alternative is also turbulent (Re≈4.5e7). The exaggeration lowers the
-/// effective sound speed so `P_REF_eff = rho/psi ≈ 0.025` keeps the vacuum floor far
-/// from the operating pressures while staying laminar.
-const NOZZLE_EXAGGERATION: f32 = 6.027e6; // 50 / (1/347.2^2)
-
-/// All-Mach thermal **supersonic nozzle** demo defaults.
-///
-/// Same gauge-pressure (incompressible-branch) knobs as [`ALLMACH`], but tuned for
-/// the converging–diverging nozzle geometry to demonstrate SUPERSONIC throughflow:
-///
-/// * `inlet_velocity = 0.09` ≈ the natural choking inlet speed for the bundled
-///   nozzle (`generate_structured_nozzle_mesh`, area ratio exit/throat = 2): the
-///   inflow enters subsonic (inlet Mach ≈ 0.64·c… actually ≈ 0.09/0.1414 ≈ 0.64),
-///   accelerates through the sonic throat (M ≈ 1), and continues into the diverging
-///   section.
-/// * `outlet_back_pressure = -0.045` (gauge) is the supersonic driver: lowering the
-///   outlet pressure below critical pulls the diverging-section flow to a
-///   SUPERSONIC exit (M_exit ≈ 1.07, validated in
-///   `tests/allmach_thermal_supersonic_test.rs`). This is the stable edge of the
-///   envelope — the gauge-pressure EOS hits its near-vacuum floor below ≈ −0.06.
-///   NB: −0.045 is a *soft* Dirichlet target — the solved field relaxes well above it,
-///   so the realized outlet absolute pressure stays POSITIVE (P_abs ≈ +0.007, never
-///   vacuum) even though P_REF + p_back = −0.0205 is sub-vacuum on paper. The clean
-///   accelerating-supersonic exit needs this pull; choking harder to raise the spec
-///   above vacuum over-expands into a shock (throat M > exit M). Probed in
-///   `tests/nozzle_interior_vacuum_probe.rs`.
-/// * `compressibility_exaggeration = NOZZLE_EXAGGERATION` ⇒ effective `psi ≈ 50`,
-///   effective sound speed `c ≈ 0.1414 m/s` — a stable, laminar, visible-supersonic
-///   regime (real Air `c ≈ 347 m/s` would be turbulent AND numerically unstable; see
-///   `NOZZLE_EXAGGERATION`).
-///
-/// Paired with the `allmach_thermal` model so the demo also shows the EXPANSION
-/// COOLING (the `T` field drops to ≈ 0.75·T_ref as the gas accelerates).
+/// Same gauge-pressure compressible knobs as [`ALLMACH`], but driven for the
+/// converging–diverging nozzle geometry (`generate_structured_nozzle_mesh`, area ratio
+/// exit/throat = 2). At the real sound speed the flow is a genuine compressible
+/// (pseudo-laminar) nozzle: a pressure inlet pins the inlet gauge pressure and the
+/// supersonic outlet floats, so the throughflow (O(100s of m/s) — physical, not a
+/// turbulence-resolved DNS) accelerates through the throat. `inlet_velocity` is the
+/// preconditioner / CFL throughflow scale; `inlet_pressure` drives it (both retuned
+/// from `tests/nozzle_real_c_pseudolaminar_probe.rs`). `outlet_back_pressure` is the
+/// velocity-inlet fallback. Paired with `allmach_thermal` so the demo also shows
+/// expansion cooling.
 pub const ALLMACH_THERMAL_NOZZLE: ModelGuiDefaults = ModelGuiDefaults {
     advection_scheme: Scheme::SecondOrderUpwindVanLeer,
     time_scheme: GpuTimeScheme::BDF2,
@@ -383,29 +327,36 @@ pub const ALLMACH_THERMAL_NOZZLE: ModelGuiDefaults = ModelGuiDefaults {
     alpha_p: 0.3,
     outer_iters: 8,
     outer_auto_converge: true,
-    target_cfl: 0.9,
-    timestep: 0.02,
+    // Conservative acoustic CFL and a tiny seed dt: at c≈347 m/s the throughflow is
+    // O(300 m/s), so the acoustic-aware adaptive dt settles to O(h/c); the small seed
+    // keeps step 0 in-bounds before it adapts (a 0.02 seed would blow up step 0). These
+    // match the proven-stable `nozzle_real_c_pseudolaminar_probe` recipe.
+    target_cfl: 0.4,
+    timestep: 1e-5,
     adaptive_dt: true,
     dual_time: false,
     dtau: 1e-5,
     low_mach_model: GpuLowMachPrecondModel::Off,
     low_mach_theta_floor: 1e-6,
     low_mach_pressure_coupling_alpha: 1.0,
-    // Near the natural choking inlet speed for the bundled nozzle (at the EXAGGERATED
-    // effective sound speed c≈0.14 m/s, so a laminar Re).
-    inlet_velocity: 0.09,
-    // EOS-derived 1/c^2 (Air) times the teaching exaggeration ⇒ effective psi≈50.
-    compressibility_exaggeration: NOZZLE_EXAGGERATION,
-    // The supersonic driver: a sub-critical (negative gauge) back-pressure.
+    // Throughflow scale (preconditioner + CFL) for the REAL-c nozzle: the Bernoulli
+    // speed √(2·inlet_pressure/ρ) for the pressure ratio below (≈313 m/s at 6e4 gauge,
+    // ρ_air=1.225). No exaggeration — this is the physical c≈347 m/s regime.
+    inlet_velocity: 313.0,
+    // The velocity-inlet fallback back-pressure (gauge). The default driving is the
+    // pressure inlet below.
     outlet_back_pressure: -0.045,
     // Ship the PHYSICALLY-CORRECT nozzle driving: a pressure inlet + supersonic
-    // (extrapolated) outlet. The gauge anchors at the inlet; the outlet floats (no
-    // back-pressure). `outlet_back_pressure` above is the velocity-inlet fallback if
-    // this is toggled off in the GUI. NB this driving is over-expanded in the
-    // artificial-compressibility model (throat over-chokes, diverging section diffuses);
-    // see tests/nozzle_pressure_inlet_gate.rs.
+    // (extrapolated) outlet, at the REAL sound speed (zero exaggeration). The gauge
+    // anchors at the inlet; the outlet floats. The elliptic pressure row is made
+    // well-posed at the supersonic exit by the pressure-flux Newton linearization
+    // ([[cfd2-hyperbolic-pressure-row]]); without it this real-c drive ran the exit
+    // to vacuum. `inlet_pressure` = 6e4 Pa gauge gives the classic CD-nozzle profile
+    // (subsonic throat M≈0.95 → supersonic exit M≈1.7, M_exit > M_throat, vacuum-free);
+    // `outlet_back_pressure` above is the velocity-inlet fallback if this is toggled
+    // off in the GUI. Retuned from `tests/nozzle_real_c_pseudolaminar_probe.rs`.
     pressure_inlet: true,
-    inlet_pressure: 0.07,
+    inlet_pressure: 6.0e4,
 };
 
 /// GUI solver defaults for `model_id`.
@@ -508,16 +459,10 @@ mod tests {
 
     #[test]
     fn allmach_default_compressibility_is_eos_derived_not_artificial() {
-        // The all-Mach default no longer hardcodes psi: it defaults to REAL EOS
-        // physics (exaggeration ×1), so the wire `psi` is `1/c^2` from the fluid's
-        // sound speed. For Air (c≈347) that is ~8.3e-6 (honestly near-incompressible);
-        // the visible-compressibility "cartoon" is the GUI exaggeration slider, not a
-        // baked default.
+        // The all-Mach psi is ALWAYS the real EOS `1/c^2` from the fluid's sound speed
+        // — no exaggeration factor anywhere. For Air (c≈347) that is ~8.3e-6 (honestly
+        // near-incompressible).
         let d = gui_defaults_for("allmach_pressure");
-        assert_eq!(
-            d.compressibility_exaggeration, 1.0,
-            "all-Mach default must be real EOS physics (×1), not an artificial psi"
-        );
         // The derived runtime psi matches 1/c^2 of the supplied fluid (Air).
         let air = EosSpec::IdealGas {
             gamma: 1.4,
@@ -545,10 +490,9 @@ mod tests {
     }
 
     #[test]
-    fn nozzle_demo_exaggeration_restores_effective_psi_50_for_air() {
-        // The supersonic nozzle keeps a *stable, visible* supersonic at laminar speeds
-        // by exaggerating the (EOS-derived) compressibility back to the validated
-        // effective psi≈50 — real units are turbulent + numerically unstable there.
+    fn nozzle_demo_uses_real_compressibility_no_exaggeration() {
+        // The supersonic nozzle now uses the REAL Air compressibility psi = 1/c^2 ≈
+        // 8.3e-6 (c ≈ 347 m/s) — no exaggeration anywhere.
         let air = EosSpec::IdealGas {
             gamma: 1.4,
             gas_constant: 287.0,
@@ -558,9 +502,8 @@ mod tests {
             .to_runtime_params(1.225, 1.81e-5, air)
             .compressibility_psi as f64;
         assert!(
-            (48.0..52.0).contains(&psi),
-            "nozzle effective psi {psi:.2} should be ≈50 (validated supersonic regime)"
+            (8.0e-6..8.6e-6).contains(&psi),
+            "nozzle psi {psi:.3e} must be real Air 1/c^2 ≈ 8.3e-6 (no exaggeration)"
         );
-        assert!(ALLMACH_THERMAL_NOZZLE.outlet_back_pressure < 0.0);
     }
 }

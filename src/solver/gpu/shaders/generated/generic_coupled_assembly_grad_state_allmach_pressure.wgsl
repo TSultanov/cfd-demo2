@@ -280,6 +280,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             phi_2 -= phi_2 * 2.0;
         }
         rhs_2 -= phi_2;
+        var a_lin_2: f32 = phi_2 * state[idx * 12u + 8u] / max(state[idx * 12u + 11u], 0.000000000000000000000000000001);
+        if (!is_boundary) {
+            diag_2 += max(a_lin_2, 0.0);
+            matrix_values[start_row_2 + neighbor_rank * 3u + 2u] += min(a_lin_2, 0.0);
+            rhs_2 += max(a_lin_2, 0.0) * state[idx * 12u + 2u] + min(a_lin_2, 0.0) * state[other_idx * 12u + 2u];
+        } else {
+            diag_2 += max(a_lin_2, 0.0);
+            rhs_2 += max(a_lin_2, 0.0) * state[idx * 12u + 2u];
+        }
     }
     diag_0 -= bounded_sum_phi_0;
     diag_1 -= bounded_sum_phi_1;

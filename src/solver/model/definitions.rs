@@ -684,7 +684,7 @@ pub use incompressible_momentum::{
 pub use allmach_pressure::{
     allmach_pressure_mms_model, allmach_pressure_model, allmach_pressure_system,
     allmach_thermal_mms_model, allmach_thermal_model, apply_pressure_inlet_nozzle_bcs,
-    AllMachPressureFields, ALLMACH_K_OVER_CP,
+    AllMachPressureFields, ALLMACH_GAMMA, ALLMACH_K_OVER_CP,
     ALLMACH_MMS_SOURCE_P_FIELD, ALLMACH_MMS_SOURCE_T_FIELD, ALLMACH_MMS_SOURCE_U_FIELD,
     ALLMACH_RHO_DT_FIELD, ALLMACH_RHO_T_REF_FIELD, ALLMACH_TEMPERATURE_FIELD, ALLMACH_T_REF,
 };

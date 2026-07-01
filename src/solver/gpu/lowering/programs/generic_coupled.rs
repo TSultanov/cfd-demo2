@@ -1008,6 +1008,7 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     plan.outer_step_status = None;
     plan.outer_field_residuals.clear();
     plan.outer_field_residuals_scaled.clear();
+    plan.prev_outer_field_residuals_scaled.clear();
     plan.repeat_break = false;
     plan.positivity_min_rho = None;
     plan.positivity_min_p = None;
@@ -1263,6 +1264,82 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
     plan.step_linear_stats.push(stats);
 }
 
+/// True when the adaptive outer-loop *plateau* detector drives this step: ANY
+/// coupled SIMPLE solver (incompressible_momentum, allmach_pressure/thermal,
+/// buoyant_incompressible, …) with a real outer loop (`outer_iters > 1`), adaptive
+/// outer convergence requested (`collect_convergence_stats` / `outer_break_enabled`,
+/// which the GUI defaults enable), and NOT pseudo-transient (`dtau > 0`, where the
+/// correction-norm plateau means something different).
+///
+/// Routing to the non-batched path (which can skip the remaining, unencoded outer
+/// iterations) and the detector itself are gated on this SAME condition so they
+/// never disagree. Explicitly excluded: the density-based `compressible` solver
+/// (its own conserved-target convergence + single outer iteration) and every
+/// `_mms` order-verification variant (which pins fixed iterations). Any
+/// pseudo-transient, fixed-iteration, or break-disabled config also stays on the
+/// batched, fixed-count path.
+fn outer_plateau_active(plan: &GpuProgramPlan) -> bool {
+    let id = plan.model.id;
+    if id == "compressible" || id.ends_with("_mms") {
+        return false;
+    }
+    plan.collect_convergence_stats && {
+        let r = res(plan);
+        r.outer_break_enabled
+            && r.outer_iters > 1
+            && r.fields.constants.values().dtau <= 0.0
+    }
+}
+
+/// Minimum outer sweeps before the plateau detector may exit — the empirically
+/// validated floor (`model_defaults`: "Ghia validates 5"). Below this the
+/// correction phase is not yet complete, so an exit could change the physics.
+const OUTER_PLATEAU_MIN_ITERS: usize = 5;
+/// A field has "stalled" when its scaled correction stopped shrinking by more than
+/// (1 - factor) per sweep AND is not growing past the ceiling. The band
+/// `[factor, ceiling]` treats the settled-but-slightly-drifting velocity residual
+/// as done while refusing to call a growing correction converged.
+const OUTER_PLATEAU_FACTOR: f32 = 0.98;
+const OUTER_PLATEAU_CEILING: f32 = 1.01;
+
+/// Adaptive outer-loop plateau detector. Returns `true` when every solved field's
+/// scaled outer-correction has stalled (or is already under tolerance) so further
+/// sweeps would not change the solution — the signal to stop the outer loop.
+/// Requires at least [`OUTER_PLATEAU_MIN_ITERS`] sweeps and a previous residual to
+/// compare against; a field still meaningfully decreasing OR growing blocks the exit.
+fn outer_corrections_plateaued(plan: &GpuProgramPlan, iters_done: usize) -> bool {
+    if iters_done < OUTER_PLATEAU_MIN_ITERS {
+        return false;
+    }
+    let cur = &plan.outer_field_residuals_scaled;
+    let prev = &plan.prev_outer_field_residuals_scaled;
+    if cur.is_empty() || prev.is_empty() {
+        return false;
+    }
+    let (tol_rel, tol_abs) = {
+        let r = res(plan);
+        (r.outer_tol.max(0.0), r.outer_tol_abs.max(0.0))
+    };
+    // Every field must be DONE (converged or plateaued); if any is missing a prior
+    // value, still improving, or growing, do not exit.
+    for (name, r_cur) in cur.iter() {
+        let r_cur = *r_cur;
+        // Already below tolerance -> done regardless of a noisy ratio near zero.
+        if r_cur <= tol_rel || r_cur <= tol_abs {
+            continue;
+        }
+        let Some((_, r_prev)) = prev.iter().find(|(n, _)| n == name) else {
+            return false;
+        };
+        let ratio = r_cur / r_prev.max(1e-30);
+        // Still improving (< factor) or growing (> ceiling) -> block the exit.
+        if ratio < OUTER_PLATEAU_FACTOR || ratio > OUTER_PLATEAU_CEILING {
+            return false;
+        }
+    }
+    true
+}
+
 pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
     let iters_done = plan.step_linear_stats.len();
     plan.outer_iterations = iters_done as u32;
@@ -1301,6 +1378,23 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
                 return;
             }
         };
+
+        // Adaptive outer-loop plateau detector (incompressible_momentum default).
+        // Handles convergence entirely here — the legacy GPU break below is
+        // converged-gated and therefore unreachable for the plateauing SIMPLE
+        // corrections. `prev` is refreshed every iter so ratios stay adjacent.
+        if outer_plateau_active(plan) {
+            let plateaued = outer_corrections_plateaued(plan, iters_done);
+            plan.prev_outer_field_residuals_scaled = plan.outer_field_residuals_scaled.clone();
+            if plateaued {
+                plan.repeat_break = true;
+            }
+            if plan.repeat_break || is_final_outer_iter {
+                finalize_outer_step_status(plan, plateaued.then_some(true));
+            }
+            return;
+        }
+
         if !break_should_run {
             if is_final_outer_iter {
                 finalize_outer_step_status(plan, None);
@@ -1650,6 +1744,15 @@ fn compute_outer_residuals(plan: &mut GpuProgramPlan) -> Option<(Vec<f32>, Optio
     }
     plan.outer_residual_u = residual_u;
     plan.outer_residual_p = residual_p;
+
+    if std::env::var("CFD2_LOG_OUTER").is_ok() {
+        let scaled: Vec<String> = plan
+            .outer_field_residuals_scaled
+            .iter()
+            .map(|(n, r)| format!("{n}={r:.3e}"))
+            .collect();
+        eprintln!("[outer-resid] iter#{} {}", plan.step_linear_stats.len(), scaled.join(" "));
+    }
 
     res_mut(plan).outer_convergence = Some(monitor);
     Some((delta, scale))
@@ -2088,6 +2191,14 @@ pub(crate) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
         let r = res(plan);
         (r.outer_batched_mode, r.outer_iters.max(1))
     };
+    // Route to the non-batched (per-iteration) outer loop when the adaptive
+    // plateau detector is active, so per-iter residuals are computed and the loop
+    // can skip the remaining UNENCODED sweeps once the corrections stall. Every
+    // other model keeps the batched one-submission path. (`CFD2_NO_BATCH` forces
+    // non-batched for diagnostics.)
+    let outer_batched_mode = outer_batched_mode
+        && !outer_plateau_active(plan)
+        && std::env::var("CFD2_NO_BATCH").is_err();
     if !outer_batched_mode || outer_iters <= 1 {
         return;
     }

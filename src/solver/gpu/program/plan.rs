@@ -361,6 +361,10 @@ pub(crate) struct GpuProgramPlan {
     pub outer_step_status: Option<OuterStepStatus>,
     pub outer_field_residuals: Vec<(String, f32)>,
     pub outer_field_residuals_scaled: Vec<(String, f32)>,
+    /// Previous outer iteration's scaled residuals, kept within a step so the
+    /// adaptive outer-loop plateau detector can compare consecutive corrections.
+    /// Cleared at the start of every step (never leaks across steps).
+    pub prev_outer_field_residuals_scaled: Vec<(String, f32)>,
     pub step_attempt_index: usize,
     pub step_attempt_count: u32,
     pub rejected_retry_count: u32,
@@ -404,6 +408,7 @@ impl GpuProgramPlan {
             outer_step_status: None,
             outer_field_residuals: Vec::new(),
             outer_field_residuals_scaled: Vec::new(),
+            prev_outer_field_residuals_scaled: Vec::new(),
             step_attempt_index: 0,
             step_attempt_count: 0,
             rejected_retry_count: 0,

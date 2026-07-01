@@ -59,24 +59,6 @@ pub fn resolve_flux_module_state_slots(
     resolve_fields_against_layout(fields, &field_map, layout.stride())
 }
 
-/// Legacy layout-based runtime-scheme resolver — retained for test equivalence checks only.
-#[cfg(test)]
-pub fn resolve_flux_module_state_slots_runtime_scheme(
-    variants: &[(crate::solver::scheme::Scheme, FluxModuleKernelSpec)],
-    primitives: &[(String, Expr)],
-    layout: &StateLayout,
-) -> Result<ResolvedStateSlotsSpec, String> {
-    let field_map = build_field_metadata_map(layout);
-    let primitive_map: HashMap<&str, &Expr> =
-        primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
-
-    let mut fields = HashSet::<String>::new();
-    for (_, spec) in variants {
-        collect_fields_from_flux_spec(spec, &primitive_map, &field_map, &mut fields)?;
-    }
-    resolve_fields_against_layout(fields, &field_map, layout.stride())
-}
-
 /// Resolve flux module state slots using a [`PortRegistry`] as the single source of truth.
 ///
 /// This replaces `resolve_flux_module_state_slots` by delegating layout resolution to

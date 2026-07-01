@@ -470,90 +470,62 @@ impl CseBuilder {
             }
         }
 
-        #[derive(Default)]
-        struct Canonicalizer {
-            intern: IndexMap<NodeKey, Expr>,
-        }
-
-        impl Canonicalizer {
-            fn canon(&mut self, expr: &Expr) -> Expr {
-                let key = expr_to_key(expr);
-                if let Some(rep) = self.intern.get(&key) {
-                    return rep.clone();
-                }
-                self.intern.insert(key, expr.clone());
-                expr.clone()
-            }
-        }
-
         fn expr_is_trivial(expr: &Expr) -> bool {
             matches!(expr.node(), ExprNode::Literal(_) | ExprNode::Ident(_))
         }
 
-        fn expr_size(
-            expr: &Expr,
-            canon: &mut Canonicalizer,
-            memo: &mut IndexMap<NodeKey, usize>,
-        ) -> usize {
+        fn expr_size(expr: &Expr, memo: &mut IndexMap<NodeKey, usize>) -> usize {
             let key = expr_to_key(expr);
             if let Some(size) = memo.get(&key).copied() {
                 return size;
             }
             let size = match expr.node() {
                 ExprNode::Literal(_) | ExprNode::Ident(_) => 1,
-                ExprNode::Field { base, .. } => 1 + expr_size(base, canon, memo),
+                ExprNode::Field { base, .. } => 1 + expr_size(base, memo),
                 ExprNode::Index { base, index } => {
-                    1 + expr_size(base, canon, memo) + expr_size(index, canon, memo)
+                    1 + expr_size(base, memo) + expr_size(index, memo)
                 }
-                ExprNode::Unary { expr: inner, .. } => 1 + expr_size(inner, canon, memo),
+                ExprNode::Unary { expr: inner, .. } => 1 + expr_size(inner, memo),
                 ExprNode::Binary { left, right, .. } => {
-                    1 + expr_size(left, canon, memo) + expr_size(right, canon, memo)
+                    1 + expr_size(left, memo) + expr_size(right, memo)
                 }
                 ExprNode::Call { callee, args } => {
-                    1 + expr_size(callee, canon, memo)
-                        + args
-                            .iter()
-                            .map(|arg| expr_size(arg, canon, memo))
-                            .sum::<usize>()
+                    1 + expr_size(callee, memo)
+                        + args.iter().map(|arg| expr_size(arg, memo)).sum::<usize>()
                 }
             };
             memo.insert(key, size);
             size
         }
 
-        fn count_subexprs(
-            expr: &Expr,
-            canon: &mut Canonicalizer,
-            counts: &mut IndexMap<NodeKey, (Expr, usize)>,
-        ) {
+        fn count_subexprs(expr: &Expr, counts: &mut IndexMap<NodeKey, (Expr, usize)>) {
             let key = expr_to_key(expr);
             let entry = counts.entry(key).or_insert_with(|| (expr.clone(), 0));
             entry.1 += 1;
             match expr.node() {
                 ExprNode::Literal(_) | ExprNode::Ident(_) => {}
-                ExprNode::Field { base, .. } => count_subexprs(base, canon, counts),
+                ExprNode::Field { base, .. } => count_subexprs(base, counts),
                 ExprNode::Index { base, index } => {
-                    count_subexprs(base, canon, counts);
-                    count_subexprs(index, canon, counts);
+                    count_subexprs(base, counts);
+                    count_subexprs(index, counts);
                 }
-                ExprNode::Unary { expr: inner, .. } => count_subexprs(inner, canon, counts),
+                ExprNode::Unary { expr: inner, .. } => count_subexprs(inner, counts),
                 ExprNode::Binary { left, right, .. } => {
-                    count_subexprs(left, canon, counts);
-                    count_subexprs(right, canon, counts);
+                    count_subexprs(left, counts);
+                    count_subexprs(right, counts);
                 }
                 ExprNode::Call { callee, args } => {
-                    count_subexprs(callee, canon, counts);
+                    count_subexprs(callee, counts);
                     for arg in args {
-                        count_subexprs(arg, canon, counts);
+                        count_subexprs(arg, counts);
                     }
                 }
             }
         }
 
-        let mut canon = Canonicalizer::default();
         let mut counts = IndexMap::<NodeKey, (Expr, usize)>::new();
         for root in roots {
-            count_subexprs(root, &mut canon, &mut counts);
+            count_subexprs(root, &mut counts);
         }
 
         let mut sizes = IndexMap::<NodeKey, usize>::new();
@@ -565,7 +537,7 @@ impl CseBuilder {
             if expr_is_trivial(rep) {
                 continue;
             }
-            let size = expr_size(rep, &mut canon, &mut sizes);
+            let size = expr_size(rep, &mut sizes);
             if size < self.config.min_nodes {
                 continue;
             }

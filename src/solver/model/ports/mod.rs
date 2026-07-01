@@ -58,7 +58,7 @@ pub use {
         ParamPort, ParamPortError, ParamPortProvider, ParamPortSet, ParamPortSetBuilder, ParamType,
         F32, F64, I32, U32,
     },
-    registry::{PortRegistry, PortRegistryError, TypedPortRegistry},
+    registry::{PortRegistry, PortRegistryError},
     // Re-export traits
     traits::{ModulePorts as ModulePortsTrait, PortSet as PortSetTrait, PortValidationError},
 };

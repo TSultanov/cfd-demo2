@@ -221,6 +221,46 @@ impl Buffers {
         }
     }
 
+    /// Like [`f32_vec`], but marshals the atomic buffer into the output `Vec` on
+    /// `threads` workers over disjoint contiguous chunks. Bit-identical to
+    /// [`f32_vec`] (same `from_bits` values); it only splits the copy across cores.
+    /// Used for the large assembled `matrix_values` buffer (tens of millions of
+    /// entries), which the serial marshal turned into a per-solve bottleneck.
+    pub fn f32_vec_threaded(&self, name: &str, threads: usize) -> Vec<f32> {
+        let data = match self.map.get(name) {
+            Some(Store::F32 { data, .. }) => data,
+            _ => panic!("`{name}` is not an f32 buffer"),
+        };
+        let n = data.len();
+        let mut out = vec![0.0f32; n];
+        // Small buffers / serial: the plain path (spawn overhead not worth it).
+        if threads <= 1 || n < (1 << 16) {
+            for (o, a) in out.iter_mut().zip(data.iter()) {
+                *o = f32::from_bits(a.load(ORD));
+            }
+            return out;
+        }
+        let workers = threads.min(n);
+        let chunk = n.div_ceil(workers);
+        std::thread::scope(|s| {
+            let mut rest: &mut [f32] = &mut out;
+            let mut start = 0usize;
+            while start < n {
+                let end = (start + chunk).min(n);
+                let (head, tail) = rest.split_at_mut(end - start);
+                rest = tail;
+                let src = &data[start..end];
+                s.spawn(move || {
+                    for (o, a) in head.iter_mut().zip(src.iter()) {
+                        *o = f32::from_bits(a.load(ORD));
+                    }
+                });
+                start = end;
+            }
+        });
+        out
+    }
+
     pub fn u32_vec(&self, name: &str) -> Vec<u32> {
         match self.map.get(name) {
             Some(Store::U32(d)) => d.iter().map(|a| a.load(ORD)).collect(),

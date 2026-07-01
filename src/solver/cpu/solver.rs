@@ -682,10 +682,36 @@ impl CpuSolver {
             );
         };
 
-        // Prepare once per step (non-bc_expr Preparation kernels).
-        for id in &prep_once {
-            run(id);
+        // Optional per-phase wall-time profiling (CFD2_CPU_PROFILE=1). Attributes
+        // step wall time to the parallel dispatch groups vs. the (serial) CPU
+        // linear solve, so the parallel/serial split is visible directly.
+        let profile = std::env::var("CFD2_CPU_PROFILE").is_ok();
+        let (mut t_prep, mut t_asm, mut t_lin, mut t_upd, mut t_bc) = (
+            std::time::Duration::ZERO,
+            std::time::Duration::ZERO,
+            std::time::Duration::ZERO,
+            std::time::Duration::ZERO,
+            std::time::Duration::ZERO,
+        );
+        macro_rules! timed {
+            ($acc:expr, $body:expr) => {{
+                if profile {
+                    let _t0 = std::time::Instant::now();
+                    let _r = $body;
+                    $acc += _t0.elapsed();
+                    _r
+                } else {
+                    $body
+                }
+            }};
         }
+
+        // Prepare once per step (non-bc_expr Preparation kernels).
+        timed!(t_prep, {
+            for id in &prep_once {
+                run(id);
+            }
+        });
 
         for _ in 0..self.outer_iters {
             // Snapshot current iterate (dual-time reference + outer-break delta).
@@ -696,16 +722,22 @@ impl CpuSolver {
             // then the CPU linear solve (replacing LinearSolve), then the update
             // group, then the recurring boundary-closure refresh (bc_expr) which
             // prepares the ghosts for the next iteration/step.
-            for id in &per_iter {
-                run(id);
-            }
-            self.linear_solve();
-            for id in &update_group {
-                run(id);
-            }
-            for id in &bc_expr_ids {
-                run(id);
-            }
+            timed!(t_asm, {
+                for id in &per_iter {
+                    run(id);
+                }
+            });
+            timed!(t_lin, self.linear_solve());
+            timed!(t_upd, {
+                for id in &update_group {
+                    run(id);
+                }
+            });
+            timed!(t_bc, {
+                for id in &bc_expr_ids {
+                    run(id);
+                }
+            });
 
             // Adaptive outer break (off when outer_tol == 0).
             if self.outer_tol > 0.0 {
@@ -719,6 +751,20 @@ impl CpuSolver {
                     break;
                 }
             }
+        }
+
+        if profile {
+            let tot = t_prep + t_asm + t_lin + t_upd + t_bc;
+            let ms = |d: std::time::Duration| d.as_secs_f64() * 1e3;
+            let pct = |d: std::time::Duration| 100.0 * d.as_secs_f64() / tot.as_secs_f64().max(1e-30);
+            eprintln!(
+                "[cpu-profile] step {} threads={} tot={:.1}ms | assembly(par)={:.1}ms({:.0}%) \
+                 linsolve(serial)={:.1}ms({:.0}%) update(par)={:.1}ms({:.0}%) \
+                 bc_expr(interp)={:.1}ms({:.0}%) prep={:.1}ms({:.0}%)",
+                self.step_count, self.config.threads, ms(tot),
+                ms(t_asm), pct(t_asm), ms(t_lin), pct(t_lin), ms(t_upd), pct(t_upd),
+                ms(t_bc), pct(t_bc), ms(t_prep), pct(t_prep),
+            );
         }
 
         // Per-step relative state change, for the GUI steady-state auto-pause
@@ -828,7 +874,9 @@ impl CpuSolver {
     fn linear_solve(&self) {
         let s = self.unknowns_per_cell;
         let n = self.num_cells * s;
-        let matrix = self.buffers.f32_vec("matrix_values");
+        // The assembled matrix is the largest buffer (nnz_blocks * S*S entries);
+        // marshal it out of the atomic store in parallel. `rhs`/`x` are O(n), small.
+        let matrix = self.buffers.f32_vec_threaded("matrix_values", self.config.threads);
         let rhs = self.buffers.f32_vec("rhs");
         // Warm-start from the persisted `x` buffer (the previous solve's
         // solution, which the update kernel keeps in sync with the state). The
@@ -842,11 +890,13 @@ impl CpuSolver {
             x = vec![0.0f32; n];
         }
 
+        let threads = self.config.threads;
         if s == 1 {
             let a = CsrView {
                 row_offsets: &self.scalar_row_offsets,
                 col_indices: &self.col_indices,
                 values: &matrix,
+                threads,
             };
             bicgstab(&a, &rhs, &mut x, LINEAR_MAX_ITERS, LINEAR_TOL, self.config.simd);
         } else {
@@ -856,6 +906,7 @@ impl CpuSolver {
                 col_indices: &self.col_indices,
                 diagonal_indices: &self.diagonal_indices,
                 values: &matrix,
+                threads,
             };
             // Preconditioner: the model-owned Schur complement for saddle-point
             // systems (incompressible/buoyant); otherwise the per-cell block

@@ -237,7 +237,7 @@ fn cpu_gpu_same_matrix_solve() {
     let nn = cells * ss;
 
     // CPU solve.
-    let a = BlockCsr { s: ss, scalar_row_offsets: sro, col_indices: col, diagonal_indices: diag, values: &matrix };
+    let a = BlockCsr { s: ss, scalar_row_offsets: sro, col_indices: col, diagonal_indices: diag, values: &matrix, threads: 1 };
     let pc = PointJacobi::new(&a);
     let mut x_cpu = vec![0.0f32; nn];
     fgmres(&a, &rhs, &mut x_cpu, &pc, 60, 5000, 1e-6, false);

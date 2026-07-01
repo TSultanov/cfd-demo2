@@ -370,6 +370,7 @@ fn residual_at(n: usize) {
             col_indices: col,
             diagonal_indices: diag_idx,
             values: &matrix,
+            threads: 1,
         };
         let pc = PointJacobi::new(&a);
         let mut xg: Vec<f32> = xe.iter().map(|&v| v as f32).collect();

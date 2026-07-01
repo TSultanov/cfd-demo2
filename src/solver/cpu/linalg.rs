@@ -10,11 +10,15 @@
 //! values are `f32`; results are compared to references at tolerance, not
 //! bit-exactly against the GPU.
 
+use crate::solver::cpu::parallel::{par_map_into, par_update};
+
 /// A borrowed CSR matrix (single scalar unknown per row).
 pub struct CsrView<'a> {
     pub row_offsets: &'a [u32],
     pub col_indices: &'a [u32],
     pub values: &'a [f32],
+    /// Worker threads for the parallel matvec (`1` = serial).
+    pub threads: usize,
 }
 
 impl CsrView<'_> {
@@ -24,14 +28,31 @@ impl CsrView<'_> {
 
     /// `y = A x` (both length n), computed in f64.
     fn spmv(&self, x: &[f64], y: &mut [f64]) {
-        for row in 0..self.n() {
+        let threads = self.threads.max(1);
+        if threads <= 1 {
+            self.spmv_range(x, 0, self.n(), y);
+            return;
+        }
+        // Disjoint output rows per worker; shared read-only `x`/`values`.
+        crate::solver::cpu::parallel::parallel_cell_chunks_mut(
+            self.n(),
+            1,
+            threads,
+            y,
+            |row0, yc| self.spmv_range(x, row0, row0 + yc.len(), yc),
+        );
+    }
+
+    #[inline]
+    fn spmv_range(&self, x: &[f64], row0: usize, row1: usize, y_out: &mut [f64]) {
+        for row in row0..row1 {
             let start = self.row_offsets[row] as usize;
             let end = self.row_offsets[row + 1] as usize;
             let mut sum = 0.0f64;
             for k in start..end {
                 sum += self.values[k] as f64 * x[self.col_indices[k] as usize];
             }
-            y[row] = sum;
+            y_out[row - row0] = sum;
         }
     }
 
@@ -51,6 +72,11 @@ impl CsrView<'_> {
         d
     }
 }
+
+/// Upper bound on the block size S (unknowns per cell) for stack-allocated
+/// per-cell scratch. Coupled models here are S <= 4 (U.x,U.y,p,T); 8 leaves head-room
+/// while keeping the fixed array small enough to live in registers/L1.
+const MAX_BLOCK_S: usize = 8;
 
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
@@ -114,6 +140,8 @@ pub struct BlockCsr<'a> {
     pub diagonal_indices: &'a [u32],
     /// Packed block values, length `nnz_blocks * S*S`.
     pub values: &'a [f32],
+    /// Worker threads for the parallel matvec / preconditioner (`1` = serial).
+    pub threads: usize,
 }
 
 impl BlockCsr<'_> {
@@ -148,11 +176,34 @@ impl BlockCsr<'_> {
     /// `y = A x` (both length `n()`), accumulated in f64.
     fn block_spmv(&self, x: &[f64], y: &mut [f64]) {
         let s = self.s;
-        for cell in 0..self.num_cells() {
+        let threads = self.threads.max(1);
+        if threads <= 1 {
+            self.block_spmv_range(x, 0, self.num_cells(), y);
+            return;
+        }
+        // Disjoint output: each worker owns a contiguous cell range and writes only
+        // its own `y[cell*s .. ]` slots (shared read-only `x` / `values`). No races.
+        crate::solver::cpu::parallel::parallel_cell_chunks_mut(
+            self.num_cells(),
+            s,
+            threads,
+            y,
+            |cell0, yc| self.block_spmv_range(x, cell0, cell0 + yc.len() / s, yc),
+        );
+    }
+
+    /// Compute `y_out[.. ] = (A x)` for cells `[cell0, cell1)`, where `y_out` is the
+    /// output sub-slice covering exactly those cells (length `(cell1-cell0)*s`).
+    #[inline]
+    fn block_spmv_range(&self, x: &[f64], cell0: usize, cell1: usize, y_out: &mut [f64]) {
+        let s = self.s;
+        debug_assert!(s <= MAX_BLOCK_S, "block size {s} exceeds MAX_BLOCK_S");
+        for cell in cell0..cell1 {
             let scalar_offset = self.scalar_offset(cell);
             let num_neighbors = self.num_neighbors(cell);
-            // Per-row accumulators.
-            let mut acc = vec![0.0f64; s];
+            // Per-row accumulators (stack, not a per-cell heap allocation).
+            let mut acc = [0.0f64; MAX_BLOCK_S];
+            let acc = &mut acc[..s];
             for rank in 0..num_neighbors {
                 let j = self.col_indices[scalar_offset + rank] as usize;
                 for (r, a) in acc.iter_mut().enumerate() {
@@ -164,9 +215,8 @@ impl BlockCsr<'_> {
                     *a += sum;
                 }
             }
-            for r in 0..s {
-                y[cell * s + r] = acc[r];
-            }
+            let out = &mut y_out[(cell - cell0) * s..(cell - cell0) * s + s];
+            out.copy_from_slice(acc);
         }
     }
 
@@ -174,15 +224,30 @@ impl BlockCsr<'_> {
     fn diagonal_blocks(&self) -> Vec<f64> {
         let s = self.s;
         let mut out = vec![0.0f64; self.num_cells() * s * s];
-        for cell in 0..self.num_cells() {
-            let scalar_offset = self.scalar_offset(cell);
-            let diag_rank = self.diagonal_indices[cell] as usize - scalar_offset;
-            for r in 0..s {
-                let base = self.start_row(cell, r) + diag_rank * s;
-                for c in 0..s {
-                    out[cell * s * s + r * s + c] = self.values[base + c] as f64;
+        let extract = |cell0: usize, chunk: &mut [f64]| {
+            for (li, block) in chunk.chunks_mut(s * s).enumerate() {
+                let cell = cell0 + li;
+                let scalar_offset = self.scalar_offset(cell);
+                let diag_rank = self.diagonal_indices[cell] as usize - scalar_offset;
+                for r in 0..s {
+                    let base = self.start_row(cell, r) + diag_rank * s;
+                    for c in 0..s {
+                        block[r * s + c] = self.values[base + c] as f64;
+                    }
                 }
             }
+        };
+        let threads = self.threads.max(1);
+        if threads <= 1 {
+            extract(0, &mut out);
+        } else {
+            crate::solver::cpu::parallel::parallel_cell_chunks_mut(
+                self.num_cells(),
+                s * s,
+                threads,
+                &mut out,
+                extract,
+            );
         }
         out
     }
@@ -257,20 +322,35 @@ pub trait Preconditioner {
 pub struct BlockJacobi {
     s: usize,
     inv_blocks: Vec<f64>,
+    threads: usize,
 }
 
 impl BlockJacobi {
     pub fn new(a: &BlockCsr) -> Self {
         let s = a.s;
+        let threads = a.threads.max(1);
         let diag = a.diagonal_blocks();
         let mut inv_blocks = vec![0.0f64; diag.len()];
-        let mut tmp = vec![0.0f64; s * s];
-        for cell in 0..a.num_cells() {
-            let base = cell * s * s;
-            invert_dense(s, &diag[base..base + s * s], &mut tmp);
-            inv_blocks[base..base + s * s].copy_from_slice(&tmp);
+        // Each cell inverts its own disjoint S×S block (reads `diag[base..]`,
+        // writes `inv_blocks[base..]`); no cross-cell dependency.
+        let invert = |cell0: usize, chunk: &mut [f64]| {
+            for (li, block) in chunk.chunks_mut(s * s).enumerate() {
+                let base = (cell0 + li) * s * s;
+                invert_dense(s, &diag[base..base + s * s], block);
+            }
+        };
+        if threads <= 1 {
+            invert(0, &mut inv_blocks);
+        } else {
+            crate::solver::cpu::parallel::parallel_cell_chunks_mut(
+                a.num_cells(),
+                s * s,
+                threads,
+                &mut inv_blocks,
+                invert,
+            );
         }
-        Self { s, inv_blocks }
+        Self { s, inv_blocks, threads }
     }
 }
 
@@ -278,15 +358,24 @@ impl Preconditioner for BlockJacobi {
     fn apply(&self, r: &[f64], z: &mut [f64]) {
         let s = self.s;
         let cells = r.len() / s;
-        for cell in 0..cells {
-            let base = cell * s * s;
-            for row in 0..s {
-                let mut sum = 0.0f64;
-                for col in 0..s {
-                    sum += self.inv_blocks[base + row * s + col] * r[cell * s + col];
+        let inv_blocks = &self.inv_blocks;
+        let mul = |cell0: usize, zc: &mut [f64]| {
+            for (li, zrow) in zc.chunks_mut(s).enumerate() {
+                let cell = cell0 + li;
+                let base = cell * s * s;
+                for row in 0..s {
+                    let mut sum = 0.0f64;
+                    for col in 0..s {
+                        sum += inv_blocks[base + row * s + col] * r[cell * s + col];
+                    }
+                    zrow[row] = sum;
                 }
-                z[cell * s + row] = sum;
             }
+        };
+        if self.threads <= 1 || cells <= 1 {
+            mul(0, z);
+        } else {
+            crate::solver::cpu::parallel::parallel_cell_chunks_mut(cells, s, self.threads, z, mul);
         }
     }
 }
@@ -414,6 +503,7 @@ impl Preconditioner for SchurPrecond<'_> {
             row_offsets: self.a.scalar_row_offsets,
             col_indices: self.a.col_indices,
             values: &self.p_values,
+            threads: self.a.threads,
         };
         let gp_f32: Vec<f32> = gp.iter().map(|&v| v as f32).collect();
         let mut psol = vec![0.0f32; cells];
@@ -463,6 +553,7 @@ pub fn fgmres(
     assert_eq!(b.len(), n);
     assert_eq!(x.len(), n);
     let m = restart.max(1);
+    let threads = a.threads.max(1);
 
     let vdot = |u: &[f64], w: &[f64]| if simd { dot_simd(u, w) } else { dot(u, w) };
     let vnorm = |u: &[f64]| vdot(u, u).sqrt();
@@ -471,35 +562,45 @@ pub fn fgmres(
     let bnorm = vnorm(&bf).max(1e-300);
     let mut xf: Vec<f64> = x.iter().map(|&v| v as f64).collect();
 
-    // Krylov / flexible bases and Hessenberg workspace.
-    let mut vbasis: Vec<Vec<f64>> = vec![vec![0.0; n]; m + 1];
-    let mut zbasis: Vec<Vec<f64>> = vec![vec![0.0; n]; m];
+    // Krylov / flexible bases: grown LAZILY. The restart cap `m` is 60, but with a
+    // warm start + inexact tolerance only a handful of iterations typically run, so
+    // eagerly allocating and zeroing `m+1` full length-`n` vectors wastes GBs of
+    // memset per solve (2*61*n*8 bytes at n=3M). Each basis vector persists across
+    // restart cycles (reused/overwritten), so the bases grow at most to the largest
+    // iteration count actually reached. `h` is tiny (m*(m+1)); keep it dense.
+    let mut vbasis: Vec<Vec<f64>> = Vec::with_capacity(m + 1);
+    let mut zbasis: Vec<Vec<f64>> = Vec::with_capacity(m);
     let mut h: Vec<Vec<f64>> = vec![vec![0.0; m + 1]; m];
     let mut cs = vec![0.0f64; m];
     let mut sn = vec![0.0f64; m];
     let mut g = vec![0.0f64; m + 1];
 
     let mut ax = vec![0.0f64; n];
+    // Reused Arnoldi work vector (was `ax.clone()` per iteration).
+    let mut w = vec![0.0f64; n];
+    // Reused residual buffer (was reallocated each restart).
+    let mut r = vec![0.0f64; n];
     let mut total_iters = 0usize;
     let mut res = {
         a.block_spmv(&xf, &mut ax);
-        let r: Vec<f64> = (0..n).map(|i| bf[i] - ax[i]).collect();
+        par_map_into(threads, &mut r, |i| bf[i] - ax[i]);
         vnorm(&r)
     };
 
     while total_iters < max_iter {
         // r0 = b - A x
         a.block_spmv(&xf, &mut ax);
-        let mut r: Vec<f64> = (0..n).map(|i| bf[i] - ax[i]).collect();
+        par_map_into(threads, &mut r, |i| bf[i] - ax[i]);
         let beta = vnorm(&r);
         res = beta;
         if beta / bnorm <= tol {
             break;
         }
         let inv_beta = 1.0 / beta;
-        for i in 0..n {
-            vbasis[0][i] = r[i] * inv_beta;
+        if vbasis.is_empty() {
+            vbasis.push(vec![0.0; n]);
         }
+        par_map_into(threads, &mut vbasis[0], |i| r[i] * inv_beta);
         for v in g.iter_mut() {
             *v = 0.0;
         }
@@ -507,18 +608,21 @@ pub fn fgmres(
 
         let mut jfin = 0usize;
         for j in 0..m {
-            // z_j = M^{-1} v_j ; w = A z_j
+            // z_j = M^{-1} v_j ; w = A z_j. Grow the flexible basis lazily.
+            if zbasis.len() <= j {
+                zbasis.push(vec![0.0; n]);
+            }
             precond.apply(&vbasis[j], &mut zbasis[j]);
-            let zj = zbasis[j].clone();
-            a.block_spmv(&zj, &mut ax);
-            let mut w = ax.clone();
-            // Modified Gram-Schmidt against v_0..v_j.
+            a.block_spmv(&zbasis[j], &mut ax);
+            w.copy_from_slice(&ax);
+            // Modified Gram-Schmidt against v_0..v_j. The dot (reduction) stays
+            // serial to keep the scalar path bit-identical across thread counts;
+            // the axpy update is elementwise, so it parallelizes bit-exactly.
             for i in 0..=j {
                 let hij = vdot(&w, &vbasis[i]);
                 h[j][i] = hij;
-                for k in 0..n {
-                    w[k] -= hij * vbasis[i][k];
-                }
+                let vi = &vbasis[i];
+                par_update(threads, &mut w, |k, wk| *wk -= hij * vi[k]);
             }
             let hnext = vnorm(&w);
             h[j][j + 1] = hnext;
@@ -552,9 +656,10 @@ pub fn fgmres(
                 break;
             }
             let inv_h = 1.0 / hnext;
-            for k in 0..n {
-                vbasis[j + 1][k] = w[k] * inv_h;
+            if vbasis.len() <= j + 1 {
+                vbasis.push(vec![0.0; n]);
             }
+            par_map_into(threads, &mut vbasis[j + 1], |k| w[k] * inv_h);
         }
 
         // Back-substitute H[0..jfin,0..jfin] y = g[0..jfin].
@@ -574,17 +679,14 @@ pub fn fgmres(
         for j in 0..jfin {
             let yj = y[j];
             if yj != 0.0 {
-                for k in 0..n {
-                    xf[k] += yj * zbasis[j][k];
-                }
+                let zj = &zbasis[j];
+                par_update(threads, &mut xf, |k, xk| *xk += yj * zj[k]);
             }
         }
 
         // Recompute residual at the restarted iterate for the loop guard.
         a.block_spmv(&xf, &mut ax);
-        for i in 0..n {
-            r[i] = bf[i] - ax[i];
-        }
+        par_map_into(threads, &mut r, |i| bf[i] - ax[i]);
         res = vnorm(&r);
         if res / bnorm <= tol {
             break;
@@ -751,6 +853,7 @@ mod tests {
             row_offsets: &row_offsets,
             col_indices: &col_indices,
             values: &values,
+            threads: 1,
         };
         let b = [1.0f32, 2.0, 3.0];
         let mut x = [0.0f32; 3];
@@ -788,6 +891,7 @@ mod tests {
             row_offsets: &row_offsets,
             col_indices: &col_indices,
             values: &values,
+            threads: 1,
         };
         let b = vec![1.0f32; n];
         let mut x = vec![0.0f32; n];
@@ -830,6 +934,98 @@ mod block_tests {
         ]
     }
 
+    /// A diagonally-dominant 1D chain of `nc` block cells (S=`s`), each coupled to
+    /// itself + left + right, laid out in the assembly SoA format. Big enough that
+    /// the parallel cell-chunk split is exercised (workers get disjoint ranges).
+    fn banded_block_system(nc: usize, s: usize) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<f32>) {
+        let neigh: Vec<Vec<usize>> = (0..nc)
+            .map(|i| {
+                let mut ns = Vec::new();
+                if i > 0 {
+                    ns.push(i - 1);
+                }
+                ns.push(i);
+                if i < nc - 1 {
+                    ns.push(i + 1);
+                }
+                ns
+            })
+            .collect();
+        let mut sro = vec![0u32];
+        let mut col = Vec::new();
+        let mut diag = Vec::new();
+        let mut blk = 0u32;
+        for (i, ns) in neigh.iter().enumerate() {
+            for (rank, &c) in ns.iter().enumerate() {
+                col.push(c as u32);
+                if c == i {
+                    diag.push(blk + rank as u32);
+                }
+            }
+            blk += ns.len() as u32;
+            sro.push(blk);
+        }
+        let mut vals = vec![0.0f32; col.len() * s * s];
+        for (i, ns) in neigh.iter().enumerate() {
+            let scalar_offset = sro[i] as usize;
+            let nn = ns.len();
+            for (rank, &c) in ns.iter().enumerate() {
+                for r in 0..s {
+                    let start_row = scalar_offset * s * s + nn * s * r;
+                    for cc in 0..s {
+                        let v = if c == i {
+                            if r == cc {
+                                8.0 + r as f32 + (i % 3) as f32
+                            } else {
+                                0.3
+                            }
+                        } else if r == cc {
+                            -0.7
+                        } else {
+                            0.1
+                        };
+                        vals[start_row + rank * s + cc] = v;
+                    }
+                }
+            }
+        }
+        (sro, col, diag, vals)
+    }
+
+    #[test]
+    fn block_fgmres_multithread_bit_identical() {
+        // The block FGMRES path (block_spmv + BlockJacobi build/apply + the
+        // elementwise Krylov updates) must be BIT-IDENTICAL across thread counts:
+        // parallel work is over disjoint cell/index ranges (reductions stay serial).
+        let (nc, s) = (200usize, 3usize);
+        let (sro, col, diag, vals) = banded_block_system(nc, s);
+        let n = nc * s;
+        let b: Vec<f32> = (0..n).map(|k| ((k * 7 % 13) as f32) - 6.0).collect();
+        let solve = |threads: usize| {
+            let a = BlockCsr {
+                s,
+                scalar_row_offsets: &sro,
+                col_indices: &col,
+                diagonal_indices: &diag,
+                values: &vals,
+                threads,
+            };
+            let pc = BlockJacobi::new(&a);
+            let mut x = vec![0.0f32; n];
+            let stats = fgmres(&a, &b, &mut x, &pc, 30, 1000, 1e-10, false);
+            (x, stats)
+        };
+        let (x1, s1) = solve(1);
+        let (x4, s4) = solve(4);
+        assert!(s1.converged && s4.converged, "did not converge: {s1:?} {s4:?}");
+        let maxd = x1
+            .iter()
+            .zip(&x4)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert_eq!(maxd, 0.0, "block fgmres threads=1 vs 4 differ: max|diff|={maxd:e}");
+    }
+
     #[test]
     fn block_spmv_matches_dense() {
         let (sro, ci, di, vals) = fixture();
@@ -839,6 +1035,7 @@ mod block_tests {
             col_indices: &ci,
             diagonal_indices: &di,
             values: &vals,
+            threads: 1,
         };
         let x = [1.0f64, -2.0, 3.0, 0.5];
         let mut y = [0.0f64; 4];
@@ -864,6 +1061,7 @@ mod block_tests {
             col_indices: &ci,
             diagonal_indices: &di,
             values: &vals,
+            threads: 1,
         };
         let diag = a.diagonal_blocks();
         // cell0 diagonal = [[4,-1],[-1,4]], cell1 = [[5,-1],[-2,5]].
@@ -898,6 +1096,7 @@ mod block_tests {
             col_indices: &ci,
             diagonal_indices: &di,
             values: &vals,
+            threads: 1,
         };
         let b = [1.0f32, 2.0, 3.0, 4.0];
         let mut x = [0.0f32; 4];
@@ -943,6 +1142,7 @@ mod block_tests {
             col_indices: &ci,
             diagonal_indices: &di,
             values: &vals,
+            threads: 1,
         };
         let b = vec![1.0f32; n];
         let mut x = vec![0.0f32; n];

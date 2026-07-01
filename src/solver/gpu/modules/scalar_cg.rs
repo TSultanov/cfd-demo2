@@ -47,16 +47,12 @@ pub struct ScalarCgModule {
     // External IO buffers (part of the linear system)
     b_rhs: wgpu::Buffer,
     b_x: wgpu::Buffer,
-    b_matrix_values: wgpu::Buffer,
 
     // Internal workspace buffers
     b_r: wgpu::Buffer,
     b_r0: wgpu::Buffer,
     b_p: wgpu::Buffer,
-    b_v: wgpu::Buffer,
 
-    b_dot_result: wgpu::Buffer,
-    b_dot_result_2: wgpu::Buffer,
     b_scalars: wgpu::Buffer,
     b_solver_params: wgpu::Buffer,
     b_staging_scalar: wgpu::Buffer,
@@ -108,13 +104,9 @@ impl ScalarCgModule {
             capacity: inputs.capacity,
             b_rhs: inputs.b_rhs.clone(),
             b_x: inputs.b_x.clone(),
-            b_matrix_values: inputs.b_matrix_values.clone(),
             b_r: inputs.b_r.clone(),
             b_r0: inputs.b_r0.clone(),
             b_p: inputs.b_p.clone(),
-            b_v: inputs.b_v.clone(),
-            b_dot_result: inputs.b_dot_result.clone(),
-            b_dot_result_2: inputs.b_dot_result_2.clone(),
             b_scalars: inputs.b_scalars.clone(),
             b_solver_params: inputs.b_solver_params.clone(),
             b_staging_scalar: inputs.b_staging_scalar.clone(),
@@ -136,52 +128,8 @@ impl ScalarCgModule {
         }
     }
 
-    pub fn matrix_values(&self) -> &wgpu::Buffer {
-        &self.b_matrix_values
-    }
-
-    pub fn rhs(&self) -> &wgpu::Buffer {
-        &self.b_rhs
-    }
-
-    pub fn x(&self) -> &wgpu::Buffer {
-        &self.b_x
-    }
-
-    pub fn r(&self) -> &wgpu::Buffer {
-        &self.b_r
-    }
-
-    pub fn r0(&self) -> &wgpu::Buffer {
-        &self.b_r0
-    }
-
-    pub fn p(&self) -> &wgpu::Buffer {
-        &self.b_p
-    }
-
-    pub fn v(&self) -> &wgpu::Buffer {
-        &self.b_v
-    }
-
-    pub fn dot_result(&self) -> &wgpu::Buffer {
-        &self.b_dot_result
-    }
-
-    pub fn dot_result_2(&self) -> &wgpu::Buffer {
-        &self.b_dot_result_2
-    }
-
     pub fn scalars(&self) -> &wgpu::Buffer {
         &self.b_scalars
-    }
-
-    pub fn solver_params(&self) -> &wgpu::Buffer {
-        &self.b_solver_params
-    }
-
-    pub fn staging_scalar(&self) -> &wgpu::Buffer {
-        &self.b_staging_scalar
     }
 
     pub fn solve(

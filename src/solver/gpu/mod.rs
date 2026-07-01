@@ -5,8 +5,6 @@ pub mod csr;
 pub mod dispatch_counter;
 pub mod enums;
 pub mod execution_plan;
-#[cfg(feature = "profiling")]
-pub mod gpu_timestamp_profiler;
 pub mod init;
 pub mod linear_solver;
 pub(crate) mod lowering;

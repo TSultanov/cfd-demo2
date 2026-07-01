@@ -1,4 +1,3 @@
-use crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
 use crate::solver::gpu::linear_solver::fgmres::{
     dispatch_2d, dispatch_x_threads, workgroups_for_size,
 };
@@ -33,49 +32,6 @@ impl DispatchGrids {
             cell_groups,
         }
     }
-}
-
-/// A preconditioner module that can be plugged into the GPU FGMRES loop.
-///
-/// **Deprecated**: Use [`PreconditionerModule`] instead.  This trait is retained
-/// only for backward compatibility with code that has not yet migrated to the
-/// solver-agnostic [`PrecondContext`] API.
-#[deprecated(
-    since = "0.1.0",
-    note = "Use PreconditionerModule with PrecondContext instead"
-)]
-pub trait FgmresPreconditionerModule {
-    fn encode_prepare(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        _encoder: &mut wgpu::CommandEncoder,
-        fgmres: &FgmresWorkspace,
-        rhs: wgpu::BindingResource<'_>,
-        dispatch: DispatchGrids,
-    ) {
-        self.prepare(device, queue, fgmres, rhs, dispatch);
-    }
-
-    fn prepare(
-        &mut self,
-        _device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        _fgmres: &FgmresWorkspace,
-        _rhs: wgpu::BindingResource<'_>,
-        _dispatch: DispatchGrids,
-    ) {
-    }
-
-    fn encode_apply(
-        &mut self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-        fgmres: &FgmresWorkspace,
-        input: wgpu::BindingResource<'_>,
-        output: wgpu::BindingResource<'_>,
-        dispatch: DispatchGrids,
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -157,10 +113,9 @@ impl<'a> PrecondContext<'a> {
 
 /// Solver-agnostic preconditioner trait.
 ///
-/// Unlike [`FgmresPreconditionerModule`], this trait does not reference
-/// [`FgmresWorkspace`] — it operates on the generic [`PrecondContext`] instead,
-/// making preconditioner implementations reusable across different Krylov
-/// solvers (FGMRES, CG, BiCGSTAB, etc.).
+/// This trait does not reference the FGMRES workspace — it operates on the
+/// generic [`PrecondContext`] instead, making preconditioner implementations
+/// reusable across different Krylov solvers (FGMRES, CG, BiCGSTAB, etc.).
 ///
 /// # Contract
 ///
@@ -215,45 +170,4 @@ pub trait PreconditionerModule {
         input: wgpu::BindingResource<'_>,
         output: wgpu::BindingResource<'_>,
     );
-}
-
-/// Adapter that wraps a [`PreconditionerModule`] so it can be used where
-/// [`FgmresPreconditionerModule`] is expected.
-///
-/// **Deprecated**: No longer needed since all solver infrastructure now uses
-/// [`PreconditionerModule`] directly.
-#[deprecated(
-    since = "0.1.0",
-    note = "No longer needed — KrylovSolveModule now uses PreconditionerModule directly"
-)]
-#[allow(deprecated)]
-pub struct PrecondAdapter<P>(pub P);
-
-#[allow(deprecated)]
-impl<P: PreconditionerModule> FgmresPreconditionerModule for PrecondAdapter<P> {
-    fn encode_prepare(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        fgmres: &FgmresWorkspace,
-        rhs: wgpu::BindingResource<'_>,
-        dispatch: DispatchGrids,
-    ) {
-        let ctx = fgmres.precond_context(dispatch);
-        self.0.encode_prepare(device, queue, encoder, &ctx, rhs);
-    }
-
-    fn encode_apply(
-        &mut self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-        fgmres: &FgmresWorkspace,
-        input: wgpu::BindingResource<'_>,
-        output: wgpu::BindingResource<'_>,
-        dispatch: DispatchGrids,
-    ) {
-        let ctx = fgmres.precond_context(dispatch);
-        self.0.encode_apply(device, encoder, &ctx, input, output);
-    }
 }

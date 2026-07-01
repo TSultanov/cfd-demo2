@@ -1,7 +1,5 @@
-pub mod bind_group_builder;
 pub mod constants;
 pub mod coupled_schur;
-pub mod field_provider;
 pub mod generated_kernels;
 pub mod generic_coupled_schur;
 pub mod generic_linear_solver;
@@ -12,7 +10,6 @@ pub mod linear_solver;
 pub mod linear_system;
 pub mod outer_convergence;
 pub mod outer_gate;
-pub mod model_lowerer;
 pub mod ports;
 pub mod resource_registry;
 pub mod runtime_preconditioner;

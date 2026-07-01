@@ -169,18 +169,6 @@ impl CoupledSchurModule {
         self.amg.is_some()
     }
 
-    pub fn b_temp_p(&self) -> &wgpu::Buffer {
-        &self.b_temp_p
-    }
-
-    pub fn b_p_sol(&self) -> &wgpu::Buffer {
-        &self.b_p_sol
-    }
-
-    pub fn bg_pressure_matrix(&self) -> &wgpu::BindGroup {
-        &self.bg_pressure_matrix
-    }
-
     pub fn ensure_amg_resources(&mut self, device: &wgpu::Device, matrix: CsrMatrix) -> Result<(), String> {
         if self.amg.is_some() {
             return Ok(());
@@ -199,21 +187,6 @@ impl CoupledSchurModule {
         self.amg = Some(amg);
         self.amg_level0_state_override = Some(override_bg);
         Ok(())
-    }
-
-    pub fn refresh_amg_level0_matrix(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        matrix_values: &wgpu::Buffer,
-        num_nonzeros: u64,
-    ) {
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("schur:refresh_amg_level0_matrix"),
-        });
-        self.encode_refresh_amg_level0_matrix(&mut encoder, matrix_values, num_nonzeros);
-        queue.submit(Some(encoder.finish()));
-        crate::count_submission!("Schur", "refresh_amg_level0_matrix");
     }
 
     pub fn encode_refresh_amg_level0_matrix(

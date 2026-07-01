@@ -1971,62 +1971,6 @@ pub(crate) fn read_solver_scalars_after_submit(
     out
 }
 
-pub fn fgmres_solve_once_with_preconditioner<'a>(
-    core: &FgmresCore<'a>,
-    x: &'a wgpu::Buffer,
-    rhs_norm: f32,
-    params: RawFgmresParams,
-    iter_params: IterParams,
-    config: FgmresSolveOnceConfig,
-    precondition: impl FnMut(
-        usize,
-        &mut wgpu::CommandEncoder,
-        wgpu::BindingResource<'a>,
-        wgpu::BindingResource<'a>,
-    ),
-) -> FgmresSolveOnceResult {
-    let mut encoder = core
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("FGMRES restart body"),
-        });
-    let encoded = encode_fgmres_solve_once_with_preconditioner(
-        core,
-        &mut encoder,
-        x,
-        rhs_norm,
-        params,
-        iter_params,
-        config,
-        true,
-        false,
-        None, // host path: rhs_norm already computed on CPU
-        precondition,
-    );
-    let status_submission_index = core.queue.submit(Some(encoder.finish()));
-    crate::count_submission!("FGMRES", "restart_body");
-
-    let solver_scalars = read_solver_scalars_after_submit(core, status_submission_index);
-    let mut basis_size = encoded.max_restart;
-
-    let residual_est = solver_scalars[FGMRES_SCALAR_RESIDUAL_EST];
-    let converged = solver_scalars[FGMRES_SCALAR_CONVERGED] > 0.5;
-
-    let reported_basis = solver_scalars[FGMRES_SCALAR_ITERS_USED];
-    if reported_basis.is_finite() {
-        let reported_basis = reported_basis
-            .round()
-            .clamp(1.0, encoded.max_restart as f32) as usize;
-        basis_size = reported_basis;
-    }
-
-    FgmresSolveOnceResult {
-        basis_size,
-        residual_est,
-        converged,
-    }
-}
-
 pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
     core: &FgmresCore<'a>,
     encoder: &mut wgpu::CommandEncoder,

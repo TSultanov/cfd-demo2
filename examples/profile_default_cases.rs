@@ -1,0 +1,195 @@
+//! Faithful GPU profiling harness for the **UI default cases**.
+//!
+//! The stock `profile_solver_performance` example drives a Jacobi / single-outer
+//! configuration that does not match anything the GUI ships. This harness instead
+//! reconstructs the *actual* default `RuntimeParams` (the incompressible coupled
+//! SIMPLE solver: Van Leer + BDF2 + model-owned Schur + 8 outer iterations +
+//! acoustic-aware adaptive dt, at the GUI's 0.025 cut-cell resolution) and drives
+//! it through the shared `SolverDriver` — the same construction + step path the
+//! desktop app runs. It reports:
+//!
+//!   * true per-step wall time (unprofiled), plus average outer/linear iterations,
+//!   * the per-graph GPU-time breakdown from the improved profiler.
+//!
+//! Run (backstep default + channel-obstacle headline demo):
+//!   cargo run --release --example profile_default_cases --features "meshgen profiling"
+//!
+//! Optional: pass a case name (`backstep` | `obstacle`) and a step count.
+use std::io::Write;
+use std::time::Instant;
+
+use cfd2::sim::{DriverBuild, RuntimeParams, SolverDriver};
+use cfd2::solver::mesh::{
+    generate_cut_cell_mesh, BackwardsStep, ChannelWithObstacle, Mesh,
+};
+use cfd2::solver::model::eos::EosSpec;
+use cfd2::solver::model::incompressible_momentum_model;
+use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
+use nalgebra::{Point2, Vector2};
+
+/// Air, matching `Fluid::presets()[1]`.
+fn air_eos() -> EosSpec {
+    EosSpec::IdealGas {
+        gamma: 1.4,
+        gas_constant: 287.0,
+        temperature: 300.0,
+    }
+}
+
+/// The shipped incompressible GUI default (`ui::model_defaults::INCOMPRESSIBLE`),
+/// reconstructed as a `RuntimeParams` so this harness needs no `ui` feature.
+fn incompressible_default_params() -> RuntimeParams {
+    RuntimeParams {
+        adaptive_dt: true,
+        target_cfl: 0.9,
+        requested_dt: 0.02,
+        dtau: 0.0,
+        log_convergence: false,
+        log_every_steps: 50,
+        advection_scheme: Scheme::SecondOrderUpwindVanLeer,
+        time_scheme: TimeScheme::BDF2,
+        // Model forces Schur internally; this is the GUI's default selection value.
+        preconditioner: PreconditionerType::Jacobi,
+        outer_iters: 8,
+        outer_auto_converge: true,
+        low_mach_model: GpuLowMachPrecondModel::Off,
+        low_mach_theta_floor: 1e-6,
+        low_mach_pressure_coupling_alpha: 1.0,
+        alpha_u: 0.7,
+        alpha_p: 0.3,
+        inlet_velocity: 0.011,
+        density: 1.225,
+        viscosity: 1.81e-5,
+        eos: air_eos(),
+        compressibility_psi: 0.0,
+        outlet_back_pressure: 0.0,
+        pressure_inlet: false,
+        inlet_pressure: 0.0,
+    }
+}
+
+fn backstep_mesh() -> Mesh {
+    let length = 3.5;
+    let geo = BackwardsStep {
+        length,
+        height_inlet: 0.5,
+        height_outlet: 1.0,
+        step_x: 0.5,
+    };
+    let mut mesh = generate_cut_cell_mesh(&geo, 0.025, 0.025, 1.2, Vector2::new(length, 1.0));
+    mesh.smooth(&geo, 0.3, 50);
+    mesh
+}
+
+fn obstacle_mesh() -> Mesh {
+    let length = 3.0;
+    let geo = ChannelWithObstacle {
+        length,
+        height: 1.0,
+        obstacle_center: Point2::new(1.0, 0.51),
+        obstacle_radius: 0.1,
+    };
+    let mut mesh = generate_cut_cell_mesh(&geo, 0.025, 0.025, 1.2, Vector2::new(length, 1.0));
+    mesh.smooth(&geo, 0.3, 100);
+    mesh
+}
+
+fn build_driver(mesh: &Mesh, params: &RuntimeParams) -> SolverDriver {
+    let n = mesh.num_cells();
+    let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
+        mesh,
+        incompressible_momentum_model().expect("incompressible model"),
+        params,
+        &vec![(0.0, 0.0); n],
+        &vec![0.0; n],
+        None,
+        None,
+    ))
+    .expect("driver build");
+    driver.apply_params(params);
+    driver
+}
+
+fn profile_case(name: &str, mesh: Mesh, steps: usize) {
+    let params = incompressible_default_params();
+    let cells = mesh.num_cells();
+    let mut driver = build_driver(&mesh, &params);
+
+    println!("\n================================================================");
+    println!("  CASE: {name}  ({cells} cells, incompressible default)");
+    println!("================================================================");
+
+    // Warm up (compiles pipelines, settles adaptive dt).
+    for i in 0..20 {
+        driver.step(i % 5 == 0);
+    }
+
+    // ---- Phase A: true per-step timing (no profiling overhead) --------------
+    let mut solver_ms = 0.0f64;
+    let mut outer_sum = 0u64;
+    let mut lin_iter_sum = 0u64;
+    let mut lin_solves = 0u64;
+    let wall = Instant::now();
+    for i in 0..steps {
+        let o = driver.step(i % 5 == 0);
+        solver_ms += o.step_time_ms as f64;
+        outer_sum += o.outer_iters.unwrap_or(0) as u64;
+        for s in &o.linear_stats {
+            lin_iter_sum += s.iterations as u64;
+            lin_solves += 1;
+        }
+    }
+    let wall = wall.elapsed();
+    let n = steps as f64;
+    println!("\n  -- true timing ({steps} steps, unprofiled) --");
+    println!("     wall/step        : {:.3} ms", wall.as_secs_f64() * 1e3 / n);
+    println!("     solver/step      : {:.3} ms", solver_ms / n);
+    println!("     outer iters/step : {:.2}", outer_sum as f64 / n);
+    if lin_solves > 0 {
+        println!(
+            "     linear solves/step: {:.2}   iters/solve: {:.1}",
+            lin_solves as f64 / n,
+            lin_iter_sum as f64 / lin_solves as f64
+        );
+    }
+
+    // ---- Phase B: per-graph GPU breakdown (profiling on) --------------------
+    driver
+        .solver_mut()
+        .enable_detailed_profiling(true)
+        .expect("enable profiling");
+    driver
+        .solver()
+        .start_profiling_session()
+        .expect("start session");
+    let prof_steps = steps.min(30);
+    let prof_wall = Instant::now();
+    for i in 0..prof_steps {
+        driver.step(i % 5 == 0);
+    }
+    let prof_wall = prof_wall.elapsed();
+    driver.solver().end_profiling_session().expect("end session");
+    println!(
+        "\n  -- profiling overhead: {:.3} ms/step (vs {:.3} true) --",
+        prof_wall.as_secs_f64() * 1e3 / prof_steps as f64,
+        wall.as_secs_f64() * 1e3 / n
+    );
+    driver.solver().print_profiling_report().expect("report");
+
+    let _ = std::io::stdout().flush();
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let case = args.get(1).map(|s| s.as_str()).unwrap_or("all");
+    let steps: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(60);
+
+    if case == "backstep" || case == "all" {
+        profile_case("backstep (startup default)", backstep_mesh(), steps);
+    }
+    if case == "obstacle" || case == "all" {
+        profile_case("channel-obstacle (vortex street)", obstacle_mesh(), steps);
+    }
+    let _ = std::io::stdout().flush();
+}

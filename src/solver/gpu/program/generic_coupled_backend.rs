@@ -163,6 +163,9 @@ pub(crate) async fn build_generic_coupled_backend(
     let context = GpuContext {
         device: runtime.common.context.device.clone(),
         queue: runtime.common.context.queue.clone(),
+        timestamp_query: runtime.common.context.timestamp_query,
+        timestamps_inside_encoders: runtime.common.context.timestamps_inside_encoders,
+        timestamp_period_ns: runtime.common.context.timestamp_period_ns,
     };
     let profiling_stats = std::sync::Arc::clone(&runtime.common.profiling_stats);
 

@@ -706,7 +706,15 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
     let num_chunks = chunk_sizes.len();
     let mut encoded_total = 0usize;
     let mut last_submission_index: Option<wgpu::SubmissionIndex> = None;
+    // Opt-in CPU breakdown of the chunked solve: encode vs submit vs readback.
+    // (The node-level profiler localizes the coupled step's cost to this solve;
+    // this splits it finer without threading `profiling_stats` through the module.)
+    let profile_fgmres = std::env::var("CFD2_PROFILE_FGMRES").is_ok();
+    let mut encode_ns: u128 = 0;
+    let mut finish_ns: u128 = 0;
+    let mut submit_ns: u128 = 0;
     for (chunk_idx, &chunk_restart) in chunk_sizes.iter().enumerate() {
+        let chunk_start = profile_fgmres.then(Instant::now);
         let mut encoder = context
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -784,11 +792,32 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
             post_encode(&mut encoder);
         }
 
-        let sub_idx = context.queue.submit(Some(encoder.finish()));
+        if let Some(cs) = chunk_start {
+            encode_ns += cs.elapsed().as_nanos();
+        }
+        let finish_start = profile_fgmres.then(Instant::now);
+        let cmd = encoder.finish();
+        if let Some(fs) = finish_start {
+            finish_ns += fs.elapsed().as_nanos();
+        }
+        let submit_start = profile_fgmres.then(Instant::now);
+        let sub_idx = context.queue.submit(Some(cmd));
+        if let Some(ss) = submit_start {
+            submit_ns += ss.elapsed().as_nanos();
+        }
         crate::count_submission!("Generic Coupled", "fgmres:one_submission_chunk");
         if is_last_chunk {
             last_submission_index = Some(sub_idx);
         }
+    }
+    if profile_fgmres {
+        eprintln!(
+            "[fgmres-cpu] chunks={num_chunks} encode={:.2}ms finish={:.2}ms submit={:.2}ms ({})",
+            encode_ns as f64 / 1e6,
+            finish_ns as f64 / 1e6,
+            submit_ns as f64 / 1e6,
+            precond_label,
+        );
     }
 
     // Read back solver scalars from the last chunk to produce a meaningful

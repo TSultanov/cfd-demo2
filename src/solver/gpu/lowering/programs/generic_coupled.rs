@@ -1180,6 +1180,9 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
     let context = crate::solver::gpu::context::GpuContext {
         device: plan.context.device.clone(),
         queue: plan.context.queue.clone(),
+        timestamp_query: plan.context.timestamp_query,
+        timestamps_inside_encoders: plan.context.timestamps_inside_encoders,
+        timestamp_period_ns: plan.context.timestamp_period_ns,
     };
 
     let r = res_mut(plan);
@@ -1662,9 +1665,17 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
     let context = crate::solver::gpu::context::GpuContext {
         device: device.clone(),
         queue: queue.clone(),
+        timestamp_query: plan.context.timestamp_query,
+        timestamps_inside_encoders: plan.context.timestamps_inside_encoders,
+        timestamp_period_ns: plan.context.timestamp_period_ns,
     };
 
     let start = std::time::Instant::now();
+    // Opt-in phase breakdown of the batched coupled step (setup / FGMRES outer
+    // loop / post-processing), to localize the step cost outside the FGMRES solves.
+    let profile_phases = std::env::var("CFD2_PROFILE_FGMRES").is_ok();
+    let mut setup_ms = 0.0f64;
+    let mut loop_ms = 0.0f64;
 
     let mut encoded_tail_stats = Vec::with_capacity(remaining);
     let mut adaptive_iter_count: Option<u32> = None;
@@ -1757,6 +1768,10 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
         } else {
             None
         };
+
+        if profile_phases {
+            setup_ms = start.elapsed().as_secs_f64() * 1e3;
+        }
 
         // Use chunked submission to avoid Metal hangs.  Each FGMRES restart
         // chunk gets its own encoder → submit cycle.  Assembly is prepended to
@@ -1857,6 +1872,10 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
             }
         }
 
+        if profile_phases {
+            loop_ms = start.elapsed().as_secs_f64() * 1e3;
+        }
+
         // Clone the iter counter buffer so we can read it back after dropping `r`.
         iter_counter_buf = if use_adaptive {
             r.outer_gate.as_ref().map(|g| g.b_iter_counter.clone())
@@ -1921,6 +1940,16 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
     // once at the end of the step — the per-iteration savings from the
     // encoded path are preserved.
     compute_outer_residuals(plan);
+    if profile_phases {
+        let total_ms = start.elapsed().as_secs_f64() * 1e3;
+        eprintln!(
+            "[coupled-phases] setup={:.2}ms fgmres_loop={:.2}ms post={:.2}ms total={:.2}ms (outer_iters={remaining})",
+            setup_ms,
+            loop_ms - setup_ms,
+            total_ms - loop_ms,
+            total_ms,
+        );
+    }
     let adaptive_break_converged = adaptive_iter_count.map(|iters| iters < remaining as u32);
     finalize_outer_step_status(plan, adaptive_break_converged);
 

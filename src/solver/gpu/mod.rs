@@ -5,6 +5,7 @@ pub mod csr;
 pub mod dispatch_counter;
 pub mod enums;
 pub mod execution_plan;
+pub mod gpu_timer;
 pub mod init;
 pub mod linear_solver;
 pub(crate) mod lowering;

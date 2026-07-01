@@ -308,6 +308,15 @@ impl ProfilingStats {
 
         println!();
 
+        // Per-node wall + GPU time, normalized per solver step. This is the
+        // actionable headline: each program node (Graph or Host) is measured both by
+        // total CPU wall-clock (the localizer — dominates when the step is bound by
+        // per-iteration readback polls) and by real GPU-timeline time. `wall − gpu`
+        // is the node's CPU/sync overhead, so the biggest `wall` node is the
+        // optimization target and its `gpu` share says whether to chase GPU compute
+        // or CPU/host overhead.
+        self.print_per_node_time(iterations);
+
         // Top hotspots by location
         let mut location_stats = self.get_location_stats();
         location_stats.sort_by(|a, b| b.1.total_time.cmp(&a.1.total_time));
@@ -336,6 +345,77 @@ impl ProfilingStats {
 
         // Optimization suggestions
         self.print_optimization_suggestions();
+    }
+
+    /// Print per-node wall + GPU time, normalized per solver step.
+    ///
+    /// Merges the `CpuCompute:label` (wall-clock) and `GpuDispatch:label` (GPU
+    /// timeline) location stats populated in `GpuProgramPlan::execute_block` into
+    /// one row per node, sorted by wall time. `wall − gpu` is the node's CPU/sync
+    /// overhead — the signal that says whether a hot node is GPU-compute-bound or
+    /// (as the coupled solve is) bound by CPU-side per-iteration polls.
+    fn print_per_node_time(&self, iterations: u64) {
+        let wall_prefix = format!("{}:", ProfileCategory::CpuCompute.name());
+        let gpu_prefix = format!("{}:", ProfileCategory::GpuDispatch.name());
+
+        // label -> (wall_total, wall_calls, gpu_total)
+        let mut rows: std::collections::HashMap<String, (Duration, u64, Duration)> =
+            std::collections::HashMap::new();
+        for (key, stats) in self.get_location_stats() {
+            if let Some(label) = key.strip_prefix(&wall_prefix) {
+                let e = rows.entry(label.to_string()).or_default();
+                e.0 += stats.total_time;
+                e.1 += stats.call_count;
+            } else if let Some(label) = key.strip_prefix(&gpu_prefix) {
+                let e = rows.entry(label.to_string()).or_default();
+                e.2 += stats.total_time;
+            }
+        }
+        if rows.is_empty() {
+            return;
+        }
+
+        let mut rows: Vec<(String, (Duration, u64, Duration))> = rows.into_iter().collect();
+        rows.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+
+        let steps = iterations.max(1) as f64;
+        let total_wall: Duration = rows.iter().map(|(_, v)| v.0).sum();
+        let total_gpu: Duration = rows.iter().map(|(_, v)| v.2).sum();
+
+        println!("Per-Node Time (per step, {} steps):", iterations);
+        println!(
+            "{:<44} {:>9} {:>11} {:>11} {:>8}",
+            "Node", "calls/st", "wall ms/st", "gpu ms/st", "% wall"
+        );
+        println!("{}", "-".repeat(87));
+        for (label, (wall, calls, gpu)) in &rows {
+            let wall_ms = wall.as_secs_f64() * 1e3 / steps;
+            let gpu_ms = gpu.as_secs_f64() * 1e3 / steps;
+            let calls_per_step = *calls as f64 / steps;
+            let pct = if total_wall.as_nanos() > 0 {
+                (wall.as_nanos() as f64 / total_wall.as_nanos() as f64) * 100.0
+            } else {
+                0.0
+            };
+            println!(
+                "{:<44} {:>9.1} {:>11.4} {:>11.4} {:>7.1}%",
+                truncate_label(label, 44),
+                calls_per_step,
+                wall_ms,
+                gpu_ms,
+                pct
+            );
+        }
+        println!("{}", "-".repeat(87));
+        println!(
+            "{:<44} {:>9} {:>11.4} {:>11.4} {:>8}",
+            "TOTAL",
+            "",
+            total_wall.as_secs_f64() * 1e3 / steps,
+            total_gpu.as_secs_f64() * 1e3 / steps,
+            "100.0%"
+        );
+        println!();
     }
 
     fn print_memory_report(&self) {
@@ -458,6 +538,16 @@ impl ProfilingStats {
             }
         }
         println!();
+    }
+}
+
+/// Truncate a label to `max` chars, replacing the dropped tail with `..` so the
+/// per-graph table stays aligned for long generated-kernel names.
+fn truncate_label(label: &str, max: usize) -> String {
+    if label.len() <= max {
+        label.to_string()
+    } else {
+        format!("{}..", &label[..max.saturating_sub(2)])
     }
 }
 

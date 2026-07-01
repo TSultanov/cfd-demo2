@@ -91,6 +91,11 @@ name = "profile_solver_performance"
 path = "examples/profile_solver_performance.rs"
 required-features = ["meshgen", "profiling"]
 
+[[example]]
+name = "profile_default_cases"
+path = "examples/profile_default_cases.rs"
+required-features = ["meshgen", "profiling"]
+
 [[test]]
 name = "amg_test"
 path = "tests/amg_test.rs"

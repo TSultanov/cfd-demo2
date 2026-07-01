@@ -4,7 +4,7 @@ use super::plan_instance::{
 };
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
-use crate::solver::gpu::profiling::ProfilingStats;
+use crate::solver::gpu::profiling::{ProfileCategory, ProfilingStats};
 use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::model::ModelSpec;
@@ -372,6 +372,10 @@ pub(crate) struct GpuProgramPlan {
     pub retry_step: bool,
     pub repeat_break: bool,
     pub skip_remaining_block: bool,
+    /// GPU-timeline per-graph profiler, created lazily when a profiling session
+    /// starts (and the device supports timestamp queries). `None` otherwise → the
+    /// per-graph timing falls back to the poll-based barrier.
+    pub gpu_timer: Option<crate::solver::gpu::gpu_timer::GpuTimestampProfiler>,
 }
 
 impl GpuProgramPlan {
@@ -411,6 +415,7 @@ impl GpuProgramPlan {
             retry_step: false,
             repeat_break: false,
             skip_remaining_block: false,
+            gpu_timer: None,
         }
     }
 
@@ -558,6 +563,22 @@ impl GpuProgramPlan {
         self.rejected_retry_count = 0;
         self.retry_step = false;
 
+        // Lazily build the GPU-timeline profiler on the first step of a profiling
+        // session, but ONLY when explicitly opted in (`CFD2_GPU_TIMESTAMPS`). On
+        // Metal a `write_timestamp` between submissions drains the pipeline, so the
+        // per-node timestamp marks serialize the solve heavily — fine for a small
+        // compute-bound case where you want the GPU-vs-CPU split, but far too slow
+        // for the default (fine-grained, CPU-bound) coupled solve. The default
+        // profiling path therefore uses the cheaper CPU-wall + single poll-barrier
+        // per node (see `execute_block`), which is what localizes a CPU-bound step.
+        if self.profiling_stats.is_enabled()
+            && self.gpu_timer.is_none()
+            && std::env::var("CFD2_GPU_TIMESTAMPS").is_ok()
+        {
+            self.gpu_timer =
+                crate::solver::gpu::gpu_timer::GpuTimestampProfiler::new(&self.context);
+        }
+
         loop {
             self.execute_block(self.spec.program.root);
             self.step_attempt_count = self.step_attempt_count.saturating_add(1);
@@ -571,6 +592,16 @@ impl GpuProgramPlan {
 
         self.step_attempt_index = 0;
         self.retry_step = false;
+
+        // Count each solver step as one profiled "iteration" so the report can
+        // normalize per-graph GPU time to per-step figures, and resolve this step's
+        // timestamp batch into the stats (one poll per step, no serialization).
+        if self.profiling_stats.is_enabled() {
+            self.profiling_stats.increment_iteration();
+            if let Some(timer) = &self.gpu_timer {
+                timer.flush(&self.context, &self.profiling_stats);
+            }
+        }
     }
 
     pub fn initialize_history(&self) {
@@ -601,8 +632,48 @@ impl GpuProgramPlan {
             }
             match node {
                 ProgramSpecNode::Graph { label, kind, mode } => {
-                    let (seconds, detail) =
-                        self.spec.ops.run_graph(kind, &*self, &self.context, mode);
+                    // While profiling, record two per-node metrics:
+                    //   * CPU wall-clock (`CpuCompute:label`) — the TOTAL cost of the
+                    //     node, including any GPU wait its own internal polls incur.
+                    //     For a CPU-bound step (e.g. the coupled solve, ~100s of ms
+                    //     dominated by per-iteration readback polls on a fast GPU) this
+                    //     wall time is the thing that localizes the cost.
+                    //   * GPU-timeline time (`GpuDispatch:label`) via timestamp marks
+                    //     (`gpu_timer`) — the GPU-only portion. wall − gpu ≈ the node's
+                    //     CPU/sync overhead. Timestamps don't serialize; they resolve
+                    //     once per step.
+                    // Without timestamp support, a fallback empty-submit + wait barrier
+                    // after the node makes the wall reflect this node's OWN GPU work
+                    // (otherwise the in-order queue lumps a submit-and-forget node's GPU
+                    // time onto whichever later node first polls). The barrier
+                    // serializes — a measurement-mode cost paid only while profiling.
+                    let profiling = self.profiling_stats.is_enabled();
+                    let (seconds, detail) = if profiling {
+                        let wall = std::time::Instant::now();
+                        let out = if let Some(timer) = &self.gpu_timer {
+                            timer.scope(&self.context, label, || {
+                                self.spec.ops.run_graph(kind, &*self, &self.context, mode)
+                            })
+                        } else {
+                            let out =
+                                self.spec.ops.run_graph(kind, &*self, &self.context, mode);
+                            let idx = self.context.queue.submit(std::iter::empty());
+                            let _ = self.context.device.poll(wgpu::PollType::Wait {
+                                submission_index: Some(idx),
+                                timeout: None,
+                            });
+                            out
+                        };
+                        self.profiling_stats.record_location(
+                            label,
+                            ProfileCategory::CpuCompute,
+                            wall.elapsed(),
+                            0,
+                        );
+                        out
+                    } else {
+                        self.spec.ops.run_graph(kind, &*self, &self.context, mode)
+                    };
                     if self.collect_trace {
                         self.step_graph_timings.push(StepGraphTiming {
                             label,
@@ -611,9 +682,42 @@ impl GpuProgramPlan {
                         });
                     }
                 }
-                ProgramSpecNode::Host { kind, .. } => {
-                    let ops = Arc::clone(&self.spec.ops);
-                    ops.run_host(kind, self);
+                ProgramSpecNode::Host { label, kind } => {
+                    // Host nodes drive most of the coupled solve (assembly, the linear
+                    // solve, field updates) and run `&mut self`, so the GPU timer is
+                    // moved out to bracket the call, then restored. Same two metrics as
+                    // the Graph arm: CPU wall (total, the localizer) + GPU timestamps.
+                    let profiling = self.profiling_stats.is_enabled();
+                    if profiling {
+                        let wall = std::time::Instant::now();
+                        let timer = self.gpu_timer.take();
+                        let start = timer.as_ref().and_then(|t| t.mark(&self.context));
+                        let ops = Arc::clone(&self.spec.ops);
+                        ops.run_host(kind, self);
+                        match &timer {
+                            Some(t) => {
+                                let end = t.mark(&self.context);
+                                t.record_scope(label, start, end);
+                            }
+                            None => {
+                                let idx = self.context.queue.submit(std::iter::empty());
+                                let _ = self.context.device.poll(wgpu::PollType::Wait {
+                                    submission_index: Some(idx),
+                                    timeout: None,
+                                });
+                            }
+                        }
+                        self.profiling_stats.record_location(
+                            label,
+                            ProfileCategory::CpuCompute,
+                            wall.elapsed(),
+                            0,
+                        );
+                        self.gpu_timer = timer;
+                    } else {
+                        let ops = Arc::clone(&self.spec.ops);
+                        ops.run_host(kind, self);
+                    }
                 }
                 ProgramSpecNode::Repeat { times, body, .. } => {
                     let times = self.spec.ops.eval_count(times, &*self);

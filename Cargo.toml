@@ -91,26 +91,6 @@ name = "profile_solver_performance"
 path = "examples/profile_solver_performance.rs"
 required-features = ["meshgen", "profiling"]
 
-[[example]]
-name = "reproduce_chamfer"
-path = "examples/reproduce_chamfer.rs"
-required-features = ["meshgen"]
-
-[[example]]
-name = "reproduce_divergence"
-path = "examples/reproduce_divergence.rs"
-required-features = ["meshgen"]
-
-[[example]]
-name = "reproduce_hole"
-path = "examples/reproduce_hole.rs"
-required-features = ["meshgen"]
-
-[[example]]
-name = "reproduce_voronoi_quality"
-path = "examples/reproduce_voronoi_quality.rs"
-required-features = ["meshgen"]
-
 [[test]]
 name = "amg_test"
 path = "tests/amg_test.rs"

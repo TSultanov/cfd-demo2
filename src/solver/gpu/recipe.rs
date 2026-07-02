@@ -147,6 +147,9 @@ pub enum KernelPhase {
     ExplicitUpdate,
     /// Matrix/RHS assembly
     Assembly,
+    /// RHS-only re-assembly for matrix-frozen outer iterations (default off;
+    /// never part of the standard phase graphs).
+    AssemblyRhsOnly,
     /// Apply solution correction (implicit methods)
     Apply,
     /// Linear solve (handled by linear solver module)

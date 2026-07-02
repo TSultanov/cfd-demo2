@@ -179,6 +179,27 @@ pub(crate) struct GenericCoupledProgramResources {
     /// between them modifies `p`. `None` when the model lacks the refresher or
     /// `CFD2_NO_GRADP_SKIP=1`.
     assembly_graph_tail: Option<ModuleGraph<GeneratedKernelsModule>>,
+    /// RHS-only assembly variant (Gradients/Flux + AssemblyRhsOnly kernels,
+    /// composed with the grad_p tail skip): re-assembles the RHS against a
+    /// FROZEN matrix. Used on outer iterations where `matrix_freeze_period`
+    /// skips re-linearization; None when the recipe has no RHS-only kernels.
+    assembly_graph_frozen: Option<ModuleGraph<GeneratedKernelsModule>>,
+    /// Matrix-freeze period (EXPERIMENTAL probe, default 0 = off; env
+    /// `CFD2_MATRIX_FREEZE=k` re-linearizes only on outers 0, k, 2k, ...).
+    /// Applied on the non-batched path and the direct batched path; the
+    /// adaptive-indirect batched sub-path keeps full re-assembly.
+    ///
+    /// MEASURED REFUTATION (2026-07-02, both benches): enabling this is
+    /// HARMFUL under the current discretization. The deferred-correction
+    /// terms (convection dc, allmach linearize_pressure_flux) pair an
+    /// implicit matrix piece with an explicit RHS piece that cancel only when
+    /// both come from the SAME linearization state; refreshing the RHS
+    /// against a frozen matrix breaks that pairing (nozzle 750k: 2.2 ->
+    /// 614 s/step). On the obstacle the frozen step-0 zero-d_p matrix also
+    /// poisons the once-built AMG hierarchy (OOM). A correct freeze would
+    /// have to freeze the deferred RHS pieces too — this knob and the
+    /// AssemblyRhsOnly machinery are the reusable substrate for that.
+    matrix_freeze_period: u32,
     apply_graph: ModuleGraph<GeneratedKernelsModule>,
     update_graph: ModuleGraph<GeneratedKernelsModule>,
     explicit_graph: ModuleGraph<GeneratedKernelsModule>,
@@ -288,6 +309,34 @@ impl GenericCoupledProgramResources {
             })
         });
 
+        // RHS-only assembly graph for matrix-frozen outer iterations (see the
+        // field docs; kernels exist only for the generic coupled models).
+        let assembly_graph_frozen = build_optional_graph_for_phases(
+            recipe,
+            &[
+                KernelPhase::Gradients,
+                KernelPhase::FluxComputation,
+                KernelPhase::AssemblyRhsOnly,
+            ],
+            &kernels,
+            "generic_coupled",
+        )?
+        .filter(|_| recipe.kernels_for_phase(KernelPhase::AssemblyRhsOnly).next().is_some())
+        .map(|g| {
+            if has_grad_p_refresh && !grad_p_skip_disabled {
+                g.clone_filtered(|label| {
+                    !label.ends_with(crate::solver::model::KernelId::FLUX_MODULE_GRADIENTS.as_str())
+                })
+            } else {
+                g
+            }
+        });
+        let matrix_freeze_period: u32 = std::env::var("CFD2_MATRIX_FREEZE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|_| assembly_graph_frozen.is_some())
+            .unwrap_or(0);
+
         // Apply and update are optional depending on the stepping mode.
         // (For implicit outer-iteration recipes, update may be executed in the "apply" stage.)
         let apply_graph = build_optional_graph_for_phase(
@@ -394,6 +443,8 @@ impl GenericCoupledProgramResources {
             recurring_prepare_enabled,
             assembly_graph,
             assembly_graph_tail,
+            assembly_graph_frozen,
+            matrix_freeze_period,
             apply_graph,
             update_graph,
             explicit_graph,
@@ -1841,6 +1892,8 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
         // grad_p recompute that grad_p_update already performed — see the
         // `assembly_graph_tail` field doc).
         let assembly_graph_tail = r.assembly_graph_tail.as_ref().unwrap_or(assembly_graph);
+        let assembly_graph_frozen = r.assembly_graph_frozen.as_ref();
+        let matrix_freeze_period = r.matrix_freeze_period;
         let update_graph = &r.update_graph;
         let kernels = &r.kernels;
         let runtime_dims = r.runtime_dims();
@@ -1950,10 +2003,17 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                         return;
                     }
                 }
-                if iter_idx > 0 {
-                    assembly_graph_tail.encode_into(encoder, kernels, runtime_dims);
-                } else {
+                if iter_idx == 0 {
                     assembly_graph.encode_into(encoder, kernels, runtime_dims);
+                } else if matrix_freeze_period > 0
+                    && iter_idx % matrix_freeze_period as usize != 0
+                    && assembly_graph_frozen.is_some()
+                {
+                    assembly_graph_frozen
+                        .expect("checked is_some")
+                        .encode_into(encoder, kernels, runtime_dims);
+                } else {
+                    assembly_graph_tail.encode_into(encoder, kernels, runtime_dims);
                 }
             };
             let mut post = |encoder: &mut wgpu::CommandEncoder| {
@@ -2176,12 +2236,20 @@ pub(crate) fn assembly_graph_run(
     let r = res(plan);
     // Outer iterations after the first (one linear-stats entry per completed
     // solve this step) use the tail variant, which skips the grad_p recompute
-    // that the Update phase's grad_p_update already performed. Out-of-step
-    // callers (debug assembly, parity harnesses) see empty stats -> full graph.
-    let graph = if !plan.step_linear_stats.is_empty() {
-        r.assembly_graph_tail.as_ref().unwrap_or(&r.assembly_graph)
-    } else {
+    // that the Update phase's grad_p_update already performed — or, under
+    // matrix freezing, the RHS-only variant on non-re-linearization outers.
+    // Out-of-step callers (debug assembly, parity harnesses) see empty stats
+    // -> full graph.
+    let iters_done = plan.step_linear_stats.len();
+    let graph = if iters_done == 0 {
         &r.assembly_graph
+    } else if r.matrix_freeze_period > 0
+        && iters_done % r.matrix_freeze_period as usize != 0
+        && r.assembly_graph_frozen.is_some()
+    {
+        r.assembly_graph_frozen.as_ref().expect("checked is_some")
+    } else {
+        r.assembly_graph_tail.as_ref().unwrap_or(&r.assembly_graph)
     };
     run_module_graph(graph, context, &r.kernels, r.runtime_dims(), mode)
 }

@@ -31,6 +31,7 @@ fn decode_phase(tag: u8) -> Result<KernelPhase, String> {
         3 => Ok(KernelPhase::Assembly),
         4 => Ok(KernelPhase::Apply),
         5 => Ok(KernelPhase::Update),
+        6 => Ok(KernelPhase::AssemblyRhsOnly),
         _ => Err(format!(
             "unknown kernel phase tag in generated schedule: {tag}"
         )),

@@ -57,6 +57,14 @@ impl KernelId {
     pub const GENERIC_COUPLED_ASSEMBLY: KernelId = KernelId("generic_coupled_assembly");
     pub const GENERIC_COUPLED_ASSEMBLY_GRAD_STATE: KernelId =
         KernelId("generic_coupled_assembly_grad_state");
+    /// RHS-only variants of the two assembly kernels (matrix writes stripped,
+    /// see cfd2_codegen::solver::codegen::rhs_only) for outer iterations that
+    /// FREEZE the assembled matrix (KernelPhaseId::AssemblyRhsOnly; scheduled
+    /// only when matrix freezing is active, default off).
+    pub const GENERIC_COUPLED_ASSEMBLY_RHS_ONLY: KernelId =
+        KernelId("generic_coupled_assembly_rhs_only");
+    pub const GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY: KernelId =
+        KernelId("generic_coupled_assembly_grad_state_rhs_only");
     pub const GENERIC_COUPLED_APPLY: KernelId = KernelId("generic_coupled_apply");
     pub const GENERIC_COUPLED_UPDATE: KernelId = KernelId("generic_coupled_update");
 
@@ -136,6 +144,11 @@ pub enum KernelPhaseId {
     Gradients,
     FluxComputation,
     Assembly,
+    /// RHS-only re-assembly for outer iterations with a FROZEN matrix
+    /// (see cfd2_codegen::solver::codegen::rhs_only). Never part of the
+    /// normal per-iteration graphs; scheduled only by the matrix-freeze
+    /// paths (default off).
+    AssemblyRhsOnly,
     Apply,
     Update,
 }
@@ -711,6 +724,28 @@ pub(crate) fn generate_generic_coupled_assembly_grad_state_kernel_program(
         schemes,
         true,
     )
+}
+
+pub(crate) fn generate_generic_coupled_assembly_rhs_only_kernel_program(
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+) -> Result<crate::solver::ir::KernelProgram, String> {
+    let full = generate_generic_coupled_assembly_kernel_program(model, schemes)?;
+    Ok(cfd2_codegen::solver::codegen::rhs_only::rhs_only_kernel_program(
+        &full,
+        KernelId::GENERIC_COUPLED_ASSEMBLY_RHS_ONLY.as_str(),
+    ))
+}
+
+pub(crate) fn generate_generic_coupled_assembly_grad_state_rhs_only_kernel_program(
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+) -> Result<crate::solver::ir::KernelProgram, String> {
+    let full = generate_generic_coupled_assembly_grad_state_kernel_program(model, schemes)?;
+    Ok(cfd2_codegen::solver::codegen::rhs_only::rhs_only_kernel_program(
+        &full,
+        KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY.as_str(),
+    ))
 }
 
 pub(crate) fn generate_packed_state_gradients_kernel_program(

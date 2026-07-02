@@ -72,6 +72,20 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                 dispatch: DispatchKindId::Cells,
                 condition: KernelConditionId::RequiresGradState,
             },
+            // RHS-only assembly variants for matrix-frozen outer iterations
+            // (scheduled only by the freeze paths; default off).
+            ModelKernelSpec {
+                id: KernelId::GENERIC_COUPLED_ASSEMBLY_RHS_ONLY,
+                phase: KernelPhaseId::AssemblyRhsOnly,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::RequiresNoGradState,
+            },
+            ModelKernelSpec {
+                id: KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY,
+                phase: KernelPhaseId::AssemblyRhsOnly,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::RequiresGradState,
+            },
             ModelKernelSpec {
                 id: KernelId::GENERIC_COUPLED_APPLY,
                 phase: KernelPhaseId::Apply,
@@ -97,6 +111,14 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
             ModelKernelGeneratorSpec::new_dsl(
                 KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE,
                 crate::solver::model::kernel::generate_generic_coupled_assembly_grad_state_kernel_program,
+            ),
+            ModelKernelGeneratorSpec::new_dsl(
+                KernelId::GENERIC_COUPLED_ASSEMBLY_RHS_ONLY,
+                crate::solver::model::kernel::generate_generic_coupled_assembly_rhs_only_kernel_program,
+            ),
+            ModelKernelGeneratorSpec::new_dsl(
+                KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY,
+                crate::solver::model::kernel::generate_generic_coupled_assembly_grad_state_rhs_only_kernel_program,
             ),
             ModelKernelGeneratorSpec::new_shared_dsl(
                 KernelId::GENERIC_COUPLED_APPLY,

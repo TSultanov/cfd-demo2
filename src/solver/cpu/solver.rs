@@ -78,6 +78,12 @@ struct ScheduleGroups {
     per_iter_tail: Vec<String>,
     /// Update + PrimitiveRecovery kernels.
     update: Vec<String>,
+    /// `per_iter_tail` with the Assembly kernels replaced by their RHS-only
+    /// variants (KernelPhaseId::AssemblyRhsOnly): re-assembles the RHS but
+    /// leaves the frozen matrix untouched. Used for outer iterations where
+    /// `matrix_freeze_period` (env `CFD2_MATRIX_FREEZE`, default 0 = off)
+    /// skips re-linearization; empty when the model has no RHS-only kernels.
+    per_iter_frozen: Vec<String>,
 }
 
 impl ScheduleGroups {
@@ -110,12 +116,30 @@ impl ScheduleGroups {
         } else {
             per_iter.clone()
         };
+        // Frozen-matrix variant: tail Gradients/FluxComputation kernels, then
+        // the AssemblyRhsOnly kernels instead of the Assembly ones (schedule
+        // order preserved). Empty when the model declares no RHS-only kernels.
+        let has_rhs_only = schedule.iter().any(|s| s.phase == KernelPhase::AssemblyRhsOnly);
+        let per_iter_frozen = if has_rhs_only {
+            schedule
+                .iter()
+                .filter(|s| {
+                    (matches!(s.phase, KernelPhase::Gradients | KernelPhase::FluxComputation)
+                        && per_iter_tail.contains(&s.id))
+                        || s.phase == KernelPhase::AssemblyRhsOnly
+                })
+                .map(|s| s.id.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
         Self {
             prep_once: ids_in(&|s| s.phase == KernelPhase::Preparation && !is_bc_expr(&s.id)),
             bc_expr: ids_in(&|s| s.phase == KernelPhase::Preparation && is_bc_expr(&s.id)),
             per_iter,
             per_iter_tail,
             update,
+            per_iter_frozen,
         }
     }
 }
@@ -753,6 +777,21 @@ impl CpuSolver {
         let per_iter = &self.groups.per_iter;
         let per_iter_tail = &self.groups.per_iter_tail;
         let update_group = &self.groups.update;
+        // Matrix freezing (EXPERIMENTAL probe, default off): re-linearize on
+        // outer 0 and every `matrix_freeze_period`-th outer; other outers
+        // refresh only the RHS against the frozen matrix. MEASURED REFUTATION:
+        // enabling is harmful — the deferred-correction terms pair an implicit
+        // matrix piece with an explicit RHS piece from the SAME linearization,
+        // and refreshing one side breaks the cancellation (nozzle 2.2 ->
+        // 614 s/step; obstacle OOMs via the frozen zero-d_p step-0 matrix
+        // poisoning the AMG hierarchy). Kept as the substrate for a correct
+        // freeze that also freezes the deferred RHS pieces.
+        // `CFD2_MATRIX_FREEZE=k` enables (see the GPU field doc).
+        let freeze_period: usize = std::env::var("CFD2_MATRIX_FREEZE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|_| !self.groups.per_iter_frozen.is_empty())
+            .unwrap_or(0);
 
         let threads = self.config.threads;
         let engine = self.config.engine;
@@ -861,7 +900,13 @@ impl CpuSolver {
             // group, then the recurring boundary-closure refresh (bc_expr) which
             // prepares the ghosts for the next iteration/step.
             timed!(t_asm, {
-                let group = if outer_idx == 0 { per_iter } else { per_iter_tail };
+                let group = if outer_idx == 0 {
+                    per_iter
+                } else if freeze_period > 0 && outer_idx % freeze_period != 0 {
+                    &self.groups.per_iter_frozen
+                } else {
+                    per_iter_tail
+                };
                 for id in group {
                     run_t!(id);
                 }

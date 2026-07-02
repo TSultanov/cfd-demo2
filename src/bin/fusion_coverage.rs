@@ -70,6 +70,7 @@ fn phase_name(phase: Option<KernelPhaseId>) -> &'static str {
         Some(KernelPhaseId::Gradients) => "Gradients",
         Some(KernelPhaseId::FluxComputation) => "FluxComputation",
         Some(KernelPhaseId::Assembly) => "Assembly",
+        Some(KernelPhaseId::AssemblyRhsOnly) => "AssemblyRhsOnly",
         Some(KernelPhaseId::Apply) => "Apply",
         Some(KernelPhaseId::Update) => "Update",
         None => "-",

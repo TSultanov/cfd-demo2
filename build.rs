@@ -957,6 +957,7 @@ fn kernel_phase_tag(phase: solver::model::kernel::KernelPhaseId) -> u8 {
         solver::model::kernel::KernelPhaseId::Assembly => 3,
         solver::model::kernel::KernelPhaseId::Apply => 4,
         solver::model::kernel::KernelPhaseId::Update => 5,
+        solver::model::kernel::KernelPhaseId::AssemblyRhsOnly => 6,
     }
 }
 

@@ -1386,10 +1386,19 @@ fn outer_plateau_active(plan: &GpuProgramPlan) -> bool {
     }
 }
 
-/// Minimum outer sweeps before the plateau detector may exit — the empirically
-/// validated floor (`model_defaults`: "Ghia validates 5"). Below this the
-/// correction phase is not yet complete, so an exit could change the physics.
+/// Minimum outer sweeps before the plateau detector may take the STALL exit —
+/// the empirically validated floor (`model_defaults`: "Ghia validates 5").
+/// Below this the correction phase is not yet complete, so a stall-exit could
+/// change the physics. The TOLERANCE exit (every field's scaled correction
+/// under `outer_tol`) is a genuine convergence criterion and is allowed below
+/// the floor (from 2 sweeps): the obstacle bench measured the floor as ALWAYS
+/// binding (exactly 5.00 outers/step) even in steady phases where corrections
+/// were under tolerance by sweep 2-3.
 const OUTER_PLATEAU_MIN_ITERS: usize = 5;
+/// Minimum outer sweeps before the TOLERANCE exit: at least one re-linearized
+/// second sweep must confirm the first's correction, so a single lucky
+/// first-outer solve cannot end the step.
+const OUTER_TOL_EXIT_MIN_ITERS: usize = 2;
 /// A field has "stalled" when its scaled correction stopped shrinking by more than
 /// (1 - factor) per sweep AND is not growing past the ceiling. The band
 /// `[factor, ceiling]` treats the settled-but-slightly-drifting velocity residual
@@ -1403,18 +1412,28 @@ const OUTER_PLATEAU_CEILING: f32 = 1.01;
 /// Requires at least [`OUTER_PLATEAU_MIN_ITERS`] sweeps and a previous residual to
 /// compare against; a field still meaningfully decreasing OR growing blocks the exit.
 fn outer_corrections_plateaued(plan: &GpuProgramPlan, iters_done: usize) -> bool {
-    if iters_done < OUTER_PLATEAU_MIN_ITERS {
-        return false;
-    }
     let cur = &plan.outer_field_residuals_scaled;
-    let prev = &plan.prev_outer_field_residuals_scaled;
-    if cur.is_empty() || prev.is_empty() {
+    if cur.is_empty() {
         return false;
     }
     let (tol_rel, tol_abs) = {
         let r = res(plan);
         (r.outer_tol.max(0.0), r.outer_tol_abs.max(0.0))
     };
+    // Tolerance exit: every solved field's scaled correction is already under
+    // tolerance — allowed below the stall floor (see the const docs).
+    if iters_done >= OUTER_TOL_EXIT_MIN_ITERS
+        && cur.iter().all(|(_, r)| *r <= tol_rel || *r <= tol_abs)
+    {
+        return true;
+    }
+    if iters_done < OUTER_PLATEAU_MIN_ITERS {
+        return false;
+    }
+    let prev = &plan.prev_outer_field_residuals_scaled;
+    if prev.is_empty() {
+        return false;
+    }
     // Every field must be DONE (converged or plateaued); if any is missing a prior
     // value, still improving, or growing, do not exit.
     for (name, r_cur) in cur.iter() {

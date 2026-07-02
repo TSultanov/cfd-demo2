@@ -874,6 +874,7 @@ impl CpuSolver {
         // pseudo-transient (dtau > 0), and single-outer configs.
         // `CFD2_CPU_OUTER_BREAK=0` pins the loop to the fixed count.
         const OUTER_PLATEAU_MIN_ITERS: usize = 5;
+        const OUTER_TOL_EXIT_MIN_ITERS: usize = 2;
         const OUTER_PLATEAU_FACTOR: f32 = 0.98;
         const OUTER_PLATEAU_CEILING: f32 = 1.01;
         let plateau_active = self.collect_convergence_stats
@@ -955,15 +956,22 @@ impl CpuSolver {
                     .map(|(&d, &s)| d / s.max(1.0))
                     .collect();
                 let tol_rel = self.outer_tol.max(0.0) as f32;
-                let plateaued = outer_idx + 1 >= OUTER_PLATEAU_MIN_ITERS
-                    && !prev_scaled.is_empty()
-                    && scaled.iter().zip(prev_scaled.iter()).all(|(&cur, &prev)| {
-                        if cur <= tol_rel {
-                            return true;
-                        }
-                        let ratio = cur / prev.max(1e-30);
-                        (OUTER_PLATEAU_FACTOR..=OUTER_PLATEAU_CEILING).contains(&ratio)
-                    });
+                // Tolerance exit below the stall floor (mirrors the GPU
+                // detector): every field's scaled correction under tolerance
+                // is a genuine convergence criterion, valid from the second
+                // sweep; the 5-sweep floor guards only the STALL exit.
+                let under_tol = outer_idx + 1 >= OUTER_TOL_EXIT_MIN_ITERS
+                    && scaled.iter().all(|&cur| cur <= tol_rel);
+                let plateaued = under_tol
+                    || (outer_idx + 1 >= OUTER_PLATEAU_MIN_ITERS
+                        && !prev_scaled.is_empty()
+                        && scaled.iter().zip(prev_scaled.iter()).all(|(&cur, &prev)| {
+                            if cur <= tol_rel {
+                                return true;
+                            }
+                            let ratio = cur / prev.max(1e-30);
+                            (OUTER_PLATEAU_FACTOR..=OUTER_PLATEAU_CEILING).contains(&ratio)
+                        }));
                 prev_scaled = scaled;
                 if plateaued {
                     break;

@@ -91,9 +91,9 @@ pub struct CpuSolver {
     /// Block-system preconditioner choice (mirrors the recipe/runtime config).
     precond: PreconditionerType,
     /// Model-owned Schur preconditioner spec, when present: (velocity unknown
-    /// indices, pressure unknown index, omega). Saddle-point models
+    /// indices, pressure unknown index, omega, sweeps_cap). Saddle-point models
     /// (incompressible/buoyant) use the CPU Schur preconditioner.
-    schur: Option<(Vec<usize>, usize, f32)>,
+    schur: Option<(Vec<usize>, usize, f32, u32)>,
     /// AMG hierarchy for the Schur pressure block, built lazily on first use
     /// (aggregation seeded by that solve's pressure-block values; the pattern
     /// never changes).
@@ -308,15 +308,16 @@ impl CpuSolver {
 
         // Model-owned Schur preconditioner (saddle-point models).
         let schur = match model.linear_solver.and_then(|ls| match ls.preconditioner {
-            crate::solver::model::ModelPreconditionerSpec::Schur { omega, layout, .. } => {
-                Some((layout, omega))
+            crate::solver::model::ModelPreconditionerSpec::Schur { omega, sweeps_cap, layout } => {
+                Some((layout, omega, sweeps_cap))
             }
             _ => None,
         }) {
-            Some((layout, omega)) => Some((
+            Some((layout, omega, sweeps_cap)) => Some((
                 layout.u_indices().iter().map(|&u| u as usize).collect::<Vec<usize>>(),
                 layout.p as usize,
                 omega,
+                sweeps_cap,
             )),
             None => None,
         };
@@ -986,7 +987,7 @@ impl CpuSolver {
                 .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(self.linear_tol);
             let stats = match &self.schur {
-                Some((u_idx, p, omega)) => {
+                Some((u_idx, p, omega, sweeps_cap)) => {
                     // Adaptive inner solve for the Schur pressure block: start
                     // with the cheap Jacobi-BiCGSTAB (wins when the block is
                     // easy, e.g. the nozzle); flip ONE-WAY to the AMG-
@@ -1012,7 +1013,15 @@ impl CpuSolver {
                         None
                     };
                     let pc = prof::time(&prof::PC_BUILD, || {
-                        SchurPrecond::new(a, u_idx, *p, *omega as f64, self.config.simd, amg_hier)
+                        SchurPrecond::new(
+                            a,
+                            u_idx,
+                            *p,
+                            *omega as f64,
+                            *sweeps_cap,
+                            self.config.simd,
+                            amg_hier,
+                        )
                     });
                     let stats = fgmres(
                         &a,

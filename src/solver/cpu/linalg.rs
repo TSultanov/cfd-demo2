@@ -480,32 +480,56 @@ impl Preconditioner for PointJacobi {
     }
 }
 
+/// Inner pressure-solve algorithm for [`SchurPrecond`]
+/// (`CFD2_CPU_SCHUR_INNER=heavyball|bicgstab|vcycle`, default `heavyball`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SchurInner {
+    /// Fused heavy-ball (second-order Richardson) sweeps — the CPU mirror of the
+    /// GPU `relax_pressure` ping-pong. One parallel pass per sweep, no
+    /// reductions in the sweep loop; residual checked at geometrically spaced
+    /// sweeps (4, 8, 16, …) for early exit on easy blocks. Default: the inner
+    /// solve is launch-overhead-bound at bench sizes (BiCGSTAB pays ~13
+    /// parallel ops/iteration and anti-scales beyond 4 threads), so fewer,
+    /// fatter parallel passes win even at a worse per-pass contraction rate.
+    HeavyBall,
+    /// Jacobi-preconditioned BiCGSTAB (the pre-heavy-ball default; also the
+    /// inner solve whenever an AMG hierarchy is active).
+    BiCgStab,
+    /// Raw AMG V-cycle(s) as the pressure solve (requires the AMG hierarchy) —
+    /// fixed work per apply, no reductions.
+    VCycle,
+}
+
 /// SIMPLE-like Schur-complement preconditioner for saddle-point block systems
 /// (incompressible/buoyant), mirroring the GPU generic Schur
 /// (`schur_precond_generic.wgsl` + `generic_coupled_schur_setup.wgsl`):
 ///   1. predict velocity  z_u = diag(A_uu)^-1 r_u,  z_p = 0
 ///   2. Schur RHS         g_p = r_p - A_pu diag(A_uu)^-1 r_u
 ///   3. pressure solve    A_pp p = g_p   (A_pp = the pressure-pressure block;
-///                        the GPU smooths it, here BiCGSTAB solves it — FGMRES is
-///                        flexible, so a variable/accurate inner solve is fine)
+///                        heavy-ball sweeps by default — the GPU shape — with
+///                        BiCGSTAB/AMG fallbacks; FGMRES is flexible, so a
+///                        variable/approximate inner solve is fine)
 ///   4. correct velocity  z_u -= diag(A_uu)^-1 A_up p,   z_p = p
 /// Built per solve from the assembled block matrix (the matrix changes each
-/// outer iteration). `omega` is accepted for parity with the GPU spec but the
-/// BiCGSTAB pressure solve makes the relaxation factor moot.
+/// outer iteration). `omega`/`sweeps_cap` follow the GPU spec semantics
+/// (`heavy_ball_omega` / `default_pressure_sweeps`, same env overrides).
 pub struct SchurPrecond<'a> {
     a: BlockCsr<'a>,
     u_idx: Vec<usize>,
     p: usize,
     diag_u_inv: Vec<f64>, // num_cells * u_len
     p_values: Vec<f32>,   // A_pp scalar-CSR values (topology = scalar_row_offsets/col_indices)
+    p_diag_inv: Vec<f64>, // 1 / diag(A_pp) per cell (heavy-ball sweep scaling)
+    /// Heavy-ball relaxation weight (model spec omega via `heavy_ball_omega`).
+    omega: f64,
+    /// Heavy-ball sweep budget (`default_pressure_sweeps(num_cells, sweeps_cap)`).
+    sweeps: usize,
     /// Inner pressure-solve budget/tolerance (env-overridable experiment knobs:
     /// `CFD2_CPU_SCHUR_INNER_ITERS` / `CFD2_CPU_SCHUR_INNER_TOL`).
     inner_iters: usize,
     inner_tol: f64,
-    /// Experiment (`CFD2_CPU_SCHUR_INNER=vcycle`): apply `inner_vcycles` raw
-    /// V-cycles as the pressure solve instead of the Krylov inner solve —
-    /// fixed work per apply, no reductions (the GPU-style shape).
-    inner_vcycle_only: bool,
+    /// Inner algorithm selection (see [`SchurInner`]).
+    inner: SchurInner,
     /// AMG operator for the pressure block (assembled from `p_values` when the
     /// caller supplies a hierarchy): preconditions the inner BiCGSTAB so its
     /// iteration count stays mesh-independent instead of growing ~h^-2.
@@ -521,31 +545,77 @@ impl<'a> SchurPrecond<'a> {
         a: BlockCsr<'a>,
         u_idx: &[usize],
         p: usize,
-        _omega: f64,
+        omega: f64,
+        sweeps_cap: u32,
         _simd: bool,
         amg_hier: Option<&'a crate::solver::cpu::amg::AmgHierarchy>,
     ) -> Self {
         let s = a.s;
         let cells = a.num_cells();
         let u_len = u_idx.len();
+        let threads = a.threads.max(1);
         let mut diag_u_inv = vec![0.0f64; cells * u_len];
         let nnz = a.col_indices.len();
         let mut p_values = vec![0.0f32; nnz];
-        for cell in 0..cells {
-            let scalar_offset = a.scalar_offset(cell);
-            let num_neighbors = a.num_neighbors(cell);
-            let diag_rank = a.diagonal_indices[cell] as usize - scalar_offset;
-            // diag(A_uu) per velocity component
-            for (i, &u) in u_idx.iter().enumerate() {
-                let base_u = a.start_row(cell, u) + diag_rank * s;
-                let du = a.values[base_u + u] as f64;
-                diag_u_inv[cell * u_len + i] = if du.abs() > 1e-30 { 1.0 / du } else { 0.0 };
+        let mut p_diag_inv = vec![0.0f64; cells];
+        // Extract diag(A_uu)^-1, the A_pp scalar-CSR values and diag(A_pp)^-1.
+        // Each cell writes only its own slots (diag_u_inv/p_diag_inv are
+        // cell-strided; a cell's p_values live in its scalar CSR row range, and
+        // row ranges are contiguous and monotone in cell), so the fill
+        // parallelizes over disjoint cell ranges bit-exactly. p_values chunks
+        // are split at scalar-row-offset boundaries (uneven widths).
+        let fill = |cell0: usize,
+                    du_chunk: &mut [f64],
+                    pd_chunk: &mut [f64],
+                    pv_chunk: &mut [f32]| {
+            let pv_base = a.scalar_offset(cell0);
+            for li in 0..pd_chunk.len() {
+                let cell = cell0 + li;
+                let scalar_offset = a.scalar_offset(cell);
+                let num_neighbors = a.num_neighbors(cell);
+                let diag_rank = a.diagonal_indices[cell] as usize - scalar_offset;
+                // diag(A_uu) per velocity component
+                for (i, &u) in u_idx.iter().enumerate() {
+                    let base_u = a.start_row(cell, u) + diag_rank * s;
+                    let du = a.values[base_u + u] as f64;
+                    du_chunk[li * u_len + i] = if du.abs() > 1e-30 { 1.0 / du } else { 0.0 };
+                }
+                // A_pp scalar-CSR row (one value per neighbour block).
+                let srp = a.start_row(cell, p);
+                for rank in 0..num_neighbors {
+                    pv_chunk[scalar_offset - pv_base + rank] = a.values[srp + rank * s + p];
+                }
+                let dp = a.values[srp + diag_rank * s + p] as f64;
+                pd_chunk[li] = if dp.abs() > 1e-30 { 1.0 / dp } else { 0.0 };
             }
-            // A_pp scalar-CSR row (one value per neighbour block).
-            let srp = a.start_row(cell, p);
-            for rank in 0..num_neighbors {
-                p_values[scalar_offset + rank] = a.values[srp + rank * s + p];
-            }
+        };
+        // ~16k cells per worker minimum: below that, scoped-thread spawn+join
+        // exceeds the extraction work itself (same rationale as the BLAS-1
+        // helpers' MIN_ELEMS_PER_WORKER).
+        let workers = threads.min(cells.div_ceil(16 * 1024)).max(1);
+        if workers <= 1 {
+            fill(0, &mut diag_u_inv, &mut p_diag_inv, &mut p_values);
+        } else {
+            let chunk = cells.div_ceil(workers);
+            std::thread::scope(|sc| {
+                let mut rest_du: &mut [f64] = &mut diag_u_inv;
+                let mut rest_pd: &mut [f64] = &mut p_diag_inv;
+                let mut rest_pv: &mut [f32] = &mut p_values;
+                let mut start = 0usize;
+                while start < cells {
+                    let end = (start + chunk).min(cells);
+                    let (du, tdu) = rest_du.split_at_mut((end - start) * u_len);
+                    let (pd, tpd) = rest_pd.split_at_mut(end - start);
+                    let pv_take = a.scalar_offset(end) - a.scalar_offset(start);
+                    let (pv, tpv) = rest_pv.split_at_mut(pv_take);
+                    rest_du = tdu;
+                    rest_pd = tpd;
+                    rest_pv = tpv;
+                    let fr = &fill;
+                    sc.spawn(move || fr(start, du, pd, pv));
+                    start = end;
+                }
+            });
         }
         let inner_iters = std::env::var("CFD2_CPU_SCHUR_INNER_ITERS")
             .ok()
@@ -559,9 +629,72 @@ impl<'a> SchurPrecond<'a> {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(1e-1);
-        let inner_vcycle_only = std::env::var("CFD2_CPU_SCHUR_INNER")
-            .map(|v| v.eq_ignore_ascii_case("vcycle"))
-            .unwrap_or(false);
+        let inner = match std::env::var("CFD2_CPU_SCHUR_INNER").as_deref() {
+            Ok(v) if v.eq_ignore_ascii_case("vcycle") => SchurInner::VCycle,
+            Ok(v) if v.eq_ignore_ascii_case("bicgstab") => SchurInner::BiCgStab,
+            _ => SchurInner::HeavyBall,
+        };
+        if std::env::var("CFD2_CPU_SCHUR_DEBUG").is_ok() {
+            let zeros = p_diag_inv.iter().filter(|&&v| v == 0.0).count();
+            let dmin = p_diag_inv.iter().cloned().fold(f64::INFINITY, f64::min);
+            let dmax = p_diag_inv.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            // Power iteration on D^-1 A_pp: heavy-ball/Jacobi stability needs
+            // the Jacobi-preconditioned spectrum inside (0, 2).
+            let pa = CsrView {
+                row_offsets: a.scalar_row_offsets,
+                col_indices: a.col_indices,
+                values: &p_values,
+                threads,
+            };
+            let mut v: Vec<f64> = (0..cells).map(|i| ((i % 13) as f64) - 6.0).collect();
+            let n0 = par_dot(threads, &v, &v).sqrt().max(1e-300);
+            for x in v.iter_mut() {
+                *x /= n0;
+            }
+            let mut w = vec![0.0f64; cells];
+            let mut lam = 0.0f64;
+            for _ in 0..40 {
+                pa.spmv(&v, &mut w);
+                for i in 0..cells {
+                    w[i] *= p_diag_inv[i];
+                }
+                lam = par_dot(threads, &w, &w).sqrt().max(1e-300);
+                for i in 0..cells {
+                    v[i] = w[i] / lam;
+                }
+            }
+            // Spectral radius of the plain-Jacobi iteration matrix G = I - D^-1 A
+            // (rho(G) > 1 means Jacobi-family smoothing genuinely diverges).
+            let mut g: Vec<f64> = (0..cells).map(|i| ((i % 7) as f64) - 3.0).collect();
+            let g0 = par_dot(threads, &g, &g).sqrt().max(1e-300);
+            for x in g.iter_mut() {
+                *x /= g0;
+            }
+            let mut rho_g = 0.0f64;
+            for _ in 0..100 {
+                pa.spmv(&g, &mut w);
+                for i in 0..cells {
+                    w[i] = g[i] - w[i] * p_diag_inv[i];
+                }
+                rho_g = par_dot(threads, &w, &w).sqrt().max(1e-300);
+                for i in 0..cells {
+                    g[i] = w[i] / rho_g;
+                }
+            }
+            eprintln!(
+                "[schur-build] cells={cells} p_diag_inv zeros={zeros} min={dmin:.3e} \
+                 max={dmax:.3e} lam_max(DinvA)~{lam:.3} rho(I-DinvA)~{rho_g:.4}"
+            );
+        }
+        // Same weight/sweep policy (and env overrides) as the GPU Schur:
+        // spec omega 1.0 = auto-1.95 (symmetric blocks), verbatim otherwise
+        // (all-Mach declares 1.6); sweeps = min(20 + sqrt(n)/8, sweeps_cap).
+        let omega =
+            crate::solver::gpu::modules::coupled_schur::heavy_ball_omega(omega as f32) as f64;
+        let sweeps = crate::solver::gpu::modules::coupled_schur::default_pressure_sweeps(
+            cells as u32,
+            sweeps_cap,
+        );
         // (Counted under PC_BUILD via the caller's wrap around `new`.)
         let amg = amg_hier.map(|h| {
             crate::solver::cpu::amg::AmgSolver::assemble(h, &p_values, a.threads.max(1))
@@ -572,9 +705,12 @@ impl<'a> SchurPrecond<'a> {
             p,
             diag_u_inv,
             p_values,
+            p_diag_inv,
+            omega,
+            sweeps,
             inner_iters,
             inner_tol,
-            inner_vcycle_only,
+            inner,
             amg,
             applies: std::cell::Cell::new(0),
             inner_failures: std::cell::Cell::new(0),
@@ -644,37 +780,38 @@ impl Preconditioner for SchurPrecond<'_> {
             values: &self.p_values,
             threads: self.a.threads,
         };
-        let gp_f32: Vec<f32> = gp.iter().map(|&v| v as f32).collect();
-        let mut psol = vec![0.0f32; cells];
         // Cheap APPROXIMATE pressure solve — this is a preconditioner, and FGMRES
         // is flexible, so a loose inner solve (few iterations) keeps each outer
         // iteration cheap (mirrors the GPU's fixed smoother sweeps).
-        // Both inner paths run with the stagnation early-exit: this is a
-        // preconditioner apply (FGMRES is flexible), so bailing on a stalled
-        // block beats burning the budget; failures feed the adaptive AMG switch.
+        // The BiCGSTAB paths run with the stagnation early-exit: bailing on a
+        // stalled block beats burning the budget; failures feed the adaptive
+        // AMG switch.
+        let mut psol = vec![0.0f64; cells];
+        let heavy_ball = self.amg.is_none() && self.inner != SchurInner::BiCgStab;
         let stats = prof::time(&prof::SCHUR_SOLVE, || match &self.amg {
-            Some(amg) if self.inner_vcycle_only => {
-                // Fixed-work apply: z_p = V-cycle(g_p) (optionally repeated as
-                // a Richardson iteration when CFD2_CPU_SCHUR_INNER_ITERS > 1).
-                let gp64: Vec<f64> = gp_f32.iter().map(|&v| v as f64).collect();
-                let n = gp64.len();
-                let mut z64 = vec![0.0f64; n];
-                amg.vcycle(&gp64, &mut z64);
-                for i in 0..n {
-                    psol[i] = z64[i] as f32;
-                }
+            Some(amg) if self.inner == SchurInner::VCycle => {
+                // Fixed-work apply: z_p = V-cycle(g_p).
+                amg.vcycle(&gp, &mut psol);
                 SolveStats { iters: 1, rel_residual: f64::NAN, converged: true }
             }
-            Some(amg) => bicgstab_pc_opts(
-                &pa,
-                &gp_f32,
-                &mut psol,
-                self.inner_iters,
-                self.inner_tol,
-                &|r, z| amg.vcycle(r, z),
-                true,
-            ),
-            None => {
+            Some(amg) => {
+                let gp_f32: Vec<f32> = gp.iter().map(|&v| v as f32).collect();
+                let mut psol_f32 = vec![0.0f32; cells];
+                let st = bicgstab_pc_opts(
+                    &pa,
+                    &gp_f32,
+                    &mut psol_f32,
+                    self.inner_iters,
+                    self.inner_tol,
+                    &|r, z| amg.vcycle(r, z),
+                    true,
+                );
+                for i in 0..cells {
+                    psol[i] = psol_f32[i] as f64;
+                }
+                st
+            }
+            None if self.inner == SchurInner::BiCgStab => {
                 let threads = pa.threads.max(1);
                 let diag = pa.diagonal();
                 let minv = move |v: &[f64], out: &mut [f64]| {
@@ -686,23 +823,58 @@ impl Preconditioner for SchurPrecond<'_> {
                         }
                     });
                 };
-                bicgstab_pc_opts(
+                let gp_f32: Vec<f32> = gp.iter().map(|&v| v as f32).collect();
+                let mut psol_f32 = vec![0.0f32; cells];
+                let st = bicgstab_pc_opts(
                     &pa,
                     &gp_f32,
-                    &mut psol,
+                    &mut psol_f32,
                     self.inner_iters,
                     self.inner_tol,
                     &minv,
                     true,
-                )
+                );
+                for i in 0..cells {
+                    psol[i] = psol_f32[i] as f64;
+                }
+                st
             }
+            None => heavy_ball_solve(
+                &pa,
+                &gp,
+                &mut psol,
+                &self.p_diag_inv,
+                self.omega,
+                self.sweeps,
+                self.inner_tol,
+            ),
         });
         self.applies.set(self.applies.get() + 1);
-        if !stats.converged {
+        // Failure accounting drives the one-way AMG switch. Heavy-ball is a
+        // fixed-sweep smoother (GPU semantics): missing `inner_tol` at the cap
+        // is NORMAL on hard Poisson blocks (rate ~ sqrt(omega-1) per sweep ⇒
+        // ~0.2 residual reduction at 63 sweeps) and FGMRES converges fine with
+        // it — only a near-total stall (barely any reduction) means the block
+        // genuinely needs the AMG hierarchy.
+        let failed = if heavy_ball {
+            !stats.converged && stats.rel_residual > 0.7
+        } else {
+            !stats.converged
+        };
+        if failed {
             self.inner_failures.set(self.inner_failures.get() + 1);
         }
+        if std::env::var("CFD2_CPU_SCHUR_DEBUG").is_ok() {
+            eprintln!(
+                "[schur-inner] apply={} mode={} iters={} rel={:.3e} conv={}",
+                self.applies.get(),
+                if heavy_ball { "heavyball" } else { "bicgstab/amg" },
+                stats.iters,
+                stats.rel_residual,
+                stats.converged
+            );
+        }
         prof::INNER_ITERS.fetch_add(stats.iters as u64, std::sync::atomic::Ordering::Relaxed);
-        let psol: Vec<f64> = psol.iter().map(|&v| v as f64).collect();
 
         // 4. correct velocity, write pressure. Cell-disjoint writes into z;
         // parallel over cell chunks, bit-exact.
@@ -935,6 +1107,125 @@ pub fn bicgstab(
         par_map_into(threads, out, |i| if diag[i] != 0.0 { v[i] / diag[i] } else { v[i] });
     };
     bicgstab_pc(a, b, x, max_iter, tol, &minv)
+}
+
+/// Fused heavy-ball (second-order Richardson) sweeps on a scalar CSR system —
+/// the CPU mirror of the GPU Schur `relax_pressure` ping-pong:
+///   x_{k+1}[i] = (1-w)·x_{k-1}[i] + w·(x_k[i] + (g[i] - Σ_j A_ij·x_k[j]) / A_ii)
+/// starting from x_{-1} = x_0 = 0 (both GPU relax buffers are zeroed).
+///
+/// Each sweep is ONE parallel pass (residual, diagonal scale and momentum
+/// update fused per row) with no reductions — the whole point: the inner solve
+/// at bench sizes is scoped-thread launch-overhead-bound, and BiCGSTAB pays
+/// ~13 launches per iteration. The residual is measured only at geometrically
+/// spaced sweeps (4, 8, 16, …, max_sweeps) so easy blocks (the all-Mach
+/// diagonal-boosted pressure row) exit after a few sweeps while hard Poisson
+/// blocks run the full budget as a FIXED linear operator — which is exactly
+/// what FGMRES wants from a preconditioner.
+///
+/// Deterministic: sweeps write each row once from read-only inputs (ping-pong
+/// buffers), and the exit decision comes from `par_dot` — bit-identical across
+/// thread counts.
+fn heavy_ball_solve(
+    pa: &CsrView,
+    g: &[f64],
+    x: &mut [f64],
+    diag_inv: &[f64],
+    omega: f64,
+    max_sweeps: usize,
+    tol: f64,
+) -> SolveStats {
+    let n = pa.n();
+    debug_assert_eq!(g.len(), n);
+    debug_assert_eq!(x.len(), n);
+    let threads = pa.threads.max(1);
+    let gnorm = par_dot(threads, g, g).sqrt().max(1e-300);
+
+    // Ping-pong pair: `cur` holds x_k, `prev` holds x_{k-1} and RECEIVES
+    // x_{k+1} (its own element is read for the momentum term before being
+    // overwritten — element-local, so the chunked write stays race-free;
+    // neighbour reads touch only `cur`).
+    let mut cur = vec![0.0f64; n];
+    let mut prev = vec![0.0f64; n];
+    let mut scratch = vec![0.0f64; n];
+
+    // Safeguard state: the GPU runs these sweeps blind (no readbacks), but on
+    // the CPU a residual check is cheap, so we use it to make high-omega
+    // momentum SAFE. The heavy-ball stability ellipse collapses onto the real
+    // axis as omega -> 2; pressure blocks with an upwinded `div_flux(phi, p)`
+    // (slightly complex spectrum) or near-null gauge modes can be AMPLIFIED at
+    // omega 1.95 even though plain Jacobi converges — and once one apply
+    // amplifies, FGMRES feeds the unstable modes right back (measured: apply 1
+    // rel 0.56, applies 2+ rel ~22 on the cut-cell obstacle). On growth vs the
+    // best iterate: halve the momentum and restart from the best; after
+    // repeated decays bail with the best iterate (feeds the AMG switch).
+    let mut best = vec![0.0f64; n];
+    let mut best_rel = 1.0f64; // x = 0 has relative residual exactly 1
+    let mut omega = omega;
+
+    let mut sweeps_done = 0usize;
+    let mut next_check = 4usize.min(max_sweeps);
+    let mut strikes = 0u32;
+    let mut decays = 0u32;
+    let mut converged = false;
+    while sweeps_done < max_sweeps {
+        {
+            let cur_ref = &cur;
+            parallel_cell_chunks_mut(n, 1, threads, &mut prev, |row0, chunk| {
+                for (li, slot) in chunk.iter_mut().enumerate() {
+                    let row = row0 + li;
+                    let start = pa.row_offsets[row] as usize;
+                    let end = pa.row_offsets[row + 1] as usize;
+                    let mut sum = 0.0f64;
+                    for k in start..end {
+                        sum += pa.values[k] as f64 * cur_ref[pa.col_indices[k] as usize];
+                    }
+                    let hat = cur_ref[row] + (g[row] - sum) * diag_inv[row];
+                    *slot = (1.0 - omega) * *slot + omega * hat;
+                }
+            });
+        }
+        std::mem::swap(&mut cur, &mut prev);
+        sweeps_done += 1;
+        if sweeps_done == next_check || sweeps_done == max_sweeps {
+            pa.spmv(&cur, &mut scratch);
+            par_update(threads, &mut scratch, |i, v| *v = g[i] - *v);
+            let rel = par_dot(threads, &scratch, &scratch).sqrt() / gnorm;
+            if rel <= tol {
+                converged = true;
+                best_rel = rel;
+                best.copy_from_slice(&cur);
+                break;
+            }
+            if rel < best_rel {
+                best_rel = rel;
+                best.copy_from_slice(&cur);
+                strikes = 0;
+            } else {
+                // Non-improving check. Heavy-ball residuals overshoot
+                // TRANSIENTLY (non-normal iteration matrix), so a single bad
+                // check is normal; only SUSTAINED growth (two consecutive
+                // checks without a new best) means momentum is amplifying part
+                // of the spectrum. Then: halve the momentum and restart from
+                // the best iterate; after two decays give up and return the
+                // best (the failure feeds the caller's adaptive AMG switch).
+                strikes += 1;
+                if strikes >= 2 {
+                    strikes = 0;
+                    decays += 1;
+                    if decays >= 2 {
+                        break;
+                    }
+                    omega = 1.0 + (omega - 1.0) * 0.5;
+                    cur.copy_from_slice(&best);
+                    prev.copy_from_slice(&best);
+                }
+            }
+            next_check = (next_check * 2).min(max_sweeps);
+        }
+    }
+    x.copy_from_slice(&best);
+    SolveStats { iters: sweeps_done, rel_residual: best_rel, converged }
 }
 
 /// BiCGSTAB with a caller-supplied left preconditioner `minv(r, z)` (e.g. the

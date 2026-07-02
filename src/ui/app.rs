@@ -257,6 +257,38 @@ impl Drop for SolverWorkerHandle {
     }
 }
 
+/// Compute-backend dropdown choice (env-driven; applied on Initialize / Reset).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackendChoice {
+    Gpu,
+    CpuInterpreter,
+    CpuTranspiled,
+    /// Transpiled kernels + the SIMD path for the linear-solve reductions.
+    CpuTranspiledSimd,
+}
+
+impl BackendChoice {
+    const ALL: [BackendChoice; 4] = [
+        BackendChoice::Gpu,
+        BackendChoice::CpuInterpreter,
+        BackendChoice::CpuTranspiled,
+        BackendChoice::CpuTranspiledSimd,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            BackendChoice::Gpu => "GPU",
+            BackendChoice::CpuInterpreter => "CPU Interpreter",
+            BackendChoice::CpuTranspiled => "CPU Transpiled",
+            BackendChoice::CpuTranspiledSimd => "CPU Transpiled (SIMD linear)",
+        }
+    }
+
+    fn is_cpu(self) -> bool {
+        !matches!(self, BackendChoice::Gpu)
+    }
+}
+
 pub struct CFDApp {
     solver_worker: SolverWorkerHandle,
     pending_init_request: Option<SolverInitRequest>,
@@ -286,10 +318,8 @@ pub struct CFDApp {
     current_fluid: Fluid,
     show_mesh_lines: bool,
     // Compute-backend selection (env-driven; applied on Initialize / Reset).
-    cpu_backend: bool,
-    cpu_engine_transpiled: bool,
+    backend: BackendChoice,
     cpu_threads: usize,
-    cpu_simd: bool,
     adaptive_dt: bool,
     target_cfl: f64,
     dual_time: bool,
@@ -437,10 +467,8 @@ impl CFDApp {
             selected_scheme: Scheme::Upwind,
             current_fluid: default_fluid,
             show_mesh_lines: true,
-            cpu_backend: false,
-            cpu_engine_transpiled: false,
+            backend: BackendChoice::Gpu,
             cpu_threads: 1,
-            cpu_simd: false,
             adaptive_dt: true,
             target_cfl: 0.9,
             dual_time: false,
@@ -793,18 +821,21 @@ impl CFDApp {
     /// `UnifiedSolver::new`). CPU options are runtime-switchable; changes take
     /// effect on the next solver (re)build.
     fn apply_backend_env(&self) {
-        if self.cpu_backend {
+        if self.backend.is_cpu() {
             std::env::set_var("CFD2_BACKEND", "cpu");
             std::env::set_var(
                 "CFD2_CPU_ENGINE",
-                if self.cpu_engine_transpiled {
-                    "transpiled"
-                } else {
+                if self.backend == BackendChoice::CpuInterpreter {
                     "interpreter"
+                } else {
+                    "transpiled"
                 },
             );
             std::env::set_var("CFD2_CPU_THREADS", self.cpu_threads.max(1).to_string());
-            std::env::set_var("CFD2_CPU_SIMD", if self.cpu_simd { "1" } else { "0" });
+            std::env::set_var(
+                "CFD2_CPU_SIMD",
+                if self.backend == BackendChoice::CpuTranspiledSimd { "1" } else { "0" },
+            );
         } else {
             std::env::remove_var("CFD2_BACKEND");
         }
@@ -2796,23 +2827,30 @@ impl eframe::App for CFDApp {
                         }
 
                         ui.separator();
-                        ui.label("Compute Backend");
-                        ui.checkbox(&mut self.cpu_backend, "CPU backend (all models)")
+                        egui::ComboBox::from_label("Compute Backend")
+                            .selected_text(self.backend.label())
+                            .show_ui(ui, |ui| {
+                                for choice in BackendChoice::ALL {
+                                    ui.selectable_value(
+                                        &mut self.backend,
+                                        choice,
+                                        choice.label(),
+                                    );
+                                }
+                            })
+                            .response
                             .on_hover_text(
-                                "Run the selected model on the CPU (no GPU adapter). \
-                                 All models are supported at parity with the GPU; \
-                                 GPU-only telemetry (profiling, per-graph timings) is \
-                                 unavailable.",
+                                "CPU backends run the selected model without a GPU \
+                                 adapter, at parity with the GPU; GPU-only telemetry \
+                                 (profiling, per-graph timings) is unavailable. \
+                                 Interpreter = reference tree-walker; Transpiled = \
+                                 compiled kernels (fast); SIMD adds the vectorized \
+                                 linear-solve reductions.",
                             );
-                        if self.cpu_backend {
-                            ui.checkbox(
-                                &mut self.cpu_engine_transpiled,
-                                "Transpiled (compiled) kernels",
-                            );
+                        if self.backend.is_cpu() {
                             ui.add(
-                                adaptive_slider(&mut self.cpu_threads, 1..=16).text("Threads"),
+                                adaptive_slider(&mut self.cpu_threads, 1..=16).text("Cores"),
                             );
-                            ui.checkbox(&mut self.cpu_simd, "SIMD linear-solve");
                             ui.label("Applied on Initialize / Reset.");
                         }
 

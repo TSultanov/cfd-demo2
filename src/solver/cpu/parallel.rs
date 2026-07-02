@@ -1,16 +1,24 @@
 //! Runtime-selectable parallel-for over a kernel dispatch domain.
 //!
-//! All threading goes through this single function so the mechanism stays
+//! All threading goes through this single module so the mechanism stays
 //! swappable. The user is (rightly) skeptical of per-dispatch fork/join overhead
-//! from a work-stealing pool, so the default deliberately avoids rayon: it splits
-//! the domain into a few **coarse contiguous chunks** and runs them on scoped
-//! threads. Each worker owns a cache-friendly cell/face range; there is no
-//! per-index task overhead. A persistent worker pool could replace the body here
-//! without touching any kernel or the interpreter.
+//! from a work-stealing pool, so the helpers split the domain into a few
+//! **coarse contiguous chunks**; each worker owns a cache-friendly cell/face
+//! range with no per-index task overhead. Execution runs on the persistent
+//! worker pool in [`super::pool`] (parked threads, ~1-5 µs region launch); the
+//! previous scoped-thread spawn+join (~100-280 µs per region at 16 threads —
+//! the measured wall of the Schur inner solve) remains available via
+//! `CFD2_CPU_POOL=0`.
 //!
 //! Soundness: callers run CPU kernels that write disjoint per-cell/face buffer
 //! slots, and the buffer store is relaxed-atomic, so concurrent invocations for
-//! distinct indices never race.
+//! distinct indices never race. Determinism: every chunk split below depends
+//! only on `n`/`threads` and fixed constants — never on which pool thread runs
+//! a chunk — and each output element is produced exactly once with identical
+//! arithmetic, so results are bit-identical across thread counts and across
+//! pool/scoped mechanisms.
+
+use super::pool;
 
 /// Run `f(idx)` for every `idx` in `0..n`, using up to `threads` workers.
 pub fn parallel_for<F>(n: usize, threads: usize, f: F)
@@ -25,36 +33,46 @@ where
     }
 
     let workers = threads.min(n);
-    let chunk = n.div_ceil(workers);
-    std::thread::scope(|s| {
-        for w in 0..workers {
-            let start = w * chunk;
-            if start >= n {
-                break;
-            }
-            let end = (start + chunk).min(n);
-            let fr = &f;
-            s.spawn(move || {
-                for idx in start..end {
-                    fr(idx);
-                }
-            });
+    let chunk = n.div_ceil(workers * pool::OVERSPLIT).max(1);
+    let tasks = n.div_ceil(chunk);
+    pool::run(tasks, workers, |w| {
+        let start = w * chunk;
+        let end = (start + chunk).min(n);
+        for idx in start..end {
+            f(idx);
         }
     });
 }
 
 /// Minimum output elements per worker for the fine-grained (BLAS-1 style)
-/// parallel helpers. Below this, thread-spawn latency exceeds the memory-bound
+/// parallel helpers. Below this, region-launch latency exceeds the memory-bound
 /// work itself, so the helpers scale the worker count down (bit-exactness is
 /// unaffected: every element is still produced by identical arithmetic).
-/// 64k f64 ≈ 512 KB per worker ≈ the measured break-even for scoped-thread
-/// spawn+join (~20-30 µs/worker) against ~10 GB/s-per-core streaming.
-const MIN_ELEMS_PER_WORKER: usize = 64 * 1024;
+/// 8k f64 ≈ 64 KB per worker ≈ the break-even for a persistent-pool region
+/// (~1-5 µs launch) against ~10 GB/s-per-core streaming. (The scoped-thread era
+/// used 64k: spawn+join cost ~20-30 µs/worker; the pool moves the knee down and
+/// lets mid-size vectors — e.g. the 118k-cell obstacle's BLAS-1 — actually use
+/// the machine instead of being capped at 1-2 workers.)
+const MIN_ELEMS_PER_WORKER: usize = 8 * 1024;
+
+/// Same idea for the row-wise chunk helpers ([`parallel_cell_chunks_mut`] and
+/// friends), whose per-element work (a CSR row gather, a block solve) is
+/// several times heavier than BLAS-1 streaming: coarse AMG levels (a few k
+/// rows) run serial instead of fanning out 16 workers for microseconds of
+/// work, while every production-size dispatch keeps its full worker count.
+const MIN_CELL_ELEMS_PER_WORKER: usize = 4 * 1024;
 
 #[inline]
 fn effective_workers(threads: usize, total_elems: usize) -> usize {
     threads
         .min(total_elems.div_ceil(MIN_ELEMS_PER_WORKER))
+        .max(1)
+}
+
+#[inline]
+fn effective_row_workers(threads: usize, total_elems: usize) -> usize {
+    threads
+        .min(total_elems.div_ceil(MIN_CELL_ELEMS_PER_WORKER))
         .max(1)
 }
 
@@ -75,20 +93,21 @@ where
         f(0, y);
         return;
     }
-    let workers = threads.min(num_cells);
-    let chunk = num_cells.div_ceil(workers);
-    std::thread::scope(|s| {
-        let mut rest: &mut [f64] = y;
-        let mut start = 0usize;
-        while start < num_cells {
-            let end = (start + chunk).min(num_cells);
-            let take = (end - start) * width;
-            let (head, tail) = rest.split_at_mut(take);
-            rest = tail;
-            let fr = &f;
-            s.spawn(move || fr(start, head));
-            start = end;
-        }
+    let workers = effective_row_workers(threads, num_cells * width).min(num_cells);
+    if workers <= 1 {
+        f(0, y);
+        return;
+    }
+    let chunk = num_cells.div_ceil(workers * pool::OVERSPLIT).max(1);
+    let tasks = num_cells.div_ceil(chunk);
+    let base = pool::MutSlicePtr::new(y);
+    pool::run(tasks, workers, |w| {
+        let start = w * chunk;
+        let end = (start + chunk).min(num_cells);
+        // SAFETY: tasks own disjoint cell ranges, so the reconstructed
+        // sub-slices never overlap; `base` outlives the (blocking) run call.
+        let head = unsafe { base.slice(start * width, (end - start) * width) };
+        f(start, head);
     });
 }
 
@@ -114,26 +133,22 @@ pub fn parallel_cell_chunks_mut2<F>(
         f(0, y1, y2);
         return;
     }
-    let workers = effective_workers(threads, num_cells * (w1 + w2)).min(num_cells);
+    let workers = effective_row_workers(threads, num_cells * (w1 + w2)).min(num_cells);
     if workers <= 1 {
         f(0, y1, y2);
         return;
     }
-    let chunk = num_cells.div_ceil(workers);
-    std::thread::scope(|s| {
-        let mut rest1: &mut [f64] = y1;
-        let mut rest2: &mut [f64] = y2;
-        let mut start = 0usize;
-        while start < num_cells {
-            let end = (start + chunk).min(num_cells);
-            let (head1, tail1) = rest1.split_at_mut((end - start) * w1);
-            let (head2, tail2) = rest2.split_at_mut((end - start) * w2);
-            rest1 = tail1;
-            rest2 = tail2;
-            let fr = &f;
-            s.spawn(move || fr(start, head1, head2));
-            start = end;
-        }
+    let chunk = num_cells.div_ceil(workers * pool::OVERSPLIT).max(1);
+    let tasks = num_cells.div_ceil(chunk);
+    let base1 = pool::MutSlicePtr::new(y1);
+    let base2 = pool::MutSlicePtr::new(y2);
+    pool::run(tasks, workers, |w| {
+        let start = w * chunk;
+        let end = (start + chunk).min(num_cells);
+        // SAFETY: disjoint cell ranges per task; bases outlive the run call.
+        let head1 = unsafe { base1.slice(start * w1, (end - start) * w1) };
+        let head2 = unsafe { base2.slice(start * w2, (end - start) * w2) };
+        f(start, head1, head2);
     });
 }
 
@@ -159,21 +174,16 @@ pub fn par_dot(threads: usize, a: &[f64], b: &[f64]) -> f64 {
         return (0..nchunks).map(chunk_partial).sum();
     }
     let mut partials = vec![0.0f64; nchunks];
-    let per = nchunks.div_ceil(workers);
-    std::thread::scope(|s| {
-        let mut rest: &mut [f64] = &mut partials;
-        let mut c0 = 0usize;
-        while c0 < nchunks {
-            let c1 = (c0 + per).min(nchunks);
-            let (head, tail) = rest.split_at_mut(c1 - c0);
-            rest = tail;
-            let cp = &chunk_partial;
-            s.spawn(move || {
-                for (li, o) in head.iter_mut().enumerate() {
-                    *o = cp(c0 + li);
-                }
-            });
-            c0 = c1;
+    let per = nchunks.div_ceil(workers * pool::OVERSPLIT).max(1);
+    let tasks = nchunks.div_ceil(per);
+    let base = pool::MutSlicePtr::new(&mut partials);
+    pool::run(tasks, workers, |w| {
+        let c0 = w * per;
+        let c1 = (c0 + per).min(nchunks);
+        // SAFETY: disjoint partial ranges per task; `partials` outlives run.
+        let head = unsafe { base.slice(c0, c1 - c0) };
+        for (li, o) in head.iter_mut().enumerate() {
+            *o = chunk_partial(c0 + li);
         }
     });
     // Serial reduction in fixed chunk order — deterministic.
@@ -222,21 +232,16 @@ where
         return;
     }
     let workers = threads.min(n);
-    let chunk = n.div_ceil(workers);
-    std::thread::scope(|s| {
-        let mut rest: &mut [f64] = out;
-        let mut start = 0usize;
-        while start < n {
-            let end = (start + chunk).min(n);
-            let (head, tail) = rest.split_at_mut(end - start);
-            rest = tail;
-            let fr = &f;
-            s.spawn(move || {
-                for (li, o) in head.iter_mut().enumerate() {
-                    *o = fr(start + li);
-                }
-            });
-            start = end;
+    let chunk = n.div_ceil(workers * pool::OVERSPLIT).max(1);
+    let tasks = n.div_ceil(chunk);
+    let base = pool::MutSlicePtr::new(out);
+    pool::run(tasks, workers, |w| {
+        let start = w * chunk;
+        let end = (start + chunk).min(n);
+        // SAFETY: disjoint index ranges per task; `out` outlives run.
+        let head = unsafe { base.slice(start, end - start) };
+        for (li, o) in head.iter_mut().enumerate() {
+            *o = f(start + li);
         }
     });
 }
@@ -258,21 +263,16 @@ where
         return;
     }
     let workers = threads.min(n);
-    let chunk = n.div_ceil(workers);
-    std::thread::scope(|s| {
-        let mut rest: &mut [f64] = out;
-        let mut start = 0usize;
-        while start < n {
-            let end = (start + chunk).min(n);
-            let (head, tail) = rest.split_at_mut(end - start);
-            rest = tail;
-            let fr = &f;
-            s.spawn(move || {
-                for (li, o) in head.iter_mut().enumerate() {
-                    fr(start + li, o);
-                }
-            });
-            start = end;
+    let chunk = n.div_ceil(workers * pool::OVERSPLIT).max(1);
+    let tasks = n.div_ceil(chunk);
+    let base = pool::MutSlicePtr::new(out);
+    pool::run(tasks, workers, |w| {
+        let start = w * chunk;
+        let end = (start + chunk).min(n);
+        // SAFETY: disjoint index ranges per task; `out` outlives run.
+        let head = unsafe { base.slice(start, end - start) };
+        for (li, o) in head.iter_mut().enumerate() {
+            f(start + li, o);
         }
     });
 }
@@ -310,17 +310,20 @@ mod tests {
     #[test]
     fn cell_chunks_mut_covers_and_matches_serial() {
         // width=3 (block stride): each cell's 3 slots filled from its global index;
-        // threaded result must equal the serial fill exactly.
-        let (num_cells, width) = (1000usize, 3usize);
-        let expect: Vec<f64> = (0..num_cells * width).map(|k| k as f64).collect();
-        for &threads in &[1usize, 3, 4, 7, 16] {
-            let mut y = vec![-1.0f64; num_cells * width];
-            parallel_cell_chunks_mut(num_cells, width, threads, &mut y, |cell0, chunk| {
-                for (li, slot) in chunk.iter_mut().enumerate() {
-                    *slot = ((cell0 * width) + li) as f64;
-                }
-            });
-            assert_eq!(y, expect, "threads={threads}");
+        // threaded result must equal the serial fill exactly. Sizes straddle the
+        // work-size guard so both the serial-collapse and multi-worker paths run.
+        for &num_cells in &[1000usize, 50_000] {
+            let width = 3usize;
+            let expect: Vec<f64> = (0..num_cells * width).map(|k| k as f64).collect();
+            for &threads in &[1usize, 3, 4, 7, 16] {
+                let mut y = vec![-1.0f64; num_cells * width];
+                parallel_cell_chunks_mut(num_cells, width, threads, &mut y, |cell0, chunk| {
+                    for (li, slot) in chunk.iter_mut().enumerate() {
+                        *slot = ((cell0 * width) + li) as f64;
+                    }
+                });
+                assert_eq!(y, expect, "num_cells={num_cells} threads={threads}");
+            }
         }
     }
 

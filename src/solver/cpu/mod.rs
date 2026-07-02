@@ -22,6 +22,7 @@ pub mod interpreter;
 pub mod linalg;
 pub mod lowering;
 pub mod parallel;
+pub(crate) mod pool;
 pub mod solver;
 pub mod transpile_rt;
 

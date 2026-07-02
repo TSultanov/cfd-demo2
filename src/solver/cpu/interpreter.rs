@@ -241,21 +241,18 @@ impl Buffers {
             return out;
         }
         let workers = threads.min(n);
-        let chunk = n.div_ceil(workers);
-        std::thread::scope(|s| {
-            let mut rest: &mut [f32] = &mut out;
-            let mut start = 0usize;
-            while start < n {
-                let end = (start + chunk).min(n);
-                let (head, tail) = rest.split_at_mut(end - start);
-                rest = tail;
-                let src = &data[start..end];
-                s.spawn(move || {
-                    for (o, a) in head.iter_mut().zip(src.iter()) {
-                        *o = f32::from_bits(a.load(ORD));
-                    }
-                });
-                start = end;
+        let chunk = n.div_ceil(workers * crate::solver::cpu::pool::OVERSPLIT).max(1);
+        let tasks = n.div_ceil(chunk);
+        let base = crate::solver::cpu::pool::MutSlicePtr::new(&mut out);
+        crate::solver::cpu::pool::run(tasks, workers, |w| {
+            let start = w * chunk;
+            let end = (start + chunk).min(n);
+            // SAFETY: disjoint index ranges per task; `out` outlives the
+            // (blocking) pool::run call.
+            let head = unsafe { base.slice(start, end - start) };
+            let src = &data[start..end];
+            for (o, a) in head.iter_mut().zip(src.iter()) {
+                *o = f32::from_bits(a.load(ORD));
             }
         });
         out

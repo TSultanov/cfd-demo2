@@ -589,32 +589,31 @@ impl<'a> SchurPrecond<'a> {
                 pd_chunk[li] = if dp.abs() > 1e-30 { 1.0 / dp } else { 0.0 };
             }
         };
-        // ~16k cells per worker minimum: below that, scoped-thread spawn+join
+        // ~16k cells per worker minimum: below that, region-launch overhead
         // exceeds the extraction work itself (same rationale as the BLAS-1
         // helpers' MIN_ELEMS_PER_WORKER).
         let workers = threads.min(cells.div_ceil(16 * 1024)).max(1);
         if workers <= 1 {
             fill(0, &mut diag_u_inv, &mut p_diag_inv, &mut p_values);
         } else {
-            let chunk = cells.div_ceil(workers);
-            std::thread::scope(|sc| {
-                let mut rest_du: &mut [f64] = &mut diag_u_inv;
-                let mut rest_pd: &mut [f64] = &mut p_diag_inv;
-                let mut rest_pv: &mut [f32] = &mut p_values;
-                let mut start = 0usize;
-                while start < cells {
-                    let end = (start + chunk).min(cells);
-                    let (du, tdu) = rest_du.split_at_mut((end - start) * u_len);
-                    let (pd, tpd) = rest_pd.split_at_mut(end - start);
-                    let pv_take = a.scalar_offset(end) - a.scalar_offset(start);
-                    let (pv, tpv) = rest_pv.split_at_mut(pv_take);
-                    rest_du = tdu;
-                    rest_pd = tpd;
-                    rest_pv = tpv;
-                    let fr = &fill;
-                    sc.spawn(move || fr(start, du, pd, pv));
-                    start = end;
-                }
+            let chunk = cells.div_ceil(workers * crate::solver::cpu::pool::OVERSPLIT).max(1);
+            let tasks = cells.div_ceil(chunk);
+            let base_du = crate::solver::cpu::pool::MutSlicePtr::new(&mut diag_u_inv);
+            let base_pd = crate::solver::cpu::pool::MutSlicePtr::new(&mut p_diag_inv);
+            let base_pv = crate::solver::cpu::pool::MutSlicePtr::new(&mut p_values);
+            crate::solver::cpu::pool::run(tasks, workers, |w| {
+                let start = w * chunk;
+                let end = (start + chunk).min(cells);
+                let pv_start = a.scalar_offset(start);
+                let pv_take = a.scalar_offset(end) - pv_start;
+                // SAFETY: tasks own disjoint cell ranges; the p_values split
+                // follows the monotone scalar-row-offset boundaries, so the
+                // three reconstructed sub-slices never overlap across tasks and
+                // all outlive the (blocking) pool::run call.
+                let du = unsafe { base_du.slice(start * u_len, (end - start) * u_len) };
+                let pd = unsafe { base_pd.slice(start, end - start) };
+                let pv = unsafe { base_pv.slice(pv_start, pv_take) };
+                fill(start, du, pd, pv);
             });
         }
         let inner_iters = std::env::var("CFD2_CPU_SCHUR_INNER_ITERS")

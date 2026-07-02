@@ -595,6 +595,9 @@ pub struct SchurPrecond<'a> {
     diag_u_inv: Vec<f64>, // num_cells * u_len
     p_values: Vec<f32>,   // A_pp scalar-CSR values (topology = scalar_row_offsets/col_indices)
     p_diag_inv: Vec<f64>, // 1 / diag(A_pp) per cell (heavy-ball sweep scaling)
+    /// f32 copy of `p_diag_inv` for the mixed-precision sweep (built only
+    /// when `a.simd`; empty otherwise).
+    p_diag_inv_f32: Vec<f32>,
     /// Heavy-ball relaxation weight (model spec omega via `heavy_ball_omega`).
     omega: f64,
     /// Heavy-ball sweep budget (`default_pressure_sweeps(num_cells, sweeps_cap)`).
@@ -653,6 +656,9 @@ struct SchurWork {
     psol_f32: Vec<f32>,
     /// heavy-ball cur/prev/scratch/best, each `cells` long.
     hb: Vec<f64>,
+    /// f32 heavy-ball workspace (cur/prev/scratch/best/g32) for the
+    /// mixed-precision path.
+    hb32: Vec<f32>,
 }
 
 impl<'a> SchurPrecond<'a> {
@@ -752,6 +758,11 @@ impl<'a> SchurPrecond<'a> {
                 fill(start, du, pd, pv, pu, up);
             });
         }
+        let p_diag_inv_f32: Vec<f32> = if a.simd {
+            p_diag_inv.iter().map(|&v| v as f32).collect()
+        } else {
+            Vec::new()
+        };
         let inner_iters = std::env::var("CFD2_CPU_SCHUR_INNER_ITERS")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -832,7 +843,7 @@ impl<'a> SchurPrecond<'a> {
         );
         // (Counted under PC_BUILD via the caller's wrap around `new`.)
         let amg = amg_hier.map(|h| {
-            crate::solver::cpu::amg::AmgSolver::assemble(h, &p_values, a.threads.max(1))
+            crate::solver::cpu::amg::AmgSolver::assemble(h, &p_values, a.threads.max(1), a.simd)
         });
         Self {
             a,
@@ -843,6 +854,7 @@ impl<'a> SchurPrecond<'a> {
             pu_values,
             up_values,
             p_diag_inv,
+            p_diag_inv_f32,
             omega,
             sweeps,
             inner_iters,
@@ -885,15 +897,17 @@ impl Preconditioner for SchurPrecond<'_> {
         let gp = &mut work.gp;
         let (aa, u_idx, diag_u_inv) = (&self.a, &self.u_idx, &self.diag_u_inv);
         let (pu_values, up_values) = (&self.pu_values, &self.up_values);
+        let simd = aa.simd && u_len <= 4;
+        // NOTE: a lane-per-component SIMD variant of the PRE pass was
+        // implemented and MEASURED SLOWER (nozzle 49 -> 78 ms/step): the
+        // r-vector lanes need per-component scalar gathers (u_idx is not
+        // contiguous for the thermal models), so assembling the vectors costs
+        // more than the u_len-long scalar FMA chain it replaces. The POST
+        // pass below vectorizes cleanly (contiguous A_up run x broadcast
+        // psol) and keeps its SIMD variant.
         prof::time(&prof::SCHUR_PRE, || {
-            parallel_cell_chunks_mut2(
-                cells,
-                s,
-                1,
-                aa.threads,
-                z,
-                gp,
-                |cell0, zc, gpc| {
+            {
+                parallel_cell_chunks_mut2(cells, s, 1, aa.threads, z, gp, |cell0, zc, gpc| {
                     for li in 0..gpc.len() {
                         let cell = cell0 + li;
                         for (i, &u) in u_idx.iter().enumerate() {
@@ -917,8 +931,8 @@ impl Preconditioner for SchurPrecond<'_> {
                         }
                         gpc[li] = g;
                     }
-                },
-            );
+                });
+            }
         });
 
         // 3. pressure solve A_pp p = g_p (scalar CSR; topology = block topology).
@@ -936,8 +950,12 @@ impl Preconditioner for SchurPrecond<'_> {
         // AMG switch.
         work.psol.resize(cells, 0.0);
         let psol = &mut work.psol;
-        let (gp_f32_buf, psol_f32_buf, hb_buf) =
-            (&mut work.gp_f32, &mut work.psol_f32, &mut work.hb);
+        let (gp_f32_buf, psol_f32_buf, hb_buf, hb32_buf) = (
+            &mut work.gp_f32,
+            &mut work.psol_f32,
+            &mut work.hb,
+            &mut work.hb32,
+        );
         let gp: &[f64] = gp;
         let heavy_ball = self.amg.is_none() && self.inner != SchurInner::BiCgStab;
         let stats = prof::time(&prof::SCHUR_SOLVE, || match &self.amg {
@@ -1038,6 +1056,16 @@ impl Preconditioner for SchurPrecond<'_> {
                 }
                 st
             }
+            None if self.a.simd => heavy_ball_solve_f32(
+                &pa,
+                gp,
+                psol,
+                &self.p_diag_inv_f32,
+                self.omega,
+                self.sweeps,
+                self.inner_tol,
+                hb32_buf,
+            ),
             None => heavy_ball_solve(
                 &pa,
                 gp,
@@ -1079,23 +1107,49 @@ impl Preconditioner for SchurPrecond<'_> {
         // 4. correct velocity, write pressure. Cell-disjoint writes into z;
         // parallel over cell chunks, bit-exact.
         prof::time(&prof::SCHUR_POST, || {
-            parallel_cell_chunks_mut(cells, s, aa.threads, z, |cell0, zc| {
-                for li in 0..zc.len() / s {
-                    let cell = cell0 + li;
-                    let scalar_offset = aa.scalar_offset(cell);
-                    let num_neighbors = aa.num_neighbors(cell);
-                    for (i, &u) in u_idx.iter().enumerate() {
-                        let mut corr = 0.0f64;
+            if simd {
+                // SIMD variant: the compact A_up run is contiguous per
+                // neighbour, so all u_len corrections accumulate as one
+                // padded f64x4 FMA against the broadcast psol[col].
+                parallel_cell_chunks_mut(cells, s, aa.threads, z, |cell0, zc| {
+                    use wide::f64x4;
+                    for li in 0..zc.len() / s {
+                        let cell = cell0 + li;
+                        let scalar_offset = aa.scalar_offset(cell);
+                        let num_neighbors = aa.num_neighbors(cell);
+                        let mut corr_v = f64x4::splat(0.0);
                         for rank in 0..num_neighbors {
                             let col_cell = aa.col_indices[scalar_offset + rank] as usize;
-                            let a_up = up_values[(scalar_offset + rank) * u_len + i] as f64;
-                            corr += a_up * psol[col_cell];
+                            let cbase = (scalar_offset + rank) * u_len;
+                            let up_v = pad4_f32(&up_values[cbase..cbase + u_len]);
+                            corr_v = up_v.mul_add(f64x4::splat(psol[col_cell]), corr_v);
                         }
-                        zc[li * s + u] -= diag_u_inv[cell * u_len + i] * corr;
+                        let corr = corr_v.to_array();
+                        for (i, &u) in u_idx.iter().enumerate() {
+                            zc[li * s + u] -= diag_u_inv[cell * u_len + i] * corr[i];
+                        }
+                        zc[li * s + p] = psol[cell];
                     }
-                    zc[li * s + p] = psol[cell];
-                }
-            });
+                });
+            } else {
+                parallel_cell_chunks_mut(cells, s, aa.threads, z, |cell0, zc| {
+                    for li in 0..zc.len() / s {
+                        let cell = cell0 + li;
+                        let scalar_offset = aa.scalar_offset(cell);
+                        let num_neighbors = aa.num_neighbors(cell);
+                        for (i, &u) in u_idx.iter().enumerate() {
+                            let mut corr = 0.0f64;
+                            for rank in 0..num_neighbors {
+                                let col_cell = aa.col_indices[scalar_offset + rank] as usize;
+                                let a_up = up_values[(scalar_offset + rank) * u_len + i] as f64;
+                                corr += a_up * psol[col_cell];
+                            }
+                            zc[li * s + u] -= diag_u_inv[cell * u_len + i] * corr;
+                        }
+                        zc[li * s + p] = psol[cell];
+                    }
+                });
+            }
         });
     }
 }
@@ -1444,6 +1498,183 @@ fn heavy_ball_solve(
         }
     }
     x.copy_from_slice(best);
+    SolveStats { iters: sweeps_done, rel_residual: best_rel, converged }
+}
+
+/// Deterministic parallel dot over f32 slices with f64 accumulation: the
+/// mixed-precision twin of `par_dot` (same fixed 8192-element chunking and
+/// serial chunk-order reduction, so the result is thread-count invariant).
+pub fn par_dot_f32(threads: usize, a: &[f32], b: &[f32]) -> f64 {
+    const DOT_CHUNK: usize = 8192;
+    debug_assert_eq!(a.len(), b.len());
+    let n = a.len();
+    let nchunks = n.div_ceil(DOT_CHUNK).max(1);
+    let chunk_partial = |c: usize| -> f64 {
+        let s = c * DOT_CHUNK;
+        let e = (s + DOT_CHUNK).min(n);
+        let (a, b) = (&a[s..e], &b[s..e]);
+        use wide::f64x4;
+        let mut acc = f64x4::splat(0.0);
+        let mut i = 0;
+        while i + 4 <= a.len() {
+            let va = f64x4::from([a[i] as f64, a[i + 1] as f64, a[i + 2] as f64, a[i + 3] as f64]);
+            let vb = f64x4::from([b[i] as f64, b[i + 1] as f64, b[i + 2] as f64, b[i + 3] as f64]);
+            acc = va.mul_add(vb, acc);
+            i += 4;
+        }
+        let l = acc.to_array();
+        let mut sum = l[0] + l[1] + l[2] + l[3];
+        while i < a.len() {
+            sum += a[i] as f64 * b[i] as f64;
+            i += 1;
+        }
+        sum
+    };
+    let workers = crate::solver::cpu::parallel::par_dot_workers(threads, n);
+    if workers <= 1 || nchunks == 1 {
+        return (0..nchunks).map(chunk_partial).sum();
+    }
+    let mut partials = vec![0.0f64; nchunks];
+    let per = nchunks.div_ceil(workers * crate::solver::cpu::pool::OVERSPLIT).max(1);
+    let tasks = nchunks.div_ceil(per);
+    let base = crate::solver::cpu::pool::MutSlicePtr::new(&mut partials);
+    crate::solver::cpu::pool::run(tasks, workers, |w| {
+        let c0 = w * per;
+        let c1 = (c0 + per).min(nchunks);
+        // SAFETY: disjoint partial ranges per task; `partials` outlives run.
+        let head = unsafe { base.slice(c0, c1 - c0) };
+        for (li, o) in head.iter_mut().enumerate() {
+            *o = chunk_partial(c0 + li);
+        }
+    });
+    partials.iter().sum()
+}
+
+/// Zero-padded f64x4 load from an up-to-4-long f32 slice (SIMD Schur lanes).
+#[inline]
+fn pad4_f32(v: &[f32]) -> wide::f64x4 {
+    let mut l = [0.0f64; 4];
+    for (o, &x) in l.iter_mut().zip(v.iter()) {
+        *o = x as f64;
+    }
+    wide::f64x4::from(l)
+}
+
+/// Mixed-precision heavy-ball inner solve (the SIMD/mixed-precision option):
+/// identical iteration to [`heavy_ball_solve`] but with the sweep state
+/// (`cur`/`prev`/`scratch`/`best`) and RHS in f32 storage — the sweep is
+/// memory-BANDWIDTH-bound (measured ~54 MB/sweep at ~74 GB/s on the 750k
+/// nozzle), so halving the vector bytes is the lever f64 SIMD arithmetic
+/// could not be. The inner tolerance is 1e-1 (a preconditioner apply under
+/// flexible FGMRES), leaving orders of magnitude of accuracy budget; the
+/// residual-check norms accumulate in f64 via the deterministic
+/// [`par_dot_f32`], and the safeguard logic is unchanged.
+#[allow(clippy::too_many_arguments)]
+fn heavy_ball_solve_f32(
+    pa: &CsrView,
+    g: &[f64],
+    x: &mut [f64],
+    diag_inv: &[f32],
+    omega: f64,
+    max_sweeps: usize,
+    tol: f64,
+    work: &mut Vec<f32>,
+) -> SolveStats {
+    let n = pa.n();
+    debug_assert_eq!(g.len(), n);
+    debug_assert_eq!(x.len(), n);
+    let threads = pa.threads.max(1);
+    let gnorm = par_dot(threads, g, g).sqrt().max(1e-300);
+
+    work.resize(5 * n, 0.0);
+    work.fill(0.0);
+    let (mut cur, rest) = work.split_at_mut(n);
+    let (mut prev, rest) = rest.split_at_mut(n);
+    let (scratch, rest) = rest.split_at_mut(n);
+    let (best, g32) = rest.split_at_mut(n);
+    parallel_cell_chunks_mut(n, 1, threads, g32, |i0, chunk| {
+        for (li, o) in chunk.iter_mut().enumerate() {
+            *o = g[i0 + li] as f32;
+        }
+    });
+    let g32: &[f32] = g32;
+
+    let mut best_rel = 1.0f64;
+    let mut omega = omega;
+    let mut sweeps_done = 0usize;
+    let mut next_check = 4usize.min(max_sweeps);
+    let mut strikes = 0u32;
+    let mut decays = 0u32;
+    let mut converged = false;
+    while sweeps_done < max_sweeps {
+        {
+            let cur_ref: &[f32] = cur;
+            let om = omega as f32;
+            parallel_cell_chunks_mut(n, 1, threads, prev, |row0, chunk| {
+                for (li, slot) in chunk.iter_mut().enumerate() {
+                    let row = row0 + li;
+                    let start = pa.row_offsets[row] as usize;
+                    let end = pa.row_offsets[row + 1] as usize;
+                    let mut sum = 0.0f32;
+                    for k in start..end {
+                        sum += pa.values[k] * cur_ref[pa.col_indices[k] as usize];
+                    }
+                    let hat = cur_ref[row] + (g32[row] - sum) * diag_inv[row];
+                    *slot = (1.0 - om) * *slot + om * hat;
+                }
+            });
+        }
+        std::mem::swap(&mut cur, &mut prev);
+        sweeps_done += 1;
+        if sweeps_done == next_check || sweeps_done == max_sweeps {
+            {
+                let cur_ref: &[f32] = cur;
+                parallel_cell_chunks_mut(n, 1, threads, scratch, |row0, chunk| {
+                    for (li, slot) in chunk.iter_mut().enumerate() {
+                        let row = row0 + li;
+                        let start = pa.row_offsets[row] as usize;
+                        let end = pa.row_offsets[row + 1] as usize;
+                        let mut sum = 0.0f32;
+                        for k in start..end {
+                            sum += pa.values[k] * cur_ref[pa.col_indices[k] as usize];
+                        }
+                        *slot = g32[row] - sum;
+                    }
+                });
+            }
+            let rel = par_dot_f32(threads, scratch, scratch).sqrt() / gnorm;
+            if rel <= tol {
+                converged = true;
+                best_rel = rel;
+                best.copy_from_slice(cur);
+                break;
+            }
+            if rel < best_rel {
+                best_rel = rel;
+                best.copy_from_slice(cur);
+                strikes = 0;
+            } else {
+                strikes += 1;
+                if strikes >= 2 {
+                    strikes = 0;
+                    decays += 1;
+                    if decays >= 2 {
+                        break;
+                    }
+                    omega = 1.0 + (omega - 1.0) * 0.5;
+                    cur.copy_from_slice(best);
+                    prev.copy_from_slice(best);
+                }
+            }
+            next_check = (next_check * 2).min(max_sweeps);
+        }
+    }
+    let best: &[f32] = best;
+    parallel_cell_chunks_mut(n, 1, threads, x, |i0, chunk| {
+        for (li, o) in chunk.iter_mut().enumerate() {
+            *o = best[i0 + li] as f64;
+        }
+    });
     SolveStats { iters: sweeps_done, rel_residual: best_rel, converged }
 }
 

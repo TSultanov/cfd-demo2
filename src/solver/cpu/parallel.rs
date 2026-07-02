@@ -85,6 +85,13 @@ const MIN_ELEMS_PER_WORKER: usize = 8 * 1024;
 /// work, while every production-size dispatch keeps its full worker count.
 const MIN_CELL_ELEMS_PER_WORKER: usize = 4 * 1024;
 
+/// Worker count for the deterministic dot helpers (shared with the f32
+/// mixed-precision twin in `linalg`).
+#[inline]
+pub(crate) fn par_dot_workers(threads: usize, total_elems: usize) -> usize {
+    effective_workers(threads, total_elems)
+}
+
 #[inline]
 fn effective_workers(threads: usize, total_elems: usize) -> usize {
     threads
@@ -107,9 +114,10 @@ fn effective_row_workers(threads: usize, total_elems: usize) -> usize {
 /// for scalar). The split is the same coarse contiguous chunking as
 /// [`parallel_for`]; results are independent of `threads` (each output element is
 /// produced by exactly one worker with the identical arithmetic).
-pub fn parallel_cell_chunks_mut<F>(num_cells: usize, width: usize, threads: usize, y: &mut [f64], f: F)
+pub fn parallel_cell_chunks_mut<T, F>(num_cells: usize, width: usize, threads: usize, y: &mut [T], f: F)
 where
-    F: Fn(usize, &mut [f64]) + Sync,
+    T: Send,
+    F: Fn(usize, &mut [T]) + Sync,
 {
     debug_assert_eq!(y.len(), num_cells * width, "y must be num_cells*width");
     if threads <= 1 || num_cells <= 1 {

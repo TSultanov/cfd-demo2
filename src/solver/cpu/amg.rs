@@ -253,6 +253,13 @@ pub struct AmgSolver<'h> {
     inv_diag: Vec<Vec<f64>>,
     /// Dense row-major inverse of the coarsest matrix.
     coarsest_inv: Vec<f64>,
+    /// f32 copies of the level matrices (the SIMD/mixed-precision option):
+    /// V-cycle smoothing and residual spmvs are BANDWIDTH-bound and the value
+    /// stream dominates their traffic (~5 entries/row vs ~3 vector touches),
+    /// so f32 storage nearly halves the bytes; accumulation stays f64. The
+    /// coarsest dense inverse and the vectors remain f64. `None` on the
+    /// default path (bit-identical to the pre-SIMD behaviour).
+    values32: Option<Vec<Vec<f32>>>,
     threads: usize,
     /// Damped-Jacobi sweeps before/after the coarse correction
     /// (`CFD2_CPU_AMG_SWEEPS`, default 1 → V(1,1)).
@@ -282,10 +289,79 @@ fn spmv_f64(
     });
 }
 
+/// `y = A x` for an f32-value CSR level, accumulated in f64 — the
+/// mixed-precision V-cycle spmv. Rows are processed FOUR at a time in
+/// lockstep over the shortest of the four (independent accumulators expose
+/// instruction-level parallelism on the cache-resident coarse levels, where
+/// dependency chains — not bandwidth — are the limit), with per-row scalar
+/// tails. Each row's terms accumulate in ascending-k order, exactly like the
+/// scalar loop, so the batching itself does not change results; only the
+/// f32-rounded VALUES differ from the f64 path.
+fn spmv_vals32(
+    row_offsets: &[u32],
+    col_indices: &[u32],
+    values: &[f32],
+    x: &[f64],
+    y: &mut [f64],
+    threads: usize,
+) {
+    let n = row_offsets.len() - 1;
+    parallel_cell_chunks_mut(n, 1, threads, y, |row0, yc| {
+        let nrows = yc.len();
+        let mut li = 0usize;
+        while li + 4 <= nrows {
+            let r = row0 + li;
+            let s0 = row_offsets[r] as usize;
+            let e0 = row_offsets[r + 1] as usize;
+            let s1 = row_offsets[r + 1] as usize;
+            let e1 = row_offsets[r + 2] as usize;
+            let s2 = row_offsets[r + 2] as usize;
+            let e2 = row_offsets[r + 3] as usize;
+            let s3 = row_offsets[r + 3] as usize;
+            let e3 = row_offsets[r + 4] as usize;
+            let l = (e0 - s0).min(e1 - s1).min(e2 - s2).min(e3 - s3);
+            let (mut a0, mut a1, mut a2, mut a3) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+            for k in 0..l {
+                a0 += values[s0 + k] as f64 * x[col_indices[s0 + k] as usize];
+                a1 += values[s1 + k] as f64 * x[col_indices[s1 + k] as usize];
+                a2 += values[s2 + k] as f64 * x[col_indices[s2 + k] as usize];
+                a3 += values[s3 + k] as f64 * x[col_indices[s3 + k] as usize];
+            }
+            for k in s0 + l..e0 {
+                a0 += values[k] as f64 * x[col_indices[k] as usize];
+            }
+            for k in s1 + l..e1 {
+                a1 += values[k] as f64 * x[col_indices[k] as usize];
+            }
+            for k in s2 + l..e2 {
+                a2 += values[k] as f64 * x[col_indices[k] as usize];
+            }
+            for k in s3 + l..e3 {
+                a3 += values[k] as f64 * x[col_indices[k] as usize];
+            }
+            yc[li] = a0;
+            yc[li + 1] = a1;
+            yc[li + 2] = a2;
+            yc[li + 3] = a3;
+            li += 4;
+        }
+        for li in li..nrows {
+            let row = row0 + li;
+            let (s0, e0) = (row_offsets[row] as usize, row_offsets[row + 1] as usize);
+            let mut sum = 0.0f64;
+            for k in s0..e0 {
+                sum += values[k] as f64 * x[col_indices[k] as usize];
+            }
+            yc[li] = sum;
+        }
+    });
+}
+
 impl<'h> AmgSolver<'h> {
     /// Galerkin-assemble all levels from the finest values (f32, as the
-    /// assembly writes them).
-    pub fn assemble(hier: &'h AmgHierarchy, fine_values: &[f32], threads: usize) -> Self {
+    /// assembly writes them). `simd` additionally stores f32 copies of the
+    /// level matrices for the mixed-precision V-cycle (see `values32`).
+    pub fn assemble(hier: &'h AmgHierarchy, fine_values: &[f32], threads: usize, simd: bool) -> Self {
         let nlev = hier.levels.len();
         let mut values: Vec<Vec<f64>> = Vec::with_capacity(nlev + 1);
         values.push(fine_values.iter().map(|&v| v as f64).collect());
@@ -340,11 +416,18 @@ impl<'h> AmgSolver<'h> {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1)
             .max(1);
+        let values32 = simd.then(|| {
+            values
+                .iter()
+                .map(|lv| lv.iter().map(|&v| v as f32).collect())
+                .collect()
+        });
         Self {
             hier,
             values,
             inv_diag,
             coarsest_inv,
+            values32,
             threads,
             sweeps,
         }
@@ -373,15 +456,21 @@ impl<'h> AmgSolver<'h> {
         let topo = &self.hier.levels[l];
         let n = topo.row_offsets.len() - 1;
         let (ro, ci, v) = (&topo.row_offsets, &topo.col_indices, &self.values[l]);
+        let v32 = self.values32.as_ref().map(|vs| &vs[l]);
         let dinv = &self.inv_diag[l];
         let threads = self.threads;
+        // Level spmv: mixed-precision f32-value path when enabled, else f64.
+        let spmv = |x: &[f64], y: &mut [f64]| match v32 {
+            Some(v32) => spmv_vals32(ro, ci, v32, x, y, threads),
+            None => spmv_f64(ro, ci, v, x, y, threads),
+        };
 
         // Pre-smooth from zero guess: x = omega * Dinv * b, then further damped
         // Jacobi refinements when sweeps > 1.
         par_map_into(threads, x, |i| JACOBI_OMEGA * dinv[i] * b[i]);
         let mut ax = vec![0.0f64; n];
         for _ in 1..self.sweeps {
-            spmv_f64(ro, ci, v, x, &mut ax, threads);
+            spmv(x, &mut ax);
             let ax_r = &ax;
             crate::solver::cpu::parallel::par_update(threads, x, |i, xi| {
                 *xi += JACOBI_OMEGA * dinv[i] * (b[i] - ax_r[i])
@@ -389,7 +478,7 @@ impl<'h> AmgSolver<'h> {
         }
 
         // Residual r = b - A x.
-        spmv_f64(ro, ci, v, x, &mut ax, threads);
+        spmv(x, &mut ax);
         let mut r = vec![0.0f64; n];
         par_map_into(threads, &mut r, |i| b[i] - ax[i]);
 
@@ -426,7 +515,7 @@ impl<'h> AmgSolver<'h> {
 
         // Post-smooth: x += omega * Dinv * (b - A x), `sweeps` times.
         for _ in 0..self.sweeps {
-            spmv_f64(ro, ci, v, x, &mut ax, threads);
+            spmv(x, &mut ax);
             let ax_r = &ax;
             crate::solver::cpu::parallel::par_update(threads, x, |i, xi| {
                 *xi += JACOBI_OMEGA * dinv[i] * (b[i] - ax_r[i])
@@ -491,7 +580,7 @@ mod tests {
         let b: Vec<f32> = (0..n).map(|k| ((k * 13 % 31) as f32) - 15.0).collect();
 
         let solve = |threads: usize| {
-            let amg = AmgSolver::assemble(&h, &vals, threads);
+            let amg = AmgSolver::assemble(&h, &vals, threads, false);
             let a = CsrView {
                 row_offsets: &ro,
                 col_indices: &ci,

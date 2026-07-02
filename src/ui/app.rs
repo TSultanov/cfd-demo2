@@ -2844,10 +2844,11 @@ impl eframe::App for CFDApp {
                                  adapter, at parity with the GPU; GPU-only telemetry \
                                  (profiling, per-graph timings) is unavailable. \
                                  Interpreter = reference tree-walker; Transpiled = \
-                                 compiled kernels (fast); SIMD adds explicit-vector \
-                                 (f64x4) block-matvec kernels in the linear solve — \
-                                 a rounding-level result change, fastest on \
-                                 solve-heavy runs.",
+                                 compiled kernels (fast); SIMD adds vectorized \
+                                 block-matvec kernels plus mixed-precision (f32) \
+                                 storage for the pressure inner solve and AMG \
+                                 levels — a rounding-level result change, fastest \
+                                 on solve-heavy runs.",
                             );
                         if self.backend.is_cpu() {
                             ui.add(

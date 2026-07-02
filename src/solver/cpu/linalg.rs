@@ -189,6 +189,15 @@ pub struct BlockCsr<'a> {
     pub values: &'a [f32],
     /// Worker threads for the parallel matvec / preconditioner (`1` = serial).
     pub threads: usize,
+    /// Explicit-SIMD matvec (the GUI "CPU Transpiled (SIMD linear)" option):
+    /// `block_spmv` uses monomorphized fixed-S kernels with `wide::f64x4`
+    /// vector accumulators for S = 3/4 instead of the runtime-`s` scalar
+    /// loop (which LLVM cannot fully vectorize at a variable trip count).
+    /// Changes the per-row summation ORDER (per-lane partials + one
+    /// horizontal add instead of a sequential scalar sum), i.e. a
+    /// rounding-level result change — validated by the tolerance suites,
+    /// still bit-exact across thread counts (chunking untouched).
+    pub simd: bool,
 }
 
 impl BlockCsr<'_> {
@@ -243,6 +252,13 @@ impl BlockCsr<'_> {
     /// output sub-slice covering exactly those cells (length `(cell1-cell0)*s`).
     #[inline]
     fn block_spmv_range(&self, x: &[f64], cell0: usize, cell1: usize, y_out: &mut [f64]) {
+        if self.simd {
+            match self.s {
+                4 => return self.block_spmv_range_simd::<4>(x, cell0, cell1, y_out),
+                3 => return self.block_spmv_range_simd::<3>(x, cell0, cell1, y_out),
+                _ => {} // uncommon block sizes keep the scalar loop
+            }
+        }
         let s = self.s;
         debug_assert!(s <= MAX_BLOCK_S, "block size {s} exceeds MAX_BLOCK_S");
         for cell in cell0..cell1 {
@@ -264,6 +280,65 @@ impl BlockCsr<'_> {
             }
             let out = &mut y_out[(cell - cell0) * s..(cell - cell0) * s + s];
             out.copy_from_slice(acc);
+        }
+    }
+
+    /// Explicit-SIMD `block_spmv_range` for compile-time block size `S`
+    /// (3 or 4; see the `simd` field docs). Layout facts it exploits: the S
+    /// columns of a block row are contiguous in `values`, and `x[j*S..]` is
+    /// contiguous per neighbour — so each neighbour contributes one f64x4
+    /// FMA per block row (S = 3 pads lane 3 with zeros, which contribute
+    /// exactly 0.0 to the horizontal sum). The x vector is loaded ONCE per
+    /// neighbour and reused across all S block rows (the scalar loop reloads
+    /// it per row).
+    fn block_spmv_range_simd<const S: usize>(
+        &self,
+        x: &[f64],
+        cell0: usize,
+        cell1: usize,
+        y_out: &mut [f64],
+    ) {
+        use wide::f64x4;
+        debug_assert_eq!(self.s, S);
+        debug_assert!(S == 3 || S == 4);
+        for cell in cell0..cell1 {
+            let scalar_offset = self.scalar_offset(cell);
+            let num_neighbors = self.num_neighbors(cell);
+            let row_stride = num_neighbors * S;
+            let row0_base = scalar_offset * S * S;
+            let mut accv = [f64x4::splat(0.0); 4];
+            for rank in 0..num_neighbors {
+                let j = self.col_indices[scalar_offset + rank] as usize * S;
+                let xv = if S == 4 {
+                    f64x4::from([x[j], x[j + 1], x[j + 2], x[j + 3]])
+                } else {
+                    f64x4::from([x[j], x[j + 1], x[j + 2], 0.0])
+                };
+                for (r, a) in accv.iter_mut().enumerate().take(S) {
+                    let base = row0_base + row_stride * r + rank * S;
+                    let vv = if S == 4 {
+                        f64x4::from([
+                            self.values[base] as f64,
+                            self.values[base + 1] as f64,
+                            self.values[base + 2] as f64,
+                            self.values[base + 3] as f64,
+                        ])
+                    } else {
+                        f64x4::from([
+                            self.values[base] as f64,
+                            self.values[base + 1] as f64,
+                            self.values[base + 2] as f64,
+                            0.0,
+                        ])
+                    };
+                    *a = vv.mul_add(xv, *a);
+                }
+            }
+            let out = &mut y_out[(cell - cell0) * S..(cell - cell0) * S + S];
+            for (r, o) in out.iter_mut().enumerate() {
+                let l = accv[r].to_array();
+                *o = (l[0] + l[1]) + (l[2] + l[3]);
+            }
         }
     }
 
@@ -1811,7 +1886,8 @@ mod block_tests {
                 diagonal_indices: &diag,
                 values: &vals,
                 threads,
-            };
+                simd: false,
+};
             let pc = BlockJacobi::new(&a);
             let mut x = vec![0.0f32; n];
             let stats = fgmres(&a, &b, &mut x, &pc, 30, 1000, 1e-10, false);
@@ -1829,6 +1905,52 @@ mod block_tests {
     }
 
     #[test]
+    fn block_spmv_simd_matches_scalar() {
+        // The explicit-SIMD kernels (S = 3, 4) change only the per-row
+        // summation ORDER, so they must match the scalar loop to f64
+        // rounding accuracy — and stay bit-identical across thread counts.
+        for s in [3usize, 4] {
+            let nc = 257; // uneven vs chunk sizes
+            let (sro, col, diag, vals) = banded_block_system(nc, s);
+            let n = nc * s;
+            let x: Vec<f64> = (0..n).map(|k| ((k * 11 % 17) as f64) * 0.31 - 2.0).collect();
+            let run = |simd: bool, threads: usize| {
+                let a = BlockCsr {
+                    s,
+                    scalar_row_offsets: &sro,
+                    col_indices: &col,
+                    diagonal_indices: &diag,
+                    values: &vals,
+                    threads,
+                    simd,
+                };
+                let mut y = vec![0.0f64; n];
+                a.block_spmv(&x, &mut y);
+                y
+            };
+            let y_scalar = run(false, 1);
+            let y_simd = run(true, 1);
+            let scale = y_scalar.iter().fold(0.0f64, |m, v| m.max(v.abs())).max(1.0);
+            let maxd = y_scalar
+                .iter()
+                .zip(&y_simd)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f64, f64::max);
+            assert!(
+                maxd / scale < 1e-13,
+                "S={s}: simd vs scalar rel diff {:.3e}",
+                maxd / scale
+            );
+            let y_simd4 = run(true, 4);
+            assert_eq!(
+                y_simd.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                y_simd4.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                "S={s}: SIMD path must be bit-identical across thread counts"
+            );
+        }
+    }
+
+    #[test]
     fn block_spmv_matches_dense() {
         let (sro, ci, di, vals) = fixture();
         let a = BlockCsr {
@@ -1838,7 +1960,8 @@ mod block_tests {
             diagonal_indices: &di,
             values: &vals,
             threads: 1,
-        };
+            simd: false,
+};
         let x = [1.0f64, -2.0, 3.0, 0.5];
         let mut y = [0.0f64; 4];
         a.block_spmv(&x, &mut y);
@@ -1864,7 +1987,8 @@ mod block_tests {
             diagonal_indices: &di,
             values: &vals,
             threads: 1,
-        };
+            simd: false,
+};
         let diag = a.diagonal_blocks();
         // cell0 diagonal = [[4,-1],[-1,4]], cell1 = [[5,-1],[-2,5]].
         assert_eq!(&diag[0..4], &[4.0, -1.0, -1.0, 4.0]);
@@ -1899,7 +2023,8 @@ mod block_tests {
             diagonal_indices: &di,
             values: &vals,
             threads: 1,
-        };
+            simd: false,
+};
         let b = [1.0f32, 2.0, 3.0, 4.0];
         let mut x = [0.0f32; 4];
         let m = BlockJacobi::new(&a);
@@ -1945,7 +2070,8 @@ mod block_tests {
             diagonal_indices: &di,
             values: &vals,
             threads: 1,
-        };
+            simd: false,
+};
         let b = vec![1.0f32; n];
         let mut x = vec![0.0f32; n];
         let m = BlockJacobi::new(&a);

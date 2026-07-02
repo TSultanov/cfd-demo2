@@ -1208,6 +1208,7 @@ impl CpuSolver {
                 diagonal_indices: &self.diagonal_indices,
                 values: &matrix,
                 threads,
+                simd: self.config.simd,
             };
             // Preconditioner: the model-owned Schur complement for saddle-point
             // systems (incompressible/buoyant); otherwise the per-cell block

@@ -48,6 +48,78 @@ struct CpuKernel {
     stmts: Vec<Stmt>,
 }
 
+/// Kernel-id groups partitioned from the schedule ONCE at construction (the
+/// schedule never changes). The step loop drives these in recipe order, which
+/// is the order the GPU executes. Timing contract (load-bearing, mirrors the
+/// GPU generic-coupled loop): the recurring `bc_expr` refresh runs at the END
+/// of each outer iteration — after the update, NOT before the assembly — so an
+/// iteration's gradients/flux/assembly see the ghosts produced by the PRIOR
+/// iteration (seeded values on the very first step). Running bc_expr before
+/// the assembly instead fed step-1 the refreshed ghosts and biased the
+/// boundary energy row (rho_e drift that broke the long MMS march). Once-only
+/// Preparation kernels (e.g. rhie_chow dp_init) run before the loop; the CPU
+/// linear solve replaces the LinearSolve phase after assembly; Apply is
+/// monitor-only (skipped); Update/PrimitiveRecovery apply the solution.
+struct ScheduleGroups {
+    /// Once-per-step Preparation kernels (non-bc_expr).
+    prep_once: Vec<String>,
+    /// Recurring boundary-closure refresh (end of each outer iteration).
+    bc_expr: Vec<String>,
+    /// Gradients + FluxComputation + Assembly, first outer iteration.
+    per_iter: Vec<String>,
+    /// `per_iter` for outer iterations AFTER the first: without
+    /// [`KernelId::FLUX_MODULE_GRADIENTS`] when the update group contains a
+    /// Rhie-Chow grad_p refresher ([`KernelId::refreshes_grad_p`]) — that
+    /// kernel already wrote the identical Green-Gauss pressure gradient
+    /// (same stencil, same boundary closure) and nothing modifies `p` in
+    /// between, so the recompute is redundant. Mirrors the GPU
+    /// `assembly_graph_tail`; `CFD2_NO_GRADP_SKIP=1` disables (then this
+    /// equals `per_iter`).
+    per_iter_tail: Vec<String>,
+    /// Update + PrimitiveRecovery kernels.
+    update: Vec<String>,
+}
+
+impl ScheduleGroups {
+    fn from_schedule(schedule: &[ScheduledKernel]) -> Self {
+        let is_bc_expr = |id: &str| id.contains("bc_expr");
+        let ids_in = |pred: &dyn Fn(&ScheduledKernel) -> bool| -> Vec<String> {
+            schedule.iter().filter(|s| pred(s)).map(|s| s.id.clone()).collect()
+        };
+        let per_iter = ids_in(&|s| {
+            matches!(
+                s.phase,
+                KernelPhase::Gradients | KernelPhase::FluxComputation | KernelPhase::Assembly
+            )
+        });
+        let update = ids_in(&|s| {
+            matches!(s.phase, KernelPhase::Update | KernelPhase::PrimitiveRecovery)
+        });
+        let has_grad_p_refresh = update
+            .iter()
+            .any(|id| crate::solver::model::KernelId::id_refreshes_grad_p(id))
+            && !std::env::var("CFD2_NO_GRADP_SKIP").is_ok_and(|v| v == "1");
+        let per_iter_tail = if has_grad_p_refresh {
+            per_iter
+                .iter()
+                .filter(|id| {
+                    id.as_str() != crate::solver::model::KernelId::FLUX_MODULE_GRADIENTS.as_str()
+                })
+                .cloned()
+                .collect()
+        } else {
+            per_iter.clone()
+        };
+        Self {
+            prep_once: ids_in(&|s| s.phase == KernelPhase::Preparation && !is_bc_expr(&s.id)),
+            bc_expr: ids_in(&|s| s.phase == KernelPhase::Preparation && is_bc_expr(&s.id)),
+            per_iter,
+            per_iter_tail,
+            update,
+        }
+    }
+}
+
 pub struct CpuSolver {
     model_id: &'static str,
     num_cells: usize,
@@ -60,6 +132,9 @@ pub struct CpuSolver {
     kernels: HashMap<String, CpuKernel>,
     /// The scheduled execution order (recipe order), with phases.
     schedule: Vec<ScheduledKernel>,
+    /// Kernel-id groups partitioned from the (immutable) schedule once at
+    /// construction — see [`ScheduleGroups`].
+    groups: ScheduleGroups,
 
     // Block-CSR topology (block-level; shared by kernels and the CPU solver).
     scalar_row_offsets: Vec<u32>,
@@ -336,6 +411,7 @@ impl CpuSolver {
         // Solved-unknown state offsets for the plateau detector's state scale.
         let unknown_offsets =
             crate::solver::model::kernel::model_unknown_state_offsets(&model)?;
+        let groups = ScheduleGroups::from_schedule(&schedule);
 
         Ok(Self {
             model_id: model.id,
@@ -346,6 +422,7 @@ impl CpuSolver {
             buffers,
             kernels,
             schedule,
+            groups,
             scalar_row_offsets,
             col_indices,
             diagonal_indices,
@@ -664,67 +741,13 @@ impl CpuSolver {
         self.constants.time_scheme = self.effective_time_scheme() as u32;
         let ctx = constants_ctx(&self.constants, &self.low_mach);
 
-        // Drive in RECIPE (schedule) ORDER, which is the order the GPU executes.
-        // Per-iteration kernels are the Gradients/FluxComputation/Assembly passes;
-        // the recurring `bc_expr` runs at the END of each outer iteration (after
-        // the update), NOT before the assembly. This timing is load-bearing and
-        // matches the GPU's generic-coupled loop: the recurring boundary-closure
-        // refresh prepares the ghosts for the NEXT iteration/step, so an outer
-        // iteration's gradients/flux/assembly all see the ghosts produced by the
-        // PRIOR iteration (seeded values on the very first step). Running bc_expr
-        // before the assembly instead fed step-1 the refreshed ghosts and biased
-        // the boundary energy row (rho_e drift that broke the long MMS march).
-        // Once-only Preparation kernels (e.g. rhie_chow dp_init) run before the
-        // loop; the CPU linear solve replaces the LinearSolve phase after
-        // assembly; Apply is monitor-only (skipped); Update/PrimitiveRecovery
-        // apply the solution.
-        let is_bc_expr = |id: &str| id.contains("bc_expr");
-        let per_iter: Vec<String> = self
-            .schedule
-            .iter()
-            .filter(|s| {
-                matches!(
-                    s.phase,
-                    KernelPhase::Gradients | KernelPhase::FluxComputation | KernelPhase::Assembly
-                )
-            })
-            .map(|s| s.id.clone())
-            .collect();
-        let bc_expr_ids: Vec<String> = self
-            .schedule
-            .iter()
-            .filter(|s| s.phase == KernelPhase::Preparation && is_bc_expr(&s.id))
-            .map(|s| s.id.clone())
-            .collect();
-        let prep_once: Vec<String> = self
-            .schedule
-            .iter()
-            .filter(|s| s.phase == KernelPhase::Preparation && !is_bc_expr(&s.id))
-            .map(|s| s.id.clone())
-            .collect();
-        let update_group: Vec<String> = self
-            .schedule
-            .iter()
-            .filter(|s| matches!(s.phase, KernelPhase::Update | KernelPhase::PrimitiveRecovery))
-            .map(|s| s.id.clone())
-            .collect();
-        // Outer iterations after the first skip `flux_module_gradients` when
-        // the Update phase's `rhie_chow/grad_p_update` refreshes the same state
-        // grad_p slots each iteration: the two kernels are byte-equivalent
-        // (identical Green-Gauss stencil + boundary closure) and nothing
-        // modifies p between them, so the recompute is redundant. Mirrors the
-        // GPU `assembly_graph_tail`; `CFD2_NO_GRADP_SKIP=1` disables.
-        let has_grad_p_refresh = update_group.iter().any(|id| id.contains("grad_p_update"))
-            && !std::env::var("CFD2_NO_GRADP_SKIP").is_ok_and(|v| v == "1");
-        let per_iter_tail: Vec<String> = if has_grad_p_refresh {
-            per_iter
-                .iter()
-                .filter(|id| !id.contains("flux_module_gradients"))
-                .cloned()
-                .collect()
-        } else {
-            per_iter.clone()
-        };
+        // Drive in RECIPE (schedule) ORDER, which is the order the GPU executes
+        // (see ScheduleGroups for the partition and its timing contract).
+        let prep_once = &self.groups.prep_once;
+        let bc_expr_ids = &self.groups.bc_expr;
+        let per_iter = &self.groups.per_iter;
+        let per_iter_tail = &self.groups.per_iter_tail;
+        let update_group = &self.groups.update;
 
         let threads = self.config.threads;
         let engine = self.config.engine;
@@ -790,7 +813,7 @@ impl CpuSolver {
 
         // Prepare once per step (non-bc_expr Preparation kernels).
         timed!(t_prep, {
-            for id in &prep_once {
+            for id in prep_once {
                 run_t!(id);
             }
         });
@@ -833,19 +856,19 @@ impl CpuSolver {
             // group, then the recurring boundary-closure refresh (bc_expr) which
             // prepares the ghosts for the next iteration/step.
             timed!(t_asm, {
-                let group = if outer_idx == 0 { &per_iter } else { &per_iter_tail };
+                let group = if outer_idx == 0 { per_iter } else { per_iter_tail };
                 for id in group {
                     run_t!(id);
                 }
             });
             timed!(t_lin, self.linear_solve());
             timed!(t_upd, {
-                for id in &update_group {
+                for id in update_group {
                     run_t!(id);
                 }
             });
             timed!(t_bc, {
-                for id in &bc_expr_ids {
+                for id in bc_expr_ids {
                     run_t!(id);
                 }
             });

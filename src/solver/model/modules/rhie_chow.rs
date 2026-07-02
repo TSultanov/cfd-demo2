@@ -128,16 +128,15 @@ pub fn rhie_chow_aux_module(
         KernelId("rhie_chow/dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused");
     let kernel_generic_coupled_update_dp_init_fused =
         KernelId("generic_coupled/update_dp_init_fused");
-    let kernel_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused = KernelId(
-        "rhie_chow/dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused",
-    );
+    let kernel_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused =
+        KernelId::RHIE_CHOW_DP_INIT_DP_UPDATE_STORE_GRAD_P_GRAD_P_UPDATE_CORRECT_VELOCITY_DELTA_FUSED;
     let kernel_store_grad_p = KernelId("rhie_chow/store_grad_p");
-    let kernel_grad_p_update = KernelId("rhie_chow/grad_p_update");
+    let kernel_grad_p_update = KernelId::RHIE_CHOW_GRAD_P_UPDATE;
     let kernel_rhie_chow_correct_velocity_delta = KernelId("rhie_chow/correct_velocity_delta");
     let kernel_grad_p_update_correct_velocity_delta_fused =
-        KernelId("rhie_chow/grad_p_update_correct_velocity_delta_fused");
+        KernelId::RHIE_CHOW_GRAD_P_UPDATE_CORRECT_VELOCITY_DELTA_FUSED;
     let kernel_store_grad_p_grad_p_update_fused =
-        KernelId("rhie_chow/store_grad_p_grad_p_update_fused");
+        KernelId::RHIE_CHOW_STORE_GRAD_P_GRAD_P_UPDATE_FUSED;
 
     let kernels = vec![
         ModelKernelSpec {

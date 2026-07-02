@@ -279,13 +279,13 @@ impl GenericCoupledProgramResources {
         // Tail-iteration assembly variant: drop `flux_module_gradients` when
         // the Update phase's `rhie_chow/grad_p_update` already refreshes the
         // same state grad_p slots each outer iteration (see the field doc).
-        let has_grad_p_refresh = recipe
-            .kernels
-            .iter()
-            .any(|k| k.id.as_str().contains("grad_p_update"));
+        let has_grad_p_refresh = recipe.kernels.iter().any(|k| k.id.refreshes_grad_p());
         let grad_p_skip_disabled = std::env::var("CFD2_NO_GRADP_SKIP").is_ok_and(|v| v == "1");
         let assembly_graph_tail = (has_grad_p_refresh && !grad_p_skip_disabled).then(|| {
-            assembly_graph.clone_filtered(|label| !label.contains("flux_module_gradients"))
+            // Node labels are "{prefix}:{kernel id}" (unified_graph::kernel_label).
+            assembly_graph.clone_filtered(|label| {
+                !label.ends_with(crate::solver::model::KernelId::FLUX_MODULE_GRADIENTS.as_str())
+            })
         });
 
         // Apply and update are optional depending on the stepping mode.

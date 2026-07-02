@@ -17,6 +17,38 @@ impl KernelId {
     pub const FLUX_MODULE_GRADIENTS: KernelId = KernelId("flux_module_gradients");
     pub const FLUX_MODULE: KernelId = KernelId("flux_module");
 
+    /// Rhie-Chow post-solve pressure-gradient refresh (modules/rhie_chow.rs).
+    /// Schedule logic keys on this (see [`Self::refreshes_grad_p`]): it writes
+    /// the SAME state grad_p slots with the SAME Green-Gauss stencil as
+    /// [`Self::FLUX_MODULE_GRADIENTS`], which both backends therefore skip on
+    /// outer iterations after the first.
+    pub const RHIE_CHOW_GRAD_P_UPDATE: KernelId = KernelId("rhie_chow/grad_p_update");
+    pub const RHIE_CHOW_GRAD_P_UPDATE_CORRECT_VELOCITY_DELTA_FUSED: KernelId =
+        KernelId("rhie_chow/grad_p_update_correct_velocity_delta_fused");
+    pub const RHIE_CHOW_STORE_GRAD_P_GRAD_P_UPDATE_FUSED: KernelId =
+        KernelId("rhie_chow/store_grad_p_grad_p_update_fused");
+    #[allow(clippy::doc_markdown)]
+    pub const RHIE_CHOW_DP_INIT_DP_UPDATE_STORE_GRAD_P_GRAD_P_UPDATE_CORRECT_VELOCITY_DELTA_FUSED:
+        KernelId =
+        KernelId("rhie_chow/dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused");
+
+    /// True when this kernel performs the Rhie-Chow post-solve pressure-gradient
+    /// refresh — standalone or as any of its fused variants. Both backends key
+    /// the "skip [`Self::FLUX_MODULE_GRADIENTS`] on outer iterations after the
+    /// first" schedule optimization on the update group containing one of these.
+    pub fn refreshes_grad_p(self) -> bool {
+        Self::id_refreshes_grad_p(self.0)
+    }
+
+    /// [`Self::refreshes_grad_p`] for contexts that hold the kernel id as a
+    /// plain string (the CPU schedule).
+    pub fn id_refreshes_grad_p(id: &str) -> bool {
+        id == Self::RHIE_CHOW_GRAD_P_UPDATE.0
+            || id == Self::RHIE_CHOW_GRAD_P_UPDATE_CORRECT_VELOCITY_DELTA_FUSED.0
+            || id == Self::RHIE_CHOW_STORE_GRAD_P_GRAD_P_UPDATE_FUSED.0
+            || id == Self::RHIE_CHOW_DP_INIT_DP_UPDATE_STORE_GRAD_P_GRAD_P_UPDATE_CORRECT_VELOCITY_DELTA_FUSED.0
+    }
+
     /// Generic refresh of expression-valued boundary-table entries
     /// (`BcValue::Expr`); see modules/bc_expr.rs.
     pub const BC_EXPR_UPDATE: KernelId = KernelId("bc_expr_update");

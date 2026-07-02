@@ -1914,6 +1914,10 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
     if remaining == 0 {
         return false;
     }
+    // Plateau-driven models (GUI incompressible defaults + benches) run their
+    // outer-exit logic in the break kernel's plateau mode (GPU port of the
+    // host detector) so they can use this batched path too.
+    let plateau_mode_active = outer_plateau_active(plan);
 
     let device = plan.context.device.clone();
     let queue = plan.context.queue.clone();
@@ -2001,8 +2005,21 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
             let state = r.fields.current_state();
             let bg_state = monitor.create_state_bind_group(&device, state);
 
-            // Upload break params
-            monitor.upload_break_params(&queue, r.outer_tol, r.outer_tol_abs);
+            // Upload break params (plateau mode for plateau-driven models:
+            // same band/floors as the host detector, evaluated on-device).
+            if plateau_mode_active {
+                monitor.upload_break_params_plateau(
+                    &queue,
+                    r.outer_tol,
+                    r.outer_tol_abs,
+                    OUTER_PLATEAU_FACTOR,
+                    OUTER_PLATEAU_CEILING,
+                    OUTER_TOL_EXIT_MIN_ITERS as u32,
+                    OUTER_PLATEAU_MIN_ITERS as u32,
+                );
+            } else {
+                monitor.upload_break_params(&queue, r.outer_tol, r.outer_tol_abs);
+            }
 
             // Clear iteration counter
             let zero: u32 = 0;
@@ -2108,7 +2125,11 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                         tol_abs,
                         precond_label: "generic_coupled:schur(batch_tail)",
                         use_encoded_seed_basis0: true,
-                        tight_budget: false,
+                        // Plateau-routed models keep the tight policy they had
+                        // on the per-outer chunked route; the long-batched
+                        // models (pseudo-transient nozzle etc.) keep the
+                        // validated legacy floor.
+                        tight_budget: plateau_mode_active,
                     },
                     &mut pre,
                     &mut post,
@@ -2129,7 +2150,7 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                         tol_abs,
                         precond_label: "generic_coupled:fgmres(batch_tail)",
                         use_encoded_seed_basis0: true,
-                        tight_budget: false,
+                        tight_budget: plateau_mode_active,
                     },
                     &mut pre,
                     &mut post,
@@ -2377,13 +2398,13 @@ pub(crate) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
         let r = res(plan);
         (r.outer_batched_mode, r.outer_iters.max(1))
     };
-    // Route to the non-batched (per-iteration) outer loop when the adaptive
-    // plateau detector is active, so per-iter residuals are computed and the loop
-    // can skip the remaining UNENCODED sweeps once the corrections stall. Every
-    // other model keeps the batched one-submission path. (`CFD2_NO_BATCH` forces
-    // non-batched for diagnostics.)
+    // Plateau-driven models run batched too since the detector was ported
+    // into the break kernel's plateau mode (`CFD2_GPU_PLATEAU=0` restores the
+    // host detector on the non-batched per-iteration loop, which computes
+    // per-iter residuals host-side and skips the remaining UNENCODED sweeps).
+    // `CFD2_NO_BATCH` forces non-batched for diagnostics.
     let outer_batched_mode = outer_batched_mode
-        && !outer_plateau_active(plan)
+        && (!outer_plateau_active(plan) || gpu_plateau_enabled())
         && std::env::var("CFD2_NO_BATCH").is_err();
     if !outer_batched_mode || outer_iters <= 1 {
         return;
@@ -2402,6 +2423,23 @@ fn encoded_seed_basis0_enabled(default_enabled: bool) -> bool {
     std::env::var("CFD2_ENABLE_ENCODED_SEED_BASIS0")
         .map(|v| v != "0")
         .unwrap_or(default_enabled)
+}
+
+/// On-device plateau detection (the break kernel's plateau mode), letting
+/// plateau-driven models use the batched one-submission outer path.
+/// `CFD2_GPU_PLATEAU=1` opts in; DEFAULT OFF by measurement (July 2026):
+/// after the per-outer host route switched to chunked one-submission solves
+/// with the tight AIMD budget, it beats the batched tail at BOTH scales —
+/// GUI obstacle 72.7 vs 104.7 ms/step, 118k obstacle 0.428 vs 0.510 s/step —
+/// because the batched tail must encode ALL `outer_iters` outers
+/// (assembly+solve+update) up front while the plateau typically exits at ~5
+/// of 8, and STOP-frozen iterations still cost their encoding and no-op
+/// dispatches. The host detector also keeps per-iteration residuals for the
+/// GUI. Machinery stays maintained: the break kernel's plateau mode
+/// replicates the host detector exactly (tolerance + stall exits, same
+/// band/floors) and is exercised opt-in.
+fn gpu_plateau_enabled() -> bool {
+    std::env::var("CFD2_GPU_PLATEAU").is_ok_and(|v| v == "1")
 }
 
 pub(crate) fn update_graph_run(

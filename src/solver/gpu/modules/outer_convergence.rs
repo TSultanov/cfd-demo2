@@ -36,7 +36,13 @@ struct GpuOuterConvergenceBreakParams {
     count: u32,
     tol_rel: f32,
     tol_abs: f32,
-    _pad0: u32,
+    plateau_factor: f32,
+    plateau_ceiling: f32,
+    min_iters_tol: u32,
+    min_iters_stall: u32,
+    /// 0 = legacy per-target tolerance check; nonzero = the GPU port of the
+    /// host outer plateau detector (tolerance + stall exits).
+    plateau_mode: u32,
 }
 
 /// Builds the outer convergence break kernel WGSL via the structured DSL.
@@ -54,6 +60,8 @@ pub(crate) struct OuterConvergenceMonitor {
     b_scale: wgpu::Buffer,
     pub(crate) b_break_status: wgpu::Buffer,
     b_break_params: wgpu::Buffer,
+    b_delta_prev: wgpu::Buffer,
+    b_eval_count: wgpu::Buffer,
     bg_x: wgpu::BindGroup,
     break_bg: wgpu::BindGroup,
     zero_out_words: Vec<u32>,
@@ -244,6 +252,21 @@ impl OuterConvergenceMonitor {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        // Plateau-mode state (see the break kernel docs): previous-sweep delta
+        // maxima and the on-device sweep counter, both rolled by the break
+        // kernel itself and cleared at each step's first outer.
+        let b_delta_prev = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_convergence:delta_prev"),
+            size: (num_targets as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let b_eval_count = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outer_convergence:eval_count"),
+            size: 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let bg_x = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("outer_convergence:bg_x"),
@@ -288,6 +311,14 @@ impl OuterConvergenceMonitor {
                     binding: 3,
                     resource: b_break_params.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: b_delta_prev.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: b_eval_count.as_entire_binding(),
+                },
             ],
         });
 
@@ -307,6 +338,8 @@ impl OuterConvergenceMonitor {
             b_scale,
             b_break_status,
             b_break_params,
+            b_delta_prev,
+            b_eval_count,
             bg_x,
             break_bg,
             zero_out_words,
@@ -537,7 +570,11 @@ impl OuterConvergenceMonitor {
             count: self.target_names.len() as u32,
             tol_rel,
             tol_abs,
-            _pad0: 0,
+            plateau_factor: 0.0,
+            plateau_ceiling: 0.0,
+            min_iters_tol: 0,
+            min_iters_stall: 0,
+            plateau_mode: 0,
         };
         plan.context
             .queue
@@ -568,7 +605,11 @@ impl OuterConvergenceMonitor {
             count: self.target_names.len() as u32,
             tol_rel,
             tol_abs,
-            _pad0: 0,
+            plateau_factor: 0.0,
+            plateau_ceiling: 0.0,
+            min_iters_tol: 0,
+            min_iters_stall: 0,
+            plateau_mode: 0,
         };
         plan.context
             .queue
@@ -643,7 +684,39 @@ impl OuterConvergenceMonitor {
             count: self.target_names.len() as u32,
             tol_rel,
             tol_abs,
-            _pad0: 0,
+            plateau_factor: 0.0,
+            plateau_ceiling: 0.0,
+            min_iters_tol: 0,
+            min_iters_stall: 0,
+            plateau_mode: 0,
+        };
+        queue.write_buffer(&self.b_break_params, 0, bytes_of(&params));
+    }
+
+    /// Upload PLATEAU-mode break parameters: the break kernel then evaluates
+    /// the host outer plateau detector's tolerance + stall exits on-device
+    /// (see the codegen doc for the exact semantics), letting plateau-driven
+    /// models run the batched one-submission outer path.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn upload_break_params_plateau(
+        &self,
+        queue: &wgpu::Queue,
+        tol_rel: f32,
+        tol_abs: f32,
+        plateau_factor: f32,
+        plateau_ceiling: f32,
+        min_iters_tol: u32,
+        min_iters_stall: u32,
+    ) {
+        let params = GpuOuterConvergenceBreakParams {
+            count: self.target_names.len() as u32,
+            tol_rel,
+            tol_abs,
+            plateau_factor,
+            plateau_ceiling,
+            min_iters_tol,
+            min_iters_stall,
+            plateau_mode: 1,
         };
         queue.write_buffer(&self.b_break_params, 0, bytes_of(&params));
     }
@@ -710,6 +783,10 @@ impl OuterConvergenceMonitor {
     ) {
         if first_iter {
             self.encode_state_scale_into(encoder, bg_state);
+            // Fresh step: no previous-sweep deltas, sweep counter at zero
+            // (the break kernel rolls both forward on every eval).
+            encoder.clear_buffer(&self.b_delta_prev, 0, None);
+            encoder.clear_buffer(&self.b_eval_count, 0, None);
         }
         self.encode_delta_maxima_into(encoder);
         self.encode_break_eval_into(encoder);

@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 7872bc790a7255c1f55a50f1100cb4eb956fc9bca3f02f02d21d8ecbdf259ce2
+// SourceHash: cb742add29525d57dd750438da39a160dcfd34c3b7e716e84a0b87de714b8b51
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -12013,8 +12013,37 @@ pub mod layout_asserts {
         assert!(
             std::mem::offset_of!(generated::outer_convergence_break::BreakParams, tol_abs) == 8
         );
-        assert!(std::mem::offset_of!(generated::outer_convergence_break::BreakParams, _pad0) == 12);
-        assert!(std::mem::size_of::<generated::outer_convergence_break::BreakParams>() == 16);
+        assert!(
+            std::mem::offset_of!(
+                generated::outer_convergence_break::BreakParams,
+                plateau_factor
+            ) == 12
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::outer_convergence_break::BreakParams,
+                plateau_ceiling
+            ) == 16
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::outer_convergence_break::BreakParams,
+                min_iters_tol
+            ) == 20
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::outer_convergence_break::BreakParams,
+                min_iters_stall
+            ) == 24
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::outer_convergence_break::BreakParams,
+                plateau_mode
+            ) == 28
+        );
+        assert!(std::mem::size_of::<generated::outer_convergence_break::BreakParams>() == 32);
     };
     const GENERATED_PACKED_STATE_GRADIENTS_ALLMACH_PRESSURE_VECTOR2_ASSERTS: () = {
         assert!(
@@ -190259,16 +190288,37 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             pub tol_rel: f32,
             #[doc = "offset: 8, size: 4, type: `f32`"]
             pub tol_abs: f32,
-            #[doc = "offset: 12, size: 4, type: `u32`"]
-            pub _pad0: u32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub plateau_factor: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub plateau_ceiling: f32,
+            #[doc = "offset: 20, size: 4, type: `u32`"]
+            pub min_iters_tol: u32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub min_iters_stall: u32,
+            #[doc = "offset: 28, size: 4, type: `u32`"]
+            pub plateau_mode: u32,
         }
         impl BreakParams {
-            pub const fn new(count: u32, tol_rel: f32, tol_abs: f32, _pad0: u32) -> Self {
+            pub const fn new(
+                count: u32,
+                tol_rel: f32,
+                tol_abs: f32,
+                plateau_factor: f32,
+                plateau_ceiling: f32,
+                min_iters_tol: u32,
+                min_iters_stall: u32,
+                plateau_mode: u32,
+            ) -> Self {
                 Self {
                     count,
                     tol_rel,
                     tol_abs,
-                    _pad0,
+                    plateau_factor,
+                    plateau_ceiling,
+                    min_iters_tol,
+                    min_iters_stall,
+                    plateau_mode,
                 }
             }
         }
@@ -190297,6 +190347,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             pub scale: wgpu::BufferBinding<'a>,
             pub status: wgpu::BufferBinding<'a>,
             pub params: wgpu::BufferBinding<'a>,
+            pub delta_prev: wgpu::BufferBinding<'a>,
+            pub eval_count: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
@@ -190304,6 +190356,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             pub scale: wgpu::BindGroupEntry<'a>,
             pub status: wgpu::BindGroupEntry<'a>,
             pub params: wgpu::BindGroupEntry<'a>,
+            pub delta_prev: wgpu::BindGroupEntry<'a>,
+            pub eval_count: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
@@ -190324,10 +190378,25 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                         binding: 3,
                         resource: wgpu::BindingResource::Buffer(params.params),
                     },
+                    delta_prev: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.delta_prev),
+                    },
+                    eval_count: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.eval_count),
+                    },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 4] {
-                [self.delta, self.scale, self.status, self.params]
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 6] {
+                [
+                    self.delta,
+                    self.scale,
+                    self.status,
+                    self.params,
+                    self.delta_prev,
+                    self.eval_count,
+                ]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
                 self.into_array().into_iter().collect()
@@ -190385,6 +190454,28 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                                 >(
                                 )
                                     as _),
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(4): \"delta_prev\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        #[doc = " @binding(5): \"eval_count\""]
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
                             },
                             count: None,
                         },
@@ -190450,7 +190541,11 @@ struct BreakParams {
     count: u32,
     tol_rel: f32,
     tol_abs: f32,
-    _pad0_: u32,
+    plateau_factor: f32,
+    plateau_ceiling: f32,
+    min_iters_tol: u32,
+    min_iters_stall: u32,
+    plateau_mode: u32,
 }
 
 @group(0) @binding(0) 
@@ -190461,49 +190556,140 @@ var<storage> scale: array<f32>;
 var<storage, read_write> status: array<u32>;
 @group(0) @binding(3) 
 var<uniform> params: BreakParams;
+@group(0) @binding(4) 
+var<storage, read_write> delta_prev: array<f32>;
+@group(0) @binding(5) 
+var<storage, read_write> eval_count: array<u32>;
 
 @compute @workgroup_size(1, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var converged: u32 = 1u;
     var i: u32 = 0u;
+    var all_under: u32 = 1u;
+    var all_band: u32 = 1u;
+    var i_1: u32 = 0u;
+    var st: u32 = 0u;
+    var i_2: u32 = 0u;
 
     if (global_id.x != 0u) {
         return;
     }
+    let _e8 = eval_count[0];
+    let it = (_e8 + 1u);
+    eval_count[0] = it;
+    let _e15 = params.plateau_mode;
+    if (_e15 == 0u) {
+        loop {
+            let _e19 = i;
+            let _e22 = params.count;
+            if (_e19 < _e22) {
+            } else {
+                break;
+            }
+            {
+                let _e25 = i;
+                let d = delta[_e25];
+                let _e29 = i;
+                let s_raw = scale[_e29];
+                let bad_d = (!((d <= d)) || (abs(d) > 1000000000000000000000000000000f));
+                let bad_s = (!((s_raw <= s_raw)) || (abs(s_raw) > 1000000000000000000000000000000f));
+                if (bad_d || bad_s) {
+                    converged = 0u;
+                    break;
+                }
+                let s = max(s_raw, 1f);
+                let _e51 = params.tol_abs;
+                let _e54 = params.tol_rel;
+                let tol = (_e51 + (_e54 * s));
+                if (d > tol) {
+                    converged = 0u;
+                    break;
+                }
+            }
+            continuing {
+                let _e60 = i;
+                i = (_e60 + 1u);
+            }
+        }
+        let _e64 = converged;
+        status[0] = _e64;
+    } else {
+        loop {
+            let _e66 = i_1;
+            let _e69 = params.count;
+            if (_e66 < _e69) {
+            } else {
+                break;
+            }
+            {
+                let _e72 = i_1;
+                let d_1 = delta[_e72];
+                let _e76 = i_1;
+                let s_raw_1 = scale[_e76];
+                let bad_d_1 = (!((d_1 <= d_1)) || (abs(d_1) > 1000000000000000000000000000000f));
+                let bad_s_1 = (!((s_raw_1 <= s_raw_1)) || (abs(s_raw_1) > 1000000000000000000000000000000f));
+                if (bad_d_1 || bad_s_1) {
+                    all_under = 0u;
+                    all_band = 0u;
+                    break;
+                }
+                let s_1 = max(s_raw_1, 1f);
+                let r_cur = (d_1 / s_1);
+                let _e101 = params.tol_rel;
+                let _e105 = params.tol_abs;
+                if !(((r_cur <= _e101) || (r_cur <= _e105))) {
+                    all_under = 0u;
+                    let _e111 = i_1;
+                    let _e113 = delta_prev[_e111];
+                    let r_prev = (_e113 / s_1);
+                    let ratio = (r_cur / max(r_prev, 0.000000000000000000000000000001f));
+                    let _e120 = params.plateau_factor;
+                    let _e124 = params.plateau_ceiling;
+                    if ((ratio < _e120) || (ratio > _e124)) {
+                        all_band = 0u;
+                    }
+                }
+            }
+            continuing {
+                let _e129 = i_1;
+                i_1 = (_e129 + 1u);
+            }
+        }
+        let _e133 = params.min_iters_tol;
+        if (it >= _e133) {
+            let _e135 = all_under;
+            if (_e135 == 1u) {
+                st = 1u;
+            }
+        }
+        let _e142 = params.min_iters_stall;
+        if (it >= _e142) {
+            let _e144 = all_band;
+            if (_e144 == 1u) {
+                st = 1u;
+            }
+        }
+        let _e150 = st;
+        status[0] = _e150;
+    }
     loop {
-        let _e7 = i;
-        let _e10 = params.count;
-        if (_e7 < _e10) {
+        let _e152 = i_2;
+        let _e155 = params.count;
+        if (_e152 < _e155) {
         } else {
             break;
         }
         {
-            let _e13 = i;
-            let d = delta[_e13];
-            let _e17 = i;
-            let s_raw = scale[_e17];
-            let bad_d = (!((d <= d)) || (abs(d) > 1000000000000000000000000000000f));
-            let bad_s = (!((s_raw <= s_raw)) || (abs(s_raw) > 1000000000000000000000000000000f));
-            if (bad_d || bad_s) {
-                converged = 0u;
-                break;
-            }
-            let s = max(s_raw, 1f);
-            let _e39 = params.tol_abs;
-            let _e42 = params.tol_rel;
-            let tol = (_e39 + (_e42 * s));
-            if (d > tol) {
-                converged = 0u;
-                break;
-            }
+            let _e158 = i_2;
+            let _e161 = i_2;
+            let _e163 = delta[_e161];
+            delta_prev[_e158] = _e163;
         }
         continuing {
-            let _e48 = i;
-            i = (_e48 + 1u);
+            let _e165 = i_2;
+            i_2 = (_e165 + 1u);
         }
     }
-    let _e52 = converged;
-    status[0] = _e52;
     return;
 }
 "#;

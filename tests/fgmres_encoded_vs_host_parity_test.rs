@@ -230,6 +230,7 @@ fn encoded_fgmres_matches_host_fgmres_on_small_system() {
             tol_abs: 1e-10,
             precond_label: "test:host",
             use_encoded_seed_basis0: false,
+        tight_budget: false,
         },
     );
     let x_host = readback_buffer_f32(&ctx, system.x(), n as usize);
@@ -262,6 +263,7 @@ fn encoded_fgmres_matches_host_fgmres_on_small_system() {
             tol_abs: 1e-10,
             precond_label: "test:encoded",
             use_encoded_seed_basis0: true,
+        tight_budget: false,
         },
         &mut encoder,
     );
@@ -451,6 +453,7 @@ fn encoded_fgmres_warm_start_uses_min_b_r0_scale() {
             tol_abs: 1e-12,
             precond_label: "test:encoded-warm",
             use_encoded_seed_basis0: true,
+        tight_budget: false,
         },
         &mut encoder,
     );
@@ -480,6 +483,7 @@ fn encoded_fgmres_warm_start_uses_min_b_r0_scale() {
             tol_abs: 1e-12,
             precond_label: "test:host-warm",
             use_encoded_seed_basis0: false,
+        tight_budget: false,
         },
     );
     let x_host = readback_buffer_f32(&ctx, system.x(), n as usize);

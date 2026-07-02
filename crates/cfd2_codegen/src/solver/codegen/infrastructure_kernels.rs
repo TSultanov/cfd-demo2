@@ -2153,9 +2153,25 @@ pub fn generate_outer_stop_inject_cg() -> KernelWgsl {
 /// Convergence break kernel: checks per-target delta vs scale tolerances.
 /// Single `main` entry point, workgroup_size(1,1,1).
 ///
-/// Reads `delta[i]` and `scale[i]` for `i < params.count`, applies
-/// `tol = tol_abs + tol_rel * max(scale, 1.0)`, and writes `status[0] = 1`
-/// if all targets are converged, `0` otherwise.
+/// Legacy mode (`plateau_mode == 0`): reads `delta[i]` and `scale[i]` for
+/// `i < params.count`, applies `tol = tol_abs + tol_rel * max(scale, 1.0)`,
+/// and writes `status[0] = 1` if all targets are converged, `0` otherwise.
+///
+/// Plateau mode (`plateau_mode != 0`): GPU port of the host outer-loop
+/// plateau detector (`generic_coupled::outer_corrections_plateaued`), so
+/// plateau-driven models can run the batched one-submission outer path.
+/// Semantics replicated EXACTLY (f32, same inputs — the same delta/scale
+/// reductions the host read back):
+///   - scaled correction `r = delta[i] / max(scale[i], 1.0)`;
+///   - a field is UNDER TOL when `r <= tol_rel || r <= tol_abs`;
+///   - TOLERANCE exit: every field under tol, from `min_iters_tol` sweeps;
+///   - STALL exit: every field under tol OR adjacent-ratio
+///     `r/r_prev ∈ [plateau_factor, plateau_ceiling]`, from
+///     `min_iters_stall` sweeps.
+/// The kernel keeps its own eval counter and previous-delta copy
+/// (`eval_count`, `delta_prev`, cleared by the host at each step's first
+/// outer); `delta_prev` starts zeroed so the first ratio is huge and blocks
+/// the stall exit, matching the host's missing-prev rule.
 pub fn generate_outer_convergence_break() -> KernelWgsl {
     let mut m = Module::new();
 
@@ -2165,7 +2181,11 @@ pub fn generate_outer_convergence_break() -> KernelWgsl {
             StructField::new("count", Type::U32),
             StructField::new("tol_rel", Type::F32),
             StructField::new("tol_abs", Type::F32),
-            StructField::new("_pad0", Type::U32),
+            StructField::new("plateau_factor", Type::F32),
+            StructField::new("plateau_ceiling", Type::F32),
+            StructField::new("min_iters_tol", Type::U32),
+            StructField::new("min_iters_stall", Type::U32),
+            StructField::new("plateau_mode", Type::U32),
         ],
     )));
 
@@ -2197,12 +2217,29 @@ pub fn generate_outer_convergence_break() -> KernelWgsl {
         None,
         vec![Attribute::Group(0), Attribute::Binding(3)],
     )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "delta_prev",
+        Type::array(Type::F32),
+        StorageClass::Storage,
+        Some(AccessMode::ReadWrite),
+        vec![Attribute::Group(0), Attribute::Binding(4)],
+    )));
+    m.push(Item::GlobalVar(GlobalVar::new(
+        "eval_count",
+        Type::array(Type::U32),
+        StorageClass::Storage,
+        Some(AccessMode::ReadWrite),
+        vec![Attribute::Group(0), Attribute::Binding(5)],
+    )));
 
     let global_id = Expr::ident("global_id");
     let params = Expr::ident("params");
     let delta = Expr::ident("delta");
     let scale = Expr::ident("scale");
     let status = Expr::ident("status");
+    let delta_prev = Expr::ident("delta_prev");
+    let eval_count = Expr::ident("eval_count");
+    let it = Expr::ident("it");
     let i = Expr::ident("i");
     let d = Expr::ident("d");
     let s_raw = Expr::ident("s_raw");
@@ -2211,6 +2248,102 @@ pub fn generate_outer_convergence_break() -> KernelWgsl {
     let s = Expr::ident("s");
     let tol = Expr::ident("tol");
     let converged = Expr::ident("converged");
+    let r_cur = Expr::ident("r_cur");
+    let r_prev = Expr::ident("r_prev");
+    let ratio = Expr::ident("ratio");
+    let all_under = Expr::ident("all_under");
+    let all_band = Expr::ident("all_band");
+    let st = Expr::ident("st");
+
+    let legacy_loop = for_loop_expr(
+        for_init_var_typed_expr("i", Type::U32, Expr::lit_u32(0)),
+        i.clone().lt(params.clone().field("count")),
+        for_step_increment_expr(i.clone()),
+        block(vec![
+            let_expr("d", delta.clone().index(i.clone())),
+            let_expr("s_raw", scale.clone().index(i.clone())),
+            let_expr(
+                "bad_d",
+                (!d.clone().le(d.clone())) | abs(d.clone()).gt(Expr::lit_f32(1.0e30)),
+            ),
+            let_expr(
+                "bad_s",
+                (!s_raw.clone().le(s_raw.clone()))
+                    | abs(s_raw.clone()).gt(Expr::lit_f32(1.0e30)),
+            ),
+            if_block_expr(
+                bad_d.clone() | bad_s.clone(),
+                block(vec![
+                    assign_expr(converged.clone(), Expr::lit_u32(0)),
+                    break_stmt(),
+                ]),
+                None,
+            ),
+            let_expr("s", max(s_raw.clone(), Expr::lit_f32(1.0))),
+            let_expr(
+                "tol",
+                params.clone().field("tol_abs") + params.clone().field("tol_rel") * s.clone(),
+            ),
+            if_block_expr(
+                d.clone().gt(tol.clone()),
+                block(vec![
+                    assign_expr(converged.clone(), Expr::lit_u32(0)),
+                    break_stmt(),
+                ]),
+                None,
+            ),
+        ]),
+    );
+
+    // Plateau-mode field loop (see the doc comment; host semantics EXACT).
+    let plateau_loop = for_loop_expr(
+        for_init_var_typed_expr("i", Type::U32, Expr::lit_u32(0)),
+        i.clone().lt(params.clone().field("count")),
+        for_step_increment_expr(i.clone()),
+        block(vec![
+            let_expr("d", delta.clone().index(i.clone())),
+            let_expr("s_raw", scale.clone().index(i.clone())),
+            let_expr(
+                "bad_d",
+                (!d.clone().le(d.clone())) | abs(d.clone()).gt(Expr::lit_f32(1.0e30)),
+            ),
+            let_expr(
+                "bad_s",
+                (!s_raw.clone().le(s_raw.clone()))
+                    | abs(s_raw.clone()).gt(Expr::lit_f32(1.0e30)),
+            ),
+            if_block_expr(
+                bad_d.clone() | bad_s.clone(),
+                block(vec![
+                    assign_expr(all_under.clone(), Expr::lit_u32(0)),
+                    assign_expr(all_band.clone(), Expr::lit_u32(0)),
+                    break_stmt(),
+                ]),
+                None,
+            ),
+            let_expr("s", max(s_raw.clone(), Expr::lit_f32(1.0))),
+            let_expr("r_cur", d.clone() / s.clone()),
+            if_block_expr(
+                !(r_cur.clone().le(params.clone().field("tol_rel"))
+                    | r_cur.clone().le(params.clone().field("tol_abs"))),
+                block(vec![
+                    assign_expr(all_under.clone(), Expr::lit_u32(0)),
+                    let_expr("r_prev", delta_prev.clone().index(i.clone()) / s.clone()),
+                    let_expr(
+                        "ratio",
+                        r_cur.clone() / max(r_prev.clone(), Expr::lit_f32(1.0e-30)),
+                    ),
+                    if_block_expr(
+                        ratio.clone().lt(params.clone().field("plateau_factor"))
+                            | ratio.clone().gt(params.clone().field("plateau_ceiling")),
+                        block(vec![assign_expr(all_band.clone(), Expr::lit_u32(0))]),
+                        None,
+                    ),
+                ]),
+                None,
+            ),
+        ]),
+    );
 
     let body = block(vec![
         if_block_expr(
@@ -2218,47 +2351,54 @@ pub fn generate_outer_convergence_break() -> KernelWgsl {
             block(vec![return_void()]),
             None,
         ),
-        var_typed_expr("converged", Type::U32, Some(Expr::lit_u32(1))),
+        // Sweeps completed INCLUDING this one (host `iters_done`); the host
+        // clears `eval_count` before each step's first outer.
+        let_expr("it", eval_count.clone().index(Expr::lit_u32(0)) + Expr::lit_u32(1)),
+        assign_expr(eval_count.clone().index(Expr::lit_u32(0)), it.clone()),
+        if_block_expr(
+            params.clone().field("plateau_mode").eq(Expr::lit_u32(0)),
+            block(vec![
+                var_typed_expr("converged", Type::U32, Some(Expr::lit_u32(1))),
+                legacy_loop,
+                assign_expr(status.clone().index(Expr::lit_u32(0)), converged.clone()),
+            ]),
+            Some(block(vec![
+                var_typed_expr("all_under", Type::U32, Some(Expr::lit_u32(1))),
+                var_typed_expr("all_band", Type::U32, Some(Expr::lit_u32(1))),
+                plateau_loop,
+                var_typed_expr("st", Type::U32, Some(Expr::lit_u32(0))),
+                if_block_expr(
+                    it.clone().ge(params.clone().field("min_iters_tol")),
+                    block(vec![if_block_expr(
+                        all_under.clone().eq(Expr::lit_u32(1)),
+                        block(vec![assign_expr(st.clone(), Expr::lit_u32(1))]),
+                        None,
+                    )]),
+                    None,
+                ),
+                if_block_expr(
+                    it.clone().ge(params.clone().field("min_iters_stall")),
+                    block(vec![if_block_expr(
+                        all_band.clone().eq(Expr::lit_u32(1)),
+                        block(vec![assign_expr(st.clone(), Expr::lit_u32(1))]),
+                        None,
+                    )]),
+                    None,
+                ),
+                assign_expr(status.clone().index(Expr::lit_u32(0)), st.clone()),
+            ])),
+        ),
+        // Roll the current deltas into `delta_prev` for the next sweep's
+        // ratio (after all reads; both modes — mode 0 never reads it).
         for_loop_expr(
             for_init_var_typed_expr("i", Type::U32, Expr::lit_u32(0)),
             i.clone().lt(params.clone().field("count")),
             for_step_increment_expr(i.clone()),
-            block(vec![
-                let_expr("d", delta.clone().index(i.clone())),
-                let_expr("s_raw", scale.clone().index(i.clone())),
-                let_expr(
-                    "bad_d",
-                    (!d.clone().le(d.clone())) | abs(d.clone()).gt(Expr::lit_f32(1.0e30)),
-                ),
-                let_expr(
-                    "bad_s",
-                    (!s_raw.clone().le(s_raw.clone()))
-                        | abs(s_raw.clone()).gt(Expr::lit_f32(1.0e30)),
-                ),
-                if_block_expr(
-                    bad_d.clone() | bad_s.clone(),
-                    block(vec![
-                        assign_expr(converged.clone(), Expr::lit_u32(0)),
-                        break_stmt(),
-                    ]),
-                    None,
-                ),
-                let_expr("s", max(s_raw.clone(), Expr::lit_f32(1.0))),
-                let_expr(
-                    "tol",
-                    params.clone().field("tol_abs") + params.clone().field("tol_rel") * s.clone(),
-                ),
-                if_block_expr(
-                    d.clone().gt(tol.clone()),
-                    block(vec![
-                        assign_expr(converged.clone(), Expr::lit_u32(0)),
-                        break_stmt(),
-                    ]),
-                    None,
-                ),
-            ]),
+            block(vec![assign_expr(
+                delta_prev.clone().index(i.clone()),
+                delta.clone().index(i.clone()),
+            )]),
         ),
-        assign_expr(status.clone().index(Expr::lit_u32(0)), converged.clone()),
     ]);
 
     m.push(Item::Function(Function::new(

@@ -42,6 +42,14 @@ pub struct SolveFgmresArgs<'a> {
     pub tol_abs: f32,
     pub precond_label: &'a str,
     pub use_encoded_seed_basis0: bool,
+    /// Tighter AIMD budget policy for the chunked path (see
+    /// [`submit_solve_fgmres_fixed_iterations_chunked`]): floor/margin of a
+    /// few iterations instead of a full restart cycle, and a first-solve
+    /// budget of one restart cycle instead of `max_iters`. Used by the
+    /// per-outer host-driven route, where encoding a 60-iteration cycle for a
+    /// ~10-iteration solve costs more than the submits it saves. The batched
+    /// one-submission outer path keeps the legacy floor (`false`).
+    pub tight_budget: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -269,6 +277,7 @@ pub fn solve_fgmres<P: PreconditionerModule>(
         tol_abs,
         precond_label,
         use_encoded_seed_basis0,
+        tight_budget: _,
     } = args;
     let tol = lin_tol_override().unwrap_or(tol);
     let start = Instant::now();
@@ -570,6 +579,7 @@ pub fn encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>(
         tol_abs,
         precond_label,
         use_encoded_seed_basis0,
+        tight_budget: _,
     } = args;
     let tol = lin_tol_override().unwrap_or(tol);
     let start = Instant::now();
@@ -672,6 +682,7 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
         tol_abs,
         precond_label,
         use_encoded_seed_basis0,
+        tight_budget,
     } = args;
     let tol = lin_tol_override().unwrap_or(tol);
     let start = Instant::now();
@@ -685,11 +696,22 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
     // budget stays max_iters. The wall-time win is on the HOST side:
     // frozen chunks execute as GPU no-ops either way, but encoding them
     // is what dominates small-system solves.
+    //
+    // `tight_budget` (per-outer host route): floor/margin of a few
+    // iterations instead of a full restart cycle, first solve starts at one
+    // restart cycle instead of max_iters — a ~10-iteration solve then
+    // encodes ~18 iterations, not 60. Under-budgeting costs one AIMD
+    // doubling on the next solve; physics is unaffected (inexact Picard).
     let restart_len_u32 = max_restart.max(1) as u32;
+    let (budget_floor, budget_margin, initial_budget) = if tight_budget {
+        (16u32.min(restart_len_u32).max(1), 8u32, restart_len_u32)
+    } else {
+        (restart_len_u32, restart_len_u32, max_iters)
+    };
     let budget = krylov
         .adaptive_budget
-        .map(|b| b.clamp(restart_len_u32, max_iters.max(1)))
-        .unwrap_or(max_iters);
+        .map(|b| b.clamp(budget_floor, max_iters.max(1)))
+        .unwrap_or(initial_budget);
 
     let FgmresChunkLayout {
         mut params,
@@ -836,12 +858,13 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
         }
         let next = if info.stopped_early {
             // Stall/guard/convergence ended the solve: next budget =
-            // actual work + one restart cycle of margin.
-            (info.actual_iters.saturating_add(restart_len_u32))
-                .clamp(restart_len_u32, max_iters.max(1))
+            // actual work + margin (a restart cycle, or a few iterations
+            // under the tight policy).
+            (info.actual_iters.saturating_add(budget_margin))
+                .clamp(budget_floor, max_iters.max(1))
         } else {
             // Budget exhausted without stopping: grow back quickly.
-            budget.saturating_mul(2).clamp(restart_len_u32, max_iters.max(1))
+            budget.saturating_mul(2).clamp(budget_floor, max_iters.max(1))
         };
         krylov.adaptive_budget = Some(next);
         stats

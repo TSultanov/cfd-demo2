@@ -894,6 +894,7 @@ impl PlanLinearSystemDebug for GenericCoupledProgramResources {
                     tol_abs: tol * 1e-4,
                     precond_label: "GenericCoupled Schur (debug)",
                     use_encoded_seed_basis0: false,
+                    tight_budget: false,
                 },
             ))
         } else if let Some(krylov) = &mut self.krylov {
@@ -920,6 +921,7 @@ impl PlanLinearSystemDebug for GenericCoupledProgramResources {
                     tol_abs: tol * 1e-4,
                     precond_label: "GenericCoupled FGMRES (debug)",
                     use_encoded_seed_basis0: false,
+                    tight_budget: false,
                 },
             ))
         } else {
@@ -1271,6 +1273,10 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
     // still more sensitive in OpenFOAM parity diagnostics.
     let use_encoded_seed_basis0 = encoded_seed_basis0_enabled(r.outer_iters > 1);
     let tol = first_outer_tolerance(r.linear_solver.tolerance, is_first_outer, r.outer_iters > 1);
+    // Multi-outer host-driven solves route through the chunked one-submission
+    // machinery (see `host_chunked_solve_enabled`); it requires the encoded
+    // seed, whose availability `use_encoded_seed_basis0` already gates.
+    let use_chunked = use_encoded_seed_basis0 && host_chunked_solve_enabled();
 
     if let Some(schur) = &mut r.schur {
         let system = LinearSystemView {
@@ -1284,22 +1290,30 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
         };
         let max_restart = max_restart.max(1);
 
-        let stats = solve_fgmres(
-            &mut schur.solver,
-            SolveFgmresArgs {
-                context: &context,
-                system,
-                n: r.runtime.num_dofs,
-                num_cells: r.runtime.common.num_cells,
-                dispatch: schur.dispatch,
-                max_restart,
-                max_iters: r.linear_solver.max_iters,
-                tol,
-                tol_abs: r.linear_solver.tolerance_abs,
-                precond_label: "generic_coupled:schur",
-                use_encoded_seed_basis0,
-            },
-        );
+        let args = SolveFgmresArgs {
+            context: &context,
+            system,
+            n: r.runtime.num_dofs,
+            num_cells: r.runtime.common.num_cells,
+            dispatch: schur.dispatch,
+            max_restart,
+            max_iters: r.linear_solver.max_iters,
+            tol,
+            tol_abs: r.linear_solver.tolerance_abs,
+            precond_label: "generic_coupled:schur",
+            use_encoded_seed_basis0,
+            tight_budget: use_chunked,
+        };
+        let stats = if use_chunked {
+            submit_solve_fgmres_fixed_iterations_chunked(
+                &mut schur.solver,
+                args,
+                &mut |_| {},
+                &mut |_| {},
+            )
+        } else {
+            solve_fgmres(&mut schur.solver, args)
+        };
         plan.last_linear_stats = stats;
         plan.step_linear_stats.push(stats);
         return;
@@ -1316,22 +1330,30 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
             _ => 30,
         };
 
-        let stats = solve_fgmres(
-            &mut krylov.solver,
-            SolveFgmresArgs {
-                context: &context,
-                system,
-                n: r.runtime.num_dofs,
-                num_cells: r.runtime.common.num_cells,
-                dispatch: krylov.dispatch,
-                max_restart: max_restart.max(1),
-                max_iters: r.linear_solver.max_iters,
-                tol,
-                tol_abs: r.linear_solver.tolerance_abs,
-                precond_label: "generic_coupled:fgmres",
-                use_encoded_seed_basis0,
-            },
-        );
+        let args = SolveFgmresArgs {
+            context: &context,
+            system,
+            n: r.runtime.num_dofs,
+            num_cells: r.runtime.common.num_cells,
+            dispatch: krylov.dispatch,
+            max_restart: max_restart.max(1),
+            max_iters: r.linear_solver.max_iters,
+            tol,
+            tol_abs: r.linear_solver.tolerance_abs,
+            precond_label: "generic_coupled:fgmres",
+            use_encoded_seed_basis0,
+            tight_budget: use_chunked,
+        };
+        let stats = if use_chunked {
+            submit_solve_fgmres_fixed_iterations_chunked(
+                &mut krylov.solver,
+                args,
+                &mut |_| {},
+                &mut |_| {},
+            )
+        } else {
+            solve_fgmres(&mut krylov.solver, args)
+        };
         plan.last_linear_stats = stats;
         plan.step_linear_stats.push(stats);
         return;
@@ -1340,6 +1362,22 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
     let stats = r.runtime.solve_linear_system_cg(r.linear_solver.max_iters, tol);
     plan.last_linear_stats = stats;
     plan.step_linear_stats.push(stats);
+}
+
+/// Route multi-outer host-driven solves through the chunked one-submission
+/// machinery (GPU-side seed + rel-scale clamp + restart guard + stall +
+/// convergence flag, ONE submission and ONE blocking scalar readback per
+/// chunk) instead of the host restart loop, which pays per restart cycle: a
+/// host residual recompute (2 submits + a blocking norm readback), a
+/// snapshot/restore submission, the restart-body submission and a second
+/// blocking scalar readback. Semantics are preserved GPU-side:
+/// `clamp_rel_scale` implements the same `rel_scale = min(||b||, ||r0||)`,
+/// the encoded stall matches the host checkpoint stall, and the restart
+/// guard replicates the snapshot/restore monotonicity logic (this is the
+/// batched path's production configuration). `CFD2_NO_HOST_CHUNKED=1`
+/// restores the host loop.
+fn host_chunked_solve_enabled() -> bool {
+    !std::env::var("CFD2_NO_HOST_CHUNKED").is_ok_and(|v| v == "1")
 }
 
 /// Eisenstat-Walker-style loosened tolerance for the FIRST outer iteration of
@@ -2070,6 +2108,7 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                         tol_abs,
                         precond_label: "generic_coupled:schur(batch_tail)",
                         use_encoded_seed_basis0: true,
+                        tight_budget: false,
                     },
                     &mut pre,
                     &mut post,
@@ -2090,6 +2129,7 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                         tol_abs,
                         precond_label: "generic_coupled:fgmres(batch_tail)",
                         use_encoded_seed_basis0: true,
+                        tight_budget: false,
                     },
                     &mut pre,
                     &mut post,

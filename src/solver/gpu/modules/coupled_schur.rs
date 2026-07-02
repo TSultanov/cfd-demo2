@@ -34,13 +34,18 @@ pub struct CoupledSchurKernelIds {
 /// With the heavy-ball relaxation (see [`heavy_ball_omega`]) far fewer sweeps
 /// are needed than the old plain-Jacobi count of `min(20 + sqrt(n)/2, 200)`:
 /// measured on the fine channel-obstacle (118k cells) the optimum is ~48-64
-/// sweeps and on the fine CD nozzle (750k cells) ~24-64, while the GUI default
-/// meshes (~5k cells) sit near 30. `CFD2_GPU_SCHUR_SWEEPS` overrides.
-pub fn default_pressure_sweeps(num_cells: u32) -> usize {
+/// sweeps, while the GUI default meshes (~5k cells) sit near 30. `sweeps_cap`
+/// comes from the model's `ModelPreconditionerSpec::Schur` (64 for
+/// Poisson-like symmetric pressure blocks; 32 for the mass-term-boosted
+/// all-Mach block, which saturates by ~24-32 sweeps).
+/// `CFD2_GPU_SCHUR_SWEEPS` overrides.
+pub fn default_pressure_sweeps(num_cells: u32, sweeps_cap: u32) -> usize {
     std::env::var("CFD2_GPU_SCHUR_SWEEPS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or_else(|| (20 + (num_cells as f32).sqrt() as usize / 8).min(64))
+        .unwrap_or_else(|| {
+            (20 + (num_cells as f32).sqrt() as usize / 8).min(sweeps_cap.max(1) as usize)
+        })
 }
 
 /// Relaxation weight for the Schur pressure sweeps.
@@ -79,6 +84,8 @@ pub struct CoupledSchurInputs<'a> {
     pub diag_p_inv: &'a wgpu::Buffer,
     pub precond_params: &'a wgpu::Buffer,
     pub pressure_kind: CoupledPressureSolveKind,
+    /// Model-declared cap for [`default_pressure_sweeps`].
+    pub sweeps_cap: u32,
     pub kernels: CoupledSchurKernelIds,
 }
 
@@ -183,7 +190,7 @@ impl CoupledSchurModule {
 
         Ok(Self {
             pressure_kind: inputs.pressure_kind,
-            pressure_sweeps: default_pressure_sweeps(inputs.num_cells),
+            pressure_sweeps: default_pressure_sweeps(inputs.num_cells, inputs.sweeps_cap),
             b_temp_p,
             b_p_sol,
             bgl_schur_vectors,

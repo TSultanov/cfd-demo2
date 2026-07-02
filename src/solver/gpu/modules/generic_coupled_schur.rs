@@ -33,6 +33,8 @@ pub struct GenericCoupledSchurPreconditionerInputs<'a> {
     pub u0123: [u32; 4],
     pub u4567: [u32; 4],
     pub pressure_kind: CoupledPressureSolveKind,
+    /// Model-declared cap on the inner pressure-relaxation sweep count.
+    pub sweeps_cap: u32,
 }
 
 /// Input struct for [`GenericCoupledSchurPreconditioner::build_setup_bind_group`].
@@ -87,6 +89,7 @@ impl GenericCoupledSchurPreconditioner {
                     diag_p_inv: inputs.diag_p_inv,
                     precond_params: inputs.precond_params,
                     pressure_kind: inputs.pressure_kind,
+                    sweeps_cap: inputs.sweeps_cap,
                     kernels: CoupledSchurKernelIds {
                         predict_and_form: KernelId::SCHUR_GENERIC_PRECOND_PREDICT_AND_FORM,
                         relax_pressure: KernelId::SCHUR_GENERIC_PRECOND_RELAX_PRESSURE,

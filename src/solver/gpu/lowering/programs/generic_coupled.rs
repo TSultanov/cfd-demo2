@@ -406,11 +406,12 @@ impl GenericCoupledProgramResources {
 fn validate_schur_model(
     model: &ModelSpec,
     unknown_mapping: &ResolvedUnknownMapping,
-) -> Result<(f32, crate::solver::model::SchurBlockLayout), String> {
+) -> Result<(f32, u32, crate::solver::model::SchurBlockLayout), String> {
     let Some(solver) = model.linear_solver else {
         return Err("model does not define a linear solver spec".into());
     };
-    let ModelPreconditionerSpec::Schur { omega, layout } = solver.preconditioner else {
+    let ModelPreconditionerSpec::Schur { omega, sweeps_cap, layout } = solver.preconditioner
+    else {
         return Err("model does not request Schur preconditioning".into());
     };
 
@@ -489,7 +490,7 @@ fn validate_schur_model(
         ));
     }
 
-    Ok((omega, layout))
+    Ok((omega, sweeps_cap, layout))
 }
 
 fn build_generic_schur(
@@ -509,7 +510,7 @@ fn build_generic_schur(
 
     // Compute the unknown mapping for Schur validation
     let unknown_mapping = resolve_unknown_mapping_runtime(model, &recipe.port_registry)?;
-    let (omega, layout) = validate_schur_model(model, &unknown_mapping)?;
+    let (omega, sweeps_cap, layout) = validate_schur_model(model, &unknown_mapping)?;
 
     let LinearSolverType::Fgmres { max_restart } = recipe.linear_solver.solver_type else {
         return Err(
@@ -665,6 +666,7 @@ fn build_generic_schur(
             pressure_kind: CoupledPressureSolveKind::from_config(
                 recipe.linear_solver.preconditioner,
             ),
+            sweeps_cap,
         },
     )?;
 
@@ -2944,6 +2946,7 @@ mod tests {
             linear_solver: Some(ModelLinearSolverSpec {
                 preconditioner: ModelPreconditionerSpec::Schur {
                     omega: 1.0,
+                    sweeps_cap: 64,
                     layout: SchurBlockLayout::from_u_p(&[0, 1, 2], 3).expect("layout build failed"),
                 },
                 ..Default::default()

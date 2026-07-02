@@ -384,6 +384,7 @@ fn incompressible_momentum_model_impl(with_mms_source: bool) -> Result<ModelSpec
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
             preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
                 omega: 1.0,
+                sweeps_cap: 64,
                 layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(
                     &[u0, u1],
                     p,

@@ -811,6 +811,11 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
                 // (gate nozzle_interior_vacuum_probe), while 1.6 reproduces the
                 // plain-Jacobi trajectory and is still ~2x faster end-to-end.
                 omega: 1.6,
+                // The psi/dtau mass term boosts the pressure diagonal, so the
+                // inner relaxation saturates by ~24-32 sweeps on the fine
+                // nozzle (0.80s at 32 vs 0.93s at the shared 64); 32 keeps
+                // margin above the measured saturation point.
+                sweeps_cap: 32,
                 layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(
                     &schur_u,
                     p,

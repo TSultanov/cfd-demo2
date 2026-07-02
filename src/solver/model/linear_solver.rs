@@ -107,6 +107,13 @@ pub enum ModelPreconditionerSpec {
         /// converges far faster than plain Jacobi. Any other value is used
         /// verbatim. The CPU backend runs its own inner solve and ignores this.
         omega: f32,
+        /// Cap on the inner pressure-relaxation sweep count
+        /// (`min(20 + sqrt(num_cells)/8, sweeps_cap)` per preconditioner
+        /// apply; see `gpu::modules::coupled_schur::default_pressure_sweeps`).
+        /// Poisson-like symmetric pressure blocks want 64; blocks with a
+        /// strong diagonal mass term (all-Mach `psi/dtau`) saturate by ~24-32
+        /// and extra sweeps are pure cost. Only binds above ~9k cells.
+        sweeps_cap: u32,
         /// Model-declared block layout for the Schur complement preconditioner.
         ///
         /// This makes the preconditioner independent of any solver-side assumptions about

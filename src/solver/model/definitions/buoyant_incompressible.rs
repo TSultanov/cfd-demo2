@@ -357,6 +357,7 @@ fn buoyant_incompressible_model_impl(with_mms_sources: bool) -> Result<ModelSpec
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
             preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
                 omega: 1.0,
+                sweeps_cap: 64,
                 layout: schur_layout,
             },
             ..Default::default()

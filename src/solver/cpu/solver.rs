@@ -308,7 +308,7 @@ impl CpuSolver {
 
         // Model-owned Schur preconditioner (saddle-point models).
         let schur = match model.linear_solver.and_then(|ls| match ls.preconditioner {
-            crate::solver::model::ModelPreconditionerSpec::Schur { omega, layout } => {
+            crate::solver::model::ModelPreconditionerSpec::Schur { omega, layout, .. } => {
                 Some((layout, omega))
             }
             _ => None,

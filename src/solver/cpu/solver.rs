@@ -708,6 +708,23 @@ impl CpuSolver {
             .filter(|s| matches!(s.phase, KernelPhase::Update | KernelPhase::PrimitiveRecovery))
             .map(|s| s.id.clone())
             .collect();
+        // Outer iterations after the first skip `flux_module_gradients` when
+        // the Update phase's `rhie_chow/grad_p_update` refreshes the same state
+        // grad_p slots each iteration: the two kernels are byte-equivalent
+        // (identical Green-Gauss stencil + boundary closure) and nothing
+        // modifies p between them, so the recompute is redundant. Mirrors the
+        // GPU `assembly_graph_tail`; `CFD2_NO_GRADP_SKIP=1` disables.
+        let has_grad_p_refresh = update_group.iter().any(|id| id.contains("grad_p_update"))
+            && !std::env::var("CFD2_NO_GRADP_SKIP").is_ok_and(|v| v == "1");
+        let per_iter_tail: Vec<String> = if has_grad_p_refresh {
+            per_iter
+                .iter()
+                .filter(|id| !id.contains("flux_module_gradients"))
+                .cloned()
+                .collect()
+        } else {
+            per_iter.clone()
+        };
 
         let threads = self.config.threads;
         let engine = self.config.engine;
@@ -816,7 +833,8 @@ impl CpuSolver {
             // group, then the recurring boundary-closure refresh (bc_expr) which
             // prepares the ghosts for the next iteration/step.
             timed!(t_asm, {
-                for id in &per_iter {
+                let group = if outer_idx == 0 { &per_iter } else { &per_iter_tail };
+                for id in group {
                     run_t!(id);
                 }
             });

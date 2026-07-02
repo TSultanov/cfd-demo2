@@ -538,6 +538,17 @@ pub struct SchurPrecond<'a> {
     /// (applies, applies that failed to converge — cap-out or stagnation).
     applies: std::cell::Cell<u32>,
     inner_failures: std::cell::Cell<u32>,
+    /// AMG-path Krylov selection. PCG was REFUTED as the default by
+    /// measurement (July 2026, 118k cut-cell obstacle): the "near-SPD"
+    /// premise fails on the real block — cut-cell/BC/deferred-correction
+    /// nonsymmetry makes CG stall at rel 0.4-1.0 within ~4 iterations
+    /// (sometimes diverging past 1.0), every apply becomes a nearly-useless
+    /// preconditioner application, and the warm step regressed 0.25 -> 0.82s
+    /// (3.2x) while BiCGSTAB's extra spmv/V-cycle per iteration buys real
+    /// reduction. Default false (BiCGSTAB);
+    /// `CFD2_CPU_SCHUR_AMG_KRYLOV=cg` opts into the experiment (curvature
+    /// breakdown still one-way-flips back).
+    amg_use_cg: std::cell::Cell<bool>,
 }
 
 impl<'a> SchurPrecond<'a> {
@@ -713,6 +724,9 @@ impl<'a> SchurPrecond<'a> {
             amg,
             applies: std::cell::Cell::new(0),
             inner_failures: std::cell::Cell::new(0),
+            amg_use_cg: std::cell::Cell::new(
+                std::env::var("CFD2_CPU_SCHUR_AMG_KRYLOV").map_or(false, |v| v == "cg"),
+            ),
         }
     }
 
@@ -796,15 +810,52 @@ impl Preconditioner for SchurPrecond<'_> {
             Some(amg) => {
                 let gp_f32: Vec<f32> = gp.iter().map(|&v| v as f32).collect();
                 let mut psol_f32 = vec![0.0f32; cells];
-                let st = bicgstab_pc_opts(
-                    &pa,
-                    &gp_f32,
-                    &mut psol_f32,
-                    self.inner_iters,
-                    self.inner_tol,
-                    &|r, z| amg.vcycle(r, z),
-                    true,
-                );
+                // BiCGSTAB by default; PCG opt-in only (see the
+                // `amg_use_cg` field doc for the measured refutation). On a
+                // CG curvature breakdown the apply re-runs with BiCGSTAB so
+                // FGMRES never sees the aborted iterate.
+                let st = if self.amg_use_cg.get() {
+                    let (st, spd_breakdown) = cg_pc_opts(
+                        &pa,
+                        &gp_f32,
+                        &mut psol_f32,
+                        self.inner_iters,
+                        self.inner_tol,
+                        &|r, z| amg.vcycle(r, z),
+                        true,
+                    );
+                    if spd_breakdown {
+                        self.amg_use_cg.set(false);
+                        if std::env::var("CFD2_CPU_SCHUR_DEBUG").is_ok() {
+                            eprintln!(
+                                "[schur-inner] CG curvature breakdown at apply {} -> BiCGSTAB (one-way)",
+                                self.applies.get() + 1
+                            );
+                        }
+                        psol_f32.fill(0.0);
+                        bicgstab_pc_opts(
+                            &pa,
+                            &gp_f32,
+                            &mut psol_f32,
+                            self.inner_iters,
+                            self.inner_tol,
+                            &|r, z| amg.vcycle(r, z),
+                            true,
+                        )
+                    } else {
+                        st
+                    }
+                } else {
+                    bicgstab_pc_opts(
+                        &pa,
+                        &gp_f32,
+                        &mut psol_f32,
+                        self.inner_iters,
+                        self.inner_tol,
+                        &|r, z| amg.vcycle(r, z),
+                        true,
+                    )
+                };
                 for i in 0..cells {
                     psol[i] = psol_f32[i] as f64;
                 }
@@ -1369,6 +1420,114 @@ pub fn bicgstab_pc_opts(
     }
 
     finish(&xf, x, max_iter, res, res / bnorm <= tol)
+}
+
+/// Preconditioned conjugate gradient with the same calling convention as
+/// [`bicgstab_pc_opts`] (f32 in/out, f64 internals, deterministic `par_dot`
+/// reductions, stagnation exit). Per iteration: 1 spmv + 1 preconditioner
+/// apply + 3 dots + 3 fused updates — HALF the spmvs/preconditioner applies
+/// (and most of the parallel-region launches) of a BiCGSTAB iteration, at
+/// comparable convergence per matvec on the near-SPD pressure block with the
+/// symmetric V(1,1) damped-Jacobi AMG cycle as `minv`.
+///
+/// Returns `(stats, spd_breakdown)`: `spd_breakdown = true` means a
+/// non-positive curvature `<p, A p>` was met — the block is materially
+/// non-symmetric/indefinite along the search direction and the caller should
+/// fall back to BiCGSTAB (one-way, mirroring the adaptive-switch style).
+pub fn cg_pc_opts(
+    a: &CsrView,
+    b: &[f32],
+    x: &mut [f32],
+    max_iter: usize,
+    tol: f64,
+    minv: &dyn Fn(&[f64], &mut [f64]),
+    stagnation_exit: bool,
+) -> (SolveStats, bool) {
+    let n = a.n();
+    assert_eq!(b.len(), n);
+    assert_eq!(x.len(), n);
+    let threads = a.threads.max(1);
+
+    let vdot = |a: &[f64], b: &[f64]| par_dot(threads, a, b);
+    let vnorm = |a: &[f64]| vdot(a, a).sqrt();
+
+    let bf: Vec<f64> = b.iter().map(|&v| v as f64).collect();
+    let bnorm = vnorm(&bf).max(1e-300);
+    let mut xf: Vec<f64> = x.iter().map(|&v| v as f64).collect();
+
+    // r = b - A x
+    let mut ax = vec![0.0f64; n];
+    a.spmv(&xf, &mut ax);
+    let mut r = vec![0.0f64; n];
+    par_map_into(threads, &mut r, |i| bf[i] - ax[i]);
+
+    let finish = |xf: &[f64], x: &mut [f32], iters: usize, res: f64, conv: bool| -> SolveStats {
+        for i in 0..n {
+            x[i] = xf[i] as f32;
+        }
+        SolveStats {
+            iters,
+            rel_residual: res / bnorm,
+            converged: conv,
+        }
+    };
+
+    let mut res = vnorm(&r);
+    if res / bnorm <= tol {
+        return (finish(&xf, x, 0, res, true), false);
+    }
+
+    let mut z = vec![0.0f64; n];
+    minv(&r, &mut z);
+    let mut p = z.clone();
+    let mut ap = vec![0.0f64; n];
+    let mut rz = vdot(&r, &z);
+    let mut best_res = res;
+    let mut stalled = 0u32;
+
+    for iter in 1..=max_iter {
+        a.spmv(&p, &mut ap);
+        let pap = vdot(&p, &ap);
+        if !(pap > 0.0) || !rz.is_finite() {
+            // Non-SPD curvature (or numeric junk): hand back the best-effort
+            // iterate and tell the caller to switch algorithms.
+            return (finish(&xf, x, iter, res, res / bnorm <= tol), true);
+        }
+        let alpha = rz / pap;
+        {
+            let p = &p;
+            par_update(threads, &mut xf, |i, xi| *xi += alpha * p[i]);
+        }
+        {
+            let ap = &ap;
+            par_update(threads, &mut r, |i, ri| *ri -= alpha * ap[i]);
+        }
+        res = vnorm(&r);
+        if res / bnorm <= tol {
+            return (finish(&xf, x, iter, res, true), false);
+        }
+        if stagnation_exit {
+            if res > 0.98 * best_res {
+                stalled += 1;
+                if stalled >= 2 {
+                    return (finish(&xf, x, iter, res, false), false);
+                }
+            } else {
+                stalled = 0;
+            }
+            best_res = best_res.min(res);
+        }
+        minv(&r, &mut z);
+        let rz_new = vdot(&r, &z);
+        let beta = rz_new / rz;
+        {
+            let z = &z;
+            par_update(threads, &mut p, |i, pi| *pi = z[i] + beta * *pi);
+        }
+        rz = rz_new;
+    }
+
+    (finish(&xf, x, max_iter, res, res / bnorm <= tol), false)
 }
 
 #[cfg(test)]

@@ -189,6 +189,10 @@ pub struct CpuSolver {
     /// converge (mesh too fine for the Jacobi inner solve). Overridable via
     /// `CFD2_CPU_SCHUR_AMG=0|1`.
     schur_amg_active: std::cell::Cell<bool>,
+    /// True while `linear_solve` serves the FIRST outer iteration of a
+    /// multi-outer step (set by the step loop; `Cell` because the loop holds
+    /// `&self` borrows) — enables the loosened Eisenstat-Walker first solve.
+    ew_first_outer: std::cell::Cell<bool>,
     dt: f32,
     dt_old: f32,
     dtau: f32,
@@ -447,6 +451,7 @@ impl CpuSolver {
             schur,
             amg_hier: std::cell::OnceCell::new(),
             schur_amg_active: std::cell::Cell::new(false),
+            ew_first_outer: std::cell::Cell::new(false),
             dt: 0.01,
             dt_old: 0.01,
             dtau: 0.0,
@@ -861,6 +866,7 @@ impl CpuSolver {
                     run_t!(id);
                 }
             });
+            self.ew_first_outer.set(outer_idx == 0 && self.outer_iters > 1);
             timed!(t_lin, self.linear_solve());
             timed!(t_upd, {
                 for id in update_group {
@@ -1131,6 +1137,19 @@ impl CpuSolver {
                 .ok()
                 .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(self.linear_tol);
+            // Eisenstat-Walker-style loosened first-outer solve (GPU
+            // `first_outer_tolerance` mirror): the first outer iteration of a
+            // multi-outer step re-linearizes immediately afterwards, so its
+            // linearization error is O(1) and solving past ~1e-2 relative is
+            // over-solving; later outers keep the model tolerance, so the
+            // converged step is unchanged. `CFD2_NO_EW_FIRST=1` disables.
+            let tol = if self.ew_first_outer.get()
+                && !std::env::var("CFD2_NO_EW_FIRST").is_ok_and(|v| v == "1")
+            {
+                tol.max(1e-2)
+            } else {
+                tol
+            };
             let stats = match &self.schur {
                 Some((u_idx, p, omega, sweeps_cap)) => {
                     // Adaptive inner solve for the Schur pressure block: start

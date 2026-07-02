@@ -116,18 +116,18 @@ impl ScheduleGroups {
         } else {
             per_iter.clone()
         };
-        // Frozen-matrix variant: tail Gradients/FluxComputation kernels, then
-        // the AssemblyRhsOnly kernels instead of the Assembly ones (schedule
-        // order preserved). Empty when the model declares no RHS-only kernels.
+        // Frozen-matrix variant: the AssemblyRhsOnly kernels ONLY. The v1
+        // frozen group re-ran the Gradients/FluxComputation kernels, which
+        // BROKE the deferred-correction pairing (the dc RHS was recomputed
+        // from FRESH fluxes against a matrix built from OLD ones — the
+        // measured 614 s/step refutation). Freezing the fluxes/gradients WITH
+        // the matrix keeps every implicit/explicit pair consistent by
+        // construction. Empty when the model declares no RHS-only kernels.
         let has_rhs_only = schedule.iter().any(|s| s.phase == KernelPhase::AssemblyRhsOnly);
         let per_iter_frozen = if has_rhs_only {
             schedule
                 .iter()
-                .filter(|s| {
-                    (matches!(s.phase, KernelPhase::Gradients | KernelPhase::FluxComputation)
-                        && per_iter_tail.contains(&s.id))
-                        || s.phase == KernelPhase::AssemblyRhsOnly
-                })
+                .filter(|s| s.phase == KernelPhase::AssemblyRhsOnly)
                 .map(|s| s.id.clone())
                 .collect()
         } else {
@@ -146,6 +146,11 @@ impl ScheduleGroups {
 
 pub struct CpuSolver {
     model_id: &'static str,
+    /// Matrix-freeze eligibility: models with `linearize_pressure_flux`
+    /// terms are EXCLUDED — that term's RHS piece is recomputed from live
+    /// state inside the RHS-only kernel, so it would decouple from the
+    /// frozen matrix's Jacobian (an a_lin cache is the future fix).
+    freeze_eligible: bool,
     num_cells: usize,
     num_faces: usize,
     state_stride: u32,
@@ -447,6 +452,9 @@ impl CpuSolver {
 
         Ok(Self {
             model_id: model.id,
+            freeze_eligible: !model.system.equations().iter().any(|eq| {
+                eq.terms().iter().any(|t| t.linearize_pressure_flux.is_some())
+            }),
             num_cells,
             num_faces,
             state_stride,
@@ -782,20 +790,20 @@ impl CpuSolver {
         let per_iter = &self.groups.per_iter;
         let per_iter_tail = &self.groups.per_iter_tail;
         let update_group = &self.groups.update;
-        // Matrix freezing (EXPERIMENTAL probe, default off): re-linearize on
-        // outer 0 and every `matrix_freeze_period`-th outer; other outers
-        // refresh only the RHS against the frozen matrix. MEASURED REFUTATION:
-        // enabling is harmful — the deferred-correction terms pair an implicit
-        // matrix piece with an explicit RHS piece from the SAME linearization,
-        // and refreshing one side breaks the cancellation (nozzle 2.2 ->
-        // 614 s/step; obstacle OOMs via the frozen zero-d_p step-0 matrix
-        // poisoning the AMG hierarchy). Kept as the substrate for a correct
-        // freeze that also freezes the deferred RHS pieces.
-        // `CFD2_MATRIX_FREEZE=k` enables (see the GPU field doc).
+        // Matrix freezing v2 (default off): re-linearize on outer 0 and every
+        // `matrix_freeze_period`-th outer; frozen outers re-run ONLY the
+        // RHS-only assembly against the frozen matrix AND the frozen
+        // fluxes/gradients, so every deferred-correction implicit/explicit
+        // pair stays consistent (the v1 frozen group re-ran FluxComputation —
+        // the measured 614 s/step refutation). Outer 1 always re-linearizes:
+        // step 0's first matrix has a zero pressure diagonal (d_p is seeded by
+        // the first Update), and freezing it poisoned the AMG hierarchy.
+        // Ineligible for models with `linearize_pressure_flux` (see the field
+        // doc). `CFD2_MATRIX_FREEZE=k` enables.
         let freeze_period: usize = std::env::var("CFD2_MATRIX_FREEZE")
             .ok()
             .and_then(|v| v.parse().ok())
-            .filter(|_| !self.groups.per_iter_frozen.is_empty())
+            .filter(|_| !self.groups.per_iter_frozen.is_empty() && self.freeze_eligible)
             .unwrap_or(0);
 
         let threads = self.config.threads;
@@ -911,7 +919,7 @@ impl CpuSolver {
             timed!(t_asm, {
                 let group = if outer_idx == 0 {
                     per_iter
-                } else if freeze_period > 0 && outer_idx % freeze_period != 0 {
+                } else if freeze_period > 0 && outer_idx > 1 && outer_idx % freeze_period != 0 {
                     &self.groups.per_iter_frozen
                 } else {
                     per_iter_tail

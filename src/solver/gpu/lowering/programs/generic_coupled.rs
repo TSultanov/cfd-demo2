@@ -179,26 +179,27 @@ pub(crate) struct GenericCoupledProgramResources {
     /// between them modifies `p`. `None` when the model lacks the refresher or
     /// `CFD2_NO_GRADP_SKIP=1`.
     assembly_graph_tail: Option<ModuleGraph<GeneratedKernelsModule>>,
-    /// RHS-only assembly variant (Gradients/Flux + AssemblyRhsOnly kernels,
-    /// composed with the grad_p tail skip): re-assembles the RHS against a
-    /// FROZEN matrix. Used on outer iterations where `matrix_freeze_period`
-    /// skips re-linearization; None when the recipe has no RHS-only kernels.
+    /// RHS-only assembly variant (v2: the AssemblyRhsOnly kernels ONLY):
+    /// re-assembles the RHS against a FROZEN matrix AND frozen
+    /// fluxes/gradients. Used on outer iterations where
+    /// `matrix_freeze_period` skips re-linearization; None when the recipe
+    /// has no RHS-only kernels or the model is freeze-ineligible.
     assembly_graph_frozen: Option<ModuleGraph<GeneratedKernelsModule>>,
-    /// Matrix-freeze period (EXPERIMENTAL probe, default 0 = off; env
-    /// `CFD2_MATRIX_FREEZE=k` re-linearizes only on outers 0, k, 2k, ...).
-    /// Applied on the non-batched path and the direct batched path; the
-    /// adaptive-indirect batched sub-path keeps full re-assembly.
+    /// Matrix-freeze period (default 0 = off; env `CFD2_MATRIX_FREEZE=k`
+    /// re-linearizes on outers 0, 1 and every k-th after). Applied on the
+    /// non-batched path and the direct batched path; the adaptive-indirect
+    /// batched sub-path keeps full re-assembly.
     ///
-    /// MEASURED REFUTATION (2026-07-02, both benches): enabling this is
-    /// HARMFUL under the current discretization. The deferred-correction
-    /// terms (convection dc, allmach linearize_pressure_flux) pair an
-    /// implicit matrix piece with an explicit RHS piece that cancel only when
-    /// both come from the SAME linearization state; refreshing the RHS
-    /// against a frozen matrix breaks that pairing (nozzle 750k: 2.2 ->
-    /// 614 s/step). On the obstacle the frozen step-0 zero-d_p matrix also
-    /// poisons the once-built AMG hierarchy (OOM). A correct freeze would
-    /// have to freeze the deferred RHS pieces too — this knob and the
-    /// AssemblyRhsOnly machinery are the reusable substrate for that.
+    /// HISTORY: v1 (refuted 2026-07-02) re-ran Gradients/FluxComputation in
+    /// the frozen graph, recomputing the deferred-correction RHS from FRESH
+    /// fluxes against a matrix built from OLD ones — the broken pairing cost
+    /// nozzle 2.2 -> 614 s/step and OOMed the obstacle (frozen step-0
+    /// zero-d_p matrix poisoning the AMG hierarchy). v2 freezes the
+    /// fluxes/gradients WITH the matrix (frozen graph = RHS-only kernels
+    /// alone), keeping every implicit/explicit pair consistent by
+    /// construction, always re-linearizes outer 1 (d_p is seeded by the
+    /// first Update), and excludes `linearize_pressure_flux` models (their
+    /// RHS piece re-reads live state — an a_lin cache is the future fix).
     matrix_freeze_period: u32,
     apply_graph: ModuleGraph<GeneratedKernelsModule>,
     update_graph: ModuleGraph<GeneratedKernelsModule>,
@@ -311,25 +312,24 @@ impl GenericCoupledProgramResources {
 
         // RHS-only assembly graph for matrix-frozen outer iterations (see the
         // field docs; kernels exist only for the generic coupled models).
+        // v2: the frozen graph runs ONLY the RHS-only assembly — freezing the
+        // fluxes/gradients together with the matrix keeps the deferred-
+        // correction pairing consistent (see the field docs). Models with
+        // `linearize_pressure_flux` stay ineligible: that term's RHS piece is
+        // recomputed from live state inside the RHS-only kernel and would
+        // decouple from the frozen matrix's Jacobian.
+        let freeze_eligible = !model.system.equations().iter().any(|eq| {
+            eq.terms().iter().any(|t| t.linearize_pressure_flux.is_some())
+        });
         let assembly_graph_frozen = build_optional_graph_for_phases(
             recipe,
-            &[
-                KernelPhase::Gradients,
-                KernelPhase::FluxComputation,
-                KernelPhase::AssemblyRhsOnly,
-            ],
+            &[KernelPhase::AssemblyRhsOnly],
             &kernels,
             "generic_coupled",
         )?
-        .filter(|_| recipe.kernels_for_phase(KernelPhase::AssemblyRhsOnly).next().is_some())
-        .map(|g| {
-            if has_grad_p_refresh && !grad_p_skip_disabled {
-                g.clone_filtered(|label| {
-                    !label.ends_with(crate::solver::model::KernelId::FLUX_MODULE_GRADIENTS.as_str())
-                })
-            } else {
-                g
-            }
+        .filter(|_| {
+            freeze_eligible
+                && recipe.kernels_for_phase(KernelPhase::AssemblyRhsOnly).next().is_some()
         });
         let matrix_freeze_period: u32 = std::env::var("CFD2_MATRIX_FREEZE")
             .ok()
@@ -2131,6 +2131,7 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                 if iter_idx == 0 {
                     assembly_graph.encode_into(encoder, kernels, runtime_dims);
                 } else if matrix_freeze_period > 0
+                    && iter_idx > 1
                     && iter_idx % matrix_freeze_period as usize != 0
                     && assembly_graph_frozen.is_some()
                 {
@@ -2375,6 +2376,7 @@ pub(crate) fn assembly_graph_run(
     let graph = if iters_done == 0 {
         &r.assembly_graph
     } else if r.matrix_freeze_period > 0
+        && iters_done > 1
         && iters_done % r.matrix_freeze_period as usize != 0
         && r.assembly_graph_frozen.is_some()
     {

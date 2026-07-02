@@ -171,6 +171,14 @@ pub(crate) struct GenericCoupledProgramResources {
     dp_init_needed: AtomicBool,
     recurring_prepare_enabled: bool,
     assembly_graph: ModuleGraph<GeneratedKernelsModule>,
+    /// Assembly graph for outer iterations AFTER the first, when the model's
+    /// Update phase runs `rhie_chow/grad_p_update`: that kernel already wrote
+    /// the identical Green-Gauss pressure gradient the Gradients-phase
+    /// `flux_module_gradients` would recompute (same stencil, same boundary
+    /// closure — verified byte-equivalent modulo a no-op `* 1.0`), and nothing
+    /// between them modifies `p`. `None` when the model lacks the refresher or
+    /// `CFD2_NO_GRADP_SKIP=1`.
+    assembly_graph_tail: Option<ModuleGraph<GeneratedKernelsModule>>,
     apply_graph: ModuleGraph<GeneratedKernelsModule>,
     update_graph: ModuleGraph<GeneratedKernelsModule>,
     explicit_graph: ModuleGraph<GeneratedKernelsModule>,
@@ -267,6 +275,18 @@ impl GenericCoupledProgramResources {
             &kernels,
             "generic_coupled",
         )?;
+
+        // Tail-iteration assembly variant: drop `flux_module_gradients` when
+        // the Update phase's `rhie_chow/grad_p_update` already refreshes the
+        // same state grad_p slots each outer iteration (see the field doc).
+        let has_grad_p_refresh = recipe
+            .kernels
+            .iter()
+            .any(|k| k.id.as_str().contains("grad_p_update"));
+        let grad_p_skip_disabled = std::env::var("CFD2_NO_GRADP_SKIP").is_ok_and(|v| v == "1");
+        let assembly_graph_tail = (has_grad_p_refresh && !grad_p_skip_disabled).then(|| {
+            assembly_graph.clone_filtered(|label| !label.contains("flux_module_gradients"))
+        });
 
         // Apply and update are optional depending on the stepping mode.
         // (For implicit outer-iteration recipes, update may be executed in the "apply" stage.)
@@ -373,6 +393,7 @@ impl GenericCoupledProgramResources {
             dp_init_needed: AtomicBool::new(dp_init_enabled),
             recurring_prepare_enabled,
             assembly_graph,
+            assembly_graph_tail,
             apply_graph,
             update_graph,
             explicit_graph,
@@ -1799,6 +1820,10 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
         // Split borrows: we need mutable access to the solver (schur or krylov)
         // and immutable access to assembly/update graphs + kernels + runtime dims.
         let assembly_graph = &r.assembly_graph;
+        // Outer iterations after the first can use the tail variant (skips the
+        // grad_p recompute that grad_p_update already performed — see the
+        // `assembly_graph_tail` field doc).
+        let assembly_graph_tail = r.assembly_graph_tail.as_ref().unwrap_or(assembly_graph);
         let update_graph = &r.update_graph;
         let kernels = &r.kernels;
         let runtime_dims = r.runtime_dims();
@@ -1828,11 +1853,14 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
             let monitor = r.outer_convergence.as_ref()
                 .expect("outer_convergence must be Some when use_adaptive is true (checked above)");
 
-            // Create indirect-dispatch variants of assembly and update graphs
+            // Create indirect-dispatch variants of assembly and update graphs.
+            // The indirect assembly graph is only ever encoded for iter_idx > 0
+            // (the direct graph covers the first iteration), so it derives from
+            // the TAIL variant.
             let indirect_cells = gate.b_indirect_args_cells.clone();
             let indirect_faces = gate.b_indirect_args_faces.clone();
             let assembly_graph_indirect =
-                assembly_graph.clone_with_indirect_dispatch(|kind| match kind {
+                assembly_graph_tail.clone_with_indirect_dispatch(|kind| match kind {
                     DispatchKind::Faces => (indirect_faces.clone(), 0),
                     _ => (indirect_cells.clone(), 0),
                 });
@@ -1904,7 +1932,11 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                         return;
                     }
                 }
-                assembly_graph.encode_into(encoder, kernels, runtime_dims);
+                if iter_idx > 0 {
+                    assembly_graph_tail.encode_into(encoder, kernels, runtime_dims);
+                } else {
+                    assembly_graph.encode_into(encoder, kernels, runtime_dims);
+                }
             };
             let mut post = |encoder: &mut wgpu::CommandEncoder| {
                 if let Some((_, ref upd_indirect, ref bg_state, _)) = adaptive_resources {
@@ -2124,13 +2156,16 @@ pub(crate) fn assembly_graph_run(
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     let r = res(plan);
-    run_module_graph(
-        &r.assembly_graph,
-        context,
-        &r.kernels,
-        r.runtime_dims(),
-        mode,
-    )
+    // Outer iterations after the first (one linear-stats entry per completed
+    // solve this step) use the tail variant, which skips the grad_p recompute
+    // that the Update phase's grad_p_update already performed. Out-of-step
+    // callers (debug assembly, parity harnesses) see empty stats -> full graph.
+    let graph = if !plan.step_linear_stats.is_empty() {
+        r.assembly_graph_tail.as_ref().unwrap_or(&r.assembly_graph)
+    } else {
+        &r.assembly_graph
+    };
+    run_module_graph(graph, context, &r.kernels, r.runtime_dims(), mode)
 }
 
 pub(crate) fn init_prepare_graph_run(

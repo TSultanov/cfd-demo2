@@ -55,6 +55,23 @@ impl<M: GpuComputeModule> ModuleGraph<M> {
         Self { nodes }
     }
 
+    /// Create a clone of this graph containing only the nodes whose label
+    /// passes `keep`. Used for schedule variants that drop kernels which are
+    /// redundant in context (e.g. the pressure-gradient recompute on outer
+    /// iterations after the first, where `rhie_chow/grad_p_update` already
+    /// left an identical gradient).
+    pub fn clone_filtered(&self, keep: impl Fn(&str) -> bool) -> Self {
+        let nodes = self
+            .nodes
+            .iter()
+            .filter(|node| match node {
+                ModuleNode::Compute(spec) => keep(spec.label),
+            })
+            .cloned()
+            .collect();
+        Self { nodes }
+    }
+
     /// Create a clone of this graph where every dispatch is replaced with indirect dispatch.
     /// The `map_fn` receives the original `DispatchKind` and returns the indirect buffer + offset
     /// to use for that dispatch. This allows different indirect buffers for Cells vs Faces.

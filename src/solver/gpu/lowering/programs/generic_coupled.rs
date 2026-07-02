@@ -1213,11 +1213,13 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
         timestamp_period_ns: plan.context.timestamp_period_ns,
     };
 
+    let is_first_outer = plan.step_linear_stats.is_empty();
     let r = res_mut(plan);
     // Enable encoded basis seeding by default for multi-outer host-driven solves.
     // Keep single-outer implicit solves opt-in via env var because that path is
     // still more sensitive in OpenFOAM parity diagnostics.
     let use_encoded_seed_basis0 = encoded_seed_basis0_enabled(r.outer_iters > 1);
+    let tol = first_outer_tolerance(r.linear_solver.tolerance, is_first_outer, r.outer_iters > 1);
 
     if let Some(schur) = &mut r.schur {
         let system = LinearSystemView {
@@ -1241,7 +1243,7 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
                 dispatch: schur.dispatch,
                 max_restart,
                 max_iters: r.linear_solver.max_iters,
-                tol: r.linear_solver.tolerance,
+                tol,
                 tol_abs: r.linear_solver.tolerance_abs,
                 precond_label: "generic_coupled:schur",
                 use_encoded_seed_basis0,
@@ -1273,7 +1275,7 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
                 dispatch: krylov.dispatch,
                 max_restart: max_restart.max(1),
                 max_iters: r.linear_solver.max_iters,
-                tol: r.linear_solver.tolerance,
+                tol,
                 tol_abs: r.linear_solver.tolerance_abs,
                 precond_label: "generic_coupled:fgmres",
                 use_encoded_seed_basis0,
@@ -1284,11 +1286,26 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
         return;
     }
 
-    let stats = r
-        .runtime
-        .solve_linear_system_cg(r.linear_solver.max_iters, r.linear_solver.tolerance);
+    let stats = r.runtime.solve_linear_system_cg(r.linear_solver.max_iters, tol);
     plan.last_linear_stats = stats;
     plan.step_linear_stats.push(stats);
+}
+
+/// Eisenstat-Walker-style loosened tolerance for the FIRST outer iteration of
+/// a multi-outer step: the step re-linearizes immediately after it, so its
+/// linearization error is O(1) and solving past ~1e-2 relative is pure
+/// over-solving (the later outers still run at the model tolerance, so the
+/// converged step is unchanged — validated by the MMS order suites). Biggest
+/// effect on from-rest first solves that otherwise burn the whole FGMRES
+/// budget at the tight tolerance. `CFD2_NO_EW_FIRST=1` disables.
+fn first_outer_tolerance(base_tol: f32, is_first_outer: bool, multi_outer: bool) -> f32 {
+    if !is_first_outer
+        || !multi_outer
+        || std::env::var("CFD2_NO_EW_FIRST").is_ok_and(|v| v == "1")
+    {
+        return base_tol;
+    }
+    base_tol.max(1e-2)
 }
 
 /// True when the adaptive outer-loop *plateau* detector drives this step: ANY
@@ -1916,6 +1933,7 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
         // outer iteration.
         for iter_idx in 0..remaining {
             let is_indirect = use_adaptive && iter_idx > 0;
+            let tol_iter = first_outer_tolerance(tol, iter_idx == 0, remaining > 1);
 
             let mut pre = |encoder: &mut wgpu::CommandEncoder| {
                 if let Some((ref asm_indirect, _, _, ref stop_bg)) = adaptive_resources {
@@ -1969,7 +1987,7 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                         dispatch: schur.dispatch,
                         max_restart,
                         max_iters,
-                        tol,
+                        tol: tol_iter,
                         tol_abs,
                         precond_label: "generic_coupled:schur(batch_tail)",
                         use_encoded_seed_basis0: true,
@@ -1989,7 +2007,7 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                         dispatch: krylov.dispatch,
                         max_restart,
                         max_iters,
-                        tol,
+                        tol: tol_iter,
                         tol_abs,
                         precond_label: "generic_coupled:fgmres(batch_tail)",
                         use_encoded_seed_basis0: true,

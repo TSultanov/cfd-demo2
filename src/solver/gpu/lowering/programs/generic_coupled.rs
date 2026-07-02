@@ -1267,12 +1267,24 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
     };
 
     let is_first_outer = plan.step_linear_stats.is_empty();
+    // Previous outer's worst scaled correction (the plateau detector's own
+    // metric), the nonlinear-error estimate the EW forcing scales from.
+    let prev_outer_err = plan
+        .outer_field_residuals_scaled
+        .iter()
+        .map(|(_, v)| *v)
+        .fold(f32::NAN, f32::max);
     let r = res_mut(plan);
     // Enable encoded basis seeding by default for multi-outer host-driven solves.
     // Keep single-outer implicit solves opt-in via env var because that path is
     // still more sensitive in OpenFOAM parity diagnostics.
     let use_encoded_seed_basis0 = encoded_seed_basis0_enabled(r.outer_iters > 1);
-    let tol = first_outer_tolerance(r.linear_solver.tolerance, is_first_outer, r.outer_iters > 1);
+    let tol = outer_forcing_tolerance(
+        r.linear_solver.tolerance,
+        is_first_outer,
+        r.outer_iters > 1,
+        prev_outer_err,
+    );
     // Multi-outer host-driven solves route through the chunked one-submission
     // machinery (see `host_chunked_solve_enabled`); it requires the encoded
     // seed, whose availability `use_encoded_seed_basis0` already gates.
@@ -1395,6 +1407,32 @@ fn first_outer_tolerance(base_tol: f32, is_first_outer: bool, multi_outer: bool)
         return base_tol;
     }
     base_tol.max(1e-2)
+}
+
+/// Full Eisenstat-Walker-style forcing for outers 2..N of a multi-outer step:
+/// the linear tolerance tracks the OUTER Picard error instead of solving every
+/// middle system two decades past it. `prev_outer_err` is the previous outer's
+/// worst per-field scaled correction (the plateau detector's own metric);
+/// eta_k = clamp(0.1 * prev_err, base_tol, 1e-2) solves one decade below the
+/// current nonlinear error, so late outers (small corrections) still get the
+/// full model tolerance and the CONVERGED step is unchanged. The first outer
+/// keeps the EW-lite 1e-2 (its linearization error is O(1)); when no
+/// correction data exists (stats not collected / first step), outers 2..N fall
+/// back to the base tolerance. `CFD2_NO_EW_FULL=1` restores first-outer-only.
+fn outer_forcing_tolerance(
+    base_tol: f32,
+    is_first_outer: bool,
+    multi_outer: bool,
+    prev_outer_err: f32,
+) -> f32 {
+    if is_first_outer || !multi_outer {
+        return first_outer_tolerance(base_tol, is_first_outer, multi_outer);
+    }
+    if !prev_outer_err.is_finite() || std::env::var("CFD2_NO_EW_FULL").is_ok_and(|v| v == "1") {
+        return base_tol;
+    }
+    let hi = base_tol.max(1e-2);
+    (0.1 * prev_outer_err).clamp(base_tol, hi)
 }
 
 /// True when the adaptive outer-loop *plateau* detector drives this step: ANY
@@ -2060,7 +2098,20 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
         // outer iteration.
         for iter_idx in 0..remaining {
             let is_indirect = use_adaptive && iter_idx > 0;
-            let tol_iter = first_outer_tolerance(tol, iter_idx == 0, remaining > 1);
+            // Tolerances are fixed at encode time on this path, so the full-EW
+            // forcing uses a static geometric continuation 1e-2 -> base across
+            // the encoded outers (first outer = the EW-lite 1e-2, last outer =
+            // the model tolerance, log-linear in between). `CFD2_NO_EW_FULL=1`
+            // restores first-outer-only.
+            let tol_iter = if iter_idx == 0 || remaining <= 1 {
+                first_outer_tolerance(tol, iter_idx == 0, remaining > 1)
+            } else if std::env::var("CFD2_NO_EW_FULL").is_ok_and(|v| v == "1") {
+                tol
+            } else {
+                let hi = tol.max(1e-2);
+                let frac = iter_idx as f32 / (remaining - 1) as f32;
+                (hi * (tol / hi).powf(frac)).clamp(tol, hi)
+            };
 
             let mut pre = |encoder: &mut wgpu::CommandEncoder| {
                 if let Some((ref asm_indirect, _, _, ref stop_bg)) = adaptive_resources {

@@ -1414,7 +1414,9 @@ fn emit_transpiled_cpu_kernels(
 
     let mut out = String::from("// @generated transpiled CPU kernels — do not edit\n");
     out.push_str(&fns);
-    out.push_str("\npub type TranspiledKernel = fn(&Buffers, u32, &GpuConstants);\n");
+    out.push_str(
+        "\n/// Chunk-range entry point: runs `[start, end)` with buffer handles\n/// resolved once per chunk (see `rust_emit::emit_kernel_fn`).\npub type TranspiledKernel = fn(&Buffers, u32, u32, &GpuConstants);\n",
+    );
     out.push_str("pub fn lookup(model_id: &str, kernel_id: &str) -> Option<TranspiledKernel> {\n");
     out.push_str("    match (model_id, kernel_id) {\n");
     for (m, k, f) in &entries {

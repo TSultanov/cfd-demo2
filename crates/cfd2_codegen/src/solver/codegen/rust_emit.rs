@@ -66,20 +66,26 @@ pub fn emit_kernel_fn(fn_name: &str, program: &KernelProgram) -> String {
     let mut s = String::new();
     s.push_str("#[allow(unused_variables, unused_mut, unused_parens, clippy::all)]\n");
     s.push_str(&format!(
-        "pub fn {fn_name}(bufs: &Buffers, idx: u32, constants: &GpuConstants) {{\n"
+        "pub fn {fn_name}(bufs: &Buffers, start: u32, end: u32, constants: &GpuConstants) {{\n"
     ));
-    // Resolve each buffer handle once.
+    // Resolve each buffer handle once PER CHUNK, not per index: `bufs.atom` is
+    // a HashMap<String, _> lookup, and the per-index entry point measured
+    // ~25-30% of the assembly phase in name lookups alone (the grad_state
+    // kernel resolves 23 handles per cell). The dispatch loop lives inside
+    // the function so the optimiser can also keep the handles in registers.
     for name in tx.bufs.keys() {
         s.push_str(&format!("    let {name} = bufs.atom(\"{name}\");\n"));
     }
+    s.push_str("    for idx in start..end {\n");
     for stmt in program
         .indexing
         .iter()
         .chain(&program.preamble)
         .chain(&program.body)
     {
-        emit_stmt(stmt, 1, &tx, &mut s);
+        emit_stmt(stmt, 2, &tx, &mut s);
     }
+    s.push_str("    }\n");
     s.push_str("}\n");
     s
 }

@@ -44,6 +44,29 @@ where
     });
 }
 
+/// Run `f(start, end)` over contiguous disjoint index ranges covering `0..n`,
+/// using up to `threads` workers — the range-granular sibling of
+/// [`parallel_for`] (identical chunk math) for callers that amortize per-chunk
+/// setup, e.g. the transpiled kernels' chunk-range entry points, which resolve
+/// their buffer handles once per range instead of once per index.
+pub fn parallel_ranges<F>(n: usize, threads: usize, f: F)
+where
+    F: Fn(usize, usize) + Sync,
+{
+    if threads <= 1 || n <= 1 {
+        f(0, n);
+        return;
+    }
+    let workers = threads.min(n);
+    let chunk = n.div_ceil(workers * pool::OVERSPLIT).max(1);
+    let tasks = n.div_ceil(chunk);
+    pool::run(tasks, workers, |w| {
+        let start = w * chunk;
+        let end = (start + chunk).min(n);
+        f(start, end);
+    });
+}
+
 /// Minimum output elements per worker for the fine-grained (BLAS-1 style)
 /// parallel helpers. Below this, region-launch latency exceeds the memory-bound
 /// work itself, so the helpers scale the worker count down (bit-exactness is

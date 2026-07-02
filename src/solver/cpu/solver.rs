@@ -1315,11 +1315,14 @@ fn run_kernel(
     };
 
     // Transpiled engine: run the compiled-Rust kernel if one was generated for
-    // this (model, kernel); otherwise fall back to the interpreter.
+    // this (model, kernel); otherwise fall back to the interpreter. The
+    // generated entry points take an index RANGE so buffer handles resolve
+    // once per chunk, not once per index (a HashMap lookup per handle —
+    // measured ~25-30% of the assembly phase at 750k cells).
     if engine == CpuEngine::Transpiled {
         if let Some(f) = crate::solver::cpu::generated::lookup(model_id, id) {
-            crate::solver::cpu::parallel::parallel_for(domain, threads, |idx| {
-                f(buffers, idx as u32, constants);
+            crate::solver::cpu::parallel::parallel_ranges(domain, threads, |start, end| {
+                f(buffers, start as u32, end as u32, constants);
             });
             return;
         }

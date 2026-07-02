@@ -1029,8 +1029,15 @@ impl Preconditioner for SchurPrecond<'_> {
 /// a pluggable (possibly nonlinear/iterative) preconditioner. Mirrors the GPU's
 /// FGMRES(60) so a variable preconditioner (the Schur complement smoother in
 /// Phase 2) can be slotted in without breaking the Krylov recurrence. `x` is the
-/// initial guess and receives the solution. Convergence is purely relative
-/// (`||b - A x|| / ||b|| <= tol`), matching the GPU inexact-Picard criterion.
+/// initial guess and receives the solution. Convergence is relative to
+/// `rel_scale = min(||b||, ||r0||)` — the GPU `clamp_rel_scale` semantics.
+/// The min matters for warm-started coupled solves whose RHS is dominated by
+/// large ddt/BDF2 terms: there `||r0|| << ||b||`, and a plain `||b||` scale
+/// declares convergence at zero iterations without computing any correction
+/// (measured: the allmach_thermal obstacle case froze bit-exact at its
+/// initial condition on the CPU backend — rel-to-b residual 6.5e-4 was
+/// already under the EW first-outer 1e-2 — while the GPU, with the clamp,
+/// evolved normally).
 #[allow(clippy::too_many_arguments)]
 pub fn fgmres(
     a: &BlockCsr,
@@ -1077,6 +1084,9 @@ pub fn fgmres(
     let mut r = vec![0.0f64; n];
     let mut total_iters = 0usize;
     let mut res;
+    // GPU-parity relative scale: min(||b||, ||r0||), fixed at the FIRST true
+    // residual (see the function docs).
+    let mut rel_scale: Option<f64> = None;
 
     loop {
         // r0 = b - A x. This head residual doubles as the restart-cycle
@@ -1088,7 +1098,8 @@ pub fn fgmres(
         prof::time(&prof::AXPY, || par_map_into(threads, &mut r, |i| bf[i] - ax[i]));
         let beta = vnorm(&r);
         res = beta;
-        if beta / bnorm <= tol || total_iters >= max_iter {
+        let rs = *rel_scale.get_or_insert_with(|| bnorm.min(beta).max(1e-300));
+        if beta / rs <= tol || total_iters >= max_iter {
             break;
         }
         let inv_beta = 1.0 / beta;
@@ -1152,7 +1163,7 @@ pub fn fgmres(
             total_iters += 1;
             jfin = j + 1;
             res = g[j + 1].abs();
-            if res / bnorm <= tol || hnext < 1e-300 || total_iters >= max_iter {
+            if res / rs <= tol || hnext < 1e-300 || total_iters >= max_iter {
                 break;
             }
             let inv_h = 1.0 / hnext;
@@ -1195,10 +1206,11 @@ pub fn fgmres(
     for i in 0..n {
         x[i] = xf[i] as f32;
     }
+    let rs = rel_scale.unwrap_or(bnorm);
     SolveStats {
         iters: total_iters,
-        rel_residual: res / bnorm,
-        converged: res / bnorm <= tol,
+        rel_residual: res / rs,
+        converged: res / rs <= tol,
     }
 }
 

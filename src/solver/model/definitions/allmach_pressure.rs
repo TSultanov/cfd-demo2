@@ -802,7 +802,15 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
         ],
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
             preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
-                omega: 1.0,
+                // Explicit (not the 1.0 = auto heavy-ball 1.95): the all-Mach
+                // pressure row is upwinded (deferred-Newton flux Jacobian), so
+                // its Jacobi-scaled spectrum has imaginary parts. The heavy-ball
+                // stability ellipse collapses onto the real axis as omega -> 2
+                // (imag tolerance ~0.025 at 1.95 vs ~0.28 at 1.6); at 1.95 the
+                // rocket-scale nozzle demo blows into the near-vacuum degeneracy
+                // (gate nozzle_interior_vacuum_probe), while 1.6 reproduces the
+                // plain-Jacobi trajectory and is still ~2x faster end-to-end.
+                omega: 1.6,
                 layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(
                     &schur_u,
                     p,

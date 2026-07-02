@@ -101,6 +101,11 @@ pub enum ModelPreconditionerSpec {
     /// SIMPLE-like Schur complement preconditioner for saddle-point systems.
     Schur {
         /// Relaxation factor used in the pressure smoother.
+        ///
+        /// `1.0` means "auto": the GPU backend substitutes the heavy-ball
+        /// weight (see `gpu::modules::coupled_schur::heavy_ball_omega`), which
+        /// converges far faster than plain Jacobi. Any other value is used
+        /// verbatim. The CPU backend runs its own inner solve and ignores this.
         omega: f32,
         /// Model-declared block layout for the Schur complement preconditioner.
         ///

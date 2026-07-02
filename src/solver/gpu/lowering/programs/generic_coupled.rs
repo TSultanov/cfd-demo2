@@ -553,6 +553,10 @@ fn build_generic_schur(
         mapped_at_creation: false,
     });
 
+    // The model-spec omega of 1.0 means "auto": use the heavy-ball weight that
+    // turns the relax_pressure ping-pong into a second-order Richardson
+    // iteration (see coupled_schur::heavy_ball_omega for the math + numbers).
+    let omega = crate::solver::gpu::modules::coupled_schur::heavy_ball_omega(omega);
     let params = GpuSchurPrecondGenericParams {
         n: num_dofs,
         num_cells,

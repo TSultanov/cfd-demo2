@@ -29,6 +29,46 @@ pub struct CoupledSchurKernelIds {
     pub correct_velocity: KernelId,
 }
 
+/// Default inner pressure-relaxation sweep count for the Schur preconditioner.
+///
+/// With the heavy-ball relaxation (see [`heavy_ball_omega`]) far fewer sweeps
+/// are needed than the old plain-Jacobi count of `min(20 + sqrt(n)/2, 200)`:
+/// measured on the fine channel-obstacle (118k cells) the optimum is ~48-64
+/// sweeps and on the fine CD nozzle (750k cells) ~24-64, while the GUI default
+/// meshes (~5k cells) sit near 30. `CFD2_GPU_SCHUR_SWEEPS` overrides.
+pub fn default_pressure_sweeps(num_cells: u32) -> usize {
+    std::env::var("CFD2_GPU_SCHUR_SWEEPS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or_else(|| (20 + (num_cells as f32).sqrt() as usize / 8).min(64))
+}
+
+/// Relaxation weight for the Schur pressure sweeps.
+///
+/// The `relax_pressure` kernel's ping-pong computes
+/// `x_{k+1} = (1-w)*x_{k-1} + w*(x_k + D^-1 r_k)`, i.e. second-order
+/// Richardson (heavy ball) with momentum `w-1`. For a SYMMETRIC
+/// Jacobi-preconditioned pressure block the spectrum sits on (0, 2), for
+/// which this form is the optimal stationary second-order iteration, and its
+/// stability threshold (eigenvalues < 2) is the same one plain Jacobi
+/// (`w = 1`) already relies on. `w = 1.95` measured best on the fine-mesh
+/// channel-obstacle (FGMRES 60 -> ~15 iters/solve, step 2.45 -> 0.59s).
+///
+/// CAVEAT: the stability region is an ellipse that collapses onto the real
+/// interval as `w -> 2` (imaginary tolerance ~0.025 at 1.95, ~0.28 at 1.6).
+/// Models whose pressure row is upwinded/non-symmetric (the all-Mach family's
+/// deferred-Newton flux Jacobian) must declare a lower explicit omega in
+/// their `ModelPreconditionerSpec::Schur`; at 1.95 the rocket-scale nozzle
+/// demo excites the near-vacuum degeneracy (see
+/// `tests/nozzle_interior_vacuum_probe.rs`). `CFD2_GPU_SCHUR_OMEGA` overrides.
+pub fn heavy_ball_omega(model_omega: f32) -> f32 {
+    let base = if model_omega == 1.0 { 1.95 } else { model_omega };
+    std::env::var("CFD2_GPU_SCHUR_OMEGA")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(base)
+}
+
 /// Input parameters for [`CoupledSchurModule`].
 pub struct CoupledSchurInputs<'a> {
     pub num_cells: u32,
@@ -43,8 +83,9 @@ pub struct CoupledSchurInputs<'a> {
 }
 
 pub struct CoupledSchurModule {
-    num_cells: u32,
     pressure_kind: CoupledPressureSolveKind,
+    /// Inner pressure-relaxation sweep count (see [`default_pressure_sweeps`]).
+    pressure_sweeps: usize,
 
     /// Temporary buffer for pressure RHS (r_p')
     b_temp_p: wgpu::Buffer,
@@ -141,8 +182,8 @@ impl CoupledSchurModule {
         };
 
         Ok(Self {
-            num_cells: inputs.num_cells,
             pressure_kind: inputs.pressure_kind,
+            pressure_sweeps: default_pressure_sweeps(inputs.num_cells),
             b_temp_p,
             b_p_sol,
             bgl_schur_vectors,
@@ -307,9 +348,9 @@ impl PreconditionerModule for CoupledSchurModule {
                 }
             }
             CoupledPressureSolveKind::Chebyshev => {
-                let p_iters = (20 + (self.num_cells as f32).sqrt() as usize / 2)
-                    .min(200)
-                    .saturating_sub(1);
+                // `predict_and_form` already wrote the first Jacobi iterate
+                // (p_sol = D^-1 rhs), so encode one fewer relax dispatch.
+                let p_iters = self.pressure_sweeps.saturating_sub(1);
                 if p_iters == 0 {
                     return;
                 }

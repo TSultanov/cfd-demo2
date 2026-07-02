@@ -74,11 +74,20 @@ fn cpu_nozzle_bench() {
     );
 
     let air = Fluid::presets()[1].clone();
-    let params = ALLMACH_THERMAL_NOZZLE.to_runtime_params(
+    let mut params = ALLMACH_THERMAL_NOZZLE.to_runtime_params(
         air.density as f32,
         air.viscosity as f32,
         air.eos,
     );
+    // Optional preconditioner override for GPU A/B runs (e.g. amg vs jacobi).
+    if let Ok(p) = std::env::var("CFD2_BENCH_PRECOND") {
+        params.preconditioner = match p.as_str() {
+            "amg" => cfd2::solver::PreconditionerType::Amg,
+            "jacobi" => cfd2::solver::PreconditionerType::Jacobi,
+            other => panic!("unknown CFD2_BENCH_PRECOND: {other}"),
+        };
+        eprintln!("[bench] preconditioner override: {p}");
+    }
 
     let t_mesh = Instant::now();
     let mesh = nozzle_mesh(nx, ny);

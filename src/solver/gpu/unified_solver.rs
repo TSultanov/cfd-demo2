@@ -427,9 +427,11 @@ impl GpuUnifiedSolver {
         if let Some(c) = self.cpu_ref() {
             // CPU has no GPU convergence monitor / per-graph telemetry, but it can
             // report steady-state auto-pause (should_stop) so the GUI behaves like
-            // the GPU under pseudo-transient continuation.
+            // the GPU under pseudo-transient continuation, plus the outer count
+            // actually executed (the CPU plateau detector's early exit).
             let mut stats = PlanStepStats::default();
             stats.should_stop = Some(c.should_stop());
+            stats.outer_iterations = Some(c.outer_iterations_done());
             return stats;
         }
         self.plan().step_stats()
@@ -437,8 +439,10 @@ impl GpuUnifiedSolver {
 
     #[allow(irrefutable_let_patterns)]
     pub fn set_collect_convergence_stats(&mut self, enable: bool) {
-        if let SolverBackend::Gpu(p) = &mut self.backend {
-            p.collect_convergence_stats = enable;
+        match &mut self.backend {
+            SolverBackend::Gpu(p) => p.collect_convergence_stats = enable,
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(c) => c.set_collect_convergence_stats(enable),
         }
     }
 

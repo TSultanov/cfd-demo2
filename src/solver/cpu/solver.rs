@@ -83,6 +83,17 @@ pub struct CpuSolver {
     /// Relative correction-norm tolerance for the adaptive outer break
     /// (0 = never break; matches the GPU outer gate pinned open).
     outer_tol: f64,
+    /// Enables the per-outer correction-norm collection and the plateau
+    /// early-exit (the CPU port of the GPU generic-coupled detector). Set by
+    /// the driver from `outer_auto_converge || log_convergence`, exactly like
+    /// the GPU `collect_convergence_stats`.
+    collect_convergence_stats: bool,
+    /// State offsets of the solved unknowns (unknown rank -> state slot), for
+    /// the plateau detector's per-field state scaling.
+    unknown_offsets: Vec<u32>,
+    /// Outer iterations actually executed by the last step (== `outer_iters`
+    /// unless the plateau detector exited early).
+    outer_iterations_done: u32,
     /// CPU linear-solve relative tolerance (block path; GPU inexact-Picard).
     linear_tol: f64,
     linear_restart: usize,
@@ -322,6 +333,10 @@ impl CpuSolver {
             None => None,
         };
 
+        // Solved-unknown state offsets for the plateau detector's state scale.
+        let unknown_offsets =
+            crate::solver::model::kernel::model_unknown_state_offsets(&model)?;
+
         Ok(Self {
             model_id: model.id,
             num_cells,
@@ -342,6 +357,9 @@ impl CpuSolver {
             stepping,
             outer_iters,
             outer_tol: 0.0,
+            collect_convergence_stats: false,
+            unknown_offsets,
+            outer_iterations_done: 0,
             linear_tol: recipe.linear_solver.tolerance as f64,
             linear_restart: match recipe.linear_solver.solver_type {
                 crate::solver::gpu::recipe::LinearSolverType::Fgmres { max_restart } => max_restart,
@@ -367,6 +385,17 @@ impl CpuSolver {
 
     pub fn set_outer_iters(&mut self, n: usize) {
         self.outer_iters = n.max(1);
+    }
+    /// Enable per-outer correction-norm collection + the plateau early-exit
+    /// (mirrors `GpuProgramPlan::collect_convergence_stats`; the driver sets it
+    /// from `outer_auto_converge || log_convergence` on both backends).
+    pub fn set_collect_convergence_stats(&mut self, enable: bool) {
+        self.collect_convergence_stats = enable;
+    }
+    /// Outer iterations executed by the last step (fewer than `outer_iters`
+    /// when the plateau detector exited early).
+    pub fn outer_iterations_done(&self) -> u32 {
+        self.outer_iterations_done
     }
     pub fn set_dt(&mut self, dt: f32) {
         self.dt = dt;
@@ -749,7 +778,35 @@ impl CpuSolver {
             }
         });
 
-        for _ in 0..self.outer_iters {
+        // Adaptive outer-loop plateau detector — the CPU port of the GPU
+        // generic-coupled detector (`outer_plateau_active` /
+        // `outer_corrections_plateaued`): per-field maxima of the linear-solve
+        // solution `x` scaled by per-field state maxima (scale computed once
+        // per step, floored at 1.0); exit once every solved field is either
+        // under tolerance or has STALLED (adjacent-ratio inside
+        // [0.98, 1.01]) after at least 5 sweeps. Same exclusions as the GPU:
+        // density-based `compressible` (conserved-target convergence, single
+        // outer), `_mms` order-verification variants (fixed iterations),
+        // pseudo-transient (dtau > 0), and single-outer configs.
+        // `CFD2_CPU_OUTER_BREAK=0` pins the loop to the fixed count.
+        const OUTER_PLATEAU_MIN_ITERS: usize = 5;
+        const OUTER_PLATEAU_FACTOR: f32 = 0.98;
+        const OUTER_PLATEAU_CEILING: f32 = 1.01;
+        let plateau_active = self.collect_convergence_stats
+            && self.outer_iters > 1
+            && self.dtau <= 0.0
+            && self.model_id != "compressible"
+            && !self.model_id.ends_with("_mms")
+            && !self.unknown_offsets.is_empty()
+            && std::env::var("CFD2_CPU_OUTER_BREAK").map_or(true, |v| v != "0");
+        let s_unk = self.unknowns_per_cell;
+        let stride = self.state_stride as usize;
+        // Per-field max |state| (the correction scale), computed once per step.
+        let mut plateau_scale: Option<Vec<f32>> = None;
+        let mut prev_scaled: Vec<f32> = Vec::new();
+        let mut outer_iters_done = 0u32;
+
+        for outer_idx in 0..self.outer_iters {
             // Snapshot current iterate (dual-time reference + outer-break delta).
             let snap = self.buffers.f32_vec("state");
             self.buffers.copy_into_f32("state_iter", &snap);
@@ -775,6 +832,52 @@ impl CpuSolver {
                 }
             });
 
+            outer_iters_done = outer_idx as u32 + 1;
+
+            // Plateau detector (see the block comment above the loop).
+            if plateau_active {
+                // Per-field max |x| — the outer correction norm the GPU
+                // monitor reduces (`delta_maxima` over the solve solution).
+                let x = self.buffers.f32_vec("x");
+                let mut delta = vec![0.0f32; s_unk];
+                if x.len() == self.num_cells * s_unk {
+                    for cell in 0..self.num_cells {
+                        for (r, d) in delta.iter_mut().enumerate() {
+                            *d = d.max(x[cell * s_unk + r].abs());
+                        }
+                    }
+                }
+                let scale = plateau_scale.get_or_insert_with(|| {
+                    let state = self.buffers.f32_vec("state");
+                    let mut sc = vec![0.0f32; s_unk];
+                    for cell in 0..self.num_cells {
+                        for (r, &off) in self.unknown_offsets.iter().enumerate() {
+                            sc[r] = sc[r].max(state[cell * stride + off as usize].abs());
+                        }
+                    }
+                    sc
+                });
+                let scaled: Vec<f32> = delta
+                    .iter()
+                    .zip(scale.iter())
+                    .map(|(&d, &s)| d / s.max(1.0))
+                    .collect();
+                let tol_rel = self.outer_tol.max(0.0) as f32;
+                let plateaued = outer_idx + 1 >= OUTER_PLATEAU_MIN_ITERS
+                    && !prev_scaled.is_empty()
+                    && scaled.iter().zip(prev_scaled.iter()).all(|(&cur, &prev)| {
+                        if cur <= tol_rel {
+                            return true;
+                        }
+                        let ratio = cur / prev.max(1e-30);
+                        (OUTER_PLATEAU_FACTOR..=OUTER_PLATEAU_CEILING).contains(&ratio)
+                    });
+                prev_scaled = scaled;
+                if plateaued {
+                    break;
+                }
+            }
+
             // Adaptive outer break (off when outer_tol == 0).
             if self.outer_tol > 0.0 {
                 let cur = self.buffers.f32_vec("state");
@@ -788,6 +891,7 @@ impl CpuSolver {
                 }
             }
         }
+        self.outer_iterations_done = outer_iters_done;
 
         if profile {
             let tot = t_prep + t_asm + t_lin + t_upd + t_bc;

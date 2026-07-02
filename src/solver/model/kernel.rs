@@ -711,20 +711,8 @@ pub(crate) fn generate_packed_state_gradients_kernel_program(
     // Unknown rank == state offset only for models whose unknowns are a
     // prefix of the state layout; the buoyant model's temperature (behind
     // d_p/grad_p aux fields) is the counterexample that exposed this.
-    let slots = resolved_slots_from_layout(&model.state_layout);
-    let mut unknown_state_offsets: Vec<u32> = Vec::new();
-    for eq in model.system.equations() {
-        let target = eq.target();
-        let base = resolve_offset_from_slots(&slots, target.name()).ok_or_else(|| {
-            format!(
-                "packed_state_gradients: no state slot for unknown '{}'",
-                target.name()
-            )
-        })?;
-        for comp in 0..target.kind().component_count() {
-            unknown_state_offsets.push(base + comp as u32);
-        }
-    }
+    let unknown_state_offsets = model_unknown_state_offsets(model)
+        .map_err(|e| format!("packed_state_gradients: {e}"))?;
     cfd2_codegen::solver::codegen::generate_packed_state_gradients_kernel_program(
         "packed_state_gradients",
         &model.state_layout,
@@ -732,6 +720,28 @@ pub(crate) fn generate_packed_state_gradients_kernel_program(
         &eos_params,
         !gradients_required_unconditionally,
     )
+}
+
+/// State offsets of the solved unknowns in equation-declaration (boundary-table
+/// rank) order: unknown rank `r` of the coupled system lives at state offset
+/// `result[r]`. Unknown rank == state offset only for models whose unknowns are
+/// a prefix of the state layout (the buoyant model's temperature sits behind
+/// the d_p/grad_p aux fields). Shared by the packed-gradients generator and the
+/// CPU backend's outer plateau detector.
+pub(crate) fn model_unknown_state_offsets(
+    model: &crate::solver::model::ModelSpec,
+) -> Result<Vec<u32>, String> {
+    let slots = resolved_slots_from_layout(&model.state_layout);
+    let mut unknown_state_offsets: Vec<u32> = Vec::new();
+    for eq in model.system.equations() {
+        let target = eq.target();
+        let base = resolve_offset_from_slots(&slots, target.name())
+            .ok_or_else(|| format!("no state slot for unknown '{}'", target.name()))?;
+        for comp in 0..target.kind().component_count() {
+            unknown_state_offsets.push(base + comp as u32);
+        }
+    }
+    Ok(unknown_state_offsets)
 }
 
 /// Resolve a state offset by field name, supporting component suffixes (e.g., "rho_u_x").

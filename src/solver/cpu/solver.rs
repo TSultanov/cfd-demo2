@@ -893,8 +893,11 @@ impl CpuSolver {
 
         for outer_idx in 0..self.outer_iters {
             // Snapshot current iterate (dual-time reference + outer-break delta).
-            let snap = self.buffers.f32_vec("state");
-            self.buffers.copy_into_f32("state_iter", &snap);
+            // Threaded marshals: two full-state passes per outer (~24 MB each
+            // on the 750k nozzle) were serial.
+            let snap = self.buffers.f32_vec_threaded("state", self.config.threads);
+            self.buffers
+                .copy_into_f32_threaded("state_iter", &snap, self.config.threads);
 
             // Per-iteration kernels in schedule order (gradients/flux/assembly),
             // then the CPU linear solve (replacing LinearSolve), then the update
@@ -931,7 +934,7 @@ impl CpuSolver {
             if plateau_active {
                 // Per-field max |x| — the outer correction norm the GPU
                 // monitor reduces (`delta_maxima` over the solve solution).
-                let x = self.buffers.f32_vec("x");
+                let x = self.buffers.f32_vec_threaded("x", self.config.threads);
                 let mut delta = vec![0.0f32; s_unk];
                 if x.len() == self.num_cells * s_unk {
                     for cell in 0..self.num_cells {
@@ -941,7 +944,7 @@ impl CpuSolver {
                     }
                 }
                 let scale = plateau_scale.get_or_insert_with(|| {
-                    let state = self.buffers.f32_vec("state");
+                    let state = self.buffers.f32_vec_threaded("state", self.config.threads);
                     let mut sc = vec![0.0f32; s_unk];
                     for cell in 0..self.num_cells {
                         for (r, &off) in self.unknown_offsets.iter().enumerate() {
@@ -980,7 +983,7 @@ impl CpuSolver {
 
             // Adaptive outer break (off when outer_tol == 0).
             if self.outer_tol > 0.0 {
-                let cur = self.buffers.f32_vec("state");
+                let cur = self.buffers.f32_vec_threaded("state", self.config.threads);
                 let (mut maxd, mut maxs) = (0.0f32, 0.0f32);
                 for i in 0..cur.len() {
                     maxd = maxd.max((cur[i] - snap[i]).abs());

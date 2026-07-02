@@ -278,6 +278,35 @@ impl Buffers {
         }
     }
 
+    /// [`Self::copy_into_f32`] parallelized over disjoint contiguous chunks
+    /// (bit-identical: same `to_bits` stores). Counterpart of
+    /// [`Self::f32_vec_threaded`] for the write direction — the per-outer
+    /// full-state snapshot restore was a serial ~24 MB pass on the nozzle.
+    pub fn copy_into_f32_threaded(&self, name: &str, src: &[f32], threads: usize) {
+        let data = match self.map.get(name) {
+            Some(Store::F32 { data, .. }) => data,
+            _ => panic!("`{name}` is not an f32 buffer"),
+        };
+        assert_eq!(data.len(), src.len(), "copy_into_f32 length mismatch for `{name}`");
+        let n = data.len();
+        if threads <= 1 || n < (1 << 16) {
+            for (a, &v) in data.iter().zip(src) {
+                a.store(v.to_bits(), ORD);
+            }
+            return;
+        }
+        let workers = threads.min(n);
+        let chunk = n.div_ceil(workers * crate::solver::cpu::pool::OVERSPLIT).max(1);
+        let tasks = n.div_ceil(chunk);
+        crate::solver::cpu::pool::run(tasks, workers, |w| {
+            let start = w * chunk;
+            let end = (start + chunk).min(n);
+            for i in start..end {
+                data[i].store(src[i].to_bits(), ORD);
+            }
+        });
+    }
+
     /// Set one element of a flat `array<f32>` buffer.
     pub fn set_f32(&self, name: &str, idx: usize, v: f32) {
         self.store(name, idx, Value::F32(v));

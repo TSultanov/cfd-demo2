@@ -528,6 +528,16 @@ pub struct SchurPrecond<'a> {
     /// `CFD2_CPU_SCHUR_INNER_ITERS` / `CFD2_CPU_SCHUR_INNER_TOL`).
     inner_iters: usize,
     inner_tol: f64,
+    /// Compact `A[p_row, u_col]` values, `u_len` per scalar-CSR entry
+    /// (layout `[(scalar_offset + rank) * u_len + i]`). The Schur pre pass
+    /// previously strided the FULL block values array to pick `u_len` floats
+    /// out of every `s*s`-value block (~2 cache lines touched per block to
+    /// use a handful of bytes, per apply, per FGMRES iteration); the compact
+    /// array streams linearly. Same values, same arithmetic — bit-exact.
+    pu_values: Vec<f32>,
+    /// Compact `A[u_row, p_col]` values, same layout (the post/velocity-
+    /// correction pass's column).
+    up_values: Vec<f32>,
     /// Inner algorithm selection (see [`SchurInner`]).
     inner: SchurInner,
     /// AMG operator for the pressure block (assembled from `p_values` when the
@@ -538,6 +548,11 @@ pub struct SchurPrecond<'a> {
     /// (applies, applies that failed to converge — cap-out or stagnation).
     applies: std::cell::Cell<u32>,
     inner_failures: std::cell::Cell<u32>,
+    /// Reusable apply-path scratch (see [`SchurWork`]): every apply
+    /// previously allocated + zero-filled fresh vectors (gp/psol + f32
+    /// mirrors + the heavy-ball ping-pong quad = ~24 MB per apply on the
+    /// 750k nozzle, ~50 applies/step of pure alloc/page-fault churn).
+    work: std::cell::RefCell<SchurWork>,
     /// AMG-path Krylov selection. PCG was REFUTED as the default by
     /// measurement (July 2026, 118k cut-cell obstacle): the "near-SPD"
     /// premise fails on the real block — cut-cell/BC/deferred-correction
@@ -549,6 +564,20 @@ pub struct SchurPrecond<'a> {
     /// `CFD2_CPU_SCHUR_AMG_KRYLOV=cg` opts into the experiment (curvature
     /// breakdown still one-way-flips back).
     amg_use_cg: std::cell::Cell<bool>,
+}
+
+/// Per-apply scratch reused across [`SchurPrecond::apply`] calls. All
+/// buffers are fully overwritten before use (the zero fills that carried
+/// semantics — heavy-ball's from-zero start, the inner solves' x0 = 0 —
+/// are now explicit `fill(0.0)` at the use sites), so reuse is bit-exact.
+#[derive(Default)]
+struct SchurWork {
+    gp: Vec<f64>,
+    psol: Vec<f64>,
+    gp_f32: Vec<f32>,
+    psol_f32: Vec<f32>,
+    /// heavy-ball cur/prev/scratch/best, each `cells` long.
+    hb: Vec<f64>,
 }
 
 impl<'a> SchurPrecond<'a> {
@@ -569,6 +598,8 @@ impl<'a> SchurPrecond<'a> {
         let nnz = a.col_indices.len();
         let mut p_values = vec![0.0f32; nnz];
         let mut p_diag_inv = vec![0.0f64; cells];
+        let mut pu_values = vec![0.0f32; nnz * u_len];
+        let mut up_values = vec![0.0f32; nnz * u_len];
         // Extract diag(A_uu)^-1, the A_pp scalar-CSR values and diag(A_pp)^-1.
         // Each cell writes only its own slots (diag_u_inv/p_diag_inv are
         // cell-strided; a cell's p_values live in its scalar CSR row range, and
@@ -578,7 +609,9 @@ impl<'a> SchurPrecond<'a> {
         let fill = |cell0: usize,
                     du_chunk: &mut [f64],
                     pd_chunk: &mut [f64],
-                    pv_chunk: &mut [f32]| {
+                    pv_chunk: &mut [f32],
+                    pu_chunk: &mut [f32],
+                    up_chunk: &mut [f32]| {
             let pv_base = a.scalar_offset(cell0);
             for li in 0..pd_chunk.len() {
                 let cell = cell0 + li;
@@ -591,10 +624,16 @@ impl<'a> SchurPrecond<'a> {
                     let du = a.values[base_u + u] as f64;
                     du_chunk[li * u_len + i] = if du.abs() > 1e-30 { 1.0 / du } else { 0.0 };
                 }
-                // A_pp scalar-CSR row (one value per neighbour block).
+                // A_pp scalar-CSR row (one value per neighbour block), plus the
+                // compact A_pu / A_up sub-operator rows (see the field docs).
                 let srp = a.start_row(cell, p);
                 for rank in 0..num_neighbors {
                     pv_chunk[scalar_offset - pv_base + rank] = a.values[srp + rank * s + p];
+                    let cbase = (scalar_offset - pv_base + rank) * u_len;
+                    for (i, &u) in u_idx.iter().enumerate() {
+                        pu_chunk[cbase + i] = a.values[srp + rank * s + u];
+                        up_chunk[cbase + i] = a.values[a.start_row(cell, u) + rank * s + p];
+                    }
                 }
                 let dp = a.values[srp + diag_rank * s + p] as f64;
                 pd_chunk[li] = if dp.abs() > 1e-30 { 1.0 / dp } else { 0.0 };
@@ -605,26 +644,37 @@ impl<'a> SchurPrecond<'a> {
         // helpers' MIN_ELEMS_PER_WORKER).
         let workers = threads.min(cells.div_ceil(16 * 1024)).max(1);
         if workers <= 1 {
-            fill(0, &mut diag_u_inv, &mut p_diag_inv, &mut p_values);
+            fill(
+                0,
+                &mut diag_u_inv,
+                &mut p_diag_inv,
+                &mut p_values,
+                &mut pu_values,
+                &mut up_values,
+            );
         } else {
             let chunk = cells.div_ceil(workers * crate::solver::cpu::pool::OVERSPLIT).max(1);
             let tasks = cells.div_ceil(chunk);
             let base_du = crate::solver::cpu::pool::MutSlicePtr::new(&mut diag_u_inv);
             let base_pd = crate::solver::cpu::pool::MutSlicePtr::new(&mut p_diag_inv);
             let base_pv = crate::solver::cpu::pool::MutSlicePtr::new(&mut p_values);
+            let base_pu = crate::solver::cpu::pool::MutSlicePtr::new(&mut pu_values);
+            let base_up = crate::solver::cpu::pool::MutSlicePtr::new(&mut up_values);
             crate::solver::cpu::pool::run(tasks, workers, |w| {
                 let start = w * chunk;
                 let end = (start + chunk).min(cells);
                 let pv_start = a.scalar_offset(start);
                 let pv_take = a.scalar_offset(end) - pv_start;
-                // SAFETY: tasks own disjoint cell ranges; the p_values split
-                // follows the monotone scalar-row-offset boundaries, so the
-                // three reconstructed sub-slices never overlap across tasks and
+                // SAFETY: tasks own disjoint cell ranges; the p/pu/up splits
+                // follow the monotone scalar-row-offset boundaries, so the
+                // reconstructed sub-slices never overlap across tasks and
                 // all outlive the (blocking) pool::run call.
                 let du = unsafe { base_du.slice(start * u_len, (end - start) * u_len) };
                 let pd = unsafe { base_pd.slice(start, end - start) };
                 let pv = unsafe { base_pv.slice(pv_start, pv_take) };
-                fill(start, du, pd, pv);
+                let pu = unsafe { base_pu.slice(pv_start * u_len, pv_take * u_len) };
+                let up = unsafe { base_up.slice(pv_start * u_len, pv_take * u_len) };
+                fill(start, du, pd, pv, pu, up);
             });
         }
         let inner_iters = std::env::var("CFD2_CPU_SCHUR_INNER_ITERS")
@@ -715,6 +765,8 @@ impl<'a> SchurPrecond<'a> {
             p,
             diag_u_inv,
             p_values,
+            pu_values,
+            up_values,
             p_diag_inv,
             omega,
             sweeps,
@@ -727,6 +779,7 @@ impl<'a> SchurPrecond<'a> {
             amg_use_cg: std::cell::Cell::new(
                 std::env::var("CFD2_CPU_SCHUR_AMG_KRYLOV").map_or(false, |v| v == "cg"),
             ),
+            work: std::cell::RefCell::new(SchurWork::default()),
         }
     }
 
@@ -750,8 +803,13 @@ impl Preconditioner for SchurPrecond<'_> {
         // hoisted into locals so the Sync closure doesn't capture `self`, which
         // holds non-Sync outcome counters.)
         z.copy_from_slice(r);
-        let mut gp = vec![0.0f64; cells];
+        let mut work = self.work.borrow_mut();
+        let work = &mut *work;
+        work.gp.resize(cells, 0.0);
+        // gp is fully written by the pre pass below; no zeroing needed.
+        let gp = &mut work.gp;
         let (aa, u_idx, diag_u_inv) = (&self.a, &self.u_idx, &self.diag_u_inv);
+        let (pu_values, up_values) = (&self.pu_values, &self.up_values);
         prof::time(&prof::SCHUR_PRE, || {
             parallel_cell_chunks_mut2(
                 cells,
@@ -759,7 +817,7 @@ impl Preconditioner for SchurPrecond<'_> {
                 1,
                 aa.threads,
                 z,
-                &mut gp,
+                gp,
                 |cell0, zc, gpc| {
                     for li in 0..gpc.len() {
                         let cell = cell0 + li;
@@ -769,12 +827,14 @@ impl Preconditioner for SchurPrecond<'_> {
                         zc[li * s + p] = 0.0;
                         let scalar_offset = aa.scalar_offset(cell);
                         let num_neighbors = aa.num_neighbors(cell);
-                        let srp = aa.start_row(cell, p);
                         let mut g = r[cell * s + p];
                         for rank in 0..num_neighbors {
                             let col_cell = aa.col_indices[scalar_offset + rank] as usize;
+                            let cbase = (scalar_offset + rank) * u_len;
                             for (i, &u) in u_idx.iter().enumerate() {
-                                let a_pu = aa.values[srp + rank * s + u] as f64;
+                                // Compact A_pu stream (bit-equal to the block
+                                // values it was extracted from).
+                                let a_pu = pu_values[cbase + i] as f64;
                                 g -= a_pu
                                     * diag_u_inv[col_cell * u_len + i]
                                     * r[col_cell * s + u];
@@ -799,17 +859,27 @@ impl Preconditioner for SchurPrecond<'_> {
         // The BiCGSTAB paths run with the stagnation early-exit: bailing on a
         // stalled block beats burning the budget; failures feed the adaptive
         // AMG switch.
-        let mut psol = vec![0.0f64; cells];
+        work.psol.resize(cells, 0.0);
+        let psol = &mut work.psol;
+        let (gp_f32_buf, psol_f32_buf, hb_buf) =
+            (&mut work.gp_f32, &mut work.psol_f32, &mut work.hb);
+        let gp: &[f64] = gp;
         let heavy_ball = self.amg.is_none() && self.inner != SchurInner::BiCgStab;
         let stats = prof::time(&prof::SCHUR_SOLVE, || match &self.amg {
             Some(amg) if self.inner == SchurInner::VCycle => {
-                // Fixed-work apply: z_p = V-cycle(g_p).
-                amg.vcycle(&gp, &mut psol);
+                // Fixed-work apply: z_p = V-cycle(g_p) (vcycle overwrites).
+                amg.vcycle(gp, psol);
                 SolveStats { iters: 1, rel_residual: f64::NAN, converged: true }
             }
             Some(amg) => {
-                let gp_f32: Vec<f32> = gp.iter().map(|&v| v as f32).collect();
-                let mut psol_f32 = vec![0.0f32; cells];
+                gp_f32_buf.resize(cells, 0.0);
+                psol_f32_buf.resize(cells, 0.0);
+                for (o, &v) in gp_f32_buf.iter_mut().zip(gp.iter()) {
+                    *o = v as f32;
+                }
+                psol_f32_buf.fill(0.0); // inner-solve x0 = 0, as the fresh alloc had
+                let gp_f32: &[f32] = gp_f32_buf;
+                let psol_f32: &mut [f32] = psol_f32_buf;
                 // BiCGSTAB by default; PCG opt-in only (see the
                 // `amg_use_cg` field doc for the measured refutation). On a
                 // CG curvature breakdown the apply re-runs with BiCGSTAB so
@@ -817,8 +887,8 @@ impl Preconditioner for SchurPrecond<'_> {
                 let st = if self.amg_use_cg.get() {
                     let (st, spd_breakdown) = cg_pc_opts(
                         &pa,
-                        &gp_f32,
-                        &mut psol_f32,
+                        gp_f32,
+                        psol_f32,
                         self.inner_iters,
                         self.inner_tol,
                         &|r, z| amg.vcycle(r, z),
@@ -835,8 +905,8 @@ impl Preconditioner for SchurPrecond<'_> {
                         psol_f32.fill(0.0);
                         bicgstab_pc_opts(
                             &pa,
-                            &gp_f32,
-                            &mut psol_f32,
+                            gp_f32,
+                            psol_f32,
                             self.inner_iters,
                             self.inner_tol,
                             &|r, z| amg.vcycle(r, z),
@@ -848,8 +918,8 @@ impl Preconditioner for SchurPrecond<'_> {
                 } else {
                     bicgstab_pc_opts(
                         &pa,
-                        &gp_f32,
-                        &mut psol_f32,
+                        gp_f32,
+                        psol_f32,
                         self.inner_iters,
                         self.inner_tol,
                         &|r, z| amg.vcycle(r, z),
@@ -873,30 +943,35 @@ impl Preconditioner for SchurPrecond<'_> {
                         }
                     });
                 };
-                let gp_f32: Vec<f32> = gp.iter().map(|&v| v as f32).collect();
-                let mut psol_f32 = vec![0.0f32; cells];
+                gp_f32_buf.resize(cells, 0.0);
+                psol_f32_buf.resize(cells, 0.0);
+                for (o, &v) in gp_f32_buf.iter_mut().zip(gp.iter()) {
+                    *o = v as f32;
+                }
+                psol_f32_buf.fill(0.0); // inner-solve x0 = 0
                 let st = bicgstab_pc_opts(
                     &pa,
-                    &gp_f32,
-                    &mut psol_f32,
+                    gp_f32_buf,
+                    psol_f32_buf,
                     self.inner_iters,
                     self.inner_tol,
                     &minv,
                     true,
                 );
                 for i in 0..cells {
-                    psol[i] = psol_f32[i] as f64;
+                    psol[i] = psol_f32_buf[i] as f64;
                 }
                 st
             }
             None => heavy_ball_solve(
                 &pa,
-                &gp,
-                &mut psol,
+                gp,
+                psol,
                 &self.p_diag_inv,
                 self.omega,
                 self.sweeps,
                 self.inner_tol,
+                hb_buf,
             ),
         });
         self.applies.set(self.applies.get() + 1);
@@ -935,11 +1010,10 @@ impl Preconditioner for SchurPrecond<'_> {
                     let scalar_offset = aa.scalar_offset(cell);
                     let num_neighbors = aa.num_neighbors(cell);
                     for (i, &u) in u_idx.iter().enumerate() {
-                        let sru = aa.start_row(cell, u);
                         let mut corr = 0.0f64;
                         for rank in 0..num_neighbors {
                             let col_cell = aa.col_indices[scalar_offset + rank] as usize;
-                            let a_up = aa.values[sru + rank * s + p] as f64;
+                            let a_up = up_values[(scalar_offset + rank) * u_len + i] as f64;
                             corr += a_up * psol[col_cell];
                         }
                         zc[li * s + u] -= diag_u_inv[cell * u_len + i] * corr;
@@ -1176,6 +1250,7 @@ pub fn bicgstab(
 /// Deterministic: sweeps write each row once from read-only inputs (ping-pong
 /// buffers), and the exit decision comes from `par_dot` — bit-identical across
 /// thread counts.
+#[allow(clippy::too_many_arguments)]
 fn heavy_ball_solve(
     pa: &CsrView,
     g: &[f64],
@@ -1184,6 +1259,7 @@ fn heavy_ball_solve(
     omega: f64,
     max_sweeps: usize,
     tol: f64,
+    work: &mut Vec<f64>,
 ) -> SolveStats {
     let n = pa.n();
     debug_assert_eq!(g.len(), n);
@@ -1195,9 +1271,16 @@ fn heavy_ball_solve(
     // x_{k+1} (its own element is read for the momentum term before being
     // overwritten — element-local, so the chunked write stays race-free;
     // neighbour reads touch only `cur`).
-    let mut cur = vec![0.0f64; n];
-    let mut prev = vec![0.0f64; n];
-    let mut scratch = vec![0.0f64; n];
+    //
+    // The four sweep buffers live in the caller's reusable workspace
+    // (allocating ~4n per apply measured as ~24 MB/apply x ~50 applies/step
+    // of alloc + page-fault churn on the 750k nozzle); the explicit zero
+    // fills reproduce the fresh-alloc from-zero start bit-exactly.
+    work.resize(4 * n, 0.0);
+    work.fill(0.0);
+    let (mut cur, rest) = work.split_at_mut(n);
+    let (mut prev, rest) = rest.split_at_mut(n);
+    let (scratch, best) = rest.split_at_mut(n);
 
     // Safeguard state: the GPU runs these sweeps blind (no readbacks), but on
     // the CPU a residual check is cheap, so we use it to make high-omega
@@ -1209,7 +1292,6 @@ fn heavy_ball_solve(
     // rel 0.56, applies 2+ rel ~22 on the cut-cell obstacle). On growth vs the
     // best iterate: halve the momentum and restart from the best; after
     // repeated decays bail with the best iterate (feeds the AMG switch).
-    let mut best = vec![0.0f64; n];
     let mut best_rel = 1.0f64; // x = 0 has relative residual exactly 1
     let mut omega = omega;
 
@@ -1220,8 +1302,8 @@ fn heavy_ball_solve(
     let mut converged = false;
     while sweeps_done < max_sweeps {
         {
-            let cur_ref = &cur;
-            parallel_cell_chunks_mut(n, 1, threads, &mut prev, |row0, chunk| {
+            let cur_ref: &[f64] = cur;
+            parallel_cell_chunks_mut(n, 1, threads, prev, |row0, chunk| {
                 for (li, slot) in chunk.iter_mut().enumerate() {
                     let row = row0 + li;
                     let start = pa.row_offsets[row] as usize;
@@ -1238,18 +1320,18 @@ fn heavy_ball_solve(
         std::mem::swap(&mut cur, &mut prev);
         sweeps_done += 1;
         if sweeps_done == next_check || sweeps_done == max_sweeps {
-            pa.spmv(&cur, &mut scratch);
-            par_update(threads, &mut scratch, |i, v| *v = g[i] - *v);
-            let rel = par_dot(threads, &scratch, &scratch).sqrt() / gnorm;
+            pa.spmv(cur, scratch);
+            par_update(threads, scratch, |i, v| *v = g[i] - *v);
+            let rel = par_dot(threads, scratch, scratch).sqrt() / gnorm;
             if rel <= tol {
                 converged = true;
                 best_rel = rel;
-                best.copy_from_slice(&cur);
+                best.copy_from_slice(cur);
                 break;
             }
             if rel < best_rel {
                 best_rel = rel;
-                best.copy_from_slice(&cur);
+                best.copy_from_slice(cur);
                 strikes = 0;
             } else {
                 // Non-improving check. Heavy-ball residuals overshoot
@@ -1267,14 +1349,14 @@ fn heavy_ball_solve(
                         break;
                     }
                     omega = 1.0 + (omega - 1.0) * 0.5;
-                    cur.copy_from_slice(&best);
-                    prev.copy_from_slice(&best);
+                    cur.copy_from_slice(best);
+                    prev.copy_from_slice(best);
                 }
             }
             next_check = (next_check * 2).min(max_sweeps);
         }
     }
-    x.copy_from_slice(&best);
+    x.copy_from_slice(best);
     SolveStats { iters: sweeps_done, rel_residual: best_rel, converged }
 }
 

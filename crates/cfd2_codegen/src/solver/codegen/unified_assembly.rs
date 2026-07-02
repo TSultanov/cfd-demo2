@@ -11,13 +11,12 @@ use super::wgsl_ast::{
 use super::wgsl_dsl as dsl;
 use super::KernelWgsl;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
-use crate::solver::codegen::reconstruction::scalar_reconstruction;
+use crate::solver::codegen::reconstruction::scalar_reconstruction_stmts;
 use crate::solver::gpu::enums::GpuBcKind;
 use crate::solver::ir::ports::{ParamSpec, ResolvedStateSlotsSpec};
 use crate::solver::ir::{
     Coefficient, Discretization, DispatchDomain, FieldKind, KernelProgram, LaunchSemantics, TermOp,
 };
-use crate::solver::scheme::Scheme;
 
 const UNIFIED_ASSEMBLY_WORKGROUP_SIZE: u32 = 64;
 
@@ -1321,15 +1320,14 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 
                         // Advection scheme selection.
                         //
-                        // A scheme declared on the term (model math declaration) is baked as a
-                        // literal; otherwise the solver drives the selection at runtime through
-                        // `constants.scheme`.
-                        let scheme_lit = if conv_op.scheme_declared {
-                            typed::EnumExpr::<Scheme>::from_expr(Expr::from(
-                                conv_op.scheme.gpu_id(),
-                            ))
+                        // A scheme declared on the term (model math declaration) is baked at
+                        // codegen time (only that variant is emitted); otherwise the solver
+                        // drives the selection at runtime through `constants.scheme` (an
+                        // if/else-if chain — each face computes only the ACTIVE variant).
+                        let scheme_src = if conv_op.scheme_declared {
+                            super::reconstruction::SchemeSource::Baked(conv_op.scheme)
                         } else {
-                            typed::EnumExpr::<Scheme>::from_expr(
+                            super::reconstruction::SchemeSource::Runtime(
                                 Expr::ident("constants").field("scheme"),
                             )
                         };
@@ -1376,8 +1374,9 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             (grad.clone(), grad)
                         };
 
-                        let rec = scalar_reconstruction(
-                            scheme_lit,
+                        let (rec_stmts, rec) = scalar_reconstruction_stmts(
+                            &format!("rec_{u_idx}"),
+                            scheme_src,
                             acc.phi(u_idx),
                             phi_own,
                             phi_neigh,
@@ -1395,7 +1394,12 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 
                         let dc_term = acc.phi(u_idx) * (rec.phi_ho - rec.phi_upwind);
 
-                        let interior_contrib = dsl::block(vec![
+                        // The reconstruction locals live at the head of the
+                        // interior branch: boundary faces never needed them (the
+                        // deferred-correction term is interior-only), so they
+                        // skip the reconstruction arithmetic entirely.
+                        let mut interior_stmts = rec_stmts;
+                        interior_stmts.extend([
                             acc.add_diag(u_idx, flux_pos.clone()),
                             dsl::assign_op_expr(
                                 AssignOp::Add,
@@ -1410,6 +1414,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             ),
                             acc.sub_rhs(u_idx, dc_term),
                         ]);
+                        let interior_contrib = dsl::block(interior_stmts);
 
                         let bc = BcTable::new(Expr::ident("face_idx"), coupled_stride);
                         let (bc_kind_expr, bc_value_expr) = bc.lookup(u_idx);

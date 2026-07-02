@@ -70,6 +70,140 @@ impl ReconstructionBuilder for WgslExprBuilder {
     }
 }
 
+/// How the advection scheme reaches a reconstruction site.
+pub enum SchemeSource {
+    /// Term-declared scheme, baked at codegen time: only this variant's
+    /// arithmetic is emitted (no runtime dispatch at all).
+    Baked(Scheme),
+    /// Runtime-selected scheme id expression (`constants.scheme`): emit an
+    /// if/else-if chain so each face computes ONLY the active variant. The
+    /// branch is uniform on the GPU (one scheme per dispatch) and predictable
+    /// on the CPU — unlike the nested-`select` expression form, which
+    /// computed all seven reconstructions per face and discarded six.
+    Runtime(Expr),
+}
+
+/// Statement-emitting variant of [`scalar_reconstruction`]: returns the
+/// declarations that compute `phi_ho` (specialized per [`SchemeSource`]) plus
+/// the reconstruction exprs, where `phi_ho` is an ident referring to the
+/// emitted local. The caller must splice the statements into the enclosing
+/// block BEFORE any use of `phi_ho` (e.g. at the head of the interior-face
+/// branch, so boundary faces skip the reconstruction entirely).
+pub fn scalar_reconstruction_stmts(
+    prefix: &str,
+    scheme: SchemeSource,
+    flux: Expr,
+    phi_own: Expr,
+    phi_neigh: Expr,
+    grad_own: Expr,
+    grad_neigh: Expr,
+    geom: GeometryPoints,
+) -> (Vec<Stmt>, ScalarReconstruction) {
+    let xy = |point: &Expr| dsl::vec2_f32(point.clone().field("x"), point.clone().field("y"));
+
+    let phi_upwind = dsl::select(phi_own.clone(), phi_neigh.clone(), flux.clone().lt(0.0));
+
+    let grad_own_vec = dsl::vec2_f32_from_xy_fields(grad_own);
+    let grad_neigh_vec = dsl::vec2_f32_from_xy_fields(grad_neigh);
+    let r_own = xy(&geom.face_center) - xy(&geom.center);
+    let r_neigh = xy(&geom.face_center) - xy(&geom.other_center);
+    let d_pos = xy(&geom.other_center) - xy(&geom.center);
+    let d_neg = xy(&geom.center) - xy(&geom.other_center);
+
+    // Build ONE scheme variant's face-value expression (only invoked for the
+    // variants that actually get emitted).
+    let variant = |s: Scheme| -> Expr {
+        let (limiter, quick) = match s {
+            Scheme::Upwind => return phi_upwind.clone(),
+            Scheme::SecondOrderUpwind => (LimiterSpec::None, false),
+            Scheme::SecondOrderUpwindMinMod => (LimiterSpec::MinMod, false),
+            Scheme::SecondOrderUpwindVanLeer => (LimiterSpec::VanLeer, false),
+            Scheme::QUICK => (LimiterSpec::None, true),
+            Scheme::QUICKMinMod => (LimiterSpec::MinMod, true),
+            Scheme::QUICKVanLeer => (LimiterSpec::VanLeer, true),
+        };
+        let (pos, neg) = if quick {
+            (
+                quick_face_value::<WgslExprBuilder>(
+                    phi_own.clone(),
+                    phi_neigh.clone(),
+                    grad_own_vec.clone(),
+                    d_pos.clone(),
+                    limiter,
+                ),
+                quick_face_value::<WgslExprBuilder>(
+                    phi_neigh.clone(),
+                    phi_own.clone(),
+                    grad_neigh_vec.clone(),
+                    d_neg.clone(),
+                    limiter,
+                ),
+            )
+        } else {
+            (
+                limited_linear_face_value::<WgslExprBuilder>(
+                    phi_own.clone(),
+                    phi_neigh.clone(),
+                    grad_own_vec.clone(),
+                    r_own.clone(),
+                    limiter,
+                ),
+                limited_linear_face_value::<WgslExprBuilder>(
+                    phi_neigh.clone(),
+                    phi_own.clone(),
+                    grad_neigh_vec.clone(),
+                    r_neigh.clone(),
+                    limiter,
+                ),
+            )
+        };
+        dsl::select(neg, pos, flux.clone().gt(0.0))
+    };
+
+    let var_name = format!("{prefix}_phi_ho");
+    let stmts = match scheme {
+        SchemeSource::Baked(s) => vec![dsl::let_expr(&var_name, variant(s))],
+        SchemeSource::Runtime(scheme_expr) => {
+            let mut stmts = vec![dsl::var_expr(&var_name, phi_upwind.clone())];
+            // Right-folded if/else-if chain over the non-upwind schemes; the
+            // default (Upwind, id 0, and any unknown id) is the initializer.
+            let arms = [
+                Scheme::SecondOrderUpwind,
+                Scheme::QUICK,
+                Scheme::SecondOrderUpwindMinMod,
+                Scheme::SecondOrderUpwindVanLeer,
+                Scheme::QUICKMinMod,
+                Scheme::QUICKVanLeer,
+            ];
+            let mut chain: Option<Stmt> = None;
+            for s in arms.iter().rev() {
+                let then = dsl::block(vec![dsl::assign_expr(
+                    Expr::ident(&var_name),
+                    variant(*s),
+                )]);
+                let else_block = chain.take().map(|st| dsl::block(vec![st]));
+                chain = Some(dsl::if_block_expr(
+                    scheme_expr.clone().eq(s.gpu_id()),
+                    then,
+                    else_block,
+                ));
+            }
+            if let Some(chain) = chain {
+                stmts.push(chain);
+            }
+            stmts
+        }
+    };
+
+    (
+        stmts,
+        ScalarReconstruction {
+            phi_upwind,
+            phi_ho: Expr::ident(&var_name),
+        },
+    )
+}
+
 pub fn scalar_reconstruction(
     scheme: EnumExpr<Scheme>,
     flux: Expr,

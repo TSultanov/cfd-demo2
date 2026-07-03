@@ -29,7 +29,10 @@ mod clip;
 mod lloyd;
 mod seed_grid;
 
-pub use assemble::{assemble_mesh, generate_meshless_voronoi_mesh};
+pub use assemble::{
+    assemble_mesh, generate_meshless_voronoi_mesh, reset_mutual_orphan_stats,
+    MUTUAL_ORPHAN_MAX_GAP, MUTUAL_ORPHAN_UNIONS,
+};
 pub use lloyd::{generate_cvt_mesh, lloyd_relax, LloydConfig, LloydStats};
 pub use boundary::{
     boundary_seeds, circle_loop, distance_to_loops, meshless_seed_points, point_in_fluid,

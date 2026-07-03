@@ -5,7 +5,7 @@ use crate::solver::gpu::program::plan::{GpuProgramPlan, StepGraphTiming};
 use crate::solver::gpu::program::plan_instance::{PlanAction, PlanInitConfig, PlanStepStats};
 use crate::solver::gpu::recipe::SteppingMode;
 use crate::solver::gpu::structs::{LinearSolverStats, PreconditionerType};
-use crate::solver::mesh::Mesh;
+use crate::solver::mesh::{Mesh, MeshRefreshLevel};
 use crate::solver::model::backend::{FieldKind, StateLayout};
 use crate::solver::model::ports::PortRegistry;
 use crate::solver::model::ModelSpec;
@@ -703,6 +703,45 @@ impl GpuUnifiedSolver {
             #[cfg(feature = "cpu")]
             SolverBackend::Cpu(c) => c.initialize_history(),
         }
+    }
+
+    /// Refresh the solver's mesh-derived state after the caller's `Mesh` changed
+    /// (M2 of the meshless/moving-mesh roadmap).
+    ///
+    /// [`MeshRefreshLevel::Geometry`] (Tier A): the mesh must be
+    /// topology-identical to the build-time mesh — same cell/face counts, same
+    /// owners/neighbors/boundary tags, same cell→face connectivity (validated;
+    /// `Err` on any mismatch) — with only positions moved. The six geometry
+    /// arrays (face areas/normals/centers/wrap shifts, cell centers/volumes)
+    /// are overwritten in place from the shared f64→f32 cast, on both backends.
+    /// Cell-indexed solver state (state ×3 history, warm-start `x`) is never
+    /// touched: cell `i` keeps its identity.
+    ///
+    /// [`MeshRefreshLevel::Topology`] (Tier B) is not yet implemented.
+    ///
+    /// Note: the opt-in SRD operator (cut-cell sliver stabilizer) bakes mesh
+    /// geometry at build and is NOT rebuilt here; refresh is refused while SRD
+    /// is enabled (it is default-off, and unsupported with mesh motion in v1).
+    pub fn refresh_mesh(&mut self, mesh: &Mesh, level: MeshRefreshLevel) -> Result<(), String> {
+        match level {
+            MeshRefreshLevel::Topology => {
+                return Err("topology refresh not yet implemented".into());
+            }
+            MeshRefreshLevel::Geometry => {}
+        }
+        if self.srd_enabled && self.srd.is_some() {
+            return Err(
+                "mesh refresh is unsupported with the SRD stabilizer enabled (its operator \
+                 bakes build-time mesh geometry)"
+                    .into(),
+            );
+        }
+        match &mut self.backend {
+            SolverBackend::Gpu(p) => p.refresh_mesh_geometry(mesh)?,
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(c) => c.refresh_mesh_geometry(mesh)?,
+        }
+        Ok(())
     }
 
     pub fn enable_detailed_profiling(&mut self, enable: bool) -> Result<(), String> {

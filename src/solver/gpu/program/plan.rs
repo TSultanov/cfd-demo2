@@ -475,6 +475,12 @@ impl GpuProgramPlan {
         (self.spec.write_state_bytes)(self, bytes)
     }
 
+    /// Tier A geometry-only mesh refresh (see `MeshResources::refresh_geometry`):
+    /// overwrite the geometry buffers in place; topology must be unchanged.
+    pub fn refresh_mesh_geometry(&self, mesh: &crate::solver::mesh::Mesh) -> Result<(), String> {
+        self.resources.backend.refresh_mesh_geometry(mesh)
+    }
+
     /// Write the current state only, preserving the `old`/`old_old` time history
     /// (unlike `write_state_bytes`, which has initial-condition semantics).
     pub fn write_state_bytes_current(&self, bytes: &[u8]) -> Result<(), String> {

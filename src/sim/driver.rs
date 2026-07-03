@@ -670,6 +670,25 @@ impl SolverDriver {
         self.min_cell_size
     }
 
+    /// Refresh the solver's mesh-derived state after the mesh changed
+    /// (passthrough to [`UnifiedSolver::refresh_mesh`]), then recompute the
+    /// driver's own mesh-derived cache: `min_cell_size`, the adaptive-dt
+    /// length scale (the only mesh-derived scalar the driver holds).
+    pub fn refresh_mesh(
+        &mut self,
+        mesh: &Mesh,
+        level: crate::solver::MeshRefreshLevel,
+    ) -> Result<(), String> {
+        self.solver.refresh_mesh(mesh, level)?;
+        // Same reduction as `build` (driver.rs `min_cell_size` construction).
+        self.min_cell_size = mesh
+            .cell_vol
+            .iter()
+            .map(|&v| v.sqrt())
+            .fold(f64::INFINITY, f64::min);
+        Ok(())
+    }
+
     /// Whether the model is density-based compressible (carries the full
     /// conservative state).
     pub fn compressible(&self) -> bool {

@@ -19,3 +19,4 @@ pub use gpu::structs::{LinearSolverStats, PreconditionerType};
 pub use gpu::{
 	FgmresSizing, GpuUnifiedSolver as UnifiedSolver, OuterStepStatus, SolverConfig, UiPortSet,
 };
+pub use mesh::MeshRefreshLevel;

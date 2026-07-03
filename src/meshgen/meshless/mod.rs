@@ -19,12 +19,16 @@
 //! `boundary` adds M0.3 — boundary loops, the review-F1 seeding protocol
 //! (vertex seeds at convex fluid corners, equidistant guard seeds around
 //! reflex ones) and own-segment-line clipping for `SeedKind::Boundary`
-//! seeds. `Mesh` assembly and Lloyd/CVT arrive in later stages.
+//! seeds; `assemble` adds M0.4 — tag-canonical `Mesh` assembly and the
+//! `generate_meshless_voronoi_mesh` entry point. Lloyd/CVT arrives in a
+//! later stage.
 
+mod assemble;
 mod boundary;
 mod clip;
 mod seed_grid;
 
+pub use assemble::{assemble_mesh, generate_meshless_voronoi_mesh};
 pub use boundary::{
     boundary_seeds, circle_loop, distance_to_loops, meshless_seed_points, point_in_fluid,
     polyline_loop, shielding_violations, tag_boundary_type, BoundaryLoop, BoundarySpec, SeedKind,

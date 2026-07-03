@@ -10,9 +10,13 @@ pub(crate) mod tolerances;
 mod voronoi;
 
 pub use cut_cell::generate_cut_cell_mesh;
-pub use delaunay::{generate_delaunay_mesh, Edge, Triangle};
+// `triangulate` is re-exported as the seed seam for the meshless-equivalence
+// gates: it yields the incumbent Voronoi generator's exact post-smoothing
+// point set (deterministic, fixed RNG), which tests feed to both pipelines.
+pub use delaunay::{generate_delaunay_mesh, triangulate, Edge, Triangle};
 pub use geometry::{BackwardsStep, ChannelWithObstacle, Geometry, Nozzle, RectangularChannel};
 pub use mesh_builder::{CellId, FaceId, MeshBuilder, VertexId};
+pub use meshless::generate_meshless_voronoi_mesh;
 pub use tolerances::MeshgenTolerances;
 pub use voronoi::generate_voronoi_mesh;
 

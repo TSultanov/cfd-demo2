@@ -9,8 +9,9 @@
 #![cfg(feature = "meshgen")]
 
 use cfd2::solver::mesh::{
-    generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, BackwardsStep,
-    ChannelWithObstacle, Geometry, Mesh, Nozzle, RectangularChannel,
+    generate_cut_cell_mesh, generate_delaunay_mesh, generate_meshless_voronoi_mesh,
+    generate_voronoi_mesh, BackwardsStep, ChannelWithObstacle, Geometry, Mesh, Nozzle,
+    RectangularChannel,
 };
 use nalgebra::{Point2, Vector2};
 use std::panic::AssertUnwindSafe;
@@ -243,6 +244,7 @@ fn run_geometry(
                 let mut mesh = match generator {
                     "delaunay" => generate_delaunay_mesh(geo, hmin, hmax, 1.2, domain),
                     "voronoi" => generate_voronoi_mesh(geo, hmin, hmax, 1.2, domain),
+                    "meshless" => generate_meshless_voronoi_mesh(geo, hmin, hmax, 1.2, domain),
                     "cutcell" => generate_cut_cell_mesh(geo, hmin, hmax, 1.2, domain),
                     _ => unreachable!(),
                 };
@@ -349,6 +351,17 @@ fn delaunay_all_geometries_valid() {
 fn voronoi_all_geometries_valid() {
     let failures = run_matrix("voronoi", false);
     assert_eq!(failures, 0, "{failures} voronoi case(s) failed validation");
+}
+
+/// Meshless-engine counterpart of `voronoi_all_geometries_valid` (M0.4):
+/// the same invariant battery over the same geometry/size matrix. NOTE the
+/// meshless path must never run `Mesh::smooth` afterwards (vertex smoothing
+/// would move Voronoi vertices off the bisectors), so it is deliberately
+/// absent from `smoothed_meshes_stay_valid`.
+#[test]
+fn meshless_all_geometries_valid() {
+    let failures = run_matrix("meshless", false);
+    assert_eq!(failures, 0, "{failures} meshless case(s) failed validation");
 }
 
 #[test]

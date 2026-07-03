@@ -14,13 +14,17 @@
 //!   cargo test --features "dev-tests ui" --release --test cpu_obstacle_bench -- --nocapture
 //!
 //! Env knobs:
-//!   CFD2_BENCH_SIZE  target cut-cell size (default 0.005; GUI default is 0.025)
+//!   CFD2_BENCH_SIZE  target cell size (default 0.005; GUI default is 0.025)
 //!   CFD2_BENCH_STEPS number of steps to time (default 3)
+//!   CFD2_BENCH_MESH  cutcell (default) | voronoi | delaunay
 
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
 use cfd2::sim::{DriverBuild, SolverDriver};
-use cfd2::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle, Mesh};
+use cfd2::solver::mesh::{
+    generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, ChannelWithObstacle,
+    Mesh,
+};
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::ui::fluid::Fluid;
 use cfd2::ui::model_defaults::gui_defaults_for;
@@ -45,8 +49,19 @@ fn obstacle_mesh(size: f64) -> Mesh {
         obstacle_center: Point2::new(1.0, 0.51),
         obstacle_radius: 0.1,
     };
-    let mut mesh = generate_cut_cell_mesh(&geo, size, size, 1.2, Vector2::new(LENGTH, HEIGHT));
-    mesh.smooth(&geo, 0.3, 100);
+    let domain = Vector2::new(LENGTH, HEIGHT);
+    let kind = std::env::var("CFD2_BENCH_MESH").unwrap_or_else(|_| "cutcell".into());
+    let mut mesh = match kind.as_str() {
+        "cutcell" => generate_cut_cell_mesh(&geo, size, size, 1.2, domain),
+        "voronoi" => generate_voronoi_mesh(&geo, size, size, 1.2, domain),
+        "delaunay" => generate_delaunay_mesh(&geo, size, size, 1.2, domain),
+        other => panic!("unknown CFD2_BENCH_MESH: {other}"),
+    };
+    // The GUI smooths unstructured meshes with 50 iterations (app.rs); keep
+    // the cut-cell path at its historical 100 so existing numbers stay
+    // comparable.
+    let smooth_iters = if kind == "cutcell" { 100 } else { 50 };
+    mesh.smooth(&geo, 0.3, smooth_iters);
     mesh
 }
 

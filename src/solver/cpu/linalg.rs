@@ -1367,6 +1367,21 @@ pub fn fgmres<T: Real>(
     let mut best_x: Vec<T> = Vec::new();
     let mut best_beta = f64::INFINITY;
     const RESTART_GROWTH_TOL: f64 = 1.25;
+    // f32 projection trust: the Givens projection may break a cycle early,
+    // but the claim is VERIFIED at the next restart head (which recomputes
+    // the true residual and makes the actual convergence decision). A cycle
+    // that broke early and fails the head check flips trust off for the rest
+    // of the solve: the gauge-mode solves where the f32 projection lies
+    // (all-wall lid: claimed 1.25e-6 while the applied update grew the true
+    // residual 47x) then run full-length cycles exactly as before, at the
+    // cost of one short wasted cycle plus two head evaluations (the failing
+    // confirmation and the post-restore recompute). Without the early break every EASY
+    // warm-started solve (the common case: EW first-outer 1e-2, inexact
+    // 1e-4 later outers) burns the entire restart length per cycle —
+    // measured on the GUI obstacle default: 60 iterations where f64 takes
+    // 1-4, a 29x step-time regression.
+    let mut trust_projection = true;
+    let mut proj_broke_early = false;
 
     let mut ax = vec![T::ZERO; n];
     // Reused Arnoldi work vector (was `ax.clone()` per iteration).
@@ -1396,7 +1411,17 @@ pub fn fgmres<T: Real>(
         }
         // Monotonicity guard (see `best_x` above): restore-and-stop when the
         // last cycle grew the true residual, restore on a non-finite one.
+        // Exception: when the offending cycle was a projection-broken f32
+        // cycle, restore-and-RETRY with the projection distrusted instead of
+        // stopping — the pre-trust behavior (full cycles) resumes from the
+        // best iterate.
         if !beta.is_finite() {
+            if proj_broke_early && !best_x.is_empty() {
+                xf.copy_from_slice(&best_x);
+                trust_projection = false;
+                proj_broke_early = false;
+                continue;
+            }
             if !best_x.is_empty() {
                 xf.copy_from_slice(&best_x);
                 res = best_beta;
@@ -1411,6 +1436,12 @@ pub fn fgmres<T: Real>(
                 best_x.copy_from_slice(&xf);
             }
         } else if !best_x.is_empty() && beta > best_beta * RESTART_GROWTH_TOL {
+            if proj_broke_early {
+                xf.copy_from_slice(&best_x);
+                trust_projection = false;
+                proj_broke_early = false;
+                continue;
+            }
             xf.copy_from_slice(&best_x);
             res = best_beta;
             break;
@@ -1418,6 +1449,12 @@ pub fn fgmres<T: Real>(
         let rs = *rel_scale.get_or_insert_with(|| bnorm.min(beta).max(1e-300));
         if beta / rs <= tol || total_iters >= max_iter {
             break;
+        }
+        if proj_broke_early {
+            // The projection claimed convergence but the head's true
+            // residual disagrees: stop trusting it for this solve.
+            trust_projection = false;
+            proj_broke_early = false;
         }
         let inv_beta = T::from_f64(1.0 / beta);
         if vbasis.is_empty() {
@@ -1498,12 +1535,13 @@ pub fn fgmres<T: Real>(
             res = g[j + 1].abs().to_f64();
             // At f32 the Givens PROJECTION residual is not trustworthy on
             // hard solves (measured on the lid: projection 1.25e-6 while the
-            // applied update GREW the true residual 47x — and every trapped
-            // solve had broken early on the projection, while every
-            // productive cycle ran to the restart head's TRUE residual).
-            // f32 therefore decides convergence ONLY at restart heads.
-            let proj_converged = !T::IS_F32 && res / rs <= tol;
+            // applied update GREW the true residual 47x). Convergence is
+            // therefore DECIDED only at restart heads (true residual); the
+            // projection may merely propose an early cycle break while it is
+            // still trusted — see `trust_projection` above.
+            let proj_converged = (!T::IS_F32 || trust_projection) && res / rs <= tol;
             if proj_converged || hnext < T::TINY || total_iters >= max_iter {
+                proj_broke_early = T::IS_F32 && proj_converged;
                 if std::env::var("CFD2_CPU_FGMRES_DEBUG").is_ok() {
                     eprintln!(
                         "[cpu-fgmres] cycle-break j={j} proj_res={res:.4e} rs={rs:.4e} tol={tol:.1e} hnext={hnext:.4e}"
@@ -2598,6 +2636,56 @@ mod block_tests {
             max_r = max_r.max((ax - b[r] as f64).abs());
         }
         assert!(max_r < 1e-5, "residual too large: {max_r}");
+    }
+
+    #[test]
+    fn fgmres_f32_easy_solve_breaks_cycle_early() {
+        // Regression for the f32 over-solve: while the f32 projection is
+        // TRUSTED it may propose an early cycle break (verified at the
+        // restart head). Before the fix f32 never broke a cycle on the
+        // projection, so this easy diagonally-dominant solve burned the
+        // full restart length (60) per cycle — measured as a 29x step-time
+        // regression on the GUI obstacle default, where f64 took 1-4
+        // iterations per warm-started solve.
+        let n = 50usize;
+        let mut sro = vec![0u32];
+        let mut ci = Vec::new();
+        let mut di = vec![0u32; n];
+        let mut vals = Vec::new();
+        for i in 0..n {
+            di[i] = ci.len() as u32;
+            ci.push(i as u32);
+            vals.push(4.0f32);
+            if i > 0 {
+                ci.push((i - 1) as u32);
+                vals.push(-1.0f32);
+            }
+            if i + 1 < n {
+                ci.push((i + 1) as u32);
+                vals.push(-1.0f32);
+            }
+            sro.push(ci.len() as u32);
+        }
+        let a = BlockCsr {
+            s: 1,
+            scalar_row_offsets: &sro,
+            col_indices: &ci,
+            diagonal_indices: &di,
+            values: &vals,
+            threads: 1,
+            simd: false,
+        };
+        let b = vec![1.0f32; n];
+        let mut x = vec![0.0f32; n];
+        let m = BlockJacobi::<f32>::new(&a);
+        let stats = fgmres::<f32>(&a, &b, &mut x, &m, 60, 400, 1e-4, false);
+        assert!(stats.converged, "did not converge: {stats:?}");
+        assert!(
+            stats.iters < 60,
+            "easy f32 solve should break its cycle before the restart \
+             length (60), took {} iterations",
+            stats.iters
+        );
     }
 
     #[test]

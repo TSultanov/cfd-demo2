@@ -473,6 +473,20 @@ impl GenericCoupledProgramResources {
             num_faces: self.runtime.common.num_faces,
         }
     }
+
+    /// Tier A geometry-only mesh refresh: rewrite the six geometry buffers in
+    /// place (see [`MeshResources::refresh_geometry`]). Topology-identical
+    /// meshes only (validated); bind groups, CSR structures, bc tables, AMG
+    /// and FGMRES/Schur workspaces are untouched — they are all
+    /// topology-derived, which is exactly what a `Geometry` refresh leaves
+    /// unchanged.
+    pub(crate) fn refresh_mesh_geometry(
+        &self,
+        mesh: &crate::solver::mesh::Mesh,
+    ) -> Result<(), String> {
+        let common = &self.runtime.common;
+        common.mesh.refresh_geometry(&common.context.queue, mesh)
+    }
 }
 
 fn validate_schur_model(

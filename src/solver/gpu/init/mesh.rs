@@ -1,3 +1,4 @@
+use crate::solver::mesh::refresh::{mesh_geometry_f32, MeshTopology};
 use crate::solver::mesh::Mesh;
 use wgpu::util::DeviceExt;
 
@@ -19,6 +20,10 @@ pub struct MeshResources {
     pub b_scalar_col_indices: wgpu::Buffer,
     pub scalar_row_offsets: Vec<u32>,
     pub scalar_col_indices: Vec<u32>,
+    /// Host snapshot of the topology this solver was built on, kept so a
+    /// `Geometry`-level `refresh_mesh` can validate the incoming mesh is
+    /// topology-identical before overwriting the geometry buffers in place.
+    pub topology: MeshTopology,
 }
 
 impl MeshResources {
@@ -41,6 +46,32 @@ impl MeshResources {
             "scalar_col_indices" => Some(&self.b_scalar_col_indices),
             _ => None,
         }
+    }
+
+    /// Tier A geometry-only refresh: overwrite the six geometry buffers
+    /// (face areas/normals/centers/wrap shifts, cell centers/volumes) with the
+    /// f32 casts of `mesh`'s geometry, produced by the same shared
+    /// [`mesh_geometry_f32`] helper `init_mesh` uses — init and refresh can
+    /// never drift. Topology must be identical to the build-time mesh
+    /// (validated against the stored snapshot; full array compare — see
+    /// [`MeshTopology::validate_matches`] for the cost note).
+    ///
+    /// The buffer objects themselves are unchanged (contents rewritten via
+    /// `queue.write_buffer`), so every bind group referencing them stays valid.
+    pub fn refresh_geometry(&self, queue: &wgpu::Queue, mesh: &Mesh) -> Result<(), String> {
+        self.topology.validate_matches(mesh)?;
+        let geo = mesh_geometry_f32(mesh);
+        queue.write_buffer(&self.b_face_areas, 0, bytemuck::cast_slice(&geo.face_areas));
+        queue.write_buffer(&self.b_face_normals, 0, bytemuck::cast_slice(&geo.face_normals));
+        queue.write_buffer(&self.b_face_centers, 0, bytemuck::cast_slice(&geo.face_centers));
+        queue.write_buffer(
+            &self.b_face_wrap_shift,
+            0,
+            bytemuck::cast_slice(&geo.face_wrap_shift),
+        );
+        queue.write_buffer(&self.b_cell_centers, 0, bytemuck::cast_slice(&geo.cell_centers));
+        queue.write_buffer(&self.b_cell_vols, 0, bytemuck::cast_slice(&geo.cell_vols));
+        Ok(())
     }
 
     /// Return the list of all binding names this resource can resolve.
@@ -67,6 +98,11 @@ impl MeshResources {
 
 pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, String> {
     let num_cells = mesh.cell_cx.len() as u32;
+
+    // Shared f64->f32 geometry cast (also consumed by the CPU backend's
+    // `upload_mesh` and by `MeshResources::refresh_geometry`): one source of
+    // truth so init, refresh, and both backends see bit-identical geometry.
+    let geo = mesh_geometry_f32(mesh);
 
     // --- CSR Matrix Structure ---
     let mut scalar_row_offsets = vec![0u32; num_cells as usize + 1];
@@ -144,70 +180,47 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, St
         usage: wgpu::BufferUsages::STORAGE,
     });
 
-    let face_areas: Vec<f32> = mesh.face_area.iter().map(|&x| x as f32).collect();
+    // The six geometry buffers carry COPY_DST so a Geometry-level
+    // `refresh_mesh` can overwrite them in place via `queue.write_buffer`
+    // (usage flags have no effect on results; see `refresh_geometry`).
     let b_face_areas = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Face Areas Buffer"),
-        contents: bytemuck::cast_slice(&face_areas),
-        usage: wgpu::BufferUsages::STORAGE,
+        contents: bytemuck::cast_slice(&geo.face_areas),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
 
-    let face_normals: Vec<[f32; 2]> = mesh
-        .face_nx
-        .iter()
-        .zip(mesh.face_ny.iter())
-        .map(|(&nx, &ny)| [nx as f32, ny as f32])
-        .collect();
     let b_face_normals = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Face Normals Buffer"),
-        contents: bytemuck::cast_slice(&face_normals),
-        usage: wgpu::BufferUsages::STORAGE,
+        contents: bytemuck::cast_slice(&geo.face_normals),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
 
-    let face_centers: Vec<[f32; 2]> = mesh
-        .face_cx
-        .iter()
-        .zip(mesh.face_cy.iter())
-        .map(|(&cx, &cy)| [cx as f32, cy as f32])
-        .collect();
     let b_face_centers = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Face Centers Buffer"),
-        contents: bytemuck::cast_slice(&face_centers),
-        usage: wgpu::BufferUsages::STORAGE,
+        contents: bytemuck::cast_slice(&geo.face_centers),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
 
     // Periodic wrap shift, one vec2 per face (zero on ordinary faces; an empty
     // mesh field means all-zero, so non-periodic meshes are unaffected).
-    let face_wrap_shift: Vec<[f32; 2]> = if mesh.face_wrap_shift.is_empty() {
-        vec![[0.0f32, 0.0f32]; mesh.face_cx.len()]
-    } else {
-        mesh.face_wrap_shift
-            .iter()
-            .map(|&[sx, sy]| [sx as f32, sy as f32])
-            .collect()
-    };
     let b_face_wrap_shift = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Face Wrap Shift Buffer"),
-        contents: bytemuck::cast_slice(&face_wrap_shift),
-        usage: wgpu::BufferUsages::STORAGE,
+        contents: bytemuck::cast_slice(&geo.face_wrap_shift),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
 
-    let cell_centers: Vec<[f32; 2]> = mesh
-        .cell_cx
-        .iter()
-        .zip(mesh.cell_cy.iter())
-        .map(|(&cx, &cy)| [cx as f32, cy as f32])
-        .collect();
     let b_cell_centers = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Cell Centers Buffer"),
-        contents: bytemuck::cast_slice(&cell_centers),
-        usage: wgpu::BufferUsages::STORAGE,
+        contents: bytemuck::cast_slice(&geo.cell_centers),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
 
-    let cell_vols: Vec<f32> = mesh.cell_vol.iter().map(|&x| x as f32).collect();
     let b_cell_vols = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Cell Volumes Buffer"),
-        contents: bytemuck::cast_slice(&cell_vols),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        contents: bytemuck::cast_slice(&geo.cell_vols),
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
     });
 
     let cell_face_offsets: Vec<u32> = mesh.cell_face_offsets.iter().map(|&x| x as u32).collect();
@@ -307,5 +320,6 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, St
         b_scalar_col_indices,
         scalar_row_offsets,
         scalar_col_indices,
+        topology: MeshTopology::from_mesh(mesh),
     })
 }

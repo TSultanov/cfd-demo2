@@ -1,17 +1,19 @@
-//! `GpuVoronoiEngine`: buffers, pipeline, CPU grid build/upload, regen
-//! encoding, validation readback, and the CPU f64 fallback path
-//! (`resolve_flagged`: flag-list over-read → M0 `compute_cell` on the
-//! f32-rounded seeds → `write_buffer` patches → RELEASE reciprocity
-//! enforcement). Design §3.3/§5.4, cloned from the srd.rs seam: manual
-//! layouts, own encoder + submit.
+//! `GpuVoronoiEngine`: buffers, pipeline, CPU grid build/upload, boundary
+//! segment/seed-kind upload, regen encoding, validation readback, the CPU
+//! f64 fallback path (`resolve_flagged`: flag-list over-read → M0
+//! `compute_cell` on the f32-rounded seeds/segments → `write_buffer`
+//! patches → RELEASE reciprocity enforcement), and the `read_diagram`
+//! bridge back to a CPU `MeshlessDiagram` for `assemble_mesh`. Design
+//! §3.3/§5.4, cloned from the srd.rs seam: manual layouts, own encoder +
+//! submit.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use nalgebra::{Point2, Vector2};
 
 use crate::meshgen::meshless::{
-    compute_cell, BoundarySpec, CellOut, CellStatus, EngineConfig, MeshlessInput, PlaneTag,
-    SeedGrid,
+    compute_cell, BoundaryLoop, BoundarySpec, CellOut, CellStatus, EngineConfig, MeshlessDiagram,
+    MeshlessInput, PlaneTag, SeedGrid, SeedKind, MAX_CLIP_VERTS,
 };
 use crate::meshgen::MeshgenTolerances;
 use crate::solver::gpu::buffers::{create_buffer, create_buffer_init};
@@ -20,7 +22,29 @@ use crate::solver::gpu::linear_solver::fgmres::dispatch_2d;
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
 
-use super::{status, wgsl, BC_NONE, K_FACE_MAX, MAX_VERTS, NBR_NONE};
+use super::{status, wgsl, BC_NONE, BC_SEG_FLAG, K_FACE_MAX, MAX_VERTS, NBR_NONE, SEG_NONE};
+
+/// Round every boundary-loop point through f32 (widened back to f64 —
+/// exact), keeping tags and segment ids. The GPU kernel sees f32 segment
+/// endpoints; review F4 requires the CPU fallback AND any CPU oracle to run
+/// on the SAME rounded values, so every consumer comparing against the GPU
+/// engine must build its `MeshlessInput` from this spec (the engine itself
+/// applies it in `upload_case`).
+pub fn boundary_spec_f32(spec: &BoundarySpec) -> BoundarySpec {
+    let loops = spec
+        .loops
+        .iter()
+        .map(|lp| BoundaryLoop {
+            pts: lp
+                .pts
+                .iter()
+                .map(|p| Point2::new(p.x as f32 as f64, p.y as f32 as f64))
+                .collect(),
+            tags: lp.tags.clone(),
+        })
+        .collect();
+    BoundarySpec::from_loops(loops)
+}
 
 const WORKGROUP_SIZE: u32 = 64;
 
@@ -51,18 +75,26 @@ struct Params {
 }
 
 /// Per-cell padded outputs (design §3.2), allocated at seed capacity.
-/// `centroid` and `face mid` are SEED-RELATIVE (see module docs).
+/// `centroid`, `face mid` and `ring_vert` are SEED-RELATIVE (module docs).
 pub struct VoronoiCellOutputs {
     pub b_nbr_ids: wgpu::Buffer,
     pub b_face_bc: wgpu::Buffer,
     pub b_face_geom: wgpu::Buffer,
     pub b_face_mid: wgpu::Buffer,
+    /// Ring vertex per face slot: vertex `e` starts edge `e` (whose tag and
+    /// geometry live in the same slot) — the CPU `MeshlessDiagram` layout,
+    /// consumed by `read_diagram`/`assemble_mesh`.
+    pub b_ring_vert: wgpu::Buffer,
     pub b_cell_centroid: wgpu::Buffer,
     pub b_cell_area: wgpu::Buffer,
     pub b_cell_nfaces: wgpu::Buffer,
     pub b_status: wgpu::Buffer,
     /// `[0]` = atomic count, `[1..=capacity]` = flagged cell ids.
     pub b_flagged: wgpu::Buffer,
+    /// Diagnostics (deterministic): low 24 bits = grid bins processed by
+    /// the cell's ring traversal (review F3 graded-set instrument), high 8
+    /// bits = the epsilon-filter condition mask of NEEDS_EXACT cells.
+    pub b_visited_bins: wgpu::Buffer,
 }
 
 /// CPU-side snapshot of the outputs (validation/parity path).
@@ -72,12 +104,15 @@ pub struct GpuVoronoiCells {
     pub status: Vec<u32>,
     /// `n * K_FACE_MAX`; `NBR_NONE` = boundary face or unused slot.
     pub nbr_ids: Vec<u32>,
-    /// `n * K_FACE_MAX`; bbox side id for boundary faces, `BC_NONE` else.
+    /// `n * K_FACE_MAX`; bbox side id (< 4) or `BC_SEG_FLAG | seg` for
+    /// boundary faces, `BC_NONE` for interior faces / unused slots.
     pub face_bc: Vec<u32>,
     /// `n * K_FACE_MAX` of `[nx, ny, len, 0]`.
     pub face_geom: Vec<[f32; 4]>,
     /// `n * K_FACE_MAX`, seed-relative.
     pub face_mid: Vec<[f32; 2]>,
+    /// `n * K_FACE_MAX`, seed-relative ring vertex starting each face slot.
+    pub ring_vert: Vec<[f32; 2]>,
     /// Seed-relative (absolute = seed + centroid_rel).
     pub centroid_rel: Vec<[f32; 2]>,
     pub area: Vec<f32>,
@@ -116,6 +151,7 @@ struct CellPatch {
     bc: [u32; K_FACE_MAX],
     geom: [[f32; 4]; K_FACE_MAX],
     mid: [[f32; 2]; K_FACE_MAX],
+    vert: [[f32; 2]; K_FACE_MAX],
     centroid: [f32; 2],
     area: f32,
     nfaces: u32,
@@ -129,6 +165,7 @@ impl CellPatch {
             bc: [BC_NONE; K_FACE_MAX],
             geom: [[0.0; 4]; K_FACE_MAX],
             mid: [[0.0; 2]; K_FACE_MAX],
+            vert: [[0.0; 2]; K_FACE_MAX],
             centroid: [0.0; 2],
             area: 0.0,
             nfaces: 0,
@@ -160,24 +197,38 @@ pub struct GpuVoronoiEngine {
     grid: Option<SeedGrid>,
     /// Coalescing table (canon[i] = lowest seed index of i's quantize bin).
     canon: Vec<u32>,
-    /// Stage-2 engine is interior-only; boundary loops arrive in stage 4.
+    /// Per-seed kinds of the uploaded case (empty = all Interior); feeds
+    /// the CPU f64 fallback's `MeshlessInput`.
+    kinds: Vec<SeedKind>,
+    /// The uploaded boundary spec, f32-ROUNDED (`boundary_spec_f32`) —
+    /// review F4: the kernel clips f32 segment endpoints, so the fallback
+    /// and every oracle must consume these exact values.
     boundary: BoundarySpec,
 
     pipeline: wgpu::ComputePipeline,
     bgl: wgpu::BindGroupLayout,
-    /// Rebuilt on every `upload_seeds` (grid buffers are recreated there);
-    /// all other bindings are engine-owned capacity buffers.
+    /// Rebuilt on every `upload_case` (grid/segment buffers are recreated
+    /// there); all other bindings are engine-owned capacity buffers.
     bind_group: Option<wgpu::BindGroup>,
 
     b_params: wgpu::Buffer,
     b_seeds: wgpu::Buffer,
-    /// FIXED bit / boundary-segment id per seed — carried for later stages
-    /// (Lloyd, boundary); not bound by the stage-1 kernel.
+    /// FIXED bit per seed — carried for the Lloyd stage; not bound by the
+    /// cell kernel.
     #[allow(dead_code)]
     b_seed_flags: wgpu::Buffer,
     b_seed_canon: wgpu::Buffer,
+    /// Per-seed (seg_prev, seg_next) u32 pair; `SEG_NONE` = Interior.
+    b_seed_kind: wgpu::Buffer,
     b_grid_offsets: Option<wgpu::Buffer>,
     b_grid_ids: Option<wgpu::Buffer>,
+    /// Flattened segment table ([ax, ay, bx, by] f32 per global SegId).
+    b_segments: Option<wgpu::Buffer>,
+    /// Per-segment `bc_table_index` u32 — uploaded for the M5 derive pass
+    /// (which needs on-GPU BC indices); the M1 cell kernel does not bind it
+    /// (segment ids in `b_face_bc` are resolved through the CPU spec).
+    #[allow(dead_code)]
+    b_seg_tags: Option<wgpu::Buffer>,
 
     pub outputs: VoronoiCellOutputs,
 }
@@ -194,6 +245,12 @@ impl GpuVoronoiEngine {
     ) -> Self {
         use wgpu::BufferUsages as U;
         assert!(capacity_seeds > 0, "capacity must be positive");
+        // The kernel clips against the f32 domain bbox while the CPU
+        // fallback/oracles use the f64 value; they must be the same number.
+        assert!(
+            domain.x as f32 as f64 == domain.x && domain.y as f32 as f64 == domain.y,
+            "domain extents must be exactly f32-representable"
+        );
         let cap = capacity_seeds as u64;
         let k = K_FACE_MAX as u64;
 
@@ -208,20 +265,24 @@ impl GpuVoronoiEngine {
             create_buffer(device, "voronoi:seed_flags", cap * 4, U::STORAGE | U::COPY_DST);
         let b_seed_canon =
             create_buffer(device, "voronoi:seed_canon", cap * 4, U::STORAGE | U::COPY_DST);
+        let b_seed_kind =
+            create_buffer(device, "voronoi:seed_kind", cap * 8, U::STORAGE | U::COPY_DST);
 
-        // Outputs get COPY_DST too: the stage-3 fallback patches flagged
-        // cells' slots with `queue.write_buffer`.
+        // Outputs get COPY_DST too: the fallback patches flagged cells'
+        // slots with `queue.write_buffer`.
         let out = U::STORAGE | U::COPY_SRC | U::COPY_DST;
         let outputs = VoronoiCellOutputs {
             b_nbr_ids: create_buffer(device, "voronoi:nbr_ids", cap * k * 4, out),
             b_face_bc: create_buffer(device, "voronoi:face_bc", cap * k * 4, out),
             b_face_geom: create_buffer(device, "voronoi:face_geom", cap * k * 16, out),
             b_face_mid: create_buffer(device, "voronoi:face_mid", cap * k * 8, out),
+            b_ring_vert: create_buffer(device, "voronoi:ring_vert", cap * k * 8, out),
             b_cell_centroid: create_buffer(device, "voronoi:cell_centroid", cap * 8, out),
             b_cell_area: create_buffer(device, "voronoi:cell_area", cap * 4, out),
             b_cell_nfaces: create_buffer(device, "voronoi:cell_nfaces", cap * 4, out),
             b_status: create_buffer(device, "voronoi:status", cap * 4, out),
             b_flagged: create_buffer(device, "voronoi:flagged", (1 + cap) * 4, out),
+            b_visited_bins: create_buffer(device, "voronoi:visited_bins", cap * 4, out),
         };
 
         let storage = |binding: u32, read_only: bool| wgpu::BindGroupLayoutEntry {
@@ -260,6 +321,10 @@ impl GpuVoronoiEngine {
                 storage(11, false), // cell_nfaces
                 storage(12, false), // status
                 storage(13, false), // flagged
+                storage(14, true),  // seed_kind
+                storage(15, true),  // segments
+                storage(16, false), // ring_vert
+                storage(17, false), // visited_bins
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -288,6 +353,7 @@ impl GpuVoronoiEngine {
             pts: Vec::new(),
             grid: None,
             canon: Vec::new(),
+            kinds: Vec::new(),
             boundary: BoundarySpec::empty(),
             pipeline,
             bgl,
@@ -296,10 +362,19 @@ impl GpuVoronoiEngine {
             b_seeds,
             b_seed_flags,
             b_seed_canon,
+            b_seed_kind,
             b_grid_offsets: None,
             b_grid_ids: None,
+            b_segments: None,
+            b_seg_tags: None,
             outputs,
         }
+    }
+
+    /// The f32-rounded boundary spec the engine (and its fallback) uses —
+    /// the values every CPU oracle must consume for parity (review F4).
+    pub fn boundary(&self) -> &BoundarySpec {
+        &self.boundary
     }
 
     pub fn capacity(&self) -> u32 {
@@ -310,11 +385,8 @@ impl GpuVoronoiEngine {
         self.n_seeds
     }
 
-    /// Upload seeds (`seeds_xy` = interleaved f32 x/y pairs, `flags` = one
-    /// u32 per seed) and build + upload the CPU `SeedGrid` and the
-    /// coalescing table. LOAD-BEARING: the grid and the coalescing keys are
-    /// computed from the SAME f32 values the kernel sees (widened to f64),
-    /// so grid membership, coalescing verdicts and kernel arithmetic agree.
+    /// Interior-only convenience wrapper over `upload_case` (the stage-1/2
+    /// configuration: no boundary loops, every seed `Interior`).
     pub fn upload_seeds(
         &mut self,
         device: &wgpu::Device,
@@ -322,11 +394,38 @@ impl GpuVoronoiEngine {
         seeds_xy: &[f32],
         flags: &[u32],
     ) {
+        self.upload_case(device, queue, seeds_xy, flags, &[], &BoundarySpec::empty());
+    }
+
+    /// Upload a full case: seeds (`seeds_xy` = interleaved f32 x/y pairs,
+    /// `flags` = one u32 per seed), per-seed `kinds` (empty = all
+    /// `Interior`) and the boundary spec; builds + uploads the CPU
+    /// `SeedGrid`, the coalescing table, the per-seed (seg_prev, seg_next)
+    /// table and the flattened segment table. LOAD-BEARING: the grid, the
+    /// coalescing keys AND the segment endpoints are computed from the SAME
+    /// f32 values the kernel sees (widened to f64 — `boundary` is rounded
+    /// through `boundary_spec_f32` here), so grid membership, coalescing
+    /// verdicts, own-plane lines and kernel arithmetic agree between the
+    /// GPU kernel and the CPU f64 fallback (review F4).
+    pub fn upload_case(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        seeds_xy: &[f32],
+        flags: &[u32],
+        kinds: &[SeedKind],
+        boundary: &BoundarySpec,
+    ) {
         assert_eq!(seeds_xy.len() % 2, 0, "seeds_xy must be x/y pairs");
         let n = seeds_xy.len() / 2;
         assert!(n > 0, "need at least one seed");
         assert!(n as u32 <= self.capacity, "seed count exceeds capacity");
         assert_eq!(flags.len(), n, "one flag word per seed");
+        assert!(
+            kinds.is_empty() || kinds.len() == n,
+            "kinds must be empty or one per seed"
+        );
+        let spec = boundary_spec_f32(boundary);
 
         // Widen the f32-rounded coordinates back to f64 for the grid build
         // and coalescing keys (f32 -> f64 is exact).
@@ -347,9 +446,38 @@ impl GpuVoronoiEngine {
             canon[i] = rep;
         }
 
+        // Per-seed (seg_prev, seg_next) table; SEG_NONE pair = Interior.
+        let mut kind_data = vec![[SEG_NONE; 2]; n];
+        if !kinds.is_empty() {
+            for (i, k) in kinds.iter().enumerate() {
+                if let SeedKind::Boundary { seg_prev, seg_next } = *k {
+                    kind_data[i] = [seg_prev, seg_next];
+                }
+            }
+        }
+
+        // Flattened segment table from the ROUNDED spec ([ax,ay,bx,by] is
+        // exactly the f32 value the f64 fallback widens back) + per-segment
+        // bc_table_index tags for the M5 derive pass. Storage buffers must
+        // be non-empty: pad the no-boundary case with one degenerate entry
+        // (never referenced — no seed carries a segment id then).
+        let nseg = spec.num_segments();
+        let mut segs: Vec<[f32; 4]> = Vec::with_capacity(nseg.max(1));
+        let mut seg_tags: Vec<u32> = Vec::with_capacity(nseg.max(1));
+        for s in 0..nseg {
+            let (a, b) = spec.segment_points(s as u32);
+            segs.push([a.x as f32, a.y as f32, b.x as f32, b.y as f32]);
+            seg_tags.push(spec.segment_tag(s as u32).bc_table_index() as u32);
+        }
+        if segs.is_empty() {
+            segs.push([0.0; 4]);
+            seg_tags.push(0);
+        }
+
         queue.write_buffer(&self.b_seeds, 0, bytemuck::cast_slice(seeds_xy));
         queue.write_buffer(&self.b_seed_flags, 0, bytemuck::cast_slice(flags));
         queue.write_buffer(&self.b_seed_canon, 0, bytemuck::cast_slice(&canon));
+        queue.write_buffer(&self.b_seed_kind, 0, bytemuck::cast_slice(&kind_data));
 
         let b_grid_offsets = create_buffer_init(
             device,
@@ -361,6 +489,18 @@ impl GpuVoronoiEngine {
             device,
             "voronoi:grid_ids",
             &grid.ids,
+            wgpu::BufferUsages::STORAGE,
+        );
+        let b_segments = create_buffer_init(
+            device,
+            "voronoi:segments",
+            &segs,
+            wgpu::BufferUsages::STORAGE,
+        );
+        let b_seg_tags = create_buffer_init(
+            device,
+            "voronoi:seg_tags",
+            &seg_tags,
             wgpu::BufferUsages::STORAGE,
         );
 
@@ -400,16 +540,24 @@ impl GpuVoronoiEngine {
                 entry(11, &self.outputs.b_cell_nfaces),
                 entry(12, &self.outputs.b_status),
                 entry(13, &self.outputs.b_flagged),
+                entry(14, &self.b_seed_kind),
+                entry(15, &b_segments),
+                entry(16, &self.outputs.b_ring_vert),
+                entry(17, &self.outputs.b_visited_bins),
             ],
         });
 
         self.b_grid_offsets = Some(b_grid_offsets);
         self.b_grid_ids = Some(b_grid_ids);
+        self.b_segments = Some(b_segments);
+        self.b_seg_tags = Some(b_seg_tags);
         self.bind_group = Some(bind_group);
         self.n_seeds = n as u32;
         self.pts = pts;
         self.grid = Some(grid);
         self.canon = canon;
+        self.kinds = kinds.to_vec();
+        self.boundary = spec;
     }
 
     /// Encode one full regen (flag-list reset + `voronoi_cell` over all
@@ -474,6 +622,11 @@ impl GpuVoronoiEngine {
             (n * k * 8) as u64,
             "voronoi:rb_mid",
         ));
+        let ring_vert = cast_vec::<[f32; 2]>(read(
+            &self.outputs.b_ring_vert,
+            (n * k * 8) as u64,
+            "voronoi:rb_vert",
+        ));
         let centroid_rel = cast_vec::<[f32; 2]>(read(
             &self.outputs.b_cell_centroid,
             (n * 8) as u64,
@@ -502,11 +655,30 @@ impl GpuVoronoiEngine {
             face_bc,
             face_geom,
             face_mid,
+            ring_vert,
             centroid_rel,
             area,
             nfaces,
             flagged,
         }
+    }
+
+    /// Read the per-cell traversal diagnostics: low 24 bits = grid bins
+    /// processed (review F3 graded-set instrument), high 8 bits = the
+    /// epsilon-filter condition mask of NEEDS_EXACT cells. Deterministic
+    /// but excluded from patches (a patched cell keeps its kernel value).
+    pub fn read_visited_bins(&self, ctx: &GpuContext, cache: &StagingBufferCache) -> Vec<u32> {
+        let n = self.n_seeds as usize;
+        let prof = ProfilingStats::new();
+        let bytes = pollster::block_on(read_buffer_cached(
+            ctx,
+            cache,
+            &prof,
+            &self.outputs.b_visited_bins,
+            (n * 4) as u64,
+            "voronoi:rb_visited",
+        ));
+        bytemuck::cast_slice(&bytes).to_vec()
     }
 
     /// Read the compacted flag list with ONE bounded over-read (review F10:
@@ -576,8 +748,18 @@ impl GpuVoronoiEngine {
                             )
                         }
                         PlaneTag::Box(s) => (NBR_NONE, s as u32, box_normal_cpu(s)),
-                        PlaneTag::Boundary(_) => {
-                            unreachable!("stage-2 engine is interior-only (no boundary loops)")
+                        PlaneTag::Boundary(s) => {
+                            // Outward (solid-side) normal of the ROUNDED
+                            // segment line — the kernel emit rule; bc keeps
+                            // the BC_SEG_FLAG|seg encoding.
+                            let (a, b) = self.boundary.segment_points(s);
+                            let d = b - a;
+                            let dn = d.norm();
+                            (
+                                NBR_NONE,
+                                BC_SEG_FLAG | s,
+                                [(d.y / dn) as f32, (-d.x / dn) as f32],
+                            )
                         }
                     };
                     p.nbr[e] = nbr;
@@ -588,6 +770,7 @@ impl GpuVoronoiEngine {
                         (0.5 * (v0[0] + v1[0]) - seed.x) as f32,
                         (0.5 * (v0[1] + v1[1]) - seed.y) as f32,
                     ];
+                    p.vert[e] = [(v0[0] - seed.x) as f32, (v0[1] - seed.y) as f32];
                 }
                 p.centroid = [
                     (out.centroid[0] - seed.x) as f32,
@@ -614,6 +797,7 @@ impl GpuVoronoiEngine {
         queue.write_buffer(&out.b_face_bc, i * k * 4, bytemuck::cast_slice(&p.bc));
         queue.write_buffer(&out.b_face_geom, i * k * 16, bytemuck::cast_slice(&p.geom));
         queue.write_buffer(&out.b_face_mid, i * k * 8, bytemuck::cast_slice(&p.mid));
+        queue.write_buffer(&out.b_ring_vert, i * k * 8, bytemuck::cast_slice(&p.vert));
         queue.write_buffer(&out.b_cell_centroid, i * 8, bytemuck::cast_slice(&p.centroid));
         queue.write_buffer(&out.b_cell_area, i * 4, bytemuck::bytes_of(&p.area));
         queue.write_buffer(&out.b_cell_nfaces, i * 4, bytemuck::bytes_of(&p.nfaces));
@@ -646,13 +830,16 @@ impl GpuVoronoiEngine {
         let grid = self.grid.as_ref().expect("upload_seeds stores the seed grid");
         let n = self.n_seeds as usize;
         let k = K_FACE_MAX;
-        let input = MeshlessInput::interior_only(
-            &self.pts,
-            &self.boundary,
-            self.domain,
-            &self.tol,
-            EngineConfig::default(),
-        );
+        // The exact inputs the kernel saw: f32-rounded seeds AND the
+        // f32-rounded boundary spec + kinds stored by `upload_case`.
+        let input = MeshlessInput {
+            seeds: &self.pts,
+            kinds: &self.kinds,
+            boundary: &self.boundary,
+            domain: self.domain,
+            tol: &self.tol,
+            cfg: EngineConfig::default(),
+        };
 
         let flagged = self.read_flag_ids(ctx, cache);
         let mut patched_set: HashSet<u32> = HashSet::new();
@@ -795,6 +982,81 @@ impl GpuVoronoiEngine {
         }
     }
 
+    /// Reconstruct a CPU `MeshlessDiagram` from the (resolved) GPU outputs
+    /// — the bridge into `assemble_mesh`. Must run AFTER `resolve_flagged`:
+    /// every cell has to be `SUCCESS` (or a coalesced `EMPTY_CELL`).
+    ///
+    /// Ring vertices are the f32 seed-relative kernel/patch values widened
+    /// back around the f64 seed — assembly re-derives every vertex
+    /// CANONICALLY from its plane-tag pair in f64 (the f32 coordinate is
+    /// only the degenerate-pair fallback), so f32 storage does not limit
+    /// the assembled mesh's precision.
+    pub fn read_diagram(&self, ctx: &GpuContext, cache: &StagingBufferCache) -> MeshlessDiagram {
+        let cells = self.read_cells(ctx, cache);
+        self.cells_to_diagram(&cells)
+    }
+
+    /// `read_diagram`'s pure conversion half (kept separate so tests can
+    /// reuse an existing readback).
+    pub fn cells_to_diagram(&self, c: &GpuVoronoiCells) -> MeshlessDiagram {
+        let n = c.n;
+        let m = MAX_CLIP_VERTS;
+        let k = K_FACE_MAX;
+        assert!(k <= m, "padded GPU rings always fit the CPU diagram stride");
+        let mut d = MeshlessDiagram {
+            n,
+            status: vec![CellStatus::Ok; n],
+            ring_xy: vec![[0.0; 2]; n * m],
+            ring_plane: vec![PlaneTag::PAD; n * m],
+            ring_len: vec![0u8; n],
+            centroid: vec![[0.0; 2]; n],
+            area: vec![0.0; n],
+            overflow: Vec::new(),
+        };
+        for i in 0..n {
+            let seed = self.pts[i];
+            match c.status[i] {
+                status::SUCCESS => {
+                    let nf = c.nfaces[i] as usize;
+                    assert!(nf <= k, "cell {i}: nfaces {nf} exceeds K_FACE_MAX");
+                    for e in 0..nf {
+                        let slot = i * k + e;
+                        d.ring_xy[i * m + e] = [
+                            seed.x + c.ring_vert[slot][0] as f64,
+                            seed.y + c.ring_vert[slot][1] as f64,
+                        ];
+                        let nbr = c.nbr_ids[slot];
+                        d.ring_plane[i * m + e] = if nbr != NBR_NONE {
+                            PlaneTag::Bisector(nbr)
+                        } else {
+                            let bc = c.face_bc[slot];
+                            if bc < 4 {
+                                PlaneTag::Box(bc as u8)
+                            } else {
+                                assert_ne!(bc, BC_NONE, "cell {i} slot {e}: unused slot in ring");
+                                PlaneTag::Boundary(bc & !BC_SEG_FLAG)
+                            }
+                        };
+                    }
+                    d.ring_len[i] = nf as u8;
+                    d.centroid[i] = [
+                        seed.x + c.centroid_rel[i][0] as f64,
+                        seed.y + c.centroid_rel[i][1] as f64,
+                    ];
+                    d.area[i] = c.area[i] as f64;
+                }
+                status::EMPTY_CELL => {
+                    d.status[i] = CellStatus::EmptyCell;
+                    d.centroid[i] = [seed.x, seed.y];
+                }
+                other => panic!(
+                    "cell {i}: status {other} in read_diagram — run resolve_flagged first"
+                ),
+            }
+        }
+        d
+    }
+
     /// Raw bytes of all deterministic outputs (everything except the
     /// flag-list order) for the byte-stability gate.
     pub fn read_raw_outputs(&self, ctx: &GpuContext, cache: &StagingBufferCache) -> Vec<u8> {
@@ -808,9 +1070,11 @@ impl GpuVoronoiEngine {
             (&self.outputs.b_face_bc, n * k * 4, "voronoi:raw_bc"),
             (&self.outputs.b_face_geom, n * k * 16, "voronoi:raw_geom"),
             (&self.outputs.b_face_mid, n * k * 8, "voronoi:raw_mid"),
+            (&self.outputs.b_ring_vert, n * k * 8, "voronoi:raw_vert"),
             (&self.outputs.b_cell_centroid, n * 8, "voronoi:raw_centroid"),
             (&self.outputs.b_cell_area, n * 4, "voronoi:raw_area"),
             (&self.outputs.b_cell_nfaces, n * 4, "voronoi:raw_nfaces"),
+            (&self.outputs.b_visited_bins, n * 4, "voronoi:raw_visited"),
         ] {
             let mut bytes =
                 pollster::block_on(read_buffer_cached(ctx, cache, &prof, buf, size, label));

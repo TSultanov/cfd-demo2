@@ -6,13 +6,31 @@
 //! seam: WGSL string literal, manual bind group layouts, own encoder +
 //! submit, outside the solver's step graph.
 //!
-//! Stage 2 scope (this module version): domain-bbox clipping only (no
-//! boundary segments / ghost seeds yet), CPU-built `SeedGrid` uploaded as
-//! CSR `u32` buffers, conservative epsilon filter (`NEEDS_EXACT`, see
-//! `wgsl.rs` docs), CPU f64 fallback (`resolve_flagged`: recompute flagged
-//! cells via M0 `compute_cell` **on the f32-rounded seeds** — review F4 —
-//! and patch via `write_buffer`), and unconditional (release-mode)
-//! reciprocity enforcement over the merged diagram.
+//! Stage 3 scope (this module version): full boundary support on top of the
+//! stage-2 filter/fallback machinery — flattened boundary-segment table +
+//! per-seed `SeedKind` upload, `Boundary`-kind seeds clipping their own
+//! segment line(s) FIRST (the M0 `own_planes`/`clip_own` order),
+//! `Boundary`/`Box` tag equivalents in the output slots (see the encoding
+//! below), CPU-built `SeedGrid` uploaded as CSR `u32` buffers, conservative
+//! epsilon filter (`NEEDS_EXACT`, see `wgsl.rs` docs), CPU f64 fallback
+//! (`resolve_flagged`: recompute flagged cells via M0 `compute_cell` **on
+//! the f32-rounded seeds and segments** — review F4 — and patch via
+//! `write_buffer`), unconditional (release-mode) reciprocity enforcement
+//! over the merged diagram, and `read_diagram` — the ring readback bridge
+//! into the M0 `assemble_mesh` for an end-to-end GPU-diagram `Mesh`.
+//!
+//! ## Output tag encoding (`b_nbr_ids` / `b_face_bc`)
+//!
+//! Face slot tags mirror the CPU `PlaneTag` in u32 space:
+//!
+//! - interior face: `b_nbr_ids` = the (coalescing-canonicalized) neighbor
+//!   seed id, `b_face_bc` = `BC_NONE`;
+//! - domain-bbox face: `b_nbr_ids` = `NBR_NONE`, `b_face_bc` = side id
+//!   `< 4` (0=left, 1=right, 2=bottom, 3=top — `PlaneTag::Box`);
+//! - boundary-segment face: `b_nbr_ids` = `NBR_NONE`, `b_face_bc` =
+//!   `BC_SEG_FLAG | seg` (`PlaneTag::Boundary(seg)`, high bit set; real
+//!   segment counts stay far below 2³¹ and `BC_NONE` is reserved);
+//! - unused slot: `NBR_NONE` / `BC_NONE`.
 //!
 //! ## Traversal decision: streaming ring clip (not kNN-then-clip)
 //!
@@ -54,7 +72,9 @@
 mod engine;
 mod wgsl;
 
-pub use engine::{GpuVoronoiCells, GpuVoronoiEngine, VoronoiResolveReport};
+pub use engine::{
+    boundary_spec_f32, GpuVoronoiCells, GpuVoronoiEngine, VoronoiResolveReport,
+};
 
 /// Max clip-polygon vertices per cell (intermediate ring). 2D Voronoi cells
 /// of Poisson-disk sets average 6 vertices with tails under 12; the bbox
@@ -84,7 +104,9 @@ pub mod status {
     /// cell's slots still hold its best-known f32 geometry;
     /// `resolve_flagged` recomputes it in f64 and patches.
     pub const NEEDS_EXACT: u32 = 5;
-    /// Placeholder for boundary-segment failures (stage 4).
+    /// Reserved for boundary-segment failures that are not expressible as
+    /// EMPTY/overflow (none exist in the current kernel: a seed on the
+    /// wrong side of its own wall clips to empty and flags).
     pub const BOUNDARY_ERROR: u32 = 6;
     /// Coalesced duplicate (shares a `quantize_point` bin with a
     /// lower-index seed — the CPU `CellStatus::EmptyCell` rule) or the cell
@@ -95,7 +117,16 @@ pub mod status {
 /// `b_nbr_ids` sentinel: boundary face (see `b_face_bc`) or unused slot.
 pub const NBR_NONE: u32 = u32::MAX;
 
-/// `b_face_bc` sentinel for unused slots / interior faces. Stage 1 writes
-/// the domain-bbox side id (0=left, 1=right, 2=bottom, 3=top — matching
-/// `PlaneTag::Box`) for boundary faces.
+/// `b_face_bc` sentinel for unused slots / interior faces (see the tag
+/// encoding in the module docs for the boundary-face values).
 pub const BC_NONE: u32 = u32::MAX;
+
+/// High bit of a `b_face_bc` value marking a boundary-SEGMENT face: the
+/// low 31 bits are the global `SegId` into the uploaded `BoundarySpec`
+/// (`PlaneTag::Boundary`). Values `< 4` are bbox sides; `BC_NONE` (all
+/// ones) stays reserved for unused slots.
+pub const BC_SEG_FLAG: u32 = 0x8000_0000;
+
+/// Per-seed kind-table sentinel (`b_seed_kind`): no own segment, i.e.
+/// `SeedKind::Interior`.
+pub const SEG_NONE: u32 = u32::MAX;

@@ -598,6 +598,65 @@ pub fn assemble_mesh(input: &MeshlessInput, d: &MeshlessDiagram) -> Mesh {
                 by_tag.entry(j).or_default().push((c, e));
             }
         }
+
+        // Mutual-orphan endpoint reconciliation (review F-3 continuation,
+        // needed by the M1 GPU path): two cells that tag EACH OTHER, whose
+        // edges share exactly one deduped vertex id and disagree on the
+        // other by fp noise, are one face whose disagreeing endpoint was
+        // canonicalized through DIFFERENT tag pairs. The classic instance
+        // is a reflex-vertex guard pair on f32-QUANTIZED seeds: the F1
+        // equidistance (their mutual bisector passing exactly through the
+        // polyline vertex) holds only to ~1 f32 ulp (~1e-7·|x|), which
+        // exceeds the 1e-6·h dedup pitch, so one cell solves
+        // bisector ∩ seg_k and the other bisector ∩ seg_{k+1} to different
+        // bins. (On f64 seed sets the disagreement is ~1e-16 and the
+        // quantized dedup absorbs it — this pass never fires.) Union the
+        // disagreeing endpoints when they sit within 1e-3 of the shorter
+        // edge's length — same-face by any geometric standard, far above
+        // fp noise — and restart the merge loop; both edges then share
+        // both endpoint ids and pair geometrically.
+        let mut any_pair_union = false;
+        for &(c, e) in &orphans {
+            let PlaneTag::Bisector(j) = rings[c as usize].1[e as usize] else {
+                unreachable!("orphans are bisector edges")
+            };
+            let (rv, _) = &rings[c as usize];
+            let m = rv.len();
+            let a1 = rv[e as usize] as usize;
+            let b1 = rv[(e as usize + 1) % m] as usize;
+            let Some(cands) = by_tag.get(&c) else { continue };
+            for &(c2, e2) in cands {
+                if c2 != j {
+                    continue;
+                }
+                let (rv2, _) = &rings[c2 as usize];
+                let m2 = rv2.len();
+                let a2 = rv2[e2 as usize] as usize;
+                let b2 = rv2[(e2 as usize + 1) % m2] as usize;
+                // The partner edge runs the opposite way on a shared face:
+                // (a1==b2, b1~a2) or (b1==a2, a1~b2). Same-orientation id
+                // sharing is not the mutual-face pattern — skip it.
+                let miss = if a1 == b2 && b1 != a2 {
+                    Some((b1, a2))
+                } else if b1 == a2 && a1 != b2 {
+                    Some((a1, b2))
+                } else {
+                    None
+                };
+                let Some((x, y)) = miss else { continue };
+                let dx = vxy[y][0] - vxy[x][0];
+                let dy = vxy[y][1] - vxy[x][1];
+                let d2 = dx * dx + dy * dy;
+                let len2 = edge_len_sq(c, e).min(edge_len_sq(c2, e2));
+                if d2 <= 1e-6 * len2 && dsu.find(x) != dsu.find(y) {
+                    dsu.union(x, y);
+                    any_pair_union = true;
+                }
+            }
+        }
+        if any_pair_union {
+            continue;
+        }
         for &oi in &order {
             let (c, e) = orphans[oi];
             if edge_face[edge_off[c as usize] + e as usize] != UNRESOLVED {

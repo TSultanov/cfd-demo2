@@ -41,7 +41,7 @@ fn env_usize(k: &str, d: usize) -> usize {
 }
 
 fn nozzle_mesh(nx: usize, ny: usize) -> Mesh {
-    generate_structured_nozzle_mesh(
+    let mut mesh = generate_structured_nozzle_mesh(
         nx,
         ny,
         LENGTH,
@@ -55,7 +55,10 @@ fn nozzle_mesh(nx: usize, ny: usize) -> Mesh {
             bottom: BoundaryType::Wall,
             top: BoundaryType::Wall,
         },
-    )
+    );
+    // Optional cell-renumbering A/B: CFD2_MESH_ORDER=rcm|hilbert|random.
+    mesh.apply_env_cell_order();
+    mesh
 }
 
 #[test]

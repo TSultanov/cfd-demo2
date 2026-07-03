@@ -62,6 +62,8 @@ fn obstacle_mesh(size: f64) -> Mesh {
     // comparable.
     let smooth_iters = if kind == "cutcell" { 100 } else { 50 };
     mesh.smooth(&geo, 0.3, smooth_iters);
+    // Optional cell-renumbering A/B: CFD2_MESH_ORDER=rcm|hilbert|random.
+    mesh.apply_env_cell_order();
     mesh
 }
 

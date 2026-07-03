@@ -96,6 +96,11 @@ name = "profile_default_cases"
 path = "examples/profile_default_cases.rs"
 required-features = ["meshgen", "profiling"]
 
+[[example]]
+name = "profile_mesh_ordering"
+path = "examples/profile_mesh_ordering.rs"
+required-features = ["meshgen"]
+
 [[test]]
 name = "amg_test"
 path = "tests/amg_test.rs"

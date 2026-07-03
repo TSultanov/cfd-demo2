@@ -25,6 +25,7 @@ use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe, SteppingMode};
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, PreconditionerType};
 use crate::solver::ir::DispatchDomain;
+use crate::solver::mesh::refresh::{mesh_geometry_f32, MeshTopology};
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::SchemeRegistry;
 use crate::solver::model::ModelSpec;
@@ -175,6 +176,11 @@ pub struct CpuSolver {
 
     // Faces grouped by boundary type index (`GpuBoundaryType as u32`).
     boundary_faces: Vec<Vec<u32>>,
+
+    /// Host snapshot of the topology this solver was built on, kept so a
+    /// `Geometry`-level `refresh_mesh` can validate the incoming mesh is
+    /// topology-identical before overwriting the geometry buffers in place.
+    mesh_topology: MeshTopology,
 
     constants: GpuConstants,
     /// Low-Mach preconditioning + biharmonic-dissipation uniform (a separate
@@ -468,6 +474,7 @@ impl CpuSolver {
             diagonal_indices,
             coupled_offsets,
             boundary_faces,
+            mesh_topology: MeshTopology::from_mesh(mesh),
             constants,
             low_mach: GpuLowMachParams::default(),
             state_layout,
@@ -498,6 +505,31 @@ impl CpuSolver {
             last_rel_delta: f64::INFINITY,
             config,
         })
+    }
+
+    // ── mesh refresh (M2 Tier A) ─────────────────────────────────────────
+
+    /// Geometry-only mesh refresh: overwrite the six geometry entries of
+    /// `Buffers` (`face_areas`/`face_normals`/`face_centers`/`face_wrap_shift`/
+    /// `cell_centers`/`cell_vols`) in place with the shared f64→f32 cast —
+    /// exactly the entries `upload_mesh` populates, from the same
+    /// [`mesh_geometry_f32`] helper, so init and refresh (and the GPU backend)
+    /// consume bit-identical geometry. Topology must be identical to the
+    /// build-time mesh (validated against the stored snapshot; full array
+    /// compare — see [`MeshTopology::validate_matches`] for the cost note).
+    ///
+    /// The `AtomicU32` backing stores are updated in place (`copy_into_f32`),
+    /// so the transpiled engine's per-run buffer handles stay valid.
+    pub fn refresh_mesh_geometry(&mut self, mesh: &Mesh) -> Result<(), String> {
+        self.mesh_topology.validate_matches(mesh)?;
+        let geo = mesh_geometry_f32(mesh);
+        self.buffers.copy_into_f32("face_areas", &geo.face_areas);
+        self.buffers.copy_into_f32("face_normals", &geo.face_normals);
+        self.buffers.copy_into_f32("face_centers", &geo.face_centers);
+        self.buffers.copy_into_f32("face_wrap_shift", &geo.face_wrap_shift);
+        self.buffers.copy_into_f32("cell_centers", &geo.cell_centers);
+        self.buffers.copy_into_f32("cell_vols", &geo.cell_vols);
+        Ok(())
     }
 
     // ── configuration ────────────────────────────────────────────────────
@@ -1456,8 +1488,11 @@ fn constants_ctx(c: &GpuConstants, lm: &GpuLowMachParams) -> Ctx {
 }
 
 /// Upload mesh geometry/topology into named CPU buffers matching kernel bindings.
+///
+/// Geometry entries come from the shared [`mesh_geometry_f32`] cast — the same
+/// arrays the GPU `init_mesh` uploads and both backends' `refresh_mesh` paths
+/// rewrite, so init/refresh and CPU/GPU consume bit-identical f32 geometry.
 fn upload_mesh(buffers: &mut Buffers, mesh: &Mesh) {
-    let nf = mesh.num_faces();
     buffers.insert_u32(
         "face_owner",
         mesh.face_owner.iter().map(|&o| o as u32).collect(),
@@ -1469,11 +1504,14 @@ fn upload_mesh(buffers: &mut Buffers, mesh: &Mesh) {
             .map(|n| n.map(|v| v as i32).unwrap_or(-1))
             .collect(),
     );
-    buffers.insert_f32("face_areas", mesh.face_area.iter().map(|&a| a as f32).collect());
-    buffers.insert_vec2("face_normals", interleave(&mesh.face_nx, &mesh.face_ny));
-    buffers.insert_vec2("cell_centers", interleave(&mesh.cell_cx, &mesh.cell_cy));
-    buffers.insert_vec2("face_centers", interleave(&mesh.face_cx, &mesh.face_cy));
-    buffers.insert_f32("cell_vols", mesh.cell_vol.iter().map(|&v| v as f32).collect());
+    let geo = mesh_geometry_f32(mesh);
+    buffers.insert_f32("face_areas", geo.face_areas);
+    buffers.insert_vec2("face_normals", geo.face_normals);
+    buffers.insert_vec2("cell_centers", geo.cell_centers);
+    buffers.insert_vec2("face_centers", geo.face_centers);
+    buffers.insert_f32("cell_vols", geo.cell_vols);
+    // face_wrap_shift is empty on non-periodic meshes (all-zero in the cast).
+    buffers.insert_vec2("face_wrap_shift", geo.face_wrap_shift);
     buffers.insert_u32(
         "cell_face_offsets",
         mesh.cell_face_offsets.iter().map(|&o| o as u32).collect(),
@@ -1489,23 +1527,6 @@ fn upload_mesh(buffers: &mut Buffers, mesh: &Mesh) {
             .map(|b| b.map(|t| t.bc_table_index() as u32).unwrap_or(0))
             .collect(),
     );
-    // face_wrap_shift is empty on non-periodic meshes (treat as zeros).
-    let wrap: Vec<f32> = if mesh.face_wrap_shift.is_empty() {
-        vec![0.0; nf * 2]
-    } else {
-        mesh.face_wrap_shift
-            .iter()
-            .flat_map(|s| [s[0] as f32, s[1] as f32])
-            .collect()
-    };
-    buffers.insert_vec2("face_wrap_shift", wrap);
-}
-
-fn interleave(xs: &[f64], ys: &[f64]) -> Vec<f32> {
-    xs.iter()
-        .zip(ys)
-        .flat_map(|(&x, &y)| [x as f32, y as f32])
-        .collect()
 }
 
 /// Construct the scalar CSR topology consistent with the assembly kernel's index

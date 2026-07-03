@@ -1,7 +1,9 @@
 pub mod ordering;
+pub mod refresh;
 pub mod structs;
 pub mod structured;
 
+pub use refresh::MeshRefreshLevel;
 pub use structs::{BoundaryType, Mesh};
 pub use structured::{
     generate_graded_rect_mesh, generate_structured_backwards_step_mesh,

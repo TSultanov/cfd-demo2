@@ -74,6 +74,47 @@ impl Mesh {
             adj[v1].push(v0);
         }
 
+        // Boundary polyline adjacency: neighbors across open (boundary) faces.
+        let mut badj = vec![Vec::new(); n_verts];
+        for i in 0..self.face_cx.len() {
+            if self.face_neighbor[i].is_none() {
+                let v0 = self.face_v1[i];
+                let v1 = self.face_v2[i];
+                badj[v0].push(v1);
+                badj[v1].push(v0);
+            }
+        }
+
+        // Pin geometric corners. A fixed vertex where the boundary polyline
+        // turns sharply (a step corner, a nozzle lip) is a feature vertex:
+        // Laplacian-plus-SDF-projection would slide it onto ONE of the walls
+        // and permanently round the feature off. Also pin fixed vertices whose
+        // boundary valence isn't 2 — they are not on a clean polyline.
+        let corner_cos = (45.0f64).to_radians().cos();
+        let pinned: Vec<bool> = (0..n_verts)
+            .map(|i| {
+                if !self.v_fixed[i] {
+                    return false;
+                }
+                match badj[i].as_slice() {
+                    &[a, b] => {
+                        let pa = Point2::new(self.vx[a], self.vy[a]);
+                        let pi = Point2::new(self.vx[i], self.vy[i]);
+                        let pb = Point2::new(self.vx[b], self.vy[b]);
+                        let d1 = pi - pa;
+                        let d2 = pb - pi;
+                        let n1 = d1.norm();
+                        let n2 = d2.norm();
+                        if n1 < tol.edge_len_eps || n2 < tol.edge_len_eps {
+                            return true;
+                        }
+                        d1.dot(&d2) / (n1 * n2) < corner_cos
+                    }
+                    _ => true,
+                }
+            })
+            .collect();
+
         // Identify domain boundaries (Box)
         let mut min_bound = Point2::new(f64::MAX, f64::MAX);
         let mut max_bound = Point2::new(f64::MIN, f64::MIN);
@@ -131,7 +172,22 @@ impl Mesh {
                         return (x_old, y_old);
                     }
 
-                    if adj[i].is_empty() {
+                    // Feature (corner) vertices never move.
+                    if pinned[i] {
+                        return (x_old, y_old);
+                    }
+
+                    // Boundary vertices relax along the boundary polyline only
+                    // (averaging interior neighbors would pull them inward and
+                    // the SDF projection would turn that into tangential drift
+                    // toward interior-dense regions, distorting wall spacing).
+                    let neighborhood: &[usize] = if self.v_fixed[i] {
+                        &badj[i]
+                    } else {
+                        &adj[i]
+                    };
+
+                    if neighborhood.is_empty() {
                         return (x_old, y_old);
                     }
 
@@ -139,7 +195,7 @@ impl Mesh {
                     let mut sum_y = 0.0;
                     let mut count = 0;
 
-                    for &neigh in &adj[i] {
+                    for &neigh in neighborhood {
                         sum_x += self.vx[neigh];
                         sum_y += self.vy[neigh];
                         count += 1;

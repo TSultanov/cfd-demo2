@@ -1174,17 +1174,9 @@ impl CFDApp {
                             Some(format!("factor=0.3 iters={smooth_iters}")),
                         );
 
-                        // The curved top wall lies below the bounding-box top, so
-                        // `classify_boundary` leaves it untagged. Cut-cell closes such
-                        // faces internally, but Delaunay/Voronoi do not — tag every
-                        // remaining open (no-neighbour, untyped) face as a no-slip
-                        // wall so the nozzle contour is a solid boundary.
-                        for f in 0..mesh.num_faces() {
-                            if mesh.face_neighbor[f].is_none() && mesh.face_boundary[f].is_none() {
-                                mesh.face_boundary[f] = Some(BoundaryType::Wall);
-                            }
-                        }
-
+                        // The curved top wall (untagged by `classify_boundary`) is
+                        // closed as a no-slip wall inside every unstructured mesh
+                        // generator (`close_untagged_boundary_faces`).
                         mesh
                     }
                 }

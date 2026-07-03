@@ -1,5 +1,5 @@
 use nalgebra::{Point2, Vector2};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::geometry::Geometry;
 use super::mesh_builder::{MeshBuilder, VertexId, FaceId};
@@ -171,12 +171,15 @@ pub fn triangulate(
     // 2. Initial Triangulation
     let mut triangles = compute_triangulation(&points, domain_size, &fixed_nodes, geo, &tol);
 
-    // 3. Smooth Generators (Laplacian Smoothing)
+    // 3. Smooth Generators (Laplacian Smoothing). The triangulation is only
+    // refreshed once the accumulated motion could plausibly change the
+    // topology (Laplacian smoothing tolerates a slightly stale neighborhood),
+    // and the loop exits early once the point set stops moving — a full
+    // Bowyer–Watson pass per iteration dominated generation time before.
     let smoothing_iters = 20;
-    println!(
-        "Starting generator smoothing for {} iterations...",
-        smoothing_iters
-    );
+    let converge_disp = 0.01 * min_cell_size;
+    let retriangulate_disp = 0.2 * min_cell_size;
+    let mut accum_disp = 0.0;
     for iter in 0..smoothing_iters {
         let (new_points, max_disp) = smooth_generators(
             &points,
@@ -189,10 +192,16 @@ pub fn triangulate(
             &tol,
         );
         points = new_points;
-        if iter % 10 == 0 {
-            println!("  Gen Smooth iter {}: max disp = {:.6}", iter, max_disp);
+        accum_disp += max_disp;
+        let converged = max_disp < converge_disp;
+        let last = converged || iter == smoothing_iters - 1;
+        if last || accum_disp > retriangulate_disp {
+            triangles = compute_triangulation(&points, domain_size, &fixed_nodes, geo, &tol);
+            accum_disp = 0.0;
         }
-        triangles = compute_triangulation(&points, domain_size, &fixed_nodes, geo, &tol);
+        if last {
+            break;
+        }
     }
 
     (points, triangles, fixed_nodes)
@@ -206,33 +215,54 @@ fn generate_poisson_points(
     growth_rate: f64,
     domain_size: Vector2<f64>,
 ) -> Vec<Point2<f64>> {
-    let mut rng = rand::thread_rng();
+    // Fixed seed: mesh generation is deterministic — the same geometry and
+    // sizing always produce the same point set (and therefore the same mesh),
+    // which makes solver results reproducible across runs.
+    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(0x5EED_CFD2);
     let r_min = min_cell_size;
-    // Cell size for the background grid.
-    // We use r_min / sqrt(2) so that each grid cell can contain at most one point.
     let cell_size = r_min / (2.0f64).sqrt();
 
     let grid_w = (domain_size.x / cell_size).ceil() as usize;
     let grid_h = (domain_size.y / cell_size).ceil() as usize;
 
-    // Grid stores index of point in the `points` list (which includes boundary + generated)
-    let mut grid: Vec<Option<usize>> = vec![None; grid_w * grid_h];
+    // Bucketed background grid: `grid_head[cell]` is the most recent point in
+    // the cell, `next_in_cell[point]` chains the rest. A single-slot grid is
+    // NOT sufficient here: boundary points arrive with arbitrary spacing (two
+    // wall polylines meeting at a corner, chords of the obstacle circle), so a
+    // cell can legitimately hold several points — a slot grid silently forgot
+    // all but the last one and let interior samples land arbitrarily close to
+    // a forgotten boundary point (sliver triangles / tiny Voronoi faces).
+    let mut grid_head: Vec<i32> = vec![-1; grid_w * grid_h];
+    let mut next_in_cell: Vec<i32> = Vec::new();
+
+    let grid_cell = |p: &Point2<f64>| -> usize {
+        // Clamp so points exactly on the far domain edges land in the last
+        // cell instead of being dropped from the conflict grid.
+        let gx = ((p.x / cell_size) as usize).min(grid_w - 1);
+        let gy = ((p.y / cell_size) as usize).min(grid_h - 1);
+        gy * grid_w + gx
+    };
 
     let mut points = Vec::new(); // Local list of all points (boundary + new)
     let mut active_list = Vec::new(); // Indices into `points`
 
+    let mut insert = |p: Point2<f64>,
+                      points: &mut Vec<Point2<f64>>,
+                      grid_head: &mut Vec<i32>,
+                      next_in_cell: &mut Vec<i32>|
+     -> usize {
+        let idx = points.len();
+        let cell = grid_cell(&p);
+        points.push(p);
+        next_in_cell.push(grid_head[cell]);
+        grid_head[cell] = idx as i32;
+        idx
+    };
+
     // Initialize with boundary points
     for &p in boundary_points {
-        let idx = points.len();
-        points.push(p);
+        let idx = insert(p, &mut points, &mut grid_head, &mut next_in_cell);
         active_list.push(idx);
-
-        let gx = (p.x / cell_size).floor() as usize;
-        let gy = (p.y / cell_size).floor() as usize;
-
-        if gx < grid_w && gy < grid_h {
-            grid[gy * grid_w + gx] = Some(idx);
-        }
     }
 
     // Sizing function
@@ -269,13 +299,16 @@ fn generate_poisson_points(
                 continue;
             }
 
-            // Check neighbors
+            // Check neighbors. A conflict is a point within `r_new` of the
+            // candidate, so scanning a window of `r_new` (not `max_cell_size`)
+            // around the candidate's cell is sufficient — and much cheaper on
+            // graded meshes where max/min is large.
             let r_new = get_radius(new_p);
 
             let gx = (new_p.x / cell_size).floor() as isize;
             let gy = (new_p.y / cell_size).floor() as isize;
 
-            let search_cells = (max_cell_size / cell_size).ceil() as isize;
+            let search_cells = (r_new / cell_size).ceil() as isize;
 
             let mut conflict = false;
 
@@ -285,34 +318,24 @@ fn generate_poisson_points(
                     let ny = gy + dy;
 
                     if nx >= 0 && nx < grid_w as isize && ny >= 0 && ny < grid_h as isize {
-                        if let Some(n_idx) = grid[(ny as usize) * grid_w + (nx as usize)] {
-                            let neighbor = points[n_idx];
+                        let mut n_idx = grid_head[(ny as usize) * grid_w + (nx as usize)];
+                        while n_idx >= 0 {
+                            let neighbor = points[n_idx as usize];
                             let d2 = (neighbor - new_p).norm_squared();
 
-                            let required_dist = r_new;
-
-                            if d2 < required_dist * required_dist {
+                            if d2 < r_new * r_new {
                                 conflict = true;
                                 break 'neighbor_check;
                             }
+                            n_idx = next_in_cell[n_idx as usize];
                         }
                     }
                 }
             }
 
             if !conflict {
-                // Add point
-                let idx = points.len();
-                points.push(new_p);
+                let idx = insert(new_p, &mut points, &mut grid_head, &mut next_in_cell);
                 active_list.push(idx);
-
-                let gx = (new_p.x / cell_size).floor() as usize;
-                let gy = (new_p.y / cell_size).floor() as usize;
-
-                if gx < grid_w && gy < grid_h {
-                    grid[gy * grid_w + gx] = Some(idx);
-                }
-
                 found = true;
                 break;
             }
@@ -348,6 +371,12 @@ fn smooth_generators(
         adj[t.v2].push(t.v3);
         adj[t.v3].push(t.v1);
         adj[t.v3].push(t.v2);
+    }
+    // Every interior edge is shared by two triangles, so each neighbor is
+    // pushed twice — dedup halves the smoothing work without changing weights.
+    for a in adj.iter_mut() {
+        a.sort_unstable();
+        a.dedup();
     }
 
     // Sizing function (same as in generate_poisson_points)
@@ -482,7 +511,7 @@ impl DelaunayTriangulation {
 fn compute_triangulation(
     points: &[Point2<f64>],
     domain_size: Vector2<f64>,
-    fixed_nodes: &[bool],
+    _fixed_nodes: &[bool],
     geo: &(impl Geometry + Sync),
     tol: &MeshgenTolerances,
 ) -> Vec<Triangle> {
@@ -510,6 +539,17 @@ fn compute_triangulation(
     let mut last_tri_idx = 0;
     let cross_eps = tol.cross_eps;
     let circumcircle_eps = tol.circumcircle_eps;
+
+    // Per-insertion scratch, hoisted out of the loop. `visit_stamp`/`bad_stamp`
+    // are epoch-tagged marks replacing a per-insertion HashSet and O(k)
+    // `Vec::contains` cavity-membership tests.
+    let mut bad_triangles: Vec<usize> = Vec::new();
+    let mut queue: Vec<usize> = Vec::new();
+    let mut boundary_edges: Vec<(usize, usize, Option<usize>)> = Vec::new();
+    let mut new_tri_indices: Vec<usize> = Vec::new();
+    let mut visit_stamp: Vec<u32> = Vec::new();
+    let mut bad_stamp: Vec<u32> = Vec::new();
+    let mut epoch: u32 = 0;
 
     for (i, &p) in points.iter().enumerate() {
         let mut curr = last_tri_idx;
@@ -567,23 +607,28 @@ fn compute_triangulation(
 
         let start_bad = curr;
 
-        let mut bad_triangles = Vec::new();
-        let mut queue = Vec::new();
-        let mut visited = HashSet::new();
+        epoch += 1;
+        bad_triangles.clear();
+        queue.clear();
+        if visit_stamp.len() < dt.triangles.len() {
+            visit_stamp.resize(dt.triangles.len() + 256, 0);
+            bad_stamp.resize(dt.triangles.len() + 256, 0);
+        }
 
         if dt.triangles[start_bad].in_circumcircle(p, &working_points, circumcircle_eps) {
             queue.push(start_bad);
-            visited.insert(start_bad);
+            visit_stamp[start_bad] = epoch;
         }
 
         while let Some(t_idx) = queue.pop() {
             let t = dt.triangles[t_idx];
             if t.in_circumcircle(p, &working_points, circumcircle_eps) {
                 bad_triangles.push(t_idx);
+                bad_stamp[t_idx] = epoch;
                 for &n_opt in &t.neighbors {
                     if let Some(n) = n_opt {
-                        if !visited.contains(&n) && dt.active[n] {
-                            visited.insert(n);
+                        if visit_stamp[n] != epoch && dt.active[n] {
+                            visit_stamp[n] = epoch;
                             queue.push(n);
                         }
                     }
@@ -595,7 +640,7 @@ fn compute_triangulation(
             continue;
         }
 
-        let mut boundary_edges = Vec::new();
+        boundary_edges.clear();
 
         for &t_idx in &bad_triangles {
             let t = dt.triangles[t_idx];
@@ -604,7 +649,7 @@ fn compute_triangulation(
             for (v_start, v_end, neigh_idx) in edges {
                 let neighbor = t.neighbors[neigh_idx];
                 let is_boundary_edge = match neighbor {
-                    Some(n) => !bad_triangles.contains(&n),
+                    Some(n) => bad_stamp[n] != epoch,
                     None => true,
                 };
 
@@ -618,7 +663,7 @@ fn compute_triangulation(
             dt.deactivate(t_idx);
         }
 
-        let mut new_tri_indices = Vec::new();
+        new_tri_indices.clear();
 
         for &(u, v, neighbor) in &boundary_edges {
             let new_t = Triangle::new(
@@ -713,9 +758,10 @@ fn compute_triangulation(
                 return None;
             }
 
-            if !fixed_nodes[t.v1] || !fixed_nodes[t.v2] || !fixed_nodes[t.v3] {
-                return Some(t);
-            }
+            // Keep only triangles whose centroid is in the fluid. This must
+            // apply to every triangle, not just all-boundary ones: a triangle
+            // with an interior vertex can still bridge a concave feature (a
+            // chord across the obstacle circle or the step notch).
             let p1 = points[t.v1];
             let p2 = points[t.v2];
             let p3 = points[t.v3];
@@ -794,7 +840,23 @@ pub fn generate_delaunay_mesh(
         }
     }
 
-    builder.build()
+    let mut mesh = builder.build();
+    close_untagged_boundary_faces(&mut mesh);
+    mesh
+}
+
+/// Tag every open (no-neighbor) face that `classify_boundary` left untyped as a
+/// no-slip wall. These are the embedded-geometry faces — the obstacle circle,
+/// the backwards-step walls, the nozzle's curved top — which do not lie on the
+/// rectangular domain edge. Without the tag the solver's BC table treats them
+/// as row 0 (zero-gradient ghost), i.e. an open hole in the middle of the
+/// domain. `generate_cut_cell_mesh` closes such faces the same way.
+pub(super) fn close_untagged_boundary_faces(mesh: &mut Mesh) {
+    for f in 0..mesh.num_faces() {
+        if mesh.face_neighbor[f].is_none() && mesh.face_boundary[f].is_none() {
+            mesh.face_boundary[f] = Some(crate::solver::mesh::BoundaryType::Wall);
+        }
+    }
 }
 
 fn sort_points_morton(points: &mut Vec<Point2<f64>>, fixed_nodes: &mut Vec<bool>) {

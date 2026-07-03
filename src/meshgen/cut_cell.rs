@@ -142,6 +142,23 @@ pub fn generate_cut_cell_mesh(
                                 t = t_a - d_a * (t_b - t_a) / denom;
                             }
 
+                            // Snap near-corner cuts onto the corner itself.
+                            // A cut within SNAP_T of an edge end produces a
+                            // sliver cell (volume down to ~1e-5 of nominal on
+                            // the nozzle's grazing top wall); collapsing it
+                            // distorts the wall by at most SNAP_T*h while the
+                            // degenerate polygon is culled by `area_eps`
+                            // below and the neighbors' faces close the gap as
+                            // tagged walls.
+                            const SNAP_T: f64 = 0.05;
+                            let t = if t < SNAP_T {
+                                0.0
+                            } else if t > 1.0 - SNAP_T {
+                                1.0
+                            } else {
+                                t
+                            };
+
                             let p_inter = p_curr + (p_next - p_curr) * t;
                             poly_verts.push((p_inter, true));
                         }

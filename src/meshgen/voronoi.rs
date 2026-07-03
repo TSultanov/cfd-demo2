@@ -3,23 +3,51 @@ use super::geometry::Geometry;
 use super::mesh_builder::{CellId, MeshBuilder, VertexId};
 use super::tolerances::MeshgenTolerances;
 use crate::solver::mesh::{BoundaryType, Mesh};
+use ahash::AHashMap;
 use nalgebra::{Point2, Vector2};
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
 
 struct FaceResult {
     v1: usize,
     v2: usize,
-    cx: f64,
-    cy: f64,
     nx: f64,
     ny: f64,
-    area: f64,
     owner: usize,
     neighbor: Option<usize>,
     boundary: Option<BoundaryType>,
-    cell_1: usize,
-    cell_2: Option<usize>,
+}
+
+/// Union-find over Voronoi vertices, used to merge the endpoints of
+/// sub-tolerance faces (cocircular generator quadruples produce coincident
+/// circumcenters; without merging those faces have ~zero length and their
+/// normals evaluate to NaN in `recalculate_geometry`).
+struct DisjointSet {
+    parent: Vec<usize>,
+}
+
+impl DisjointSet {
+    fn new(n: usize) -> Self {
+        Self {
+            parent: (0..n).collect(),
+        }
+    }
+
+    fn find(&mut self, mut x: usize) -> usize {
+        while self.parent[x] != x {
+            self.parent[x] = self.parent[self.parent[x]];
+            x = self.parent[x];
+        }
+        x
+    }
+
+    fn union(&mut self, a: usize, b: usize) {
+        let (ra, rb) = (self.find(a), self.find(b));
+        if ra != rb {
+            // Deterministic: smaller root wins.
+            let (lo, hi) = if ra < rb { (ra, rb) } else { (rb, ra) };
+            self.parent[hi] = lo;
+        }
+    }
 }
 
 pub fn generate_voronoi_mesh(
@@ -34,140 +62,105 @@ pub fn generate_voronoi_mesh(
     let (points, triangles, _fixed_nodes) =
         triangulate(geo, min_cell_size, max_cell_size, growth_rate, domain_size);
 
-    let mut mesh = Mesh::new();
-    mesh.cell_face_offsets.push(0);
-    mesh.cell_vertex_offsets.push(0);
-
-    // 1. Build Adjacency Maps
-    // Edge -> Triangles
-    let mut edge_to_triangles: HashMap<Edge, Vec<usize>> = HashMap::new();
-    // Vertex -> Edges
-    let mut vertex_to_edges: Vec<Vec<Edge>> = vec![Vec::new(); points.len()];
-
+    // 1. Edge -> triangle adjacency.
+    let mut edge_to_triangles: AHashMap<Edge, Vec<usize>> = AHashMap::new();
     for (t_idx, t) in triangles.iter().enumerate() {
-        let edges = [
+        for edge in [
             Edge::new(t.v1, t.v2),
             Edge::new(t.v2, t.v3),
             Edge::new(t.v3, t.v1),
-        ];
-
-        for &edge in &edges {
+        ] {
             edge_to_triangles.entry(edge).or_default().push(t_idx);
         }
     }
 
-    for (e, _) in &edge_to_triangles {
-        vertex_to_edges[e.v1].push(*e);
-        vertex_to_edges[e.v2].push(*e);
-    }
+    // Deterministic edge order (hash-map iteration order is arbitrary).
+    let mut edges: Vec<Edge> = edge_to_triangles.keys().cloned().collect();
+    edges.sort_by(|a, b| a.v1.cmp(&b.v1).then(a.v2.cmp(&b.v2)));
 
-    // 2. Construct Voronoi Cells (one per Delaunay vertex)
-    for p in &points {
-        mesh.cell_cx.push(p.x);
-        mesh.cell_cy.push(p.y);
-        mesh.cell_vol.push(0.0);
-    }
-
-    let mut cell_faces: Vec<Vec<usize>> = vec![Vec::new(); points.len()];
-
-    // 3. Identify all unique Voronoi vertices.
+    // 2. Voronoi vertices, deduplicated on the quantization grid. Coincident
+    // circumcenters (cocircular points) collapse to a single vertex here.
     let mut voronoi_points: Vec<Point2<f64>> = Vec::new();
+    let mut vor_map: AHashMap<(i64, i64), usize> = AHashMap::new();
+    let mut add_vor_point = |p: Point2<f64>, voronoi_points: &mut Vec<Point2<f64>>| -> usize {
+        *vor_map
+            .entry(tol.quantize_point(p.x, p.y))
+            .or_insert_with(|| {
+                voronoi_points.push(p);
+                voronoi_points.len() - 1
+            })
+    };
 
-    // Direct mappings
-    let mut circumcenter_indices: Vec<usize> = Vec::with_capacity(triangles.len());
+    let circumcenter_indices: Vec<usize> = triangles
+        .iter()
+        .map(|t| add_vor_point(t.circumcenter, &mut voronoi_points))
+        .collect();
+
+    // Hull-edge midpoints and hull-vertex positions (they close the boundary
+    // cells: a boundary generator's cell runs ... -> midpoint -> generator ->
+    // midpoint -> ... along the hull).
+    let mut midpoint_indices: AHashMap<Edge, usize> = AHashMap::new();
     let mut vertex_indices: Vec<Option<usize>> = vec![None; points.len()];
-    let mut midpoint_indices: HashMap<Edge, usize> = HashMap::new();
-
-    // Add circumcenters
-    for t in triangles.iter() {
-        circumcenter_indices.push(voronoi_points.len());
-        voronoi_points.push(t.circumcenter);
-    }
-
-    // Add midpoints and original vertices
-    for (edge, tris) in &edge_to_triangles {
-        if tris.len() == 1 {
+    for edge in &edges {
+        if edge_to_triangles[edge].len() == 1 {
             let p1 = points[edge.v1];
             let p2 = points[edge.v2];
             let mid = Point2::new((p1.x + p2.x) / 2.0, (p1.y + p2.y) / 2.0);
-
-            midpoint_indices.insert(*edge, voronoi_points.len());
-            voronoi_points.push(mid);
-
+            midpoint_indices.insert(*edge, add_vor_point(mid, &mut voronoi_points));
             if vertex_indices[edge.v1].is_none() {
-                vertex_indices[edge.v1] = Some(voronoi_points.len());
-                voronoi_points.push(p1);
+                vertex_indices[edge.v1] = Some(add_vor_point(p1, &mut voronoi_points));
             }
             if vertex_indices[edge.v2].is_none() {
-                vertex_indices[edge.v2] = Some(voronoi_points.len());
-                voronoi_points.push(p2);
+                vertex_indices[edge.v2] = Some(add_vor_point(p2, &mut voronoi_points));
             }
         }
     }
 
-    // Sort edges for deterministic parallel execution
-    let mut edges: Vec<Edge> = edge_to_triangles.keys().cloned().collect();
-    edges.sort_by(|a, b| a.v1.cmp(&b.v1).then(a.v2.cmp(&b.v2)));
-
-    // Parallel Face Generation
+    // 3. Face candidates, one batch per Delaunay edge (parallel over the
+    // deterministic edge order).
     let process_edge = |edge: &Edge| -> Vec<FaceResult> {
         let tris = &edge_to_triangles[edge];
         let mut results = Vec::new();
         let v1 = edge.v1;
         let v2 = edge.v2;
 
-        // 1. Main Face
-        let idx_a;
-        let idx_b;
-
-        if tris.len() == 2 {
-            idx_a = circumcenter_indices[tris[0]];
-            idx_b = circumcenter_indices[tris[1]];
+        // Main face: the perpendicular-bisector segment between the two
+        // circumcenters (or circumcenter -> hull-edge midpoint on the hull).
+        let idx_a = circumcenter_indices[tris[0]];
+        let idx_b = if tris.len() == 2 {
+            circumcenter_indices[tris[1]]
         } else {
-            idx_a = circumcenter_indices[tris[0]];
-            idx_b = *midpoint_indices.get(edge).unwrap();
+            midpoint_indices[edge]
+        };
+
+        if idx_a != idx_b {
+            let p_v1 = points[v1];
+            let p_v2 = points[v2];
+            let normal = (p_v2 - p_v1).normalize();
+            results.push(FaceResult {
+                v1: idx_a,
+                v2: idx_b,
+                nx: normal.x,
+                ny: normal.y,
+                owner: v1,
+                neighbor: Some(v2),
+                boundary: None,
+            });
         }
 
-        let pa = voronoi_points[idx_a];
-        let pb = voronoi_points[idx_b];
-        let f_center = Point2::new((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0);
-        let f_len = (pa - pb).norm();
-
-        let p_v1 = points[v1];
-        let p_v2 = points[v2];
-        let del_edge_vec = p_v2 - p_v1;
-        let normal = del_edge_vec.normalize();
-
-        results.push(FaceResult {
-            v1: idx_a,
-            v2: idx_b,
-            cx: f_center.x,
-            cy: f_center.y,
-            nx: normal.x,
-            ny: normal.y,
-            area: f_len,
-            owner: v1,
-            neighbor: Some(v2),
-            boundary: None,
-            cell_1: v1,
-            cell_2: Some(v2),
-        });
-
-        // 2. Boundary Faces
+        // Hull edge: close the two boundary cells with the half-edges
+        // [midpoint, v1] and [midpoint, v2] lying on the hull segment.
         if tris.len() == 1 {
-            let idx_mid = *midpoint_indices.get(edge).unwrap();
+            let idx_mid = midpoint_indices[edge];
             let idx_v1 = vertex_indices[v1].unwrap();
             let idx_v2 = vertex_indices[v2].unwrap();
 
-            let p_mid = voronoi_points[idx_mid];
-            let p_v1_vor = voronoi_points[idx_v1];
-            let p_v2_vor = voronoi_points[idx_v2];
-
-            // Face 1: Midpoint - V1
-            let f1_center = Point2::new((p_mid.x + p_v1_vor.x) / 2.0, (p_mid.y + p_v1_vor.y) / 2.0);
+            let p_v1 = points[v1];
+            let p_v2 = points[v2];
             let tangent = p_v2 - p_v1;
             let mut normal = Vector2::new(tangent.y, -tangent.x).normalize();
 
+            // Orient outward (away from the triangle's interior).
             let t = triangles[tris[0]];
             let t_center = (points[t.v1].coords + points[t.v2].coords + points[t.v3].coords) / 3.0;
             let edge_center = (p_v1.coords + p_v2.coords) / 2.0;
@@ -175,192 +168,281 @@ pub fn generate_voronoi_mesh(
                 normal = -normal;
             }
 
-            let boundary_type =
-                tol.classify_boundary(f1_center.x, f1_center.y, domain_size.x, domain_size.y);
-
-            results.push(FaceResult {
-                v1: idx_mid,
-                v2: idx_v1,
-                cx: f1_center.x,
-                cy: f1_center.y,
-                nx: normal.x,
-                ny: normal.y,
-                area: (p_mid - p_v1_vor).norm(),
-                owner: v1,
-                neighbor: None,
-                boundary: boundary_type,
-                cell_1: v1,
-                cell_2: None,
-            });
-
-            // Face 2: Midpoint - V2
-            let f2_center = Point2::new((p_mid.x + p_v2_vor.x) / 2.0, (p_mid.y + p_v2_vor.y) / 2.0);
-            let boundary_type_2 =
-                tol.classify_boundary(f2_center.x, f2_center.y, domain_size.x, domain_size.y);
-
-            results.push(FaceResult {
-                v1: idx_mid,
-                v2: idx_v2,
-                cx: f2_center.x,
-                cy: f2_center.y,
-                nx: normal.x,
-                ny: normal.y,
-                area: (p_mid - p_v2_vor).norm(),
-                owner: v2,
-                neighbor: None,
-                boundary: boundary_type_2,
-                cell_1: v2,
-                cell_2: None,
-            });
+            for (idx_end, own) in [(idx_v1, v1), (idx_v2, v2)] {
+                if idx_mid == idx_end {
+                    continue;
+                }
+                let p_mid = voronoi_points[idx_mid];
+                let p_end = voronoi_points[idx_end];
+                let center = Point2::from((p_mid.coords + p_end.coords) * 0.5);
+                let boundary = tol.classify_boundary(center.x, center.y, domain_size.x, domain_size.y);
+                results.push(FaceResult {
+                    v1: idx_mid,
+                    v2: idx_end,
+                    nx: normal.x,
+                    ny: normal.y,
+                    owner: own,
+                    neighbor: None,
+                    boundary,
+                });
+            }
         }
 
         results
     };
 
-    let all_faces: Vec<FaceResult>;
-    if edges.len() < 5000 {
-        all_faces = edges.iter().flat_map(|edge| process_edge(edge)).collect();
+    let mut all_faces: Vec<FaceResult> = if edges.len() < 5000 {
+        edges.iter().flat_map(|edge| process_edge(edge)).collect()
     } else {
-        all_faces = edges
+        edges
             .par_iter()
             .flat_map(|edge| process_edge(edge))
-            .collect();
+            .collect()
+    };
+
+    // 4. Merge the endpoints of sub-tolerance faces so no near-zero-length
+    // faces (and no ring gaps) survive, then drop the collapsed faces.
+    let mut dsu = DisjointSet::new(voronoi_points.len());
+    for f in &all_faces {
+        let d2 = (voronoi_points[f.v1] - voronoi_points[f.v2]).norm_squared();
+        if d2 < tol.edge_len_eps * tol.edge_len_eps {
+            dsu.union(f.v1, f.v2);
+        }
     }
+    for f in all_faces.iter_mut() {
+        f.v1 = dsu.find(f.v1);
+        f.v2 = dsu.find(f.v2);
+    }
+    all_faces.retain(|f| f.v1 != f.v2);
 
-    // Push faces to mesh
-    for f in all_faces {
-        let f_idx = mesh.face_cx.len();
-        mesh.face_v1.push(f.v1);
-        mesh.face_v2.push(f.v2);
-        mesh.face_cx.push(f.cx);
-        mesh.face_cy.push(f.cy);
-        mesh.face_nx.push(f.nx);
-        mesh.face_ny.push(f.ny);
-        mesh.face_area.push(f.area);
-        mesh.face_owner.push(f.owner);
-        mesh.face_neighbor.push(f.neighbor);
-        mesh.face_boundary.push(f.boundary);
-
-        cell_faces[f.cell_1].push(f_idx);
-        if let Some(c2) = f.cell_2 {
-            cell_faces[c2].push(f_idx);
+    // 5. Per-generator face lists.
+    let n_gen = points.len();
+    let mut cell_faces: Vec<Vec<usize>> = vec![Vec::new(); n_gen];
+    for (f_idx, f) in all_faces.iter().enumerate() {
+        cell_faces[f.owner].push(f_idx);
+        if let Some(nb) = f.neighbor {
+            cell_faces[nb].push(f_idx);
         }
     }
 
-    // 3. Finalize Mesh
+    // 6. Vertex rings per cell: chain the cell's faces end-to-end. Cells whose
+    // face graph is not a single degree-2 cycle fall back to an angular sort
+    // around the generator (star-shaped recovery) and are excluded from the
+    // concave-split pass.
+    let mut rings: Vec<Vec<usize>> = Vec::with_capacity(n_gen);
+    let mut ring_consistent: Vec<bool> = Vec::with_capacity(n_gen);
+    let mut alive: Vec<bool> = Vec::with_capacity(n_gen);
+    for i in 0..n_gen {
+        let (ring, consistent) = build_ring(&cell_faces[i], &all_faces, &voronoi_points, points[i]);
+        alive.push(ring.len() >= 3);
+        rings.push(ring);
+        ring_consistent.push(consistent);
+    }
+
+    // 7. Remap dead generators (no resolvable polygon). Their faces either
+    // vanish (both sides dead) or turn into hull faces of the survivor.
+    let mut cell_id: Vec<usize> = vec![usize::MAX; n_gen];
+    let mut n_cells = 0;
+    for i in 0..n_gen {
+        if alive[i] {
+            cell_id[i] = n_cells;
+            n_cells += 1;
+        }
+    }
+
+    // 8. Assemble the mesh.
+    let mut mesh = Mesh::new();
     mesh.vx = voronoi_points.iter().map(|p| p.x).collect();
     mesh.vy = voronoi_points.iter().map(|p| p.y).collect();
 
-    // Mark boundary vertices as fixed
+    // Fixed vertices: everything on the hull (midpoints and generator
+    // positions) must not be moved by smoothing.
     mesh.v_fixed = vec![false; mesh.vx.len()];
     for idx in midpoint_indices.values() {
-        mesh.v_fixed[*idx] = true;
+        mesh.v_fixed[dsu.find(*idx)] = true;
     }
     for idx in vertex_indices.iter().flatten() {
-        mesh.v_fixed[*idx] = true;
+        mesh.v_fixed[dsu.find(*idx)] = true;
     }
 
-    // Fill cell_faces and calculate volumes
-    for i in 0..points.len() {
-        mesh.cell_faces.extend(&cell_faces[i]);
-        mesh.cell_face_offsets.push(mesh.cell_faces.len());
-
-        // Reconstruct cell polygon by chaining faces
-        let mut adj: HashMap<usize, Vec<usize>> = HashMap::new();
-        for &f_idx in &cell_faces[i] {
-            let v1 = mesh.face_v1[f_idx];
-            let v2 = mesh.face_v2[f_idx];
-            adj.entry(v1).or_default().push(v2);
-            adj.entry(v2).or_default().push(v1);
-        }
-
-        let start_node = if let Some(idx) = vertex_indices[i] {
-            idx
-        } else {
-            // Internal cell. Pick any vertex.
-            if let Some(&first) = adj.keys().next() {
-                first
-            } else {
-                mesh.cell_vertex_offsets.push(mesh.cell_vertices.len());
-                continue;
-            }
+    let mut kept_face_cells: Vec<(usize, Option<usize>)> = Vec::with_capacity(all_faces.len());
+    for f in &all_faces {
+        let owner_alive = alive[f.owner];
+        let neighbor_alive = f.neighbor.map(|nb| alive[nb]).unwrap_or(false);
+        let (owner, neighbor) = match (owner_alive, neighbor_alive) {
+            (true, true) => (f.owner, f.neighbor),
+            (true, false) => (f.owner, None),
+            (false, true) => (f.neighbor.unwrap(), None),
+            (false, false) => continue,
         };
+        mesh.face_v1.push(f.v1);
+        mesh.face_v2.push(f.v2);
+        let pa = voronoi_points[f.v1];
+        let pb = voronoi_points[f.v2];
+        mesh.face_cx.push((pa.x + pb.x) * 0.5);
+        mesh.face_cy.push((pa.y + pb.y) * 0.5);
+        mesh.face_nx.push(f.nx);
+        mesh.face_ny.push(f.ny);
+        mesh.face_area.push((pa - pb).norm());
+        mesh.face_owner.push(cell_id[owner]);
+        mesh.face_neighbor.push(neighbor.map(|nb| cell_id[nb]));
+        mesh.face_boundary
+            .push(if neighbor.is_some() { None } else { f.boundary });
+        kept_face_cells.push((owner, neighbor));
+    }
 
-        let mut c_verts = Vec::new();
-        let mut curr = start_node;
-        let mut visited = HashSet::new();
-
-        if let Some(neighbors) = adj.get(&curr) {
-            if neighbors.is_empty() {
-                mesh.cell_vertex_offsets.push(mesh.cell_vertices.len());
-                continue;
-            }
-
-            c_verts.push(curr);
-            visited.insert(curr);
-
-            let mut next = neighbors[0];
-
-            while next != start_node {
-                c_verts.push(next);
-                visited.insert(next);
-
-                if let Some(next_neighbors) = adj.get(&next) {
-                    let mut found = false;
-                    for &n in next_neighbors {
-                        if n != curr {
-                            if n == start_node {
-                                found = true;
-                                curr = next;
-                                next = n;
-                                break;
-                            }
-                            if !visited.contains(&n) {
-                                found = true;
-                                curr = next;
-                                next = n;
-                                break;
-                            }
-                        }
-                    }
-                    if !found {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
+    mesh.cell_face_offsets.push(0);
+    mesh.cell_vertex_offsets.push(0);
+    let mut mesh_cell_faces: Vec<Vec<usize>> = vec![Vec::new(); n_cells];
+    for (f_idx, &(owner, neighbor)) in kept_face_cells.iter().enumerate() {
+        mesh_cell_faces[cell_id[owner]].push(f_idx);
+        if let Some(nb) = neighbor {
+            mesh_cell_faces[cell_id[nb]].push(f_idx);
         }
-
-        // Ensure CCW ordering
-        if c_verts.len() >= 3 {
-            let mut signed_area = 0.0;
-            let n = c_verts.len();
-            for k in 0..n {
-                let v_idx0 = c_verts[k];
-                let v_idx1 = c_verts[(k + 1) % n];
-                let p0_x = voronoi_points[v_idx0].x;
-                let p0_y = voronoi_points[v_idx0].y;
-                let p1_x = voronoi_points[v_idx1].x;
-                let p1_y = voronoi_points[v_idx1].y;
-                signed_area += p0_x * p1_y - p1_x * p0_y;
-            }
-            if signed_area < 0.0 {
-                c_verts.reverse();
-            }
+    }
+    let mut splittable = Vec::with_capacity(n_cells);
+    let mut generators = Vec::with_capacity(n_cells);
+    for i in 0..n_gen {
+        if !alive[i] {
+            continue;
         }
-
-        mesh.cell_vertices.extend(&c_verts);
+        mesh.cell_cx.push(points[i].x);
+        mesh.cell_cy.push(points[i].y);
+        mesh.cell_vol.push(0.0);
+        mesh.cell_faces.extend(&mesh_cell_faces[cell_id[i]]);
+        mesh.cell_face_offsets.push(mesh.cell_faces.len());
+        mesh.cell_vertices.extend(&rings[i]);
         mesh.cell_vertex_offsets.push(mesh.cell_vertices.len());
+        splittable.push(ring_consistent[i]);
+        generators.push(points[i]);
     }
 
     // Recalculate geometry to ensure areas and centroids are correct
     mesh.recalculate_geometry();
 
-    // 4. Fix Concave Cells
-    mesh = fix_concave_cells(mesh, &points, &tol);
+    // 9. Fix Concave Cells
+    mesh = fix_concave_cells(mesh, &generators, &splittable, &tol);
+
+    // 10. Close embedded-geometry faces (obstacle/step/nozzle contours) that
+    // are not on the domain box and so were left untyped — see the doc comment
+    // on `close_untagged_boundary_faces`.
+    super::delaunay::close_untagged_boundary_faces(&mut mesh);
 
     mesh
+}
+
+/// Order a cell's face endpoints into a closed CCW vertex ring.
+///
+/// Returns `(ring, consistent)`. `consistent` means the faces form a single
+/// degree-2 cycle (each vertex appears in exactly two of the cell's faces), so
+/// every face maps to a consecutive ring pair — the precondition for the
+/// concave-split pass. Defective cells (degenerate topology) fall back to an
+/// angular sort of the unique endpoints around the generator, which recovers a
+/// valid star-shaped polygon but is excluded from splitting.
+fn build_ring(
+    face_indices: &[usize],
+    faces: &[FaceResult],
+    vor_points: &[Point2<f64>],
+    generator: Point2<f64>,
+) -> (Vec<usize>, bool) {
+    let n = face_indices.len();
+    if n < 3 {
+        return (Vec::new(), false);
+    }
+
+    // Local adjacency: vertex -> up to 2 partner vertices.
+    let mut verts: Vec<usize> = Vec::with_capacity(2 * n);
+    for &fi in face_indices {
+        verts.push(faces[fi].v1);
+        verts.push(faces[fi].v2);
+    }
+
+    // Degree check: a chainable ring needs every vertex exactly twice.
+    let mut sorted = verts.clone();
+    sorted.sort_unstable();
+    let mut degree_ok = true;
+    let mut k = 0;
+    while k < sorted.len() {
+        let run = sorted[k..].iter().take_while(|&&v| v == sorted[k]).count();
+        if run != 2 {
+            degree_ok = false;
+            break;
+        }
+        k += run;
+    }
+
+    let ring = if degree_ok {
+        // Chain deterministically starting from the smallest vertex.
+        let mut ring = Vec::with_capacity(n);
+        let start = sorted[0];
+        let mut used = vec![false; n];
+        let mut curr = start;
+        loop {
+            ring.push(curr);
+            let mut next = None;
+            for (slot, &fi) in face_indices.iter().enumerate() {
+                if used[slot] {
+                    continue;
+                }
+                let (a, b) = (faces[fi].v1, faces[fi].v2);
+                if a == curr {
+                    used[slot] = true;
+                    next = Some(b);
+                    break;
+                }
+                if b == curr {
+                    used[slot] = true;
+                    next = Some(a);
+                    break;
+                }
+            }
+            match next {
+                Some(v) if v != start => curr = v,
+                _ => break,
+            }
+        }
+        if ring.len() == n {
+            ring
+        } else {
+            // Disconnected cycles — fall back below.
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    let (mut ring, consistent) = if ring.is_empty() {
+        // Fallback: unique vertices sorted by angle around the generator.
+        let mut unique = verts;
+        unique.sort_unstable();
+        unique.dedup();
+        unique.sort_by(|&a, &b| {
+            let pa = vor_points[a] - generator;
+            let pb = vor_points[b] - generator;
+            pa.y.atan2(pa.x)
+                .partial_cmp(&pb.y.atan2(pb.x))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        (unique, false)
+    } else {
+        (ring, true)
+    };
+
+    // Enforce CCW ordering.
+    if ring.len() >= 3 {
+        let mut signed_area = 0.0;
+        let m = ring.len();
+        for k in 0..m {
+            let p0 = vor_points[ring[k]];
+            let p1 = vor_points[ring[(k + 1) % m]];
+            signed_area += p0.x * p1.y - p1.x * p0.y;
+        }
+        if signed_area < 0.0 {
+            ring.reverse();
+        }
+    }
+
+    (ring, consistent)
 }
 
 struct SplitInfo {
@@ -371,7 +453,12 @@ struct SplitInfo {
     center_vert_id: VertexId,
 }
 
-fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>], tol: &MeshgenTolerances) -> Mesh {
+fn fix_concave_cells(
+    old_mesh: Mesh,
+    generators: &[Point2<f64>],
+    splittable: &[bool],
+    tol: &MeshgenTolerances,
+) -> Mesh {
     let mut builder = MeshBuilder::with_capacity(
         old_mesh.num_vertices() + old_mesh.num_cells(),
         old_mesh.num_cells() * 2,
@@ -382,6 +469,28 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>], tol: &MeshgenTo
     let old_vert_ids: Vec<VertexId> = (0..old_mesh.num_vertices())
         .map(|i| builder.add_vertex(old_mesh.vx[i], old_mesh.vy[i], old_mesh.v_fixed[i]))
         .collect();
+
+    // A cell may only be split if every one of its faces spans a consecutive
+    // ring pair — otherwise `get_sub_cell` below cannot resolve which sub-cell
+    // a face belongs to. (Fallback-ordered rings don't satisfy this.)
+    let face_splittable = |cell_idx: usize| -> bool {
+        if !splittable[cell_idx] {
+            return false;
+        }
+        let start = old_mesh.cell_face_offsets[cell_idx];
+        let end = old_mesh.cell_face_offsets[cell_idx + 1];
+        let vstart = old_mesh.cell_vertex_offsets[cell_idx];
+        let vend = old_mesh.cell_vertex_offsets[cell_idx + 1];
+        let n = vend - vstart;
+        old_mesh.cell_faces[start..end].iter().all(|&f| {
+            let (a, b) = (old_mesh.face_v1[f], old_mesh.face_v2[f]);
+            (0..n).any(|k| {
+                let va = old_mesh.cell_vertices[vstart + k];
+                let vb = old_mesh.cell_vertices[vstart + (k + 1) % n];
+                (va == a && vb == b) || (va == b && vb == a)
+            })
+        })
+    };
 
     let mut cell_info = Vec::with_capacity(old_mesh.num_cells());
 
@@ -394,7 +503,7 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>], tol: &MeshgenTo
             .map(|k| old_vert_ids[old_mesh.cell_vertices[k]])
             .collect();
 
-        if !is_concave(&old_mesh, i, tol) {
+        if !is_concave(&old_mesh, i, tol) || !face_splittable(i) {
             // Keep cell as-is
             let cell_id = builder.add_cell(&cell_verts);
             cell_info.push(SplitInfo {
@@ -513,7 +622,8 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>], tol: &MeshgenTo
     }
 
     // 3. Process faces
-    // Helper: find sub-cell that owns edge (v1, v2) in a split old cell
+    // Helper: find sub-cell that owns edge (v1, v2) in a split old cell.
+    // Split cells passed `face_splittable`, so the lookup always succeeds.
     let get_sub_cell = |old_c_idx: usize, v1_raw: usize, v2_raw: usize| -> CellId {
         let info = &cell_info[old_c_idx];
         if !info.is_split {
@@ -529,7 +639,7 @@ fn fix_concave_cells(old_mesh: Mesh, generators: &[Point2<f64>], tol: &MeshgenTo
                 return info.new_cell_ids[k];
             }
         }
-        panic!("Edge not found in split cell");
+        unreachable!("face_splittable guaranteed every face maps to a ring pair");
     };
 
     // A. Re-create old faces, redirecting to new sub-cells

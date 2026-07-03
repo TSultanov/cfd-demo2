@@ -20,17 +20,29 @@
 //! 2. **Sub-tolerance edge merge.** Union-find over the deduped vertices for
 //!    ring edges shorter than `edge_len_eps` — a verbatim policy transplant
 //!    of the incumbent's `DisjointSet` merge (`voronoi.rs:24-51,204-216`,
-//!    smaller-root-wins). Both cells incident to a collapsing face see the
-//!    same merged vertex ids, so faces disappear symmetrically and no ring
-//!    gaps can open.
-//! 3. **Face emission**, sweeping cells in index order: a `Bisector(j)` edge
-//!    with `j > i` emits the interior face (owner `i`, neighbor `j`, normal
-//!    `normalize(p_j − p_i)` — the incumbent convention, `voronoi.rs:139` —
-//!    which recalculate_geometry's sign-preservation keeps); `j < i` looks up
-//!    the face `j` already emitted. `Boundary`/`Box` edges emit boundary
-//!    faces with outward normals and `face_boundary` from
-//!    `tag_boundary_type` (so nothing is ever left untagged —
-//!    `close_untagged_boundary_faces` is *not* needed and not called).
+//!    smaller-root-wins), iterated with the ring rebuild until stable. Both
+//!    cells incident to a collapsing face see the same merged vertex ids,
+//!    so faces disappear symmetrically and no ring gaps can open.
+//! 3. **Face resolution by canonical vertex pair** (review F-1). Interior
+//!    faces are paired GEOMETRICALLY — two ring edges sharing the same
+//!    unordered deduped-vertex-id pair are one face — because tag
+//!    reciprocity is not sound: the clip's Cut-vs-Redundant verdict is per
+//!    cell, so near-coincident seed pairs make a shared neighbor swallow
+//!    one twin's plane into the other's (a long, real, one-sided edge
+//!    tagged with the eps-indistinguishable twin). Unpaired edges fall back
+//!    to: endpoint-union for tiny (< 4·`edge_len_eps`) knife-edge stubs;
+//!    CHAINING for coarse edges subdivided by finer twin cells; and a
+//!    forced pairing with the tag's cell as the total fallback (structurally
+//!    valid, eps-approximate, adversarial inputs only). Emission then sweeps
+//!    cells in index order: faces materialize at first reference (owner =
+//!    smaller seed id, normal `normalize(p_b − p_a)` — the incumbent
+//!    convention, `voronoi.rs:139` — which recalculate_geometry's
+//!    sign-preservation keeps), so on tag-consistent inputs face ids and
+//!    bits are identical to the plain `j > i` emission scheme.
+//!    `Boundary`/`Box` edges emit boundary faces with outward normals and
+//!    `face_boundary` from `tag_boundary_type` (so nothing is ever left
+//!    untagged — `close_untagged_boundary_faces` is *not* needed and not
+//!    called).
 //! 4. **Cell arrays** — CCW `cell_vertices` rings, `cell_faces` in ring
 //!    order (first-use-by-owner, Morton-friendly since the seeds arrive
 //!    Morton-sorted), `v_fixed` on boundary-face vertices, `face_wrap_shift`
@@ -167,11 +179,16 @@ fn circumcenter(
 /// Canonically re-evaluate the ring vertex of cell `i` whose incident edges
 /// were created by the plane pair `(t_in, t_out)`. Pure function of the tag
 /// pair (plus `i` for bisectors, whose lines involve the owning seed), so
-/// every cell incident to the vertex computes the exact same bits. The
-/// `clipped` coordinate is the deterministic per-cell fallback for
-/// degenerate pairings (same plane twice, parallel lines) — those never
-/// arise from a valid convex clip, and if one ever does, quantized dedup
-/// still absorbs sub-`vertex_merge` disagreement.
+/// every cell incident to the vertex *with the same tag pair* computes the
+/// exact same bits. Cells seeing one physical point through DIFFERENT tag
+/// pairs (e.g. a reflex polyline corner where guard g1 solves
+/// bisector ∩ prev-line while g2 solves bisector ∩ cur-line — review F-3)
+/// agree only to fp noise (~1e-16), a coincidence class the quantized
+/// dedup absorbs like the cocircular one. The `clipped` coordinate is the
+/// deterministic per-cell fallback for degenerate pairings (same plane
+/// twice, parallel lines) — those never arise from a valid convex clip,
+/// and if one ever does, quantized dedup still absorbs sub-`vertex_merge`
+/// disagreement.
 fn canonical_vertex(
     input: &MeshlessInput,
     i: usize,
@@ -347,11 +364,37 @@ pub fn assemble_mesh(input: &MeshlessInput, d: &MeshlessDiagram) -> Mesh {
         cell_vert_ids.push(ids);
     }
 
-    // Pass 2: sub-tolerance edge merge (incumbent DSU policy). Interior
-    // edges are visited from both incident cells — the union is idempotent
-    // and both see the same merged roots, so collapses are symmetric.
+    // Pass 2 + 3a, iterated: sub-tolerance edge merge (incumbent DSU
+    // policy) and ring rebuild, then face RESOLUTION by canonical vertex
+    // pair. Review F-1 exposed that tag reciprocity is not a sound pairing
+    // key: the Cut-vs-Redundant verdict is per cell (`sv > eps` against the
+    // cell's OWN ring), so near-coincident seed pairs make a neighbor
+    // swallow one twin's plane into the other's — the swallowed face is
+    // long and real, merely tagged with the wrong (indistinguishable-
+    // within-eps) twin. Faces are therefore paired GEOMETRICALLY: two ring
+    // edges sharing the same unordered deduped-vertex-id pair are the same
+    // face (canonical vertices make the ids bit-stable across cells).
+    // Leftover one-sided edges are handled by, in order:
+    //  - tiny orphans (< 4·edge_len_eps): the knife-edge class — union the
+    //    endpoints and re-merge (the collapse both cells agree on);
+    //  - long orphans, longest first: try to CHAIN them — a coarse edge
+    //    [A,B] of cell x whose region is subdivided by finer cells pairs
+    //    with a path of orphan edges tagged `x` from A to B (the twin-pair
+    //    split case), yielding one face per sub-edge, all referenced by x;
+    //  - anything still unmatched pairs with its own tag's cell, which
+    //    references the face without owning a ring edge for it (total
+    //    fallback: structurally valid, geometrically eps-approximate —
+    //    reachable only from adversarial near-twin inputs).
     let mut dsu = DisjointSet::new(vxy.len());
     let merge_sq = input.tol.edge_len_eps * input.tol.edge_len_eps;
+    // Tiny-orphan threshold: one-sided knife-edge stubs whose canonical
+    // endpoints re-expanded past `edge_len_eps` (review F-1) still sit at
+    // that scale; 4x gives headroom while staying far below real edges.
+    let tiny_sq = 16.0 * merge_sq;
+
+    // Pre-merge on the raw rings so the loop below runs its single-rebuild
+    // fast path on clean inputs (iterating rebuild+merge from scratch costs
+    // a full extra pass at 300k).
     for ids in &cell_vert_ids {
         let m = ids.len();
         for e in 0..m {
@@ -367,35 +410,307 @@ pub fn assemble_mesh(input: &MeshlessInput, d: &MeshlessDiagram) -> Mesh {
         }
     }
 
-    // Pass 3a: rebuild rings on merged vertex ids, dropping collapsed edges
-    // (an edge survives iff its mapped endpoints differ; the surviving ring
-    // chains exactly because collapsed runs share one root).
-    let mut rings: Vec<(Vec<u32>, Vec<PlaneTag>)> = Vec::with_capacity(n);
-    for i in 0..n {
-        let ids = &cell_vert_ids[i];
-        let (_, tags) = ring_of(d, &spill, i);
-        let m = ids.len();
-        let mapped: Vec<u32> = ids.iter().map(|&v| dsu.find(v as usize) as u32).collect();
-        let mut rv: Vec<u32> = Vec::with_capacity(m);
-        let mut rt: Vec<PlaneTag> = Vec::with_capacity(m);
-        for e in 0..m {
-            if mapped[e] != mapped[(e + 1) % m] {
-                rv.push(mapped[e]);
-                rt.push(tags[e]);
+    let mut rings: Vec<(Vec<u32>, Vec<PlaneTag>)> = Vec::new();
+    // Per-edge face resolution, parallel to `rings` (global edge index =
+    // edge_off[cell] + ring position).
+    #[derive(Clone, Debug)]
+    enum EdgeRes {
+        Boundary,
+        /// Face descriptor index (interior face, this edge is one side).
+        Face(u32),
+        /// Coarse edge covered by several finer faces (chain case).
+        Chain(Vec<u32>),
+    }
+    /// An interior face: the two incident cells (a < b) and the ring edge
+    /// its geometry is taken from.
+    struct FaceDesc {
+        a: u32,
+        b: u32,
+        src_cell: u32,
+        src_pos: u32,
+    }
+    let mut edge_off: Vec<usize> = Vec::new();
+    let mut res: Vec<EdgeRes> = Vec::new();
+    let mut descs: Vec<FaceDesc> = Vec::new();
+    // Chain resolutions of the final pass: (coarse edge, its face descs).
+    let mut res_chain: Vec<((u32, u32), Vec<u32>)> = Vec::new();
+    // Faces force-referenced by a cell that has no ring edge for them
+    // (fallback case), keyed by target cell; filled in ascending desc order.
+    let mut forced_for: Vec<Vec<u32>> = vec![Vec::new(); n];
+
+    loop {
+        // Pass 3a: rebuild rings on merged vertex ids, dropping collapsed
+        // edges (an edge survives iff its mapped endpoints differ; the
+        // surviving ring chains exactly because collapsed runs share one
+        // root).
+        rings.clear();
+        for i in 0..n {
+            let ids = &cell_vert_ids[i];
+            let (_, tags) = ring_of(d, &spill, i);
+            let m = ids.len();
+            let mapped: Vec<u32> = ids.iter().map(|&v| dsu.find(v as usize) as u32).collect();
+            let mut rv: Vec<u32> = Vec::with_capacity(m);
+            let mut rt: Vec<PlaneTag> = Vec::with_capacity(m);
+            for e in 0..m {
+                if mapped[e] != mapped[(e + 1) % m] {
+                    rv.push(mapped[e]);
+                    rt.push(tags[e]);
+                }
+            }
+            assert!(
+                rv.len() >= 3,
+                "cell {i}: ring degenerated to {} vertices after sub-tolerance merge",
+                rv.len()
+            );
+            rings.push((rv, rt));
+        }
+
+        // Length-based merge on the rebuilt rings (both incident cells see
+        // the same roots, so collapses stay symmetric). Newly-merged edges
+        // require another rebuild.
+        let mut merged_any = false;
+        for (rv, _) in &rings {
+            let m = rv.len();
+            for e in 0..m {
+                let a = rv[e] as usize;
+                let b = rv[(e + 1) % m] as usize;
+                if a != b {
+                    let dx = vxy[b][0] - vxy[a][0];
+                    let dy = vxy[b][1] - vxy[a][1];
+                    if dx * dx + dy * dy < merge_sq && dsu.find(a) != dsu.find(b) {
+                        dsu.union(a, b);
+                        merged_any = true;
+                    }
+                }
             }
         }
-        assert!(
-            rv.len() >= 3,
-            "cell {i}: ring degenerated to {} vertices after sub-tolerance merge",
-            rv.len()
-        );
-        rings.push((rv, rt));
+        if merged_any {
+            continue;
+        }
+
+        // Pair interior edges by unordered vertex-id key: a single-slot map
+        // holds the first unmatched edge per key, its partner (from another
+        // cell) claims it — one entry per open face, no per-key Vecs.
+        // Lookup/entry only, never iterated; pairing follows the
+        // deterministic edge sweep (so on tag-consistent inputs the pair is
+        // always claimed by the LARGER cell id, matching the incumbent
+        // emission structure).
+        edge_off.clear();
+        let mut total = 0usize;
+        for (rv, _) in &rings {
+            edge_off.push(total);
+            total += rv.len();
+        }
+        const UNRESOLVED: u32 = u32::MAX;
+        let mut edge_face: Vec<u32> = vec![UNRESOLVED; total];
+        descs.clear();
+        for f in &mut forced_for {
+            f.clear();
+        }
+        let mut open: AHashMap<(u32, u32), (u32, u32)> = AHashMap::with_capacity(total / 2 + 1);
+        for (i, (rv, rt)) in rings.iter().enumerate() {
+            let m = rv.len();
+            for e in 0..m {
+                if !matches!(rt[e], PlaneTag::Bisector(_)) {
+                    continue;
+                }
+                let a = rv[e];
+                let b = rv[(e + 1) % m];
+                let key = (a.min(b), a.max(b));
+                match open.get(&key).copied() {
+                    Some((c2, e2)) if c2 as usize != i => {
+                        open.remove(&key);
+                        let id = descs.len() as u32;
+                        descs.push(FaceDesc {
+                            a: (i as u32).min(c2),
+                            b: (i as u32).max(c2),
+                            // Geometry from the FIRST (lower-id) side — the
+                            // incumbent emission convention.
+                            src_cell: c2,
+                            src_pos: e2,
+                        });
+                        edge_face[edge_off[i] + e] = id;
+                        edge_face[edge_off[c2 as usize] + e2 as usize] = id;
+                    }
+                    Some(_) => {
+                        // Same-cell key reuse (degenerate ring): leave the
+                        // stored edge open; this one becomes an orphan.
+                    }
+                    None => {
+                        open.insert(key, (i as u32, e as u32));
+                    }
+                }
+            }
+        }
+        // Unmatched edges (still open or shadowed) in deterministic order.
+        let mut orphans: Vec<(u32, u32)> = Vec::new();
+        for (i, (rv, _)) in rings.iter().enumerate() {
+            for e in 0..rv.len() {
+                if matches!(rings[i].1[e], PlaneTag::Bisector(_))
+                    && edge_face[edge_off[i] + e] == UNRESOLVED
+                {
+                    orphans.push((i as u32, e as u32));
+                }
+            }
+        }
+
+        // Tiny orphans: knife-edge stubs the neighbor declared Redundant —
+        // collapse them (endpoint union) and restart the merge loop.
+        let mut any_tiny = false;
+        for &(c, e) in &orphans {
+            let (rv, _) = &rings[c as usize];
+            let m = rv.len();
+            let a = rv[e as usize] as usize;
+            let b = rv[(e as usize + 1) % m] as usize;
+            let dx = vxy[b][0] - vxy[a][0];
+            let dy = vxy[b][1] - vxy[a][1];
+            if dx * dx + dy * dy < tiny_sq {
+                dsu.union(a, b);
+                any_tiny = true;
+            }
+        }
+        if any_tiny {
+            continue;
+        }
+
+        // Long orphans, longest first (coarse edges before the finer edges
+        // that subdivide them), ties on (cell, pos) for determinism.
+        let mut order: Vec<usize> = (0..orphans.len()).collect();
+        let edge_len_sq = |c: u32, e: u32| -> f64 {
+            let (rv, _) = &rings[c as usize];
+            let m = rv.len();
+            let a = rv[e as usize] as usize;
+            let b = rv[(e as usize + 1) % m] as usize;
+            let dx = vxy[b][0] - vxy[a][0];
+            let dy = vxy[b][1] - vxy[a][1];
+            dx * dx + dy * dy
+        };
+        order.sort_by(|&x, &y| {
+            let lx = edge_len_sq(orphans[x].0, orphans[x].1);
+            let ly = edge_len_sq(orphans[y].0, orphans[y].1);
+            ly.total_cmp(&lx).then(orphans[x].cmp(&orphans[y]))
+        });
+        // Orphans grouped by their tag's cell (chain candidates for a
+        // coarse edge of cell x are orphan edges tagged x). Lookup-only.
+        let mut by_tag: AHashMap<u32, Vec<(u32, u32)>> = AHashMap::new();
+        for &(c, e) in &orphans {
+            if let PlaneTag::Bisector(j) = rings[c as usize].1[e as usize] {
+                by_tag.entry(j).or_default().push((c, e));
+            }
+        }
+        for &oi in &order {
+            let (c, e) = orphans[oi];
+            if edge_face[edge_off[c as usize] + e as usize] != UNRESOLVED {
+                continue; // consumed as a chain partner
+            }
+            let (rv, rt) = &rings[c as usize];
+            let m = rv.len();
+            let p_start = rv[e as usize];
+            let p_end = rv[(e as usize + 1) % m];
+            let PlaneTag::Bisector(j) = rt[e as usize] else {
+                unreachable!("orphans are bisector edges")
+            };
+            debug_assert!((j as usize) < n && j as usize != c as usize);
+            // Chain attempt: walk unresolved orphan edges tagged `c` from
+            // p_start to p_end (each step picks the first candidate in
+            // deterministic (cell, pos) order).
+            let mut chain: Vec<(u32, u32)> = Vec::new();
+            if let Some(cands) = by_tag.get(&c) {
+                let mut cur = p_start;
+                let mut guard = cands.len() + 1;
+                while cur != p_end && guard > 0 {
+                    guard -= 1;
+                    let next = cands.iter().copied().find(|&(c2, e2)| {
+                        if edge_face[edge_off[c2 as usize] + e2 as usize] != UNRESOLVED {
+                            return false;
+                        }
+                        if chain.contains(&(c2, e2)) {
+                            return false;
+                        }
+                        let (rv2, _) = &rings[c2 as usize];
+                        let m2 = rv2.len();
+                        let a2 = rv2[e2 as usize];
+                        let b2 = rv2[(e2 as usize + 1) % m2];
+                        a2 == cur || b2 == cur
+                    });
+                    match next {
+                        Some((c2, e2)) => {
+                            let (rv2, _) = &rings[c2 as usize];
+                            let m2 = rv2.len();
+                            let a2 = rv2[e2 as usize];
+                            let b2 = rv2[(e2 as usize + 1) % m2];
+                            cur = if a2 == cur { b2 } else { a2 };
+                            chain.push((c2, e2));
+                        }
+                        None => break,
+                    }
+                }
+                if cur != p_end {
+                    chain.clear();
+                }
+            }
+            if !chain.is_empty() {
+                let mut ids = Vec::with_capacity(chain.len());
+                for &(c2, e2) in &chain {
+                    let id = descs.len() as u32;
+                    descs.push(FaceDesc {
+                        a: c.min(c2),
+                        b: c.max(c2),
+                        src_cell: c2,
+                        src_pos: e2,
+                    });
+                    edge_face[edge_off[c2 as usize] + e2 as usize] = id;
+                    ids.push(id);
+                }
+                // The coarse edge itself references the whole chain; encode
+                // via a sentinel resolved below (Chain stored in `res`).
+                edge_face[edge_off[c as usize] + e as usize] = u32::MAX - 1; // placeholder
+                res_chain.push(((c, e), ids));
+            } else {
+                // Total fallback: pair with the tag's cell.
+                let id = descs.len() as u32;
+                descs.push(FaceDesc {
+                    a: c.min(j),
+                    b: c.max(j),
+                    src_cell: c,
+                    src_pos: e,
+                });
+                edge_face[edge_off[c as usize] + e as usize] = id;
+                forced_for[j as usize].push(id);
+            }
+        }
+
+        // Freeze the per-edge resolution for emission.
+        res.clear();
+        res.reserve(total);
+        let mut chain_map: AHashMap<(u32, u32), Vec<u32>> = AHashMap::new();
+        for (ce, ids) in res_chain.drain(..) {
+            chain_map.insert(ce, ids);
+        }
+        for (i, (rv, rt)) in rings.iter().enumerate() {
+            for e in 0..rv.len() {
+                let r = match rt[e] {
+                    PlaneTag::Bisector(_) => {
+                        if let Some(ids) = chain_map.get(&(i as u32, e as u32)) {
+                            EdgeRes::Chain(ids.clone())
+                        } else {
+                            EdgeRes::Face(edge_face[edge_off[i] + e])
+                        }
+                    }
+                    _ => EdgeRes::Boundary,
+                };
+                res.push(r);
+            }
+        }
+        break;
     }
 
-    // Pass 3b/4: emit faces sweeping cells in index order, filling the cell
-    // arrays in the same sweep (a cell's face indices are fully resolved
-    // when it is visited: `j > i` faces are emitted here, `j < i` ones were
-    // emitted by cell j).
+    // Pass 4: emit faces sweeping cells in index order, filling the cell
+    // arrays in the same sweep. A face is created the first time any of its
+    // references is visited (for tag-consistent meshes that is the smaller
+    // cell id's ring edge — the incumbent emission point), so face ids are
+    // deterministic and byte-identical to the pre-resolution scheme on
+    // clean inputs.
     let mut mesh = Mesh::new();
     mesh.vx = vxy.iter().map(|p| p[0]).collect();
     mesh.vy = vxy.iter().map(|p| p[1]).collect();
@@ -403,39 +718,50 @@ pub fn assemble_mesh(input: &MeshlessInput, d: &MeshlessDiagram) -> Mesh {
     mesh.cell_face_offsets.push(0);
     mesh.cell_vertex_offsets.push(0);
 
-    let mut face_map: AHashMap<(u32, u32), usize> = AHashMap::new(); // (i, j), i < j; lookup only
+    const NOT_EMITTED: usize = usize::MAX;
+    let mut desc_face: Vec<usize> = vec![NOT_EMITTED; descs.len()];
+    let emit_desc = |mesh: &mut Mesh, desc_face: &mut Vec<usize>, id: u32| -> usize {
+        if desc_face[id as usize] != NOT_EMITTED {
+            return desc_face[id as usize];
+        }
+        let fd = &descs[id as usize];
+        let (rv, _) = &rings[fd.src_cell as usize];
+        let m = rv.len();
+        let va = rv[fd.src_pos as usize] as usize;
+        let vb = rv[(fd.src_pos as usize + 1) % m] as usize;
+        let idx = mesh.face_v1.len();
+        push_face_geometry(mesh, &vxy, va, vb);
+        // Incumbent normal convention: normalize(p_b − p_a), owner = the
+        // smaller seed id (voronoi.rs:139-147).
+        let nrm = (input.seeds[fd.b as usize] - input.seeds[fd.a as usize]).normalize();
+        mesh.face_nx.push(nrm.x);
+        mesh.face_ny.push(nrm.y);
+        mesh.face_owner.push(fd.a as usize);
+        mesh.face_neighbor.push(Some(fd.b as usize));
+        mesh.face_boundary.push(None);
+        desc_face[id as usize] = idx;
+        idx
+    };
+
     for i in 0..n {
         let (rv, rt) = &rings[i];
         let m = rv.len();
         for e in 0..m {
             let va = rv[e] as usize;
             let vb = rv[(e + 1) % m] as usize;
-            let f_idx = match rt[e] {
-                PlaneTag::Bisector(j) => {
-                    let j = j as usize;
-                    debug_assert!(j < n && j != i, "cell {i}: bad neighbor tag {j}");
-                    if j > i {
-                        let idx = mesh.face_v1.len();
-                        push_face_geometry(&mut mesh, &vxy, va, vb);
-                        // Incumbent normal convention: normalize(p_j − p_i),
-                        // owner = smaller seed id (voronoi.rs:139-147).
-                        let nrm = (input.seeds[j] - input.seeds[i]).normalize();
-                        mesh.face_nx.push(nrm.x);
-                        mesh.face_ny.push(nrm.y);
-                        mesh.face_owner.push(i);
-                        mesh.face_neighbor.push(Some(j));
-                        mesh.face_boundary.push(None);
-                        let prev = face_map.insert((i as u32, j as u32), idx);
-                        assert!(prev.is_none(), "duplicate interior face ({i},{j})");
-                        idx
-                    } else {
-                        *face_map.get(&(j as u32, i as u32)).unwrap_or_else(|| {
-                            panic!("non-reciprocal face: cell {i} sees neighbor {j}, but {j} emitted no face to {i}")
-                        })
+            match &res[edge_off[i] + e] {
+                EdgeRes::Face(id) => {
+                    let f_idx = emit_desc(&mut mesh, &mut desc_face, *id);
+                    mesh.cell_faces.push(f_idx);
+                }
+                EdgeRes::Chain(ids) => {
+                    for id in ids {
+                        let f_idx = emit_desc(&mut mesh, &mut desc_face, *id);
+                        mesh.cell_faces.push(f_idx);
                     }
                 }
-                tag @ (PlaneTag::Boundary(_) | PlaneTag::Box(_)) => {
-                    let bt = tag_boundary_type(tag, input.boundary)
+                EdgeRes::Boundary => {
+                    let bt = tag_boundary_type(rt[e], input.boundary)
                         .expect("boundary/box tags always resolve to a BoundaryType");
                     let idx = mesh.face_v1.len();
                     push_face_geometry(&mut mesh, &vxy, va, vb);
@@ -451,9 +777,14 @@ pub fn assemble_mesh(input: &MeshlessInput, d: &MeshlessDiagram) -> Mesh {
                     mesh.face_boundary.push(Some(bt));
                     mesh.v_fixed[va] = true;
                     mesh.v_fixed[vb] = true;
-                    idx
+                    mesh.cell_faces.push(idx);
                 }
-            };
+            }
+        }
+        // Faces this cell references without owning a ring edge for them
+        // (fallback pairings targeting this cell), in ascending desc order.
+        for id in &forced_for[i] {
+            let f_idx = emit_desc(&mut mesh, &mut desc_face, *id);
             mesh.cell_faces.push(f_idx);
         }
         mesh.cell_face_offsets.push(mesh.cell_faces.len());

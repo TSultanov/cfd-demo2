@@ -69,6 +69,16 @@ impl BoundaryLoop {
     ) -> Self {
         assert!(pts.len() >= 3, "a boundary loop needs at least 3 points");
         let n = pts.len();
+        // Degenerate segments would produce NaN guard seeds downstream
+        // (`t / l` with `l = 0` in `boundary_seeds`) — reject them here,
+        // where the invariant belongs, instead of in a test (review F-2).
+        for s in 0..n {
+            let len = (pts[(s + 1) % n] - pts[s]).norm();
+            assert!(
+                len > tol.edge_len_eps,
+                "boundary loop segment {s} is degenerate (length {len:.3e} <= edge_len_eps)"
+            );
+        }
         let tags = (0..n)
             .map(|s| {
                 let a = pts[s];
@@ -252,6 +262,16 @@ const TURN_SIN_EPS: f64 = 1e-12;
 /// (fluid angle > π). Seeds are deduplicated on the `quantize_point` grid
 /// (first occurrence wins; the map is lookup-only, so output order is the
 /// deterministic loop-walk order).
+///
+/// Guard collapse (review): the two guards emitted onto a SEGMENT shared by
+/// consecutive reflex vertices (the uniform-chord case: both land at the
+/// chord midpoint) are computed from opposite ends and agree only to last
+/// ulps — relying on the quantization bin to dedup them risks a bin-edge
+/// straddle leaving twin seeds ~1 ulp apart. When the two flanking guards
+/// of a segment land within `2·edge_len_eps` of each other, BOTH vertices
+/// emit the midpoint of the pair instead — bit-identical from either side
+/// (the two addends swap, fp `+` is commutative), so the dedup is exact by
+/// construction.
 pub fn boundary_seeds(
     spec: &BoundarySpec,
     tol: &MeshgenTolerances,
@@ -267,13 +287,17 @@ pub fn boundary_seeds(
             kinds.push(kind);
         }
     };
+    let collapse_eps = 2.0 * tol.edge_len_eps;
 
     for (l, lp) in spec.loops.iter().enumerate() {
         let n = lp.pts.len();
         let base = spec.seg_offsets[l];
+        // Per-vertex classification pass: reflex flag + the equidistant
+        // guard offset t (0 for convex vertices, unused).
+        let mut reflex = vec![false; n];
+        let mut t_of = vec![0.0f64; n];
         for v in 0..n {
-            let prev = (v + n - 1) % n;
-            let a = lp.pts[prev];
+            let a = lp.pts[(v + n - 1) % n];
             let b = lp.pts[v];
             let c = lp.pts[(v + 1) % n];
             let u1 = b - a;
@@ -283,28 +307,59 @@ pub fn boundary_seeds(
             // Fluid on the left ⇒ fluid angle = π − turn: a left turn
             // (cross > 0) is a convex fluid corner, a right turn is reflex.
             let cross = u1.x * u2.y - u1.y * u2.x;
+            if cross < -TURN_SIN_EPS * l1 * l2 {
+                reflex[v] = true;
+                // Reflex: two guards at the SAME distance t along each wall.
+                t_of[v] = 0.5 * l1.min(l2);
+            }
+        }
+        for v in 0..n {
+            let prev = (v + n - 1) % n;
+            let next = (v + 1) % n;
+            let a = lp.pts[prev];
+            let b = lp.pts[v];
+            let c = lp.pts[next];
+            let u1 = b - a;
+            let u2 = c - b;
+            let l1 = u1.norm();
+            let l2 = u2.norm();
             let seg_prev = (base + prev) as SegId;
             let seg_next = (base + v) as SegId;
-            if cross >= -TURN_SIN_EPS * l1 * l2 {
+            if !reflex[v] {
                 push(b, SeedKind::Boundary { seg_prev, seg_next });
-            } else {
-                // Reflex: two guards at the SAME distance t along each wall.
-                let t = 0.5 * l1.min(l2);
-                push(
-                    b - u1 * (t / l1),
-                    SeedKind::Boundary {
-                        seg_prev,
-                        seg_next: seg_prev,
-                    },
-                );
-                push(
-                    b + u2 * (t / l2),
-                    SeedKind::Boundary {
-                        seg_prev: seg_next,
-                        seg_next,
-                    },
-                );
+                continue;
             }
+            // Guard on seg_prev; its potential partner is the previous
+            // vertex's guard onto the same segment (emitted from `a`).
+            let mut g1 = b - u1 * (t_of[v] / l1);
+            if reflex[prev] {
+                let partner = a + u1 * (t_of[prev] / l1);
+                if (g1 - partner).norm() <= collapse_eps {
+                    g1 = Point2::new(0.5 * (g1.x + partner.x), 0.5 * (g1.y + partner.y));
+                }
+            }
+            push(
+                g1,
+                SeedKind::Boundary {
+                    seg_prev,
+                    seg_next: seg_prev,
+                },
+            );
+            // Guard on seg_next; partner = the next vertex's guard onto it.
+            let mut g2 = b + u2 * (t_of[v] / l2);
+            if reflex[next] {
+                let partner = c - u2 * (t_of[next] / l2);
+                if (g2 - partner).norm() <= collapse_eps {
+                    g2 = Point2::new(0.5 * (g2.x + partner.x), 0.5 * (g2.y + partner.y));
+                }
+            }
+            push(
+                g2,
+                SeedKind::Boundary {
+                    seg_prev: seg_next,
+                    seg_next,
+                },
+            );
         }
     }
     (pts, kinds)

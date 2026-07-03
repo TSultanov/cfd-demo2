@@ -18,6 +18,13 @@
 //! overflow spills), success fraction ≥ 99.9% for classes a–c, and the
 //! partition of unity (Σ areas == bbox) whenever no cell is Empty/Failed.
 //!
+//! Whenever a diagram is clean (no Empty/Failed cells) the battery ALSO runs
+//! `assemble_mesh` on it — the shipped pipeline's last pass must share the
+//! "statuses, never panics" contract on legal inputs (review F-1: a
+//! knife-edge twin pair used to trip the non-reciprocal-face panic when the
+//! two cells eps-disagreed about a sub-tolerance face; class (e) pins that
+//! reproducer down).
+//!
 //! RNG seeds are explicit per (class, run, sub-case) — nothing relies on the
 //! crate's global fixed seed. Scale with CFD2_MESHLESS_FUZZ_RUNS (default 4):
 //!
@@ -29,8 +36,8 @@
 #![cfg(feature = "meshgen")]
 
 use cfd2::meshgen::meshless::{
-    build_diagram, BoundarySpec, CellStatus, EngineConfig, MeshlessDiagram, MeshlessInput,
-    MAX_CLIP_VERTS,
+    assemble_mesh, build_diagram, BoundarySpec, CellStatus, EngineConfig, MeshlessDiagram,
+    MeshlessInput, MAX_CLIP_VERTS,
 };
 use cfd2::meshgen::MeshgenTolerances;
 use nalgebra::{Point2, Vector2};
@@ -172,6 +179,25 @@ fn check_diagram(case: &FuzzCase) -> (MeshlessDiagram, (usize, usize, usize, usi
     }
 
     let counts = d.status_counts();
+
+    // 4. Assembly must share the never-panics contract on clean diagrams
+    //    (review F-1: build_diagram alone left the last pipeline pass
+    //    unfuzzed). Sanity on the result: seed-i == cell-i and the cell
+    //    volumes still partition the bbox.
+    let (_, _, _, empty, failed) = counts;
+    if empty + failed == 0 {
+        let mesh = catch_unwind(AssertUnwindSafe(|| assemble_mesh(&input, &d)))
+            .unwrap_or_else(|_| panic!("{}: assemble_mesh panicked", case.name));
+        assert_eq!(mesh.num_cells(), case.seeds.len(), "{}: cell count", case.name);
+        let total: f64 = mesh.cell_vol.iter().sum();
+        let rel = ((total - bbox) / bbox).abs();
+        assert!(
+            rel < 1e-9,
+            "{}: assembled volumes broke the partition (rel err {rel:.3e})",
+            case.name
+        );
+    }
+
     (d, counts)
 }
 
@@ -327,6 +353,145 @@ fn fuzz_exact_cocircular_lattice() {
 }
 
 // ---------------------------------------------------------------------------
+// Class (e): knife-edge twins in a Poisson-like set, THROUGH assembly
+//            (the review F-1 reproducer: a twin pair's sub-tolerance face can
+//            be Cut for one cell and Redundant for the other; assembly must
+//            symmetrize, not panic "non-reciprocal face")
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fuzz_knife_edge_twins_through_assembly() {
+    let domain = Vector2::new(2.0, 1.0);
+    let h = 0.04;
+    for run in 0..fuzz_runs() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed_for(b'e', run, 0));
+        // Poisson-like carrier set (min separation 0.04 — a legal input).
+        let min_sep = h;
+        let mut seeds: Vec<Point2<f64>> = Vec::new();
+        let target = ((domain.x * domain.y) / (h * h) * 0.6) as usize;
+        let mut attempts = 0usize;
+        while seeds.len() < target && attempts < target * 200 {
+            attempts += 1;
+            let p = Point2::new(
+                0.05 + rng.gen::<f64>() * (domain.x - 0.1),
+                0.05 + rng.gen::<f64>() * (domain.y - 0.1),
+            );
+            if seeds
+                .iter()
+                .all(|q| (q - p).norm_squared() >= min_sep * min_sep)
+            {
+                seeds.push(p);
+            }
+        }
+        // 20 knife-edge twins, 5 per gap, all ABOVE the coalescing pitch
+        // (1e-6·h = 4e-8) so both twins keep real cells and the diagram
+        // reaches assembly: the class where a shared neighbor swallows one
+        // twin's plane into the other's (eps-Redundant) and face pairing
+        // must recover the topology geometrically.
+        // Smallest gap 1e-7: per-axis projection ≥ 1e-7/√2 ≈ 7.1e-8 > the
+        // 4e-8 pitch, so the pair is guaranteed to stay un-coalesced at any
+        // twin direction (a 5e-8 gap at ~45° coalesces).
+        let carriers = seeds.len();
+        for (g, gap) in [1e-5, 1e-6, 3e-7, 1e-7].iter().enumerate() {
+            for t in 0..5 {
+                let p = seeds[(g * 5 + t) % carriers];
+                let th = rng.gen::<f64>() * 2.0 * std::f64::consts::PI;
+                seeds.push(Point2::new(p.x + gap * th.cos(), p.y + gap * th.sin()));
+            }
+        }
+        let case = FuzzCase {
+            name: format!("knife_edge_twins/run{run}"),
+            seeds,
+            domain,
+            h,
+        };
+        // check_diagram assembles clean diagrams — the panic this class
+        // exists for happened inside assemble_mesh, not build_diagram.
+        let (_, (ok, esc, ovf, empty, failed)) = check_diagram(&case);
+        assert_eq!(empty + failed, 0, "{}: twins must not drop cells", case.name);
+        println!(
+            "[{}] n={} ok={ok} esc={esc} ovf={ovf} empty={empty} failed={failed}",
+            case.name,
+            case.seeds.len()
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Class (f): exact + sub-pitch duplicates — the coalescing contract
+//            (design M0.6 named "duplicated" seeds; they must produce
+//            STATUSES: lowest-index bin sibling keeps the whole cell, the
+//            rest are EmptyCell, and the partition of unity still holds)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fuzz_duplicate_seeds_coalesce() {
+    let domain = Vector2::new(2.0, 1.0);
+    let h = 0.05;
+    for run in 0..fuzz_runs() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed_for(b'f', run, 0));
+        let min_sep = h;
+        let mut seeds: Vec<Point2<f64>> = Vec::new();
+        let target = ((domain.x * domain.y) / (h * h) * 0.6) as usize;
+        let mut attempts = 0usize;
+        while seeds.len() < target && attempts < target * 200 {
+            attempts += 1;
+            let p = Point2::new(rng.gen::<f64>() * domain.x, rng.gen::<f64>() * domain.y);
+            if seeds
+                .iter()
+                .all(|q| (q - p).norm_squared() >= min_sep * min_sep)
+            {
+                seeds.push(p);
+            }
+        }
+        let carriers = seeds.len();
+        // 8 EXACT duplicates (bit-identical — guaranteed same bin) …
+        for t in 0..8 {
+            seeds.push(seeds[t % carriers]);
+        }
+        // … and 8 sub-pitch twins (1e-12 ≪ pitch 5e-8; same bin unless the
+        // pair straddles a bin edge, which coalescing deliberately ignores
+        // — straddlers stay distinct cells and go through assembly).
+        for t in 8..16 {
+            let p = seeds[t % carriers];
+            seeds.push(Point2::new(p.x + 1e-12, p.y - 1e-12));
+        }
+        let case = FuzzCase {
+            name: format!("duplicates/run{run}"),
+            seeds,
+            domain,
+            h,
+        };
+        let (d, (ok, esc, ovf, empty, failed)) = check_diagram(&case);
+        assert_eq!(failed, 0, "{}: no SecurityRadiusFailed", case.name);
+        assert!(
+            empty >= 8 && empty <= 16,
+            "{}: expected the 8 exact dups (and up to 8 sub-pitch twins) to \
+             coalesce, got empty={empty}",
+            case.name
+        );
+        // Coalescing keeps the partition exact: the kept bin sibling's cell
+        // absorbs the duplicate's region.
+        let bbox = domain.x * domain.y;
+        let total: f64 = d.area.iter().sum();
+        let rel = ((total - bbox) / bbox).abs();
+        assert!(rel < 1e-9, "{}: partition broken ({rel:.3e})", case.name);
+        // Every duplicate's slot is a proper status, not garbage.
+        for i in 0..d.n {
+            if d.status[i] == CellStatus::EmptyCell {
+                assert_eq!(d.ring_len[i], 0, "{} cell {i}: empty slot not empty", case.name);
+                assert_eq!(d.area[i], 0.0, "{} cell {i}: empty cell with area", case.name);
+            }
+        }
+        println!(
+            "[{}] n={} ok={ok} esc={esc} ovf={ovf} empty={empty} failed={failed}",
+            case.name,
+            case.seeds.len()
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Class (d): Gaussian density cluster + twins + boundary-huggers
 //            (violates the smooth-density assumption on purpose; report-only)
 // ---------------------------------------------------------------------------
@@ -380,8 +545,10 @@ fn fuzz_gaussian_cluster_report_only() {
             case.name,
             100.0 * esc as f64 / n as f64
         );
-        // Even here the partition must hold when nothing was dropped.
-        if empty + failed == 0 {
+        // Even here the partition must hold: all seeds are strictly inside
+        // the domain, so any EmptyCell in this class is a coalesced
+        // sub-pitch twin — whose region the kept bin sibling absorbs.
+        if failed == 0 {
             let total: f64 = d.area.iter().sum();
             let bbox = domain.x * domain.y;
             let rel = ((total - bbox) / bbox).abs();

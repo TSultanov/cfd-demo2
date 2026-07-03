@@ -84,7 +84,13 @@ pub enum CellStatus {
     /// `MeshlessDiagram::overflow` and the padded slot is empty.
     RingOverflow,
     /// The cell was clipped away entirely (input error, e.g. a seed outside
-    /// the domain).
+    /// the domain) — or the seed is a COALESCED DUPLICATE: it shares a
+    /// vertex-quantization bin (`tol.quantize_point`) with a lower-index
+    /// seed. Sub-pitch seed pairs are indistinguishable to the canonical
+    /// assembler, so the engine keeps the lowest-index seed of a bin (whose
+    /// cell absorbs the whole region) and empties the rest; their planes
+    /// are skipped everywhere. Shipped seeding (Poisson min-sep + quantized
+    /// boundary dedup) can never trigger this.
     EmptyCell,
 }
 
@@ -109,7 +115,10 @@ impl PlaneTag {
 
 /// Engine input. `seeds` must lie inside `[0, domain.x] × [0, domain.y]` and
 /// be pairwise distinct; `kinds` may be empty, meaning every seed is
-/// `Interior`.
+/// `Interior`. Seeds closer than the vertex-quantization pitch
+/// (`1e-6 · min_cell_size`, incl. exact duplicates) are tolerated but
+/// COALESCED: only the lowest-index seed of a quantization bin gets a cell,
+/// the rest are flagged `EmptyCell` (see `CellStatus::EmptyCell`).
 pub struct MeshlessInput<'a> {
     pub seeds: &'a [Point2<f64>],
     pub kinds: &'a [SeedKind],
@@ -318,9 +327,27 @@ pub fn compute_cell(input: &MeshlessInput, grid: &SeedGrid, i: usize) -> CellOut
     let mut doublings: u8 = 0;
     let mut use_slow = false;
     let mut nbrs: Vec<(f64, u32)> = Vec::new();
+    // Coalescing key: seeds in the same vertex-quantization bin as `p` are
+    // duplicates of it (see `CellStatus::EmptyCell`). A lower-index bin
+    // sibling always shows up in the very first kNN batch (it is a nearest
+    // neighbor by construction), so the empty verdict cannot be missed.
+    let key = input.tol.quantize_point(p.x, p.y);
     loop {
         let exhaustive = k >= max_nb;
         grid.knn(seeds, i as u32, k, &mut nbrs);
+        let mut is_dup = false;
+        nbrs.retain(|&(_, j)| {
+            let q = seeds[j as usize];
+            if input.tol.quantize_point(q.x, q.y) == key {
+                is_dup |= (j as usize) < i;
+                false // skip duplicate planes (they cannot separate cells)
+            } else {
+                true
+            }
+        });
+        if is_dup {
+            return CellOut::empty(p);
+        }
 
         let attempt = if use_slow {
             let mut ring = ClipPolyVec::from_bbox(p, input.domain);
@@ -388,6 +415,22 @@ pub fn compute_cell_exhaustive(input: &MeshlessInput, i: usize) -> CellOut {
         .map(|j| (dist2(p, seeds[j]), j as u32))
         .collect();
     nbrs.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    // Same coalescing rule as `compute_cell` (bitwise parity requires the
+    // oracle to skip/empty identically).
+    let key = input.tol.quantize_point(p.x, p.y);
+    let mut is_dup = false;
+    nbrs.retain(|&(_, j)| {
+        let q = seeds[j as usize];
+        if input.tol.quantize_point(q.x, q.y) == key {
+            is_dup |= (j as usize) < i;
+            false
+        } else {
+            true
+        }
+    });
+    if is_dup {
+        return CellOut::empty(p);
+    }
 
     let mut ring = ClipPolyVec::from_bbox(p, input.domain);
     if !clip_own(&mut ring, &own_planes(input, i)) {
@@ -411,6 +454,12 @@ pub fn build_diagram(input: &MeshlessInput) -> MeshlessDiagram {
     assert!(
         input.kinds.is_empty() || input.kinds.len() == n,
         "kinds must be empty or one per seed"
+    );
+    // The v1 fast path is compiled at MAX_CLIP_VERTS; a silently-ignored
+    // knob would be worse than a hard error (review finding).
+    assert_eq!(
+        input.cfg.max_ring, MAX_CLIP_VERTS,
+        "EngineConfig::max_ring must equal MAX_CLIP_VERTS in v1"
     );
     let m = MAX_CLIP_VERTS;
     let mut d = MeshlessDiagram {

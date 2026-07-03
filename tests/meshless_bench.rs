@@ -3,10 +3,12 @@
 //! Times every engine phase on the ChannelWithObstacle geometry (the class
 //! the roadmap budgets were written for) at ~75k and ~300k cells, plus the
 //! incumbent `generate_voronoi_mesh` baseline the CVT total is budgeted
-//! against. REPORT-ONLY: it prints a table for the roadmap's acceptance
-//! review (diagram ≤ 100 ms @300k, Lloyd iter ≤ 120 ms, assembly ≤ 250 ms,
-//! CVT total ≤ incumbent wall time, all at 16T) and never asserts — perf
-//! regressions are reviewed against these lines, not turned into flaky CI.
+//! against. Reports the full table for the roadmap's acceptance review
+//! (diagram ≤ 100 ms @300k, Lloyd iter ≤ 120 ms, assembly ≤ 250 ms, CVT
+//! total ≤ incumbent wall time, all at 16T), and ASSERTS only at 2× budget
+//! (the roadmap's "red flag" threshold) on the ≥250k-seed case — generous
+//! enough not to flake on machine noise (measured headroom ≥ 3×), loud
+//! enough that a real regression fails instead of hiding in a report.
 //!
 //! Poisson seeding is timed separately on purpose: it is inherently
 //! sequential, common to BOTH pipelines, and must not be booked as engine
@@ -136,6 +138,20 @@ fn bench_case(size: f64, reps: usize) {
     println!("  Lloyd iteration      min/mean     {:9.1} / {:7.1} ms   [budget @300k: <= 120 ms]", ms(lloyd_min), ms(lloyd_mean));
     println!("  generate_cvt_mesh total           {:9.1} ms   [budget: <= incumbent voronoi]", ms(t_cvt));
     println!("  incumbent generate_voronoi_mesh   {:9.1} ms   (+ GUI smooth(0.3,50): {:.1} ms)", ms(t_inc), ms(t_inc_smooth));
+
+    // Regression gates at 2x budget (roadmap red-flag line), on the ~300k
+    // case only. `min` over reps is the noise-robust statistic.
+    if n >= 250_000 {
+        assert!(diag_min <= 0.200, "build_diagram {:.1} ms > 2x budget (200 ms) @ {n} seeds", ms(diag_min));
+        assert!(asm_min <= 0.500, "assemble_mesh {:.1} ms > 2x budget (500 ms) @ {n} seeds", ms(asm_min));
+        assert!(lloyd_min <= 0.240, "Lloyd iteration {:.1} ms > 2x budget (240 ms) @ {n} seeds", ms(lloyd_min));
+        assert!(
+            t_cvt <= 2.0 * (t_inc + t_inc_smooth),
+            "generate_cvt_mesh {:.2} s > 2x incumbent+smooth {:.2} s @ {n} seeds",
+            t_cvt,
+            t_inc + t_inc_smooth
+        );
+    }
 }
 
 #[test]

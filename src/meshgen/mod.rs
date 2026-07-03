@@ -4,6 +4,7 @@ mod geometry;
 pub(crate) mod mesh_builder;
 mod meshgen_ext;
 mod meshgen_utils;
+pub mod meshless;
 mod quadtree;
 pub(crate) mod tolerances;
 mod voronoi;

@@ -16,14 +16,14 @@
 //! Env knobs:
 //!   CFD2_BENCH_SIZE  target cell size (default 0.005; GUI default is 0.025)
 //!   CFD2_BENCH_STEPS number of steps to time (default 3)
-//!   CFD2_BENCH_MESH  cutcell (default) | voronoi | delaunay
+//!   CFD2_BENCH_MESH  cutcell (default) | voronoi | delaunay | meshless | cvt
 
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
 use cfd2::sim::{DriverBuild, SolverDriver};
 use cfd2::solver::mesh::{
-    generate_cut_cell_mesh, generate_delaunay_mesh, generate_voronoi_mesh, ChannelWithObstacle,
-    Mesh,
+    generate_cut_cell_mesh, generate_cvt_mesh, generate_delaunay_mesh,
+    generate_meshless_voronoi_mesh, generate_voronoi_mesh, ChannelWithObstacle, LloydConfig, Mesh,
 };
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::ui::fluid::Fluid;
@@ -55,13 +55,19 @@ fn obstacle_mesh(size: f64) -> Mesh {
         "cutcell" => generate_cut_cell_mesh(&geo, size, size, 1.2, domain),
         "voronoi" => generate_voronoi_mesh(&geo, size, size, 1.2, domain),
         "delaunay" => generate_delaunay_mesh(&geo, size, size, 1.2, domain),
+        "meshless" => generate_meshless_voronoi_mesh(&geo, size, size, 1.2, domain),
+        "cvt" => generate_cvt_mesh(&geo, size, size, 1.2, domain, &LloydConfig::default()),
         other => panic!("unknown CFD2_BENCH_MESH: {other}"),
     };
     // The GUI smooths unstructured meshes with 50 iterations (app.rs); keep
     // the cut-cell path at its historical 100 so existing numbers stay
-    // comparable.
-    let smooth_iters = if kind == "cutcell" { 100 } else { 50 };
-    mesh.smooth(&geo, 0.3, smooth_iters);
+    // comparable. The meshless arms must NOT smooth: vertex smoothing would
+    // move Voronoi vertices off the bisectors (the GUI's VoronoiCvt arm
+    // skips smoothing for the same reason).
+    if !matches!(kind.as_str(), "meshless" | "cvt") {
+        let smooth_iters = if kind == "cutcell" { 100 } else { 50 };
+        mesh.smooth(&geo, 0.3, smooth_iters);
+    }
     // Optional cell-renumbering A/B: CFD2_MESH_ORDER=rcm|hilbert|random.
     mesh.apply_env_cell_order();
     mesh

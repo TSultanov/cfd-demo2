@@ -22,6 +22,7 @@ use crate::solver::gpu::linear_solver::fgmres::dispatch_2d;
 use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
 
+use super::lloyd::LloydResources;
 use super::{status, wgsl, BC_NONE, BC_SEG_FLAG, K_FACE_MAX, MAX_VERTS, NBR_NONE, SEG_NONE};
 
 /// Round every boundary-loop point through f32 (widened back to f64 —
@@ -185,8 +186,8 @@ fn box_normal_cpu(side: u8) -> [f32; 2] {
 
 pub struct GpuVoronoiEngine {
     capacity: u32,
-    n_seeds: u32,
-    domain: Vector2<f64>,
+    pub(super) n_seeds: u32,
+    pub(super) domain: Vector2<f64>,
     tol: MeshgenTolerances,
     /// The uploaded seeds, f32-rounded and widened back to f64 (exact) —
     /// review F4: the f64 fallback MUST run on the values the kernel saw,
@@ -199,11 +200,14 @@ pub struct GpuVoronoiEngine {
     canon: Vec<u32>,
     /// Per-seed kinds of the uploaded case (empty = all Interior); feeds
     /// the CPU f64 fallback's `MeshlessInput`.
-    kinds: Vec<SeedKind>,
+    pub(super) kinds: Vec<SeedKind>,
+    /// Per-seed flag words as uploaded (`SEED_FLAG_FIXED` bit); kept so
+    /// `refresh_after_lloyd` can re-run `upload_case` unchanged.
+    pub(super) flags: Vec<u32>,
     /// The uploaded boundary spec, f32-ROUNDED (`boundary_spec_f32`) —
     /// review F4: the kernel clips f32 segment endpoints, so the fallback
     /// and every oracle must consume these exact values.
-    boundary: BoundarySpec,
+    pub(super) boundary: BoundarySpec,
 
     pipeline: wgpu::ComputePipeline,
     bgl: wgpu::BindGroupLayout,
@@ -212,14 +216,18 @@ pub struct GpuVoronoiEngine {
     bind_group: Option<wgpu::BindGroup>,
 
     b_params: wgpu::Buffer,
-    b_seeds: wgpu::Buffer,
-    /// FIXED bit per seed — carried for the Lloyd stage; not bound by the
-    /// cell kernel.
-    #[allow(dead_code)]
-    b_seed_flags: wgpu::Buffer,
+    pub(super) b_seeds: wgpu::Buffer,
+    /// `SEED_FLAG_FIXED` bit per seed — bound by `lloyd_update` (the cell
+    /// kernel does not read it).
+    pub(super) b_seed_flags: wgpu::Buffer,
     b_seed_canon: wgpu::Buffer,
     /// Per-seed (seg_prev, seg_next) u32 pair; `SEG_NONE` = Interior.
-    b_seed_kind: wgpu::Buffer,
+    pub(super) b_seed_kind: wgpu::Buffer,
+    /// `[0]` = grid-staleness slack (absolute distance): the accumulated
+    /// max seed displacement since the CPU `SeedGrid` was built. Zeroed by
+    /// `upload_case`, grown by the Lloyd reduce, subtracted from the ring
+    /// sweep's lower bound (see lloyd.rs module docs).
+    pub(super) b_slack: wgpu::Buffer,
     b_grid_offsets: Option<wgpu::Buffer>,
     b_grid_ids: Option<wgpu::Buffer>,
     /// Flattened segment table ([ax, ay, bx, by] f32 per global SegId).
@@ -229,6 +237,9 @@ pub struct GpuVoronoiEngine {
     /// (segment ids in `b_face_bc` are resolved through the CPU spec).
     #[allow(dead_code)]
     b_seg_tags: Option<wgpu::Buffer>,
+
+    /// Lloyd-stage pipelines + buffers (lloyd.rs).
+    pub(super) lloyd: LloydResources,
 
     pub outputs: VoronoiCellOutputs,
 }
@@ -260,13 +271,26 @@ impl GpuVoronoiEngine {
             std::mem::size_of::<Params>() as u64,
             U::UNIFORM | U::COPY_DST,
         );
-        let b_seeds = create_buffer(device, "voronoi:seeds", cap * 8, U::STORAGE | U::COPY_DST);
+        // Seeds carry COPY_SRC: Lloyd updates them in place on the GPU and
+        // `read_seeds`/`refresh_after_lloyd` read them back.
+        let b_seeds = create_buffer(
+            device,
+            "voronoi:seeds",
+            cap * 8,
+            U::STORAGE | U::COPY_DST | U::COPY_SRC,
+        );
         let b_seed_flags =
             create_buffer(device, "voronoi:seed_flags", cap * 4, U::STORAGE | U::COPY_DST);
         let b_seed_canon =
             create_buffer(device, "voronoi:seed_canon", cap * 4, U::STORAGE | U::COPY_DST);
         let b_seed_kind =
             create_buffer(device, "voronoi:seed_kind", cap * 8, U::STORAGE | U::COPY_DST);
+        let b_slack = create_buffer(
+            device,
+            "voronoi:grid_slack",
+            4,
+            U::STORAGE | U::COPY_DST | U::COPY_SRC,
+        );
 
         // Outputs get COPY_DST too: the fallback patches flagged cells'
         // slots with `queue.write_buffer`.
@@ -325,6 +349,7 @@ impl GpuVoronoiEngine {
                 storage(15, true),  // segments
                 storage(16, false), // ring_vert
                 storage(17, false), // visited_bins
+                storage(18, true),  // grid_slack
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -345,6 +370,17 @@ impl GpuVoronoiEngine {
             cache: None,
         });
 
+        let lloyd = LloydResources::new(
+            device,
+            capacity_seeds,
+            &b_seeds,
+            &b_seed_kind,
+            &b_seed_flags,
+            &outputs.b_ring_vert,
+            &outputs.b_cell_nfaces,
+            &b_slack,
+        );
+
         Self {
             capacity: capacity_seeds,
             n_seeds: 0,
@@ -354,6 +390,7 @@ impl GpuVoronoiEngine {
             grid: None,
             canon: Vec::new(),
             kinds: Vec::new(),
+            flags: Vec::new(),
             boundary: BoundarySpec::empty(),
             pipeline,
             bgl,
@@ -363,10 +400,12 @@ impl GpuVoronoiEngine {
             b_seed_flags,
             b_seed_canon,
             b_seed_kind,
+            b_slack,
             b_grid_offsets: None,
             b_grid_ids: None,
             b_segments: None,
             b_seg_tags: None,
+            lloyd,
             outputs,
         }
     }
@@ -516,6 +555,17 @@ impl GpuVoronoiEngine {
         };
         queue.write_buffer(&self.b_params, 0, bytemuck::bytes_of(&params));
 
+        // Fresh grid ⇒ zero staleness slack; refresh the Lloyd seed-count
+        // params (density config in `self.lloyd.params` is preserved).
+        queue.write_buffer(&self.b_slack, 0, bytemuck::bytes_of(&0.0f32));
+        self.lloyd.params.n_seeds = n as u32;
+        self.lloyd.params.num_groups = (n as u32).div_ceil(64).max(1);
+        queue.write_buffer(
+            &self.lloyd.b_params,
+            0,
+            bytemuck::bytes_of(&self.lloyd.params),
+        );
+
         fn entry(binding: u32, buf: &wgpu::Buffer) -> wgpu::BindGroupEntry<'_> {
             wgpu::BindGroupEntry {
                 binding,
@@ -544,6 +594,7 @@ impl GpuVoronoiEngine {
                 entry(15, &b_segments),
                 entry(16, &self.outputs.b_ring_vert),
                 entry(17, &self.outputs.b_visited_bins),
+                entry(18, &self.b_slack),
             ],
         });
 
@@ -557,6 +608,7 @@ impl GpuVoronoiEngine {
         self.grid = Some(grid);
         self.canon = canon;
         self.kinds = kinds.to_vec();
+        self.flags = flags.to_vec();
         self.boundary = spec;
     }
 

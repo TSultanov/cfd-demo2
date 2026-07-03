@@ -196,6 +196,12 @@ struct Params {
 // cell's traversal (the F3 graded-set instrument), high 8 bits = the
 // epsilon-filter condition mask of a NEEDS_EXACT cell.
 @group(0) @binding(17) var<storage, read_write> visited_bins: array<u32>;
+// [0] = grid-staleness slack: accumulated max seed displacement since the
+// CPU SeedGrid was built (chained Lloyd iterations move seeds without
+// rebuilding the grid — see lloyd.rs). Subtracted from the ring sweep's
+// distance lower bound; zero outside Lloyd episodes (upload_case resets),
+// where `lb - 0.0` is bitwise `lb` and behavior is identical to stage 3.
+@group(0) @binding(18) var<storage, read> grid_slack: array<f32>;
 
 // Zero/PAD the padded face slots and scalar outputs of a cell that has no
 // usable geometry (empty, overflow — hard-failure statuses).
@@ -600,8 +606,11 @@ fn voronoi_cell(
     if (st == 0u) {
         for (var r = 0u; r <= r_max; r = r + 1u) {
             if (r > 0u) {
-                let lb = ring_lower_bound(p, bx, by, r);
-                if (lb * lb * SECURITY_SCALE > 4.0 * r2) {
+                // Derate the lower bound by the grid-staleness slack: a seed
+                // stored in a ring-r bin may have moved up to `slack` since
+                // the grid was built (binding 18 docs; 0 outside Lloyd).
+                let lb = ring_lower_bound(p, bx, by, r) - grid_slack[0];
+                if (lb > 0.0 && lb * lb * SECURITY_SCALE > 4.0 * r2) {
                     break;
                 }
             }

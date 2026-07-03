@@ -69,7 +69,19 @@
 //! absolute-f32 quantum (~1e-7 at x≈2) is larger than the 1e-5·h parity
 //! tolerance, while relative coordinates are O(h) with ~1e-10 ulps.
 
+//!
+//! ## Stage 4: GPU Lloyd/CVT relaxation (lloyd.rs)
+//!
+//! `lloyd_update` moves every non-fixed seed to the ρ = h⁻ᵉˣᵖ density-
+//! weighted centroid of its cell (the exact M0 `weighted_centroid` fan
+//! quadrature; sizing field = CPU-sampled bilerp grid), chained with full
+//! regens in one encoder and no readback; a two-pass max-displacement
+//! reduce feeds both the standalone convergence check (one tiny readback)
+//! and the grid-staleness slack that keeps the stale CPU `SeedGrid`'s
+//! security stop conservative across chained iterations (lloyd.rs docs).
+
 mod engine;
+mod lloyd;
 mod wgsl;
 
 pub use engine::{
@@ -130,3 +142,8 @@ pub const BC_SEG_FLAG: u32 = 0x8000_0000;
 /// Per-seed kind-table sentinel (`b_seed_kind`): no own segment, i.e.
 /// `SeedKind::Interior`.
 pub const SEG_NONE: u32 = u32::MAX;
+
+/// `b_seed_flags` bit: the seed is pinned — `lloyd_update` never moves it.
+/// `SeedKind::Boundary` seeds are ALWAYS fixed (keyed off the kind table,
+/// matching M0 `lloyd_relax`); this flag additionally pins interior seeds.
+pub const SEED_FLAG_FIXED: u32 = 1;

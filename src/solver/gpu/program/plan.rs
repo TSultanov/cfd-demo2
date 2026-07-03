@@ -616,6 +616,11 @@ impl GpuProgramPlan {
     }
 
     pub fn initialize_history(&self) {
+        // ALE volume history: `cell_vols_old == cell_vols_old_old ==
+        // cell_vols` at t=0 (the buffers are also created equal, but a
+        // geometry refresh may have rewritten `cell_vols` since). Numerically
+        // a no-op for static models (their kernels never bind the history).
+        self.resources.backend.seed_volume_history();
         if let Some(init) = self.spec.initialize_history {
             init(self);
         }

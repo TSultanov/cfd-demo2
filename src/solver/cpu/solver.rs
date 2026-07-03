@@ -406,6 +406,15 @@ impl CpuSolver {
         // layout); falls back to 1 for models with no flux buffer.
         let flux_stride = recipe.flux.map(|f| f.stride as usize).unwrap_or(1);
         buffers.insert_f32("fluxes", vec![0.0; num_faces * flux_stride]);
+        // ALE buffers (mirroring the GPU `MeshResources`): always allocated,
+        // bound only by *_ale model kernels. `mesh_fluxes` zero-filled — a
+        // static mesh has zero swept rate, so an ALE model that never uploads
+        // reproduces static physics bitwise. Volume history seeded equal to
+        // the current volumes (re-seeded by `initialize_history`).
+        buffers.insert_f32("mesh_fluxes", vec![0.0; num_faces]);
+        let vols = buffers.f32_vec("cell_vols");
+        buffers.insert_f32("cell_vols_old", vols.clone());
+        buffers.insert_f32("cell_vols_old_old", vols);
         // grad_state mirrors the state layout: one Vector2 gradient per state slot
         // (indexed `grad_state[cell * stride + component]`), so it holds
         // `num_cells * stride` Vector2 elements (× 2 floats each).
@@ -755,6 +764,13 @@ impl CpuSolver {
         self.buffers.copy_into_f32("state_old", &state);
         self.buffers.copy_into_f32("state_old_old", &state);
         self.buffers.copy_into_f32("state_iter", &state);
+        // ALE volume history: `cell_vols_old == cell_vols_old_old ==
+        // cell_vols` at t=0 (also seeded at build; re-copied here in case a
+        // geometry refresh rewrote `cell_vols` before initialization). A
+        // numeric no-op for static models — only *_ale kernels bind these.
+        let vols = self.buffers.f32_vec("cell_vols");
+        self.buffers.copy_into_f32("cell_vols_old", &vols);
+        self.buffers.copy_into_f32("cell_vols_old_old", &vols);
         // Warm-start the solve buffer `x` from the coupled unknowns in the state.
         // The compressible EOS-coupled block system is rank-deficient (the
         // recovery rows admit a null-space the residual does not pin), so a zero

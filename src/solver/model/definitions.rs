@@ -676,9 +676,9 @@ pub use buoyant_incompressible::{
 };
 #[allow(unused_imports)]
 pub use incompressible_momentum::{
-    incompressible_momentum_mms_model, incompressible_momentum_model,
-    incompressible_momentum_system, IncompressibleMomentumFields,
-    INCOMPRESSIBLE_MMS_SOURCE_FIELD,
+    incompressible_momentum_ale_model, incompressible_momentum_mms_model,
+    incompressible_momentum_model, incompressible_momentum_system,
+    IncompressibleMomentumFields, INCOMPRESSIBLE_MMS_SOURCE_FIELD,
 };
 #[allow(unused_imports)]
 pub use allmach_pressure::{
@@ -702,6 +702,10 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
     Ok(vec![
         incompressible_momentum_model()?,
         incompressible_momentum_mms_model()?,
+        // ALE (moving-mesh) variant: same physics with mesh-relative
+        // convection; own id => own generated kernels, so static models stay
+        // byte-identical (docs/meshless-moving-mesh-roadmap.md §M3).
+        incompressible_momentum_ale_model()?,
         allmach_pressure_model()?,
         allmach_pressure_mms_model()?,
         allmach_thermal_model()?,
@@ -771,6 +775,49 @@ mod tests {
             other => panic!("expected coefficient product, got {:?}", other),
         }
         assert_eq!(pressure.terms()[1].op, TermOp::DivFlux);
+    }
+
+    /// M3.1: the ALE variant flags exactly its two convection terms as
+    /// mesh-relative (`div(phi,U).bounded()` and `div_flux(phi,p)`), derives
+    /// `is_ale()`, and — critically — the static and MMS models stay non-ALE
+    /// (their generated kernels must remain byte-identical).
+    #[test]
+    fn incompressible_momentum_ale_flags_convection_terms_only() {
+        let ale = incompressible_momentum_ale_model().expect("ale model");
+        assert_eq!(ale.id, "incompressible_momentum_ale");
+        assert!(ale.system.is_ale(), "ALE model must derive is_ale()");
+
+        let momentum = &ale.system.equations()[0];
+        let div = &momentum.terms()[1];
+        assert_eq!(div.op, TermOp::Div);
+        assert!(div.bounded, "ALE div term must keep the bounded form");
+        assert!(div.relative_to_mesh, "div(phi,U) must be mesh-relative");
+        let pressure = &ale.system.equations()[1];
+        let div_flux = &pressure.terms()[1];
+        assert_eq!(div_flux.op, TermOp::DivFlux);
+        assert!(div_flux.relative_to_mesh, "div_flux(phi,p) must be mesh-relative");
+
+        // No other term is flagged.
+        let flagged: usize = ale
+            .system
+            .equations()
+            .iter()
+            .flat_map(|eq| eq.terms())
+            .filter(|t| t.relative_to_mesh)
+            .count();
+        assert_eq!(flagged, 2, "exactly the two convection terms are flagged");
+
+        // Static + MMS variants are untouched (the do-no-harm invariant).
+        for model in [
+            incompressible_momentum_model().expect("model"),
+            incompressible_momentum_mms_model().expect("mms model"),
+        ] {
+            assert!(
+                !model.system.is_ale(),
+                "static model '{}' must not be ALE",
+                model.id
+            );
+        }
     }
 
     #[test]

@@ -83,6 +83,7 @@ const VISCOUS_STRESS_FORM: ViscousStressForm = ViscousStressForm::FullDev2;
 fn build_incompressible_momentum_system(
     _fields: &IncompressibleMomentumFields,
     with_mms_source: bool,
+    ale: bool,
 ) -> EquationSystem {
     // NOTE: This model uses typed builder APIs with explicit cast_to() calls to align
     // terms to canonical dimension types. The type-level dimension expressions are not
@@ -112,7 +113,12 @@ fn build_incompressible_momentum_system(
     // continuity defect (div phi) * U_P from the diagonal, matching the
     // reference solver's convection form while the flux is not exactly
     // divergence-free.
-    let div_term = typed_fvm::div(phi_typed, u_typed).bounded();
+    let mut div_term = typed_fvm::div(phi_typed, u_typed).bounded();
+    if ale {
+        // ALE variant: convection consumes the mesh-relative flux
+        // `phi - rho * mesh_fluxes[face]` (see `Term::relative_to_mesh`).
+        div_term = div_term.with_mesh_relative();
+    }
 
     // laplacian(mu, U): integrated unit is DynamicViscosity * Velocity * Area / Length = Force
     let laplacian_term = typed_fvm::laplacian(mu_coeff, u_typed);
@@ -151,7 +157,13 @@ fn build_incompressible_momentum_system(
     let p_laplacian_term = typed_fvm::laplacian(rho_dp_coeff, p_typed);
 
     // div_flux(phi, p): integrated unit is MassFlux
-    let p_div_flux_term = typed_fvm::div_flux(phi_typed, p_typed);
+    let mut p_div_flux_term = typed_fvm::div_flux(phi_typed, p_typed);
+    if ale {
+        // Continuity on the moving mesh is also mesh-relative. The
+        // compensating volume-change source (`+rho*(V^{n+1}-V^n)/dt`, exact
+        // by SCL construction) lands with the moving-volume ddt (M3.2).
+        p_div_flux_term = p_div_flux_term.with_mesh_relative();
+    }
 
     // Cast all terms to MassFlux and add
     let pressure_eqn = (p_laplacian_term.cast_to::<MassFlux>()
@@ -172,22 +184,42 @@ fn build_incompressible_momentum_system(
 
 pub fn incompressible_momentum_system() -> EquationSystem {
     let fields = IncompressibleMomentumFields::new();
-    build_incompressible_momentum_system(&fields, false)
+    build_incompressible_momentum_system(&fields, false, false)
 }
 
 pub fn incompressible_momentum_model() -> Result<ModelSpec, String> {
-    incompressible_momentum_model_impl(false)
+    incompressible_momentum_model_impl(false, false)
 }
 
 /// `incompressible_momentum` plus a manufactured per-component momentum
 /// source field (`INCOMPRESSIBLE_MMS_SOURCE_FIELD`) for MMS order tests.
 pub fn incompressible_momentum_mms_model() -> Result<ModelSpec, String> {
-    incompressible_momentum_model_impl(true)
+    incompressible_momentum_model_impl(true, false)
 }
 
-fn incompressible_momentum_model_impl(with_mms_source: bool) -> Result<ModelSpec, String> {
+/// ALE (moving-mesh) variant of `incompressible_momentum`: identical physics
+/// declaration except the convection terms — `div(phi, U).bounded()` and
+/// `div_flux(phi, p)` — are declared `.with_mesh_relative()`, so assembly
+/// consumes `phi_rel = phi - rho * mesh_fluxes[face]` (M3 of the
+/// meshless/moving-mesh roadmap). Registered exactly like the `_mms`
+/// variants: its own model id gets its own generated kernels, and static
+/// models stay byte-identical. With the (always-allocated) `mesh_fluxes`
+/// buffer zero-filled and equal volume history this reproduces the static
+/// model's results bitwise (`x - rho*0.0` is an IEEE identity; gated by
+/// tests/ale_zero_flux_equivalence_test.rs).
+pub fn incompressible_momentum_ale_model() -> Result<ModelSpec, String> {
+    incompressible_momentum_model_impl(false, true)
+}
+
+fn incompressible_momentum_model_impl(with_mms_source: bool, ale: bool) -> Result<ModelSpec, String> {
+    // A combined mms+ale variant (prescribed-motion MMS, M3.3) will need its
+    // own model id before this combination is allowed.
+    assert!(
+        !(with_mms_source && ale),
+        "mms+ale variant not defined yet (would collide with incompressible_momentum_mms)"
+    );
     let fields = IncompressibleMomentumFields::new();
-    let system = build_incompressible_momentum_system(&fields, with_mms_source);
+    let system = build_incompressible_momentum_system(&fields, with_mms_source, ale);
     let mut layout_fields = vec![
         fields.u,
         fields.p,
@@ -363,10 +395,10 @@ fn incompressible_momentum_model_impl(with_mms_source: bool) -> Result<ModelSpec
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
     Ok(ModelSpec {
-        id: if with_mms_source {
-            "incompressible_momentum_mms"
-        } else {
-            "incompressible_momentum"
+        id: match (with_mms_source, ale) {
+            (true, _) => "incompressible_momentum_mms",
+            (false, true) => "incompressible_momentum_ale",
+            (false, false) => "incompressible_momentum",
         },
         system,
         state_layout: layout,

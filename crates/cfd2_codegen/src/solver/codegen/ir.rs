@@ -60,6 +60,12 @@ pub struct DiscreteOp {
     /// RHS correction (frozen-state pressure) that cancels it at convergence
     /// (see `Term::linearize_pressure_flux`).
     pub linearize_pressure_flux: Option<Coefficient>,
+    /// ALE (mesh-relative) convection: assembly consumes this op's face flux
+    /// as `phi_rel = phi - rho_f * mesh_fluxes[face]` (owner-signed exactly
+    /// like `phi`; `rho_f` = the constant `rho` coefficient for incompressible
+    /// models). Gates the `mesh_fluxes` storage binding in the assembly
+    /// kernels. See `Term::relative_to_mesh`.
+    pub relative_to_mesh: bool,
     pub field: FieldRef,
     pub flux: Option<FluxRef>,
     pub coeff: Option<Coefficient>,
@@ -129,6 +135,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
         transpose_dev2: term.transpose_dev2,
         static_diag: term.static_diag,
         linearize_pressure_flux: term.linearize_pressure_flux.clone(),
+        relative_to_mesh: term.relative_to_mesh,
         field: term.field,
         flux: term.flux,
         coeff: term.coeff.clone(),

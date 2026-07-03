@@ -487,6 +487,18 @@ impl GenericCoupledProgramResources {
         let common = &self.runtime.common;
         common.mesh.refresh_geometry(&common.context.queue, mesh)
     }
+
+    /// Seed the ALE volume history buffers (`cell_vols_old{,_old}` :=
+    /// `cell_vols`); see [`MeshResources::seed_volume_history`]. Invoked from
+    /// `GpuProgramPlan::initialize_history` for every model — numerically a
+    /// no-op unless the model's kernels bind the history (only `*_ale`
+    /// variants do).
+    pub(crate) fn seed_volume_history(&self) {
+        let common = &self.runtime.common;
+        common
+            .mesh
+            .seed_volume_history(&common.context.device, &common.context.queue);
+    }
 }
 
 fn validate_schur_model(

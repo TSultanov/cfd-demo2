@@ -18,6 +18,20 @@ pub struct MeshResources {
     pub b_diagonal_indices: wgpu::Buffer,
     pub b_scalar_row_offsets: wgpu::Buffer,
     pub b_scalar_col_indices: wgpu::Buffer,
+    /// ALE mesh face fluxes: per-face volumetric swept rate `V̇_f` (f32,
+    /// Volume/Time, owner-signed like `fluxes`). Allocated zero-filled ALWAYS
+    /// — non-ALE models never bind it, and ALE models over a static mesh bind
+    /// zeros so the mesh-relative subtraction vanishes bitwise (mirrors the
+    /// `face_wrap_shift` empty-means-zero convention). Written per step by
+    /// the moving-mesh loop (M4) from swept-face geometry.
+    pub b_mesh_fluxes: wgpu::Buffer,
+    /// ALE volume history `V^n` (f32, cells). Seeded equal to `cell_vols` at
+    /// creation and by `seed_volume_history`; rotated by the refresh/ALE-step
+    /// seam (single owner — NOT `host_prepare_step`, which runs after new
+    /// volumes are uploaded).
+    pub b_cell_vols_old: wgpu::Buffer,
+    /// ALE volume history `V^{n-1}` (f32, cells); see `b_cell_vols_old`.
+    pub b_cell_vols_old_old: wgpu::Buffer,
     pub scalar_row_offsets: Vec<u32>,
     pub scalar_col_indices: Vec<u32>,
     /// Host snapshot of the topology this solver was built on, kept so a
@@ -44,6 +58,9 @@ impl MeshResources {
             "diagonal_indices" => Some(&self.b_diagonal_indices),
             "scalar_row_offsets" => Some(&self.b_scalar_row_offsets),
             "scalar_col_indices" => Some(&self.b_scalar_col_indices),
+            "mesh_fluxes" => Some(&self.b_mesh_fluxes),
+            "cell_vols_old" => Some(&self.b_cell_vols_old),
+            "cell_vols_old_old" => Some(&self.b_cell_vols_old_old),
             _ => None,
         }
     }
@@ -74,6 +91,21 @@ impl MeshResources {
         Ok(())
     }
 
+    /// Seed the ALE volume history: `cell_vols_old = cell_vols_old_old =
+    /// cell_vols` (on-device copies). Called from `initialize_history` so a
+    /// geometry refresh before initialization cannot leave stale history; a
+    /// no-op numerically for static runs (the buffers are created equal and
+    /// only *_ale kernels ever bind them).
+    pub fn seed_volume_history(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let size = self.b_cell_vols.size();
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("ALE volume history seed"),
+        });
+        encoder.copy_buffer_to_buffer(&self.b_cell_vols, 0, &self.b_cell_vols_old, 0, size);
+        encoder.copy_buffer_to_buffer(&self.b_cell_vols, 0, &self.b_cell_vols_old_old, 0, size);
+        queue.submit(std::iter::once(encoder.finish()));
+    }
+
     /// Return the list of all binding names this resource can resolve.
     pub fn binding_names(&self) -> &'static [&'static str] {
         &[
@@ -82,6 +114,8 @@ impl MeshResources {
             "cell_face_offsets",
             "cell_faces",
             "cell_vols",
+            "cell_vols_old",
+            "cell_vols_old_old",
             "diagonal_indices",
             "face_areas",
             "face_boundary",
@@ -90,6 +124,7 @@ impl MeshResources {
             "face_normals",
             "face_owner",
             "face_wrap_shift",
+            "mesh_fluxes",
             "scalar_col_indices",
             "scalar_row_offsets",
         ]
@@ -302,6 +337,31 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, St
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
 
+    // --- ALE buffers (always allocated; bound only by *_ale model kernels) ---
+    // Zero-filled mesh face fluxes: a static mesh has zero swept rate, so an
+    // ALE model that never uploads reproduces static physics bitwise.
+    let mesh_fluxes = vec![0.0f32; mesh.face_owner.len()];
+    let b_mesh_fluxes = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Mesh Fluxes Buffer (ALE)"),
+        contents: bytemuck::cast_slice(&mesh_fluxes),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    });
+    // Volume history, seeded equal to the current volumes (COPY_SRC so the
+    // old -> old_old rotation can run on-device; COPY_DST for uploads/seeding).
+    let vols_history_usage = wgpu::BufferUsages::STORAGE
+        | wgpu::BufferUsages::COPY_SRC
+        | wgpu::BufferUsages::COPY_DST;
+    let b_cell_vols_old = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Cell Volumes Old Buffer (ALE)"),
+        contents: bytemuck::cast_slice(&geo.cell_vols),
+        usage: vols_history_usage,
+    });
+    let b_cell_vols_old_old = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Cell Volumes Old-Old Buffer (ALE)"),
+        contents: bytemuck::cast_slice(&geo.cell_vols),
+        usage: vols_history_usage,
+    });
+
     Ok(MeshResources {
         b_face_wrap_shift,
         b_face_owner,
@@ -318,6 +378,9 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, St
         b_diagonal_indices,
         b_scalar_row_offsets,
         b_scalar_col_indices,
+        b_mesh_fluxes,
+        b_cell_vols_old,
+        b_cell_vols_old_old,
         scalar_row_offsets,
         scalar_col_indices,
         topology: MeshTopology::from_mesh(mesh),

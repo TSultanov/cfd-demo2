@@ -6,8 +6,9 @@ use super::coupled_common::{
 use super::dsl as typed;
 use super::state_access::{find_slot, state_component_slot};
 use super::wgsl_ast::{
-    AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt, Type,
+    AccessMode, AssignOp, Attribute, Block, Expr, Function, Item, Module, Param, Stmt, Type,
 };
+use super::wgsl_bindings::storage_var;
 use super::wgsl_dsl as dsl;
 use super::KernelWgsl;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
@@ -32,6 +33,57 @@ fn validate_unified_assembly_inputs(needs_fluxes: bool, flux_stride: u32) {
     if needs_fluxes && flux_stride == 0 {
         panic!("unified_assembly requires flux_stride > 0 when convection ops are present");
     }
+}
+
+/// ALE marker, derived from the discrete system: any convection op consuming
+/// its face flux relative to the mesh (`Term::relative_to_mesh`). Gates the
+/// `mesh_fluxes` storage binding emission — static (non-ALE) models emit no
+/// new item and stay byte-identical.
+fn unified_assembly_needs_mesh_fluxes(system: &DiscreteSystem) -> bool {
+    system
+        .equations
+        .iter()
+        .any(|eq| eq.ops.iter().any(|op| op.relative_to_mesh))
+}
+
+/// `mesh_fluxes` storage binding (group 0 / binding 8, the first free mesh
+/// slot): per-face volumetric swept rate `V̇_f = A_swept(f)/dt` (Volume/Time),
+/// signed along the stored face normal (owner convention, exactly like the
+/// `fluxes` mass flux). Computed host-side from swept-face geometry (SCL by
+/// construction), NEVER from a velocity dotted with a normal. Allocated
+/// zero-filled always at runtime, so an ALE model over a static mesh binds
+/// zeros and the mesh-relative subtraction vanishes bitwise.
+fn mesh_fluxes_item() -> Item {
+    storage_var("mesh_fluxes", Type::array(Type::F32), 0, 8, AccessMode::Read)
+}
+
+/// The convective face flux actually consumed by a convection op: the stored
+/// (absolute) mass flux for static terms, or the mesh-relative flux
+/// `phi_rel = phi - rho_f * mesh_fluxes[face_idx]` for `relative_to_mesh`
+/// terms. The subtraction sits BEFORE the non-owner sign flip so `phi_rel`
+/// inherits the flip exactly like `phi` — both cells of a shared face see one
+/// consistent relative flux. Every downstream consumer (upwind matrix
+/// coefficients, deferred correction, the `bounded` diagonal correction, the
+/// `DivFlux` RHS and its pressure linearization) reads the accumulator, so
+/// this is the single subtraction point for the whole assembly (and the
+/// rhs_only / fused kernel variants are synthesized from this same
+/// `KernelProgram`, inheriting it).
+///
+/// `rho_f` is the constant density coefficient (`constants.density`): v1 ALE
+/// scope is constant-density (incompressible) mass fluxes, where
+/// `phi = rho * (U·n) A` uses the same constant. Variable-density fluxes
+/// (compressible/allmach upwinded `rho_f`) would need the flux kernel to
+/// persist its face density — flagged follow-up, not supported here.
+fn ale_relative_flux_expr(
+    conv_op: &crate::solver::codegen::ir::DiscreteOp,
+    flux_val_expr: Expr,
+) -> Expr {
+    if !conv_op.relative_to_mesh {
+        return flux_val_expr;
+    }
+    flux_val_expr
+        - Expr::ident("constants").field("density")
+            * dsl::array_access("mesh_fluxes", Expr::ident("face_idx"))
 }
 
 pub fn generate_unified_assembly_wgsl(
@@ -65,6 +117,9 @@ pub fn generate_unified_assembly_wgsl(
                 needs_fluxes,
                 self.eos_params,
             ));
+            if unified_assembly_needs_mesh_fluxes(self.system) {
+                module.push(mesh_fluxes_item());
+            }
             module.push(Item::Function(main_assembly_fn::<Ax>(
                 self.system,
                 self.slots,
@@ -110,7 +165,10 @@ pub fn generate_unified_assembly_kernel_program(
             let needs_fluxes = unified_assembly_needs_fluxes(self.system);
             validate_unified_assembly_inputs(needs_fluxes, self.flux_stride);
 
-            let items = base_assembly_items(self.needs_gradients, needs_fluxes, self.eos_params);
+            let mut items = base_assembly_items(self.needs_gradients, needs_fluxes, self.eos_params);
+            if unified_assembly_needs_mesh_fluxes(self.system) {
+                items.push(mesh_fluxes_item());
+            }
             let bindings = kernel_bindings_from_items(&items)?;
             let main = main_assembly_fn::<Ax>(
                 self.system,
@@ -1153,6 +1211,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             flux_stride,
                             u_idx,
                         );
+                        let flux_val_expr = ale_relative_flux_expr(conv_op, flux_val_expr);
 
                         body.push(acc.declare_phi(u_idx, flux_val_expr));
                         body.push(dsl::if_block_expr(
@@ -1277,6 +1336,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             flux_stride,
                             u_idx,
                         );
+                        let flux_val_expr = ale_relative_flux_expr(conv_op, flux_val_expr);
                         body.push(acc.declare_phi(u_idx, flux_val_expr));
                         body.push(dsl::if_block_expr(
                             Expr::ident("owner").ne(Expr::ident("idx")),

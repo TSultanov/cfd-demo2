@@ -260,6 +260,26 @@ pub struct Term {
     /// terms whose target is the pressure; the `_mms` variants omit it to stay
     /// byte-identical (their steady solution never approaches the runaway).
     pub linearize_pressure_flux: Option<Coefficient>,
+    /// ALE (moving-mesh) convection: the face flux consumed by this term is
+    /// taken RELATIVE to the mesh motion, `phi_rel = phi - rho_f * meshPhi_f`,
+    /// where `meshPhi_f` is the per-face volumetric swept rate (`mesh_fluxes`
+    /// runtime buffer, Volume/Time, signed along the stored face normal /
+    /// owner convention — exactly like `phi`) and `rho_f` is the flux's
+    /// density factor (the constant `rho` coefficient for incompressible
+    /// models; variable-density fluxes need a persisted face density and are
+    /// out of v1 scope). The subtraction happens assembly-side at every
+    /// convective consumption point of the term (upwind matrix coefficients,
+    /// deferred correction, `bounded` diagonal correction, `DivFlux` RHS), so
+    /// the stored `fluxes` buffer keeps holding the ABSOLUTE mass flux.
+    ///
+    /// Zero-filled `mesh_fluxes` makes `phi_rel ≡ phi` bitwise (`x - rho*0.0`
+    /// is an IEEE identity), so an ALE model over a static mesh reproduces
+    /// the static model. Models with any flagged term get the `mesh_fluxes`
+    /// storage binding emitted into their assembly kernels; static models'
+    /// generated code is untouched (no runtime branch — separate `*_ale`
+    /// kernels, like the `_mms` variants). Only meaningful on implicit `Div`
+    /// / `DivFlux` terms.
+    pub relative_to_mesh: bool,
 }
 
 impl Term {
@@ -282,6 +302,7 @@ impl Term {
             transpose_dev2: false,
             static_diag: false,
             linearize_pressure_flux: None,
+            relative_to_mesh: false,
         }
     }
 
@@ -320,6 +341,24 @@ impl Term {
     /// mass-flux term against the pressure (see `linearize_pressure_flux` docs).
     pub fn with_pressure_flux_linearization(mut self, coeff: Coefficient) -> Self {
         self.linearize_pressure_flux = Some(coeff);
+        self
+    }
+
+    /// Declare ALE (mesh-relative) convection for this term (see
+    /// `relative_to_mesh` field docs). Only valid on `Div` / `DivFlux` terms.
+    ///
+    /// # Panics
+    ///
+    /// Panics when applied to any other term op — the flag has no meaning
+    /// there, and model construction is build-time, so failing fast is the
+    /// correct contract.
+    pub fn with_mesh_relative(mut self) -> Self {
+        assert!(
+            matches!(self.op, TermOp::Div | TermOp::DivFlux),
+            "with_mesh_relative is only valid on Div/DivFlux terms, got {:?}",
+            self.op
+        );
+        self.relative_to_mesh = true;
         self
     }
 
@@ -488,6 +527,15 @@ impl EquationSystem {
             .iter()
             .map(|eqn| eqn.target.kind().component_count() as u32)
             .sum()
+    }
+
+    /// ALE marker, derived: a system is ALE iff any term declares
+    /// `relative_to_mesh`. Gates the `mesh_fluxes` binding emission in the
+    /// generated assembly kernels (see `Term::relative_to_mesh`).
+    pub fn is_ale(&self) -> bool {
+        self.equations
+            .iter()
+            .any(|eq| eq.terms().iter().any(|t| t.relative_to_mesh))
     }
 }
 

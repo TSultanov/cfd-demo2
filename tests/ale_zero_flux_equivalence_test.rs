@@ -1,0 +1,266 @@
+//! M3.1 zero-flux equivalence gate (meshless/moving-mesh roadmap,
+//! docs/meshless-moving-mesh-roadmap.md §M3).
+//!
+//! The load-bearing property: `incompressible_momentum_ale` with all-zero
+//! `mesh_fluxes` and equal volume history over a STATIC mesh must reproduce
+//! `incompressible_momentum` **byte-identically**. The ALE kernels differ from
+//! the static ones by exactly `phi_rel = phi - rho * mesh_fluxes[face]` at
+//! every convective consumption point (verified by diffing the generated
+//! WGSL), and with `mesh_fluxes[face] == 0.0` the subtraction is
+//! `x - rho*0.0 = x - 0.0`, an IEEE-754 bitwise identity for every finite x
+//! (including -0.0: `-0.0 - 0.0 == -0.0` under round-to-nearest). The volume
+//! history buffers exist but are not yet consumed by any kernel (moving-volume
+//! ddt is M3.2), so equal-vols is trivially satisfied; this gate still pins it
+//! by construction (both backends seed `cell_vols_old(_old) = cell_vols`).
+//!
+//! Comparison is on the CPU backend, where `read_state_f32` is a lossless view
+//! of the f32-bit interpreter state (see tests/mesh_refresh_identity_test.rs
+//! header, review-validation #9). Both CPU engines are covered: the
+//! interpreter (executes the KernelProgram IR) and the transpiler (compiled
+//! Rust) — the two independent consumers of the ALE codegen.
+//!
+//! Feature gate: `meshgen` (the `sim::SolverDriver` seam) + `cpu` — Tier-1
+//! always-on under `--features meshgen,cpu` per the roadmap's validation
+//! program.
+#![cfg(all(feature = "meshgen", feature = "cpu"))]
+
+use cfd2::sim::{DriverBuild, RuntimeParams, SolverDriver};
+use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
+use cfd2::solver::model::eos::EosSpec;
+use cfd2::solver::model::{
+    incompressible_momentum_ale_model, incompressible_momentum_model, ModelSpec,
+};
+use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
+use std::sync::Mutex;
+
+/// `CFD2_BACKEND`/`CFD2_CPU_ENGINE` are process-global; serialize the tests.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+const NX: usize = 64;
+const NY: usize = 32;
+const LX: f64 = 2.0;
+const LY: f64 = 1.0;
+const STEPS: usize = 20;
+
+/// ~2k-cell structured channel (inlet -> outlet with walls): the flow evolves
+/// from rest, so byte-identity is not trivially true on a frozen zero state.
+fn channel_mesh() -> Mesh {
+    generate_structured_rect_mesh(
+        NX,
+        NY,
+        LX,
+        LY,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
+    )
+}
+
+/// Fixed-dt, fixed-outer-iteration knobs (adaptive dt / auto-converge off) so
+/// both models execute the identical step sequence.
+fn test_params() -> RuntimeParams {
+    RuntimeParams {
+        adaptive_dt: false,
+        target_cfl: 0.9,
+        requested_dt: 0.005,
+        dtau: 0.0,
+        log_convergence: false,
+        log_every_steps: 50,
+        // A high-order limited scheme so the deferred-correction path (which
+        // multiplies by phi) is exercised, not just plain upwind.
+        advection_scheme: Scheme::SecondOrderUpwindVanLeer,
+        time_scheme: TimeScheme::BDF2,
+        preconditioner: PreconditionerType::Jacobi,
+        outer_iters: 8,
+        outer_auto_converge: false,
+        low_mach_model: GpuLowMachPrecondModel::Off,
+        low_mach_theta_floor: 1e-6,
+        low_mach_pressure_coupling_alpha: 1.0,
+        alpha_u: 0.7,
+        alpha_p: 0.3,
+        inlet_velocity: 1.0,
+        density: 1.0,
+        viscosity: 1e-2,
+        eos: EosSpec::Constant,
+        compressibility_psi: 0.0,
+        outlet_back_pressure: 0.0,
+        pressure_inlet: false,
+        inlet_pressure: 0.0,
+    }
+}
+
+fn build_driver(mesh: &Mesh, model: ModelSpec) -> SolverDriver {
+    let params = test_params();
+    let n = mesh.num_cells();
+    let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
+        mesh,
+        model,
+        &params,
+        &vec![(0.0, 0.0); n],
+        &vec![0.0; n],
+        None,
+        None,
+    ))
+    .expect("driver build");
+    driver.apply_params(&params);
+    driver
+}
+
+fn state_bits(driver: &SolverDriver) -> Vec<u32> {
+    pollster::block_on(driver.solver().read_state_f32())
+        .iter()
+        .map(|v| v.to_bits())
+        .collect()
+}
+
+/// Run the static and ALE models side by side on the given CPU engine,
+/// asserting bit-equality of the full state every step.
+fn assert_zero_flux_equivalence(engine: &str) {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    std::env::set_var("CFD2_CPU_ENGINE", engine);
+    let result = std::panic::catch_unwind(|| {
+        let mesh = channel_mesh();
+
+        let mut base = build_driver(&mesh, incompressible_momentum_model().expect("model"));
+        let mut ale = build_driver(&mesh, incompressible_momentum_ale_model().expect("model"));
+        assert!(base.solver().is_cpu(), "expected the CPU backend");
+        assert!(ale.solver().is_cpu(), "expected the CPU backend");
+
+        for step in 0..STEPS {
+            let out_base = base.step(false);
+            let out_ale = ale.step(false);
+            assert!(
+                out_base.diverged.is_none() && out_ale.diverged.is_none(),
+                "[{engine}] step {step} diverged (base {:?}, ale {:?})",
+                out_base.diverged,
+                out_ale.diverged
+            );
+            let bits_base = state_bits(&base);
+            let bits_ale = state_bits(&ale);
+            assert_eq!(bits_base.len(), bits_ale.len(), "state length mismatch");
+            let ndiff = bits_base
+                .iter()
+                .zip(&bits_ale)
+                .filter(|(a, b)| a != b)
+                .count();
+            assert_eq!(
+                ndiff,
+                0,
+                "[{engine}] step {step}: ALE model with zero mesh_fluxes diverged bitwise from \
+                 the static model: {ndiff}/{} state slots differ (max |diff| = {:.3e})",
+                bits_base.len(),
+                bits_base
+                    .iter()
+                    .zip(&bits_ale)
+                    .map(|(&a, &b)| (f32::from_bits(a) - f32::from_bits(b)).abs())
+                    .fold(0.0f32, f32::max),
+            );
+        }
+        println!(
+            "[ale-zero-flux] {engine}: ALE == static bitwise over {STEPS} steps ({} state slots)",
+            (NX * NY) as f64
+        );
+    });
+    std::env::remove_var("CFD2_BACKEND");
+    std::env::remove_var("CFD2_CPU_ENGINE");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// Interpreter engine: executes the KernelProgram IR directly.
+#[test]
+fn ale_zero_flux_byte_identical_cpu_interpreter() {
+    assert_zero_flux_equivalence("interpreter");
+}
+
+/// Transpiled engine: the compiled-Rust kernels emitted at build time.
+#[test]
+fn ale_zero_flux_byte_identical_cpu_transpiled() {
+    assert_zero_flux_equivalence("transpiled");
+}
+
+/// GPU leg: primarily a *binding-resolution* gate — the ALE kernels bind
+/// `mesh_fluxes` (group 0 / binding 8) through
+/// `MeshResources::buffer_for_binding_name`, and a resolution gap would fail
+/// pipeline/bind-group creation right here, long before M3.2 uploads real
+/// fluxes. Same-device determinism + the IEEE `x - rho*0.0` identity make the
+/// exact-bit comparison hold on GPU too (fp contraction of `fma(-rho, 0, x)`
+/// is still `x`); `CFD2_ALLOW_GPU_BYTE_WAIVE=1` downgrades to <1e-6 (the
+/// driver-update escape hatch, mirroring tests/mesh_refresh_identity_test.rs).
+/// Skips when no GPU adapter is available.
+#[test]
+fn ale_zero_flux_byte_identical_gpu() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    std::env::remove_var("CFD2_BACKEND");
+
+    let ctx = match pollster::block_on(cfd2::solver::gpu::context::GpuContext::new(None, None)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[ale-zero-flux] no GPU adapter ({e}); skipping GPU byte gate");
+            return;
+        }
+    };
+
+    let mesh = channel_mesh();
+    let params = test_params();
+    let n = mesh.num_cells();
+    let build = |model: ModelSpec| -> SolverDriver {
+        let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
+            &mesh,
+            model,
+            &params,
+            &vec![(0.0, 0.0); n],
+            &vec![0.0; n],
+            Some(ctx.device.clone()),
+            Some(ctx.queue.clone()),
+        ))
+        .expect("driver build");
+        driver.apply_params(&params);
+        driver
+    };
+
+    let mut base = build(incompressible_momentum_model().expect("model"));
+    let mut ale = build(incompressible_momentum_ale_model().expect("model"));
+    assert!(!base.solver().is_cpu() && !ale.solver().is_cpu(), "expected the GPU backend");
+
+    for step in 0..STEPS {
+        let out_base = base.step(false);
+        let out_ale = ale.step(false);
+        assert!(
+            out_base.diverged.is_none() && out_ale.diverged.is_none(),
+            "[gpu] step {step} diverged (base {:?}, ale {:?})",
+            out_base.diverged,
+            out_ale.diverged
+        );
+    }
+    let bits_base = state_bits(&base);
+    let bits_ale = state_bits(&ale);
+    assert_eq!(bits_base.len(), bits_ale.len(), "state length mismatch");
+    let maxd = bits_base
+        .iter()
+        .zip(&bits_ale)
+        .map(|(&a, &b)| (f32::from_bits(a) - f32::from_bits(b)).abs())
+        .fold(0.0f32, f32::max);
+    if std::env::var("CFD2_ALLOW_GPU_BYTE_WAIVE").as_deref() == Ok("1") {
+        eprintln!(
+            "[ale-zero-flux] *** GPU BYTE GATE WAIVED: comparing at <1e-6; max|diff| = {maxd:.3e} ***"
+        );
+        assert!(maxd < 1e-6, "waived GPU comparison exceeded 1e-6: {maxd:.3e}");
+    } else {
+        let ndiff = bits_base.iter().zip(&bits_ale).filter(|(a, b)| a != b).count();
+        assert_eq!(
+            ndiff,
+            0,
+            "[gpu] ALE model with zero mesh_fluxes diverged bitwise from the static model: \
+             {ndiff}/{} state slots differ (max |diff| = {maxd:.3e})",
+            bits_base.len(),
+        );
+    }
+    println!("[ale-zero-flux] gpu: ALE == static bitwise over {STEPS} steps");
+}

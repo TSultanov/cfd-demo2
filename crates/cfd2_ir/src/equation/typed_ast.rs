@@ -250,6 +250,15 @@ impl<D: UnitDimension> TypedTerm<D> {
         self
     }
 
+    /// Declare ALE (mesh-relative) convection: assembly consumes this term's
+    /// face flux relative to the mesh motion, `phi_rel = phi - rho_f *
+    /// mesh_fluxes[face]`. See `Term::relative_to_mesh` for the full
+    /// semantics. Only valid on `Div` / `DivFlux` terms (panics otherwise).
+    pub fn with_mesh_relative(mut self) -> Self {
+        self.inner = self.inner.with_mesh_relative();
+        self
+    }
+
     /// Create an equation from this single term.
     ///
     /// The target field is the unknown being solved for. Its dimension can be

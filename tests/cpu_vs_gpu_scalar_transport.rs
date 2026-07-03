@@ -113,15 +113,15 @@ fn cpu_matches_gpu_scalar_transport() {
     let configs = [
         (
             "interp/1t",
-            CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false },
+            CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false, precision: Default::default(), },
         ),
         (
             "interp/4t/simd",
-            CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 4, simd: true },
+            CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 4, simd: true, precision: Default::default(), },
         ),
         (
             "transpiled/4t/simd",
-            CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 4, simd: true },
+            CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 4, simd: true, precision: Default::default(), },
         ),
     ];
     for scheme in [Scheme::Upwind, Scheme::SecondOrderUpwind] {

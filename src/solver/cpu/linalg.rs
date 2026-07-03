@@ -14,6 +14,124 @@ use crate::solver::cpu::parallel::{
     par_dot, par_map_into, par_update, parallel_cell_chunks_mut, parallel_cell_chunks_mut2,
 };
 
+/// Scalar type of the CPU coupled linear solve — the runtime PRECISION option
+/// (`CpuBackendConfig::precision` / `CFD2_CPU_PRECISION`).
+///
+/// `f64` is the reference (and the default): the generic code instantiated at
+/// f64 compiles to exactly the pre-generics arithmetic (every `from_*`/`to_*`
+/// is a no-op there), so the default path stays bit-identical. `f32` mirrors
+/// the GPU's arithmetic — f32 storage and accumulation through the matvec,
+/// preconditioner and Krylov updates — halving vector bandwidth on the
+/// memory-bound phases. BOTH precisions keep their reductions deterministic:
+/// dot products always accumulate in f64 through the fixed-chunk
+/// [`par_dot`]/[`par_dot_f32`], so results remain bit-exact across thread
+/// counts; the Hessenberg/Givens bookkeeping is f64 for both.
+pub trait Real:
+    Copy
+    + Send
+    + Sync
+    + PartialOrd
+    + std::ops::Add<Output = Self>
+    + std::ops::Sub<Output = Self>
+    + std::ops::Mul<Output = Self>
+    + std::ops::Div<Output = Self>
+    + std::ops::Neg<Output = Self>
+    + std::ops::AddAssign
+    + std::ops::SubAssign
+    + 'static
+{
+    const ZERO: Self;
+    const ONE: Self;
+    /// True for the f32 instantiation (runtime dispatch where a dedicated
+    /// mixed-precision kernel exists, e.g. the f64-mode SIMD heavy-ball).
+    const IS_F32: bool;
+    /// Division-guard threshold in the precision's own scale: a pivot below
+    /// this is treated as zero. The f64 guards used 1e-300, which an
+    /// f32-DENORMAL pivot sails past — the division then overflows f32 to
+    /// inf and poisons the iterate with NaN (measured: every hard lid solve
+    /// died at a NaN restart head until the guard restored the warm start
+    /// and the march froze).
+    const TINY: f64;
+    fn from_f64(v: f64) -> Self;
+    fn to_f64(self) -> f64;
+    fn from_f32(v: f32) -> Self;
+    fn to_f32(self) -> f32;
+    fn abs(self) -> Self;
+    fn sqrt(self) -> Self;
+    /// Deterministic fixed-chunk parallel dot with f64 accumulation.
+    fn par_dot(threads: usize, a: &[Self], b: &[Self]) -> f64;
+}
+
+impl Real for f64 {
+    const ZERO: Self = 0.0;
+    const ONE: Self = 1.0;
+    const IS_F32: bool = false;
+    const TINY: f64 = 1e-300;
+    #[inline(always)]
+    fn from_f64(v: f64) -> Self {
+        v
+    }
+    #[inline(always)]
+    fn to_f64(self) -> f64 {
+        self
+    }
+    #[inline(always)]
+    fn from_f32(v: f32) -> Self {
+        v as f64
+    }
+    #[inline(always)]
+    fn to_f32(self) -> f32 {
+        self as f32
+    }
+    #[inline(always)]
+    fn abs(self) -> Self {
+        f64::abs(self)
+    }
+    #[inline(always)]
+    fn sqrt(self) -> Self {
+        f64::sqrt(self)
+    }
+    #[inline(always)]
+    fn par_dot(threads: usize, a: &[Self], b: &[Self]) -> f64 {
+        par_dot(threads, a, b)
+    }
+}
+
+impl Real for f32 {
+    const ZERO: Self = 0.0;
+    const ONE: Self = 1.0;
+    const IS_F32: bool = true;
+    const TINY: f64 = 1e-30;
+    #[inline(always)]
+    fn from_f64(v: f64) -> Self {
+        v as f32
+    }
+    #[inline(always)]
+    fn to_f64(self) -> f64 {
+        self as f64
+    }
+    #[inline(always)]
+    fn from_f32(v: f32) -> Self {
+        v
+    }
+    #[inline(always)]
+    fn to_f32(self) -> f32 {
+        self
+    }
+    #[inline(always)]
+    fn abs(self) -> Self {
+        f32::abs(self)
+    }
+    #[inline(always)]
+    fn sqrt(self) -> Self {
+        f32::sqrt(self)
+    }
+    #[inline(always)]
+    fn par_dot(threads: usize, a: &[Self], b: &[Self]) -> f64 {
+        par_dot_f32(threads, a, b)
+    }
+}
+
 /// Fine-grained linear-solve profiling (enabled by `CFD2_CPU_PROFILE` via
 /// `CpuSolver::step`). Global atomic accumulators: the linear solve runs once
 /// per outer iteration on the solver thread, so plain relaxed adds are enough.
@@ -93,6 +211,31 @@ pub struct CsrView<'a> {
 impl CsrView<'_> {
     pub fn n(&self) -> usize {
         self.row_offsets.len() - 1
+    }
+
+    /// `y = A x` (both length n) in the solve precision `T`.
+    fn spmv_t<T: Real>(&self, x: &[T], y: &mut [T]) {
+        let n = self.n();
+        crate::solver::cpu::parallel::parallel_cell_chunks_mut(
+            n,
+            1,
+            self.threads.max(1),
+            y,
+            |row0, yc| {
+                for (li, out) in yc.iter_mut().enumerate() {
+                    let row = row0 + li;
+                    let (s, e) = (
+                        self.row_offsets[row] as usize,
+                        self.row_offsets[row + 1] as usize,
+                    );
+                    let mut sum = T::ZERO;
+                    for k in s..e {
+                        sum += T::from_f32(self.values[k]) * x[self.col_indices[k] as usize];
+                    }
+                    *out = sum;
+                }
+            },
+        );
     }
 
     /// `y = A x` (both length n), computed in f64.
@@ -229,8 +372,8 @@ impl BlockCsr<'_> {
         scalar_offset * s * s + num_neighbors * s * r
     }
 
-    /// `y = A x` (both length `n()`), accumulated in f64.
-    fn block_spmv(&self, x: &[f64], y: &mut [f64]) {
+    /// `y = A x` (both length `n()`), accumulated in the solve precision `T`.
+    fn block_spmv<T: Real>(&self, x: &[T], y: &mut [T]) {
         let s = self.s;
         let threads = self.threads.max(1);
         if threads <= 1 {
@@ -251,11 +394,11 @@ impl BlockCsr<'_> {
     /// Compute `y_out[.. ] = (A x)` for cells `[cell0, cell1)`, where `y_out` is the
     /// output sub-slice covering exactly those cells (length `(cell1-cell0)*s`).
     #[inline]
-    fn block_spmv_range(&self, x: &[f64], cell0: usize, cell1: usize, y_out: &mut [f64]) {
+    fn block_spmv_range<T: Real>(&self, x: &[T], cell0: usize, cell1: usize, y_out: &mut [T]) {
         if self.simd {
             match self.s {
-                4 => return self.block_spmv_range_simd::<4>(x, cell0, cell1, y_out),
-                3 => return self.block_spmv_range_simd::<3>(x, cell0, cell1, y_out),
+                4 => return self.block_spmv_range_simd::<T, 4>(x, cell0, cell1, y_out),
+                3 => return self.block_spmv_range_simd::<T, 3>(x, cell0, cell1, y_out),
                 _ => {} // uncommon block sizes keep the scalar loop
             }
         }
@@ -265,15 +408,15 @@ impl BlockCsr<'_> {
             let scalar_offset = self.scalar_offset(cell);
             let num_neighbors = self.num_neighbors(cell);
             // Per-row accumulators (stack, not a per-cell heap allocation).
-            let mut acc = [0.0f64; MAX_BLOCK_S];
+            let mut acc = [T::ZERO; MAX_BLOCK_S];
             let acc = &mut acc[..s];
             for rank in 0..num_neighbors {
                 let j = self.col_indices[scalar_offset + rank] as usize;
                 for (r, a) in acc.iter_mut().enumerate() {
                     let base = self.start_row(cell, r) + rank * s;
-                    let mut sum = 0.0f64;
+                    let mut sum = T::ZERO;
                     for c in 0..s {
-                        sum += self.values[base + c] as f64 * x[j * s + c];
+                        sum += T::from_f32(self.values[base + c]) * x[j * s + c];
                     }
                     *a += sum;
                 }
@@ -291,12 +434,12 @@ impl BlockCsr<'_> {
     /// exactly 0.0 to the horizontal sum). The x vector is loaded ONCE per
     /// neighbour and reused across all S block rows (the scalar loop reloads
     /// it per row).
-    fn block_spmv_range_simd<const S: usize>(
+    fn block_spmv_range_simd<T: Real, const S: usize>(
         &self,
-        x: &[f64],
+        x: &[T],
         cell0: usize,
         cell1: usize,
-        y_out: &mut [f64],
+        y_out: &mut [T],
     ) {
         use wide::f64x4;
         debug_assert_eq!(self.s, S);
@@ -310,9 +453,14 @@ impl BlockCsr<'_> {
             for rank in 0..num_neighbors {
                 let j = self.col_indices[scalar_offset + rank] as usize * S;
                 let xv = if S == 4 {
-                    f64x4::from([x[j], x[j + 1], x[j + 2], x[j + 3]])
+                    f64x4::from([
+                        x[j].to_f64(),
+                        x[j + 1].to_f64(),
+                        x[j + 2].to_f64(),
+                        x[j + 3].to_f64(),
+                    ])
                 } else {
-                    f64x4::from([x[j], x[j + 1], x[j + 2], 0.0])
+                    f64x4::from([x[j].to_f64(), x[j + 1].to_f64(), x[j + 2].to_f64(), 0.0])
                 };
                 for (r, a) in accv.iter_mut().enumerate().take(S) {
                     let base = row0_base + row_stride * r + rank * S;
@@ -337,7 +485,7 @@ impl BlockCsr<'_> {
             let out = &mut y_out[(cell - cell0) * S..(cell - cell0) * S + S];
             for (r, o) in out.iter_mut().enumerate() {
                 let l = accv[r].to_array();
-                *o = (l[0] + l[1]) + (l[2] + l[3]);
+                *o = T::from_f64((l[0] + l[1]) + (l[2] + l[3]));
             }
         }
     }
@@ -437,8 +585,8 @@ pub(crate) fn invert_dense(s: usize, src: &[f64], inv: &mut [f64]) {
 }
 
 /// A left preconditioner `z = M^{-1} r`.
-pub trait Preconditioner {
-    fn apply(&self, r: &[f64], z: &mut [f64]);
+pub trait Preconditioner<T: Real> {
+    fn apply(&self, r: &[T], z: &mut [T]);
 }
 
 /// Extract the pressure-pressure scalar-CSR values (`A_pp`) from an assembled
@@ -459,25 +607,30 @@ pub fn extract_p_values(a: &BlockCsr, p: usize) -> Vec<f32> {
     p_values
 }
 
-/// Block-Jacobi: per-cell S×S diagonal-block inverse.
-pub struct BlockJacobi {
+/// Block-Jacobi: per-cell S×S diagonal-block inverse. Blocks are inverted in
+/// f64 (robustness) and stored/applied in the solve precision `T`.
+pub struct BlockJacobi<T: Real> {
     s: usize,
-    inv_blocks: Vec<f64>,
+    inv_blocks: Vec<T>,
     threads: usize,
 }
 
-impl BlockJacobi {
+impl<T: Real> BlockJacobi<T> {
     pub fn new(a: &BlockCsr) -> Self {
         let s = a.s;
         let threads = a.threads.max(1);
         let diag = a.diagonal_blocks();
-        let mut inv_blocks = vec![0.0f64; diag.len()];
+        let mut inv_blocks = vec![T::ZERO; diag.len()];
         // Each cell inverts its own disjoint S×S block (reads `diag[base..]`,
         // writes `inv_blocks[base..]`); no cross-cell dependency.
-        let invert = |cell0: usize, chunk: &mut [f64]| {
+        let invert = |cell0: usize, chunk: &mut [T]| {
+            let mut inv = [0.0f64; MAX_BLOCK_S * MAX_BLOCK_S];
             for (li, block) in chunk.chunks_mut(s * s).enumerate() {
                 let base = (cell0 + li) * s * s;
-                invert_dense(s, &diag[base..base + s * s], block);
+                invert_dense(s, &diag[base..base + s * s], &mut inv[..s * s]);
+                for (o, &v) in block.iter_mut().zip(inv[..s * s].iter()) {
+                    *o = T::from_f64(v);
+                }
             }
         };
         if threads <= 1 {
@@ -495,17 +648,17 @@ impl BlockJacobi {
     }
 }
 
-impl Preconditioner for BlockJacobi {
-    fn apply(&self, r: &[f64], z: &mut [f64]) {
+impl<T: Real> Preconditioner<T> for BlockJacobi<T> {
+    fn apply(&self, r: &[T], z: &mut [T]) {
         let s = self.s;
         let cells = r.len() / s;
         let inv_blocks = &self.inv_blocks;
-        let mul = |cell0: usize, zc: &mut [f64]| {
+        let mul = |cell0: usize, zc: &mut [T]| {
             for (li, zrow) in zc.chunks_mut(s).enumerate() {
                 let cell = cell0 + li;
                 let base = cell * s * s;
                 for row in 0..s {
-                    let mut sum = 0.0f64;
+                    let mut sum = T::ZERO;
                     for col in 0..s {
                         sum += inv_blocks[base + row * s + col] * r[cell * s + col];
                     }
@@ -528,27 +681,28 @@ impl Preconditioner for BlockJacobi {
 /// linear solve into a full Newton/Picard correction that excites the
 /// inviscid-margin instability, whereas point-Jacobi + the inexact-Picard stop
 /// (1e-4) yields the damped correction the GPU relies on.
-pub struct PointJacobi {
-    inv_diag: Vec<f64>,
+pub struct PointJacobi<T: Real> {
+    inv_diag: Vec<T>,
 }
 
-impl PointJacobi {
+impl<T: Real> PointJacobi<T> {
     pub fn new(a: &BlockCsr) -> Self {
         let s = a.s;
         let diag = a.diagonal_blocks();
-        let mut inv_diag = vec![0.0f64; a.num_cells() * s];
+        let mut inv_diag = vec![T::ZERO; a.num_cells() * s];
         for cell in 0..a.num_cells() {
             for r in 0..s {
                 let d = diag[cell * s * s + r * s + r];
-                inv_diag[cell * s + r] = if d.abs() > 1e-30 { 1.0 / d } else { 1.0 };
+                inv_diag[cell * s + r] =
+                    T::from_f64(if d.abs() > 1e-30 { 1.0 / d } else { 1.0 });
             }
         }
         Self { inv_diag }
     }
 }
 
-impl Preconditioner for PointJacobi {
-    fn apply(&self, r: &[f64], z: &mut [f64]) {
+impl<T: Real> Preconditioner<T> for PointJacobi<T> {
+    fn apply(&self, r: &[T], z: &mut [T]) {
         for i in 0..r.len() {
             z[i] = self.inv_diag[i] * r[i];
         }
@@ -588,13 +742,13 @@ enum SchurInner {
 /// Built per solve from the assembled block matrix (the matrix changes each
 /// outer iteration). `omega`/`sweeps_cap` follow the GPU spec semantics
 /// (`heavy_ball_omega` / `default_pressure_sweeps`, same env overrides).
-pub struct SchurPrecond<'a> {
+pub struct SchurPrecond<'a, T: Real> {
     a: BlockCsr<'a>,
     u_idx: Vec<usize>,
     p: usize,
-    diag_u_inv: Vec<f64>, // num_cells * u_len
+    diag_u_inv: Vec<T>, // num_cells * u_len
     p_values: Vec<f32>,   // A_pp scalar-CSR values (topology = scalar_row_offsets/col_indices)
-    p_diag_inv: Vec<f64>, // 1 / diag(A_pp) per cell (heavy-ball sweep scaling)
+    p_diag_inv: Vec<T>, // 1 / diag(A_pp) per cell (heavy-ball sweep scaling)
     /// f32 copy of `p_diag_inv` for the mixed-precision sweep (built only
     /// when `a.simd`; empty otherwise).
     p_diag_inv_f32: Vec<f32>,
@@ -630,7 +784,7 @@ pub struct SchurPrecond<'a> {
     /// previously allocated + zero-filled fresh vectors (gp/psol + f32
     /// mirrors + the heavy-ball ping-pong quad = ~24 MB per apply on the
     /// 750k nozzle, ~50 applies/step of pure alloc/page-fault churn).
-    work: std::cell::RefCell<SchurWork>,
+    work: std::cell::RefCell<SchurWork<T>>,
     /// AMG-path Krylov selection. PCG was REFUTED as the default by
     /// measurement (July 2026, 118k cut-cell obstacle): the "near-SPD"
     /// premise fails on the real block — cut-cell/BC/deferred-correction
@@ -648,20 +802,32 @@ pub struct SchurPrecond<'a> {
 /// buffers are fully overwritten before use (the zero fills that carried
 /// semantics — heavy-ball's from-zero start, the inner solves' x0 = 0 —
 /// are now explicit `fill(0.0)` at the use sites), so reuse is bit-exact.
-#[derive(Default)]
-struct SchurWork {
-    gp: Vec<f64>,
-    psol: Vec<f64>,
+struct SchurWork<T: Real> {
+    gp: Vec<T>,
+    psol: Vec<T>,
     gp_f32: Vec<f32>,
     psol_f32: Vec<f32>,
     /// heavy-ball cur/prev/scratch/best, each `cells` long.
-    hb: Vec<f64>,
-    /// f32 heavy-ball workspace (cur/prev/scratch/best/g32) for the
-    /// mixed-precision path.
+    hb: Vec<T>,
+    /// f32 heavy-ball workspace (cur/prev/scratch/best/g32) for the f64-mode
+    /// mixed-precision (SIMD) path; unused when `T` is already f32.
     hb32: Vec<f32>,
 }
 
-impl<'a> SchurPrecond<'a> {
+impl<T: Real> Default for SchurWork<T> {
+    fn default() -> Self {
+        Self {
+            gp: Vec::new(),
+            psol: Vec::new(),
+            gp_f32: Vec::new(),
+            psol_f32: Vec::new(),
+            hb: Vec::new(),
+            hb32: Vec::new(),
+        }
+    }
+}
+
+impl<'a, T: Real> SchurPrecond<'a, T> {
     pub fn new(
         a: BlockCsr<'a>,
         u_idx: &[usize],
@@ -675,10 +841,10 @@ impl<'a> SchurPrecond<'a> {
         let cells = a.num_cells();
         let u_len = u_idx.len();
         let threads = a.threads.max(1);
-        let mut diag_u_inv = vec![0.0f64; cells * u_len];
+        let mut diag_u_inv = vec![T::ZERO; cells * u_len];
         let nnz = a.col_indices.len();
         let mut p_values = vec![0.0f32; nnz];
-        let mut p_diag_inv = vec![0.0f64; cells];
+        let mut p_diag_inv = vec![T::ZERO; cells];
         let mut pu_values = vec![0.0f32; nnz * u_len];
         let mut up_values = vec![0.0f32; nnz * u_len];
         // Extract diag(A_uu)^-1, the A_pp scalar-CSR values and diag(A_pp)^-1.
@@ -688,8 +854,8 @@ impl<'a> SchurPrecond<'a> {
         // parallelizes over disjoint cell ranges bit-exactly. p_values chunks
         // are split at scalar-row-offset boundaries (uneven widths).
         let fill = |cell0: usize,
-                    du_chunk: &mut [f64],
-                    pd_chunk: &mut [f64],
+                    du_chunk: &mut [T],
+                    pd_chunk: &mut [T],
                     pv_chunk: &mut [f32],
                     pu_chunk: &mut [f32],
                     up_chunk: &mut [f32]| {
@@ -703,7 +869,8 @@ impl<'a> SchurPrecond<'a> {
                 for (i, &u) in u_idx.iter().enumerate() {
                     let base_u = a.start_row(cell, u) + diag_rank * s;
                     let du = a.values[base_u + u] as f64;
-                    du_chunk[li * u_len + i] = if du.abs() > 1e-30 { 1.0 / du } else { 0.0 };
+                    du_chunk[li * u_len + i] =
+                        T::from_f64(if du.abs() > 1e-30 { 1.0 / du } else { 0.0 });
                 }
                 // A_pp scalar-CSR row (one value per neighbour block), plus the
                 // compact A_pu / A_up sub-operator rows (see the field docs).
@@ -717,7 +884,7 @@ impl<'a> SchurPrecond<'a> {
                     }
                 }
                 let dp = a.values[srp + diag_rank * s + p] as f64;
-                pd_chunk[li] = if dp.abs() > 1e-30 { 1.0 / dp } else { 0.0 };
+                pd_chunk[li] = T::from_f64(if dp.abs() > 1e-30 { 1.0 / dp } else { 0.0 });
             }
         };
         // ~16k cells per worker minimum: below that, region-launch overhead
@@ -758,8 +925,8 @@ impl<'a> SchurPrecond<'a> {
                 fill(start, du, pd, pv, pu, up);
             });
         }
-        let p_diag_inv_f32: Vec<f32> = if a.simd {
-            p_diag_inv.iter().map(|&v| v as f32).collect()
+        let p_diag_inv_f32: Vec<f32> = if a.simd && !T::IS_F32 {
+            p_diag_inv.iter().map(|v| v.to_f32()).collect()
         } else {
             Vec::new()
         };
@@ -781,9 +948,12 @@ impl<'a> SchurPrecond<'a> {
             _ => SchurInner::HeavyBall,
         };
         if std::env::var("CFD2_CPU_SCHUR_DEBUG").is_ok() {
-            let zeros = p_diag_inv.iter().filter(|&&v| v == 0.0).count();
-            let dmin = p_diag_inv.iter().cloned().fold(f64::INFINITY, f64::min);
-            let dmax = p_diag_inv.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let zeros = p_diag_inv.iter().filter(|v| v.to_f64() == 0.0).count();
+            let dmin = p_diag_inv.iter().map(|v| v.to_f64()).fold(f64::INFINITY, f64::min);
+            let dmax = p_diag_inv
+                .iter()
+                .map(|v| v.to_f64())
+                .fold(f64::NEG_INFINITY, f64::max);
             // Power iteration on D^-1 A_pp: heavy-ball/Jacobi stability needs
             // the Jacobi-preconditioned spectrum inside (0, 2).
             let pa = CsrView {
@@ -802,7 +972,7 @@ impl<'a> SchurPrecond<'a> {
             for _ in 0..40 {
                 pa.spmv(&v, &mut w);
                 for i in 0..cells {
-                    w[i] *= p_diag_inv[i];
+                    w[i] *= p_diag_inv[i].to_f64();
                 }
                 lam = par_dot(threads, &w, &w).sqrt().max(1e-300);
                 for i in 0..cells {
@@ -820,7 +990,7 @@ impl<'a> SchurPrecond<'a> {
             for _ in 0..100 {
                 pa.spmv(&g, &mut w);
                 for i in 0..cells {
-                    w[i] = g[i] - w[i] * p_diag_inv[i];
+                    w[i] = g[i] - w[i] * p_diag_inv[i].to_f64();
                 }
                 rho_g = par_dot(threads, &w, &w).sqrt().max(1e-300);
                 for i in 0..cells {
@@ -877,8 +1047,8 @@ impl<'a> SchurPrecond<'a> {
     }
 }
 
-impl Preconditioner for SchurPrecond<'_> {
-    fn apply(&self, r: &[f64], z: &mut [f64]) {
+impl<T: Real> Preconditioner<T> for SchurPrecond<'_, T> {
+    fn apply(&self, r: &[T], z: &mut [T]) {
         let s = self.a.s;
         let cells = self.a.num_cells();
         let u_len = self.u_idx.len();
@@ -892,7 +1062,7 @@ impl Preconditioner for SchurPrecond<'_> {
         z.copy_from_slice(r);
         let mut work = self.work.borrow_mut();
         let work = &mut *work;
-        work.gp.resize(cells, 0.0);
+        work.gp.resize(cells, T::ZERO);
         // gp is fully written by the pre pass below; no zeroing needed.
         let gp = &mut work.gp;
         let (aa, u_idx, diag_u_inv) = (&self.a, &self.u_idx, &self.diag_u_inv);
@@ -913,7 +1083,7 @@ impl Preconditioner for SchurPrecond<'_> {
                         for (i, &u) in u_idx.iter().enumerate() {
                             zc[li * s + u] = diag_u_inv[cell * u_len + i] * r[cell * s + u];
                         }
-                        zc[li * s + p] = 0.0;
+                        zc[li * s + p] = T::ZERO;
                         let scalar_offset = aa.scalar_offset(cell);
                         let num_neighbors = aa.num_neighbors(cell);
                         let mut g = r[cell * s + p];
@@ -923,7 +1093,7 @@ impl Preconditioner for SchurPrecond<'_> {
                             for (i, &u) in u_idx.iter().enumerate() {
                                 // Compact A_pu stream (bit-equal to the block
                                 // values it was extracted from).
-                                let a_pu = pu_values[cbase + i] as f64;
+                                let a_pu = T::from_f32(pu_values[cbase + i]);
                                 g -= a_pu
                                     * diag_u_inv[col_cell * u_len + i]
                                     * r[col_cell * s + u];
@@ -948,7 +1118,7 @@ impl Preconditioner for SchurPrecond<'_> {
         // The BiCGSTAB paths run with the stagnation early-exit: bailing on a
         // stalled block beats burning the budget; failures feed the adaptive
         // AMG switch.
-        work.psol.resize(cells, 0.0);
+        work.psol.resize(cells, T::ZERO);
         let psol = &mut work.psol;
         let (gp_f32_buf, psol_f32_buf, hb_buf, hb32_buf) = (
             &mut work.gp_f32,
@@ -956,7 +1126,7 @@ impl Preconditioner for SchurPrecond<'_> {
             &mut work.hb,
             &mut work.hb32,
         );
-        let gp: &[f64] = gp;
+        let gp: &[T] = gp;
         let heavy_ball = self.amg.is_none() && self.inner != SchurInner::BiCgStab;
         let stats = prof::time(&prof::SCHUR_SOLVE, || match &self.amg {
             Some(amg) if self.inner == SchurInner::VCycle => {
@@ -965,23 +1135,18 @@ impl Preconditioner for SchurPrecond<'_> {
                 SolveStats { iters: 1, rel_residual: f64::NAN, converged: true }
             }
             Some(amg) => {
-                gp_f32_buf.resize(cells, 0.0);
-                psol_f32_buf.resize(cells, 0.0);
-                for (o, &v) in gp_f32_buf.iter_mut().zip(gp.iter()) {
-                    *o = v as f32;
-                }
-                psol_f32_buf.fill(0.0); // inner-solve x0 = 0, as the fresh alloc had
-                let gp_f32: &[f32] = gp_f32_buf;
-                let psol_f32: &mut [f32] = psol_f32_buf;
+                // Native-`T` inner solve (V-cycle + Krylov vectors all in the
+                // solve precision — no f32 mirror conversions).
+                psol.fill(T::ZERO); // inner-solve x0 = 0, as the fresh alloc had
                 // BiCGSTAB by default; PCG opt-in only (see the
                 // `amg_use_cg` field doc for the measured refutation). On a
                 // CG curvature breakdown the apply re-runs with BiCGSTAB so
                 // FGMRES never sees the aborted iterate.
-                let st = if self.amg_use_cg.get() {
+                if self.amg_use_cg.get() {
                     let (st, spd_breakdown) = cg_pc_opts(
                         &pa,
-                        gp_f32,
-                        psol_f32,
+                        gp,
+                        psol,
                         self.inner_iters,
                         self.inner_tol,
                         &|r, z| amg.vcycle(r, z),
@@ -995,11 +1160,11 @@ impl Preconditioner for SchurPrecond<'_> {
                                 self.applies.get() + 1
                             );
                         }
-                        psol_f32.fill(0.0);
+                        psol.fill(T::ZERO);
                         bicgstab_pc_opts(
                             &pa,
-                            gp_f32,
-                            psol_f32,
+                            gp,
+                            psol,
                             self.inner_iters,
                             self.inner_tol,
                             &|r, z| amg.vcycle(r, z),
@@ -1011,52 +1176,34 @@ impl Preconditioner for SchurPrecond<'_> {
                 } else {
                     bicgstab_pc_opts(
                         &pa,
-                        gp_f32,
-                        psol_f32,
+                        gp,
+                        psol,
                         self.inner_iters,
                         self.inner_tol,
                         &|r, z| amg.vcycle(r, z),
                         true,
                     )
-                };
-                for i in 0..cells {
-                    psol[i] = psol_f32[i] as f64;
                 }
-                st
             }
             None if self.inner == SchurInner::BiCgStab => {
                 let threads = pa.threads.max(1);
                 let diag = pa.diagonal();
-                let minv = move |v: &[f64], out: &mut [f64]| {
+                let minv = move |v: &[T], out: &mut [T]| {
                     par_map_into(threads, out, |i| {
                         if diag[i] != 0.0 {
-                            v[i] / diag[i]
+                            v[i] / T::from_f64(diag[i])
                         } else {
                             v[i]
                         }
                     });
                 };
-                gp_f32_buf.resize(cells, 0.0);
-                psol_f32_buf.resize(cells, 0.0);
-                for (o, &v) in gp_f32_buf.iter_mut().zip(gp.iter()) {
-                    *o = v as f32;
-                }
-                psol_f32_buf.fill(0.0); // inner-solve x0 = 0
-                let st = bicgstab_pc_opts(
-                    &pa,
-                    gp_f32_buf,
-                    psol_f32_buf,
-                    self.inner_iters,
-                    self.inner_tol,
-                    &minv,
-                    true,
-                );
-                for i in 0..cells {
-                    psol[i] = psol_f32_buf[i] as f64;
-                }
-                st
+                psol.fill(T::ZERO); // inner-solve x0 = 0
+                bicgstab_pc_opts(&pa, gp, psol, self.inner_iters, self.inner_tol, &minv, true)
             }
-            None if self.a.simd => heavy_ball_solve_f32(
+            // f64-mode SIMD: mixed-precision f32-storage sweep. In the f32
+            // precision mode the GENERIC sweep below is already f32-native,
+            // so the dedicated variant is skipped.
+            None if self.a.simd && !T::IS_F32 => heavy_ball_solve_mixed(
                 &pa,
                 gp,
                 psol,
@@ -1122,11 +1269,12 @@ impl Preconditioner for SchurPrecond<'_> {
                             let col_cell = aa.col_indices[scalar_offset + rank] as usize;
                             let cbase = (scalar_offset + rank) * u_len;
                             let up_v = pad4_f32(&up_values[cbase..cbase + u_len]);
-                            corr_v = up_v.mul_add(f64x4::splat(psol[col_cell]), corr_v);
+                            corr_v = up_v.mul_add(f64x4::splat(psol[col_cell].to_f64()), corr_v);
                         }
                         let corr = corr_v.to_array();
                         for (i, &u) in u_idx.iter().enumerate() {
-                            zc[li * s + u] -= diag_u_inv[cell * u_len + i] * corr[i];
+                            zc[li * s + u] -=
+                                diag_u_inv[cell * u_len + i] * T::from_f64(corr[i]);
                         }
                         zc[li * s + p] = psol[cell];
                     }
@@ -1138,10 +1286,11 @@ impl Preconditioner for SchurPrecond<'_> {
                         let scalar_offset = aa.scalar_offset(cell);
                         let num_neighbors = aa.num_neighbors(cell);
                         for (i, &u) in u_idx.iter().enumerate() {
-                            let mut corr = 0.0f64;
+                            let mut corr = T::ZERO;
                             for rank in 0..num_neighbors {
                                 let col_cell = aa.col_indices[scalar_offset + rank] as usize;
-                                let a_up = up_values[(scalar_offset + rank) * u_len + i] as f64;
+                                let a_up =
+                                    T::from_f32(up_values[(scalar_offset + rank) * u_len + i]);
                                 corr += a_up * psol[col_cell];
                             }
                             zc[li * s + u] -= diag_u_inv[cell * u_len + i] * corr;
@@ -1168,11 +1317,11 @@ impl Preconditioner for SchurPrecond<'_> {
 /// already under the EW first-outer 1e-2 — while the GPU, with the clamp,
 /// evolved normally).
 #[allow(clippy::too_many_arguments)]
-pub fn fgmres(
+pub fn fgmres<T: Real>(
     a: &BlockCsr,
     b: &[f32],
     x: &mut [f32],
-    precond: &dyn Preconditioner,
+    precond: &dyn Preconditioner<T>,
     restart: usize,
     max_iter: usize,
     tol: f64,
@@ -1185,13 +1334,13 @@ pub fn fgmres(
     let threads = a.threads.max(1);
 
     let _ = simd;
-    let vdot = |u: &[f64], w: &[f64]| prof::time(&prof::DOT, || par_dot(threads, u, w));
-    let vnorm = |u: &[f64]| vdot(u, u).sqrt();
-    let spmv = |x: &[f64], y: &mut [f64]| prof::time(&prof::SPMV, || a.block_spmv(x, y));
+    let vdot = |u: &[T], w: &[T]| prof::time(&prof::DOT, || T::par_dot(threads, u, w));
+    let vnorm = |u: &[T]| vdot(u, u).sqrt();
+    let spmv = |x: &[T], y: &mut [T]| prof::time(&prof::SPMV, || a.block_spmv(x, y));
 
-    let bf: Vec<f64> = b.iter().map(|&v| v as f64).collect();
+    let bf: Vec<T> = b.iter().map(|&v| T::from_f32(v)).collect();
     let bnorm = vnorm(&bf).max(1e-300);
-    let mut xf: Vec<f64> = x.iter().map(|&v| v as f64).collect();
+    let mut xf: Vec<T> = x.iter().map(|&v| T::from_f32(v)).collect();
 
     // Krylov / flexible bases: grown LAZILY. The restart cap `m` is 60, but with a
     // warm start + inexact tolerance only a handful of iterations typically run, so
@@ -1199,18 +1348,31 @@ pub fn fgmres(
     // memset per solve (2*61*n*8 bytes at n=3M). Each basis vector persists across
     // restart cycles (reused/overwritten), so the bases grow at most to the largest
     // iteration count actually reached. `h` is tiny (m*(m+1)); keep it dense.
-    let mut vbasis: Vec<Vec<f64>> = Vec::with_capacity(m + 1);
-    let mut zbasis: Vec<Vec<f64>> = Vec::with_capacity(m);
-    let mut h: Vec<Vec<f64>> = vec![vec![0.0; m + 1]; m];
-    let mut cs = vec![0.0f64; m];
-    let mut sn = vec![0.0f64; m];
-    let mut g = vec![0.0f64; m + 1];
+    let mut vbasis: Vec<Vec<T>> = Vec::with_capacity(m + 1);
+    let mut zbasis: Vec<Vec<T>> = Vec::with_capacity(m);
+    // Hessenberg/Givens bookkeeping in the solve precision (GPU parity: the
+    // f32 mode matches the GPU's f32 Hessenberg); dots still ACCUMULATE in
+    // f64 inside par_dot before rounding to T.
+    let mut h: Vec<Vec<T>> = vec![vec![T::ZERO; m + 1]; m];
+    let mut cs = vec![T::ZERO; m];
+    let mut sn = vec![T::ZERO; m];
+    let mut g = vec![T::ZERO; m + 1];
+    // Restart-boundary monotonicity guard (the CPU port of the GPU host
+    // loop's snapshot/restore): an Arnoldi cycle whose reduced-precision
+    // basis lost orthogonality can APPLY an update that GROWS the true
+    // residual; unguarded this compounds across restarts (measured at f32:
+    // the Ghia lid march diverged to ~1e19 while every short run passed).
+    // Track the best-so-far x at the restart-head true-residual checkpoints
+    // and restore it when a cycle made things worse.
+    let mut best_x: Vec<T> = Vec::new();
+    let mut best_beta = f64::INFINITY;
+    const RESTART_GROWTH_TOL: f64 = 1.25;
 
-    let mut ax = vec![0.0f64; n];
+    let mut ax = vec![T::ZERO; n];
     // Reused Arnoldi work vector (was `ax.clone()` per iteration).
-    let mut w = vec![0.0f64; n];
+    let mut w = vec![T::ZERO; n];
     // Reused residual buffer (was reallocated each restart).
-    let mut r = vec![0.0f64; n];
+    let mut r = vec![T::ZERO; n];
     let mut total_iters = 0usize;
     let mut res;
     // GPU-parity relative scale: min(||b||, ||r0||), fixed at the FIRST true
@@ -1227,27 +1389,53 @@ pub fn fgmres(
         prof::time(&prof::AXPY, || par_map_into(threads, &mut r, |i| bf[i] - ax[i]));
         let beta = vnorm(&r);
         res = beta;
+        if std::env::var("CFD2_CPU_FGMRES_DEBUG").is_ok() {
+            eprintln!(
+                "[cpu-fgmres] head iters={total_iters} bnorm={bnorm:.4e} beta={beta:.4e} best={best_beta:.4e}"
+            );
+        }
+        // Monotonicity guard (see `best_x` above): restore-and-stop when the
+        // last cycle grew the true residual, restore on a non-finite one.
+        if !beta.is_finite() {
+            if !best_x.is_empty() {
+                xf.copy_from_slice(&best_x);
+                res = best_beta;
+            }
+            break;
+        }
+        if beta < best_beta {
+            best_beta = beta;
+            if best_x.is_empty() {
+                best_x = xf.clone();
+            } else {
+                best_x.copy_from_slice(&xf);
+            }
+        } else if !best_x.is_empty() && beta > best_beta * RESTART_GROWTH_TOL {
+            xf.copy_from_slice(&best_x);
+            res = best_beta;
+            break;
+        }
         let rs = *rel_scale.get_or_insert_with(|| bnorm.min(beta).max(1e-300));
         if beta / rs <= tol || total_iters >= max_iter {
             break;
         }
-        let inv_beta = 1.0 / beta;
+        let inv_beta = T::from_f64(1.0 / beta);
         if vbasis.is_empty() {
-            vbasis.push(vec![0.0; n]);
+            vbasis.push(vec![T::ZERO; n]);
         }
         prof::time(&prof::AXPY, || {
             par_map_into(threads, &mut vbasis[0], |i| r[i] * inv_beta)
         });
         for v in g.iter_mut() {
-            *v = 0.0;
+            *v = T::ZERO;
         }
-        g[0] = beta;
+        g[0] = T::from_f64(beta);
 
         let mut jfin = 0usize;
         for j in 0..m {
             // z_j = M^{-1} v_j ; w = A z_j. Grow the flexible basis lazily.
             if zbasis.len() <= j {
-                zbasis.push(vec![0.0; n]);
+                zbasis.push(vec![T::ZERO; n]);
             }
             prof::time(&prof::PC_APPLY, || precond.apply(&vbasis[j], &mut zbasis[j]));
             spmv(&zbasis[j], &mut ax);
@@ -1257,15 +1445,31 @@ pub fn fgmres(
             // invariant); the axpy update is elementwise, so it parallelizes
             // bit-exactly.
             for i in 0..=j {
-                let hij = vdot(&w, &vbasis[i]);
+                let hij = T::from_f64(vdot(&w, &vbasis[i]));
                 h[j][i] = hij;
                 let vi = &vbasis[i];
                 prof::time(&prof::AXPY, || {
                     par_update(threads, &mut w, |k, wk| *wk -= hij * vi[k])
                 });
             }
+            if T::IS_F32 {
+                // Re-orthogonalization pass ("twice is enough"): one MGS pass
+                // at f32 loses orthogonality on hard solves — the SAME
+                // failure cluster that made the GPU arm CGS2 on the lid
+                // (Arc C) — and the corrupted updates GREW the true residual
+                // every cycle until the restart guard froze the march.
+                for i in 0..=j {
+                    let d = vdot(&w, &vbasis[i]);
+                    h[j][i] += T::from_f64(d);
+                    let d_t = T::from_f64(d);
+                    let vi = &vbasis[i];
+                    prof::time(&prof::AXPY, || {
+                        par_update(threads, &mut w, |k, wk| *wk -= d_t * vi[k])
+                    });
+                }
+            }
             let hnext = vnorm(&w);
-            h[j][j + 1] = hnext;
+            h[j][j + 1] = T::from_f64(hnext);
 
             // Apply previous Givens rotations to the new column.
             for i in 0..j {
@@ -1275,15 +1479,15 @@ pub fn fgmres(
             }
             // New Givens rotation to zero h[j][j+1].
             let rr = (h[j][j] * h[j][j] + h[j][j + 1] * h[j][j + 1]).sqrt();
-            if rr > 1e-300 {
+            if rr.to_f64() > T::TINY {
                 cs[j] = h[j][j] / rr;
                 sn[j] = h[j][j + 1] / rr;
             } else {
-                cs[j] = 1.0;
-                sn[j] = 0.0;
+                cs[j] = T::ONE;
+                sn[j] = T::ZERO;
             }
             h[j][j] = cs[j] * h[j][j] + sn[j] * h[j][j + 1];
-            h[j][j + 1] = 0.0;
+            h[j][j + 1] = T::ZERO;
             // Update the residual projection.
             let gj = g[j];
             g[j] = cs[j] * gj;
@@ -1291,13 +1495,25 @@ pub fn fgmres(
 
             total_iters += 1;
             jfin = j + 1;
-            res = g[j + 1].abs();
-            if res / rs <= tol || hnext < 1e-300 || total_iters >= max_iter {
+            res = g[j + 1].abs().to_f64();
+            // At f32 the Givens PROJECTION residual is not trustworthy on
+            // hard solves (measured on the lid: projection 1.25e-6 while the
+            // applied update GREW the true residual 47x — and every trapped
+            // solve had broken early on the projection, while every
+            // productive cycle ran to the restart head's TRUE residual).
+            // f32 therefore decides convergence ONLY at restart heads.
+            let proj_converged = !T::IS_F32 && res / rs <= tol;
+            if proj_converged || hnext < T::TINY || total_iters >= max_iter {
+                if std::env::var("CFD2_CPU_FGMRES_DEBUG").is_ok() {
+                    eprintln!(
+                        "[cpu-fgmres] cycle-break j={j} proj_res={res:.4e} rs={rs:.4e} tol={tol:.1e} hnext={hnext:.4e}"
+                    );
+                }
                 break;
             }
-            let inv_h = 1.0 / hnext;
+            let inv_h = T::from_f64(1.0 / hnext);
             if vbasis.len() <= j + 1 {
-                vbasis.push(vec![0.0; n]);
+                vbasis.push(vec![T::ZERO; n]);
             }
             prof::time(&prof::AXPY, || {
                 par_map_into(threads, &mut vbasis[j + 1], |k| w[k] * inv_h)
@@ -1305,27 +1521,54 @@ pub fn fgmres(
         }
 
         // Back-substitute H[0..jfin,0..jfin] y = g[0..jfin].
-        let mut y = vec![0.0f64; jfin];
+        //
+        // f32 regularization (truncated pivots): on gauge-mode systems (the
+        // all-wall lid: pressure defined up to a constant) H is near-singular
+        // and the tiny pivots pump enormous y components along near-null
+        // directions. At f64 their residual contribution still cancels
+        // (eps64 headroom); at f32 it does NOT — measured: the projection
+        // claimed 1e-6 while the applied update grew the true residual 47x.
+        // Dropping pivots below 1e-5 of the largest (truncated least squares)
+        // bounds y at a negligible cost in attainable residual. The f64 path
+        // keeps the absolute TINY guard only.
+        let pivot_floor = if T::IS_F32 {
+            let hmax = (0..jfin).fold(0.0f64, |m, i| m.max(h[i][i].abs().to_f64()));
+            (1e-5 * hmax).max(T::TINY)
+        } else {
+            T::TINY
+        };
+        let mut y = vec![T::ZERO; jfin];
         for i in (0..jfin).rev() {
             let mut sum = g[i];
             for k in (i + 1)..jfin {
                 sum -= h[k][i] * y[k];
             }
-            y[i] = if h[i][i].abs() > 1e-300 {
+            y[i] = if h[i][i].abs().to_f64() > pivot_floor {
                 sum / h[i][i]
             } else {
-                0.0
+                T::ZERO
             };
         }
         // x += Z y  (flexible: use z basis, not v basis).
         for j in 0..jfin {
             let yj = y[j];
-            if yj != 0.0 {
+            if yj != T::ZERO {
                 let zj = &zbasis[j];
                 prof::time(&prof::AXPY, || {
                     par_update(threads, &mut xf, |k, xk| *xk += yj * zj[k])
                 });
             }
+        }
+        if std::env::var("CFD2_CPU_FGMRES_DEBUG").is_ok() {
+            let ymax = y.iter().fold(0.0f64, |m, v| m.max(v.abs().to_f64()));
+            let zmax = (0..jfin).fold(0.0f64, |m, j| {
+                m.max(zbasis[j].iter().fold(0.0f64, |mm, v| mm.max(v.abs().to_f64())))
+            });
+            let hdiag_min = (0..jfin).fold(f64::INFINITY, |m, i| m.min(h[i][i].abs().to_f64()));
+            let hdiag_max = (0..jfin).fold(0.0f64, |m, i| m.max(h[i][i].abs().to_f64()));
+            eprintln!(
+                "[cpu-fgmres] update jfin={jfin} ymax={ymax:.3e} zmax={zmax:.3e} hdiag=[{hdiag_min:.3e},{hdiag_max:.3e}]"
+            );
         }
         // Loop back: the head recomputes the true residual at the restarted
         // iterate and applies the convergence/budget guard.
@@ -1333,7 +1576,7 @@ pub fn fgmres(
 
     prof::FGMRES_ITERS.fetch_add(total_iters as u64, std::sync::atomic::Ordering::Relaxed);
     for i in 0..n {
-        x[i] = xf[i] as f32;
+        x[i] = xf[i].to_f32();
     }
     let rs = rel_scale.unwrap_or(bnorm);
     SolveStats {
@@ -1355,7 +1598,7 @@ pub struct SolveStats {
 /// Solve `A x = b` with Jacobi-preconditioned BiCGSTAB. `x` is used as the
 /// initial guess and overwritten with the solution. Returns convergence
 /// statistics.
-pub fn bicgstab(
+pub fn bicgstab<T: Real>(
     a: &CsrView,
     b: &[f32],
     x: &mut [f32],
@@ -1366,12 +1609,24 @@ pub fn bicgstab(
     let _ = simd;
     let threads = a.threads.max(1);
     let diag = a.diagonal();
-    let minv = move |v: &[f64], out: &mut [f64]| {
+    let minv = move |v: &[T], out: &mut [T]| {
         // Jacobi; guard a (pathological) zero diagonal. Elementwise → parallel
         // bit-exactly.
-        par_map_into(threads, out, |i| if diag[i] != 0.0 { v[i] / diag[i] } else { v[i] });
+        par_map_into(threads, out, |i| {
+            if diag[i] != 0.0 {
+                v[i] / T::from_f64(diag[i])
+            } else {
+                v[i]
+            }
+        });
     };
-    bicgstab_pc(a, b, x, max_iter, tol, &minv)
+    let bt: Vec<T> = b.iter().map(|&v| T::from_f32(v)).collect();
+    let mut xt: Vec<T> = x.iter().map(|&v| T::from_f32(v)).collect();
+    let stats = bicgstab_pc(a, &bt, &mut xt, max_iter, tol, &minv);
+    for (o, v) in x.iter_mut().zip(xt.iter()) {
+        *o = v.to_f32();
+    }
+    stats
 }
 
 /// Fused heavy-ball (second-order Richardson) sweeps on a scalar CSR system —
@@ -1392,21 +1647,21 @@ pub fn bicgstab(
 /// buffers), and the exit decision comes from `par_dot` — bit-identical across
 /// thread counts.
 #[allow(clippy::too_many_arguments)]
-fn heavy_ball_solve(
+fn heavy_ball_solve<T: Real>(
     pa: &CsrView,
-    g: &[f64],
-    x: &mut [f64],
-    diag_inv: &[f64],
+    g: &[T],
+    x: &mut [T],
+    diag_inv: &[T],
     omega: f64,
     max_sweeps: usize,
     tol: f64,
-    work: &mut Vec<f64>,
+    work: &mut Vec<T>,
 ) -> SolveStats {
     let n = pa.n();
     debug_assert_eq!(g.len(), n);
     debug_assert_eq!(x.len(), n);
     let threads = pa.threads.max(1);
-    let gnorm = par_dot(threads, g, g).sqrt().max(1e-300);
+    let gnorm = T::par_dot(threads, g, g).sqrt().max(1e-300);
 
     // Ping-pong pair: `cur` holds x_k, `prev` holds x_{k-1} and RECEIVES
     // x_{k+1} (its own element is read for the momentum term before being
@@ -1417,8 +1672,8 @@ fn heavy_ball_solve(
     // (allocating ~4n per apply measured as ~24 MB/apply x ~50 applies/step
     // of alloc + page-fault churn on the 750k nozzle); the explicit zero
     // fills reproduce the fresh-alloc from-zero start bit-exactly.
-    work.resize(4 * n, 0.0);
-    work.fill(0.0);
+    work.resize(4 * n, T::ZERO);
+    work.fill(T::ZERO);
     let (mut cur, rest) = work.split_at_mut(n);
     let (mut prev, rest) = rest.split_at_mut(n);
     let (scratch, best) = rest.split_at_mut(n);
@@ -1443,27 +1698,43 @@ fn heavy_ball_solve(
     let mut converged = false;
     while sweeps_done < max_sweeps {
         {
-            let cur_ref: &[f64] = cur;
+            let cur_ref: &[T] = cur;
+            let om = T::from_f64(omega);
+            let one_m_om = T::from_f64(1.0 - omega);
             parallel_cell_chunks_mut(n, 1, threads, prev, |row0, chunk| {
                 for (li, slot) in chunk.iter_mut().enumerate() {
                     let row = row0 + li;
                     let start = pa.row_offsets[row] as usize;
                     let end = pa.row_offsets[row + 1] as usize;
-                    let mut sum = 0.0f64;
+                    let mut sum = T::ZERO;
                     for k in start..end {
-                        sum += pa.values[k] as f64 * cur_ref[pa.col_indices[k] as usize];
+                        sum += T::from_f32(pa.values[k]) * cur_ref[pa.col_indices[k] as usize];
                     }
                     let hat = cur_ref[row] + (g[row] - sum) * diag_inv[row];
-                    *slot = (1.0 - omega) * *slot + omega * hat;
+                    *slot = one_m_om * *slot + om * hat;
                 }
             });
         }
         std::mem::swap(&mut cur, &mut prev);
         sweeps_done += 1;
         if sweeps_done == next_check || sweeps_done == max_sweeps {
-            pa.spmv(cur, scratch);
-            par_update(threads, scratch, |i, v| *v = g[i] - *v);
-            let rel = par_dot(threads, scratch, scratch).sqrt() / gnorm;
+            {
+                let cur_ref: &[T] = cur;
+                parallel_cell_chunks_mut(n, 1, threads, scratch, |row0, chunk| {
+                    for (li, slot) in chunk.iter_mut().enumerate() {
+                        let row = row0 + li;
+                        let start = pa.row_offsets[row] as usize;
+                        let end = pa.row_offsets[row + 1] as usize;
+                        let mut sum = T::ZERO;
+                        for k in start..end {
+                            sum += T::from_f32(pa.values[k])
+                                * cur_ref[pa.col_indices[k] as usize];
+                        }
+                        *slot = g[row] - sum;
+                    }
+                });
+            }
+            let rel = T::par_dot(threads, scratch, scratch).sqrt() / gnorm;
             if rel <= tol {
                 converged = true;
                 best_rel = rel;
@@ -1474,6 +1745,17 @@ fn heavy_ball_solve(
                 best_rel = rel;
                 best.copy_from_slice(cur);
                 strikes = 0;
+            } else if T::IS_F32 {
+                // f32 runs the sweeps GPU-BLIND: on near-critical blocks
+                // (lid: lam_max(DinvA) ~ 1.975 at omega 1.95) the f32-measured
+                // residual hovers ~1.0 through the transient and the f64
+                // strike/decay safeguard below misreads that as divergence —
+                // bailing with the ZERO iterate and starving FGMRES of its
+                // pressure preconditioning (measured: the Ghia march froze at
+                // an undeveloped state). The GPU, which passes Ghia at f32,
+                // runs these sweeps blind; the final iterate's low-frequency
+                // content is what flexible FGMRES actually needs. Only a
+                // genuine blow-up restores `best`, after the loop.
             } else {
                 // Non-improving check. Heavy-ball residuals overshoot
                 // TRANSIENTLY (non-normal iteration matrix), so a single bad
@@ -1495,6 +1777,41 @@ fn heavy_ball_solve(
                 }
             }
             next_check = (next_check * 2).min(max_sweeps);
+        }
+    }
+    if T::IS_F32 && !converged {
+        // Blind mode: hand back the FINAL iterate unless it genuinely blew up
+        // (non-finite or an order of magnitude past the best-known residual).
+        let final_rel = {
+            let cur_ref: &[T] = cur;
+            parallel_cell_chunks_mut(n, 1, threads, scratch, |row0, chunk| {
+                for (li, slot) in chunk.iter_mut().enumerate() {
+                    let row = row0 + li;
+                    let start = pa.row_offsets[row] as usize;
+                    let end = pa.row_offsets[row + 1] as usize;
+                    let mut sum = T::ZERO;
+                    for k in start..end {
+                        sum += T::from_f32(pa.values[k]) * cur_ref[pa.col_indices[k] as usize];
+                    }
+                    *slot = g[row] - sum;
+                }
+            });
+            T::par_dot(threads, scratch, scratch).sqrt() / gnorm
+        };
+        // Accept the final iterate only when it is NOT net-amplified: an
+        // iterate with rel >~ 1.5 carries momentum-amplified modes whose
+        // magnitude poisons the downstream f32 Arnoldi (eps32 * ||z|| errors
+        // in H become comparable to the outer residual itself — measured on
+        // the lid: the projection claimed 1e-6 while the applied update GREW
+        // the true residual 47x). Otherwise fall back to the best iterate
+        // (typically near-zero: a weak but benign preconditioner apply).
+        if final_rel.is_finite() && final_rel <= 1.5f64.max(1.05 * best_rel) {
+            x.copy_from_slice(cur);
+            return SolveStats {
+                iters: sweeps_done,
+                rel_residual: final_rel,
+                converged: false,
+            };
         }
     }
     x.copy_from_slice(best);
@@ -1570,10 +1887,10 @@ fn pad4_f32(v: &[f32]) -> wide::f64x4 {
 /// residual-check norms accumulate in f64 via the deterministic
 /// [`par_dot_f32`], and the safeguard logic is unchanged.
 #[allow(clippy::too_many_arguments)]
-fn heavy_ball_solve_f32(
+fn heavy_ball_solve_mixed<T: Real>(
     pa: &CsrView,
-    g: &[f64],
-    x: &mut [f64],
+    g: &[T],
+    x: &mut [T],
     diag_inv: &[f32],
     omega: f64,
     max_sweeps: usize,
@@ -1584,7 +1901,7 @@ fn heavy_ball_solve_f32(
     debug_assert_eq!(g.len(), n);
     debug_assert_eq!(x.len(), n);
     let threads = pa.threads.max(1);
-    let gnorm = par_dot(threads, g, g).sqrt().max(1e-300);
+    let gnorm = T::par_dot(threads, g, g).sqrt().max(1e-300);
 
     work.resize(5 * n, 0.0);
     work.fill(0.0);
@@ -1594,7 +1911,7 @@ fn heavy_ball_solve_f32(
     let (best, g32) = rest.split_at_mut(n);
     parallel_cell_chunks_mut(n, 1, threads, g32, |i0, chunk| {
         for (li, o) in chunk.iter_mut().enumerate() {
-            *o = g[i0 + li] as f32;
+            *o = g[i0 + li].to_f32();
         }
     });
     let g32: &[f32] = g32;
@@ -1672,7 +1989,7 @@ fn heavy_ball_solve_f32(
     let best: &[f32] = best;
     parallel_cell_chunks_mut(n, 1, threads, x, |i0, chunk| {
         for (li, o) in chunk.iter_mut().enumerate() {
-            *o = best[i0 + li] as f64;
+            *o = T::from_f32(best[i0 + li]);
         }
     });
     SolveStats { iters: sweeps_done, rel_residual: best_rel, converged }
@@ -1680,13 +1997,13 @@ fn heavy_ball_solve_f32(
 
 /// BiCGSTAB with a caller-supplied left preconditioner `minv(r, z)` (e.g. the
 /// AMG V-cycle for the Schur pressure block).
-pub fn bicgstab_pc(
+pub fn bicgstab_pc<T: Real>(
     a: &CsrView,
-    b: &[f32],
-    x: &mut [f32],
+    b: &[T],
+    x: &mut [T],
     max_iter: usize,
     tol: f64,
-    minv: &dyn Fn(&[f64], &mut [f64]),
+    minv: &dyn Fn(&[T], &mut [T]),
 ) -> SolveStats {
     bicgstab_pc_opts(a, b, x, max_iter, tol, minv, false)
 }
@@ -1700,13 +2017,13 @@ pub fn bicgstab_pc(
 /// from-rest step-0 pressure system). Deterministic: the residual norms that
 /// drive the exit come from `par_dot`.
 #[allow(clippy::too_many_arguments)]
-pub fn bicgstab_pc_opts(
+pub fn bicgstab_pc_opts<T: Real>(
     a: &CsrView,
-    b: &[f32],
-    x: &mut [f32],
+    b: &[T],
+    x: &mut [T],
     max_iter: usize,
     tol: f64,
-    minv: &dyn Fn(&[f64], &mut [f64]),
+    minv: &dyn Fn(&[T], &mut [T]),
     stagnation_exit: bool,
 ) -> SolveStats {
     let n = a.n();
@@ -1714,24 +2031,24 @@ pub fn bicgstab_pc_opts(
     assert_eq!(x.len(), n);
     let threads = a.threads.max(1);
 
-    let vdot = |a: &[f64], b: &[f64]| par_dot(threads, a, b);
-    let vnorm = |a: &[f64]| vdot(a, a).sqrt();
+    // Vectors live in the solve precision `T`; the recurrence COEFFICIENTS
+    // (rho/alpha/omega/beta) stay f64 registers — they come from the
+    // f64-accumulating dots anyway, cost no bandwidth, and f32 rho products
+    // underflow (breakdown false-positives) long before the vectors care.
+    let vdot = |a: &[T], b: &[T]| T::par_dot(threads, a, b);
+    let vnorm = |a: &[T]| vdot(a, a).sqrt();
 
-    let bf: Vec<f64> = b.iter().map(|&v| v as f64).collect();
-    let bnorm = vnorm(&bf).max(1e-300);
-
-    let mut xf: Vec<f64> = x.iter().map(|&v| v as f64).collect();
+    let bnorm = vnorm(b).max(1e-300);
+    let mut xf: Vec<T> = x.to_vec();
 
     // r = b - A x
-    let mut ax = vec![0.0f64; n];
-    a.spmv(&xf, &mut ax);
-    let mut r = vec![0.0f64; n];
-    par_map_into(threads, &mut r, |i| bf[i] - ax[i]);
+    let mut ax = vec![T::ZERO; n];
+    a.spmv_t(&xf, &mut ax);
+    let mut r = vec![T::ZERO; n];
+    par_map_into(threads, &mut r, |i| b[i] - ax[i]);
 
-    let finish = |xf: &[f64], x: &mut [f32], iters: usize, res: f64, conv: bool| -> SolveStats {
-        for i in 0..n {
-            x[i] = xf[i] as f32;
-        }
+    let finish = |xf: &[T], x: &mut [T], iters: usize, res: f64, conv: bool| -> SolveStats {
+        x.copy_from_slice(xf);
         SolveStats {
             iters,
             rel_residual: res / bnorm,
@@ -1748,61 +2065,73 @@ pub fn bicgstab_pc_opts(
     let mut rho = 1.0f64;
     let mut alpha = 1.0f64;
     let mut omega = 1.0f64;
-    let mut v = vec![0.0f64; n];
-    let mut p = vec![0.0f64; n];
-    let (mut phat, mut shat, mut t) = (vec![0.0f64; n], vec![0.0f64; n], vec![0.0f64; n]);
+    let mut v = vec![T::ZERO; n];
+    let mut p = vec![T::ZERO; n];
+    let (mut phat, mut shat, mut t) = (vec![T::ZERO; n], vec![T::ZERO; n], vec![T::ZERO; n]);
     // Hoisted s-vector (was a fresh allocation every iteration).
-    let mut sv = vec![0.0f64; n];
+    let mut sv = vec![T::ZERO; n];
     // Stagnation tracking (see `stagnation_exit`).
     let mut best_res = res;
     let mut stalled = 0u32;
 
     for iter in 1..=max_iter {
         let rho_new = vdot(&rhat, &r);
-        if rho_new.abs() < 1e-300 {
+        if rho_new.abs() < T::TINY {
             // Breakdown; restart from the current residual.
             return finish(&xf, x, iter, res, res / bnorm <= tol);
         }
         let beta = (rho_new / rho) * (alpha / omega);
         {
             let (r, v) = (&r, &v);
-            par_update(threads, &mut p, |i, pi| *pi = r[i] + beta * (*pi - omega * v[i]));
+            let (beta_t, omega_t) = (T::from_f64(beta), T::from_f64(omega));
+            par_update(threads, &mut p, |i, pi| {
+                *pi = r[i] + beta_t * (*pi - omega_t * v[i])
+            });
         }
         minv(&p, &mut phat);
-        a.spmv(&phat, &mut v);
+        a.spmv_t(&phat, &mut v);
         let rhat_v = vdot(&rhat, &v);
+        if rhat_v.abs() < T::TINY {
+            return finish(&xf, x, iter, res, res / bnorm <= tol);
+        }
         alpha = rho_new / rhat_v;
 
         // s = r - alpha v
         {
             let (r, v) = (&r, &v);
-            par_map_into(threads, &mut sv, |i| r[i] - alpha * v[i]);
+            let alpha_t = T::from_f64(alpha);
+            par_map_into(threads, &mut sv, |i| r[i] - alpha_t * v[i]);
         }
         let snorm = vnorm(&sv);
         if snorm / bnorm <= tol {
             let phat = &phat;
-            par_update(threads, &mut xf, |i, xi| *xi += alpha * phat[i]);
+            let alpha_t = T::from_f64(alpha);
+            par_update(threads, &mut xf, |i, xi| *xi += alpha_t * phat[i]);
             return finish(&xf, x, iter, snorm, true);
         }
 
         minv(&sv, &mut shat);
-        a.spmv(&shat, &mut t);
-        let tt = vdot(&t, &t).max(1e-300);
+        a.spmv_t(&shat, &mut t);
+        let tt = vdot(&t, &t).max(T::TINY);
         omega = vdot(&t, &sv) / tt;
 
         {
             let (phat, shat) = (&phat, &shat);
-            par_update(threads, &mut xf, |i, xi| *xi += alpha * phat[i] + omega * shat[i]);
+            let (alpha_t, omega_t) = (T::from_f64(alpha), T::from_f64(omega));
+            par_update(threads, &mut xf, |i, xi| {
+                *xi += alpha_t * phat[i] + omega_t * shat[i]
+            });
         }
         {
             let (sv, t) = (&sv, &t);
-            par_map_into(threads, &mut r, |i| sv[i] - omega * t[i]);
+            let omega_t = T::from_f64(omega);
+            par_map_into(threads, &mut r, |i| sv[i] - omega_t * t[i]);
         }
         res = vnorm(&r);
         if res / bnorm <= tol {
             return finish(&xf, x, iter, res, true);
         }
-        if omega.abs() < 1e-300 {
+        if omega.abs() < T::TINY {
             return finish(&xf, x, iter, res, res / bnorm <= tol);
         }
         if stagnation_exit {
@@ -1834,13 +2163,13 @@ pub fn bicgstab_pc_opts(
 /// non-positive curvature `<p, A p>` was met — the block is materially
 /// non-symmetric/indefinite along the search direction and the caller should
 /// fall back to BiCGSTAB (one-way, mirroring the adaptive-switch style).
-pub fn cg_pc_opts(
+pub fn cg_pc_opts<T: Real>(
     a: &CsrView,
-    b: &[f32],
-    x: &mut [f32],
+    b: &[T],
+    x: &mut [T],
     max_iter: usize,
     tol: f64,
-    minv: &dyn Fn(&[f64], &mut [f64]),
+    minv: &dyn Fn(&[T], &mut [T]),
     stagnation_exit: bool,
 ) -> (SolveStats, bool) {
     let n = a.n();
@@ -1848,23 +2177,20 @@ pub fn cg_pc_opts(
     assert_eq!(x.len(), n);
     let threads = a.threads.max(1);
 
-    let vdot = |a: &[f64], b: &[f64]| par_dot(threads, a, b);
-    let vnorm = |a: &[f64]| vdot(a, a).sqrt();
+    let vdot = |a: &[T], b: &[T]| T::par_dot(threads, a, b);
+    let vnorm = |a: &[T]| vdot(a, a).sqrt();
 
-    let bf: Vec<f64> = b.iter().map(|&v| v as f64).collect();
-    let bnorm = vnorm(&bf).max(1e-300);
-    let mut xf: Vec<f64> = x.iter().map(|&v| v as f64).collect();
+    let bnorm = vnorm(b).max(1e-300);
+    let mut xf: Vec<T> = x.to_vec();
 
     // r = b - A x
-    let mut ax = vec![0.0f64; n];
-    a.spmv(&xf, &mut ax);
-    let mut r = vec![0.0f64; n];
-    par_map_into(threads, &mut r, |i| bf[i] - ax[i]);
+    let mut ax = vec![T::ZERO; n];
+    a.spmv_t(&xf, &mut ax);
+    let mut r = vec![T::ZERO; n];
+    par_map_into(threads, &mut r, |i| b[i] - ax[i]);
 
-    let finish = |xf: &[f64], x: &mut [f32], iters: usize, res: f64, conv: bool| -> SolveStats {
-        for i in 0..n {
-            x[i] = xf[i] as f32;
-        }
+    let finish = |xf: &[T], x: &mut [T], iters: usize, res: f64, conv: bool| -> SolveStats {
+        x.copy_from_slice(xf);
         SolveStats {
             iters,
             rel_residual: res / bnorm,
@@ -1877,16 +2203,16 @@ pub fn cg_pc_opts(
         return (finish(&xf, x, 0, res, true), false);
     }
 
-    let mut z = vec![0.0f64; n];
+    let mut z = vec![T::ZERO; n];
     minv(&r, &mut z);
     let mut p = z.clone();
-    let mut ap = vec![0.0f64; n];
+    let mut ap = vec![T::ZERO; n];
     let mut rz = vdot(&r, &z);
     let mut best_res = res;
     let mut stalled = 0u32;
 
     for iter in 1..=max_iter {
-        a.spmv(&p, &mut ap);
+        a.spmv_t(&p, &mut ap);
         let pap = vdot(&p, &ap);
         if !(pap > 0.0) || !rz.is_finite() {
             // Non-SPD curvature (or numeric junk): hand back the best-effort
@@ -1896,11 +2222,13 @@ pub fn cg_pc_opts(
         let alpha = rz / pap;
         {
             let p = &p;
-            par_update(threads, &mut xf, |i, xi| *xi += alpha * p[i]);
+            let alpha_t = T::from_f64(alpha);
+            par_update(threads, &mut xf, |i, xi| *xi += alpha_t * p[i]);
         }
         {
             let ap = &ap;
-            par_update(threads, &mut r, |i, ri| *ri -= alpha * ap[i]);
+            let alpha_t = T::from_f64(alpha);
+            par_update(threads, &mut r, |i, ri| *ri -= alpha_t * ap[i]);
         }
         res = vnorm(&r);
         if res / bnorm <= tol {
@@ -1922,7 +2250,8 @@ pub fn cg_pc_opts(
         let beta = rz_new / rz;
         {
             let z = &z;
-            par_update(threads, &mut p, |i, pi| *pi = z[i] + beta * *pi);
+            let beta_t = T::from_f64(beta);
+            par_update(threads, &mut p, |i, pi| *pi = z[i] + beta_t * *pi);
         }
         rz = rz_new;
     }
@@ -1965,7 +2294,7 @@ mod tests {
         };
         let b = [1.0f32, 2.0, 3.0];
         let mut x = [0.0f32; 3];
-        let stats = bicgstab(&a, &b, &mut x, 100, 1e-10, false);
+        let stats = bicgstab::<f64>(&a, &b, &mut x, 100, 1e-10, false);
         assert!(stats.converged, "did not converge: {stats:?}");
         assert!(
             residual_norm(&a, &b, &x) < 1e-5,
@@ -2003,7 +2332,7 @@ mod tests {
         };
         let b = vec![1.0f32; n];
         let mut x = vec![0.0f32; n];
-        let stats = bicgstab(&a, &b, &mut x, 500, 1e-10, false);
+        let stats = bicgstab::<f64>(&a, &b, &mut x, 500, 1e-10, false);
         assert!(stats.converged, "did not converge: {stats:?}");
         assert!(residual_norm(&a, &b, &x) < 1e-4);
     }
@@ -2119,7 +2448,7 @@ mod block_tests {
                 threads,
                 simd: false,
 };
-            let pc = BlockJacobi::new(&a);
+            let pc = BlockJacobi::<f64>::new(&a);
             let mut x = vec![0.0f32; n];
             let stats = fgmres(&a, &b, &mut x, &pc, 30, 1000, 1e-10, false);
             (x, stats)
@@ -2258,7 +2587,7 @@ mod block_tests {
 };
         let b = [1.0f32, 2.0, 3.0, 4.0];
         let mut x = [0.0f32; 4];
-        let m = BlockJacobi::new(&a);
+        let m = BlockJacobi::<f64>::new(&a);
         let stats = fgmres(&a, &b, &mut x, &m, 30, 200, 1e-12, false);
         assert!(stats.converged, "fgmres did not converge: {stats:?}");
         // Verify residual against the dense system.
@@ -2305,7 +2634,7 @@ mod block_tests {
 };
         let b = vec![1.0f32; n];
         let mut x = vec![0.0f32; n];
-        let m = BlockJacobi::new(&a);
+        let m = BlockJacobi::<f64>::new(&a);
         let stats = fgmres(&a, &b, &mut x, &m, 40, 400, 1e-10, true);
         assert!(stats.converged, "did not converge: {stats:?}");
         // residual

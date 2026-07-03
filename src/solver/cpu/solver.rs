@@ -1199,14 +1199,51 @@ impl CpuSolver {
                 values: &matrix,
                 threads,
             };
-            bicgstab(&a, &rhs, &mut x, LINEAR_MAX_ITERS, LINEAR_TOL, self.config.simd);
+            // Scalar path honours the precision option too.
+            match self.config.precision {
+                crate::solver::cpu::CpuPrecision::F64 => {
+                    bicgstab::<f64>(&a, &rhs, &mut x, LINEAR_MAX_ITERS, LINEAR_TOL, self.config.simd)
+                }
+                crate::solver::cpu::CpuPrecision::F32 => {
+                    bicgstab::<f32>(&a, &rhs, &mut x, LINEAR_MAX_ITERS, LINEAR_TOL, self.config.simd)
+                }
+            };
         } else {
+            // Coupled block system: solve in the configured PRECISION (the
+            // f64 instantiation is the bit-identical reference; f32 mirrors
+            // the GPU arithmetic). The scalar (s == 1) path above keeps the
+            // validated f64 BiCGSTAB.
+            match self.config.precision {
+                crate::solver::cpu::CpuPrecision::F64 => {
+                    self.solve_block_system::<f64>(&matrix, &rhs, &mut x)
+                }
+                crate::solver::cpu::CpuPrecision::F32 => {
+                    self.solve_block_system::<f32>(&matrix, &rhs, &mut x)
+                }
+            }
+        }
+
+        prof::time(&prof::MARSHAL, || self.buffers.copy_into_f32("x", &x));
+    }
+
+    /// The coupled (S > 1) linear solve at precision `T` — see `linear_solve`.
+    fn solve_block_system<T: crate::solver::cpu::linalg::Real>(
+        &self,
+        matrix: &[f32],
+        rhs: &[f32],
+        x: &mut [f32],
+    ) {
+        use crate::solver::cpu::linalg::prof;
+        let s = self.unknowns_per_cell;
+        let n = self.num_cells * s;
+        let threads = self.config.threads;
+        {
             let a = BlockCsr {
                 s,
                 scalar_row_offsets: &self.scalar_row_offsets,
                 col_indices: &self.col_indices,
                 diagonal_indices: &self.diagonal_indices,
-                values: &matrix,
+                values: matrix,
                 threads,
                 simd: self.config.simd,
             };
@@ -1279,10 +1316,10 @@ impl CpuSolver {
                             amg_hier,
                         )
                     });
-                    let stats = fgmres(
+                    let stats = fgmres::<T>(
                         &a,
-                        &rhs,
-                        &mut x,
+                        rhs,
+                        x,
                         &pc,
                         self.linear_restart,
                         self.linear_max_iters,
@@ -1298,17 +1335,18 @@ impl CpuSolver {
                     stats
                 }
                 None => {
-                    let block_pc: Box<dyn Preconditioner> = prof::time(&prof::PC_BUILD, || {
-                        if std::env::var("CFD2_CPU_POINT_JACOBI").is_ok() {
-                            Box::new(PointJacobi::new(&a)) as Box<dyn Preconditioner>
-                        } else {
-                            Box::new(BlockJacobi::new(&a))
-                        }
-                    });
-                    fgmres(
+                    let block_pc: Box<dyn Preconditioner<T>> =
+                        prof::time(&prof::PC_BUILD, || {
+                            if std::env::var("CFD2_CPU_POINT_JACOBI").is_ok() {
+                                Box::new(PointJacobi::<T>::new(&a)) as Box<dyn Preconditioner<T>>
+                            } else {
+                                Box::new(BlockJacobi::<T>::new(&a))
+                            }
+                        });
+                    fgmres::<T>(
                         &a,
-                        &rhs,
-                        &mut x,
+                        rhs,
+                        x,
                         block_pc.as_ref(),
                         self.linear_restart,
                         self.linear_max_iters,
@@ -1324,8 +1362,6 @@ impl CpuSolver {
                 );
             }
         }
-
-        prof::time(&prof::MARSHAL, || self.buffers.copy_into_f32("x", &x));
     }
 }
 
@@ -1737,8 +1773,8 @@ mod tests {
         // buffers + disjoint per-cell writes make the parallel run deterministic and
         // identical to the serial run.
         let n = 32;
-        let (_, t1) = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false });
-        let (_, t4) = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 4, simd: false });
+        let (_, t1) = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false, precision: Default::default(), });
+        let (_, t4) = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 4, simd: false, precision: Default::default(), });
         let max_diff = t1
             .iter()
             .zip(&t4)
@@ -1758,13 +1794,13 @@ mod tests {
         // reduction summation so it matches to rounding (not bit-exact); threads
         // are bit-identical.
         let n = 32;
-        let base = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false }).1;
+        let base = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false, precision: Default::default(), }).1;
         for (threads, simd, tol) in [
             (4usize, false, 0.0f64),
             (1, true, 1e-4),
             (4, true, 1e-4),
         ] {
-            let t = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { engine: CpuEngine::Interpreter, threads, simd }).1;
+            let t = solve_steady_cfg(n, Scheme::Upwind, CpuBackendConfig { engine: CpuEngine::Interpreter, threads, simd, precision: Default::default(), }).1;
             let max_diff = base
                 .iter()
                 .zip(&t)
@@ -1787,12 +1823,12 @@ mod tests {
             let interp = solve_steady_cfg(
                 n,
                 scheme,
-                CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false },
+                CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false, precision: Default::default(), },
             )
             .1;
             for (label, cfg) in [
-                ("transpiled/1t", CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 1, simd: false }),
-                ("transpiled/4t/simd", CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 4, simd: true }),
+                ("transpiled/1t", CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 1, simd: false, precision: Default::default(), }),
+                ("transpiled/4t/simd", CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 4, simd: true, precision: Default::default(), }),
             ] {
                 let t = solve_steady_cfg(n, scheme, cfg).1;
                 let d = interp

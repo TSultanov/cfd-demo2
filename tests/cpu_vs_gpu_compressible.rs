@@ -269,8 +269,8 @@ fn cpu_matches_gpu_compressible() {
     let mesh = inlet_box(n);
     let (g_rho, g_u, g_p) = run_gpu(&mesh);
     for (label, cfg) in [
-        ("interp/1t", CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false }),
-        ("interp/4t/simd", CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 4, simd: true }),
+        ("interp/1t", CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false, precision: Default::default(), }),
+        ("interp/4t/simd", CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 4, simd: true, precision: Default::default(), }),
     ] {
         let (c_rho, c_u, c_p) = run_cpu(&mesh, cfg);
         let drho = c_rho.iter().zip(&g_rho).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);

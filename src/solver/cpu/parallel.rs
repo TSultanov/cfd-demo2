@@ -147,16 +147,17 @@ where
 /// pass can produce two disjoint per-cell outputs (e.g. the Schur velocity
 /// predict `z` and the Schur RHS `gp`). Same determinism guarantee: each output
 /// element is written by exactly one worker with identical arithmetic.
-pub fn parallel_cell_chunks_mut2<F>(
+pub fn parallel_cell_chunks_mut2<T, F>(
     num_cells: usize,
     w1: usize,
     w2: usize,
     threads: usize,
-    y1: &mut [f64],
-    y2: &mut [f64],
+    y1: &mut [T],
+    y2: &mut [T],
     f: F,
 ) where
-    F: Fn(usize, &mut [f64], &mut [f64]) + Sync,
+    T: Send,
+    F: Fn(usize, &mut [T], &mut [T]) + Sync,
 {
     debug_assert_eq!(y1.len(), num_cells * w1, "y1 must be num_cells*w1");
     debug_assert_eq!(y2.len(), num_cells * w2, "y2 must be num_cells*w2");
@@ -250,9 +251,10 @@ fn dot_simd_range(a: &[f64], b: &[f64]) -> f64 {
 /// same arithmetic, so the result is BIT-IDENTICAL to the serial loop regardless
 /// of `threads` (no reduction / summation reorder). `f` reads only shared
 /// immutable inputs.
-pub fn par_map_into<F>(threads: usize, out: &mut [f64], f: F)
+pub fn par_map_into<T, F>(threads: usize, out: &mut [T], f: F)
 where
-    F: Fn(usize) -> f64 + Sync,
+    T: Send,
+    F: Fn(usize) -> T + Sync,
 {
     let n = out.len();
     let threads = effective_workers(threads, n);
@@ -281,9 +283,10 @@ where
 /// contiguous disjoint index chunks. BIT-IDENTICAL to the serial loop (each
 /// element updated once, same arithmetic). `f` reads only shared immutable inputs
 /// besides its own `&mut` element.
-pub fn par_update<F>(threads: usize, out: &mut [f64], f: F)
+pub fn par_update<T, F>(threads: usize, out: &mut [T], f: F)
 where
-    F: Fn(usize, &mut f64) + Sync,
+    T: Send,
+    F: Fn(usize, &mut T) + Sync,
 {
     let n = out.len();
     let threads = effective_workers(threads, n);

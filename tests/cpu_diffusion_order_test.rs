@@ -200,14 +200,14 @@ fn cpu_diffusion_engines_agree() {
     let base = solve_steady(
         generic_diffusion_demo_mms_model,
         n,
-        CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false },
+        CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false, precision: Default::default(), },
         &source,
         &|_s, _m| {},
     )
     .1;
     for (label, cfg) in [
-        ("interp/4t/simd", CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 4, simd: true }),
-        ("transpiled/4t", CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 4, simd: false }),
+        ("interp/4t/simd", CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 4, simd: true, precision: Default::default(), }),
+        ("transpiled/4t", CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 4, simd: false, precision: Default::default(), }),
     ] {
         let t = solve_steady(generic_diffusion_demo_mms_model, n, cfg, &source, &|_s, _m| {}).1;
         let d = base.iter().zip(&t).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);

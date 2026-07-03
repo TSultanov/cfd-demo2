@@ -1007,7 +1007,11 @@ fn cpu_backend_from_env() -> Option<crate::solver::cpu::CpuBackendConfig> {
     let simd = std::env::var("CFD2_CPU_SIMD")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
-    Some(CpuBackendConfig { engine, threads, simd })
+    let precision = match std::env::var("CFD2_CPU_PRECISION").as_deref() {
+        Ok("f32") | Ok("F32") => crate::solver::cpu::CpuPrecision::F32,
+        _ => crate::solver::cpu::CpuPrecision::F64,
+    };
+    Some(CpuBackendConfig { engine, threads, simd, precision })
 }
 
 /// Route a runtime named-param onto the CPU backend. Params that don't apply to

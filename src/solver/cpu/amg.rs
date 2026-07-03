@@ -24,6 +24,7 @@
 //! per-node chunks, so results are bit-identical across thread counts (the
 //! same contract as the rest of `cpu::linalg`).
 
+use crate::solver::cpu::linalg::Real;
 use crate::solver::cpu::parallel::{par_map_into, parallel_cell_chunks_mut};
 
 /// Stop coarsening when a level is at most this many unknowns; solve it densely.
@@ -253,6 +254,13 @@ pub struct AmgSolver<'h> {
     inv_diag: Vec<Vec<f64>>,
     /// Dense row-major inverse of the coarsest matrix.
     coarsest_inv: Vec<f64>,
+    /// Gauge-singular pressure hierarchy (pure-Neumann/all-wall block,
+    /// detected by ~zero row sums at the coarsest level): the V-cycle then
+    /// PROJECTS OUT the constant null mode from every apply — without this
+    /// the smoothers/coarse solve amplify the unconstrained constant by the
+    /// Tikhonov bound per apply and the iterate wanders to ~1e9 along the
+    /// null (invisible to residuals, poisonous to reduced-precision Krylov).
+    gauge_singular: bool,
     /// f32 copies of the level matrices (the SIMD/mixed-precision option):
     /// V-cycle smoothing and residual spmvs are BANDWIDTH-bound and the value
     /// stream dominates their traffic (~5 entries/row vs ~3 vector touches),
@@ -266,13 +274,14 @@ pub struct AmgSolver<'h> {
     sweeps: usize,
 }
 
-/// `y = A x` for an f64 CSR level (parallel over disjoint row chunks).
-fn spmv_f64(
+/// `y = A x` for an f64-value CSR level over solve-precision vectors
+/// (accumulated in f64; parallel over disjoint row chunks).
+fn spmv_f64<T: Real>(
     row_offsets: &[u32],
     col_indices: &[u32],
     values: &[f64],
-    x: &[f64],
-    y: &mut [f64],
+    x: &[T],
+    y: &mut [T],
     threads: usize,
 ) {
     let n = row_offsets.len() - 1;
@@ -282,9 +291,9 @@ fn spmv_f64(
             let (s, e) = (row_offsets[row] as usize, row_offsets[row + 1] as usize);
             let mut sum = 0.0f64;
             for k in s..e {
-                sum += values[k] * x[col_indices[k] as usize];
+                sum += values[k] * x[col_indices[k] as usize].to_f64();
             }
-            *out = sum;
+            *out = T::from_f64(sum);
         }
     });
 }
@@ -297,12 +306,12 @@ fn spmv_f64(
 /// tails. Each row's terms accumulate in ascending-k order, exactly like the
 /// scalar loop, so the batching itself does not change results; only the
 /// f32-rounded VALUES differ from the f64 path.
-fn spmv_vals32(
+fn spmv_vals32<T: Real>(
     row_offsets: &[u32],
     col_indices: &[u32],
     values: &[f32],
-    x: &[f64],
-    y: &mut [f64],
+    x: &[T],
+    y: &mut [T],
     threads: usize,
 ) {
     let n = row_offsets.len() - 1;
@@ -322,27 +331,27 @@ fn spmv_vals32(
             let l = (e0 - s0).min(e1 - s1).min(e2 - s2).min(e3 - s3);
             let (mut a0, mut a1, mut a2, mut a3) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
             for k in 0..l {
-                a0 += values[s0 + k] as f64 * x[col_indices[s0 + k] as usize];
-                a1 += values[s1 + k] as f64 * x[col_indices[s1 + k] as usize];
-                a2 += values[s2 + k] as f64 * x[col_indices[s2 + k] as usize];
-                a3 += values[s3 + k] as f64 * x[col_indices[s3 + k] as usize];
+                a0 += values[s0 + k] as f64 * x[col_indices[s0 + k] as usize].to_f64();
+                a1 += values[s1 + k] as f64 * x[col_indices[s1 + k] as usize].to_f64();
+                a2 += values[s2 + k] as f64 * x[col_indices[s2 + k] as usize].to_f64();
+                a3 += values[s3 + k] as f64 * x[col_indices[s3 + k] as usize].to_f64();
             }
             for k in s0 + l..e0 {
-                a0 += values[k] as f64 * x[col_indices[k] as usize];
+                a0 += values[k] as f64 * x[col_indices[k] as usize].to_f64();
             }
             for k in s1 + l..e1 {
-                a1 += values[k] as f64 * x[col_indices[k] as usize];
+                a1 += values[k] as f64 * x[col_indices[k] as usize].to_f64();
             }
             for k in s2 + l..e2 {
-                a2 += values[k] as f64 * x[col_indices[k] as usize];
+                a2 += values[k] as f64 * x[col_indices[k] as usize].to_f64();
             }
             for k in s3 + l..e3 {
-                a3 += values[k] as f64 * x[col_indices[k] as usize];
+                a3 += values[k] as f64 * x[col_indices[k] as usize].to_f64();
             }
-            yc[li] = a0;
-            yc[li + 1] = a1;
-            yc[li + 2] = a2;
-            yc[li + 3] = a3;
+            yc[li] = T::from_f64(a0);
+            yc[li + 1] = T::from_f64(a1);
+            yc[li + 2] = T::from_f64(a2);
+            yc[li + 3] = T::from_f64(a3);
             li += 4;
         }
         for li in li..nrows {
@@ -350,9 +359,9 @@ fn spmv_vals32(
             let (s0, e0) = (row_offsets[row] as usize, row_offsets[row + 1] as usize);
             let mut sum = 0.0f64;
             for k in s0..e0 {
-                sum += values[k] as f64 * x[col_indices[k] as usize];
+                sum += values[k] as f64 * x[col_indices[k] as usize].to_f64();
             }
-            yc[li] = sum;
+            yc[li] = T::from_f64(sum);
         }
     });
 }
@@ -408,6 +417,33 @@ impl<'h> AmgSolver<'h> {
                 dense[i * nc + cci[k] as usize] = cvals[k];
             }
         }
+        // GAUGE-SINGULAR blocks (all-wall pressure: pure Neumann, defined up
+        // to a constant — the lid cavity) have ~zero row sums all the way to
+        // the coarsest level; the raw dense inverse of that singular matrix
+        // is unbounded garbage that injects enormous constant-mode
+        // corrections into every V-cycle (measured: 1.6e9-scale entries in
+        // the FGMRES z-basis, poisoning the f32 solve; latent-but-dormant at
+        // f64, which never took the AMG flip on such a case). Detect the
+        // Neumann block by its row sums and Tikhonov-shift the diagonal so
+        // the null mode's inverse is bounded instead of infinite; every
+        // pinned-pressure case (outlets) keeps the exact inverse, bit-
+        // identical to before.
+        let diag_max = (0..nc).fold(0.0f64, |m, i| m.max(dense[i * nc + i].abs()));
+        let rowsum_max = (0..nc).fold(0.0f64, |m, i| {
+            m.max((0..nc).map(|j| dense[i * nc + j]).sum::<f64>().abs())
+        });
+        let gauge_singular = diag_max > 0.0 && rowsum_max < 1e-6 * diag_max;
+        if std::env::var("CFD2_CPU_SCHUR_DEBUG").is_ok() {
+            eprintln!(
+                "[amg-build] nc={nc} diag_max={diag_max:.3e} rowsum_max={rowsum_max:.3e} gauge_singular={gauge_singular}"
+            );
+        }
+        if gauge_singular {
+            let shift = diag_max * 1e-6;
+            for i in 0..nc {
+                dense[i * nc + i] += shift;
+            }
+        }
         let mut coarsest_inv = vec![0.0f64; nc * nc];
         super::linalg::invert_dense(nc, &dense, &mut coarsest_inv);
 
@@ -416,6 +452,7 @@ impl<'h> AmgSolver<'h> {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1)
             .max(1);
+        let _ = &gauge_singular;
         let values32 = simd.then(|| {
             values
                 .iter()
@@ -427,6 +464,7 @@ impl<'h> AmgSolver<'h> {
             values,
             inv_diag,
             coarsest_inv,
+            gauge_singular,
             values32,
             threads,
             sweeps,
@@ -435,11 +473,21 @@ impl<'h> AmgSolver<'h> {
 
     /// One V(1,1) cycle: `z ≈ A^{-1} b` from a ZERO initial guess (the
     /// preconditioner-apply contract). `z` and `b` are finest-level length.
-    pub fn vcycle(&self, b: &[f64], z: &mut [f64]) {
+    pub fn vcycle<T: Real>(&self, b: &[T], z: &mut [T]) {
         self.cycle_level(0, b, z);
+        if self.gauge_singular {
+            // Remove the null (constant) component: deterministic serial sum
+            // (only gauge cases pay it; the pinned-pressure cases skip).
+            let n = z.len().max(1);
+            let mean = z.iter().fold(0.0f64, |a, v| a + v.to_f64()) / n as f64;
+            let mean_t = T::from_f64(mean);
+            for v in z.iter_mut() {
+                *v -= mean_t;
+            }
+        }
     }
 
-    fn cycle_level(&self, l: usize, b: &[f64], x: &mut [f64]) {
+    fn cycle_level<T: Real>(&self, l: usize, b: &[T], x: &mut [T]) {
         let nlev = self.hier.levels.len();
         if l == nlev {
             // Coarsest: dense multiply x = A^{-1} b.
@@ -447,9 +495,9 @@ impl<'h> AmgSolver<'h> {
             for i in 0..n {
                 let mut s = 0.0f64;
                 for j in 0..n {
-                    s += self.coarsest_inv[i * n + j] * b[j];
+                    s += self.coarsest_inv[i * n + j] * b[j].to_f64();
                 }
-                x[i] = s;
+                x[i] = T::from_f64(s);
             }
             return;
         }
@@ -460,31 +508,31 @@ impl<'h> AmgSolver<'h> {
         let dinv = &self.inv_diag[l];
         let threads = self.threads;
         // Level spmv: mixed-precision f32-value path when enabled, else f64.
-        let spmv = |x: &[f64], y: &mut [f64]| match v32 {
+        let spmv = |x: &[T], y: &mut [T]| match v32 {
             Some(v32) => spmv_vals32(ro, ci, v32, x, y, threads),
             None => spmv_f64(ro, ci, v, x, y, threads),
         };
 
         // Pre-smooth from zero guess: x = omega * Dinv * b, then further damped
         // Jacobi refinements when sweeps > 1.
-        par_map_into(threads, x, |i| JACOBI_OMEGA * dinv[i] * b[i]);
-        let mut ax = vec![0.0f64; n];
+        par_map_into(threads, x, |i| T::from_f64(JACOBI_OMEGA * dinv[i] * b[i].to_f64()));
+        let mut ax = vec![T::ZERO; n];
         for _ in 1..self.sweeps {
             spmv(x, &mut ax);
             let ax_r = &ax;
             crate::solver::cpu::parallel::par_update(threads, x, |i, xi| {
-                *xi += JACOBI_OMEGA * dinv[i] * (b[i] - ax_r[i])
+                *xi += T::from_f64(JACOBI_OMEGA * dinv[i] * (b[i] - ax_r[i]).to_f64())
             });
         }
 
         // Residual r = b - A x.
         spmv(x, &mut ax);
-        let mut r = vec![0.0f64; n];
+        let mut r = vec![T::ZERO; n];
         par_map_into(threads, &mut r, |i| b[i] - ax[i]);
 
         // Restrict: r_c[I] = sum of r over members of I (fixed member order).
         let nc = topo.coarse_n;
-        let mut bc = vec![0.0f64; nc];
+        let mut bc = vec![T::ZERO; nc];
         parallel_cell_chunks_mut(nc, 1, threads, &mut bc, |c0, out| {
             for (li, o) in out.iter_mut().enumerate() {
                 let cidx = c0 + li;
@@ -492,7 +540,7 @@ impl<'h> AmgSolver<'h> {
                     topo.member_offsets[cidx] as usize,
                     topo.member_offsets[cidx + 1] as usize,
                 );
-                let mut sum = 0.0f64;
+                let mut sum = T::ZERO;
                 for &m in &topo.members[s..e] {
                     sum += r[m as usize];
                 }
@@ -501,7 +549,7 @@ impl<'h> AmgSolver<'h> {
         });
 
         // Coarse solve (recursive).
-        let mut xc = vec![0.0f64; nc];
+        let mut xc = vec![T::ZERO; nc];
         self.cycle_level(l + 1, &bc, &mut xc);
 
         // Prolong: x[i] += xc[agg[i]].
@@ -518,7 +566,7 @@ impl<'h> AmgSolver<'h> {
             spmv(x, &mut ax);
             let ax_r = &ax;
             crate::solver::cpu::parallel::par_update(threads, x, |i, xi| {
-                *xi += JACOBI_OMEGA * dinv[i] * (b[i] - ax_r[i])
+                *xi += T::from_f64(JACOBI_OMEGA * dinv[i] * (b[i] - ax_r[i]).to_f64())
             });
         }
     }
@@ -577,7 +625,9 @@ mod tests {
         let (ro, ci, vals) = poisson2d(nx, ny);
         let n = nx * ny;
         let h = AmgHierarchy::build(&ro, &ci, &vals);
-        let b: Vec<f32> = (0..n).map(|k| ((k * 13 % 31) as f32) - 15.0).collect();
+        // f64 vectors: this test pins the REFERENCE-precision behaviour (the
+        // 1e-8 tolerance is out of f32 reach by design).
+        let b: Vec<f64> = (0..n).map(|k| ((k * 13 % 31) as f64) - 15.0).collect();
 
         let solve = |threads: usize| {
             let amg = AmgSolver::assemble(&h, &vals, threads, false);
@@ -587,7 +637,7 @@ mod tests {
                 values: &vals,
                 threads,
             };
-            let mut x = vec![0.0f32; n];
+            let mut x = vec![0.0f64; n];
             let stats =
                 bicgstab_pc(&a, &b, &mut x, 30, 1e-8, &|r, z| amg.vcycle(r, z));
             (x, stats)
@@ -606,7 +656,7 @@ mod tests {
             .iter()
             .zip(&x8)
             .map(|(a, b)| (a - b).abs())
-            .fold(0.0f32, f32::max);
+            .fold(0.0f64, f64::max);
         assert_eq!(maxd, 0.0, "threads=1 vs 8 differ: max|diff|={maxd:e}");
     }
 }

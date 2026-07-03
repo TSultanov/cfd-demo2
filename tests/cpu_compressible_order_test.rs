@@ -1327,6 +1327,7 @@ fn diag_cpu_perturbed_ic() {
         engine: cfd2::solver::cpu::CpuEngine::Interpreter,
         threads: 8,
         simd: false,
+        precision: Default::default(),
     };
     for &vfac in &[0.5f64, 0.8] {
         let mut hs = Vec::new();
@@ -1396,6 +1397,7 @@ fn diag_cpu_mu_sweep() {
         engine: cfd2::solver::cpu::CpuEngine::Interpreter,
         threads: 8,
         simd: false,
+        precision: Default::default(),
     };
     for &mu in &[0.05f64, 0.1, 0.2, 0.4] {
         let mut hs = Vec::new();

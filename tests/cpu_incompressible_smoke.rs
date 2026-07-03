@@ -97,8 +97,8 @@ fn cpu_incompressible_taylor_green_converges() {
 #[test]
 fn cpu_incompressible_engines_agree() {
     let n = 8;
-    let (m, u_i) = solve(n, 10, CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false });
-    let (_m, u_t) = solve(n, 10, CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 1, simd: false });
+    let (m, u_i) = solve(n, 10, CpuBackendConfig { engine: CpuEngine::Interpreter, threads: 1, simd: false, precision: Default::default(), });
+    let (_m, u_t) = solve(n, 10, CpuBackendConfig { engine: CpuEngine::Transpiled, threads: 1, simd: false, precision: Default::default(), });
     let d = u_i
         .iter()
         .zip(&u_t)

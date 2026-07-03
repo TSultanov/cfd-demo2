@@ -320,6 +320,9 @@ pub struct CFDApp {
     // Compute-backend selection (env-driven; applied on Initialize / Reset).
     backend: BackendChoice,
     cpu_threads: usize,
+    /// Coupled linear-solve precision for the CPU backends (f64 = reference,
+    /// f32 = GPU-like arithmetic, lower bandwidth).
+    cpu_precision_f32: bool,
     adaptive_dt: bool,
     target_cfl: f64,
     dual_time: bool,
@@ -469,6 +472,7 @@ impl CFDApp {
             show_mesh_lines: true,
             backend: BackendChoice::Gpu,
             cpu_threads: 1,
+            cpu_precision_f32: false,
             adaptive_dt: true,
             target_cfl: 0.9,
             dual_time: false,
@@ -835,6 +839,10 @@ impl CFDApp {
             std::env::set_var(
                 "CFD2_CPU_SIMD",
                 if self.backend == BackendChoice::CpuTranspiledSimd { "1" } else { "0" },
+            );
+            std::env::set_var(
+                "CFD2_CPU_PRECISION",
+                if self.cpu_precision_f32 { "f32" } else { "f64" },
             );
         } else {
             std::env::remove_var("CFD2_BACKEND");
@@ -2854,6 +2862,31 @@ impl eframe::App for CFDApp {
                             ui.add(
                                 adaptive_slider(&mut self.cpu_threads, 1..=16).text("Cores"),
                             );
+                            egui::ComboBox::from_label("Solver Precision")
+                                .selected_text(if self.cpu_precision_f32 {
+                                    "f32 (GPU-like)"
+                                } else {
+                                    "f64 (reference)"
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut self.cpu_precision_f32,
+                                        false,
+                                        "f64 (reference)",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.cpu_precision_f32,
+                                        true,
+                                        "f32 (GPU-like)",
+                                    );
+                                })
+                                .response
+                                .on_hover_text(
+                                    "Scalar precision of the coupled linear solve. f64 is \
+                                     the reference; f32 mirrors the GPU's arithmetic and \
+                                     halves solve bandwidth (results differ at rounding \
+                                     level).",
+                                );
                             ui.label("Applied on Initialize / Reset.");
                         }
 

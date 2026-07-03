@@ -967,6 +967,52 @@ impl GpuUnifiedSolver {
         self.plan_mut().write_state_bytes(bytemuck::cast_slice(&state))
     }
 
+    /// Set a Vector2 field in the current state only, preserving the time
+    /// history (the Vector2 twin of [`Self::set_field_scalar_current`]). Use
+    /// for mid-run updates of non-solved fields — e.g. a manufactured MMS
+    /// source re-evaluated at moved cell centroids under ALE mesh motion.
+    pub fn set_field_vec2_current(&mut self, field: &str, values: &[(f64, f64)]) -> Result<(), String> {
+        #[cfg(feature = "cpu")]
+        if self.is_cpu() {
+            if let Some(c) = self.cpu_mut() {
+                c.set_field_vec2_current(field, values)?;
+            }
+            self.sync_cpu_render();
+            return Ok(());
+        }
+        let stride = self.model.state_layout.stride() as usize;
+        let state_field = self
+            .model
+            .state_layout
+            .field(field)
+            .ok_or_else(|| format!("field '{field}' not found in layout"))?;
+        if state_field.kind() != FieldKind::Vector2 {
+            return Err(format!(
+                "field '{field}' is not Vector2 (kind={})",
+                state_field.kind().as_str()
+            ));
+        }
+        let offset = state_field.offset() as usize;
+        if values.len() != self.num_cells() as usize {
+            return Err(format!(
+                "value length {} does not match num_cells {}",
+                values.len(),
+                self.num_cells()
+            ));
+        }
+        let mut state = pollster::block_on(async { self.read_state_f32().await });
+        if state.len() != self.num_cells() as usize * stride {
+            state.resize(self.num_cells() as usize * stride, 0.0);
+        }
+        for (i, &(x, y)) in values.iter().enumerate() {
+            let base = i * stride + offset;
+            state[base] = x as f32;
+            state[base + 1] = y as f32;
+        }
+        self.plan_mut()
+            .write_state_bytes_current(bytemuck::cast_slice(&state))
+    }
+
     pub async fn get_field_vec2(&self, field: &str) -> Result<Vec<(f64, f64)>, String> {
         let data = self.read_state_f32().await;
         let stride = self.model.state_layout.stride() as usize;

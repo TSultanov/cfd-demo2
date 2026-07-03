@@ -1,0 +1,446 @@
+//! Prescribed-motion MMS (M3.3 of the meshless/moving-mesh roadmap):
+//! convergence orders of the ALE incompressible solver on a smoothly
+//! deforming structured mesh.
+//!
+//! **Spatial study** — the forced steady Taylor–Green of
+//! tests/mms_incompressible_order_test.rs (same manufactured solution, same
+//! source, same all-wall per-face Dirichlet BCs), except the mesh vertices
+//! oscillate through a smooth interior bump (amplitude ∝ h, zero on the
+//! boundary — boundary face centers never move, so the per-face Dirichlet
+//! values stay exact). The manufactured solution is defined in FIXED space;
+//! the discrete solution sees moving cell centroids, mesh-relative fluxes
+//! (`phi − rho·mesh_flux`), the moving-volume ddt and the continuity volume
+//! source. If the SCL closure and the ALE terms are consistent, the observed
+//! error matches a STATIC solve on the same (deformed) geometry — verified
+//! to 3 significant digits per level, see the probe notes at the spatial
+//! gate; an inconsistent ALE term shows up as an order collapse here long
+//! before it corrupts a real moving-mesh run.
+//!
+//! Per step (the M4 loop in miniature, fixed dt):
+//!   move vertices analytically → `recalculate_geometry` → swept-quad fluxes
+//!   + f32 SCL closure → `begin_ale_step` (rotates volume history, uploads
+//!   geometry + fluxes) → re-upload the manufactured source at the MOVED
+//!   centroids (`set_field_vec2_current`, history-preserving) → `step()`.
+//!
+//! The run marches a fixed 35 steps at dt=0.05 (static suite settles in ~12
+//! steps; the motion period is 1.0, so the state has orbited the periodic
+//! regime for ≥1 cycle) and samples at t=1.75 — the phase where the mesh is
+//! at MAXIMUM deformation and momentarily at rest (sin(2π·1.75)=−1,
+//! cos(2π·1.75)=0), i.e. the error is measured on the deformed geometry.
+//!
+//! **Temporal study** — BDF2 on moving volumes: spatially uniform
+//! U*(t) = U₀·e^{−t} (spatial operators are exact for uniform fields — the
+//! GCL gate pins that), manufactured source S = ρ·dU*/dt uniform, on a mesh
+//! oscillating at FIXED amplitude while dt refines. The measured error is
+//! purely the temporal truncation of the moving-volume BDF2.
+//! Validation-review note: a naive swept-volume BDF2 can degrade to first
+//! order — the gate asserts the honest measured floor and ratchets per the
+//! repo convention (values recorded at the asserts).
+//!
+//! Tolerances follow the repo's pin-after-first-measurement convention.
+#![cfg(feature = "dev-tests")]
+
+mod mms_support;
+
+use std::f64::consts::PI;
+
+use cfd2::solver::gpu::enums::GpuBoundaryType;
+use cfd2::solver::mesh::{
+    generate_structured_rect_mesh, swept_mesh_fluxes_closed, BoundarySides, BoundaryType, Mesh,
+};
+use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
+use cfd2::solver::model::{
+    incompressible_momentum_ale_mms_model, INCOMPRESSIBLE_MMS_SOURCE_FIELD,
+};
+use cfd2::solver::scheme::Scheme;
+use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
+
+use mms_support::{assert_convergence_order, field_errors, field_errors_vec2};
+
+const MU: f64 = 1.0;
+const RHO: f64 = 1.0;
+const DT: f64 = 0.05;
+/// 1.75 motion periods: transient decayed (static settles ~12 steps), mesh
+/// sampled at max deformation / zero mesh velocity (see header).
+const STEPS: usize = 35;
+const MOTION_PERIOD: f64 = 1.0;
+/// Interior bump amplitude as a fraction of h — mesh distortion is uniform
+/// across refinement levels (same relative cell-size perturbation), so the
+/// ALE terms stay proportionally as large on every level.
+const AMP_FRAC: f64 = 0.2;
+
+// ── manufactured solution (identical to the static incompressible suite) ──
+
+fn exact_u(x: f64, y: f64) -> (f64, f64) {
+    ((PI * x).sin() * (PI * y).cos(), -(PI * x).cos() * (PI * y).sin())
+}
+
+fn exact_p(x: f64, y: f64) -> f64 {
+    (RHO / 4.0) * ((2.0 * PI * x).cos() + (2.0 * PI * y).cos())
+}
+
+fn source(x: f64, y: f64) -> (f64, f64) {
+    let (ux, uy) = exact_u(x, y);
+    (2.0 * MU * PI * PI * ux, 2.0 * MU * PI * PI * uy)
+}
+
+fn env_f64(name: &str, default: f64) -> f64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+/// Prescribed vertex position at time `t` from the UNDEFORMED coordinates
+/// (no incremental drift): smooth interior bump, zero on the boundary. The
+/// env knobs are the diagnostic probes documented at the spatial gate.
+fn vertex_position(x0: f64, y0: f64, t: f64, h: f64) -> (f64, f64) {
+    let amp_frac = env_f64("CFD2_ALE_SPATIAL_AMP", AMP_FRAC);
+    let period = env_f64("CFD2_ALE_SPATIAL_PERIOD", MOTION_PERIOD);
+    // Probe: deform to max ONCE and hold (zero motion after step 1) — the
+    // static solve on the deformed mesh, isolating spatial-on-skewed-cells
+    // accuracy from the ALE terms.
+    let phase = if std::env::var("CFD2_ALE_SPATIAL_STATIC_DEFORM").as_deref() == Ok("1") {
+        1.0
+    } else {
+        (2.0 * PI * t / period).sin()
+    };
+    let amp = amp_frac * h * phase;
+    let bump = (PI * x0).sin().powi(2) * (PI * y0).sin().powi(2);
+    (x0 + amp * bump, y0 - 0.6 * amp * bump)
+}
+
+fn build_solver(mesh: &Mesh, model: cfd2::solver::model::ModelSpec) -> UnifiedSolver {
+    pollster::block_on(UnifiedSolver::new(
+        mesh,
+        model,
+        SolverConfig {
+            advection_scheme: Scheme::SecondOrderUpwind,
+            time_scheme: TimeScheme::BDF2,
+            preconditioner: PreconditionerType::Jacobi,
+            stepping: SteppingMode::Coupled,
+        },
+        None,
+        None,
+    ))
+    .expect("solver init")
+}
+
+/// Volume-weighted mean of a scalar field (pressure-gauge removal).
+fn volume_mean(mesh: &Mesh, f: &[f64]) -> f64 {
+    let mut sum = 0.0;
+    let mut vol = 0.0;
+    for i in 0..mesh.num_cells() {
+        sum += mesh.cell_vol[i] * f[i];
+        vol += mesh.cell_vol[i];
+    }
+    sum / vol
+}
+
+/// One spatial level: march the ALE protocol on an n×n all-wall unit square
+/// with prescribed bump motion; returns (deformed mesh at t_end, U, p).
+fn solve_taylor_green_moving(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>) {
+    let mut mesh = generate_structured_rect_mesh(n, n, 1.0, 1.0, BoundarySides::wall());
+    let x0 = mesh.vx.clone();
+    let y0 = mesh.vy.clone();
+    let h = 1.0 / n as f64;
+
+    let model = incompressible_momentum_ale_mms_model().expect("ale+mms model");
+    let mut solver = build_solver(&mesh, model);
+
+    solver.set_dt(DT as f32);
+    solver.set_dtau(0.0).expect("dtau");
+    solver.set_density(RHO as f32).expect("density");
+    solver.set_viscosity(MU as f32).expect("viscosity");
+    solver.set_alpha_u(0.7).expect("alpha_u");
+    solver.set_alpha_p(0.3).expect("alpha_p");
+    solver.set_outer_iters(25).expect("outer_iters");
+
+    // Per-face Dirichlet U on all walls from the exact solution. Boundary
+    // face centers are motion-invariant (bump ≡ 0 on the boundary).
+    let fx = mesh.face_cx.clone();
+    let fy = mesh.face_cy.clone();
+    let wall_u = move |c: usize| {
+        let fx = fx.clone();
+        let fy = fy.clone();
+        move |face_idx: u32| {
+            let i = face_idx as usize;
+            let (ux, uy) = exact_u(fx[i], fy[i]);
+            (if c == 0 { ux } else { uy }) as f32
+        }
+    };
+    solver
+        .set_boundary_values_per_face(GpuBoundaryType::Wall, "U", 0, &wall_u(0))
+        .expect("wall u_x");
+    solver
+        .set_boundary_values_per_face(GpuBoundaryType::Wall, "U", 1, &wall_u(1))
+        .expect("wall u_y");
+
+    // Initial source at the undeformed centroids (IC semantics: all history
+    // buffers), zero initial U/p, seeded history.
+    let src: Vec<(f64, f64)> = (0..mesh.num_cells())
+        .map(|i| source(mesh.cell_cx[i], mesh.cell_cy[i]))
+        .collect();
+    solver
+        .set_field_vec2(INCOMPRESSIBLE_MMS_SOURCE_FIELD, &src)
+        .expect("upload mms source");
+    solver.set_u(&vec![(0.0, 0.0); mesh.num_cells()]);
+    solver.set_p(&vec![0.0; mesh.num_cells()]);
+    solver.initialize_history();
+
+    // Probe scaffolding: a longer motion period keeps the same max
+    // deformation but slower motion; steps scale so the run still covers
+    // 1.75 periods and samples at the max-deformation/zero-velocity phase.
+    let period = env_f64("CFD2_ALE_SPATIAL_PERIOD", MOTION_PERIOD);
+    let steps = ((STEPS as f64) * period / MOTION_PERIOD).round() as usize;
+
+    for step in 0..steps {
+        let t_new = (step as f64 + 1.0) * DT;
+        let old_vx = mesh.vx.clone();
+        let old_vy = mesh.vy.clone();
+        for v in 0..mesh.num_vertices() {
+            let (x, y) = vertex_position(x0[v], y0[v], t_new, h);
+            mesh.vx[v] = x;
+            mesh.vy[v] = y;
+        }
+        mesh.recalculate_geometry();
+
+        let swept =
+            swept_mesh_fluxes_closed(&mesh, &old_vx, &old_vy, DT).expect("swept mesh fluxes");
+        assert!(
+            swept.max_identity_err_rel < 1e-12,
+            "step {step}: f64 swept-quad identity violated: {:.3e}",
+            swept.max_identity_err_rel
+        );
+        assert!(
+            swept.max_defect_rel < 1e-8,
+            "step {step}: f32 SCL closure defect above roundoff: {:.3e}",
+            swept.max_defect_rel
+        );
+        solver
+            .begin_ale_step(&mesh, &swept.fluxes)
+            .expect("begin_ale_step");
+
+        // Manufactured source re-evaluated at the MOVED centroids —
+        // history-preserving upload (BDF2 history must not be clobbered).
+        let src: Vec<(f64, f64)> = (0..mesh.num_cells())
+            .map(|i| source(mesh.cell_cx[i], mesh.cell_cy[i]))
+            .collect();
+        solver
+            .set_field_vec2_current(INCOMPRESSIBLE_MMS_SOURCE_FIELD, &src)
+            .expect("re-upload mms source");
+
+        solver.step();
+    }
+
+    let u = pollster::block_on(solver.get_field_vec2("U")).expect("read U");
+    let p = pollster::block_on(solver.get_p());
+    (mesh, u, p)
+}
+
+/// SPATIAL order on the moving mesh (the M3.3 gate). Static-suite reference
+/// band: u order 2.0 − 0.35 (measured 1.87 uniform / 1.98 graded); the
+/// roadmap allows this gate an extra −0.3 slope tolerance — used, see below.
+///
+/// Measured July 2026 (n = 8/16/32/64, GPU f32, amp 0.2h, dt 0.05):
+///   u_l2 = [9.945e-3, 3.460e-3, 1.284e-3, 5.610e-4], order 1.387
+///   p_l2 = [9.202e-2, 4.668e-2, 2.331e-2, 1.161e-2], order ~1.0
+///
+/// The sub-2 u order is NOT the ALE machinery — three probes localize it to
+/// the spatial operator on persistently-skewed cells (amplitude ∝ h keeps
+/// the non-orthogonality constant across levels, so the skew-related error
+/// component never refines away):
+///   * ω-independence: 4× slower motion (CFD2_ALE_SPATIAL_PERIOD=4, same
+///     deformation) leaves the error unchanged (n=32: 1.292e-3 vs 1.284e-3)
+///     — not a fixed-dt temporal artifact;
+///   * amplitude scaling: 10× smaller bump (CFD2_ALE_SPATIAL_AMP=0.02)
+///     recovers the static-protocol error (n=32: 7.33e-4);
+///   * STATIC pre-deformed solve (CFD2_ALE_SPATIAL_STATIC_DEFORM=1: deform
+///     to max once, hold, zero mesh fluxes) reproduces the moving-mesh
+///     sweep to 3 significant digits at EVERY level and the identical
+///     order 1.387 — the moving protocol adds nothing on top of the static
+///     solve on the same skewed geometry, which is exactly the statement
+///     this gate exists to pin.
+///
+/// The non-orthogonal (skewed-quad) spatial band is a pre-existing solver
+/// property outside ALE scope (the graded static suite keeps orthogonal
+/// cells, so it never sees it). Gate: the roadmap band 2.0 − (0.35 + 0.3);
+/// finest cap ~2× measured. An order collapse below 1.35 or a blown finest
+/// cap catches ALE-term regressions.
+#[test]
+fn ale_taylor_green_sou_velocity_second_order() {
+    let mut hs = Vec::new();
+    let mut u_errs = Vec::new();
+    let mut p_errs = Vec::new();
+    let levels: Vec<usize> = std::env::var("CFD2_ALE_SPATIAL_LEVELS")
+        .ok()
+        .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
+        .unwrap_or_else(|| vec![8, 16, 32, 64]);
+    for n in levels {
+        let (mesh, u, p) = solve_taylor_green_moving(n);
+        let u_err = field_errors_vec2(&mesh, &u, exact_u).l2;
+        // Demean both pressures (all-wall mesh leaves the gauge free).
+        let p_mean = volume_mean(&mesh, &p);
+        let exact_mean = {
+            let exact: Vec<f64> = (0..mesh.num_cells())
+                .map(|i| exact_p(mesh.cell_cx[i], mesh.cell_cy[i]))
+                .collect();
+            volume_mean(&mesh, &exact)
+        };
+        let p_err = field_errors(&mesh, &p, |x, y| exact_p(x, y) - exact_mean + p_mean).l2;
+        println!("[mms][ale_taylor_green] n={n} u_l2={u_err:.4e} p_l2={p_err:.4e}");
+        hs.push(1.0 / n as f64);
+        u_errs.push(u_err);
+        p_errs.push(p_err);
+    }
+    assert_convergence_order("ale_taylor_green_u", &hs, &u_errs, 2.0, 0.65, 1.2e-3);
+    let p_order = mms_support::fit_order(&hs, &p_errs);
+    println!("[mms][ale_taylor_green] pressure order {p_order:.3}");
+    assert!(
+        p_order > 0.9,
+        "pressure order regressed: {p_order:.3} (errors {p_errs:?})"
+    );
+}
+
+// ── temporal study ────────────────────────────────────────────────────────
+
+const T_END: f64 = 1.0;
+const U0: (f64, f64) = (1.0, 0.5);
+/// Temporal-study mesh: fixed 24×16 channel (GCL BC layout: uniform flow
+/// enters left+bottom, leaves right+top — every BC is exactly satisfied by a
+/// spatially uniform U(t)).
+const TNX: usize = 24;
+const TNY: usize = 16;
+const TLX: f64 = 1.5;
+const TLY: f64 = 1.0;
+/// FIXED motion amplitude/period across the dt sweep (the mesh path is the
+/// same curve, sampled finer as dt shrinks).
+const T_MOTION_PERIOD: f64 = 1.0;
+
+fn exact_u_t(t: f64) -> (f64, f64) {
+    ((-t).exp() * U0.0, (-t).exp() * U0.1)
+}
+
+/// One dt level of the temporal study: returns the U L2 error at t=1.
+fn bdf2_moving_volume_error(steps: usize) -> f64 {
+    let dt = T_END / steps as f64;
+    let mut mesh = generate_structured_rect_mesh(
+        TNX,
+        TNY,
+        TLX,
+        TLY,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Inlet,
+            top: BoundaryType::Outlet,
+        },
+    );
+    let x0 = mesh.vx.clone();
+    let y0 = mesh.vy.clone();
+    let h = TLX / TNX as f64;
+
+    // The mms variant: the (spatially uniform) manufactured source
+    // S = rho·dU*/dt needs the declared source term. The linear tolerance is
+    // tightened through the MODEL recipe field (works on both backends;
+    // CFD2_LIN_TOL is GPU-only — review-validation #7).
+    let mut model = incompressible_momentum_ale_mms_model().expect("ale+mms model");
+    if let Some(ls) = model.linear_solver.as_mut() {
+        ls.solver.tolerance = 1e-7;
+    }
+    let mut solver = build_solver(&mesh, model);
+
+    solver.set_dt(dt as f32);
+    solver.set_dtau(0.0).expect("dtau");
+    solver.set_density(RHO as f32).expect("density");
+    solver.set_viscosity(1e-2_f32).expect("viscosity");
+    solver.set_alpha_u(0.7).expect("alpha_u");
+    solver.set_alpha_p(0.3).expect("alpha_p");
+    // 50 outers: a temporal-order instrument must drive each implicit step
+    // to convergence well below the finest truncation error. Measured floors
+    // (July 2026, motion on AND off — i.e. a PROTOCOL artifact, not ALE):
+    // 8 outers floors the sweep at u_l2 ≈ 2.3e-3 (order 0.48), 25 outers at
+    // ≈ 1.45e-4 (order 1.1) — per-step Picard/relaxation lag, insensitive to
+    // linear tolerance. 50 outers clears the floor through dt = 0.0125.
+    solver.set_outer_iters(50).expect("outer_iters");
+
+    // t=0 state: exactly U0 everywhere, p = 0.
+    let n = mesh.num_cells();
+    solver
+        .set_field_vec2(INCOMPRESSIBLE_MMS_SOURCE_FIELD, &vec![(0.0, 0.0); n])
+        .expect("zero source");
+    solver.set_u(&vec![U0; n]);
+    solver.set_p(&vec![0.0; n]);
+    solver.initialize_history();
+    solver
+        .set_boundary_vec2(GpuBoundaryType::Inlet, "U", [U0.0 as f32, U0.1 as f32])
+        .expect("inlet U");
+
+    let bump = |x0: f64, y0: f64| {
+        (PI * x0 / TLX).sin().powi(2) * (PI * y0 / TLY).sin().powi(2)
+    };
+
+    for step in 0..steps {
+        let t_new = (step as f64 + 1.0) * dt;
+        let old_vx = mesh.vx.clone();
+        let old_vy = mesh.vy.clone();
+        let amp = AMP_FRAC * h * (2.0 * PI * t_new / T_MOTION_PERIOD).sin();
+        for v in 0..mesh.num_vertices() {
+            let b = bump(x0[v], y0[v]);
+            mesh.vx[v] = x0[v] + amp * b;
+            mesh.vy[v] = y0[v] - 0.6 * amp * b;
+        }
+        mesh.recalculate_geometry();
+        let swept =
+            swept_mesh_fluxes_closed(&mesh, &old_vx, &old_vy, dt).expect("swept mesh fluxes");
+        solver
+            .begin_ale_step(&mesh, &swept.fluxes)
+            .expect("begin_ale_step");
+
+        // Time-varying manufactured source S = rho·dU*/dt and inlet Dirichlet
+        // U*(t^{n+1}), both at the new time level (implicit consumption).
+        let (ex, ey) = exact_u_t(t_new);
+        solver
+            .set_field_vec2_current(
+                INCOMPRESSIBLE_MMS_SOURCE_FIELD,
+                &vec![(-RHO * ex, -RHO * ey); n],
+            )
+            .expect("source upload");
+        solver
+            .set_boundary_vec2(GpuBoundaryType::Inlet, "U", [ex as f32, ey as f32])
+            .expect("inlet U(t)");
+
+        solver.step();
+    }
+
+    let u = pollster::block_on(solver.get_field_vec2("U")).expect("read U");
+    let (ex, ey) = exact_u_t(T_END);
+    field_errors_vec2(&mesh, &u, |_x, _y| (ex, ey)).l2
+}
+
+/// TEMPORAL order of BDF2 on moving volumes (dt sweep at fixed mesh + fixed
+/// motion amplitude; spatially uniform manufactured solution so the error is
+/// purely temporal). The roadmap's honest floor was ≥1.0 (naive
+/// swept-volume BDF2 can be first order — measure, do not force 2.0).
+///
+/// Measured July 2026 (steps = 10/20/40/80, GPU f32, amp 0.2h, 50 outers):
+///   u_l2 = [1.462e-3, 3.472e-4, 7.913e-5, 1.652e-5], order 2.154
+/// — the moving-volume BDF2 (variable-dt Newton weights on V·φ + the
+/// scheme-matched bounded rate `ale_dvdt_ddt`) holds SECOND order; gate
+/// ratcheted to 2.0 − 0.3 per the repo convention. Finest cap ~3× measured
+/// (GPU run-to-run jitter headroom).
+#[test]
+fn ale_bdf2_moving_volume_temporal_order() {
+    let mut dts = Vec::new();
+    let mut errs = Vec::new();
+    for steps in [10usize, 20, 40, 80] {
+        let err = bdf2_moving_volume_error(steps);
+        println!(
+            "[mms][ale_bdf2_temporal] steps={steps} dt={:.4} u_l2={err:.4e}",
+            T_END / steps as f64
+        );
+        dts.push(T_END / steps as f64);
+        errs.push(err);
+    }
+    assert_convergence_order("ale_bdf2_temporal", &dts, &errs, 2.0, 0.3, 5.0e-5);
+}

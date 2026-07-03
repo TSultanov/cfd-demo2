@@ -676,9 +676,10 @@ pub use buoyant_incompressible::{
 };
 #[allow(unused_imports)]
 pub use incompressible_momentum::{
-    incompressible_momentum_ale_model, incompressible_momentum_mms_model,
-    incompressible_momentum_model, incompressible_momentum_system,
-    IncompressibleMomentumFields, INCOMPRESSIBLE_MMS_SOURCE_FIELD,
+    incompressible_momentum_ale_mms_model, incompressible_momentum_ale_model,
+    incompressible_momentum_mms_model, incompressible_momentum_model,
+    incompressible_momentum_system, IncompressibleMomentumFields,
+    INCOMPRESSIBLE_MMS_SOURCE_FIELD,
 };
 #[allow(unused_imports)]
 pub use allmach_pressure::{
@@ -706,6 +707,8 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
         // convection; own id => own generated kernels, so static models stay
         // byte-identical (docs/meshless-moving-mesh-roadmap.md §M3).
         incompressible_momentum_ale_model()?,
+        // ALE + manufactured source (prescribed-motion MMS, M3.3).
+        incompressible_momentum_ale_mms_model()?,
         allmach_pressure_model()?,
         allmach_pressure_mms_model()?,
         allmach_thermal_model()?,

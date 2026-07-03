@@ -211,13 +211,18 @@ pub fn incompressible_momentum_ale_model() -> Result<ModelSpec, String> {
     incompressible_momentum_model_impl(false, true)
 }
 
+/// ALE + MMS combined variant (prescribed-motion MMS, M3.3): the
+/// mesh-relative convection of `_ale` plus the manufactured momentum source
+/// of `_mms`, under its own model id (own generated kernels; the pairwise
+/// variants stay byte-identical). Used by tests/mms_ale_order_test.rs to
+/// measure convergence orders on a prescribed smoothly-deforming mesh — the
+/// manufactured source is re-evaluated at the moved cell centroids every
+/// step (`set_field_vec2_current`, history-preserving).
+pub fn incompressible_momentum_ale_mms_model() -> Result<ModelSpec, String> {
+    incompressible_momentum_model_impl(true, true)
+}
+
 fn incompressible_momentum_model_impl(with_mms_source: bool, ale: bool) -> Result<ModelSpec, String> {
-    // A combined mms+ale variant (prescribed-motion MMS, M3.3) will need its
-    // own model id before this combination is allowed.
-    assert!(
-        !(with_mms_source && ale),
-        "mms+ale variant not defined yet (would collide with incompressible_momentum_mms)"
-    );
     let fields = IncompressibleMomentumFields::new();
     let system = build_incompressible_momentum_system(&fields, with_mms_source, ale);
     let mut layout_fields = vec![
@@ -396,7 +401,8 @@ fn incompressible_momentum_model_impl(with_mms_source: bool, ale: bool) -> Resul
 
     Ok(ModelSpec {
         id: match (with_mms_source, ale) {
-            (true, _) => "incompressible_momentum_mms",
+            (true, false) => "incompressible_momentum_mms",
+            (true, true) => "incompressible_momentum_ale_mms",
             (false, true) => "incompressible_momentum_ale",
             (false, false) => "incompressible_momentum",
         },

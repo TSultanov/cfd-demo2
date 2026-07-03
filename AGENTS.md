@@ -25,6 +25,29 @@ its `#[ignore]` probe (doubled-shear sources) must SATURATE — order-2 converge
 means the pre-June-2026 double-counted laplacian came back (see the header of
 `tests/mms_compressible_order_test.rs`).
 
+## Mandatory ALE gate (moving-mesh path)
+
+For any change touching the ALE codegen (`Term::relative_to_mesh`, moving-volume ddt,
+`mesh_fluxes`/volume-history plumbing, `begin_ale_step`, `src/solver/mesh/ale.rs`) or the
+mesh-refresh seam, run the ALE suite and require it green — same declaration style as the
+MMS gate above:
+
+```bash
+cargo test --test static_wgsl_snapshot_test                    # static models byte-identical (hash-pinned)
+cargo test --features meshgen,cpu --test ale_zero_flux_equivalence_test -- --test-threads 1
+cargo test --features meshgen,cpu --test ale_gcl_test -- --test-threads 1
+cargo test --features cpu --test ale_conservation_test -- --test-threads 1
+cargo test --features dev-tests --test mms_ale_order_test -- --test-threads 1
+```
+
+The snapshot test pins every generated WGSL file's content hash (bless ritual in its
+header); zero-flux equivalence pins ALE-with-zero-fluxes == static bitwise on CPU;
+the GCL gate pins free-stream preservation on a deforming mesh (Euler AND BDF2, both
+backends); the conservation audit pins the f64 mesh-side mass/area identities and
+zero spurious ALE-injected velocity; the MMS-ALE suite (dev-tests tier, ~8 min, the
+n=64 spatial level and the 80-step temporal level dominate) pins spatial order ~2 and
+temporal BDF2 order ~2 on prescribed motion.
+
 ## Mandatory OpenFOAM drift check (before/after each major changeset)
 
 For every **major** changeset, run the OpenFOAM reference suite both **before** and **after** the edits, then compare failure magnitudes.

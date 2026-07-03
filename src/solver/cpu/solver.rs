@@ -680,6 +680,14 @@ impl CpuSolver {
         Ok(())
     }
 
+    /// Vector2 twin of [`Self::set_field_scalar_current`]: on the CPU the
+    /// plain setter already writes only the current `state` buffer (history
+    /// lives in `state_old`/`state_old_old`), so this is the same operation
+    /// under the history-preserving name the `UnifiedSolver` API routes to.
+    pub fn set_field_vec2_current(&mut self, field: &str, values: &[(f64, f64)]) -> Result<(), String> {
+        self.set_field_vec2(field, values)
+    }
+
     pub fn get_field_scalar(&self, field: &str) -> Result<Vec<f64>, String> {
         let off = self
             .state_layout

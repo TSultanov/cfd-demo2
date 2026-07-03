@@ -72,6 +72,35 @@ impl HalfPlane {
         }
     }
 
+    /// Line through boundary segment `a -> b`, keep-set = the fluid side.
+    /// Loops are walked with the fluid on the LEFT of the segment direction
+    /// `d = b − a`, so the outward (solid-side) normal is `q = (d.y, −d.x)`
+    /// and `s(x) = (x − a)·q ≤ 0` keeps the fluid. Everything is evaluated
+    /// seed-relative (the seed lies ON the line, so `s(0) = 0` — kept by the
+    /// ≤ rule). `eps = |d|·edge_len_eps`, dimensionally as for bisectors.
+    #[inline]
+    pub fn segment_line(
+        a: Point2<f64>,
+        b: Point2<f64>,
+        seed: Point2<f64>,
+        seg: u32,
+        edge_len_eps: f64,
+    ) -> Self {
+        let ax = a.x - seed.x;
+        let ay = a.y - seed.y;
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let qx = dy;
+        let qy = -dx;
+        Self {
+            qx,
+            qy,
+            off: ax * qx + ay * qy,
+            eps: (dx * dx + dy * dy).sqrt() * edge_len_eps,
+            tag: PlaneTag::Boundary(seg),
+        }
+    }
+
     #[inline]
     fn eval(&self, x: f64, y: f64) -> f64 {
         x * self.qx + y * self.qy - self.off

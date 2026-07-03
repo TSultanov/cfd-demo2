@@ -1,3 +1,5 @@
+use super::meshless::{circle_loop, polyline_loop, BoundaryLoop};
+use super::tolerances::MeshgenTolerances;
 use nalgebra::{Point2, Vector2};
 use wide::f64x4;
 
@@ -19,6 +21,36 @@ pub trait Geometry {
 
     // Returns boundary points with given spacing
     fn get_boundary_points(&self, spacing: f64) -> Vec<Point2<f64>>;
+
+    /// Ordered, closed boundary polylines with per-segment BC tags, walked
+    /// with the fluid on the LEFT (outer loop CCW, embedded holes CW) — the
+    /// meshless engine's boundary input (roadmap M0.3). Tags follow
+    /// `classify_boundary` on segment midpoints with the `Wall` fallback.
+    ///
+    /// Default (review F5: out-of-module implementors must keep compiling):
+    /// the domain bounding box only — correct solely for geometries whose
+    /// fluid region is the whole box; anything with embedded or curved
+    /// boundaries must override. Note `get_boundary_points` implementations
+    /// are deliberately NOT derived from the loops: their point order feeds
+    /// the Poisson RNG of the incumbent generators and must stay byte-stable.
+    fn get_boundary_loops(
+        &self,
+        spacing: f64,
+        domain: Vector2<f64>,
+        tol: &MeshgenTolerances,
+    ) -> Vec<BoundaryLoop> {
+        vec![polyline_loop(
+            &[
+                Point2::new(0.0, 0.0),
+                Point2::new(domain.x, 0.0),
+                Point2::new(domain.x, domain.y),
+                Point2::new(0.0, domain.y),
+            ],
+            spacing,
+            domain,
+            tol,
+        )]
+    }
 }
 
 pub struct ChannelWithObstacle {
@@ -99,6 +131,30 @@ impl Geometry for ChannelWithObstacle {
         }
 
         points
+    }
+
+    fn get_boundary_loops(
+        &self,
+        spacing: f64,
+        domain: Vector2<f64>,
+        tol: &MeshgenTolerances,
+    ) -> Vec<BoundaryLoop> {
+        vec![
+            // Outer channel box (CCW).
+            polyline_loop(
+                &[
+                    Point2::new(0.0, 0.0),
+                    Point2::new(self.length, 0.0),
+                    Point2::new(self.length, self.height),
+                    Point2::new(0.0, self.height),
+                ],
+                spacing,
+                domain,
+                tol,
+            ),
+            // Embedded obstacle (CW hole; all segments off-box ⇒ Wall).
+            circle_loop(self.obstacle_center, self.obstacle_radius, spacing, domain, tol),
+        ]
     }
 }
 
@@ -208,6 +264,30 @@ impl Geometry for BackwardsStep {
         }
         points
     }
+
+    fn get_boundary_loops(
+        &self,
+        spacing: f64,
+        domain: Vector2<f64>,
+        tol: &MeshgenTolerances,
+    ) -> Vec<BoundaryLoop> {
+        let step_h = self.height_outlet - self.height_inlet;
+        // Single CCW walk (fluid on the left); (step_x, step_h) is the one
+        // reflex corner, handled by the guard-seed policy in `boundary_seeds`.
+        vec![polyline_loop(
+            &[
+                Point2::new(self.step_x, 0.0),
+                Point2::new(self.length, 0.0),
+                Point2::new(self.length, self.height_outlet),
+                Point2::new(0.0, self.height_outlet),
+                Point2::new(0.0, step_h),
+                Point2::new(self.step_x, step_h),
+            ],
+            spacing,
+            domain,
+            tol,
+        )]
+    }
 }
 
 /// Converging–diverging nozzle: a channel with a flat bottom wall at `y = 0` and
@@ -290,6 +370,43 @@ impl Geometry for Nozzle {
 
         points
     }
+
+    fn get_boundary_loops(
+        &self,
+        spacing: f64,
+        domain: Vector2<f64>,
+        tol: &MeshgenTolerances,
+    ) -> Vec<BoundaryLoop> {
+        // Single CCW walk, fluid on the left. The curved top wall is sampled
+        // at uniform x from the shared `nozzle_height` profile; its endpoint
+        // heights `top(0)`/`top(length)` are used verbatim (instead of
+        // `height`/`exit_height`) so the walk closes exactly in f64.
+        let mut pts = Vec::new();
+        // Bottom wall (0, 0) -> (length, 0).
+        let n_b = ((self.length / spacing).ceil() as usize).max(1);
+        for i in 0..n_b {
+            pts.push(Point2::new(i as f64 / n_b as f64 * self.length, 0.0));
+        }
+        // Outlet (length, 0) -> (length, top(length)).
+        let y_out = self.top(self.length);
+        let n_r = ((y_out / spacing).ceil() as usize).max(1);
+        for i in 0..n_r {
+            pts.push(Point2::new(self.length, i as f64 / n_r as f64 * y_out));
+        }
+        // Top wall, walked right -> left (fluid below = on the left).
+        let n_t = ((self.length / spacing).ceil() as usize).max(1);
+        for k in 0..n_t {
+            let x = (n_t - k) as f64 / n_t as f64 * self.length;
+            pts.push(Point2::new(x, self.top(x)));
+        }
+        // Inlet (0, top(0)) -> (0, 0).
+        let y_in = self.top(0.0);
+        let n_l = ((y_in / spacing).ceil() as usize).max(1);
+        for i in 0..n_l {
+            pts.push(Point2::new(0.0, (n_l - i) as f64 / n_l as f64 * y_in));
+        }
+        vec![BoundaryLoop::from_points(pts, domain, tol)]
+    }
 }
 
 pub struct RectangularChannel {
@@ -338,5 +455,24 @@ impl Geometry for RectangularChannel {
             points.push(Point2::new(self.length, y));
         }
         points
+    }
+
+    fn get_boundary_loops(
+        &self,
+        spacing: f64,
+        domain: Vector2<f64>,
+        tol: &MeshgenTolerances,
+    ) -> Vec<BoundaryLoop> {
+        vec![polyline_loop(
+            &[
+                Point2::new(0.0, 0.0),
+                Point2::new(self.length, 0.0),
+                Point2::new(self.length, self.height),
+                Point2::new(0.0, self.height),
+            ],
+            spacing,
+            domain,
+            tol,
+        )]
     }
 }

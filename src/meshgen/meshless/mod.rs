@@ -15,68 +15,29 @@
 //!   ties break on id, and there is no shared mutable state — output is
 //!   byte-identical for any rayon thread count by construction.
 //!
-//! Stage coverage: this file + `seed_grid` + `clip` implement M0.1/M0.2
-//! (domain bbox only). Embedded-boundary clipping (`boundary.rs`, midpoint
-//! seeding per review F1), `Mesh` assembly and Lloyd/CVT arrive in later
-//! stages; the `BoundarySpec`/`SeedKind` types below already carry what
-//! those stages need, so they extend rather than refactor.
+//! Stage coverage: this file + `seed_grid` + `clip` implement M0.1/M0.2;
+//! `boundary` adds M0.3 — boundary loops, the review-F1 seeding protocol
+//! (vertex seeds at convex fluid corners, equidistant guard seeds around
+//! reflex ones) and own-segment-line clipping for `SeedKind::Boundary`
+//! seeds. `Mesh` assembly and Lloyd/CVT arrive in later stages.
 
+mod boundary;
 mod clip;
 mod seed_grid;
 
+pub use boundary::{
+    boundary_seeds, circle_loop, distance_to_loops, meshless_seed_points, point_in_fluid,
+    polyline_loop, shielding_violations, tag_boundary_type, BoundaryLoop, BoundarySpec, SeedKind,
+    SegId,
+};
 pub use clip::MAX_CLIP_VERTS;
 pub use seed_grid::SeedGrid;
 
-use clip::{drive, Attempt, CellRing, ClipPoly, ClipPolyVec, HalfPlane};
+use clip::{drive, Attempt, CellRing, ClipOutcome, ClipPoly, ClipPolyVec, HalfPlane};
 use seed_grid::dist2;
 
 use super::tolerances::MeshgenTolerances;
-use crate::solver::mesh::BoundaryType;
 use nalgebra::{Point2, Vector2};
-
-/// Global segment index into `BoundarySpec` (loop-major, see `seg_offsets`).
-pub type SegId = u32;
-
-/// Ordered, closed boundary polyline with per-segment BC tags.
-/// Segment `s` runs `pts[s] -> pts[(s+1) % pts.len()]`.
-#[derive(Clone, Debug)]
-pub struct BoundaryLoop {
-    pub pts: Vec<Point2<f64>>,
-    /// `BoundaryType` per segment (parity with `classify_boundary`, `Wall`
-    /// fallback for embedded contours).
-    pub tags: Vec<BoundaryType>,
-}
-
-/// All boundary loops of a geometry plus the flattened segment table that
-/// gives every segment a stable global `SegId`.
-#[derive(Clone, Debug)]
-pub struct BoundarySpec {
-    pub loops: Vec<BoundaryLoop>,
-    /// `seg_offsets[l]` = global id of loop `l`'s first segment;
-    /// `seg_offsets.last()` = total segment count. Always `len() + 1` entries.
-    pub seg_offsets: Vec<usize>,
-}
-
-impl BoundarySpec {
-    /// No embedded boundaries: cells clip against the domain bbox only
-    /// (stage-1 mode; also the pure-bbox configuration used by the
-    /// engine-vs-oracle gates).
-    pub fn empty() -> Self {
-        Self {
-            loops: Vec::new(),
-            seg_offsets: vec![0],
-        }
-    }
-}
-
-/// Per-seed kind. Boundary seeds sit on the boundary polyline and know their
-/// adjacent segments (`seg_prev` ends at the seed, `seg_next` starts at it;
-/// the same id twice for a mid-segment — midpoint-seeded — seed).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SeedKind {
-    Interior,
-    Boundary { seg_prev: SegId, seg_next: SegId },
-}
 
 /// Engine tuning knobs. `k` is the initial candidate count; uncertified
 /// cells retry with `k` doubled up to `k_max`, then stream every remaining
@@ -128,7 +89,7 @@ pub enum CellStatus {
 pub enum PlaneTag {
     /// Bisector against seed `j`.
     Bisector(u32),
-    /// Boundary segment (global `SegId`) — produced from stage 2 on.
+    /// Boundary segment (global `SegId` into the input's `BoundarySpec`).
     Boundary(u32),
     /// Domain bbox side: 0=left(Inlet) 1=right(Outlet) 2=bottom(Wall) 3=top(Wall).
     Box(u8),
@@ -295,18 +256,57 @@ fn escalated_status(doublings: u8) -> CellStatus {
     }
 }
 
+/// The seed's own boundary-segment half-planes: the lines through the
+/// segments the seed sits on, clipped *first* (they pass through the seed —
+/// distance 0, so they precede every bisector in distance order). One plane
+/// for a mid-segment guard seed (`seg_prev == seg_next`), two for a vertex
+/// seed. Pure function of the input ⇒ determinism is unaffected.
+fn own_planes(input: &MeshlessInput, i: usize) -> [Option<HalfPlane>; 2] {
+    match input.kind(i) {
+        SeedKind::Interior => [None, None],
+        SeedKind::Boundary { seg_prev, seg_next } => {
+            let p = input.seeds[i];
+            let eps = input.tol.edge_len_eps;
+            let (a, b) = input.boundary.segment_points(seg_prev);
+            let first = HalfPlane::segment_line(a, b, p, seg_prev, eps);
+            let second = if seg_next != seg_prev {
+                let (a, b) = input.boundary.segment_points(seg_next);
+                Some(HalfPlane::segment_line(a, b, p, seg_next, eps))
+            } else {
+                None
+            };
+            [Some(first), second]
+        }
+    }
+}
+
+/// Apply the own-segment planes to a fresh bbox ring. Returns `false` if the
+/// cell was clipped away entirely (a seed on the wrong side of its own wall
+/// — broken input).
+fn clip_own<R: CellRing>(ring: &mut R, own: &[Option<HalfPlane>; 2]) -> bool {
+    for hp in own.iter().flatten() {
+        match ring.clip(hp) {
+            ClipOutcome::Empty => return false,
+            // 4 bbox verts + at most one net vertex per clip stays far
+            // below MAX_CLIP_VERTS.
+            ClipOutcome::Overflow => unreachable!("own-segment clips cannot overflow a bbox ring"),
+            ClipOutcome::Redundant | ClipOutcome::Cut => {}
+        }
+    }
+    true
+}
+
 /// Compute cell `i` — pure function of `(input, i)`; `grid` is just the
 /// accelerator index over `input.seeds`. Escalation (k-doubling up to
 /// `k_max`, then exhaustive) happens per cell and functionally, so thread
-/// count cannot affect the result.
-///
-/// Stage 1: `SeedKind::Boundary` own-segment clipping is not applied yet
-/// (boundary machinery lands with `boundary.rs`); every seed clips the
-/// domain box plus bisectors.
+/// count cannot affect the result. `SeedKind::Boundary` seeds clip their
+/// own segment lines before the bisector loop (both re-applied on every
+/// escalation attempt, since the ring restarts from the bbox).
 pub fn compute_cell(input: &MeshlessInput, grid: &SeedGrid, i: usize) -> CellOut {
     let seeds = input.seeds;
     let p = seeds[i];
     let eps = input.tol.edge_len_eps;
+    let own = own_planes(input, i);
     let max_nb = seeds.len() - 1;
     let mut k = input.cfg.k.max(1);
     let mut doublings: u8 = 0;
@@ -318,6 +318,9 @@ pub fn compute_cell(input: &MeshlessInput, grid: &SeedGrid, i: usize) -> CellOut
 
         let attempt = if use_slow {
             let mut ring = ClipPolyVec::from_bbox(p, input.domain);
+            if !clip_own(&mut ring, &own) {
+                return CellOut::empty(p);
+            }
             let a = drive(&mut ring, p, seeds, &nbrs, eps);
             match a {
                 Attempt::Certified => {
@@ -333,6 +336,9 @@ pub fn compute_cell(input: &MeshlessInput, grid: &SeedGrid, i: usize) -> CellOut
             }
         } else {
             let mut ring = ClipPoly::from_bbox(p, input.domain);
+            if !clip_own(&mut ring, &own) {
+                return CellOut::empty(p);
+            }
             let a = drive(&mut ring, p, seeds, &nbrs, eps);
             match a {
                 Attempt::Certified => {
@@ -362,11 +368,12 @@ pub fn compute_cell(input: &MeshlessInput, grid: &SeedGrid, i: usize) -> CellOut
     }
 }
 
-/// Brute-force oracle: clip cell `i` against **every** other seed's bisector
-/// in ascending `(d², id)` order — no kNN, no security radius, same clip
-/// arithmetic. The engine must reproduce this bit-for-bit (the accelerator
-/// is exactness-preserving, not approximate); kept public for the test gates
-/// and the M1 GPU-parity harness.
+/// Brute-force oracle: clip cell `i` against its own segment lines (if any)
+/// and then **every** other seed's bisector in ascending `(d², id)` order —
+/// no kNN, no security radius, same clip arithmetic. The engine must
+/// reproduce this bit-for-bit (the accelerator is exactness-preserving, not
+/// approximate); kept public for the test gates and the M1 GPU-parity
+/// harness.
 pub fn compute_cell_exhaustive(input: &MeshlessInput, i: usize) -> CellOut {
     let seeds = input.seeds;
     let p = seeds[i];
@@ -377,11 +384,12 @@ pub fn compute_cell_exhaustive(input: &MeshlessInput, i: usize) -> CellOut {
     nbrs.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
 
     let mut ring = ClipPolyVec::from_bbox(p, input.domain);
+    if !clip_own(&mut ring, &own_planes(input, i)) {
+        return CellOut::empty(p);
+    }
     for &(_, j) in &nbrs {
         let q = seeds[j as usize] - p;
-        if ring.clip(&HalfPlane::bisector(q, j, input.tol.edge_len_eps))
-            == clip::ClipOutcome::Empty
-        {
+        if ring.clip(&HalfPlane::bisector(q, j, input.tol.edge_len_eps)) == ClipOutcome::Empty {
             return CellOut::empty(p);
         }
     }

@@ -207,7 +207,9 @@ pub fn triangulate(
     (points, triangles, fixed_nodes)
 }
 
-fn generate_poisson_points(
+// `pub(super)`: the meshless path (`meshgen::meshless::boundary`) reuses the
+// exact same sampler (and RNG seed) with loop-derived boundary seeds.
+pub(super) fn generate_poisson_points(
     boundary_points: &[Point2<f64>],
     geo: &(impl Geometry + Sync),
     min_cell_size: f64,
@@ -859,7 +861,11 @@ pub(super) fn close_untagged_boundary_faces(mesh: &mut Mesh) {
     }
 }
 
-fn sort_points_morton(points: &mut Vec<Point2<f64>>, fixed_nodes: &mut Vec<bool>) {
+/// Morton (Z-order) permutation of `points`: `order[new] = old`. Extracted
+/// from `sort_points_morton` (byte-identical order — same codes, same stable
+/// sort) so the meshless path can co-permute its per-seed `SeedKind`s with
+/// the exact same order (review F4).
+pub(super) fn morton_order(points: &[Point2<f64>]) -> Vec<usize> {
     let mut indices: Vec<usize> = (0..points.len()).collect();
 
     // Compute bounding box to normalize coordinates
@@ -884,6 +890,11 @@ fn sort_points_morton(points: &mut Vec<Point2<f64>>, fixed_nodes: &mut Vec<bool>
     };
 
     indices.sort_by_key(|&i| morton(points[i]));
+    indices
+}
+
+fn sort_points_morton(points: &mut Vec<Point2<f64>>, fixed_nodes: &mut Vec<bool>) {
+    let indices = morton_order(points);
 
     // Permute points and fixed_nodes
     let p_old = points.clone();

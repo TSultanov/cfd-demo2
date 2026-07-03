@@ -183,9 +183,15 @@ fn gpu_voronoi_bench() {
             "  lloyd chained ({lloyd_iters:3} iters):    {t_lloyd:9.2} ms   ({:.2} ms/iter)",
             t_lloyd / lloyd_iters as f64
         );
+        let cons_rel = (merged - expected).abs() / expected;
         println!(
-            "  conservation: sum areas {merged:.6} vs loop shoelace {expected:.6} (rel {:.2e}); overflows {overflows}",
-            (merged - expected).abs() / expected
+            "  conservation: sum areas {merged:.6} vs loop shoelace {expected:.6} (rel {cons_rel:.2e}); overflows {overflows}"
+        );
+        // Design gate 4, asserted (stage-5 review: was report-only;
+        // measured 1.85e-8 at 100k, so 1e-4 is free).
+        assert!(
+            cons_rel <= 1e-4,
+            "conservation broken: sum of cell areas off by rel {cons_rel:.3e}"
         );
         assert!(
             report.unresolved.is_empty(),

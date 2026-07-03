@@ -81,6 +81,14 @@ pub(super) const C_VERT_EPS: f32 = 4.8e-7;
 /// componentwise numerator-magnitude bound is honest under cancellation
 /// but scales like `(|A|+|B|)/sin θ`, so slack here directly multiplies
 /// the flag rate on moderate-angle plane pairs.
+///
+/// HEADROOM NOTE (stage-5 review): the `/det` in the canonical solve is
+/// only 2.5 ULP under the WGSL accuracy spec (division is NOT correctly
+/// rounded). The bound still covers it because `dmag/|det| ≥ 1` makes the
+/// `dmag·|vi|` term contribute ≥ 4u and `|num|/det ≈ |vi|` adds another
+/// ≥ 4u — ~8u available vs ~7u consumed (product roundings + the 2.5-ULP
+/// division). The headroom is thin: do NOT tighten below 4u without
+/// redoing that budget.
 pub(super) const C_NUM_EPS: f32 = 2.4e-7;
 
 /// Exact-degeneracy threshold for the 2×2 canonical solve (relative to
@@ -102,9 +110,16 @@ pub(super) const EPS_SHORT: f32 = 4e-6;
 pub(super) const VE_MAX_REL: f32 = 1e-5;
 
 /// Relative security-radius margin: the ring-sweep stop requires
-/// `lb²·(1−SECURITY_MARGIN) > 4·R²` so an R² underestimated by up to
-/// ~`SECURITY_MARGIN/2` (vertex error) can never hide a cutting plane.
-pub(super) const SECURITY_MARGIN: f32 = 3e-5;
+/// `lb²·(1−SECURITY_MARGIN) > 4·R²`. Budget (stage-5 review fix — the old
+/// 3e-5 did not cover it): on an UNFLAGGED cell every vertex may carry a
+/// certified componentwise error up to `VE_MAX_REL·h_min` (norm ≤ √2×),
+/// and R can be as small as `h_min/2`, so `4·r2` can undersell the true
+/// `4·R²` by up to `~4·√2·VE_MAX_REL ≈ 5.7e-5` relative; 1e-4 carries
+/// ~1.75× headroom. The lb leg's f32 error is ABSOLUTE (ulps of DOMAIN
+/// scale, not of lb — see `ring_lower_bound`) and cannot be covered by any
+/// relative margin; it is handled by the `grid_slack` baseline instead
+/// (`lb_abs_slack` in engine.rs).
+pub(super) const SECURITY_MARGIN: f32 = 1e-4;
 
 /// Build the shader source. Numeric constants are injected from the Rust
 /// consts so the two can never drift.
@@ -196,11 +211,12 @@ struct Params {
 // cell's traversal (the F3 graded-set instrument), high 8 bits = the
 // epsilon-filter condition mask of a NEEDS_EXACT cell.
 @group(0) @binding(17) var<storage, read_write> visited_bins: array<u32>;
-// [0] = grid-staleness slack: accumulated max seed displacement since the
-// CPU SeedGrid was built (chained Lloyd iterations move seeds without
-// rebuilding the grid — see lloyd.rs). Subtracted from the ring sweep's
-// distance lower bound; zero outside Lloyd episodes (upload_case resets),
-// where `lb - 0.0` is bitwise `lb` and behavior is identical to stage 3.
+// [0] = distance-lower-bound derate, subtracted from the ring sweep's
+// lower bound. upload_case initializes it to the ABSOLUTE f32 slack
+// `lb_abs_slack` (covers ring_lower_bound's domain-scale ulp overestimate,
+// see its comment); chained Lloyd iterations accumulate the per-iteration
+// max seed displacement on top (grid staleness — seeds move without a CPU
+// SeedGrid rebuild, see lloyd.rs).
 @group(0) @binding(18) var<storage, read> grid_slack: array<f32>;
 
 // Zero/PAD the padded face slots and scalar outputs of a cell that has no
@@ -464,9 +480,15 @@ fn process_bin(
     return 0u;
 }
 
-// Lower bound (in distance units, conservative up to ~1 ulp) on the distance
-// from p to any seed in a grid bin of Chebyshev ring r or beyond — the CPU
-// SeedGrid::ring_lower_bound formula. Ring r=0 has bound 0.
+// Lower bound (in distance units) on the distance from p to any seed in a
+// grid bin of Chebyshev ring r or beyond — the CPU SeedGrid::ring_lower_bound
+// formula. Ring r=0 has bound 0. f32 CAVEAT (stage-5 review): `cell_size` is
+// the f32 rounding of the f64 grid pitch and the products below round once
+// more, so the result can OVERESTIMATE the true bound by up to
+// ~2·2⁻²⁴·domain ABSOLUTE — ulps of DOMAIN scale, not of the result. The
+// caller subtracts `grid_slack[0]`, whose upload_case baseline
+// (`lb_abs_slack` ≥ 4·2⁻²⁴·max_domain, engine.rs) covers this with 2×
+// headroom; Lloyd staleness accumulates on top of that baseline.
 fn ring_lower_bound(p: vec2<f32>, bx: u32, by: u32, r: u32) -> f32 {
     let cs = params.cell_size;
     let rf = f32(r);
@@ -606,9 +628,9 @@ fn voronoi_cell(
     if (st == 0u) {
         for (var r = 0u; r <= r_max; r = r + 1u) {
             if (r > 0u) {
-                // Derate the lower bound by the grid-staleness slack: a seed
-                // stored in a ring-r bin may have moved up to `slack` since
-                // the grid was built (binding 18 docs; 0 outside Lloyd).
+                // Derate the lower bound by grid_slack: the absolute f32
+                // lb slack baseline + any Lloyd grid-staleness displacement
+                // (binding 18 docs).
                 let lb = ring_lower_bound(p, bx, by, r) - grid_slack[0];
                 if (lb > 0.0 && lb * lb * SECURITY_SCALE > 4.0 * r2) {
                     break;
@@ -693,8 +715,7 @@ fn voronoi_cell(
     }
 
     // Local scale h_min = distance to the nearest final bisector neighbor
-    // (drives the short-face / vertex-error filter conditions; 0 when the
-    // ring has no bisector edge — a single-seed domain, nothing to filter).
+    // (drives the short-face / vertex-error filter conditions).
     var h2_min = 0.0;
     var have_h = false;
     for (var e = 0u; e < n; e = e + 1u) {
@@ -708,7 +729,12 @@ fn voronoi_cell(
             }
         }
     }
-    var h_min = 0.0;
+    // Cells with NO bisector edge (near-single-seed regions, wall-enclosed
+    // pockets) get a domain-scale h so conditions 3/4 still run (stage-5
+    // review): their real box/segment faces are domain scale, so genuine
+    // geometry never flags, while a threshold-straddling sliver face does
+    // instead of silently bypassing the filter.
+    var h_min = min(params.domain_x, params.domain_y);
     if (have_h) {
         h_min = sqrt(h2_min);
     }
@@ -734,17 +760,16 @@ fn voronoi_cell(
         cy = cy + (v0.y + v1.y) * cross_t;
 
         let flen = distance(v0, v1);
-        if (have_h) {
-            // Filter conditions 3/4: short/untrustworthy faces and
-            // geometry-degrading vertex error bounds.
-            let vee = length(ve[e]);
-            let vew = length(ve[w]);
-            if (flen - 4.0 * (vee + vew) <= EPS_SHORT * h_min) {
-                unc = unc | 4u;
-            }
-            if (max(vee, vew) > VE_MAX_REL * h_min) {
-                unc = unc | 8u;
-            }
+        // Filter conditions 3/4: short/untrustworthy faces and
+        // geometry-degrading vertex error bounds (h_min falls back to the
+        // domain scale for bisector-free rings — see above).
+        let vee = length(ve[e]);
+        let vew = length(ve[w]);
+        if (flen - 4.0 * (vee + vew) <= EPS_SHORT * h_min) {
+            unc = unc | 4u;
+        }
+        if (max(vee, vew) > VE_MAX_REL * h_min) {
+            unc = unc | 8u;
         }
 
         let base = i * K_FACE_MAX + e;

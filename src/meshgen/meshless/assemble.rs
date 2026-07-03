@@ -310,6 +310,25 @@ fn ring_of<'a>(
     }
 }
 
+/// Test instrument (stage-5 review): number of mutual-orphan endpoint
+/// unions the pass below performed since the last reset, and the largest
+/// endpoint gap it accepted (stored as f64 bits — monotone for finite
+/// non-negative values). Assembly is sequential, so `Relaxed` suffices;
+/// the counters exist to prove in CPU-only tests that the pass (a) fires
+/// and closes the mesh on standard seed sets and (b) accepts only gaps at
+/// the fp-coincidence scales it is justified by (f32 position ulps /
+/// sub-dedup-pitch bin straddles — see the pass comment).
+pub static MUTUAL_ORPHAN_UNIONS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub static MUTUAL_ORPHAN_MAX_GAP: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Reset both mutual-orphan instruments (test setup).
+pub fn reset_mutual_orphan_stats() {
+    MUTUAL_ORPHAN_UNIONS.store(0, std::sync::atomic::Ordering::Relaxed);
+    MUTUAL_ORPHAN_MAX_GAP.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Assemble the diagram into a classic static-pipeline `Mesh` (see the
 /// module docs for the pass structure). Sequential and deterministic: hash
 /// maps are used for lookup only, never iterated. Panics on `EmptyCell` /
@@ -603,18 +622,30 @@ pub fn assemble_mesh(input: &MeshlessInput, d: &MeshlessDiagram) -> Mesh {
         // needed by the M1 GPU path): two cells that tag EACH OTHER, whose
         // edges share exactly one deduped vertex id and disagree on the
         // other by fp noise, are one face whose disagreeing endpoint was
-        // canonicalized through DIFFERENT tag pairs. The classic instance
-        // is a reflex-vertex guard pair on f32-QUANTIZED seeds: the F1
-        // equidistance (their mutual bisector passing exactly through the
-        // polyline vertex) holds only to ~1 f32 ulp (~1e-7·|x|), which
-        // exceeds the 1e-6·h dedup pitch, so one cell solves
-        // bisector ∩ seg_k and the other bisector ∩ seg_{k+1} to different
-        // bins. (On f64 seed sets the disagreement is ~1e-16 and the
-        // quantized dedup absorbs it — this pass never fires.) Union the
-        // disagreeing endpoints when they sit within 1e-3 of the shorter
-        // edge's length — same-face by any geometric standard, far above
-        // fp noise — and restart the merge loop; both edges then share
-        // both endpoint ids and pair geometrically.
+        // canonicalized through DIFFERENT tag pairs. Two measured
+        // coincidence classes (instrumented by MUTUAL_ORPHAN_* above,
+        // tests/meshless_orphan_cpu_test.rs):
+        //  - reflex/curved-wall guard pairs on f32-QUANTIZED seeds, where
+        //    the F1 equidistance holds only to ~1 f32 position ulp
+        //    (~1e-7·|x|), so one cell solves bisector ∩ seg_k and the
+        //    other bisector ∩ seg_{k+1} to different bins;
+        //  - sub-dedup-pitch BIN STRADDLES on either precision (measured on
+        //    the f64 obstacle circle: gaps ~1.7e-8 < the 1e-6·h pitch —
+        //    within the dedup's own tolerance, but the two solves round to
+        //    adjacent quantize bins). NOTE the stage-3 claim that this pass
+        //    "never fires on f64" was WRONG (stage-5 instrumentation);
+        //    f64 firings are exclusively this sub-pitch class. Union the
+        // disagreeing endpoints when they sit BOTH within 1e-3 of the
+        // shorter edge's length AND within the f32 noise cap (64 ulps of
+        // domain scale — the disagreement is a few position ulps through
+        // the intersection solve; stage-5 review tightened this from the
+        // relative condition alone, whose 1e-3·edge window could weld a
+        // genuine micro-face of a third cell). Then restart the merge
+        // loop; both edges share both endpoint ids and pair geometrically.
+        let noise_sq = {
+            let s = 64.0 * 2f64.powi(-24) * input.domain.x.max(input.domain.y);
+            s * s
+        };
         let mut any_pair_union = false;
         for &(c, e) in &orphans {
             let PlaneTag::Bisector(j) = rings[c as usize].1[e as usize] else {
@@ -648,7 +679,10 @@ pub fn assemble_mesh(input: &MeshlessInput, d: &MeshlessDiagram) -> Mesh {
                 let dy = vxy[y][1] - vxy[x][1];
                 let d2 = dx * dx + dy * dy;
                 let len2 = edge_len_sq(c, e).min(edge_len_sq(c2, e2));
-                if d2 <= 1e-6 * len2 && dsu.find(x) != dsu.find(y) {
+                if d2 <= (1e-6 * len2).min(noise_sq) && dsu.find(x) != dsu.find(y) {
+                    use std::sync::atomic::Ordering::Relaxed;
+                    MUTUAL_ORPHAN_UNIONS.fetch_add(1, Relaxed);
+                    MUTUAL_ORPHAN_MAX_GAP.fetch_max(d2.sqrt().to_bits(), Relaxed);
                     dsu.union(x, y);
                     any_pair_union = true;
                 }

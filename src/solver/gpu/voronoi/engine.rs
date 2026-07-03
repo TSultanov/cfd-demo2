@@ -49,10 +49,16 @@ pub fn boundary_spec_f32(spec: &BoundarySpec) -> BoundarySpec {
 
 const WORKGROUP_SIZE: u32 = 64;
 
-/// Reciprocity enforcement is a fixed-point loop (each round recomputes the
-/// disagreeing endpoints in f64 and never revisits them); real chains die in
-/// 1-2 rounds, so exceeding this bound means the invariant is broken.
-const RECIP_MAX_ROUNDS: u32 = 8;
+/// Absolute derate of the kernel's ring-sweep distance lower bound, in
+/// domain units (stage-5 review fix): the WGSL `ring_lower_bound` carries
+/// the f32 rounding of `cell_size` times the bin index plus one product
+/// rounding — up to ~2·2⁻²⁴·domain ABSOLUTE overestimate regardless of how
+/// small the bound itself is, which no relative margin can cover.
+/// `upload_case` writes this as the `b_slack` baseline (2× headroom); the
+/// Lloyd grid-staleness accumulation adds on top of it.
+fn lb_abs_slack(domain: &Vector2<f64>) -> f32 {
+    (4.0 * domain.x.max(domain.y) * 2f64.powi(-24)) as f32
+}
 
 /// A one-sided face is a reciprocity VIOLATION iff its length exceeds
 /// `REAL_FACE_REL * |p_j - p_i|`; shorter one-sided faces are eps-scale
@@ -223,10 +229,11 @@ pub struct GpuVoronoiEngine {
     b_seed_canon: wgpu::Buffer,
     /// Per-seed (seg_prev, seg_next) u32 pair; `SEG_NONE` = Interior.
     pub(super) b_seed_kind: wgpu::Buffer,
-    /// `[0]` = grid-staleness slack (absolute distance): the accumulated
-    /// max seed displacement since the CPU `SeedGrid` was built. Zeroed by
-    /// `upload_case`, grown by the Lloyd reduce, subtracted from the ring
-    /// sweep's lower bound (see lloyd.rs module docs).
+    /// `[0]` = ring-sweep lower-bound derate (absolute distance): the
+    /// `lb_abs_slack` f32 baseline plus the accumulated max seed
+    /// displacement since the CPU `SeedGrid` was built. Reset to the
+    /// baseline by `upload_case`, grown by the Lloyd reduce, subtracted
+    /// from the ring sweep's lower bound (see lloyd.rs module docs).
     pub(super) b_slack: wgpu::Buffer,
     b_grid_offsets: Option<wgpu::Buffer>,
     b_grid_ids: Option<wgpu::Buffer>,
@@ -240,6 +247,16 @@ pub struct GpuVoronoiEngine {
 
     /// Lloyd-stage pipelines + buffers (lloyd.rs).
     pub(super) lloyd: LloydResources,
+
+    /// A regen has been encoded since the last `upload_case` — Lloyd
+    /// updates consume cell outputs, so this must be true before
+    /// `encode_lloyd_update` (stage-5 review: was a doc-only contract).
+    pub(super) outputs_ready: std::cell::Cell<bool>,
+    /// A chained-Lloyd episode moved seeds on the GPU: the CPU mirrors
+    /// (`pts`/`grid`/`canon`) are STALE, so `resolve_flagged`/`read_diagram`
+    /// must not run until `refresh_after_lloyd` + a fresh regen (stage-5
+    /// review: was a doc-only contract).
+    pub(super) lloyd_dirty: std::cell::Cell<bool>,
 
     pub outputs: VoronoiCellOutputs,
 }
@@ -406,6 +423,8 @@ impl GpuVoronoiEngine {
             b_segments: None,
             b_seg_tags: None,
             lloyd,
+            outputs_ready: std::cell::Cell::new(false),
+            lloyd_dirty: std::cell::Cell::new(false),
             outputs,
         }
     }
@@ -471,6 +490,20 @@ impl GpuVoronoiEngine {
         let pts: Vec<Point2<f64>> = (0..n)
             .map(|i| Point2::new(seeds_xy[2 * i] as f64, seeds_xy[2 * i + 1] as f64))
             .collect();
+        // Out-of-domain seeds void SeedGrid's ring-lower-bound contract
+        // (they clamp into an edge bin) — the documented failure mode of a
+        // Lloyd `omega > 1` overshoot re-entering through
+        // `refresh_after_lloyd`. Fail loudly here (stage-5 review).
+        for (i, p) in pts.iter().enumerate() {
+            assert!(
+                (0.0..=self.domain.x).contains(&p.x) && (0.0..=self.domain.y).contains(&p.y),
+                "seed {i} ({}, {}) outside the domain [0,{}]x[0,{}]",
+                p.x,
+                p.y,
+                self.domain.x,
+                self.domain.y
+            );
+        }
 
         let grid = SeedGrid::build(&pts, self.domain);
 
@@ -505,6 +538,17 @@ impl GpuVoronoiEngine {
         let mut seg_tags: Vec<u32> = Vec::with_capacity(nseg.max(1));
         for s in 0..nseg {
             let (a, b) = spec.segment_points(s as u32);
+            // Re-assert the BoundaryLoop::from_points degeneracy invariant
+            // AFTER f32 rounding: `boundary_spec_f32` builds loops as
+            // struct literals, so a segment collapsing within an f32 ulp
+            // would otherwise reach the kernel and emit NaN normals
+            // (stage-5 review).
+            let len = (b - a).norm();
+            assert!(
+                len > self.tol.edge_len_eps,
+                "boundary segment {s} degenerate after f32 rounding \
+                 (length {len:.3e} <= edge_len_eps)"
+            );
             segs.push([a.x as f32, a.y as f32, b.x as f32, b.y as f32]);
             seg_tags.push(spec.segment_tag(s as u32).bc_table_index() as u32);
         }
@@ -555,9 +599,15 @@ impl GpuVoronoiEngine {
         };
         queue.write_buffer(&self.b_params, 0, bytemuck::bytes_of(&params));
 
-        // Fresh grid ⇒ zero staleness slack; refresh the Lloyd seed-count
-        // params (density config in `self.lloyd.params` is preserved).
-        queue.write_buffer(&self.b_slack, 0, bytemuck::bytes_of(&0.0f32));
+        // Fresh grid ⇒ reset the lower-bound derate to the absolute f32
+        // baseline (see `lb_abs_slack`; Lloyd accumulates staleness on top);
+        // refresh the Lloyd seed-count params (density config in
+        // `self.lloyd.params` is preserved).
+        queue.write_buffer(
+            &self.b_slack,
+            0,
+            bytemuck::bytes_of(&lb_abs_slack(&self.domain)),
+        );
         self.lloyd.params.n_seeds = n as u32;
         self.lloyd.params.num_groups = (n as u32).div_ceil(64).max(1);
         queue.write_buffer(
@@ -603,6 +653,8 @@ impl GpuVoronoiEngine {
         self.b_segments = Some(b_segments);
         self.b_seg_tags = Some(b_seg_tags);
         self.bind_group = Some(bind_group);
+        self.outputs_ready.set(false);
+        self.lloyd_dirty.set(false);
         self.n_seeds = n as u32;
         self.pts = pts;
         self.grid = Some(grid);
@@ -623,6 +675,7 @@ impl GpuVoronoiEngine {
             .bind_group
             .as_ref()
             .expect("upload_seeds must be called before encode_regen");
+        self.outputs_ready.set(true);
         // Reset the flag-append cursor.
         enc.clear_buffer(&self.outputs.b_flagged, 0, Some(4));
         let workgroups = n_seeds.div_ceil(WORKGROUP_SIZE).max(1);
@@ -879,6 +932,15 @@ impl GpuVoronoiEngine {
         cache: &StagingBufferCache,
     ) -> VoronoiResolveReport {
         assert!(self.n_seeds > 0, "upload_seeds must run before resolve_flagged");
+        assert!(
+            self.outputs_ready.get(),
+            "run a regen before resolve_flagged (outputs are undefined)"
+        );
+        assert!(
+            !self.lloyd_dirty.get(),
+            "outputs come from a chained-Lloyd episode with stale CPU mirrors: \
+             call refresh_after_lloyd + a fresh regen before resolve_flagged"
+        );
         let grid = self.grid.as_ref().expect("upload_seeds stores the seed grid");
         let n = self.n_seeds as usize;
         let k = K_FACE_MAX;
@@ -897,6 +959,7 @@ impl GpuVoronoiEngine {
         let mut patched_set: HashSet<u32> = HashSet::new();
         let mut patched: Vec<u32> = Vec::new();
         let mut unresolved: Vec<u32> = Vec::new();
+        let mut unresolved_set: HashSet<u32> = HashSet::new();
         for &i in &flagged {
             let out = compute_cell(&input, grid, i as usize);
             match self.cell_patch(i, &out) {
@@ -905,7 +968,10 @@ impl GpuVoronoiEngine {
                     patched_set.insert(i);
                     patched.push(i);
                 }
-                None => unresolved.push(i),
+                None => {
+                    unresolved.push(i);
+                    unresolved_set.insert(i);
+                }
             }
         }
 
@@ -972,7 +1038,7 @@ impl GpuVoronoiEngine {
                     sub_eps += 1;
                     continue;
                 }
-                if unresolved.contains(&a) || unresolved.contains(&b) {
+                if unresolved_set.contains(&a) || unresolved_set.contains(&b) {
                     continue; // already reported as unfixable
                 }
                 let a_done = patched_set.contains(&a);
@@ -997,9 +1063,18 @@ impl GpuVoronoiEngine {
             viol.sort_unstable();
             viol.dedup();
             rounds += 1;
+            // Progress is structural: every id in `viol` is outside both
+            // `patched_set` and `unresolved_set`, and the round below moves
+            // each into one of them, so `patched_set ∪ unresolved_set`
+            // strictly grows and the loop is bounded by n. A fresh f64
+            // patch CAN legitimately expose a new one-sided face against a
+            // yet-unpatched neighbor (chains advance one adjacency hop per
+            // round — stage-5 review: a fixed small bound was a latent
+            // release panic on long chains).
             assert!(
-                rounds <= RECIP_MAX_ROUNDS,
-                "meshless reciprocity enforcement exceeded {RECIP_MAX_ROUNDS} rounds"
+                rounds <= self.n_seeds,
+                "meshless reciprocity enforcement did not terminate in n rounds — \
+                 progress invariant broken"
             );
             for &i in &viol {
                 let out = compute_cell(&input, grid, i as usize);
@@ -1016,7 +1091,10 @@ impl GpuVoronoiEngine {
                         patched.push(i);
                         reciprocity_flagged.push(i);
                     }
-                    None => unresolved.push(i),
+                    None => {
+                        unresolved.push(i);
+                        unresolved_set.insert(i);
+                    }
                 }
             }
         }
@@ -1044,6 +1122,11 @@ impl GpuVoronoiEngine {
     /// only the degenerate-pair fallback), so f32 storage does not limit
     /// the assembled mesh's precision.
     pub fn read_diagram(&self, ctx: &GpuContext, cache: &StagingBufferCache) -> MeshlessDiagram {
+        assert!(
+            !self.lloyd_dirty.get(),
+            "outputs come from a chained-Lloyd episode with stale CPU mirrors: \
+             call refresh_after_lloyd + a fresh regen before read_diagram"
+        );
         let cells = self.read_cells(ctx, cache);
         self.cells_to_diagram(&cells)
     }

@@ -820,6 +820,33 @@ fn gpu_voronoi_geometry_nozzle() {
     );
 }
 
+/// Design-scale boundary gate (stage-5 review: design §8.3 gate 1 names
+/// obstacle 100k/300k, but every boundary case above runs at ~600-1100
+/// seeds — the flag-window over-read, wall-strip fallback volume and graded
+/// ring sweep were untested at scale). The FULL stage-3 protocol (oracle
+/// parity, zero-tolerance, budgets, byte stability, fallback, reciprocity,
+/// end-to-end mesh + equivalence) at ~100k seeds. dev-tests-gated: run in
+/// release (`cargo test --release --features "meshgen dev-tests"`).
+#[cfg(feature = "dev-tests")]
+#[test]
+fn gpu_voronoi_geometry_obstacle_100k() {
+    // h chosen via the measured Poisson density ≈ 0.716 seeds/h² on this
+    // geometry (bench calibration) to land near 100k.
+    run_geometry_case(
+        "obstacle-100k/h=0.0046",
+        &ChannelWithObstacle {
+            length: 3.0,
+            height: 1.0,
+            obstacle_center: Point2::new(1.0, 0.51),
+            obstacle_radius: 0.1,
+        },
+        Vector2::new(3.0, 1.0),
+        0.0046,
+        0.0046,
+        true,
+    );
+}
+
 /// Graded nozzle seed set (review F3): min/max cell size 0.02/0.08 (h ratio
 /// 4×, density ratio 16×). The CPU-built `SeedGrid` sizes bins by mean
 /// occupancy, so coarse-region cells must sweep more rings before the

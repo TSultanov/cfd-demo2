@@ -35,8 +35,9 @@
 //! displacement into `b_slack[0]`, and `voronoi_cell` derates its stop to
 //! `(lb − slack)² · SECURITY_SCALE > 4R²` — no readback, provably
 //! conservative (per-seed total displacement ≤ sum of per-iteration maxima).
-//! `upload_case` resets the slack to zero (fresh grid), so the non-Lloyd
-//! path evaluates `lb − 0.0` — bitwise identical to stage 3. The coalescing
+//! `upload_case` resets the slack to the `lb_abs_slack` baseline (fresh
+//! grid; the baseline covers the kernel `ring_lower_bound`'s absolute f32
+//! rounding — see engine.rs, stage-5 review). The coalescing
 //! table is also held fixed across chained iterations: a coalesced duplicate
 //! outputs `EMPTY_CELL` (centroid 0 ⇒ parked seed) and its planes stay
 //! skipped; `refresh_after_lloyd` re-derives grid + coalescing from the
@@ -354,6 +355,15 @@ impl GpuVoronoiEngine {
     /// the grid-staleness slack). Requires cell outputs from a prior regen.
     pub fn encode_lloyd_update(&self, enc: &mut wgpu::CommandEncoder) {
         assert!(self.n_seeds > 0, "upload_case must run before Lloyd");
+        assert!(
+            self.outputs_ready.get(),
+            "encode_lloyd_update consumes cell outputs: encode/run a regen \
+             after upload_case before the first Lloyd iteration"
+        );
+        // CPU mirrors (pts/grid/canon) go stale the moment seeds move on
+        // the GPU; resolve_flagged/read_diagram assert on this flag until
+        // refresh_after_lloyd re-uploads (stage-5 review).
+        self.lloyd_dirty.set(true);
         let n_groups = self.n_seeds.div_ceil(WORKGROUP_SIZE).max(1);
         debug_assert_eq!(n_groups, self.lloyd.params.num_groups);
         let (ux, uy) = dispatch_2d(n_groups);

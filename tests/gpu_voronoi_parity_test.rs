@@ -450,6 +450,16 @@ fn gpu_voronoi_interior_parity_30k() {
     run_case("30k", seeds, DOMAIN.y / 123.0, true, true);
 }
 
+/// Design-scale interior gate (stage-5 review: design §8.3 gate 1 commits
+/// to parity at bench scale, previously only run to 30k). Full stage-2
+/// protocol at ~300k seeds. dev-tests-gated: run in release.
+#[cfg(feature = "dev-tests")]
+#[test]
+fn gpu_voronoi_interior_parity_300k() {
+    let seeds = jittered_seeds(775, 388, 0.8, 0xCFD2_0300);
+    run_case("300k", seeds, DOMAIN.y / 388.0, true, true);
+}
+
 /// Near-cocircular lattices (M0 fuzz class (c) analog): a 64×32 lattice on
 /// an exactly f32-representable pitch (2/64 = 2⁻⁵), jitter swept from
 /// Poisson-like down to EXACTLY cocircular (every interior Voronoi vertex

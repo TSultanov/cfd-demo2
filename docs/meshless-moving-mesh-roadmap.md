@@ -156,6 +156,42 @@ per-call bind groups, own submissions).
 - **Perf:** ~2-5 ms full regen @300k discrete GPU (~10-40 ms integrated).
 - **Standalone value:** GPU mesh generation for large meshes; GPU Lloyd for CVT.
 
+**M1 as-shipped notes (stage-5 review record):**
+
+- *Traversal-order deviation:* the "CPU engine implements the same traversal order" clause
+  above was NOT kept. The kernel streams Chebyshev grid rings (CPU `for_each_ring_bin` order,
+  in-bin ids ascending) while M0 clips in kNN ascending-(d², id) order. Rationale
+  (`src/solver/gpu/voronoi/mod.rs`): the clipped polygon is order-independent up to f32
+  rounding and every parity gate compares eps_face-filtered sets, never bits, so matching the
+  CPU order buys nothing for triage while costing a k-array + register sort + a "k too small"
+  failure mode. Decision made at stage 1 and kept for all M1 stages.
+- *Flag budget carve-out:* the ≤2e-3 pre-Lloyd budget is enforced on the BULK interior;
+  the wall strip (boundary seeds + their interior neighbors) runs under a defensive 35% cap
+  because M0 `boundary_seeds` emits same-segment reflex-guard pairs 1e-3·h…1e-2·h apart —
+  knife-edge twins by construction. Measured strip rates at h=0.05: rect 1.8%, obstacle 1.9%,
+  backstep 2.5%, nozzle 27.7%, graded nozzle 28.7%; at design scale (obstacle h=0.0046,
+  ~89k seeds) the strip rate drops to 0 and the global rate is 1.2e-4. Follow-up lever (M0
+  arc): collapse/equalize same-segment guard pairs in `boundary_seeds`, then ratchet the cap.
+- *Perf baseline (Apple-Silicon integrated adapter, Metal; discrete-GPU gate-5 numbers not
+  measurable on this machine — the design estimate is ×4-8 between the classes):*
+
+  | phase | ~88k seeds | ~264k seeds |
+  |---|---|---|
+  | SeedGrid::build (CPU) | 0.22 ms | 0.65 ms |
+  | upload_case (grid+canon+writes) | 2.6 ms | 9.0 ms |
+  | regen kernel (submit→poll, best) | 4.6 ms | 12.1 ms |
+  | read_cells full validation readback | 24 ms | 43 ms |
+  | resolve_flagged (f64 + reciprocity readback) | 39 ms (7 flagged) | 113 ms (38 flagged) |
+  | Lloyd chained, per iteration | 5.5 ms | 17.2 ms |
+
+  Conservation (gate 4) is asserted ≤1e-4 in the bench (measured ~1.9e-8). The stage-2 commit
+  message's "30k regen 1.5 ms" is superseded: after stages 3-5 (boundary clipping, slack
+  read, diagnostics writes, derated security stop) the 30k regen is ~2.7 ms best.
+- *Assembler note:* the mutual-orphan endpoint reconciliation added for M1 also fires on pure
+  f64 M0 inputs (4 sites on the obstacle circle, gaps ~1.7e-8 — sub-dedup-pitch quantize-bin
+  straddles, welding only what the dedup already targets). Instrumented + gated CPU-only by
+  `tests/meshless_orphan_cpu_test.rs`.
+
 ### M2 — Solver mesh-refresh seam  [Track B — start immediately]
 
 `UnifiedSolver::refresh_mesh(&Mesh, MeshRefreshLevel::{Geometry,Topology})` + driver

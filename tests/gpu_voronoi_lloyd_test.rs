@@ -12,7 +12,7 @@
 //! 2. Fixed seeds bit-unmoved: `SeedKind::Boundary` seeds (kind-keyed,
 //!    like M0) and `SEED_FLAG_FIXED`-pinned interior seeds keep their f32
 //!    bit patterns through the whole chained relaxation.
-//! 3. Flag-rate budget after 30 Lloyd iterations ≤ 5e-3 (design gate 2:
+//! 3. Flag-rate budget after 50 Lloyd iterations ≤ 5e-3 (design gate 2:
 //!    the near-hex/cocircular stress) on a 30k interior set, zero
 //!    overflow statuses; the rate is printed.
 //! 4. Max-displacement reduce validated against a CPU recompute of the
@@ -300,12 +300,13 @@ fn gpu_lloyd_graded_nozzle_matches_cpu() {
     );
 }
 
-/// Design gate 2 stress: 30 Lloyd iterations drive a jittered-lattice 30k
+/// Design gate 2 stress: 50 Lloyd iterations (the design §8.3 number —
+/// stage-5 review restored it from 30) drive a jittered-lattice 30k
 /// interior set toward the near-hex (near-cocircular everywhere) CVT — the
 /// epsilon filter's worst case. Budget: flag rate ≤ 5e-3 on the fresh-grid
 /// final regen, zero overflows.
 #[test]
-fn gpu_lloyd_flag_rate_after_30_iters_30k() {
+fn gpu_lloyd_flag_rate_after_50_iters_30k() {
     let Some(ctx) = gpu_context() else { return };
     let domain = Vector2::new(2.0, 1.0);
     let (nx, ny) = (245usize, 123usize);
@@ -331,7 +332,7 @@ fn gpu_lloyd_flag_rate_after_30_iters_30k() {
     engine.upload_seeds(&ctx.device, &ctx.queue, &seeds_f32, &flags);
     engine.set_lloyd_density(&ctx.device, &ctx.queue, 1, 1, 4.0, 1.0, &|_| sy);
     poll(&ctx, engine.run_regen(&ctx.device, &ctx.queue));
-    poll(&ctx, engine.run_lloyd_iterations(&ctx.device, &ctx.queue, 30));
+    poll(&ctx, engine.run_lloyd_iterations(&ctx.device, &ctx.queue, 50));
 
     let cache = StagingBufferCache::default();
     // Flag rate of the LAST chained (stale-grid + slack) regen, reported
@@ -363,7 +364,7 @@ fn gpu_lloyd_flag_rate_after_30_iters_30k() {
         .filter(|&&s| s == status::VERT_OVERFLOW || s == status::FACE_OVERFLOW)
         .count();
     println!(
-        "[lloyd-30k] n={n} post-30-iters flag rate: {rate:.3e} ({} cells; \
+        "[lloyd-30k] n={n} post-50-iters flag rate: {rate:.3e} ({} cells; \
          last chained regen {stale_rate:.3e} / {}) overflows={overflows}",
         cells.flagged.len(),
         stale.flagged.len()
@@ -472,6 +473,16 @@ fn gpu_lloyd_reduce_convergence_and_pinning() {
     assert!(
         post_rel < 0.02,
         "converged CVT moved {post_rel:.3e} h on the next iteration"
+    );
+    // Decay, not tautology (stage-5 review): 20 further iterations must not
+    // climb back over the convergence tolerance — a 'converged' CVT that
+    // keeps drifting would pass the one-shot check above but fail here.
+    poll(&ctx, engine.run_lloyd_iterations(&ctx.device, &ctx.queue, 20));
+    let (rel20, _) = engine.read_max_disp(&ctx, &cache);
+    println!("[lloyd-reduce] +20 iterations after convergence: rel {rel20:.3e}");
+    assert!(
+        rel20 < 0.01,
+        "converged CVT drifted back above tol after 20 more iterations ({rel20:.3e})"
     );
 
     // Pinned interior seeds bit-unmoved through everything.

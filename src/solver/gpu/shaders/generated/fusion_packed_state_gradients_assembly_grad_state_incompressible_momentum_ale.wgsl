@@ -37,11 +37,13 @@ struct Constants {
 @group(0) @binding(6) var<storage, read> cell_face_offsets: array<u32>;
 @group(0) @binding(7) var<storage, read> cell_faces: array<u32>;
 @group(0) @binding(8) var<storage, read> mesh_fluxes: array<f32>;
+@group(0) @binding(9) var<storage, read> cell_vols_old: array<f32>;
 @group(0) @binding(10) var<storage, read> cell_face_matrix_indices: array<u32>;
 @group(0) @binding(11) var<storage, read> diagonal_indices: array<u32>;
 @group(0) @binding(12) var<storage, read> face_boundary: array<u32>;
 @group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
 @group(0) @binding(14) var<storage, read> face_wrap_shift: array<Vector2>;
+@group(0) @binding(15) var<storage, read> cell_vols_old_old: array<f32>;
 @group(1) @binding(0) var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) var<storage, read> state_old: array<f32>;
 @group(1) @binding(2) var<storage, read> state_old_old: array<f32>;
@@ -159,29 +161,39 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let k1_face_metric_scale = max(1.0, k1_perimeter_sum * k1_perimeter_sum / max(16.0 * k1_vol, 0.000000000001));
     let k1_dual_time_scale = k1_global_dual_time_scale * k1_face_metric_scale;
+    let k1_vol_old = cell_vols_old[idx];
+    let k1_vol_old_old = cell_vols_old_old[idx];
+    let k1_ale_vol_ratio_n = select(k1_vol_old / k1_vol, 1.0, k1_vol_old == k1_vol);
+    let k1_ale_vol_ratio_nm1 = select(k1_vol_old_old / k1_vol, 1.0, k1_vol_old_old == k1_vol);
+    let k1_ale_dvdt_scl = (k1_vol - k1_vol_old) / constants.dt;
+    var k1_ale_dvdt_ddt: f32 = k1_ale_dvdt_scl;
+    if (constants.time_scheme == 1u) {
+        let k1_r_ale = constants.dt / constants.dt_old;
+        k1_ale_dvdt_ddt = ((k1_r_ale * 2.0 + 1.0) / (k1_r_ale + 1.0) * (k1_vol - k1_vol_old) - k1_r_ale * k1_r_ale / (k1_r_ale + 1.0) * (k1_vol_old - k1_vol_old_old)) / constants.dt;
+    }
     k1_diag_0 += k1_vol * constants.density / constants.dt;
-    k1_rhs_0 += k1_vol * constants.density / constants.dt * state_old[idx * 8u + 0u];
+    k1_rhs_0 += k1_vol * constants.density / constants.dt * k1_ale_vol_ratio_n * state_old[idx * 8u + 0u];
     if (constants.time_scheme == 1u) {
         let k1_r = constants.dt / constants.dt_old;
         let k1_diag_bdf2 = k1_vol * constants.density / constants.dt * (k1_r * 2.0 + 1.0) / (k1_r + 1.0);
         let k1_factor_n = k1_r + 1.0;
         let k1_factor_nm1 = k1_r * k1_r / (k1_r + 1.0);
         k1_diag_0 = k1_diag_0 - k1_vol * constants.density / constants.dt + k1_diag_bdf2;
-        k1_rhs_0 = k1_rhs_0 - k1_vol * constants.density / constants.dt * state_old[idx * 8u + 0u] + k1_vol * constants.density / constants.dt * (k1_factor_n * state_old[idx * 8u + 0u] - k1_factor_nm1 * state_old_old[idx * 8u + 0u]);
+        k1_rhs_0 = k1_rhs_0 - k1_vol * constants.density / constants.dt * k1_ale_vol_ratio_n * state_old[idx * 8u + 0u] + k1_vol * constants.density / constants.dt * (k1_factor_n * k1_ale_vol_ratio_n * state_old[idx * 8u + 0u] - k1_factor_nm1 * k1_ale_vol_ratio_nm1 * state_old_old[idx * 8u + 0u]);
     }
     if (constants.dtau > 0.0) {
         k1_diag_0 += constants.density * k1_dual_time_scale;
         k1_rhs_0 += constants.density * k1_dual_time_scale * state_iter[idx * 8u + 0u];
     }
     k1_diag_1 += k1_vol * constants.density / constants.dt;
-    k1_rhs_1 += k1_vol * constants.density / constants.dt * state_old[idx * 8u + 1u];
+    k1_rhs_1 += k1_vol * constants.density / constants.dt * k1_ale_vol_ratio_n * state_old[idx * 8u + 1u];
     if (constants.time_scheme == 1u) {
         let k1_r = constants.dt / constants.dt_old;
         let k1_diag_bdf2 = k1_vol * constants.density / constants.dt * (k1_r * 2.0 + 1.0) / (k1_r + 1.0);
         let k1_factor_n = k1_r + 1.0;
         let k1_factor_nm1 = k1_r * k1_r / (k1_r + 1.0);
         k1_diag_1 = k1_diag_1 - k1_vol * constants.density / constants.dt + k1_diag_bdf2;
-        k1_rhs_1 = k1_rhs_1 - k1_vol * constants.density / constants.dt * state_old[idx * 8u + 1u] + k1_vol * constants.density / constants.dt * (k1_factor_n * state_old[idx * 8u + 1u] - k1_factor_nm1 * state_old_old[idx * 8u + 1u]);
+        k1_rhs_1 = k1_rhs_1 - k1_vol * constants.density / constants.dt * k1_ale_vol_ratio_n * state_old[idx * 8u + 1u] + k1_vol * constants.density / constants.dt * (k1_factor_n * k1_ale_vol_ratio_n * state_old[idx * 8u + 1u] - k1_factor_nm1 * k1_ale_vol_ratio_nm1 * state_old_old[idx * 8u + 1u]);
     }
     if (constants.dtau > 0.0) {
         k1_diag_1 += constants.density * k1_dual_time_scale;
@@ -381,8 +393,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         k1_rhs_2 -= k1_phi_2;
     }
+    k1_bounded_sum_phi_0 += constants.density * k1_ale_dvdt_ddt;
     k1_diag_0 -= k1_bounded_sum_phi_0;
+    k1_bounded_sum_phi_1 += constants.density * k1_ale_dvdt_ddt;
     k1_diag_1 -= k1_bounded_sum_phi_1;
+    k1_rhs_2 -= constants.density * k1_ale_dvdt_scl;
     matrix_values[k1_start_row_0 + k1_diag_rank * 3u + 0u] += k1_diag_0;
     rhs[idx * 3u + 0u] = k1_rhs_0;
     matrix_values[k1_start_row_1 + k1_diag_rank * 3u + 1u] += k1_diag_1;

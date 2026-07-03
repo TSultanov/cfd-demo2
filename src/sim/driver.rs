@@ -689,6 +689,20 @@ impl SolverDriver {
         Ok(())
     }
 
+    /// ALE step entry (passthrough to [`UnifiedSolver::begin_ale_step`]:
+    /// rotate volume history → upload new geometry → upload closed mesh
+    /// fluxes), then recompute the driver's mesh-derived `min_cell_size`
+    /// (the adaptive-dt length scale). Call once per step, before `step()`.
+    pub fn begin_ale_step(&mut self, mesh: &Mesh, mesh_fluxes: &[f32]) -> Result<(), String> {
+        self.solver.begin_ale_step(mesh, mesh_fluxes)?;
+        self.min_cell_size = mesh
+            .cell_vol
+            .iter()
+            .map(|&v| v.sqrt())
+            .fold(f64::INFINITY, f64::min);
+        Ok(())
+    }
+
     /// Whether the model is density-based compressible (carries the full
     /// conservative state).
     pub fn compressible(&self) -> bool {

@@ -62,7 +62,7 @@ fn channel_mesh() -> Mesh {
 
 /// Fixed-dt, fixed-outer-iteration knobs (adaptive dt / auto-converge off) so
 /// both models execute the identical step sequence.
-fn test_params() -> RuntimeParams {
+fn test_params_with(time_scheme: TimeScheme) -> RuntimeParams {
     RuntimeParams {
         adaptive_dt: false,
         target_cfl: 0.9,
@@ -73,7 +73,7 @@ fn test_params() -> RuntimeParams {
         // A high-order limited scheme so the deferred-correction path (which
         // multiplies by phi) is exercised, not just plain upwind.
         advection_scheme: Scheme::SecondOrderUpwindVanLeer,
-        time_scheme: TimeScheme::BDF2,
+        time_scheme,
         preconditioner: PreconditionerType::Jacobi,
         outer_iters: 8,
         outer_auto_converge: false,
@@ -91,6 +91,10 @@ fn test_params() -> RuntimeParams {
         pressure_inlet: false,
         inlet_pressure: 0.0,
     }
+}
+
+fn test_params() -> RuntimeParams {
+    test_params_with(TimeScheme::BDF2)
 }
 
 fn build_driver(mesh: &Mesh, model: ModelSpec) -> SolverDriver {
@@ -185,30 +189,19 @@ fn ale_zero_flux_byte_identical_cpu_transpiled() {
     assert_zero_flux_equivalence("transpiled");
 }
 
-/// GPU leg: primarily a *binding-resolution* gate — the ALE kernels bind
-/// `mesh_fluxes` (group 0 / binding 8) through
-/// `MeshResources::buffer_for_binding_name`, and a resolution gap would fail
-/// pipeline/bind-group creation right here, long before M3.2 uploads real
-/// fluxes. Same-device determinism + the IEEE `x - rho*0.0` identity make the
-/// exact-bit comparison hold on GPU too (fp contraction of `fma(-rho, 0, x)`
-/// is still `x`); `CFD2_ALLOW_GPU_BYTE_WAIVE=1` downgrades to <1e-6 (the
-/// driver-update escape hatch, mirroring tests/mesh_refresh_identity_test.rs).
-/// Skips when no GPU adapter is available.
-#[test]
-fn ale_zero_flux_byte_identical_gpu() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    std::env::remove_var("CFD2_BACKEND");
-
+/// Shared GPU protocol: run static + ALE side by side, return
+/// (differing-slot count, max abs diff) after `STEPS` steps.
+fn run_gpu_pair(time_scheme: TimeScheme) -> Option<(usize, f32)> {
     let ctx = match pollster::block_on(cfd2::solver::gpu::context::GpuContext::new(None, None)) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[ale-zero-flux] no GPU adapter ({e}); skipping GPU byte gate");
-            return;
+            eprintln!("[ale-zero-flux] no GPU adapter ({e}); skipping GPU gate");
+            return None;
         }
     };
 
     let mesh = channel_mesh();
-    let params = test_params();
+    let params = test_params_with(time_scheme);
     let n = mesh.num_cells();
     let build = |model: ModelSpec| -> SolverDriver {
         let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
@@ -247,20 +240,67 @@ fn ale_zero_flux_byte_identical_gpu() {
         .zip(&bits_ale)
         .map(|(&a, &b)| (f32::from_bits(a) - f32::from_bits(b)).abs())
         .fold(0.0f32, f32::max);
+    let ndiff = bits_base.iter().zip(&bits_ale).filter(|(a, b)| a != b).count();
+    Some((ndiff, maxd))
+}
+
+/// GPU leg, Euler: BITWISE. Also the *binding-resolution* gate — the ALE
+/// kernels bind `mesh_fluxes`/`cell_vols_old{,_old}` (group 0 / bindings
+/// 8, 9, 15) through `MeshResources::buffer_for_binding_name`, and a
+/// resolution gap would fail pipeline/bind-group creation right here, long
+/// before real fluxes are uploaded. Under Euler every ALE delta is an IEEE
+/// identity at zero fluxes / equal volume history (`x - rho*0`, `x/x` via
+/// the select guard, `(v - v)/dt`), and fp contraction cannot break any of
+/// them, so the exact-bit comparison holds on the GPU too.
+/// `CFD2_ALLOW_GPU_BYTE_WAIVE=1` downgrades to <1e-6 (driver-update escape
+/// hatch, mirroring tests/mesh_refresh_identity_test.rs). Skips without a
+/// GPU adapter.
+#[test]
+fn ale_zero_flux_byte_identical_gpu_euler() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    std::env::remove_var("CFD2_BACKEND");
+    let Some((ndiff, maxd)) = run_gpu_pair(TimeScheme::Euler) else {
+        return;
+    };
     if std::env::var("CFD2_ALLOW_GPU_BYTE_WAIVE").as_deref() == Ok("1") {
         eprintln!(
             "[ale-zero-flux] *** GPU BYTE GATE WAIVED: comparing at <1e-6; max|diff| = {maxd:.3e} ***"
         );
         assert!(maxd < 1e-6, "waived GPU comparison exceeded 1e-6: {maxd:.3e}");
     } else {
-        let ndiff = bits_base.iter().zip(&bits_ale).filter(|(a, b)| a != b).count();
         assert_eq!(
-            ndiff,
-            0,
-            "[gpu] ALE model with zero mesh_fluxes diverged bitwise from the static model: \
-             {ndiff}/{} state slots differ (max |diff| = {maxd:.3e})",
-            bits_base.len(),
+            ndiff, 0,
+            "[gpu/euler] ALE model with zero mesh_fluxes diverged bitwise from the static \
+             model: {ndiff} state slots differ (max |diff| = {maxd:.3e})",
         );
     }
-    println!("[ale-zero-flux] gpu: ALE == static bitwise over {STEPS} steps");
+    println!("[ale-zero-flux] gpu/euler: ALE == static bitwise over {STEPS} steps");
+}
+
+/// GPU leg, BDF2: TOLERANCE-GATED, deliberately NOT bitwise. The
+/// moving-volume BDF2 ddt multiplies the history states by volume ratios
+/// that are an exact 1.0 here, but Metal fast math reassociates the
+/// (textually different) static and ALE rhs chains differently, giving
+/// ~1-ulp per-assembly differences even at ratio == 1.0 — isolated and
+/// pinned by tests/ale_metal_fastmath_evidence.rs, exactly the
+/// "reassociation genuinely prevents byte-identity" fallback of the M3.2
+/// contract (CPU stays bitwise under BDF2 — see the CPU legs, which is the
+/// discretization-correctness statement; this leg only bounds the compiler
+/// noise). Measured July 2026: max|diff| = 6.15e-5 after 20 steps (the ulp
+/// noise amplified through the nonlinear solve feedback); cap ~2.5x.
+#[test]
+fn ale_zero_flux_equivalent_gpu_bdf2() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    std::env::remove_var("CFD2_BACKEND");
+    let Some((ndiff, maxd)) = run_gpu_pair(TimeScheme::BDF2) else {
+        return;
+    };
+    println!(
+        "[ale-zero-flux] gpu/bdf2: ndiff = {ndiff}, max|diff| = {maxd:.3e} over {STEPS} steps \
+         (tolerance gate; see tests/ale_metal_fastmath_evidence.rs)"
+    );
+    assert!(
+        maxd < 1.5e-4,
+        "[gpu/bdf2] ALE-vs-static difference {maxd:.3e} exceeds the pinned fast-math cap",
+    );
 }

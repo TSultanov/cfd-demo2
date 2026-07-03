@@ -37,10 +37,12 @@ struct Constants {
 @group(0) @binding(6) var<storage, read> cell_face_offsets: array<u32>;
 @group(0) @binding(7) var<storage, read> cell_faces: array<u32>;
 @group(0) @binding(8) var<storage, read> mesh_fluxes: array<f32>;
+@group(0) @binding(9) var<storage, read> cell_vols_old: array<f32>;
 @group(0) @binding(10) var<storage, read> cell_face_matrix_indices: array<u32>;
 @group(0) @binding(11) var<storage, read> diagonal_indices: array<u32>;
 @group(0) @binding(12) var<storage, read> face_boundary: array<u32>;
 @group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
+@group(0) @binding(15) var<storage, read> cell_vols_old_old: array<f32>;
 @group(1) @binding(0) var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) var<storage, read> state_old: array<f32>;
 @group(1) @binding(2) var<storage, read> state_old_old: array<f32>;
@@ -84,24 +86,34 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let face_metric_scale = max(1.0, perimeter_sum * perimeter_sum / max(16.0 * vol, 0.000000000001));
     let dual_time_scale = global_dual_time_scale * face_metric_scale;
-    rhs_0 += vol * constants.density / constants.dt * state_old[idx * 8u + 0u];
+    let vol_old = cell_vols_old[idx];
+    let vol_old_old = cell_vols_old_old[idx];
+    let ale_vol_ratio_n = select(vol_old / vol, 1.0, vol_old == vol);
+    let ale_vol_ratio_nm1 = select(vol_old_old / vol, 1.0, vol_old_old == vol);
+    let ale_dvdt_scl = (vol - vol_old) / constants.dt;
+    var ale_dvdt_ddt: f32 = ale_dvdt_scl;
+    if (constants.time_scheme == 1u) {
+        let r_ale = constants.dt / constants.dt_old;
+        ale_dvdt_ddt = ((r_ale * 2.0 + 1.0) / (r_ale + 1.0) * (vol - vol_old) - r_ale * r_ale / (r_ale + 1.0) * (vol_old - vol_old_old)) / constants.dt;
+    }
+    rhs_0 += vol * constants.density / constants.dt * ale_vol_ratio_n * state_old[idx * 8u + 0u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
         let diag_bdf2 = vol * constants.density / constants.dt * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
-        rhs_0 = rhs_0 - vol * constants.density / constants.dt * state_old[idx * 8u + 0u] + vol * constants.density / constants.dt * (factor_n * state_old[idx * 8u + 0u] - factor_nm1 * state_old_old[idx * 8u + 0u]);
+        rhs_0 = rhs_0 - vol * constants.density / constants.dt * ale_vol_ratio_n * state_old[idx * 8u + 0u] + vol * constants.density / constants.dt * (factor_n * ale_vol_ratio_n * state_old[idx * 8u + 0u] - factor_nm1 * ale_vol_ratio_nm1 * state_old_old[idx * 8u + 0u]);
     }
     if (constants.dtau > 0.0) {
         rhs_0 += constants.density * dual_time_scale * state_iter[idx * 8u + 0u];
     }
-    rhs_1 += vol * constants.density / constants.dt * state_old[idx * 8u + 1u];
+    rhs_1 += vol * constants.density / constants.dt * ale_vol_ratio_n * state_old[idx * 8u + 1u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
         let diag_bdf2 = vol * constants.density / constants.dt * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
-        rhs_1 = rhs_1 - vol * constants.density / constants.dt * state_old[idx * 8u + 1u] + vol * constants.density / constants.dt * (factor_n * state_old[idx * 8u + 1u] - factor_nm1 * state_old_old[idx * 8u + 1u]);
+        rhs_1 = rhs_1 - vol * constants.density / constants.dt * ale_vol_ratio_n * state_old[idx * 8u + 1u] + vol * constants.density / constants.dt * (factor_n * ale_vol_ratio_n * state_old[idx * 8u + 1u] - factor_nm1 * ale_vol_ratio_nm1 * state_old_old[idx * 8u + 1u]);
     }
     if (constants.dtau > 0.0) {
         rhs_1 += constants.density * dual_time_scale * state_iter[idx * 8u + 1u];
@@ -281,6 +293,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         rhs_2 -= phi_2;
     }
+    bounded_sum_phi_0 += constants.density * ale_dvdt_ddt;
+    bounded_sum_phi_1 += constants.density * ale_dvdt_ddt;
+    rhs_2 -= constants.density * ale_dvdt_scl;
     rhs[idx * 3u + 0u] = rhs_0;
     rhs[idx * 3u + 1u] = rhs_1;
     rhs[idx * 3u + 2u] = rhs_2;

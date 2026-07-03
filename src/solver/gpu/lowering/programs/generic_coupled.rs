@@ -488,6 +488,29 @@ impl GenericCoupledProgramResources {
         common.mesh.refresh_geometry(&common.context.queue, mesh)
     }
 
+    /// ALE step entry: rotate the volume history, THEN upload the new
+    /// geometry, THEN upload the closed mesh fluxes (single owner of that
+    /// ordering — see [`MeshResources::begin_ale_step`] for why
+    /// `host_prepare_step` cannot do the rotation). Note the v1 scope guard:
+    /// the dual-time step retry/rollback machinery is compressible-only
+    /// (`plan.model.id == "compressible"` gates in this file), and v1 ALE is
+    /// incompressible-only, so a rejected-step re-run against an
+    /// already-advanced mesh cannot occur; compressible ALE will need mesh
+    /// rollback (seed snapshot + regen) before those paths may fire.
+    pub(crate) fn begin_ale_step(
+        &self,
+        mesh: &crate::solver::mesh::Mesh,
+        mesh_fluxes: &[f32],
+    ) -> Result<(), String> {
+        let common = &self.runtime.common;
+        common.mesh.begin_ale_step(
+            &common.context.device,
+            &common.context.queue,
+            mesh,
+            mesh_fluxes,
+        )
+    }
+
     /// Seed the ALE volume history buffers (`cell_vols_old{,_old}` :=
     /// `cell_vols`); see [`MeshResources::seed_volume_history`]. Invoked from
     /// `GpuProgramPlan::initialize_history` for every model — numerically a

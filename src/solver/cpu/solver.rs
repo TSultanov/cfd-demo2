@@ -541,6 +541,34 @@ impl CpuSolver {
         Ok(())
     }
 
+    /// ALE step entry (M3.2): rotate the volume history, THEN upload the new
+    /// geometry, THEN upload the (f32-closed) mesh face fluxes — mirroring
+    /// the GPU `MeshResources::begin_ale_step`. Ordering contract (review
+    /// F3): the rotation must capture the CURRENT `cell_vols` as `V^n` before
+    /// `refresh_mesh_geometry` overwrites them with `V^{n+1}`, which is why
+    /// this seam — not the `step()` prologue (it runs after the upload) —
+    /// owns the rotation. Call once per step, before `step()`.
+    pub fn begin_ale_step(&mut self, mesh: &Mesh, mesh_fluxes: &[f32]) -> Result<(), String> {
+        if mesh_fluxes.len() != self.num_faces {
+            return Err(format!(
+                "begin_ale_step: mesh_fluxes has {} entries, mesh has {} faces",
+                mesh_fluxes.len(),
+                self.num_faces
+            ));
+        }
+        // 1. Rotate the volume history: old_old <- old, old <- current.
+        let old = self.buffers.f32_vec("cell_vols_old");
+        self.buffers.copy_into_f32("cell_vols_old_old", &old);
+        let cur = self.buffers.f32_vec("cell_vols");
+        self.buffers.copy_into_f32("cell_vols_old", &cur);
+        // 2. Upload the new geometry (validates topology-identity).
+        self.refresh_mesh_geometry(mesh)?;
+        // 3. Upload the closed mesh fluxes verbatim (already f32 — the SCL
+        //    closure must survive byte-exactly).
+        self.buffers.copy_into_f32("mesh_fluxes", mesh_fluxes);
+        Ok(())
+    }
+
     // ── configuration ────────────────────────────────────────────────────
 
     pub fn set_outer_iters(&mut self, n: usize) {

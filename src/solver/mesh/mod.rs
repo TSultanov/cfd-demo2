@@ -1,8 +1,10 @@
+pub mod ale;
 pub mod ordering;
 pub mod refresh;
 pub mod structs;
 pub mod structured;
 
+pub use ale::{swept_mesh_fluxes_closed, SweptMeshFluxes};
 pub use refresh::MeshRefreshLevel;
 pub use structs::{BoundaryType, Mesh};
 pub use structured::{

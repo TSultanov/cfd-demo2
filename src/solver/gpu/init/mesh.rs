@@ -91,6 +91,53 @@ impl MeshResources {
         Ok(())
     }
 
+    /// ALE step entry (M3.2): rotate the volume history, upload the new
+    /// geometry, upload the (f32-closed) mesh face fluxes — in that order.
+    ///
+    /// Ordering is the whole point (review F3): the rotation must capture the
+    /// CURRENT `cell_vols` as `V^n` **before** `refresh_geometry` overwrites
+    /// them with `V^{n+1}`. That is why the rotation lives here, in the
+    /// refresh/ALE-step seam, and NOT in `host_prepare_step`
+    /// (generic_coupled.rs): `host_prepare_step` runs inside `step()`, i.e.
+    /// AFTER the caller's refresh has already uploaded the new volumes —
+    /// rotating there would copy `V^{n+1}` into the history and corrupt the
+    /// moving-volume ddt. Single owner = this method.
+    ///
+    /// `mesh_fluxes` are the per-face volumetric swept rates, already
+    /// f32-closed against `(V^{n+1}-V^n)/dt` per cell (see
+    /// `solver::mesh::ale::swept_mesh_fluxes_closed`); they are uploaded
+    /// verbatim (no cast) so the closure survives byte-exactly.
+    pub fn begin_ale_step(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        mesh: &Mesh,
+        mesh_fluxes: &[f32],
+    ) -> Result<(), String> {
+        if mesh_fluxes.len() != mesh.num_faces() {
+            return Err(format!(
+                "begin_ale_step: mesh_fluxes has {} entries, mesh has {} faces",
+                mesh_fluxes.len(),
+                mesh.num_faces()
+            ));
+        }
+        // 1. Rotate the volume history: old_old <- old, old <- current.
+        //    (cell_vols_old carries COPY_SRC|COPY_DST; cell_vols COPY_SRC.)
+        let size = self.b_cell_vols.size();
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("ALE volume history rotate"),
+        });
+        encoder.copy_buffer_to_buffer(&self.b_cell_vols_old, 0, &self.b_cell_vols_old_old, 0, size);
+        encoder.copy_buffer_to_buffer(&self.b_cell_vols, 0, &self.b_cell_vols_old, 0, size);
+        queue.submit(std::iter::once(encoder.finish()));
+        // 2. Upload the new geometry (validates topology-identity; writes the
+        //    new cell_vols = V^{n+1}).
+        self.refresh_geometry(queue, mesh)?;
+        // 3. Upload the closed mesh fluxes.
+        queue.write_buffer(&self.b_mesh_fluxes, 0, bytemuck::cast_slice(mesh_fluxes));
+        Ok(())
+    }
+
     /// Seed the ALE volume history: `cell_vols_old = cell_vols_old_old =
     /// cell_vols` (on-device copies). Called from `initialize_history` so a
     /// geometry refresh before initialization cannot leave stale history; a

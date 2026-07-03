@@ -37,13 +37,10 @@ fn validate_unified_assembly_inputs(needs_fluxes: bool, flux_stride: u32) {
 
 /// ALE marker, derived from the discrete system: any convection op consuming
 /// its face flux relative to the mesh (`Term::relative_to_mesh`). Gates the
-/// `mesh_fluxes` storage binding emission — static (non-ALE) models emit no
-/// new item and stay byte-identical.
+/// ALE storage-binding emission — static (non-ALE) models emit no new item
+/// and stay byte-identical.
 fn unified_assembly_needs_mesh_fluxes(system: &DiscreteSystem) -> bool {
-    system
-        .equations
-        .iter()
-        .any(|eq| eq.ops.iter().any(|op| op.relative_to_mesh))
+    system.is_ale()
 }
 
 /// `mesh_fluxes` storage binding (group 0 / binding 8, the first free mesh
@@ -55,6 +52,33 @@ fn unified_assembly_needs_mesh_fluxes(system: &DiscreteSystem) -> bool {
 /// zeros and the mesh-relative subtraction vanishes bitwise.
 fn mesh_fluxes_item() -> Item {
     storage_var("mesh_fluxes", Type::array(Type::F32), 0, 8, AccessMode::Read)
+}
+
+/// ALE volume-history bindings (group 0 / bindings 9 and 15 — the remaining
+/// free mesh slots; 14 is `face_wrap_shift` in the flux modules and is left
+/// untouched so fused kernels can never collide). `cell_vols_old` = V^n,
+/// `cell_vols_old_old` = V^{n-1}; both rotated by the ALE step seam
+/// (`begin_ale_step`: old_old ← old ← current, BEFORE the new volumes are
+/// uploaded) and seeded equal to `cell_vols` by `initialize_history`.
+/// Consumed by the moving-volume ddt and the ALE volume rates
+/// (`ale_volume_locals_setup`, time_integration.rs).
+fn ale_vols_history_items() -> Vec<Item> {
+    vec![
+        storage_var(
+            "cell_vols_old",
+            Type::array(Type::F32),
+            0,
+            9,
+            AccessMode::Read,
+        ),
+        storage_var(
+            "cell_vols_old_old",
+            Type::array(Type::F32),
+            0,
+            15,
+            AccessMode::Read,
+        ),
+    ]
 }
 
 /// The convective face flux actually consumed by a convection op: the stored
@@ -119,6 +143,9 @@ pub fn generate_unified_assembly_wgsl(
             ));
             if unified_assembly_needs_mesh_fluxes(self.system) {
                 module.push(mesh_fluxes_item());
+                for item in ale_vols_history_items() {
+                    module.push(item);
+                }
             }
             module.push(Item::Function(main_assembly_fn::<Ax>(
                 self.system,
@@ -168,6 +195,7 @@ pub fn generate_unified_assembly_kernel_program(
             let mut items = base_assembly_items(self.needs_gradients, needs_fluxes, self.eos_params);
             if unified_assembly_needs_mesh_fluxes(self.system) {
                 items.push(mesh_fluxes_item());
+                items.extend(ale_vols_history_items());
             }
             let bindings = kernel_bindings_from_items(&items)?;
             let main = main_assembly_fn::<Ax>(
@@ -491,7 +519,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
     // diagonal afterwards — fvm::div(phi, u) - Sp(div(phi), u). This keeps
     // convection bounded while the flux field is not exactly divergence-free
     // (outer iterations, imperfectly converged steady states).
-    let bounded_unknowns: Vec<u32> = system
+    // Per bounded unknown: (packed component index, term is mesh-relative).
+    let bounded_unknowns: Vec<(u32, bool)> = system
         .equations
         .iter()
         .flat_map(|equation| {
@@ -508,11 +537,13 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         && op.term_op == TermOp::Div
                         && op.bounded
                 })
-                .flat_map(move |_| (0..components).map(move |c| base_offset + c))
+                .flat_map(move |op| {
+                    (0..components).map(move |c| (base_offset + c, op.relative_to_mesh))
+                })
                 .collect::<Vec<_>>()
         })
         .collect();
-    for &u_idx in &bounded_unknowns {
+    for &(u_idx, _) in &bounded_unknowns {
         stmts.push(dsl::var_typed_expr(
             &format!("bounded_sum_phi_{u_idx}"),
             Type::F32,
@@ -1581,8 +1612,65 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 
     // Bounded convection: subtract the accumulated continuity defect from
     // the diagonal (LHS gains -(sum_f phi_f) * u_P).
-    for &u_idx in &bounded_unknowns {
+    //
+    // ALE (mesh-relative) bounded terms: the subtraction must remove
+    // `U_P × (discrete mass residual)`, and on a moving mesh that residual is
+    // `ρ·dV/dt + Σ_f φ_rel` (mass in the cell changes because the volume
+    // does), with the volume rate taken at the SAME time-scheme weights as
+    // the momentum ddt (`ale_dvdt_ddt`, see time_integration.rs). Augment the
+    // face-accumulated `Σ_f φ_rel` accordingly. This is what makes a uniform
+    // flow an exact fixed point of the moving-mesh momentum equation under
+    // both Euler and BDF2: ddt contributes `ρU·dV/dt|_scheme`, upwind
+    // convection of a uniform U contributes `U·Σφ_rel`, and the bounded
+    // subtraction removes both. With a static mesh (equal volume history)
+    // `ale_dvdt_ddt` is exactly `0.0` and the augmentation is the IEEE
+    // identity `x + 0.0` (the accumulated sum is never `-0.0`: +0-initialized
+    // f32 additions cannot produce it), keeping the zero-flux equivalence
+    // gate bitwise.
+    for &(u_idx, ale) in &bounded_unknowns {
+        if ale {
+            stmts.push(dsl::assign_op_expr(
+                AssignOp::Add,
+                Expr::ident(format!("bounded_sum_phi_{u_idx}")),
+                Expr::ident("constants").field("density") * Expr::ident("ale_dvdt_ddt"),
+            ));
+        }
         stmts.push(acc.sub_diag(u_idx, Expr::ident(format!("bounded_sum_phi_{u_idx}"))));
+    }
+
+    // ALE continuity volume source (design S2.3 option b): an equation whose
+    // `DivFlux` mass-flux divergence is mesh-relative gains the compensating
+    // per-cell volume-change source. Mass balance on a moving cell (constant
+    // density): ρ·(V^{n+1}−V^n)/dt + Σ_f φ_rel = 0, so the RHS (which already
+    // accumulated `−Σ_f φ_rel` in the face loop) gains `−ρ·ale_dvdt_scl`.
+    // The rate is the SCL/BDF1 rate — exactly what the mesh-flux closure
+    // guarantees `Σ_f mesh_fluxes` sums to (src/solver/mesh/ale.rs), so at a
+    // divergence-free absolute flux the two cancel to f32 roundoff under any
+    // time scheme. Static mesh: `ale_dvdt_scl == 0.0` bitwise and
+    // `rhs -= ρ·0.0` is the IEEE identity `x - 0.0`.
+    for equation in &system.equations {
+        let has_ale_div_flux = equation.ops.iter().any(|op| {
+            op.kind == DiscreteOpKind::Convection
+                && op.discretization == Discretization::Implicit
+                && op.term_op == TermOp::DivFlux
+                && op.relative_to_mesh
+        });
+        if !has_ale_div_flux {
+            continue;
+        }
+        assert_eq!(
+            equation.target.kind().component_count(),
+            1,
+            "ALE DivFlux continuity source requires a scalar target equation (got '{}')",
+            equation.target.name()
+        );
+        let base_offset = *offsets
+            .get(equation.target.name())
+            .expect("missing target offset");
+        stmts.push(acc.sub_rhs(
+            base_offset,
+            Expr::ident("constants").field("density") * Expr::ident("ale_dvdt_scl"),
+        ));
     }
 
     // Write diagonal block and RHS.

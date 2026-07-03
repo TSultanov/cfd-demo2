@@ -481,6 +481,19 @@ impl GpuProgramPlan {
         self.resources.backend.refresh_mesh_geometry(mesh)
     }
 
+    /// ALE step entry (M3.2): rotate the volume history (old_old ← old ←
+    /// current), then upload the new geometry, then upload the f32-closed
+    /// mesh face fluxes. Call once per step, BEFORE `step()`, after moving
+    /// the mesh. See `MeshResources::begin_ale_step` for the ordering
+    /// contract (review F3: `host_prepare_step` cannot own the rotation).
+    pub fn begin_ale_step(
+        &self,
+        mesh: &crate::solver::mesh::Mesh,
+        mesh_fluxes: &[f32],
+    ) -> Result<(), String> {
+        self.resources.backend.begin_ale_step(mesh, mesh_fluxes)
+    }
+
     /// Write the current state only, preserving the `old`/`old_old` time history
     /// (unlike `write_state_bytes`, which has initial-condition semantics).
     pub fn write_state_bytes_current(&self, bytes: &[u8]) -> Result<(), String> {

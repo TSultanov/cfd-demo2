@@ -744,6 +744,35 @@ impl GpuUnifiedSolver {
         Ok(())
     }
 
+    /// ALE step entry (M3.2 of the meshless/moving-mesh roadmap): after the
+    /// caller moved the mesh (topology-identical; `recalculate_geometry`
+    /// already run), rotate the volume history (`cell_vols_old_old ←
+    /// cell_vols_old ← cell_vols`), upload the new geometry, and upload the
+    /// per-face volumetric mesh fluxes — in that order (the rotation must
+    /// capture the pre-refresh volumes as `V^n`; see
+    /// `MeshResources::begin_ale_step`). Call once per step, before `step()`.
+    ///
+    /// `mesh_fluxes` must be the f32-CLOSED swept rates from
+    /// [`crate::solver::mesh::ale::swept_mesh_fluxes_closed`] (owner-signed,
+    /// Volume/Time); they are uploaded verbatim so the per-cell SCL closure
+    /// `Σ_f flux_f ≈ (V^{n+1}−V^n)/dt` survives byte-exactly. Only `*_ale`
+    /// model kernels consume them; calling this on a static model is
+    /// harmless but pointless.
+    pub fn begin_ale_step(&mut self, mesh: &Mesh, mesh_fluxes: &[f32]) -> Result<(), String> {
+        if self.srd_enabled && self.srd.is_some() {
+            return Err(
+                "ALE stepping is unsupported with the SRD stabilizer enabled (its operator \
+                 bakes build-time mesh geometry)"
+                    .into(),
+            );
+        }
+        match &mut self.backend {
+            SolverBackend::Gpu(p) => p.begin_ale_step(mesh, mesh_fluxes),
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(c) => c.begin_ale_step(mesh, mesh_fluxes),
+        }
+    }
+
     pub fn enable_detailed_profiling(&mut self, enable: bool) -> Result<(), String> {
         self.set_named_param("detailed_profiling_enabled", PlanParamValue::Bool(enable))
     }

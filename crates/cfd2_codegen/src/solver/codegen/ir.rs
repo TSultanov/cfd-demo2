@@ -82,6 +82,20 @@ pub struct DiscreteSystem {
     pub equations: Vec<DiscreteEquation>,
 }
 
+impl DiscreteSystem {
+    /// ALE marker, derived: a system is ALE iff any op consumes its face flux
+    /// relative to the mesh (`Term::relative_to_mesh`). Gates the ALE codegen:
+    /// the `mesh_fluxes` / `cell_vols_old{,_old}` storage bindings, the
+    /// moving-volume ddt lowering, the ALE bounded-correction augmentation and
+    /// the continuity volume source. Static (non-ALE) systems take the exact
+    /// pre-ALE emission paths, so their generated code stays byte-identical.
+    pub fn is_ale(&self) -> bool {
+        self.equations
+            .iter()
+            .any(|eq| eq.ops.iter().any(|op| op.relative_to_mesh))
+    }
+}
+
 /// Lower an equation system to a discrete system without validation.
 ///
 /// This is a "trusted" variant for systems that have already been validated

@@ -6,10 +6,13 @@
 //! seam: WGSL string literal, manual bind group layouts, own encoder +
 //! submit, outside the solver's step graph.
 //!
-//! Stage 1 scope (this module version): domain-bbox clipping only (no
+//! Stage 2 scope (this module version): domain-bbox clipping only (no
 //! boundary segments / ghost seeds yet), CPU-built `SeedGrid` uploaded as
-//! CSR `u32` buffers, statuses SET but the epsilon (`NEEDS_EXACT`) filter
-//! and the CPU f64 fallback are later stages.
+//! CSR `u32` buffers, conservative epsilon filter (`NEEDS_EXACT`, see
+//! `wgsl.rs` docs), CPU f64 fallback (`resolve_flagged`: recompute flagged
+//! cells via M0 `compute_cell` **on the f32-rounded seeds** — review F4 —
+//! and patch via `write_buffer`), and unconditional (release-mode)
+//! reciprocity enforcement over the merged diagram.
 //!
 //! ## Traversal decision: streaming ring clip (not kNN-then-clip)
 //!
@@ -51,7 +54,7 @@
 mod engine;
 mod wgsl;
 
-pub use engine::{GpuVoronoiCells, GpuVoronoiEngine};
+pub use engine::{GpuVoronoiCells, GpuVoronoiEngine, VoronoiResolveReport};
 
 /// Max clip-polygon vertices per cell (intermediate ring). 2D Voronoi cells
 /// of Poisson-disk sets average 6 vertices with tails under 12; the bbox
@@ -76,8 +79,10 @@ pub mod status {
     /// Reserved: CPU-built CSR bins have no capacity limit (GPU counting
     /// sort would use it).
     pub const GRID_OVERFLOW: u32 = 4;
-    /// Placeholder for the stage-3 epsilon filter (conservative f32
-    /// uncertainty ⇒ CPU f64 recompute).
+    /// Conservative epsilon filter fired (f32 cannot certify agreement
+    /// with the f64 oracle — see `wgsl.rs` docs for the conditions). The
+    /// cell's slots still hold its best-known f32 geometry;
+    /// `resolve_flagged` recomputes it in f64 and patches.
     pub const NEEDS_EXACT: u32 = 5;
     /// Placeholder for boundary-segment failures (stage 4).
     pub const BOUNDARY_ERROR: u32 = 6;

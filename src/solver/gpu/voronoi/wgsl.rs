@@ -1,4 +1,5 @@
-//! WGSL source for the `voronoi_cell` kernel (stage 1: domain bbox only).
+//! WGSL source for the `voronoi_cell` kernel (stage 2: domain bbox +
+//! conservative epsilon filter + CPU f64 fallback flagging).
 //!
 //! One thread per seed; the cell starts as the seed-relative domain bbox and
 //! is cut by one half-plane per candidate neighbor, streamed in Chebyshev
@@ -6,8 +7,74 @@
 //! security-radius stop `d² > 4·R²`. All arithmetic is seed-relative f32;
 //! function-scope arrays follow the shipped `block_precond.wgsl` precedent
 //! (~2 KB/thread with dynamic indexing).
+//!
+//! ## Canonical vertex construction + certified error bounds
+//!
+//! Every intersection vertex is created as the 2×2 solve of its two defining
+//! edge planes (both known exactly from the seeds — plane coefficients carry
+//! no chain error), NOT as the Sutherland-Hodgman lerp along the clipped
+//! edge. This kills error *accumulation* through the clip chain: a vertex's
+//! position error is `~C_VERT_EPS · |v| · cond` where `cond = |A||B|/|det|`
+//! is the conditioning of its own plane pair, independent of clip history.
+//! That bound is carried per vertex (`ve[]`) and drives the epsilon filter.
+//! (Stage 1 solved the same 2×2 systems in a final re-evaluation pass;
+//! moving it to creation time makes the *classification tests* accurate too
+//! and yields the same final vertex values for well-conditioned cells.)
+//!
+//! ## Conservative epsilon filter (design §5.4, one-sided by design)
+//!
+//! `NEEDS_EXACT` is flagged whenever f32 cannot certify agreement with the
+//! f64 oracle; false positives cost a cheap CPU recompute, false negatives
+//! corrupt topology. Conditions:
+//! 1. near-parallel plane pair at vertex creation (`|det| ≤ DET_HARD·scale`
+//!    — the design's small-denominator condition; falls back to the lerp
+//!    vertex);
+//! 2. a plane-distance classification lands inside its own error band:
+//!    `|s − eps| ≤ |q|·(C_DOT_EPS·max(|v|,|q|) + ve)` (dot rounding plus the
+//!    vertex's certified position error can flip the inside/outside verdict
+//!    the CPU reaches in f64);
+//! 3. a final face is shorter than `EPS_SHORT·h_min` after subtracting its
+//!    endpoints' error bounds (its presence/absence under the downstream
+//!    `eps_face` topology filter is not trustworthy), or a final vertex
+//!    carries an error bound above `VE_MAX_REL·h_min` (geometry gates);
+//! `h_min` = distance to the nearest final bisector neighbor. All bands are
+//! relative to per-plane/per-vertex scales (`|q|`, `|v|`, `h_min`), so the
+//! filter needs no uniform-spacing assumption (review F3: graded sets).
 
 use super::{status, BC_NONE, K_FACE_MAX, MAX_VERTS, NBR_NONE};
+
+/// Dot-product rounding slack: 4 × f32 machine epsilon. Scales the
+/// `|q|·max(|v|,|q|)` term of the classification band.
+pub(super) const C_DOT_EPS: f32 = 4.8e-7;
+
+/// Canonical-vertex error-bound slack: 4 × f32 machine epsilon, multiplied
+/// by the vertex's plane-pair conditioning at creation.
+pub(super) const C_VERT_EPS: f32 = 4.8e-7;
+
+/// Hard near-parallel threshold for the 2×2 canonical solve (relative to
+/// `|A||B|`); below it the lerp fallback vertex is kept and the cell is
+/// flagged. Same threshold stage 1 used in its re-evaluation pass.
+pub(super) const DET_HARD: f32 = 1e-6;
+
+/// Faces shorter than `EPS_SHORT · h_min` (error-adjusted) are flagged:
+/// 4× the downstream `eps_face = 1e-6·h` topology filter, covering the
+/// worst face-length error so threshold-straddling faces always resolve
+/// through the f64 fallback.
+pub(super) const EPS_SHORT: f32 = 4e-6;
+
+/// Max tolerated certified vertex error BOUND in units of `h_min`, matching
+/// the `1e-5·h` geometry parity tolerance. The bound already carries the
+/// `C_VERT_EPS` = 4× slack over the real rounding error, so a cell passing
+/// this check keeps its true vertex error ≲ 2.5e-6·h — 4× inside the gate.
+/// (Measured: at 2.5e-6 this condition alone flagged ~2% of Poisson-like
+/// cells — ordinary flat polygon vertices, cond ≳ 5 — while every other
+/// condition stayed ≤ 1e-4; 1e-5 keeps the guarantee and the 2e-3 budget.)
+pub(super) const VE_MAX_REL: f32 = 1e-5;
+
+/// Relative security-radius margin: the ring-sweep stop requires
+/// `lb²·(1−SECURITY_MARGIN) > 4·R²` so an R² underestimated by up to
+/// ~`SECURITY_MARGIN/2` (vertex error) can never hide a cutting plane.
+pub(super) const SECURITY_MARGIN: f32 = 3e-5;
 
 /// Build the shader source. Numeric constants are injected from the Rust
 /// consts so the two can never drift.
@@ -20,7 +87,14 @@ pub fn voronoi_cell_shader() -> String {
          const STATUS_SUCCESS: u32 = {s_ok}u;\n\
          const STATUS_VERT_OVERFLOW: u32 = {s_vert}u;\n\
          const STATUS_FACE_OVERFLOW: u32 = {s_face}u;\n\
-         const STATUS_EMPTY_CELL: u32 = {s_empty}u;\n",
+         const STATUS_NEEDS_EXACT: u32 = {s_exact}u;\n\
+         const STATUS_EMPTY_CELL: u32 = {s_empty}u;\n\
+         const C_DOT_EPS: f32 = {c_dot:e};\n\
+         const C_VERT_EPS: f32 = {c_vert:e};\n\
+         const DET_HARD: f32 = {det_hard:e};\n\
+         const EPS_SHORT: f32 = {eps_short:e};\n\
+         const VE_MAX_REL: f32 = {ve_max:e};\n\
+         const SECURITY_SCALE: f32 = {sec_scale:.9};\n",
         max_verts = MAX_VERTS,
         k_face_max = K_FACE_MAX,
         nbr_none = NBR_NONE,
@@ -28,7 +102,14 @@ pub fn voronoi_cell_shader() -> String {
         s_ok = status::SUCCESS,
         s_vert = status::VERT_OVERFLOW,
         s_face = status::FACE_OVERFLOW,
+        s_exact = status::NEEDS_EXACT,
         s_empty = status::EMPTY_CELL,
+        c_dot = C_DOT_EPS,
+        c_vert = C_VERT_EPS,
+        det_hard = DET_HARD,
+        eps_short = EPS_SHORT,
+        ve_max = VE_MAX_REL,
+        sec_scale = 1.0 - SECURITY_MARGIN,
     );
     format!("{header}{BODY}")
 }
@@ -71,7 +152,7 @@ struct Params {
 @group(0) @binding(13) var<storage, read_write> flagged: array<atomic<u32>>;
 
 // Zero/PAD the padded face slots and scalar outputs of a cell that has no
-// usable geometry (empty, overflow — statuses other than SUCCESS).
+// usable geometry (empty, overflow — hard-failure statuses).
 fn write_empty_outputs(i: u32) {
     for (var s = 0u; s < K_FACE_MAX; s = s + 1u) {
         let base = i * K_FACE_MAX + s;
@@ -85,6 +166,21 @@ fn write_empty_outputs(i: u32) {
     cell_centroid[i] = vec2<f32>(0.0, 0.0);
 }
 
+// Seed-relative plane of an edge tag as (q.x, q.y, off): { x : dot(x,q) = off }.
+// Plane coefficients are pure functions of the seeds/domain — no chain error.
+fn plane_of(tag: u32, p: vec2<f32>) -> vec3<f32> {
+    if (tag >= TAG_BOX_BASE) {
+        switch (tag - TAG_BOX_BASE) {
+            case 0u: { return vec3<f32>(-1.0, 0.0, p.x); }
+            case 1u: { return vec3<f32>(1.0, 0.0, params.domain_x - p.x); }
+            case 2u: { return vec3<f32>(0.0, -1.0, p.y); }
+            default: { return vec3<f32>(0.0, 1.0, params.domain_y - p.y); }
+        }
+    }
+    let q = seeds[tag] - p;
+    return vec3<f32>(q.x, q.y, 0.5 * dot(q, q));
+}
+
 struct ClipResult {
     // New vertex count: 0 = cell clipped away, CLIP_OVERFLOW = > MAX_VERTS,
     // n unchanged for a redundant plane.
@@ -94,28 +190,43 @@ struct ClipResult {
 };
 
 // Sutherland-Hodgman clip of the convex ring by the half-plane
-// { x : dot(x, q) - off <= eps } (seed-relative). Mirrors the CPU sh_emit:
-// vertices with |s| <= eps count as inside (degenerate verts kept), the
-// intersection parameter t = s_u / (s_u - s_w) is clamped to [0, 1], kept
-// vertices keep their outgoing-edge tag, an exit intersection starts the
-// new plane's edge, a re-entry intersection resumes the original edge.
+// { x : dot(x, q) - off <= eps } (seed-relative). Mirrors the CPU sh_emit
+// CLASSIFICATION rule exactly (vertices with |s| <= eps count as inside,
+// degenerate verts kept), but intersection vertices are constructed
+// canonically (module docs): the 2x2 solve of the crossed edge's plane with
+// the new plane, with a certified error bound written to `pe`; the lerp
+// (t = s_u / (s_u - s_w)) survives only as the near-parallel fallback.
 // A redundant plane (no vertex outside) leaves the ring bitwise untouched.
+// Epsilon-filter hits are OR-ed into *pu.
 fn clip_plane(
     pv: ptr<function, array<vec2<f32>, MAX_VERTS>>,
     pt: ptr<function, array<u32, MAX_VERTS>>,
+    pe: ptr<function, array<f32, MAX_VERTS>>,
     n: u32,
     r2_in: f32,
     q: vec2<f32>,
     off: f32,
     eps: f32,
+    ql: f32,
     tag: u32,
+    p: vec2<f32>,
+    pu: ptr<function, u32>,
 ) -> ClipResult {
     var s: array<f32, MAX_VERTS>;
     var any_out = false;
     var any_in = false;
     for (var e = 0u; e < n; e = e + 1u) {
-        let sv = dot((*pv)[e], q) - off;
+        let v = (*pv)[e];
+        let sv = dot(v, q) - off;
         s[e] = sv;
+        // Filter condition 2 (orientation band): the f32 value of s carries
+        // worst-case error |q|*(C_DOT_EPS*max(|v|,|q|) + ve); if that band
+        // reaches the classification threshold, the f64 oracle may classify
+        // this vertex differently.
+        let band = ql * (C_DOT_EPS * max(length(v), ql) + (*pe)[e]);
+        if (abs(sv - eps) <= band) {
+            *pu = *pu | 1u;
+        }
         if (sv > eps) {
             any_out = true;
         } else {
@@ -130,6 +241,7 @@ fn clip_plane(
     }
     var nx: array<vec2<f32>, MAX_VERTS>;
     var nt: array<u32, MAX_VERTS>;
+    var ne: array<f32, MAX_VERTS>;
     var m = 0u;
     var r2 = 0.0;
     for (var e = 0u; e < n; e = e + 1u) {
@@ -146,6 +258,7 @@ fn clip_plane(
             let v = (*pv)[e];
             nx[m] = v;
             nt[m] = (*pt)[e];
+            ne[m] = (*pe)[e];
             r2 = max(r2, dot(v, v));
             m = m + 1u;
         }
@@ -153,12 +266,32 @@ fn clip_plane(
             if (m == MAX_VERTS) {
                 return ClipResult(CLIP_OVERFLOW, 0.0);
             }
-            let t = clamp(s[e] / (s[e] - s[w]), 0.0, 1.0);
-            let vi = (*pv)[e] + t * ((*pv)[w] - (*pv)[e]);
+            // Canonical vertex: intersection of the crossed edge's plane
+            // with the new plane (both exact), Cramer 2x2.
+            let pa = plane_of((*pt)[e], p);
+            let det = pa.x * q.y - pa.y * q.x;
+            let scale = length(pa.xy) * ql;
+            var vi: vec2<f32>;
+            var ei: f32;
+            if (abs(det) > DET_HARD * scale) {
+                vi = vec2<f32>(
+                    (pa.z * q.y - pa.y * off) / det,
+                    (pa.x * off - pa.z * q.x) / det,
+                );
+                ei = C_VERT_EPS * length(vi) * scale / abs(det);
+            } else {
+                // Filter condition 1 (near-parallel denominator): keep the
+                // lerp vertex, give it a garbage-level error bound, flag.
+                let t = clamp(s[e] / (s[e] - s[w]), 0.0, 1.0);
+                vi = (*pv)[e] + t * ((*pv)[w] - (*pv)[e]);
+                ei = length(vi);
+                *pu = *pu | 2u;
+            }
             nx[m] = vi;
             // Leaving the keep-set starts the new plane's edge; re-entering
             // resumes the original edge.
             nt[m] = select((*pt)[e], tag, u_in);
+            ne[m] = ei;
             r2 = max(r2, dot(vi, vi));
             m = m + 1u;
         }
@@ -169,6 +302,7 @@ fn clip_plane(
     for (var e = 0u; e < m; e = e + 1u) {
         (*pv)[e] = nx[e];
         (*pt)[e] = nt[e];
+        (*pe)[e] = ne[e];
     }
     return ClipResult(m, r2);
 }
@@ -184,8 +318,10 @@ fn process_bin(
     p: vec2<f32>,
     pv: ptr<function, array<vec2<f32>, MAX_VERTS>>,
     pt: ptr<function, array<u32, MAX_VERTS>>,
+    pe: ptr<function, array<f32, MAX_VERTS>>,
     pn: ptr<function, u32>,
     pr2: ptr<function, f32>,
+    pu: ptr<function, u32>,
 ) -> u32 {
     let lo = grid_offsets[bin];
     let hi = grid_offsets[bin + 1u];
@@ -202,7 +338,10 @@ fn process_bin(
         // evaluate the exactly-negated coefficients of the same line.
         let q = seeds[j] - p;
         let q2 = dot(q, q);
-        let res = clip_plane(pv, pt, *pn, *pr2, q, 0.5 * q2, sqrt(q2) * params.edge_len_eps, j);
+        let ql = sqrt(q2);
+        let res = clip_plane(
+            pv, pt, pe, *pn, *pr2, q, 0.5 * q2, ql * params.edge_len_eps, ql, j, p, pu,
+        );
         if (res.n == CLIP_OVERFLOW) {
             return STATUS_VERT_OVERFLOW;
         }
@@ -239,20 +378,6 @@ fn box_normal(side: u32) -> vec2<f32> {
     }
 }
 
-// Seed-relative plane of an edge tag as (q.x, q.y, off): { x : dot(x,q) = off }.
-fn plane_of(tag: u32, p: vec2<f32>) -> vec3<f32> {
-    if (tag >= TAG_BOX_BASE) {
-        switch (tag - TAG_BOX_BASE) {
-            case 0u: { return vec3<f32>(-1.0, 0.0, p.x); }
-            case 1u: { return vec3<f32>(1.0, 0.0, params.domain_x - p.x); }
-            case 2u: { return vec3<f32>(0.0, -1.0, p.y); }
-            default: { return vec3<f32>(0.0, 1.0, params.domain_y - p.y); }
-        }
-    }
-    let q = seeds[tag] - p;
-    return vec3<f32>(q.x, q.y, 0.5 * dot(q, q));
-}
-
 @compute @workgroup_size(64)
 fn voronoi_cell(
     @builtin(global_invocation_id) gid: vec3<u32>,
@@ -277,13 +402,15 @@ fn voronoi_cell(
 
     // Seed-relative CCW domain bbox: verts (x0,y0)(x1,y0)(x1,y1)(x0,y1),
     // edge tags bottom/right/top/left = Box(2)/Box(1)/Box(3)/Box(0) — the
-    // CPU bbox_ring layout.
+    // CPU bbox_ring layout. Corner error bounds: exact-ish subtractions,
+    // ~1 ulp per component.
     let x0 = -p.x;
     let y0 = -p.y;
     let x1 = params.domain_x - p.x;
     let y1 = params.domain_y - p.y;
     var vx: array<vec2<f32>, MAX_VERTS>;
     var vt: array<u32, MAX_VERTS>;
+    var ve: array<f32, MAX_VERTS>;
     vx[0] = vec2<f32>(x0, y0);
     vx[1] = vec2<f32>(x1, y0);
     vx[2] = vec2<f32>(x1, y1);
@@ -295,8 +422,11 @@ fn voronoi_cell(
     var n = 4u;
     var r2 = 0.0;
     for (var e = 0u; e < 4u; e = e + 1u) {
+        ve[e] = C_DOT_EPS * length(vx[e]);
         r2 = max(r2, dot(vx[e], vx[e]));
     }
+    // Epsilon-filter accumulator (any nonzero => NEEDS_EXACT).
+    var unc = 0u;
 
     // Home bin (clamped; kernel f32 binning may disagree with the CPU's f64
     // assignment by one bin near an edge — the ring lower bound stays valid
@@ -316,16 +446,19 @@ fn voronoi_cell(
     var st = 0u;
     // Chebyshev ring sweep with the security-radius stop. Completing the
     // sweep without the stop means every seed in the grid was clipped —
-    // exhaustive, therefore exact (SUCCESS, matching CPU semantics).
+    // exhaustive, therefore exact (SUCCESS, matching CPU semantics). The
+    // stop is derated by SECURITY_SCALE so an R^2 underestimated by vertex
+    // error (bounded by VE_MAX_REL, else the cell is flagged) can never
+    // hide a plane that would cut a post-eps_face-visible face.
     for (var r = 0u; r <= r_max; r = r + 1u) {
         if (r > 0u) {
             let lb = ring_lower_bound(p, bx, by, r);
-            if (lb * lb > 4.0 * r2) {
+            if (lb * lb * SECURITY_SCALE > 4.0 * r2) {
                 break;
             }
         }
         if (r == 0u) {
-            st = process_bin(by * gw + bx, ci, p, &vx, &vt, &n, &r2);
+            st = process_bin(by * gw + bx, ci, p, &vx, &vt, &ve, &n, &r2, &unc);
             if (st != 0u) {
                 break;
             }
@@ -343,7 +476,7 @@ fn voronoi_cell(
                     gy = byi + ri;
                 }
                 if (gy >= 0 && gy < ghi) {
-                    st = process_bin(u32(gy) * gw + u32(gx), ci, p, &vx, &vt, &n, &r2);
+                    st = process_bin(u32(gy) * gw + u32(gx), ci, p, &vx, &vt, &ve, &n, &r2, &unc);
                     if (st != 0u) {
                         break;
                     }
@@ -367,7 +500,7 @@ fn voronoi_cell(
                     gx = bxi + ri;
                 }
                 if (gx >= 0 && gx < gwi) {
-                    st = process_bin(u32(gy) * gw + u32(gx), ci, p, &vx, &vt, &n, &r2);
+                    st = process_bin(u32(gy) * gw + u32(gx), ci, p, &vx, &vt, &ve, &n, &r2, &unc);
                     if (st != 0u) {
                         break;
                     }
@@ -397,37 +530,31 @@ fn voronoi_cell(
         return;
     }
 
-    // Canonical vertex re-evaluation (the M0 assembly trick): the clipped
-    // vertex chain carries ~domain·eps_f32 absolute error from the early
-    // bbox-scale clips, which is ~1e-5·h relative at 30k seeds — too coarse
-    // for the geometry parity gates. Each final vertex is the intersection
-    // of its two adjacent edge planes, whose seed-relative coefficients are
-    // h-scale, so re-solving the 2x2 system recovers ~eps_f32-relative
-    // accuracy. Near-parallel plane pairs (sliver vertices) keep the
-    // clipped position.
-    var rx: array<vec2<f32>, K_FACE_MAX>;
+    // Local scale h_min = distance to the nearest final bisector neighbor
+    // (drives the short-face / vertex-error filter conditions; 0 when the
+    // ring is all box edges — a single-seed domain, nothing to filter).
+    var h2_min = 0.0;
+    var have_h = false;
     for (var e = 0u; e < n; e = e + 1u) {
-        var prev = n - 1u;
-        if (e > 0u) {
-            prev = e - 1u;
+        let tag = vt[e];
+        if (tag < TAG_BOX_BASE) {
+            let dq = seeds[tag] - p;
+            let d2 = dot(dq, dq);
+            if (!have_h || d2 < h2_min) {
+                h2_min = d2;
+                have_h = true;
+            }
         }
-        let pa = plane_of(vt[prev], p);
-        let pb = plane_of(vt[e], p);
-        let det = pa.x * pb.y - pa.y * pb.x;
-        let scale = length(pa.xy) * length(pb.xy);
-        if (abs(det) > 1e-6 * scale) {
-            rx[e] = vec2<f32>(
-                (pa.z * pb.y - pa.y * pb.z) / det,
-                (pa.x * pb.z - pa.z * pb.x) / det,
-            );
-        } else {
-            rx[e] = vx[e];
-        }
+    }
+    var h_min = 0.0;
+    if (have_h) {
+        h_min = sqrt(h2_min);
     }
 
     // Emit faces + shoelace area/centroid (seed-relative; the seed is
     // strictly inside its cell, so every cross term has the same sign — no
-    // cancellation).
+    // cancellation). Vertices are already canonical (creation-time 2x2
+    // solves), so no re-evaluation pass is needed.
     var signed2 = 0.0;
     var cx = 0.0;
     var cy = 0.0;
@@ -436,12 +563,24 @@ fn voronoi_cell(
         if (w == n) {
             w = 0u;
         }
-        let v0 = rx[e];
-        let v1 = rx[w];
+        let v0 = vx[e];
+        let v1 = vx[w];
         let cross_t = v0.x * v1.y - v1.x * v0.y;
         signed2 = signed2 + cross_t;
         cx = cx + (v0.x + v1.x) * cross_t;
         cy = cy + (v0.y + v1.y) * cross_t;
+
+        let flen = distance(v0, v1);
+        if (have_h) {
+            // Filter condition 3: short/untrustworthy faces and
+            // geometry-degrading vertex error bounds.
+            if (flen - 4.0 * (ve[e] + ve[w]) <= EPS_SHORT * h_min) {
+                unc = unc | 4u;
+            }
+            if (max(ve[e], ve[w]) > VE_MAX_REL * h_min) {
+                unc = unc | 8u;
+            }
+        }
 
         let base = i * K_FACE_MAX + e;
         let tag = vt[e];
@@ -452,14 +591,19 @@ fn voronoi_cell(
             bc = tag - TAG_BOX_BASE;
             nrm = box_normal(bc);
         } else {
-            nbr = tag;
+            // Neighbor id is CANONICALIZED (coalesced duplicates report
+            // their bin representative) so topology consumers see one id
+            // per physical cell regardless of which duplicate's plane
+            // happened to survive eps-redundant clipping. The geometry
+            // still uses the actual plane seed (sub-pitch identical).
+            nbr = canon[tag];
             // Face normal = owner->neighbor bisector direction (the M5
             // face-normal convention).
             nrm = normalize(seeds[tag] - p);
         }
         nbr_ids[base] = nbr;
         face_bc[base] = bc;
-        face_geom[base] = vec4<f32>(nrm.x, nrm.y, distance(v0, v1), 0.0);
+        face_geom[base] = vec4<f32>(nrm.x, nrm.y, flen, 0.0);
         face_mid[base] = 0.5 * (v0 + v1);
     }
     for (var e = n; e < K_FACE_MAX; e = e + 1u) {
@@ -478,13 +622,25 @@ fn voronoi_cell(
     } else {
         // Degenerate-area fallback: vertex average (CPU ring_geometry).
         for (var e = 0u; e < n; e = e + 1u) {
-            cen = cen + rx[e];
+            cen = cen + vx[e];
         }
         cen = cen / f32(max(n, 1u));
     }
     cell_area[i] = area;
     cell_centroid[i] = cen;
     cell_nfaces[i] = n;
-    status_out[i] = STATUS_SUCCESS;
+
+    if (unc != 0u) {
+        // Best-known f32 geometry stays in the output slots (the CPU f64
+        // fallback overwrites them); the status + flag route the cell to
+        // resolve_flagged.
+        status_out[i] = STATUS_NEEDS_EXACT;
+        let slot = atomicAdd(&flagged[0], 1u);
+        if (slot < params.flag_cap) {
+            atomicStore(&flagged[1u + slot], i);
+        }
+    } else {
+        status_out[i] = STATUS_SUCCESS;
+    }
 }
 "#;

@@ -122,6 +122,8 @@ pub enum TraceMeshType {
     CutCell,
     Delaunay,
     Voronoi,
+    /// Meshless Lloyd-relaxed (CVT) Voronoi mesh (`generate_cvt_mesh`).
+    VoronoiCvt,
     /// Body-fitted curvilinear structured grid (nozzle-only).
     Fitted,
 }

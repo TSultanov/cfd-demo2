@@ -1,7 +1,7 @@
 use crate::solver::mesh::{
-    generate_cut_cell_mesh, generate_delaunay_mesh, generate_structured_nozzle_mesh,
-    generate_voronoi_mesh, BackwardsStep, BoundarySides, BoundaryType, ChannelWithObstacle, Mesh,
-    Nozzle,
+    generate_cut_cell_mesh, generate_cvt_mesh, generate_delaunay_mesh,
+    generate_structured_nozzle_mesh, generate_voronoi_mesh, BackwardsStep, BoundarySides,
+    BoundaryType, ChannelWithObstacle, LloydConfig, Mesh, Nozzle,
 };
 use crate::solver::model::{
     all_models, compressible_model_with_eos, ModelPreconditionerSpec, ModelSpec,
@@ -52,6 +52,11 @@ enum MeshType {
     CutCell,
     Delaunay,
     Voronoi,
+    /// Meshless CVT (Lloyd-relaxed) Voronoi mesh (`generate_cvt_mesh`). Seed
+    /// positions are optimized instead of running `Mesh::smooth`: vertex
+    /// smoothing would move Voronoi vertices off the bisectors, so this mesh
+    /// type must never be smoothed after generation.
+    VoronoiCvt,
     /// Body-fitted curvilinear structured grid. Only meaningful — and only
     /// offered in the UI — for the converging–diverging nozzle geometry, whose
     /// walls it conforms to exactly (see `generate_structured_nozzle_mesh`).
@@ -632,6 +637,7 @@ impl CFDApp {
             MeshType::CutCell => tracefmt::TraceMeshType::CutCell,
             MeshType::Delaunay => tracefmt::TraceMeshType::Delaunay,
             MeshType::Voronoi => tracefmt::TraceMeshType::Voronoi,
+            MeshType::VoronoiCvt => tracefmt::TraceMeshType::VoronoiCvt,
             MeshType::Fitted => tracefmt::TraceMeshType::Fitted,
         };
 
@@ -912,6 +918,7 @@ impl CFDApp {
                 MeshType::CutCell => "cutcell",
                 MeshType::Delaunay => "delaunay",
                 MeshType::Voronoi => "voronoi",
+                MeshType::VoronoiCvt => "voronoi_cvt",
                 MeshType::Fitted => "fitted",
             }
         }
@@ -968,6 +975,14 @@ impl CFDApp {
                         growth_rate,
                         domain_size,
                     ),
+                    MeshType::VoronoiCvt => generate_cvt_mesh(
+                        &geo,
+                        min_cell_size,
+                        max_cell_size,
+                        growth_rate,
+                        domain_size,
+                        &LloydConfig::default(),
+                    ),
                 };
 
                 CFDApp::push_trace_init_event(
@@ -982,14 +997,19 @@ impl CFDApp {
                     )),
                 );
 
-                let smooth_start = std::time::Instant::now();
-                mesh.smooth(&geo, 0.3, 50);
-                CFDApp::push_trace_init_event(
-                    trace_init_events,
-                    format!("mesh.smooth.{geometry}.{mesh_kind}"),
-                    smooth_start.elapsed(),
-                    Some("factor=0.3 iters=50".to_string()),
-                );
+                // The CVT mesh optimizes seed positions instead: vertex
+                // smoothing would move Voronoi vertices off the bisectors
+                // and destroy the mesh's defining property.
+                if mesh_type != MeshType::VoronoiCvt {
+                    let smooth_start = std::time::Instant::now();
+                    mesh.smooth(&geo, 0.3, 50);
+                    CFDApp::push_trace_init_event(
+                        trace_init_events,
+                        format!("mesh.smooth.{geometry}.{mesh_kind}"),
+                        smooth_start.elapsed(),
+                        Some("factor=0.3 iters=50".to_string()),
+                    );
+                }
 
                 mesh
             }
@@ -1028,6 +1048,14 @@ impl CFDApp {
                         growth_rate,
                         domain_size,
                     ),
+                    MeshType::VoronoiCvt => generate_cvt_mesh(
+                        &geo,
+                        min_cell_size,
+                        max_cell_size,
+                        growth_rate,
+                        domain_size,
+                        &LloydConfig::default(),
+                    ),
                 };
 
                 CFDApp::push_trace_init_event(
@@ -1042,19 +1070,25 @@ impl CFDApp {
                     )),
                 );
 
-                let smooth_iters = match mesh_type {
-                    MeshType::CutCell | MeshType::Fitted => 100,
-                    MeshType::Delaunay | MeshType::Voronoi => 50,
-                };
+                // The CVT mesh optimizes seed positions instead: vertex
+                // smoothing would move Voronoi vertices off the bisectors
+                // and destroy the mesh's defining property.
+                if mesh_type != MeshType::VoronoiCvt {
+                    let smooth_iters = match mesh_type {
+                        MeshType::CutCell | MeshType::Fitted => 100,
+                        MeshType::Delaunay | MeshType::Voronoi => 50,
+                        MeshType::VoronoiCvt => unreachable!(),
+                    };
 
-                let smooth_start = std::time::Instant::now();
-                mesh.smooth(&geo, 0.3, smooth_iters);
-                CFDApp::push_trace_init_event(
-                    trace_init_events,
-                    format!("mesh.smooth.{geometry}.{mesh_kind}"),
-                    smooth_start.elapsed(),
-                    Some(format!("factor=0.3 iters={smooth_iters}")),
-                );
+                    let smooth_start = std::time::Instant::now();
+                    mesh.smooth(&geo, 0.3, smooth_iters);
+                    CFDApp::push_trace_init_event(
+                        trace_init_events,
+                        format!("mesh.smooth.{geometry}.{mesh_kind}"),
+                        smooth_start.elapsed(),
+                        Some(format!("factor=0.3 iters={smooth_iters}")),
+                    );
+                }
 
                 mesh
             }
@@ -1111,7 +1145,10 @@ impl CFDApp {
 
                         mesh
                     }
-                    MeshType::CutCell | MeshType::Delaunay | MeshType::Voronoi => {
+                    MeshType::CutCell
+                    | MeshType::Delaunay
+                    | MeshType::Voronoi
+                    | MeshType::VoronoiCvt => {
                         // Unstructured mesh conforming to the nozzle SDF. The bounding
                         // box is the inlet-height rectangle; the mesher tags the left
                         // edge Inlet, the right edge Outlet, and the flat bottom Wall.
@@ -1140,6 +1177,14 @@ impl CFDApp {
                                 growth_rate,
                                 domain_size,
                             ),
+                            MeshType::VoronoiCvt => generate_cvt_mesh(
+                                &geo,
+                                min_cell_size,
+                                max_cell_size,
+                                growth_rate,
+                                domain_size,
+                                &LloydConfig::default(),
+                            ),
                             // CutCell (and the unreachable Fitted, already handled).
                             _ => generate_cut_cell_mesh(
                                 &geo,
@@ -1161,18 +1206,23 @@ impl CFDApp {
                             )),
                         );
 
-                        let smooth_iters = match mesh_type {
-                            MeshType::Delaunay | MeshType::Voronoi => 50,
-                            _ => 100,
-                        };
-                        let smooth_start = std::time::Instant::now();
-                        mesh.smooth(&geo, 0.3, smooth_iters);
-                        CFDApp::push_trace_init_event(
-                            trace_init_events,
-                            format!("mesh.smooth.{geometry}.{mesh_kind}"),
-                            smooth_start.elapsed(),
-                            Some(format!("factor=0.3 iters={smooth_iters}")),
-                        );
+                        // The CVT mesh optimizes seed positions instead:
+                        // vertex smoothing would move Voronoi vertices off
+                        // the bisectors and destroy its defining property.
+                        if mesh_type != MeshType::VoronoiCvt {
+                            let smooth_iters = match mesh_type {
+                                MeshType::Delaunay | MeshType::Voronoi => 50,
+                                _ => 100,
+                            };
+                            let smooth_start = std::time::Instant::now();
+                            mesh.smooth(&geo, 0.3, smooth_iters);
+                            CFDApp::push_trace_init_event(
+                                trace_init_events,
+                                format!("mesh.smooth.{geometry}.{mesh_kind}"),
+                                smooth_start.elapsed(),
+                                Some(format!("factor=0.3 iters={smooth_iters}")),
+                            );
+                        }
 
                         // The curved top wall (untagged by `classify_boundary`) is
                         // closed as a no-slip wall inside every unstructured mesh
@@ -2144,6 +2194,12 @@ impl eframe::App for CFDApp {
                         ui.radio_value(&mut self.mesh_type, MeshType::CutCell, "CutCell");
                         ui.radio_value(&mut self.mesh_type, MeshType::Delaunay, "Delaunay");
                         ui.radio_value(&mut self.mesh_type, MeshType::Voronoi, "Voronoi");
+                        ui.radio_value(&mut self.mesh_type, MeshType::VoronoiCvt, "Voronoi (CVT)")
+                            .on_hover_text(
+                                "Meshless Voronoi mesh with Lloyd/CVT seed relaxation: \
+                                 near-hexagonal cells with close-to-zero interior-face \
+                                 skewness (no post-generation vertex smoothing).",
+                            );
                     });
 
                         ui.group(|ui| {

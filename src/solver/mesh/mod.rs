@@ -12,7 +12,7 @@ pub use structured::{
 
 #[cfg(feature = "meshgen")]
 pub use crate::meshgen::{
-    generate_cut_cell_mesh, generate_delaunay_mesh, generate_meshless_voronoi_mesh,
-    generate_voronoi_mesh, BackwardsStep, ChannelWithObstacle, Edge, Geometry, Nozzle,
-    RectangularChannel, Triangle,
+    generate_cut_cell_mesh, generate_cvt_mesh, generate_delaunay_mesh,
+    generate_meshless_voronoi_mesh, generate_voronoi_mesh, BackwardsStep, ChannelWithObstacle,
+    Edge, Geometry, LloydConfig, Nozzle, RectangularChannel, Triangle,
 };

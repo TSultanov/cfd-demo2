@@ -20,15 +20,17 @@
 //! (vertex seeds at convex fluid corners, equidistant guard seeds around
 //! reflex ones) and own-segment-line clipping for `SeedKind::Boundary`
 //! seeds; `assemble` adds M0.4 — tag-canonical `Mesh` assembly and the
-//! `generate_meshless_voronoi_mesh` entry point. Lloyd/CVT arrives in a
-//! later stage.
+//! `generate_meshless_voronoi_mesh` entry point; `lloyd` adds M0.5 —
+//! Lloyd/CVT relaxation and the `generate_cvt_mesh` entry point.
 
 mod assemble;
 mod boundary;
 mod clip;
+mod lloyd;
 mod seed_grid;
 
 pub use assemble::{assemble_mesh, generate_meshless_voronoi_mesh};
+pub use lloyd::{generate_cvt_mesh, lloyd_relax, LloydConfig, LloydStats};
 pub use boundary::{
     boundary_seeds, circle_loop, distance_to_loops, meshless_seed_points, point_in_fluid,
     polyline_loop, shielding_violations, tag_boundary_type, BoundaryLoop, BoundarySpec, SeedKind,

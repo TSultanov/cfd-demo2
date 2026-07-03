@@ -1591,13 +1591,18 @@ impl CFDApp {
                 queue.submit(Some(encoder.finish()));
             }
 
+            // Size the render buffers from the actual triangulated data: a
+            // per-cell heuristic undersizes polygonal (Voronoi) meshes, whose
+            // fan triangulation needs 3*(n-2) and wireframe 2*n vertices per
+            // n-gon (~12+ for the typical hexagon).
+            let vertices = cfd_renderer::build_mesh_vertices(&cached_cells);
+            let line_vertices = cfd_renderer::build_line_vertices(&cached_cells);
+            let max_vertices = vertices.len().max(line_vertices.len()).max(1);
             let mut renderer = cfd_renderer::CfdRenderResources::new(
                 device,
                 request.target_format,
-                mesh.num_cells() * 10,
+                max_vertices,
             );
-            let vertices = cfd_renderer::build_mesh_vertices(&cached_cells);
-            let line_vertices = cfd_renderer::build_line_vertices(&cached_cells);
             renderer.update_mesh(queue, &vertices, &line_vertices);
             renderer.update_bind_group(device, &viz_buffer);
             (

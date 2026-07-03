@@ -21,6 +21,10 @@ pub mod srd;
 pub mod structs;
 pub mod submission_counter;
 pub mod unified_solver;
+/// GPU meshless Voronoi engine (roadmap M1); depends on the M0 CPU engine's
+/// shared types, hence the `meshgen` gate.
+#[cfg(feature = "meshgen")]
+pub mod voronoi;
 pub(crate) mod wgsl_reflect;
 
 pub use program::plan_instance::OuterStepStatus;

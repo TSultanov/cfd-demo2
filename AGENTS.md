@@ -44,9 +44,20 @@ The snapshot test pins every generated WGSL file's content hash (bless ritual in
 header); zero-flux equivalence pins ALE-with-zero-fluxes == static bitwise on CPU;
 the GCL gate pins free-stream preservation on a deforming mesh (Euler AND BDF2, both
 backends); the conservation audit pins the f64 mesh-side mass/area identities and
-zero spurious ALE-injected velocity; the MMS-ALE suite (dev-tests tier, ~8 min, the
-n=64 spatial level and the 80-step temporal level dominate) pins spatial order ~2 and
-temporal BDF2 order ~2 on prescribed motion.
+zero spurious ALE-injected velocity; the MMS-ALE suite pins temporal BDF2 order ~2
+(measured 2.154) and spatial order ≥ 1.35 — the honest measured band (1.387,
+skew-limited: the prescribed motion keeps cells persistently non-orthogonal, a
+pre-existing spatial property, NOT an ALE defect) — plus the decisive in-test
+equivalence assert: the moving-mesh error must match a static solve on the same
+deformed geometry to ±5% (measured equal to 3 significant digits). Also run
+`cargo test --features meshgen --test ale_metal_fastmath_evidence` (<5 s) — it backs
+the GPU/BDF2 zero-flux tolerance gate's ~1-ulp-per-assembly justification.
+
+Runtime honesty (measured July 2026, M2 Max): zero-flux ~2 min, GCL ~5 min,
+conservation ~3 min, MMS-ALE ~8 min (the n=64 spatial level and the 80-step temporal
+level dominate) — ~18 min total; the GPU legs (pipeline compilation for the ALE
+models + multi-hundred-step runs) dominate. The CPU-only legs skip cleanly without
+an adapter if you need a headless quick pass.
 
 ## Mandatory OpenFOAM drift check (before/after each major changeset)
 

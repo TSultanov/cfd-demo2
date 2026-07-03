@@ -24,6 +24,16 @@
 //! This test asserts the per-evaluation difference stays at the <= 1-ulp
 //! scale — if it ever grows beyond that, the reassociation excuse no longer
 //! holds and the ALE ddt emission must be revisited.
+//!
+//! STALENESS GUARD (adversarial review, July 2026): the WGSL below is a hand
+//! transcription of the July-2026 `emit_ddt_contributions` output shape. If
+//! the emission changes, the evidence kernel would silently test a stale
+//! shape while the zero-flux BDF2 gate keeps its cap. The
+//! `transcription_matches_generated_ddt_shape` test below re-derives the key
+//! transcribed lines from the committed generated WGSL
+//! (generic_coupled_assembly_incompressible_momentum{,_ale}.wgsl — the same
+//! files the hash-pinned snapshot covers), so any ddt-shape change fails HERE
+//! too, prompting a transcription refresh.
 #![cfg(feature = "meshgen")]
 
 const WGSL: &str = r#"
@@ -95,6 +105,60 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     out_ale[idx] = a_rhs_0 + 1.7 * a_diag_0;
 }
 "#;
+
+/// Freshness pin for the hand-transcribed kernel above: the load-bearing ddt
+/// lines must still appear VERBATIM (modulo the state-array -> probe-buffer
+/// renames `state_old[idx * 8u + Cu]` -> `so[idx]` / `state_old_old[...]` ->
+/// `soo[idx]`) in the committed generated WGSL. Runs without a GPU adapter.
+#[test]
+fn transcription_matches_generated_ddt_shape() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("src/solver/gpu/shaders/generated");
+    let static_wgsl = std::fs::read_to_string(
+        root.join("generic_coupled_assembly_incompressible_momentum.wgsl"),
+    )
+    .expect("read static generated WGSL");
+    let ale_wgsl = std::fs::read_to_string(
+        root.join("generic_coupled_assembly_incompressible_momentum_ale.wgsl"),
+    )
+    .expect("read ALE generated WGSL");
+
+    // The transcription's probe-buffer lines, mapped back to the generated
+    // state-array form. Each must appear verbatim in the generated file, or
+    // the evidence kernel is testing a stale ddt shape.
+    let static_expected = [
+        "let diag_bdf2 = vol * constants.density / constants.dt * (r * 2.0 + 1.0) / (r + 1.0);",
+        "rhs_0 = rhs_0 - vol * constants.density / constants.dt * state_old[idx * 8u + 0u] + \
+         vol * constants.density / constants.dt * (factor_n * state_old[idx * 8u + 0u] - \
+         factor_nm1 * state_old_old[idx * 8u + 0u]);",
+    ];
+    let ale_expected = [
+        "let ale_vol_ratio_n = select(vol_old / vol, 1.0, vol_old == vol);",
+        "let ale_vol_ratio_nm1 = select(vol_old_old / vol, 1.0, vol_old_old == vol);",
+        "let ale_dvdt_scl = (vol - vol_old) / constants.dt;",
+        "ale_dvdt_ddt = ((r_ale * 2.0 + 1.0) / (r_ale + 1.0) * (vol - vol_old) - r_ale * \
+         r_ale / (r_ale + 1.0) * (vol_old - vol_old_old)) / constants.dt;",
+        "rhs_0 = rhs_0 - vol * constants.density / constants.dt * ale_vol_ratio_n * \
+         state_old[idx * 8u + 0u] + vol * constants.density / constants.dt * (factor_n * \
+         ale_vol_ratio_n * state_old[idx * 8u + 0u] - factor_nm1 * ale_vol_ratio_nm1 * \
+         state_old_old[idx * 8u + 0u]);",
+    ];
+    for line in static_expected {
+        assert!(
+            static_wgsl.contains(line),
+            "generated STATIC ddt shape drifted from the hand-transcribed evidence kernel; \
+             refresh the WGSL transcription in this file. Missing line:\n{line}"
+        );
+    }
+    for line in ale_expected {
+        assert!(
+            ale_wgsl.contains(line),
+            "generated ALE ddt shape drifted from the hand-transcribed evidence kernel; \
+             refresh the WGSL transcription in this file. Missing line:\n{line}"
+        );
+    }
+    println!("[ale-fastmath-evidence] transcription matches the generated ddt shape");
+}
 
 #[test]
 fn gpu_bdf2_ddt_reassociation_at_ulp_scale() {

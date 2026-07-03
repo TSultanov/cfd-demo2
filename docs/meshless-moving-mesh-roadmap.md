@@ -206,6 +206,14 @@ face-kernel dispatch), plus `SolverDriver.min_cell_size`.
   from ≥1.0 per repo convention); mass-conservation audit (pin tolerance after first
   measurement — 1e-12/step is optimistic under 1e-4 inexact-Picard; and `CFD2_LIN_TOL` is
   GPU-only, CPU needs its recipe tolerance set).
+  *As-shipped deltas (July 2026, recorded honestly):* the GCL gate runs 220 steps (not 500 —
+  2.2 motion periods with a late-window no-compounding split; per-step drift margin for a
+  sign/weighting error is 10²–10⁴×, so extra periods add wall time, not power) and the
+  flip-inducing case is DEFERRED to M2 Tier-B/M4 (topology refresh is not shipped; geometry-only
+  seam cannot induce flips). Measured spatial order is 1.387, skew-limited (pre-existing
+  non-orthogonal spatial band, localized by three probes); the gate pins ≥1.35 PLUS an in-test
+  moving ≡ static-on-deformed-geometry equivalence assert (±5%), which is the actual
+  ALE-correctness statement.
 - **Standalone value:** deforming-domain ALE on structured meshes (prescribed motion) — a
   complete feature without any Voronoi work.
 
@@ -304,7 +312,10 @@ amortized — viable. The wall candidates, in order: M0 engine regen, AMG policy
 
 - **Tier 1, always-on under `--features meshgen,cpu`** (≤ ~2 min added): engine equivalence +
   invariants + determinism + default fuzz; GPU parity default; all four M2 byte gates; M3 GCL +
-  conservation; M4 static-limit.
+  conservation; M4 static-limit. *Budget honesty (July 2026): the M3 gates blew this budget —
+  zero-flux ~2 min, GCL ~5 min, conservation ~3 min (GPU pipeline compilation for the ALE
+  models + multi-hundred-step GPU runs dominate; the CPU legs alone fit the original budget
+  and skip cleanly without an adapter). See AGENTS.md for the measured per-suite numbers.*
 - **Tier 2, dev-tests** (AGENTS.md-mandated for mesh/ALE/codegen changes): Ghia-on-CVT,
   status-rate @300k, ALE-MMS orders, vortex gates, M6 demo.
 - **Nightly/env-gated:** fuzz at scale, soaks, perf budgets.

@@ -94,13 +94,15 @@ fn env_f64(name: &str, default: f64) -> f64 {
 /// Prescribed vertex position at time `t` from the UNDEFORMED coordinates
 /// (no incremental drift): smooth interior bump, zero on the boundary. The
 /// env knobs are the diagnostic probes documented at the spatial gate.
-fn vertex_position(x0: f64, y0: f64, t: f64, h: f64) -> (f64, f64) {
+///
+/// `static_deform` (also forceable via `CFD2_ALE_SPATIAL_STATIC_DEFORM=1`):
+/// deform to max ONCE and hold (zero motion after step 1) — the static solve
+/// on the deformed mesh, isolating spatial-on-skewed-cells accuracy from the
+/// ALE terms. The spatial gate asserts moving ≡ static-deformed in-test.
+fn vertex_position(x0: f64, y0: f64, t: f64, h: f64, static_deform: bool) -> (f64, f64) {
     let amp_frac = env_f64("CFD2_ALE_SPATIAL_AMP", AMP_FRAC);
     let period = env_f64("CFD2_ALE_SPATIAL_PERIOD", MOTION_PERIOD);
-    // Probe: deform to max ONCE and hold (zero motion after step 1) — the
-    // static solve on the deformed mesh, isolating spatial-on-skewed-cells
-    // accuracy from the ALE terms.
-    let phase = if std::env::var("CFD2_ALE_SPATIAL_STATIC_DEFORM").as_deref() == Ok("1") {
+    let phase = if static_deform {
         1.0
     } else {
         (2.0 * PI * t / period).sin()
@@ -138,8 +140,9 @@ fn volume_mean(mesh: &Mesh, f: &[f64]) -> f64 {
 }
 
 /// One spatial level: march the ALE protocol on an n×n all-wall unit square
-/// with prescribed bump motion; returns (deformed mesh at t_end, U, p).
-fn solve_taylor_green_moving(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>) {
+/// with prescribed bump motion (or the deform-once-and-hold probe when
+/// `static_deform`); returns (deformed mesh at t_end, U, p).
+fn solve_taylor_green_moving(n: usize, static_deform: bool) -> (Mesh, Vec<(f64, f64)>, Vec<f64>) {
     let mut mesh = generate_structured_rect_mesh(n, n, 1.0, 1.0, BoundarySides::wall());
     let x0 = mesh.vx.clone();
     let y0 = mesh.vy.clone();
@@ -199,7 +202,7 @@ fn solve_taylor_green_moving(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>) {
         let old_vx = mesh.vx.clone();
         let old_vy = mesh.vy.clone();
         for v in 0..mesh.num_vertices() {
-            let (x, y) = vertex_position(x0[v], y0[v], t_new, h);
+            let (x, y) = vertex_position(x0[v], y0[v], t_new, h, static_deform);
             mesh.vx[v] = x;
             mesh.vy[v] = y;
         }
@@ -238,13 +241,21 @@ fn solve_taylor_green_moving(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>) {
     (mesh, u, p)
 }
 
-/// SPATIAL order on the moving mesh (the M3.3 gate). Static-suite reference
-/// band: u order 2.0 − 0.35 (measured 1.87 uniform / 1.98 graded); the
-/// roadmap allows this gate an extra −0.3 slope tolerance — used, see below.
+/// SPATIAL order on the moving mesh (the M3.3 gate).
 ///
 /// Measured July 2026 (n = 8/16/32/64, GPU f32, amp 0.2h, dt 0.05):
 ///   u_l2 = [9.945e-3, 3.460e-3, 1.284e-3, 5.610e-4], order 1.387
 ///   p_l2 = [9.202e-2, 4.668e-2, 2.331e-2, 1.161e-2], order ~1.0
+///
+/// **Honest deviation record (adversarial review, July 2026)**: the design
+/// spec asked order ≥ ~1.7 with slope_tol 0.3 (design-solver-ale M3.3 /
+/// design-validation); the measured 1.387 sits BELOW that band, and no
+/// roadmap allowance covers the gap. The order gate is therefore pinned at
+/// the measured value per the repo's pin-after-first-measurement convention
+/// (2.0 − 0.65 ⇒ ≥ 1.35), and the load-bearing correctness statement is
+/// asserted separately, in-test, below: the moving-mesh solve must match a
+/// STATIC solve on the same (max-deformed) geometry — i.e. the ALE machinery
+/// adds NO error on top of the pre-existing skewed-cell spatial band.
 ///
 /// The sub-2 u order is NOT the ALE machinery — three probes localize it to
 /// the spatial operator on persistently-skewed cells (amplitude ∝ h keeps
@@ -255,18 +266,18 @@ fn solve_taylor_green_moving(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>) {
 ///     — not a fixed-dt temporal artifact;
 ///   * amplitude scaling: 10× smaller bump (CFD2_ALE_SPATIAL_AMP=0.02)
 ///     recovers the static-protocol error (n=32: 7.33e-4);
-///   * STATIC pre-deformed solve (CFD2_ALE_SPATIAL_STATIC_DEFORM=1: deform
-///     to max once, hold, zero mesh fluxes) reproduces the moving-mesh
-///     sweep to 3 significant digits at EVERY level and the identical
-///     order 1.387 — the moving protocol adds nothing on top of the static
-///     solve on the same skewed geometry, which is exactly the statement
-///     this gate exists to pin.
+///   * STATIC pre-deformed solve (deform to max once at step 1, hold, zero
+///     mesh fluxes afterwards) reproduces the moving-mesh sweep to 3
+///     significant digits at EVERY level and the identical order 1.387 —
+///     ASSERTED below at n=32 (moving/static u-error ratio within 5%; the
+///     probe remains sweepable via CFD2_ALE_SPATIAL_STATIC_DEFORM=1).
 ///
 /// The non-orthogonal (skewed-quad) spatial band is a pre-existing solver
 /// property outside ALE scope (the graded static suite keeps orthogonal
-/// cells, so it never sees it). Gate: the roadmap band 2.0 − (0.35 + 0.3);
-/// finest cap ~2× measured. An order collapse below 1.35 or a blown finest
-/// cap catches ALE-term regressions.
+/// cells, so it never sees it; static-suite band: u order 2.0 − 0.35,
+/// measured 1.87 uniform / 1.98 graded). An order collapse below 1.35, a
+/// blown finest cap (~2× measured) or a moving/static divergence >5% catches
+/// ALE-term regressions.
 #[test]
 fn ale_taylor_green_sou_velocity_second_order() {
     let mut hs = Vec::new();
@@ -276,8 +287,13 @@ fn ale_taylor_green_sou_velocity_second_order() {
         .ok()
         .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
         .unwrap_or_else(|| vec![8, 16, 32, 64]);
+    let env_static_deform =
+        std::env::var("CFD2_ALE_SPATIAL_STATIC_DEFORM").as_deref() == Ok("1");
+    // The moving ≡ static-on-deformed-geometry equivalence assert (below)
+    // needs the n=32 moving error; only available on the default level list.
+    let default_levels = levels == [8, 16, 32, 64];
     for n in levels {
-        let (mesh, u, p) = solve_taylor_green_moving(n);
+        let (mesh, u, p) = solve_taylor_green_moving(n, env_static_deform);
         let u_err = field_errors_vec2(&mesh, &u, exact_u).l2;
         // Demean both pressures (all-wall mesh leaves the gauge free).
         let p_mean = volume_mean(&mesh, &p);
@@ -300,6 +316,31 @@ fn ale_taylor_green_sou_velocity_second_order() {
         p_order > 0.9,
         "pressure order regressed: {p_order:.3} (errors {p_errs:?})"
     );
+
+    // The decisive ALE-correctness statement (see the header's deviation
+    // record): the moving-mesh error must equal the static solve on the same
+    // max-deformed geometry — the ALE terms (mesh-relative fluxes,
+    // moving-volume ddt, continuity volume source) add nothing on top of the
+    // pre-existing skewed-cell spatial error. Measured equal to 3 significant
+    // digits (n=32: moving 1.284e-3 vs static-deformed 1.284e-3, July 2026);
+    // asserted at ±5% for GPU run-to-run headroom. Skipped when the level
+    // list or the static-deform probe is overridden via env (diagnostics).
+    if default_levels && !env_static_deform {
+        let (mesh_s, u_s, _p_s) = solve_taylor_green_moving(32, true);
+        let u_err_static = field_errors_vec2(&mesh_s, &u_s, exact_u).l2;
+        let u_err_moving = u_errs[2];
+        let ratio = u_err_moving / u_err_static;
+        println!(
+            "[mms][ale_taylor_green] n=32 moving/static-deformed u_l2 ratio {ratio:.4} \
+             (moving {u_err_moving:.4e}, static {u_err_static:.4e})"
+        );
+        assert!(
+            (ratio - 1.0).abs() <= 0.05,
+            "ALE moving-mesh error diverged from the static solve on the same deformed \
+             geometry: ratio {ratio:.4} (moving {u_err_moving:.4e}, static {u_err_static:.4e}) \
+             — the ALE terms are injecting error beyond the spatial skew band"
+        );
+    }
 }
 
 // ── temporal study ────────────────────────────────────────────────────────

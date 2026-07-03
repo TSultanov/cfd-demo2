@@ -693,7 +693,26 @@ impl SolverDriver {
     /// rotate volume history → upload new geometry → upload closed mesh
     /// fluxes), then recompute the driver's mesh-derived `min_cell_size`
     /// (the adaptive-dt length scale). Call once per step, before `step()`.
+    ///
+    /// **dt handshake (review-solver-ale F2)**: the mesh fluxes are closed
+    /// against ONE dt (the `dt` argument of `swept_mesh_fluxes_closed`), and
+    /// the SCL only holds if the solver steps with exactly that dt. This
+    /// driver's [`Self::step`] pins `params.requested_dt` when adaptive dt is
+    /// off, so the contract is: close the fluxes against `params.requested_dt`
+    /// and keep `params.adaptive_dt == false`. Adaptive dt would silently
+    /// re-scale dt after the closure (Σφ·dt ≠ ΔV ⇒ mass injection with no
+    /// diagnostic firing), so it is rejected here until the M4 motion↔dt
+    /// handshake lands.
     pub fn begin_ale_step(&mut self, mesh: &Mesh, mesh_fluxes: &[f32]) -> Result<(), String> {
+        if self.params.adaptive_dt {
+            return Err(
+                "begin_ale_step: adaptive dt is incompatible with ALE stepping (the mesh \
+                 fluxes are SCL-closed against a fixed dt; an adaptive recompute after the \
+                 closure silently violates the GCL). Set params.adaptive_dt = false and close \
+                 the fluxes against params.requested_dt."
+                    .into(),
+            );
+        }
         self.solver.begin_ale_step(mesh, mesh_fluxes)?;
         self.min_cell_size = mesh
             .cell_vol

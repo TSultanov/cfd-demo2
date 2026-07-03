@@ -148,6 +148,12 @@ pub struct GpuUnifiedSolver {
     /// Runtime toggle for the SRD pass (**default off**; only meaningful when
     /// `srd` is `Some`). Opt-in via [`Self::set_srd_enabled`].
     srd_enabled: bool,
+    /// ALE sequencing guard: set by [`Self::begin_ale_step`], cleared by
+    /// `step`/`step_with_stats`. A second `begin_ale_step` without an
+    /// intervening step would double-rotate the volume history (the `V^n`
+    /// slot silently becomes `V^{n+1}` — a corrupted moving-volume ddt), so
+    /// double-arming is rejected.
+    ale_step_armed: bool,
     #[cfg(feature = "cpu")]
     cpu_render: Option<CpuRender>,
 }
@@ -204,6 +210,7 @@ impl GpuUnifiedSolver {
                 // builds or applies it.
                 srd: None,
                 srd_enabled: false,
+                ale_step_armed: false,
                 cpu_render,
             };
             solver.sync_cpu_render();
@@ -236,6 +243,7 @@ impl GpuUnifiedSolver {
             config,
             srd: None,
             srd_enabled: false,
+            ale_step_armed: false,
             #[cfg(feature = "cpu")]
             cpu_render: None,
         };
@@ -670,6 +678,7 @@ impl GpuUnifiedSolver {
     }
 
     pub fn step(&mut self) {
+        self.ale_step_armed = false;
         match &mut self.backend {
             SolverBackend::Gpu(p) => p.step(),
             #[cfg(feature = "cpu")]
@@ -685,6 +694,7 @@ impl GpuUnifiedSolver {
     }
 
     pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
+        self.ale_step_armed = false;
         let stats = match &mut self.backend {
             SolverBackend::Gpu(p) => p.step_with_stats()?,
             #[cfg(feature = "cpu")]
@@ -736,6 +746,20 @@ impl GpuUnifiedSolver {
                     .into(),
             );
         }
+        // ALE sequencing guard: on an ALE model, a plain geometry refresh
+        // updates `cell_vols` WITHOUT rotating the volume history and leaves
+        // the (stale, likely zero) mesh fluxes bound — the moving-volume ddt
+        // then sees an inconsistent (V^{n+1}, V^n) pair and the SCL breaks
+        // silently. The ALE seam is `begin_ale_step` (rotation + geometry +
+        // fluxes in the correct order); use it for any mid-run mesh change.
+        if self.model.system.is_ale() {
+            return Err(
+                "refresh_mesh on an ALE model is rejected: it would update cell volumes \
+                 without rotating the volume history or supplying mesh fluxes (silent SCL \
+                 violation). Use begin_ale_step for mesh motion on ALE models."
+                    .into(),
+            );
+        }
         match &mut self.backend {
             SolverBackend::Gpu(p) => p.refresh_mesh_geometry(mesh)?,
             #[cfg(feature = "cpu")]
@@ -758,6 +782,12 @@ impl GpuUnifiedSolver {
     /// `Σ_f flux_f ≈ (V^{n+1}−V^n)/dt` survives byte-exactly. Only `*_ale`
     /// model kernels consume them; calling this on a static model is
     /// harmless but pointless.
+    ///
+    /// **dt handshake (review-solver-ale F2)**: the closure fixes ONE dt; the
+    /// caller must step with exactly that dt (`set_dt` with the same value)
+    /// or the SCL silently breaks (Σφ·dt ≠ ΔV). `SolverDriver::begin_ale_step`
+    /// enforces this by rejecting `adaptive_dt`; raw-solver callers own the
+    /// contract themselves.
     pub fn begin_ale_step(&mut self, mesh: &Mesh, mesh_fluxes: &[f32]) -> Result<(), String> {
         if self.srd_enabled && self.srd.is_some() {
             return Err(
@@ -766,11 +796,24 @@ impl GpuUnifiedSolver {
                     .into(),
             );
         }
-        match &mut self.backend {
-            SolverBackend::Gpu(p) => p.begin_ale_step(mesh, mesh_fluxes),
-            #[cfg(feature = "cpu")]
-            SolverBackend::Cpu(c) => c.begin_ale_step(mesh, mesh_fluxes),
+        // Sequencing guard: double-arming without an intervening step would
+        // rotate the volume history twice (V^n slot silently becomes V^{n+1}),
+        // corrupting the moving-volume ddt with no diagnostic downstream.
+        if self.ale_step_armed {
+            return Err(
+                "begin_ale_step called twice without an intervening step(): this would \
+                 double-rotate the volume history (V^n <- V^{n+1}) and corrupt the \
+                 moving-volume ddt. Call step() (or roll back and rebuild) first."
+                    .into(),
+            );
         }
+        match &mut self.backend {
+            SolverBackend::Gpu(p) => p.begin_ale_step(mesh, mesh_fluxes)?,
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(c) => c.begin_ale_step(mesh, mesh_fluxes)?,
+        }
+        self.ale_step_armed = true;
+        Ok(())
     }
 
     pub fn enable_detailed_profiling(&mut self, enable: bool) -> Result<(), String> {

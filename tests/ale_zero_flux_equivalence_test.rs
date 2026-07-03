@@ -93,12 +93,8 @@ fn test_params_with(time_scheme: TimeScheme) -> RuntimeParams {
     }
 }
 
-fn test_params() -> RuntimeParams {
-    test_params_with(TimeScheme::BDF2)
-}
-
-fn build_driver(mesh: &Mesh, model: ModelSpec) -> SolverDriver {
-    let params = test_params();
+fn build_driver(mesh: &Mesh, model: ModelSpec, time_scheme: TimeScheme) -> SolverDriver {
+    let params = test_params_with(time_scheme);
     let n = mesh.num_cells();
     let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
         mesh,
@@ -121,17 +117,28 @@ fn state_bits(driver: &SolverDriver) -> Vec<u32> {
         .collect()
 }
 
-/// Run the static and ALE models side by side on the given CPU engine,
-/// asserting bit-equality of the full state every step.
-fn assert_zero_flux_equivalence(engine: &str) {
+/// Run the static and ALE models side by side on the given CPU engine and
+/// time scheme, asserting bit-equality of the full state every step. Both
+/// schemes are load-bearing legs: Euler exercises the BDF1 moving-volume ddt
+/// branch directly; BDF2 exercises the volume-ratio-weighted history chain
+/// (plus the step-0 Euler startup fallback on the from-rest state).
+fn assert_zero_flux_equivalence(engine: &str, time_scheme: TimeScheme) {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     std::env::set_var("CFD2_BACKEND", "cpu");
     std::env::set_var("CFD2_CPU_ENGINE", engine);
     let result = std::panic::catch_unwind(|| {
         let mesh = channel_mesh();
 
-        let mut base = build_driver(&mesh, incompressible_momentum_model().expect("model"));
-        let mut ale = build_driver(&mesh, incompressible_momentum_ale_model().expect("model"));
+        let mut base = build_driver(
+            &mesh,
+            incompressible_momentum_model().expect("model"),
+            time_scheme,
+        );
+        let mut ale = build_driver(
+            &mesh,
+            incompressible_momentum_ale_model().expect("model"),
+            time_scheme,
+        );
         assert!(base.solver().is_cpu(), "expected the CPU backend");
         assert!(ale.solver().is_cpu(), "expected the CPU backend");
 
@@ -166,7 +173,8 @@ fn assert_zero_flux_equivalence(engine: &str) {
             );
         }
         println!(
-            "[ale-zero-flux] {engine}: ALE == static bitwise over {STEPS} steps ({} state slots)",
+            "[ale-zero-flux] {engine}/{time_scheme:?}: ALE == static bitwise over {STEPS} steps \
+             ({} state slots)",
             (NX * NY) as f64
         );
     });
@@ -177,16 +185,105 @@ fn assert_zero_flux_equivalence(engine: &str) {
     }
 }
 
-/// Interpreter engine: executes the KernelProgram IR directly.
+/// Interpreter engine, BDF2: executes the KernelProgram IR directly.
 #[test]
 fn ale_zero_flux_byte_identical_cpu_interpreter() {
-    assert_zero_flux_equivalence("interpreter");
+    assert_zero_flux_equivalence("interpreter", TimeScheme::BDF2);
 }
 
-/// Transpiled engine: the compiled-Rust kernels emitted at build time.
+/// Transpiled engine, BDF2: the compiled-Rust kernels emitted at build time.
 #[test]
 fn ale_zero_flux_byte_identical_cpu_transpiled() {
-    assert_zero_flux_equivalence("transpiled");
+    assert_zero_flux_equivalence("transpiled", TimeScheme::BDF2);
+}
+
+/// Interpreter engine, Euler: the BDF1 moving-volume branch as the DECLARED
+/// scheme (the BDF2 legs only reach it through the step-0 startup fallback
+/// on a from-rest state — adversarial review, July 2026).
+#[test]
+fn ale_zero_flux_byte_identical_cpu_interpreter_euler() {
+    assert_zero_flux_equivalence("interpreter", TimeScheme::Euler);
+}
+
+/// Transpiled engine, Euler (same rationale as the interpreter Euler leg).
+#[test]
+fn ale_zero_flux_byte_identical_cpu_transpiled_euler() {
+    assert_zero_flux_equivalence("transpiled", TimeScheme::Euler);
+}
+
+/// ALE sequencing/handshake guards (adversarial review, July 2026), pinned on
+/// the cheap CPU backend:
+///   * `SolverDriver::begin_ale_step` under `adaptive_dt` must ERROR — the
+///     fluxes are SCL-closed against one dt, and an adaptive recompute after
+///     the closure silently injects mass (review F2);
+///   * double-arming `begin_ale_step` without an intervening `step()` must
+///     ERROR — it would rotate the volume history twice;
+///   * `refresh_mesh` on an ALE model must ERROR — it updates volumes without
+///     rotation/fluxes (the seam is `begin_ale_step`).
+#[test]
+fn ale_sequencing_guards_reject_misuse() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    std::env::set_var("CFD2_CPU_ENGINE", "interpreter");
+    let result = std::panic::catch_unwind(|| {
+        let mut mesh = channel_mesh();
+        let mut driver = build_driver(
+            &mesh,
+            incompressible_momentum_ale_model().expect("model"),
+            TimeScheme::BDF2,
+        );
+
+        // Static-mesh "motion": identical vertices, all-zero closed fluxes.
+        let old_vx = mesh.vx.clone();
+        let old_vy = mesh.vy.clone();
+        mesh.recalculate_geometry();
+        let swept = cfd2::solver::mesh::swept_mesh_fluxes_closed(
+            &mesh,
+            &old_vx,
+            &old_vy,
+            f64::from(test_params_with(TimeScheme::BDF2).requested_dt),
+        )
+        .expect("swept fluxes");
+
+        // adaptive_dt guard.
+        let mut adaptive = test_params_with(TimeScheme::BDF2);
+        adaptive.adaptive_dt = true;
+        driver.apply_params(&adaptive);
+        let err = driver
+            .begin_ale_step(&mesh, &swept.fluxes)
+            .expect_err("begin_ale_step must reject adaptive dt");
+        assert!(err.contains("adaptive dt"), "unexpected error: {err}");
+
+        // Double-arm guard (fixed dt again).
+        driver.apply_params(&test_params_with(TimeScheme::BDF2));
+        driver
+            .begin_ale_step(&mesh, &swept.fluxes)
+            .expect("first begin_ale_step");
+        let err = driver
+            .begin_ale_step(&mesh, &swept.fluxes)
+            .expect_err("double-arm must be rejected");
+        assert!(err.contains("twice"), "unexpected error: {err}");
+        // step() clears the arm; the next begin_ale_step is legal again.
+        let out = driver.step(false);
+        assert!(out.diverged.is_none(), "step diverged: {:?}", out.diverged);
+        driver
+            .begin_ale_step(&mesh, &swept.fluxes)
+            .expect("re-arm after step");
+        let out = driver.step(false);
+        assert!(out.diverged.is_none(), "step diverged: {:?}", out.diverged);
+
+        // refresh_mesh-on-ALE guard.
+        let err = driver
+            .refresh_mesh(&mesh, cfd2::solver::MeshRefreshLevel::Geometry)
+            .expect_err("refresh_mesh on an ALE model must be rejected");
+        assert!(err.contains("begin_ale_step"), "unexpected error: {err}");
+        println!("[ale-guards] adaptive-dt, double-arm and refresh-on-ALE misuse all rejected");
+    });
+    std::env::remove_var("CFD2_BACKEND");
+    std::env::remove_var("CFD2_CPU_ENGINE");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
 }
 
 /// Shared GPU protocol: run static + ALE side by side, return

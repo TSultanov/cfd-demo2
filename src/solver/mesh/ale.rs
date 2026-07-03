@@ -42,6 +42,7 @@
 use super::structs::Mesh;
 
 /// Result of [`swept_mesh_fluxes_closed`].
+#[derive(Debug)]
 pub struct SweptMeshFluxes {
     /// Per-face volumetric swept rate `V̇_f = A_swept(f)/dt` (Volume/Time),
     /// f32, signed along the stored face normal (owner-outward convention —
@@ -188,6 +189,28 @@ pub fn swept_mesh_fluxes_closed(
         let dv = mesh.cell_vol[i] - old_vols[i];
         let err = (sum - dv).abs() / mesh.cell_vol[i].max(f64::MIN_POSITIVE);
         max_identity_err_rel = max_identity_err_rel.max(err);
+    }
+
+    // The identity is f64-roundoff exact (≲1e-13 measured) whenever the
+    // inputs are consistent: same topology, `recalculate_geometry` volumes,
+    // linear vertex motion. A violation means the swept-quad geometry does
+    // NOT describe the actual volume change (wrong old positions, stale
+    // volumes, inverted/degenerate cells — `cell_volumes_from` takes |·|, so
+    // an inversion shows up HERE, not in the volumes). Failing is load-bearing
+    // (adversarial review, July 2026): the f32 closure downstream would
+    // otherwise silently "repair" arbitrarily wrong fluxes to the per-cell
+    // sums — free-stream preservation only senses those sums, so the GCL gate
+    // would stay green while the per-face flux distribution is garbage. The
+    // 1e-9 threshold is ~3-4 orders looser than roundoff and ~orders tighter
+    // than any real defect.
+    if max_identity_err_rel > 1e-9 {
+        return Err(format!(
+            "swept_mesh_fluxes: telescoping identity violated (max rel residual {:.3e} > 1e-9): \
+             the swept-quad areas do not sum to the per-cell volume changes. The old/new vertex \
+             positions are inconsistent with the mesh geometry (stale recalculate_geometry, \
+             wrong old positions, or inverted/degenerate cells)",
+            max_identity_err_rel
+        ));
     }
 
     // ── 2. f32 cast ────────────────────────────────────────────────────────
@@ -385,6 +408,28 @@ mod tests {
         assert_eq!(
             out.fluxes.iter().map(|f| f.to_bits()).collect::<Vec<_>>(),
             out2.fluxes.iter().map(|f| f.to_bits()).collect::<Vec<_>>(),
+        );
+    }
+
+    /// Inconsistent inputs are REJECTED, not laundered (adversarial review,
+    /// July 2026): stale `cell_vol` (geometry not recalculated after the
+    /// move) violates the telescoping identity, and the function must error
+    /// instead of letting the f32 closure silently repair the per-cell sums.
+    /// Note perturbing the OLD positions alone does not violate the identity
+    /// (both sides derive from the same old/new vertex sets — the geometry is
+    /// self-consistent, just a different motion); staleness of the mesh's own
+    /// volumes is the observable inconsistency.
+    #[test]
+    fn stale_volumes_are_rejected() {
+        let mut mesh = test_mesh();
+        let h = 1.5 / 24.0;
+        let (ovx, ovy) = displace(&mut mesh, 0.2 * h, 1.5, 1.0);
+        mesh.cell_vol[10] *= 1.001; // simulate a stale/corrupt volume
+        let err = swept_mesh_fluxes_closed(&mesh, &ovx, &ovy, 1e-2)
+            .expect_err("stale volumes must be rejected");
+        assert!(
+            err.contains("telescoping identity violated"),
+            "unexpected error: {err}"
         );
     }
 

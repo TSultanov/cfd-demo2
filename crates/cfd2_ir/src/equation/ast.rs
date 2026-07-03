@@ -345,18 +345,28 @@ impl Term {
     }
 
     /// Declare ALE (mesh-relative) convection for this term (see
-    /// `relative_to_mesh` field docs). Only valid on `Div` / `DivFlux` terms.
+    /// `relative_to_mesh` field docs). Only valid on IMPLICIT `Div` /
+    /// `DivFlux` terms.
     ///
     /// # Panics
     ///
-    /// Panics when applied to any other term op — the flag has no meaning
-    /// there, and model construction is build-time, so failing fast is the
-    /// correct contract.
+    /// Panics when applied to any other term op, or to an explicit-discretized
+    /// term — the mesh-relative subtraction is emitted at the implicit
+    /// convection consumption points only, so an explicit flagged term would
+    /// silently keep the absolute flux (GCL-violating). Model construction is
+    /// build-time, so failing fast is the correct contract (codegen re-asserts
+    /// this for directly-constructed IR).
     pub fn with_mesh_relative(mut self) -> Self {
         assert!(
             matches!(self.op, TermOp::Div | TermOp::DivFlux),
             "with_mesh_relative is only valid on Div/DivFlux terms, got {:?}",
             self.op
+        );
+        assert!(
+            self.discretization == Discretization::Implicit,
+            "with_mesh_relative is only valid on IMPLICIT terms (the mesh-relative flux \
+             subtraction lives at the implicit convection assembly sites), got {:?}",
+            self.discretization
         );
         self.relative_to_mesh = true;
         self
@@ -885,6 +895,17 @@ mod tests {
         let err = Coefficient::product(Coefficient::field(rho).unwrap(), Coefficient::Field(u))
             .unwrap_err();
         assert!(matches!(err, CodegenError::NonScalarCoefficient { .. }));
+    }
+
+    /// ALE flag scope (adversarial review, July 2026): the mesh-relative
+    /// subtraction only exists at the implicit convection assembly sites, so
+    /// an explicit flagged term would silently keep the absolute flux.
+    #[test]
+    #[should_panic(expected = "only valid on IMPLICIT terms")]
+    fn with_mesh_relative_rejects_explicit_terms() {
+        let p = vol_scalar("p", si::PRESSURE);
+        let phi = surface_scalar("phi", si::MASS_FLUX);
+        let _ = fvc::div(phi, p).with_mesh_relative();
     }
 
     #[test]

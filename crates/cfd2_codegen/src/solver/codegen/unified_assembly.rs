@@ -43,6 +43,51 @@ fn unified_assembly_needs_mesh_fluxes(system: &DiscreteSystem) -> bool {
     system.is_ale()
 }
 
+/// Fail-fast validation of the ALE v1 scope, called whenever a system is ALE
+/// (mirrors the ALE+`dt_local` assert in time_integration.rs). Two silent
+/// mishandlings are rejected at codegen time instead of compiling into
+/// GCL-violating kernels:
+///
+/// * **Explicit flagged terms**: every mesh-relative subtraction site gates on
+///   `Discretization::Implicit`, so an explicit `Div` term flagged
+///   `relative_to_mesh` would get the bindings / moving-volume ddt /
+///   continuity source emitted but NO flux subtraction — an inconsistent ALE
+///   discretization. (`Term::with_mesh_relative` also rejects this at model
+///   construction; this is the authoritative consumer-side backstop for
+///   directly-constructed IR.)
+///
+/// * **Variable density**: `ale_relative_flux_expr` hardcodes the flux's
+///   density factor as the uniform `constants.density`. The flux derivation
+///   (src/solver/model/flux_derivation.rs `density_face_expr`) uses that same
+///   uniform exactly when the state layout has NO `rho` field; a state-layout
+///   `rho` means the flux carries an upwinded face density and the subtraction
+///   would be wrong-by-ρ. v1 ALE scope is constant-density (incompressible)
+///   only — variable-density fluxes need a persisted face density (flagged
+///   follow-up, see `Term::relative_to_mesh` docs).
+fn validate_ale_unified_assembly(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) {
+    for eq in &system.equations {
+        for op in &eq.ops {
+            assert!(
+                !op.relative_to_mesh || op.discretization == Discretization::Implicit,
+                "ALE (relative_to_mesh) is only supported on IMPLICIT Div/DivFlux terms: \
+                 the mesh-relative flux subtraction is emitted at the implicit convection \
+                 consumption points, so an explicit flagged term ({:?} on target '{}') would \
+                 silently keep the absolute flux (GCL-violating)",
+                op.term_op,
+                eq.target.name(),
+            );
+        }
+    }
+    assert!(
+        !slots.slots.iter().any(|s| s.name == "rho"),
+        "ALE (relative_to_mesh) on a variable-density model is unsupported: the state \
+         layout carries a 'rho' field, so the derived face flux uses an upwinded face \
+         density, while the ALE subtraction assumes the uniform constants.density \
+         (v1 constant-density scope; a variable-density ALE flux needs a persisted \
+         face density)"
+    );
+}
+
 /// `mesh_fluxes` storage binding (group 0 / binding 8, the first free mesh
 /// slot): per-face volumetric swept rate `V̇_f = A_swept(f)/dt` (Volume/Time),
 /// signed along the stored face normal (owner convention, exactly like the
@@ -142,6 +187,7 @@ pub fn generate_unified_assembly_wgsl(
                 self.eos_params,
             ));
             if unified_assembly_needs_mesh_fluxes(self.system) {
+                validate_ale_unified_assembly(self.system, self.slots);
                 module.push(mesh_fluxes_item());
                 for item in ale_vols_history_items() {
                     module.push(item);
@@ -194,6 +240,7 @@ pub fn generate_unified_assembly_kernel_program(
 
             let mut items = base_assembly_items(self.needs_gradients, needs_fluxes, self.eos_params);
             if unified_assembly_needs_mesh_fluxes(self.system) {
+                validate_ale_unified_assembly(self.system, self.slots);
                 items.push(mesh_fluxes_item());
                 items.extend(ale_vols_history_items());
             }

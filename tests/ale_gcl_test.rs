@@ -28,6 +28,19 @@
 //! is exactly satisfied by the uniform state. Interior vertex motion is zero
 //! at the boundary, so boundary faces have zero mesh flux.
 //!
+//! Scope deviations from the roadmap sketch (recorded per adversarial review,
+//! July 2026 — the roadmap's M3 gate section carries the same note):
+//!   * 220 steps, not 500: 2.2 motion periods with the late-window
+//!     no-compounding split below. The gate's power is per-step margin, not
+//!     duration — mesh flux is ~6% of convective flux, so a sign error or a
+//!     missing `ale_dvdt_ddt` produces per-step drift 10²–10⁴× above the
+//!     late-window caps; extra periods add wall time (the GCL suite is
+//!     already ~5 min), not sensitivity.
+//!   * NO topology-flip case: flips need the M2 Tier-B topology refresh,
+//!     which is not shipped (the seam is geometry-only and structured-mesh
+//!     motion cannot induce flips). DEFERRED to M2 Tier-B/M4 — when topology
+//!     refresh lands, add a flip-inducing uniform-flow case here.
+//!
 //! Tolerances follow the repo's pin-after-first-measurement convention; the
 //! caps are ~2× (CPU) / ~4× (GPU) the measured drift (values recorded at the
 //! asserts). The SCL defect diagnostic is asserted at f32-roundoff scale

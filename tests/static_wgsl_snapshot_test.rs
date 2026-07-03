@@ -19,6 +19,10 @@
 //!      explicitly declares otherwise, per AGENTS.md).
 //!   3. Re-bless: `CFD2_BLESS_WGSL_SNAPSHOT=1 cargo test --test
 //!      static_wgsl_snapshot_test` rewrites `tests/static_wgsl_snapshot.txt`.
+//!      For the common "adding a new model" case prefer
+//!      `CFD2_BLESS_WGSL_SNAPSHOT=add-only` — it accepts NEW files but
+//!      REFUSES changed/removed hashes, so an unintended static-model drift
+//!      cannot ride along with a routine re-bless.
 //!   4. Commit the snapshot file TOGETHER with the shader diffs, and call out
 //!      any static-model hash change in the changeset report.
 //!
@@ -119,13 +123,47 @@ fn read_snapshot(path: &Path) -> BTreeMap<String, u64> {
 fn generated_wgsl_matches_snapshot() {
     let current = current_hashes();
 
-    if std::env::var("CFD2_BLESS_WGSL_SNAPSHOT").as_deref() == Ok("1") {
-        write_snapshot(&current);
-        println!(
-            "[wgsl-snapshot] BLESSED {} files into {SNAPSHOT_PATH}",
-            current.len()
-        );
-        return;
+    match std::env::var("CFD2_BLESS_WGSL_SNAPSHOT").as_deref() {
+        Ok("1") => {
+            write_snapshot(&current);
+            println!(
+                "[wgsl-snapshot] BLESSED {} files into {SNAPSHOT_PATH}",
+                current.len()
+            );
+            return;
+        }
+        // Safe-by-construction bless for the common "new model" case: accept
+        // added files, refuse any changed or removed hash (those need the
+        // full ritual and an explicit `=1`).
+        Ok("add-only") => {
+            let pinned = read_snapshot(&snapshot_file());
+            let changed: Vec<&String> = pinned
+                .iter()
+                .filter(|(name, hash)| current.get(*name).is_some_and(|c| c != *hash))
+                .map(|(name, _)| name)
+                .collect();
+            let missing: Vec<&String> =
+                pinned.keys().filter(|n| !current.contains_key(*n)).collect();
+            assert!(
+                changed.is_empty() && missing.is_empty(),
+                "add-only bless refused: existing pinned hashes drifted.\n\
+                 changed ({} files): {changed:?}\n\
+                 removed ({} files): {missing:?}\n\
+                 If the drift is deliberate, follow the full ritual and bless with \
+                 CFD2_BLESS_WGSL_SNAPSHOT=1.",
+                changed.len(),
+                missing.len(),
+            );
+            let added = current.len() - pinned.len();
+            write_snapshot(&current);
+            println!(
+                "[wgsl-snapshot] BLESSED (add-only): {added} new files added, \
+                 {} existing pins verified unchanged",
+                pinned.len()
+            );
+            return;
+        }
+        _ => {}
     }
 
     let pinned = read_snapshot(&snapshot_file());

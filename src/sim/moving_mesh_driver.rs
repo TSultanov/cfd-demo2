@@ -31,9 +31,11 @@
 //! **Model scope (v1)**: `incompressible_momentum_ale` only. The constructor
 //! builds that model; no other model is accepted.
 //!
-//! Stage-1 scope: the [`MeshMotionSpec::Frozen`] leg (seeds never move — the
-//! plumbing proven before any motion). `Prescribed`/`FlowCoupled` are declared
-//! but not yet wired (they return an error from `step`).
+//! Scope so far: [`MeshMotionSpec::Frozen`] (stage 1 — the static-limit
+//! plumbing) and [`MeshMotionSpec::Prescribed`] (stage 2 — analytic seed motion
+//! through the full Voronoi-regen + swept-flux path, PERSISTENT topology only:
+//! a Voronoi flip returns an error, since the conservative swept-flux remap
+//! across a re-tessellation is stage 3). `FlowCoupled` is declared but rejected.
 
 use std::time::Instant;
 
@@ -41,7 +43,7 @@ use nalgebra::{Point2, Vector2};
 
 use super::{RuntimeParams, SolverDriver, StepOutcome};
 use crate::meshgen::meshless::{assemble_meshless_from_seeds, BoundarySpec, CvtMeshSeeds, SeedKind};
-use crate::solver::mesh::{swept_mesh_fluxes_closed, Mesh};
+use crate::solver::mesh::{align_old_vertices_by_seed_set, swept_mesh_fluxes_closed, Mesh};
 use crate::solver::model::incompressible_momentum_ale_model;
 
 /// Default mesh-motion CFL cap factor (`dt ≤ cfl_mesh · min_h / max|w|`).
@@ -52,29 +54,20 @@ pub const DEFAULT_MESH_CFL: f64 = 0.2;
 
 /// How the seeds move each step.
 ///
-/// Stage 1 implements [`MeshMotionSpec::Frozen`] only; the other variants are
-/// declared for the milestone shape and rejected by [`MovingMeshDriver::step`]
-/// until their stages land.
+/// `Frozen` and `Prescribed` are implemented; `FlowCoupled` is declared for the
+/// milestone shape and rejected by [`MovingMeshDriver::step`] until its stage.
 #[derive(Clone, Copy)]
 pub enum MeshMotionSpec {
     /// Seeds never move (regen reproduces the same mesh byte-for-byte). The
     /// static-limit / do-no-harm case.
     Frozen,
-    /// Prescribed analytic motion `new_pos = f(seed, t)` (stage 2).
+    /// Prescribed analytic motion `new_pos = f(seed0, t)` from the t=0 seed
+    /// label and absolute time (interior seeds only; boundary seeds fixed in
+    /// v1). Persistent topology only — a flip is rejected (stage 2).
     Prescribed(fn([f64; 2], f64) -> [f64; 2]),
     /// Flow-coupled motion (cell velocity + AREPO centroid steering); the
     /// `regularization` is the steering strength χ (stage 4).
     FlowCoupled { regularization: f64 },
-}
-
-impl MeshMotionSpec {
-    fn label(&self) -> &'static str {
-        match self {
-            MeshMotionSpec::Frozen => "Frozen",
-            MeshMotionSpec::Prescribed(_) => "Prescribed",
-            MeshMotionSpec::FlowCoupled { .. } => "FlowCoupled",
-        }
-    }
 }
 
 /// Per-step moving-mesh telemetry (the always-on diagnostics the M4 gates and
@@ -97,9 +90,14 @@ pub struct MovingMeshStats {
     pub max_skew: f64,
     pub n_cells: usize,
     pub n_faces: usize,
-    /// The regenerated mesh's face set / adjacency differs from the previous
-    /// step's (a Voronoi flip). Always `false` under `Frozen` (byte-identical
-    /// regen); a real signal once seeds move.
+    /// The regenerated mesh's face ARRAYS (order and/or adjacency) differ from
+    /// the previous step's, so the step drove the TOPOLOGY seam (a full CSR
+    /// rebuild) rather than the surgical geometry seam. Note: any real seed
+    /// motion reorders the deterministic face emission, so this is `true` every
+    /// motion step — it is NOT a flip flag. A genuine Voronoi flip (born/dead
+    /// faces) instead makes [`MovingMeshDriver::step`] return an error (the
+    /// conservative remap is stage 3). Always `false` under `Frozen`
+    /// (byte-identical regen ⇒ geometry seam).
     pub topo_changed: bool,
     /// The pinned dt the swept fluxes were closed against AND the solver
     /// stepped with (they are equal by the F2 handshake). f64-widened f32 —
@@ -111,8 +109,16 @@ pub struct MovingMeshStats {
 /// the current realized mesh, and the wrapped [`SolverDriver`].
 pub struct MovingMeshDriver {
     driver: SolverDriver,
-    /// Authoritative seed positions (f64), seed `i` == cell `i`.
+    /// Authoritative seed positions (f64), seed `i` == cell `i` — the CURRENT
+    /// (t^n) realized set. Advanced each step by [`MeshMotionSpec`].
     seeds: Vec<Point2<f64>>,
+    /// The t=0 seed positions (the Lagrangian labels). Prescribed motion is
+    /// evaluated as `f(seed0_i, t)` from these — sampling the analytic
+    /// trajectory absolutely, so there is no incremental round-off drift.
+    seeds0: Vec<Point2<f64>>,
+    /// Accumulated simulated time (Σ of the actually-pinned dt's) — the `t`
+    /// argument of a [`MeshMotionSpec::Prescribed`] law.
+    time: f64,
     /// Per-seed kind (interior vs boundary), fixed for the run.
     kinds: Vec<SeedKind>,
     /// Boundary loops the regen clips against.
@@ -135,6 +141,16 @@ pub struct MovingMeshDriver {
     /// do-no-harm skip-regen variant (a pure `SolverDriver::step` passthrough,
     /// byte-identical to a static run).
     regen_each_step: bool,
+    /// Optional per-regen boundary-tag rewrite, applied to each freshly
+    /// regenerated mesh before the ALE seam. The M0 engine tags the domain box
+    /// sides by a FIXED rule (left Inlet / right Outlet / bottom+top Wall), so a
+    /// run that wants a different arrangement (e.g. slip channel walls, or
+    /// inlet/outlet on the bottom) must re-stamp `face_boundary` every step —
+    /// the topology seam rebuilds the bc tables from the regenerated mesh's
+    /// tags, so a one-time retag of the initial mesh would be lost. Touches only
+    /// `face_boundary` (never geometry/adjacency), so it does not affect the
+    /// swept fluxes or the topology-diff. `None` = keep the engine's tags.
+    boundary_retag: Option<fn(&mut Mesh)>,
     /// Route every step through the topology seam even when the topology is
     /// unchanged (default `false` — use the geometry seam when it suffices).
     /// The topology seam clears the AMG hierarchy + re-scatters bc tables, so
@@ -193,6 +209,8 @@ impl MovingMeshDriver {
 
         Ok(Self {
             driver: build.driver,
+            seeds0: seeds.clone(),
+            time: 0.0,
             seeds,
             kinds,
             spec,
@@ -203,6 +221,7 @@ impl MovingMeshDriver {
             prev_vy,
             motion,
             mesh_cfl: DEFAULT_MESH_CFL,
+            boundary_retag: None,
             regen_each_step: true,
             force_topology_seam: false,
             step_index: 0,
@@ -212,6 +231,13 @@ impl MovingMeshDriver {
     /// Set the mesh-motion CFL cap factor (default [`DEFAULT_MESH_CFL`]).
     pub fn set_mesh_cfl(&mut self, cfl: f64) {
         self.mesh_cfl = cfl;
+    }
+
+    /// Install a per-regen boundary-tag rewrite (see the `boundary_retag`
+    /// field). Apply the same rewrite to the initial mesh before `build` so the
+    /// first step and every regen agree. `None` restores the engine's tags.
+    pub fn set_boundary_retag(&mut self, retag: Option<fn(&mut Mesh)>) {
+        self.boundary_retag = retag;
     }
 
     /// Force every step through the topology-refresh seam (default off — the
@@ -254,24 +280,44 @@ impl MovingMeshDriver {
             return Ok((outcome, stats));
         }
 
-        // 2. Advect the seeds per the motion law (also yields max|w| for the
-        //    dt cap). Frozen ⇒ unchanged seeds, max|w| = 0.
-        let (new_seeds, w_max) = self.advect_seeds()?;
+        // Flow-coupled motion is a later stage (needs the on-device cell
+        // velocity + AREPO steering); reject it up front with a crisp message.
+        if let MeshMotionSpec::FlowCoupled { .. } = self.motion {
+            return Err(
+                "MovingMeshDriver: FlowCoupled motion is not implemented in this stage \
+                 (Frozen + Prescribed only)"
+                    .into(),
+            );
+        }
 
-        // 1. dt handshake: pin the fixed dt (mesh-motion CFL capped) BEFORE the
-        //    swept fluxes are closed, so the flux dt == the step dt exactly.
+        // 1. dt handshake: estimate max seed speed over the upcoming base step,
+        //    then pin the fixed dt (mesh-motion CFL capped) BEFORE the swept
+        //    fluxes are closed, so the flux dt == the step dt exactly.
+        let dt_base = self.driver.params().requested_dt as f64;
+        let w_max = self.max_seed_speed(dt_base);
         let dt = self.pin_dt(w_max);
+        let new_time = self.time + dt;
+
+        // 2. Advect the seeds to t^{n+1} along the prescribed law (interior
+        //    seeds only; boundary seeds are fixed in v1). Frozen ⇒ unchanged.
+        let new_seeds = self.advect_to(new_time);
 
         // 3. Regenerate the mesh from the advected seeds (deterministic; a
         //    frozen seed set reproduces `self.mesh` byte-for-byte).
         let regen_start = Instant::now();
-        let new_mesh = assemble_meshless_from_seeds(
+        let mut new_mesh = assemble_meshless_from_seeds(
             &new_seeds,
             &self.kinds,
             &self.spec,
             self.domain,
             self.min_cell_size,
         );
+        // Re-stamp boundary tags (the topology seam rebuilds bc tables from
+        // these) before anything downstream reads them. face_boundary only —
+        // geometry/adjacency untouched.
+        if let Some(retag) = self.boundary_retag {
+            retag(&mut new_mesh);
+        }
         let regen_ms = ms_since(regen_start);
         if new_mesh.num_cells() != self.mesh.num_cells() {
             return Err(format!(
@@ -281,35 +327,62 @@ impl MovingMeshDriver {
                 new_mesh.num_cells()
             ));
         }
-        let topo_changed = topology_differs(&self.mesh, &new_mesh);
+        // Whether the regenerated face ARRAYS (order and/or adjacency) differ
+        // from the previous mesh. Stage-2 finding: seed motion can REORDER the
+        // deterministic face emission without changing the adjacency, so this is
+        // NOT a flip flag — it just decides geometry-vs-topology seam below. (In
+        // practice a swirl toggles it on ~1/5 of steps; a rigid translation
+        // trips it almost immediately.) The genuine-flip discriminator is the
+        // VERTEX correspondence: a born vertex — an incident-seed set with no
+        // t^n counterpart — is precisely what the swept-quad path cannot close.
+        let face_arrays_differ = topology_differs(&self.mesh, &new_mesh);
 
-        // 4. Swept-quad mesh fluxes old→new with the pinned dt. `prev_vx/vy`
-        //    are `self.mesh`'s t^n vertex positions; a frozen regen makes them
-        //    equal to `new_mesh`'s vertices ⇒ all-zero fluxes.
+        // 4. Swept-quad mesh fluxes old→new with the pinned dt. Across the
+        //    Voronoi regen the new mesh's vertex ids are unrelated to the old
+        //    mesh's, so we first map each NEW vertex to its t^n position via the
+        //    seed-set correspondence (roadmap R2: vertex ≡ seed-triple), then
+        //    hand those aligned old positions to the M3 f64-telescoping +
+        //    f32-forest-closure path. `unmatched > 0` is a genuine FLIP — a born
+        //    vertex with no t^n counterpart, for which the persistent-topology
+        //    swept quads have no correspondence (a conservative remap across the
+        //    re-tessellation is stage 3). We reject it here rather than silently
+        //    producing GCL-breaking fluxes; the flip-frequency probe measures how
+        //    far the motion can push before this fires.
         let swept_start = Instant::now();
-        let swept = swept_mesh_fluxes_closed(&new_mesh, &self.prev_vx, &self.prev_vy, dt)?;
+        let (old_vx_aligned, old_vy_aligned, unmatched) =
+            align_old_vertices_by_seed_set(&self.mesh, &new_mesh)?;
+        if unmatched != 0 {
+            return Err(format!(
+                "MovingMeshDriver: Voronoi topology flip at step {} ({unmatched} born vertices \
+                 with no t^n seed-set counterpart) — conservative swept-flux remap across flips is \
+                 deferred (M4 stage 3). Reduce the motion amplitude or the mesh CFL to stay \
+                 flip-free.",
+                self.step_index
+            ));
+        }
+        let swept =
+            swept_mesh_fluxes_closed(&new_mesh, &old_vx_aligned, &old_vy_aligned, dt)?;
         let swept_ms = ms_since(swept_start);
 
-        // 5. Refresh (rotate volume history → upload new geometry → upload
-        //    closed fluxes). SEAM CHOICE (do-no-harm finding, stage 1): use the
-        //    GEOMETRY seam whenever the face set / adjacency is unchanged — the
-        //    CPU geometry refresh is fully surgical (re-uploads geometry, keeps
-        //    the AMG hierarchy, keeps per-face BC overrides), so a zero-motion
-        //    (frozen) step is byte-identical to a static run. The TOPOLOGY seam
-        //    is required only on a real flip: it rebuilds the CSR stack AND
-        //    clears the Schur-AMG hierarchy + re-scatters bc tables from the
-        //    model per-type defaults — both of which perturb a subsequent solve
-        //    away from a static run (the AMG reset alone drives an O(1) drift on
-        //    a developing channel). `force_topology_seam` routes every step
-        //    through the topology seam to MEASURE that perturbation.
+        // 5. Refresh (rotate volume history → rebuild/upload geometry → upload
+        //    closed fluxes). SEAM CHOICE:
+        //    * Face arrays BYTE-IDENTICAL (a frozen regen): the surgical
+        //      GEOMETRY seam re-uploads geometry while keeping the AMG hierarchy
+        //      + per-face BC overrides — a zero-motion step is byte-identical to
+        //      a static run (the stage-1 do-no-harm anchor).
+        //    * Face arrays differ (ANY real motion reorders the face emission):
+        //      the geometry seam would upload against a stale face order, so we
+        //      take the CPU-surgical TOPOLOGY seam (rebuilds the face-indexed
+        //      CSR stack for the new order; cell-indexed state incl. the
+        //      warm-start `x` and BDF2 history is preserved — M3 proved this
+        //      holds the GCL at ~1e-6). The rebuild re-scatters bc tables from
+        //      the model per-type defaults, dropping per-face overrides, so we
+        //      re-apply them (`bc_overrides_reset`).
         let refresh_start = Instant::now();
-        if topo_changed || self.force_topology_seam {
+        if face_arrays_differ || self.force_topology_seam {
             let report = self
                 .driver
                 .begin_ale_step_topology(&new_mesh, &swept.fluxes)?;
-            // The topology rebuild re-scatters bc tables from the model per-type
-            // defaults, dropping the per-face inlet override — re-apply it
-            // (`bc_overrides_reset`), exactly as a hand-written ALE loop does.
             if report.bc_overrides_reset {
                 self.driver.reapply_boundary_conditions();
             }
@@ -317,6 +390,7 @@ impl MovingMeshDriver {
             self.driver.begin_ale_step(&new_mesh, &swept.fluxes)?;
         }
         let refresh_ms = ms_since(refresh_start);
+        let topo_changed = face_arrays_differ;
 
         // 6. Step.
         let outcome = self.driver.step(readback);
@@ -330,6 +404,7 @@ impl MovingMeshDriver {
         self.prev_vy = new_mesh.vy.clone();
         self.mesh = new_mesh;
         self.seeds = new_seeds;
+        self.time = new_time;
         self.step_index += 1;
 
         let stats = MovingMeshStats {
@@ -347,16 +422,53 @@ impl MovingMeshDriver {
         Ok((outcome, stats))
     }
 
-    /// Advance the seeds by one step per [`MeshMotionSpec`], returning the new
-    /// seed positions and the max seed speed `max_i |w_i|` (for the dt cap).
-    fn advect_seeds(&self) -> Result<(Vec<Point2<f64>>, f64), String> {
+    /// The seed positions at absolute time `t`, evaluated from the t=0 labels
+    /// `f(seed0_i, t)` for interior seeds; boundary seeds are held fixed (v1).
+    /// Frozen returns the labels unchanged (t is irrelevant).
+    fn advect_to(&self, t: f64) -> Vec<Point2<f64>> {
         match self.motion {
-            MeshMotionSpec::Frozen => Ok((self.seeds.clone(), 0.0)),
-            other => Err(format!(
-                "MovingMeshDriver: {} motion is not implemented in this stage (only Frozen)",
-                other.label()
-            )),
+            MeshMotionSpec::Frozen | MeshMotionSpec::FlowCoupled { .. } => self.seeds0.clone(),
+            MeshMotionSpec::Prescribed(f) => self
+                .seeds0
+                .iter()
+                .zip(&self.kinds)
+                .map(|(s0, kind)| {
+                    if *kind == SeedKind::Interior {
+                        let p = f([s0.x, s0.y], t);
+                        Point2::new(p[0], p[1])
+                    } else {
+                        // Boundary seeds are fixed in v1 (moving boundaries are
+                        // M6); this keeps boundary faces static ⇒ zero mesh flux.
+                        *s0
+                    }
+                })
+                .collect(),
         }
+    }
+
+    /// The max interior-seed speed `max_i |w_i|` over the upcoming base step,
+    /// a finite-difference estimate `|f(seed0,t+dt) − f(seed0,t)|/dt` used only
+    /// to size the mesh-motion CFL cap (conservative — the cap has its own 0.2
+    /// safety factor). Zero for Frozen/FlowCoupled.
+    fn max_seed_speed(&self, dt_base: f64) -> f64 {
+        let f = match self.motion {
+            MeshMotionSpec::Prescribed(f) => f,
+            _ => return 0.0,
+        };
+        if dt_base <= 0.0 {
+            return 0.0;
+        }
+        let mut w_max = 0.0f64;
+        for (s0, kind) in self.seeds0.iter().zip(&self.kinds) {
+            if *kind != SeedKind::Interior {
+                continue;
+            }
+            let a = f([s0.x, s0.y], self.time);
+            let b = f([s0.x, s0.y], self.time + dt_base);
+            let w = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt() / dt_base;
+            w_max = w_max.max(w);
+        }
+        w_max
     }
 
     /// Pin the fixed dt: the configured `requested_dt`, capped by the

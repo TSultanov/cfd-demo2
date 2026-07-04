@@ -325,6 +325,107 @@ pub fn swept_mesh_fluxes_closed(
     })
 }
 
+/// The old→new vertex correspondence across a Voronoi **regeneration**, keyed
+/// by the incident-seed SET (roadmap R2: a Voronoi vertex ≡ the set of seeds
+/// meeting at it — a triple point for three cells, more at degeneracies). Seed
+/// `i` == cell `i`, so a vertex's incident-seed set is exactly the set of cells
+/// whose `cell_vertices` ring contains it.
+///
+/// Returns arrays sized to `new_mesh.num_vertices()`: `old_vx_aligned[nv]` /
+/// `old_vy_aligned[nv]` are the position **at t^n** of the vertex `new_mesh`
+/// vertex `nv` corresponds to, ready to hand straight to
+/// [`swept_mesh_fluxes_closed`] as its `old_vx`/`old_vy` (that function indexes
+/// the old arrays by the NEW mesh's vertex ids, so this is precisely the shape
+/// it needs). `unmatched` counts new vertices whose incident-seed set did NOT
+/// exist in `old_mesh` — a topology flip (a born vertex with no t^n
+/// counterpart); it is 0 for a persistent topology.
+///
+/// **Why this makes the telescoping identity hold** ([`swept_mesh_fluxes_closed`]
+/// asserts it): with a per-new-vertex old position, every vertex shared around a
+/// cell's ring carries ONE old position, so the swept quads tile the annulus
+/// between the cell's old and new polygons exactly. For a persistent topology
+/// the cyclic neighbour order around each cell is preserved, so the new ring's
+/// old positions reproduce the old polygon and the per-cell swept areas sum to
+/// the true ΔV. A mismatch (bad correspondence / an undetected flip) shows up as
+/// a blown telescoping residual there — the load-bearing check.
+///
+/// Determinism: new vertices are processed in index order; among old vertices
+/// sharing a seed set (a degenerate collision — two triple points on the same
+/// three seeds) the nearest to the new position wins, ties broken by the lower
+/// old index. No map iteration feeds the output.
+pub fn align_old_vertices_by_seed_set(
+    old_mesh: &Mesh,
+    new_mesh: &Mesh,
+) -> Result<(Vec<f64>, Vec<f64>, usize), String> {
+    if old_mesh.num_cells() != new_mesh.num_cells() {
+        return Err(format!(
+            "align_old_vertices: cell counts differ ({} old vs {} new) — v1 ALE is fixed-seed",
+            old_mesh.num_cells(),
+            new_mesh.num_cells()
+        ));
+    }
+    let old_sets = vertex_incident_cells(old_mesh);
+    let new_sets = vertex_incident_cells(new_mesh);
+
+    // seed set → old vertex ids (ascending; insertion order = old vertex order).
+    let mut old_by_set: std::collections::HashMap<Vec<usize>, Vec<usize>> =
+        std::collections::HashMap::with_capacity(old_mesh.num_vertices());
+    for (ov, set) in old_sets.iter().enumerate() {
+        old_by_set.entry(set.clone()).or_default().push(ov);
+    }
+
+    let nv = new_mesh.num_vertices();
+    let mut ovx = vec![0.0f64; nv];
+    let mut ovy = vec![0.0f64; nv];
+    let mut unmatched = 0usize;
+    for v in 0..nv {
+        let (nx, ny) = (new_mesh.vx[v], new_mesh.vy[v]);
+        match old_by_set.get(&new_sets[v]) {
+            None => {
+                // A born vertex (flip): no t^n counterpart. Leave the old
+                // position at the new one (zero local sweep) and report it —
+                // the caller treats any unmatched as a deferred flip; if it
+                // proceeds, the telescoping check will reject the inconsistency.
+                ovx[v] = nx;
+                ovy[v] = ny;
+                unmatched += 1;
+            }
+            Some(cands) => {
+                let mut best = cands[0];
+                let mut best_d2 = f64::INFINITY;
+                for &ov in cands {
+                    let dx = old_mesh.vx[ov] - nx;
+                    let dy = old_mesh.vy[ov] - ny;
+                    let d2 = dx * dx + dy * dy;
+                    if d2 < best_d2 {
+                        best_d2 = d2;
+                        best = ov;
+                    }
+                }
+                ovx[v] = old_mesh.vx[best];
+                ovy[v] = old_mesh.vy[best];
+            }
+        }
+    }
+    Ok((ovx, ovy, unmatched))
+}
+
+/// Per-vertex sorted list of the cells (== seeds) incident to it — the set that
+/// keys the [`align_old_vertices_by_seed_set`] correspondence.
+fn vertex_incident_cells(mesh: &Mesh) -> Vec<Vec<usize>> {
+    let mut sets = vec![Vec::<usize>::new(); mesh.num_vertices()];
+    for c in 0..mesh.num_cells() {
+        for k in mesh.cell_vertex_offsets[c]..mesh.cell_vertex_offsets[c + 1] {
+            sets[mesh.cell_vertices[k]].push(c);
+        }
+    }
+    for s in &mut sets {
+        s.sort_unstable();
+        s.dedup();
+    }
+    sets
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

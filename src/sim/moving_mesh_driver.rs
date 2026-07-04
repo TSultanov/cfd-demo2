@@ -33,9 +33,12 @@
 //!
 //! Scope so far: [`MeshMotionSpec::Frozen`] (stage 1 — the static-limit
 //! plumbing) and [`MeshMotionSpec::Prescribed`] (stage 2 — analytic seed motion
-//! through the full Voronoi-regen + swept-flux path, PERSISTENT topology only:
-//! a Voronoi flip returns an error, since the conservative swept-flux remap
-//! across a re-tessellation is stage 3). `FlowCoupled` is declared but rejected.
+//! through the full Voronoi-regen + swept-flux path; stage 3 — Voronoi
+//! topology FLIPS via the born/dead-face conservative remap: born faces carry
+//! zero swept contribution and the per-cell defect is closed onto the slack
+//! faces by the spanning forest, so `Σ_f σ·flux = ΔV_i/dt` stays exact per cell
+//! and free-stream flow survives the flip). `FlowCoupled` is declared but
+//! rejected.
 
 use std::time::Instant;
 
@@ -43,7 +46,10 @@ use nalgebra::{Point2, Vector2};
 
 use super::{RuntimeParams, SolverDriver, StepOutcome};
 use crate::meshgen::meshless::{assemble_meshless_from_seeds, BoundarySpec, CvtMeshSeeds, SeedKind};
-use crate::solver::mesh::{align_old_vertices_by_seed_set, swept_mesh_fluxes_closed, Mesh};
+use crate::solver::mesh::{
+    align_old_vertices_by_seed_set, detect_flips, swept_mesh_fluxes_closed,
+    swept_mesh_fluxes_closed_flip, Mesh,
+};
 use crate::solver::model::incompressible_momentum_ale_model;
 
 /// Default mesh-motion CFL cap factor (`dt ≤ cfl_mesh · min_h / max|w|`).
@@ -63,7 +69,8 @@ pub enum MeshMotionSpec {
     Frozen,
     /// Prescribed analytic motion `new_pos = f(seed0, t)` from the t=0 seed
     /// label and absolute time (interior seeds only; boundary seeds fixed in
-    /// v1). Persistent topology only — a flip is rejected (stage 2).
+    /// v1). Voronoi topology flips are handled by the born/dead-face
+    /// conservative remap (stage 3).
     Prescribed(fn([f64; 2], f64) -> [f64; 2]),
     /// Flow-coupled motion (cell velocity + AREPO centroid steering); the
     /// `regularization` is the steering strength χ (stage 4).
@@ -94,11 +101,29 @@ pub struct MovingMeshStats {
     /// the previous step's, so the step drove the TOPOLOGY seam (a full CSR
     /// rebuild) rather than the surgical geometry seam. Note: any real seed
     /// motion reorders the deterministic face emission, so this is `true` every
-    /// motion step — it is NOT a flip flag. A genuine Voronoi flip (born/dead
-    /// faces) instead makes [`MovingMeshDriver::step`] return an error (the
-    /// conservative remap is stage 3). Always `false` under `Frozen`
-    /// (byte-identical regen ⇒ geometry seam).
+    /// motion step — it is NOT a flip flag (see `flipped` for the genuine
+    /// adjacency-change flag). Always `false` under `Frozen` (byte-identical
+    /// regen ⇒ geometry seam).
     pub topo_changed: bool,
+    /// A genuine Voronoi topology FLIP happened this step (born/dead faces —
+    /// an ADJACENCY change, not merely a face-array reorder). A flip always
+    /// takes the topology seam and the flip-aware swept-flux path.
+    pub flipped: bool,
+    /// Number of NEWBORN faces (new `(i,j)` adjacency, no t^n swept quad) whose
+    /// swept contribution was forced to zero. 0 on non-flip steps.
+    pub born_faces: usize,
+    /// Number of DIED faces (a t^n adjacency gone at t^{n+1}). 0 on non-flip
+    /// steps.
+    pub died_faces: usize,
+    /// Number of cells a flip touched (incident to a born face). 0 on non-flip
+    /// steps. The flip RATE diagnostic (÷ n_cells).
+    pub flipped_cells: usize,
+    /// Pre-closure per-cell **flip defect** (relative) — the residual the
+    /// born/dead faces leave that the forest closure repairs onto the slack
+    /// faces. O(motion·h/V) on a flip step, 0 otherwise. The always-on flip
+    /// diagnostic (roadmap: "defect magnitude is the diagnostic"). NOT a GCL
+    /// error — `scl_defect` (the post-closure per-cell sum) stays at roundoff.
+    pub flip_defect: f64,
     /// The pinned dt the swept fluxes were closed against AND the solver
     /// stepped with (they are equal by the F2 handshake). f64-widened f32 —
     /// exactly `params.requested_dt as f64`.
@@ -275,6 +300,11 @@ impl MovingMeshDriver {
                 n_cells: self.mesh.num_cells(),
                 n_faces: self.mesh.num_faces(),
                 topo_changed: false,
+                flipped: false,
+                born_faces: 0,
+                died_faces: 0,
+                flipped_cells: 0,
+                flip_defect: 0.0,
                 dt,
             };
             return Ok((outcome, stats));
@@ -340,28 +370,42 @@ impl MovingMeshDriver {
         // 4. Swept-quad mesh fluxes old→new with the pinned dt. Across the
         //    Voronoi regen the new mesh's vertex ids are unrelated to the old
         //    mesh's, so we first map each NEW vertex to its t^n position via the
-        //    seed-set correspondence (roadmap R2: vertex ≡ seed-triple), then
-        //    hand those aligned old positions to the M3 f64-telescoping +
-        //    f32-forest-closure path. `unmatched > 0` is a genuine FLIP — a born
-        //    vertex with no t^n counterpart, for which the persistent-topology
-        //    swept quads have no correspondence (a conservative remap across the
-        //    re-tessellation is stage 3). We reject it here rather than silently
-        //    producing GCL-breaking fluxes; the flip-frequency probe measures how
-        //    far the motion can push before this fires.
+        //    seed-set correspondence (roadmap R2: vertex ≡ seed-triple).
+        //
+        //    Then we detect ADJACENCY flips (born/dead faces). Two regimes:
+        //    * NO flip (`is_flip()` false — persistent adjacency, at worst a
+        //      face-array reorder): the aligned old ring reproduces each cell's
+        //      t^n polygon, so the M3 f64-telescoping + f32-forest-closure path
+        //      applies directly and its telescoping identity is HARD-asserted.
+        //    * FLIP (born/dead faces): the born faces have no swept quad, so we
+        //      take the flip-aware path — born faces carry zero swept
+        //      contribution and the per-cell defect they (and the born-vertex
+        //      partial sweeps) leave is distributed onto the slack faces by the
+        //      SAME spanning-forest closure, keeping `Σ_f σ·flux = ΔV_i/dt`
+        //      EXACT per cell (⇒ GCL survives the flip). `unmatched > 0` (a born
+        //      vertex) always coincides with a flip and forces this path even in
+        //      the rare case where the adjacency scan alone would miss it.
         let swept_start = Instant::now();
         let (old_vx_aligned, old_vy_aligned, unmatched) =
             align_old_vertices_by_seed_set(&self.mesh, &new_mesh)?;
-        if unmatched != 0 {
-            return Err(format!(
-                "MovingMeshDriver: Voronoi topology flip at step {} ({unmatched} born vertices \
-                 with no t^n seed-set counterpart) — conservative swept-flux remap across flips is \
-                 deferred (M4 stage 3). Reduce the motion amplitude or the mesh CFL to stay \
-                 flip-free.",
-                self.step_index
-            ));
-        }
-        let swept =
-            swept_mesh_fluxes_closed(&new_mesh, &old_vx_aligned, &old_vy_aligned, dt)?;
+        let flip = detect_flips(&self.mesh, &new_mesh)?;
+        let is_flip = flip.is_flip() || unmatched != 0;
+        let swept = if is_flip {
+            // The actual t^n cell volumes (`self.mesh` is still the old mesh
+            // here) are the closure target's old-volume — the born vertices'
+            // aligned old positions cannot reconstruct the old polygon across a
+            // flip, so the ring-reconstructed old volume would be wrong.
+            swept_mesh_fluxes_closed_flip(
+                &new_mesh,
+                &old_vx_aligned,
+                &old_vy_aligned,
+                &self.mesh.cell_vol,
+                &flip.born_face_mask,
+                dt,
+            )?
+        } else {
+            swept_mesh_fluxes_closed(&new_mesh, &old_vx_aligned, &old_vy_aligned, dt)?
+        };
         let swept_ms = ms_since(swept_start);
 
         // 5. Refresh (rotate volume history → rebuild/upload geometry → upload
@@ -378,8 +422,10 @@ impl MovingMeshDriver {
         //      holds the GCL at ~1e-6). The rebuild re-scatters bc tables from
         //      the model per-type defaults, dropping per-face overrides, so we
         //      re-apply them (`bc_overrides_reset`).
+        //    A genuine flip changes adjacency ⇒ `face_arrays_differ` is already
+        //    true; the explicit `is_flip` guard makes the coupling defensive.
         let refresh_start = Instant::now();
-        if face_arrays_differ || self.force_topology_seam {
+        if face_arrays_differ || is_flip || self.force_topology_seam {
             let report = self
                 .driver
                 .begin_ale_step_topology(&new_mesh, &swept.fluxes)?;
@@ -390,7 +436,7 @@ impl MovingMeshDriver {
             self.driver.begin_ale_step(&new_mesh, &swept.fluxes)?;
         }
         let refresh_ms = ms_since(refresh_start);
-        let topo_changed = face_arrays_differ;
+        let topo_changed = face_arrays_differ || is_flip;
 
         // 6. Step.
         let outcome = self.driver.step(readback);
@@ -407,16 +453,27 @@ impl MovingMeshDriver {
         self.time = new_time;
         self.step_index += 1;
 
+        // On a flip step the pre-closure per-cell residual is the intended flip
+        // defect, not a telescoping-identity violation, so it is reported via
+        // `flip_defect` and `identity_err` is left at 0 (the persistent identity
+        // is not enforced across a flip). On a non-flip step it is the roundoff
+        // telescoping residual, reported as `identity_err` and asserted by the
+        // GCL gates.
         let stats = MovingMeshStats {
             regen_ms,
             swept_ms,
             refresh_ms,
             scl_defect: swept.max_defect_rel,
-            identity_err: swept.max_identity_err_rel,
+            identity_err: if is_flip { 0.0 } else { swept.max_identity_err_rel },
             max_skew,
             n_cells,
             n_faces,
             topo_changed,
+            flipped: is_flip,
+            born_faces: flip.born_faces,
+            died_faces: flip.died_faces,
+            flipped_cells: flip.flipped_cells,
+            flip_defect: if is_flip { swept.max_identity_err_rel } else { 0.0 },
             dt,
         };
         Ok((outcome, stats))

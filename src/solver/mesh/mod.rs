@@ -5,7 +5,10 @@ pub mod refresh;
 pub mod structs;
 pub mod structured;
 
-pub use ale::{align_old_vertices_by_seed_set, swept_mesh_fluxes_closed, SweptMeshFluxes};
+pub use ale::{
+    align_old_vertices_by_seed_set, detect_flips, swept_mesh_fluxes_closed,
+    swept_mesh_fluxes_closed_flip, FlipReport, SweptMeshFluxes,
+};
 pub use csr::{build_diag_first_scalar_csr, build_sorted_scalar_csr, ScalarCsr};
 pub use refresh::{MeshRefreshLevel, MeshRefreshReport};
 pub use structs::{BoundaryType, Mesh};

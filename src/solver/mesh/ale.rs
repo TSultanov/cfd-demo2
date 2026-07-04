@@ -56,8 +56,15 @@ pub struct SweptMeshFluxes {
     /// Pre-closure f64 telescoping-identity residual, relative:
     /// `max_i |Σ_f σ·A_swept − (V_i^{n+1} − V_i^n)| / V_i^{n+1}` — a
     /// diagnostic that the swept-quad geometry itself is consistent
-    /// (f64-roundoff scale on any linear vertex motion).
+    /// (f64-roundoff scale on any linear vertex motion). On a persistent
+    /// topology this is roundoff and hard-asserted; on a FLIP step (via
+    /// [`swept_mesh_fluxes_closed_flip`]) it is instead the O(motion·h/V)
+    /// **flip defect** the closure repairs onto the slack faces — NOT an error.
     pub max_identity_err_rel: f64,
+    /// Number of faces whose swept contribution was FORCED to zero because they
+    /// are newborn (a flip's new adjacency, no t^n swept quad). Always 0 on the
+    /// persistent path ([`swept_mesh_fluxes_closed`]).
+    pub born_faces: usize,
 }
 
 /// Cell volumes from vertex positions, replicating the polygon-shoelace part
@@ -141,12 +148,96 @@ fn swept_area_along_normal(
 ///
 /// Errors on meshes with a boundary-free connected component (a closure slack
 /// face cannot be chosen — periodic domains are out of ALE v1 scope).
+///
+/// PERSISTENT-topology entry: the swept-quad geometry must be self-consistent,
+/// so the f64 telescoping identity is HARD-asserted (>1e-9 ⇒ Err). For a
+/// Voronoi FLIP (born/dead faces have no swept quad), use
+/// [`swept_mesh_fluxes_closed_flip`] instead.
 pub fn swept_mesh_fluxes_closed(
     mesh: &Mesh,
     old_vx: &[f64],
     old_vy: &[f64],
     dt: f64,
 ) -> Result<SweptMeshFluxes, String> {
+    swept_closed_impl(mesh, old_vx, old_vy, None, dt)
+}
+
+/// Flip-aware swept-flux construction (roadmap M4 / review-solver-ale R2): the
+/// conservative-remap flux path across a Voronoi RE-TESSELLATION.
+///
+/// `born_mask[f]` (length `mesh.num_faces()`) marks each NEW-mesh face whose
+/// `(i,j)` adjacency did not exist at t^n — a **born** face with no swept quad.
+/// Born faces are given **zero** swept contribution; every persistent face gets
+/// its swept quad from the aligned old vertex positions (born vertices carry
+/// their new position ⇒ locally partial sweep). The residual this leaves per
+/// cell — `e_i = ΔV_i/dt − Σ_persistent σ·swept` — is exactly what the
+/// spanning-forest closure distributes onto each cell's slack face, so
+/// `Σ_f σ·mesh_flux_f = ΔV_i/dt` holds **per cell** (⇒ GCL / free-stream
+/// preservation survives the flip) and **globally** (interior slacks cancel;
+/// only true boundary faces feed the total — mass conserved). DIED faces have
+/// no new-mesh representative, so their old flux mass is not carried face-to-face;
+/// it is absorbed into the exact per-cell balance of the surviving new faces.
+///
+/// The per-FACE flux on and around a flip is only locally first-order accurate
+/// (the slack face soaks the whole `e_i`); this is the roadmap's accepted flip
+/// cost. The pre-closure `max_identity_err_rel` IS that per-cell flip defect —
+/// reported as the always-on diagnostic, NOT hard-asserted (born faces are
+/// EXPECTED to break the telescoping identity). The post-closure
+/// `max_defect_rel` is still f32-roundoff by construction: the closure is the
+/// correctness guarantee.
+///
+/// Preconditions: same as [`swept_mesh_fluxes_closed`] (non-periodic, valid dt,
+/// boundary-connected dual graph). A born face is a perfectly valid slack edge
+/// for a BFS parent — the forest closure is unchanged.
+///
+/// `old_cell_vol` are the ACTUAL t^n cell volumes (the previous mesh's
+/// `cell_vol`, == what the kernel's `cell_vols_old` buffer holds after the M2
+/// rotation). This is load-bearing: on a flip the new ring's aligned old
+/// positions do NOT reconstruct the old cell's polygon (the born vertices carry
+/// their new position), so the ring-reconstructed old volume would spuriously
+/// equal the NEW volume and the closure would target a zero ΔV — missing the
+/// real volume change. Passing the actual old volumes makes the per-cell target
+/// `(V_i^{n+1} − V_i^n)/dt` consistent with the moving-volume ddt, which is
+/// exactly the GCL condition. Cell `i` == cell `i` across the regen (fixed
+/// seeds), so the volumes are directly comparable.
+pub fn swept_mesh_fluxes_closed_flip(
+    mesh: &Mesh,
+    old_vx: &[f64],
+    old_vy: &[f64],
+    old_cell_vol: &[f64],
+    born_mask: &[bool],
+    dt: f64,
+) -> Result<SweptMeshFluxes, String> {
+    if born_mask.len() != mesh.num_faces() {
+        return Err(format!(
+            "swept_mesh_fluxes_closed_flip: born_mask length {} != num_faces {}",
+            born_mask.len(),
+            mesh.num_faces()
+        ));
+    }
+    if old_cell_vol.len() != mesh.num_cells() {
+        return Err(format!(
+            "swept_mesh_fluxes_closed_flip: old_cell_vol length {} != num_cells {}",
+            old_cell_vol.len(),
+            mesh.num_cells()
+        ));
+    }
+    swept_closed_impl(mesh, old_vx, old_vy, Some((born_mask, old_cell_vol)), dt)
+}
+
+/// Shared core for the persistent ([`swept_mesh_fluxes_closed`]) and flip
+/// ([`swept_mesh_fluxes_closed_flip`]) paths. `born_mask = None` is the
+/// persistent path (hard identity check, no forced-zero faces); `Some(mask)`
+/// forces the marked faces' swept area to zero and RELAXES the identity check
+/// (the flip defect is the diagnostic, the forest closure the guarantee).
+fn swept_closed_impl(
+    mesh: &Mesh,
+    old_vx: &[f64],
+    old_vy: &[f64],
+    flip: Option<(&[bool], &[f64])>,
+    dt: f64,
+) -> Result<SweptMeshFluxes, String> {
+    let born_mask: Option<&[bool]> = flip.map(|(m, _)| m);
     let num_cells = mesh.num_cells();
     let num_faces = mesh.num_faces();
     if old_vx.len() != mesh.vx.len() || old_vy.len() != mesh.vy.len() {
@@ -165,12 +256,31 @@ pub fn swept_mesh_fluxes_closed(
     }
 
     // ── 1. f64 swept areas + telescoping-identity diagnostic ──────────────
+    // Born faces (flip path) carry NO swept quad — their contribution is zero
+    // and the per-cell residual they leave is closed onto the slack face below.
+    // (Skipping the geometry also avoids a spurious degenerate-tangent error on
+    // a born face whose t^n endpoints collapsed to the born vertex position.)
     let mut swept = vec![0.0f64; num_faces];
     for f in 0..num_faces {
+        if let Some(mask) = born_mask {
+            if mask[f] {
+                continue;
+            }
+        }
         swept[f] = swept_area_along_normal(mesh, f, old_vx, old_vy)?;
     }
 
-    let old_vols = cell_volumes_from(mesh, old_vx, old_vy);
+    // Old cell volumes for the closure target + identity diagnostic. Persistent
+    // path: reconstruct from the aligned old ring (byte-identical to the M3
+    // behaviour, and == the actual old volume because the topology is the same).
+    // Flip path: the caller-supplied ACTUAL old volumes (the new ring's aligned
+    // old positions do NOT reproduce the old polygon across a flip — see
+    // `swept_mesh_fluxes_closed_flip`).
+    let recon_old_vols = cell_volumes_from(mesh, old_vx, old_vy);
+    let old_vols: &[f64] = match flip {
+        Some((_, actual)) => actual,
+        None => &recon_old_vols,
+    };
     let sign = |cell: usize, face: usize| -> f64 {
         if mesh.face_owner[face] == cell {
             1.0
@@ -203,12 +313,27 @@ pub fn swept_mesh_fluxes_closed(
     // would stay green while the per-face flux distribution is garbage. The
     // 1e-9 threshold is ~3-4 orders looser than roundoff and ~orders tighter
     // than any real defect.
-    if max_identity_err_rel > 1e-9 {
+    //
+    // FLIP path (born_mask = Some): the born faces deliberately zero out their
+    // swept quads, so the identity is EXPECTED to be violated by exactly the
+    // flip defect e_i — that IS the diagnostic (returned as
+    // `max_identity_err_rel`), not an error. The forest closure below still
+    // makes the per-cell sums exact, so GCL is preserved; a truly garbage
+    // input (an inverted cell) instead shows up as a non-finite defect, which
+    // the closure would propagate to a non-finite flux — guarded here.
+    if born_mask.is_none() && max_identity_err_rel > 1e-9 {
         return Err(format!(
             "swept_mesh_fluxes: telescoping identity violated (max rel residual {:.3e} > 1e-9): \
              the swept-quad areas do not sum to the per-cell volume changes. The old/new vertex \
              positions are inconsistent with the mesh geometry (stale recalculate_geometry, \
              wrong old positions, or inverted/degenerate cells)",
+            max_identity_err_rel
+        ));
+    }
+    if born_mask.is_some() && !max_identity_err_rel.is_finite() {
+        return Err(format!(
+            "swept_mesh_fluxes_closed_flip: non-finite pre-closure flip defect ({}): a cell is \
+             inverted or degenerate at the flip",
             max_identity_err_rel
         ));
     }
@@ -318,10 +443,102 @@ pub fn swept_mesh_fluxes_closed(
         max_defect_rel = max_defect_rel.max(defect);
     }
 
+    let born_faces = born_mask
+        .map(|m| m.iter().filter(|&&b| b).count())
+        .unwrap_or(0);
     Ok(SweptMeshFluxes {
         fluxes,
         max_defect_rel,
         max_identity_err_rel,
+        born_faces,
+    })
+}
+
+/// Topology-flip report between two same-cell-count meshes (roadmap M4 flip
+/// detection): which NEW-mesh faces were BORN (an `(i,j)` adjacency absent at
+/// t^n), how many DIED (an old adjacency with no new face), and which cells a
+/// flip touched. Adjacency is keyed by the incident cell/seed pair — interior
+/// faces by the sorted `(owner,neighbor)` pair, boundary faces by
+/// `(owner, BOUNDARY)`; seed `i` == cell `i` across the regen, so these pairs
+/// are directly comparable.
+#[derive(Debug, Clone)]
+pub struct FlipReport {
+    /// `born_face_mask[f]` — the NEW-mesh face `f`'s adjacency did not exist at
+    /// t^n. Feeds [`swept_mesh_fluxes_closed_flip`] verbatim.
+    pub born_face_mask: Vec<bool>,
+    /// Number of born faces (`= born_face_mask.iter().filter(..).count()`).
+    pub born_faces: usize,
+    /// Number of old adjacencies with no counterpart in the new mesh.
+    pub died_faces: usize,
+    /// Number of NEW-mesh cells incident to at least one born face.
+    pub flipped_cells: usize,
+}
+
+impl FlipReport {
+    /// Whether the topology actually flipped (any born or died face). `false`
+    /// ⇒ the persistent-topology swept path applies (adjacency unchanged; a
+    /// pure face-array REORDER is not a flip).
+    pub fn is_flip(&self) -> bool {
+        self.born_faces != 0 || self.died_faces != 0
+    }
+}
+
+/// The adjacency key of a face: `(min(o,n), max(o,n))` for an interior face,
+/// `(owner, BOUNDARY_KEY)` for a boundary face. Seed `i` == cell `i`, so the
+/// key is stable across a regen.
+const BOUNDARY_KEY: usize = usize::MAX;
+fn face_adjacency_key(mesh: &Mesh, f: usize) -> (usize, usize) {
+    let o = mesh.face_owner[f];
+    match mesh.face_neighbor[f] {
+        Some(nb) => (o.min(nb), o.max(nb)),
+        None => (o, BOUNDARY_KEY),
+    }
+}
+
+/// Detect Voronoi topology flips between the t^n mesh (`old`) and the
+/// regenerated t^{n+1} mesh (`new`), producing the born-face mask
+/// [`swept_mesh_fluxes_closed_flip`] consumes plus the flip diagnostics. O(faces).
+///
+/// A flip is an ADJACENCY change: `new` gained an `(i,j)` face pair that `old`
+/// lacked (born) and/or lost one `old` had (died). A pure reordering of the
+/// deterministic face emission — same adjacency set — is NOT a flip (empty
+/// born mask), so the persistent swept path stays byte-stable through reorders.
+pub fn detect_flips(old_mesh: &Mesh, new_mesh: &Mesh) -> Result<FlipReport, String> {
+    if old_mesh.num_cells() != new_mesh.num_cells() {
+        return Err(format!(
+            "detect_flips: cell counts differ ({} old vs {} new) — v1 ALE is fixed-seed",
+            old_mesh.num_cells(),
+            new_mesh.num_cells()
+        ));
+    }
+    let old_keys: std::collections::HashSet<(usize, usize)> = (0..old_mesh.num_faces())
+        .map(|f| face_adjacency_key(old_mesh, f))
+        .collect();
+    let new_keys: std::collections::HashSet<(usize, usize)> = (0..new_mesh.num_faces())
+        .map(|f| face_adjacency_key(new_mesh, f))
+        .collect();
+
+    let mut born_face_mask = vec![false; new_mesh.num_faces()];
+    let mut born_faces = 0usize;
+    let mut cell_flipped = vec![false; new_mesh.num_cells()];
+    for f in 0..new_mesh.num_faces() {
+        if !old_keys.contains(&face_adjacency_key(new_mesh, f)) {
+            born_face_mask[f] = true;
+            born_faces += 1;
+            cell_flipped[new_mesh.face_owner[f]] = true;
+            if let Some(nb) = new_mesh.face_neighbor[f] {
+                cell_flipped[nb] = true;
+            }
+        }
+    }
+    let died_faces = old_keys.iter().filter(|k| !new_keys.contains(k)).count();
+    let flipped_cells = cell_flipped.iter().filter(|&&b| b).count();
+
+    Ok(FlipReport {
+        born_face_mask,
+        born_faces,
+        died_faces,
+        flipped_cells,
     })
 }
 
@@ -546,5 +763,289 @@ mod tests {
         assert!(out.fluxes.iter().all(|&f| f == 0.0), "nonzero flux on a static mesh");
         assert_eq!(out.max_defect_rel, 0.0);
         assert_eq!(out.max_identity_err_rel, 0.0);
+    }
+
+    // ── Hand-constructed 2-cell Voronoi flip (deliverable 4) ─────────────────
+
+    /// A specced face of the hand-built windmill mesh.
+    struct FaceSpec {
+        v1: usize,
+        v2: usize,
+        owner: usize,
+        neighbor: Option<usize>,
+    }
+
+    /// Assemble a valid FV `Mesh` from an explicit vertex list, per-cell CCW
+    /// vertex rings, and face specs (shared-edge endpoints + owner/neighbor).
+    /// Boundary faces (`neighbor = None`) are tagged `Wall`. Face normals are
+    /// seeded owner-outward so `recalculate_geometry` keeps the sign.
+    fn assemble_windmill(
+        verts: &[(f64, f64)],
+        cell_rings: &[Vec<usize>],
+        faces: &[FaceSpec],
+    ) -> Mesh {
+        let mut m = Mesh::new();
+        m.vx = verts.iter().map(|v| v.0).collect();
+        m.vy = verts.iter().map(|v| v.1).collect();
+        m.v_fixed = vec![false; verts.len()];
+        let nf = faces.len();
+        for fs in faces {
+            m.face_v1.push(fs.v1);
+            m.face_v2.push(fs.v2);
+            m.face_owner.push(fs.owner);
+            m.face_neighbor.push(fs.neighbor);
+            m.face_boundary.push(if fs.neighbor.is_none() {
+                Some(BoundaryType::Wall)
+            } else {
+                None
+            });
+        }
+        m.face_nx = vec![0.0; nf];
+        m.face_ny = vec![0.0; nf];
+        m.face_area = vec![0.0; nf];
+        m.face_cx = vec![0.0; nf];
+        m.face_cy = vec![0.0; nf];
+        let nc = cell_rings.len();
+        m.cell_cx = vec![0.0; nc];
+        m.cell_cy = vec![0.0; nc];
+        m.cell_vol = vec![0.0; nc];
+        for ring in cell_rings {
+            m.cell_vertex_offsets.push(m.cell_vertices.len());
+            m.cell_vertices.extend_from_slice(ring);
+        }
+        m.cell_vertex_offsets.push(m.cell_vertices.len());
+        for c in 0..nc {
+            m.cell_face_offsets.push(m.cell_faces.len());
+            for (fi, fs) in faces.iter().enumerate() {
+                if fs.owner == c || fs.neighbor == Some(c) {
+                    m.cell_faces.push(fi);
+                }
+            }
+        }
+        m.cell_face_offsets.push(m.cell_faces.len());
+        // Rough ring-average centroids to orient the seed normals outward.
+        let cent: Vec<(f64, f64)> = cell_rings
+            .iter()
+            .map(|ring| {
+                let n = ring.len() as f64;
+                let sx: f64 = ring.iter().map(|&v| verts[v].0).sum();
+                let sy: f64 = ring.iter().map(|&v| verts[v].1).sum();
+                (sx / n, sy / n)
+            })
+            .collect();
+        for (fi, fs) in faces.iter().enumerate() {
+            let (x1, y1) = verts[fs.v1];
+            let (x2, y2) = verts[fs.v2];
+            let (tx, ty) = (x2 - x1, y2 - y1);
+            let (mut nx, mut ny) = (ty, -tx);
+            let (ox, oy) = cent[fs.owner];
+            let (mx, my) = ((x1 + x2) * 0.5, (y1 + y2) * 0.5);
+            if nx * (mx - ox) + ny * (my - oy) < 0.0 {
+                nx = -nx;
+                ny = -ny;
+            }
+            m.face_nx[fi] = nx;
+            m.face_ny[fi] = ny;
+        }
+        m.recalculate_geometry();
+        m
+    }
+
+    /// The unit box [0,1]² tessellated into 4 cells (W=0, E=1, S=2, N=3) meeting
+    /// near the centre, with the central adjacency oriented one of two ways —
+    /// exactly the 4-seed cocircular Voronoi flip. `horizontal=true` ⇒ N–S share
+    /// the central face (W,E not adjacent); `false` ⇒ W–E share it (N,S not
+    /// adjacent). `d` is the half-separation of the two central triple points.
+    fn windmill(horizontal: bool, d: f64) -> Mesh {
+        // Corners: bl=0, br=1, tr=2, tl=3.
+        let bl = 0;
+        let br = 1;
+        let tr = 2;
+        let tl = 3;
+        if horizontal {
+            // Central pair on the horizontal midline: P1=(.5-d,.5)=(W,N,S),
+            // P2=(.5+d,.5)=(E,N,S). Shared central face is (N,S).
+            let p1 = 4;
+            let p2 = 5;
+            let verts = vec![
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (1.0, 1.0),
+                (0.0, 1.0),
+                (0.5 - d, 0.5),
+                (0.5 + d, 0.5),
+            ];
+            let rings = vec![
+                vec![bl, p1, tl],      // W (0): triangle
+                vec![br, tr, p2],      // E (1): triangle
+                vec![bl, br, p2, p1],  // S (2): quad
+                vec![p1, p2, tr, tl],  // N (3): quad
+            ];
+            let faces = vec![
+                FaceSpec { v1: bl, v2: p1, owner: 0, neighbor: Some(2) }, // W-S
+                FaceSpec { v1: p1, v2: tl, owner: 0, neighbor: Some(3) }, // W-N
+                FaceSpec { v1: br, v2: p2, owner: 1, neighbor: Some(2) }, // E-S
+                FaceSpec { v1: tr, v2: p2, owner: 1, neighbor: Some(3) }, // E-N
+                FaceSpec { v1: p1, v2: p2, owner: 2, neighbor: Some(3) }, // N-S (central)
+                FaceSpec { v1: tl, v2: bl, owner: 0, neighbor: None },    // left
+                FaceSpec { v1: bl, v2: br, owner: 2, neighbor: None },    // bottom
+                FaceSpec { v1: br, v2: tr, owner: 1, neighbor: None },    // right
+                FaceSpec { v1: tr, v2: tl, owner: 3, neighbor: None },    // top
+            ];
+            assemble_windmill(&verts, &rings, &faces)
+        } else {
+            // Central pair on the vertical midline: Q1=(.5,.5-d)=(W,E,S),
+            // Q2=(.5,.5+d)=(W,E,N). Shared central face is (W,E).
+            let q1 = 4;
+            let q2 = 5;
+            let verts = vec![
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (1.0, 1.0),
+                (0.0, 1.0),
+                (0.5, 0.5 - d),
+                (0.5, 0.5 + d),
+            ];
+            let rings = vec![
+                vec![bl, q1, q2, tl],  // W (0): quad
+                vec![br, tr, q2, q1],  // E (1): quad
+                vec![bl, br, q1],      // S (2): triangle
+                vec![tl, q2, tr],      // N (3): triangle
+            ];
+            let faces = vec![
+                FaceSpec { v1: bl, v2: q1, owner: 0, neighbor: Some(2) }, // W-S
+                FaceSpec { v1: q1, v2: q2, owner: 0, neighbor: Some(1) }, // W-E (central)
+                FaceSpec { v1: q2, v2: tl, owner: 0, neighbor: Some(3) }, // W-N
+                FaceSpec { v1: br, v2: q1, owner: 1, neighbor: Some(2) }, // E-S
+                FaceSpec { v1: tr, v2: q2, owner: 1, neighbor: Some(3) }, // E-N
+                FaceSpec { v1: tl, v2: bl, owner: 0, neighbor: None },    // left
+                FaceSpec { v1: bl, v2: br, owner: 2, neighbor: None },    // bottom
+                FaceSpec { v1: br, v2: tr, owner: 1, neighbor: None },    // right
+                FaceSpec { v1: tr, v2: tl, owner: 3, neighbor: None },    // top
+            ];
+            assemble_windmill(&verts, &rings, &faces)
+        }
+    }
+
+    /// THE flip unit test (deliverable 4): a known 4-seed cocircular
+    /// reconfiguration (N–S adjacency → W–E adjacency). One face is BORN, one
+    /// DIES; the flip-aware swept flux must close each cell's defect onto its
+    /// slack faces so `Σ_f σ·flux·dt = ΔV_i` holds per cell to f32-closure
+    /// roundoff, and globally (Σ boundary flux = 0 ⇒ mass conserved).
+    #[test]
+    fn flip_windmill_per_cell_closure() {
+        let d = 0.15;
+        let dt = 1e-2;
+        let old_mesh = windmill(true, d); // N–S adjacent
+        let new_mesh = windmill(false, d); // W–E adjacent (flipped)
+
+        // Areas are exact: box conserved cell-by-cell up to the flip.
+        let area: f64 = new_mesh.cell_vol.iter().sum();
+        assert!((area - 1.0).abs() < 1e-12, "box area drifted: {area}");
+
+        // Flip detection: exactly one born (W-E) and one died (N-S) adjacency;
+        // the born face touches W and E only.
+        let flip = detect_flips(&old_mesh, &new_mesh).expect("detect_flips");
+        assert_eq!(flip.born_faces, 1, "expected exactly one born face");
+        assert_eq!(flip.died_faces, 1, "expected exactly one died face");
+        assert_eq!(flip.flipped_cells, 2, "born face should touch W and E only");
+        assert!(flip.is_flip());
+
+        // No-flip control: a mesh against itself is flip-free.
+        let self_flip = detect_flips(&new_mesh, &new_mesh).expect("detect_flips self");
+        assert_eq!(self_flip.born_faces, 0);
+        assert_eq!(self_flip.died_faces, 0);
+        assert!(!self_flip.is_flip());
+
+        // Seed-set correspondence: the two central triple points are born.
+        let (ovx, ovy, unmatched) =
+            align_old_vertices_by_seed_set(&old_mesh, &new_mesh).expect("align");
+        assert_eq!(unmatched, 2, "both new central vertices should be born");
+
+        // The persistent path SILENTLY MISSES the flip: with born vertices
+        // aligned to their new positions, the new ring's reconstructed old
+        // volume equals the new volume, so it reports a zero defect and all-zero
+        // fluxes — exactly why the flip needs the actual old volumes.
+        let persistent = swept_mesh_fluxes_closed(&new_mesh, &ovx, &ovy, dt).expect("persistent");
+        assert!(
+            persistent.fluxes.iter().all(|&f| f == 0.0),
+            "persistent path should (wrongly) see no motion across a flip"
+        );
+
+        // The flip-aware path: actual old volumes as the target, born faces
+        // zeroed, defect closed onto slack faces.
+        let out = swept_mesh_fluxes_closed_flip(
+            &new_mesh,
+            &ovx,
+            &ovy,
+            &old_mesh.cell_vol,
+            &flip.born_face_mask,
+            dt,
+        )
+        .expect("flip swept fluxes");
+        assert_eq!(out.born_faces, 1);
+        println!(
+            "[ale-flip] pre-closure flip defect (rel) = {:.3e}, post-closure per-cell defect \
+             (rel) = {:.3e}",
+            out.max_identity_err_rel, out.max_defect_rel
+        );
+        // The flip genuinely perturbs the per-cell volumes (else the test is
+        // vacuous): the pre-closure defect is O(1)-relative, not roundoff.
+        assert!(
+            out.max_identity_err_rel > 1e-3,
+            "flip defect suspiciously small ({:.3e}) — the flip is not exercised",
+            out.max_identity_err_rel
+        );
+
+        // Per-cell closure to f32 roundoff: Σ_f σ·flux·dt == ΔV_i exactly, where
+        // ΔV_i is the ACTUAL config-A→config-B volume change (each computed on
+        // its own topology).
+        let mut max_cell_rel = 0.0f64;
+        for i in 0..new_mesh.num_cells() {
+            let mut sum = 0.0f64;
+            for k in new_mesh.cell_face_offsets[i]..new_mesh.cell_face_offsets[i + 1] {
+                let f = new_mesh.cell_faces[k];
+                let s = if new_mesh.face_owner[f] == i { 1.0 } else { -1.0 };
+                sum += s * out.fluxes[f] as f64 * dt;
+            }
+            let dv = (new_mesh.cell_vol[i] as f32) as f64 - (old_mesh.cell_vol[i] as f32) as f64;
+            let rel = (sum - dv).abs() / new_mesh.cell_vol[i];
+            max_cell_rel = max_cell_rel.max(rel);
+        }
+        assert!(
+            max_cell_rel < 1e-6,
+            "per-cell closure defect {:.3e} above f32 roundoff",
+            max_cell_rel
+        );
+        assert!(out.max_defect_rel < 1e-6, "reported defect {:.3e}", out.max_defect_rel);
+
+        // Global mass conservation: interior fluxes cancel in the total, so the
+        // net across the (static) box boundary must be zero to roundoff.
+        let mut boundary_sum = 0.0f64;
+        for f in 0..new_mesh.num_faces() {
+            if new_mesh.face_neighbor[f].is_none() {
+                boundary_sum += out.fluxes[f] as f64 * dt;
+            }
+        }
+        assert!(
+            boundary_sum.abs() < 1e-6,
+            "net boundary swept flux {:.3e} != 0 (mass not conserved)",
+            boundary_sum
+        );
+
+        // Determinism: identical bits on a re-run.
+        let out2 = swept_mesh_fluxes_closed_flip(
+            &new_mesh,
+            &ovx,
+            &ovy,
+            &old_mesh.cell_vol,
+            &flip.born_face_mask,
+            dt,
+        )
+        .expect("flip swept fluxes 2");
+        assert_eq!(
+            out.fluxes.iter().map(|f| f.to_bits()).collect::<Vec<_>>(),
+            out2.fluxes.iter().map(|f| f.to_bits()).collect::<Vec<_>>(),
+        );
     }
 }

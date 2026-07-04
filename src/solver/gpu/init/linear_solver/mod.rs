@@ -2,6 +2,7 @@ pub mod matrix;
 pub mod pipelines;
 pub mod state;
 
+use crate::solver::gpu::capacity::CapacityPlan;
 use crate::solver::gpu::init::scalars;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::{BufF32, BufU32, PortSpace};
@@ -50,6 +51,7 @@ pub fn init_scalar_linear_solver(
     num_cells: u32,
     scalar_row_offsets: &[u32],
     scalar_col_indices: &[u32],
+    capacity: CapacityPlan,
 ) -> Result<ScalarLinearSolverResources, String> {
     let mut port_space = PortSpace::new();
 
@@ -58,7 +60,7 @@ pub fn init_scalar_linear_solver(
         num_cells as usize + 1,
         "unexpected CSR row_offsets length"
     );
-    let matrix_res = matrix::init_matrix(device, scalar_row_offsets, scalar_col_indices);
+    let matrix_res = matrix::init_matrix(device, scalar_row_offsets, scalar_col_indices, capacity);
     let state_res = state::init_state(device, num_cells);
     let ports = {
         let row_offsets_port = port_space.port::<BufU32>("linear:row_offsets");
@@ -119,9 +121,15 @@ pub fn init_scalar_cg(
     num_cells: u32,
     scalar_row_offsets: &[u32],
     scalar_col_indices: &[u32],
+    capacity: CapacityPlan,
 ) -> Result<ScalarCgInit, String> {
-    let linear_res =
-        init_scalar_linear_solver(device, num_cells, scalar_row_offsets, scalar_col_indices)?;
+    let linear_res = init_scalar_linear_solver(
+        device,
+        num_cells,
+        scalar_row_offsets,
+        scalar_col_indices,
+        capacity,
+    )?;
     let scalar_cg = build_scalar_cg(device, num_cells, &linear_res)?;
 
     Ok(ScalarCgInit {

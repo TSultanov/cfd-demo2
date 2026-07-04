@@ -1,5 +1,6 @@
 pub mod bindings;
 pub mod buffers;
+pub mod capacity;
 pub mod context;
 pub mod csr;
 pub mod dispatch_counter;

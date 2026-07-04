@@ -1,3 +1,5 @@
+use crate::solver::gpu::capacity::{create_buffer_with_capacity, sized_binding, CapacityPlan};
+use crate::solver::mesh::csr::build_sorted_scalar_csr;
 use crate::solver::mesh::refresh::{mesh_geometry_f32, MeshTopology};
 use crate::solver::mesh::Mesh;
 use wgpu::util::DeviceExt;
@@ -38,6 +40,10 @@ pub struct MeshResources {
     /// `Geometry`-level `refresh_mesh` can validate the incoming mesh is
     /// topology-identical before overwriting the geometry buffers in place.
     pub topology: MeshTopology,
+    /// Allocation policy the topology-sized buffers were created with
+    /// (default = exact size). Kept so a Tier-B refresh can decide whether a
+    /// new topology still fits the reserved capacity.
+    pub capacity: CapacityPlan,
 }
 
 impl MeshResources {
@@ -63,6 +69,40 @@ impl MeshResources {
             "cell_vols_old_old" => Some(&self.b_cell_vols_old_old),
             _ => None,
         }
+    }
+
+    /// Logical byte length of a topology-sized binding, or `None` for
+    /// bindings whose logical size always equals the allocation (cell-sized
+    /// buffers — the cell count is invariant under every refresh level).
+    ///
+    /// Element strides: u32/f32 = 4 bytes, vec2<f32> = 8 bytes.
+    fn logical_binding_bytes(&self, name: &str) -> Option<u64> {
+        let faces = self.topology.num_faces() as u64;
+        let cell_faces = self.topology.cell_faces_len() as u64;
+        let nnz = self.scalar_col_indices.len() as u64;
+        match name {
+            "face_owner" | "face_neighbor" | "face_boundary" | "face_areas" | "mesh_fluxes" => {
+                Some(faces * 4)
+            }
+            "face_normals" | "face_centers" | "face_wrap_shift" => Some(faces * 8),
+            "cell_faces" | "cell_face_matrix_indices" => Some(cell_faces * 4),
+            "scalar_col_indices" => Some(nnz * 4),
+            _ => None,
+        }
+    }
+
+    /// Resolve a binding name to a **sized** binding resource: topology-sized
+    /// buffers are bound as `BufferBinding { offset: 0, size: logical }` so
+    /// their WGSL `arrayLength` guards see the logical length even when the
+    /// allocation carries capacity headroom (see `gpu::capacity`); cell-sized
+    /// buffers bind entire. With the default exact-capacity plan the two
+    /// shapes are equivalent (size == full buffer size).
+    pub fn binding_resource_for(&self, name: &str) -> Option<wgpu::BindingResource<'_>> {
+        let buffer = self.buffer_for_binding_name(name)?;
+        Some(match self.logical_binding_bytes(name) {
+            Some(bytes) => sized_binding(buffer, bytes),
+            None => wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
+        })
     }
 
     /// Tier A geometry-only refresh: overwrite the six geometry buffers
@@ -178,41 +218,31 @@ impl MeshResources {
     }
 }
 
-pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, String> {
-    let num_cells = mesh.cell_cx.len() as u32;
-
+pub fn init_mesh(
+    device: &wgpu::Device,
+    mesh: &Mesh,
+    capacity: CapacityPlan,
+) -> Result<MeshResources, String> {
     // Shared f64->f32 geometry cast (also consumed by the CPU backend's
     // `upload_mesh` and by `MeshResources::refresh_geometry`): one source of
     // truth so init, refresh, and both backends see bit-identical geometry.
     let geo = mesh_geometry_f32(mesh);
 
-    // --- CSR Matrix Structure ---
-    let mut scalar_row_offsets = vec![0u32; num_cells as usize + 1];
-    let mut scalar_col_indices = Vec::new();
+    // --- CSR Matrix Structure (factored builder — Tier B refresh reuses it;
+    // byte-equivalence to the historical inlined logic is gated by
+    // tests/csr_builder_equivalence_test.rs) ---
+    let csr = build_sorted_scalar_csr(mesh)?;
+    let scalar_row_offsets = csr.row_offsets;
+    let scalar_col_indices = csr.col_indices;
+    let diagonal_indices = csr.diagonal_indices;
+    let cell_face_matrix_indices = csr.cell_face_matrix_indices;
 
-    let mut adj = vec![Vec::new(); num_cells as usize];
-    for (i, &owner) in mesh.face_owner.iter().enumerate() {
-        if let Some(neighbor) = mesh.face_neighbor[i] {
-            adj[owner].push(neighbor);
-            adj[neighbor].push(owner);
-        }
-    }
-
-    for (i, list) in adj.iter_mut().enumerate() {
-        list.push(i); // Add diagonal
-        list.sort();
-        list.dedup();
-    }
-
-    let mut current_offset = 0;
-    for (i, list) in adj.iter().enumerate() {
-        scalar_row_offsets[i] = current_offset;
-        for &neighbor in list {
-            scalar_col_indices.push(neighbor as u32);
-        }
-        current_offset += list.len() as u32;
-    }
-    scalar_row_offsets[num_cells as usize] = current_offset;
+    // Capacity-reserved element counts for the topology-sized buffers
+    // (default plan = exact size; see `gpu::capacity`). Cell-sized buffers
+    // are always exact — the cell count is invariant under refresh.
+    let faces_cap = capacity.capacity_elems(mesh.num_faces());
+    let cell_faces_cap = capacity.capacity_elems(mesh.cell_faces.len());
+    let nnz_cap = capacity.capacity_elems(scalar_col_indices.len());
 
     let b_scalar_row_offsets = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Mesh scalar_row_offsets"),
@@ -220,19 +250,23 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, St
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     });
 
-    let b_scalar_col_indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Mesh scalar_col_indices"),
-        contents: bytemuck::cast_slice(&scalar_col_indices),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    });
+    let b_scalar_col_indices = create_buffer_with_capacity(
+        device,
+        "Mesh scalar_col_indices",
+        bytemuck::cast_slice(&scalar_col_indices),
+        (nnz_cap * 4) as u64,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    );
 
     // --- Mesh Buffers ---
     let face_owner: Vec<u32> = mesh.face_owner.iter().map(|&x| x as u32).collect();
-    let b_face_owner = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Face Owner Buffer"),
-        contents: bytemuck::cast_slice(&face_owner),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
+    let b_face_owner = create_buffer_with_capacity(
+        device,
+        "Face Owner Buffer",
+        bytemuck::cast_slice(&face_owner),
+        (faces_cap * 4) as u64,
+        wgpu::BufferUsages::STORAGE,
+    );
 
     let face_neighbor: Vec<u32> = mesh
         .face_neighbor
@@ -242,11 +276,13 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, St
             None => u32::MAX,
         })
         .collect();
-    let b_face_neighbor = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Face Neighbor Buffer"),
-        contents: bytemuck::cast_slice(&face_neighbor),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
+    let b_face_neighbor = create_buffer_with_capacity(
+        device,
+        "Face Neighbor Buffer",
+        bytemuck::cast_slice(&face_neighbor),
+        (faces_cap * 4) as u64,
+        wgpu::BufferUsages::STORAGE,
+    );
 
     let face_boundary: Vec<u32> = mesh
         .face_boundary
@@ -256,40 +292,50 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, St
             Some(bt) => bt.bc_table_index() as u32,
         })
         .collect();
-    let b_face_boundary = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Face Boundary Buffer"),
-        contents: bytemuck::cast_slice(&face_boundary),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
+    let b_face_boundary = create_buffer_with_capacity(
+        device,
+        "Face Boundary Buffer",
+        bytemuck::cast_slice(&face_boundary),
+        (faces_cap * 4) as u64,
+        wgpu::BufferUsages::STORAGE,
+    );
 
     // The six geometry buffers carry COPY_DST so a Geometry-level
     // `refresh_mesh` can overwrite them in place via `queue.write_buffer`
     // (usage flags have no effect on results; see `refresh_geometry`).
-    let b_face_areas = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Face Areas Buffer"),
-        contents: bytemuck::cast_slice(&geo.face_areas),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    });
+    let b_face_areas = create_buffer_with_capacity(
+        device,
+        "Face Areas Buffer",
+        bytemuck::cast_slice(&geo.face_areas),
+        (faces_cap * 4) as u64,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    );
 
-    let b_face_normals = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Face Normals Buffer"),
-        contents: bytemuck::cast_slice(&geo.face_normals),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    });
+    let b_face_normals = create_buffer_with_capacity(
+        device,
+        "Face Normals Buffer",
+        bytemuck::cast_slice(&geo.face_normals),
+        (faces_cap * 8) as u64,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    );
 
-    let b_face_centers = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Face Centers Buffer"),
-        contents: bytemuck::cast_slice(&geo.face_centers),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    });
+    let b_face_centers = create_buffer_with_capacity(
+        device,
+        "Face Centers Buffer",
+        bytemuck::cast_slice(&geo.face_centers),
+        (faces_cap * 8) as u64,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    );
 
     // Periodic wrap shift, one vec2 per face (zero on ordinary faces; an empty
     // mesh field means all-zero, so non-periodic meshes are unaffected).
-    let b_face_wrap_shift = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Face Wrap Shift Buffer"),
-        contents: bytemuck::cast_slice(&geo.face_wrap_shift),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    });
+    let b_face_wrap_shift = create_buffer_with_capacity(
+        device,
+        "Face Wrap Shift Buffer",
+        bytemuck::cast_slice(&geo.face_wrap_shift),
+        (faces_cap * 8) as u64,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    );
 
     let b_cell_centers = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Cell Centers Buffer"),
@@ -313,86 +359,43 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, St
     });
 
     let cell_faces: Vec<u32> = mesh.cell_faces.iter().map(|&x| x as u32).collect();
-    let b_cell_faces = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Cell Faces Buffer"),
-        contents: bytemuck::cast_slice(&cell_faces),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
+    let b_cell_faces = create_buffer_with_capacity(
+        device,
+        "Cell Faces Buffer",
+        bytemuck::cast_slice(&cell_faces),
+        (cell_faces_cap * 4) as u64,
+        wgpu::BufferUsages::STORAGE,
+    );
 
-    // --- Cell Face Matrix Indices ---
-    let mut cell_face_matrix_indices = Vec::new();
-    for i in 0..num_cells {
-        let start = mesh.cell_face_offsets[i as usize];
-        let end = mesh.cell_face_offsets[i as usize + 1];
-
-        for k in start..end {
-            let face_idx = mesh.cell_faces[k];
-            let owner = mesh.face_owner[face_idx];
-            let neighbor_opt = mesh.face_neighbor[face_idx];
-
-            let neighbor = if owner == i as usize {
-                neighbor_opt
-            } else {
-                Some(owner)
-            };
-
-            // For boundary faces, map to the diagonal entry.
-            //
-            // Assembly kernels rely on `cell_face_matrix_indices` to produce a valid CSR rank for
-            // every (cell, face) pair. Using the diagonal for boundary faces keeps neighbor-rank
-            // indexing well-defined and matches the intended "ghost equals owner" convention.
-            let target_col = match neighbor {
-                Some(n) => n as u32,
-                None => i,
-            };
-
-            let row_start = scalar_row_offsets[i as usize] as usize;
-            let row_end = scalar_row_offsets[i as usize + 1] as usize;
-            let cols = &scalar_col_indices[row_start..row_end];
-
-            if let Ok(idx) = cols.binary_search(&target_col) {
-                cell_face_matrix_indices.push((row_start + idx) as u32);
-            } else {
-                // Should not happen: scalar CSR always contains the diagonal and any true neighbor.
-                cell_face_matrix_indices.push(u32::MAX);
-            }
-        }
-    }
-
-    let b_cell_face_matrix_indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Cell Face Matrix Indices Buffer"),
-        contents: bytemuck::cast_slice(&cell_face_matrix_indices),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-
-    let mut diagonal_indices = Vec::with_capacity(num_cells as usize);
-    for i in 0..num_cells {
-        let row_start = scalar_row_offsets[i as usize] as usize;
-        let row_end = scalar_row_offsets[i as usize + 1] as usize;
-        let cols = &scalar_col_indices[row_start..row_end];
-
-        if let Ok(idx) = cols.binary_search(&i) {
-            diagonal_indices.push((row_start + idx) as u32);
-        } else {
-            return Err(format!("diagonal not found in CSR cols for cell {i}"));
-        }
-    }
+    // COPY_DST: rewritten in place by a Tier-B topology refresh (and by the
+    // M5 GPU-resident regeneration path).
+    let b_cell_face_matrix_indices = create_buffer_with_capacity(
+        device,
+        "Cell Face Matrix Indices Buffer",
+        bytemuck::cast_slice(&cell_face_matrix_indices),
+        (cell_faces_cap * 4) as u64,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    );
 
     let b_diagonal_indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Diagonal Indices Buffer"),
         contents: bytemuck::cast_slice(&diagonal_indices),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
     });
 
     // --- ALE buffers (always allocated; bound only by *_ale model kernels) ---
     // Zero-filled mesh face fluxes: a static mesh has zero swept rate, so an
     // ALE model that never uploads reproduces static physics bitwise.
     let mesh_fluxes = vec![0.0f32; mesh.face_owner.len()];
-    let b_mesh_fluxes = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Mesh Fluxes Buffer (ALE)"),
-        contents: bytemuck::cast_slice(&mesh_fluxes),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    });
+    let b_mesh_fluxes = create_buffer_with_capacity(
+        device,
+        "Mesh Fluxes Buffer (ALE)",
+        bytemuck::cast_slice(&mesh_fluxes),
+        (faces_cap * 4) as u64,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    );
     // Volume history, seeded equal to the current volumes (COPY_SRC so the
     // old -> old_old rotation can run on-device; COPY_DST for uploads/seeding).
     let vols_history_usage = wgpu::BufferUsages::STORAGE
@@ -431,5 +434,6 @@ pub fn init_mesh(device: &wgpu::Device, mesh: &Mesh) -> Result<MeshResources, St
         scalar_row_offsets,
         scalar_col_indices,
         topology: MeshTopology::from_mesh(mesh),
+        capacity,
     })
 }

@@ -1585,47 +1585,19 @@ fn upload_mesh(buffers: &mut Buffers, mesh: &Mesh) {
 /// maps: each row holds the diagonal (rank 0) followed by one entry per interior
 /// face. Returns `(row_offsets, col_indices, diagonal_indices,
 /// cell_face_matrix_indices)`.
+/// CPU diag-first scalar-CSR topology. Delegates to the factored builder
+/// (`solver::mesh::csr::build_diag_first_scalar_csr`) so init and a Tier-B
+/// topology refresh rebuild byte-identical structure from one source of truth;
+/// byte-equivalence to the historical inlined logic is gated by
+/// `tests/csr_builder_equivalence_test.rs`.
 fn build_csr_topology(mesh: &Mesh) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>) {
-    let n = mesh.num_cells();
-    let mut row_offsets = vec![0u32; n + 1];
-    for i in 0..n {
-        let start = mesh.cell_face_offsets[i];
-        let end = mesh.cell_face_offsets[i + 1];
-        let interior = (start..end)
-            .filter(|&k| mesh.face_neighbor[mesh.cell_faces[k]].is_some())
-            .count();
-        row_offsets[i + 1] = row_offsets[i] + 1 + interior as u32;
-    }
-    let nnz = *row_offsets.last().unwrap() as usize;
-    let mut col_indices = vec![0u32; nnz];
-    let mut diagonal_indices = vec![0u32; n];
-    let mut cell_face_matrix_indices = vec![0u32; mesh.cell_faces.len()];
-
-    for i in 0..n {
-        let base = row_offsets[i] as usize;
-        col_indices[base] = i as u32;
-        diagonal_indices[i] = base as u32;
-        let mut pos = base + 1;
-        let start = mesh.cell_face_offsets[i];
-        let end = mesh.cell_face_offsets[i + 1];
-        for k in start..end {
-            let f = mesh.cell_faces[k];
-            match mesh.face_neighbor[f] {
-                Some(nb) => {
-                    let other = if mesh.face_owner[f] == i { nb } else { mesh.face_owner[f] };
-                    col_indices[pos] = other as u32;
-                    cell_face_matrix_indices[k] = pos as u32;
-                    pos += 1;
-                }
-                None => {
-                    // Boundary face: no column entry; point at the diagonal so any
-                    // stray read is harmless (the kernel guards with is_boundary).
-                    cell_face_matrix_indices[k] = base as u32;
-                }
-            }
-        }
-    }
-    (row_offsets, col_indices, diagonal_indices, cell_face_matrix_indices)
+    let csr = crate::solver::mesh::csr::build_diag_first_scalar_csr(mesh);
+    (
+        csr.row_offsets,
+        csr.col_indices,
+        csr.diagonal_indices,
+        csr.cell_face_matrix_indices,
+    )
 }
 
 /// Build per-face `(bc_kind, bc_value)` tables (length `num_faces * S`) by

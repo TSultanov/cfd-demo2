@@ -93,6 +93,18 @@ pub struct MeshTopology {
 }
 
 impl MeshTopology {
+    /// Face count of the snapshotted topology (logical size of face-indexed
+    /// buffers — used for sized bindings over capacity-reserved allocations).
+    pub fn num_faces(&self) -> usize {
+        self.num_faces
+    }
+
+    /// Length of the `cell_faces` array (logical size of `cell_faces` /
+    /// `cell_face_matrix_indices` buffers).
+    pub fn cell_faces_len(&self) -> usize {
+        self.cell_faces.len()
+    }
+
     pub fn from_mesh(mesh: &Mesh) -> Self {
         Self {
             num_cells: mesh.num_cells(),

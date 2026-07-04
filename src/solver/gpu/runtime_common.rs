@@ -19,12 +19,13 @@ impl GpuRuntimeCommon {
         mesh: &Mesh,
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
+        capacity: crate::solver::gpu::capacity::CapacityPlan,
     ) -> Result<Self, String> {
         let context = GpuContext::new(device, queue).await?;
         let num_cells = mesh.cell_cx.len() as u32;
         let num_faces = mesh.face_owner.len() as u32;
 
-        let mesh_res = mesh_init::init_mesh(&context.device, mesh)?;
+        let mesh_res = mesh_init::init_mesh(&context.device, mesh, capacity)?;
 
         Ok(Self {
             context,

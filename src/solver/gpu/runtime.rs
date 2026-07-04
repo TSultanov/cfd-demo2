@@ -31,8 +31,9 @@ impl GpuCsrRuntime {
         unknowns_per_cell: u32,
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
+        capacity: crate::solver::gpu::capacity::CapacityPlan,
     ) -> Result<Self, String> {
-        let common = GpuRuntimeCommon::new(mesh, device, queue).await?;
+        let common = GpuRuntimeCommon::new(mesh, device, queue, capacity).await?;
 
         let num_dofs = common
             .num_cells
@@ -50,6 +51,7 @@ impl GpuCsrRuntime {
             num_dofs,
             &row_offsets,
             &col_indices,
+            capacity,
         )?;
 
         Ok(Self {

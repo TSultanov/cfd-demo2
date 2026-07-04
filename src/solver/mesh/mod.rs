@@ -1,10 +1,12 @@
 pub mod ale;
+pub mod csr;
 pub mod ordering;
 pub mod refresh;
 pub mod structs;
 pub mod structured;
 
 pub use ale::{swept_mesh_fluxes_closed, SweptMeshFluxes};
+pub use csr::{build_diag_first_scalar_csr, build_sorted_scalar_csr, ScalarCsr};
 pub use refresh::MeshRefreshLevel;
 pub use structs::{BoundaryType, Mesh};
 pub use structured::{

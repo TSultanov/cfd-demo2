@@ -33,7 +33,17 @@ pub(crate) async fn build_generic_coupled_backend(
         .unknowns_per_cell
         .try_into()
         .map_err(|_| "recipe.unknowns_per_cell overflows u32".to_string())?;
-    let runtime = GpuCsrRuntime::new(mesh, unknowns_per_cell, device, queue).await?;
+    // Stage-1 groundwork: build paths reserve EXACT capacity (byte-neutral —
+    // sized bindings at full size == whole-buffer bindings). A refresh/churn
+    // context can later request headroom here without touching this seam.
+    let runtime = GpuCsrRuntime::new(
+        mesh,
+        unknowns_per_cell,
+        device,
+        queue,
+        crate::solver::gpu::capacity::CapacityPlan::EXACT,
+    )
+    .await?;
 
     let device = &runtime.common.context.device;
 

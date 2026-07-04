@@ -1,3 +1,4 @@
+use crate::solver::gpu::capacity::{create_buffer_with_capacity, CapacityPlan};
 use wgpu::util::DeviceExt;
 
 pub struct MatrixResources {
@@ -7,28 +8,43 @@ pub struct MatrixResources {
     pub num_nonzeros: u32,
 }
 
+/// Allocate the (block-expanded) CSR matrix buffers.
+///
+/// `num_nonzeros` stays the LOGICAL count; `capacity` only widens the
+/// `col_indices`/`matrix_values` allocations (M2 Tier B: a topology refresh
+/// rewrites them in place instead of reallocating; the block CSR is ~S² x the
+/// scalar nnz and dominates uploads — review-solver-ale F7). `row_offsets` is
+/// dof-sized (cell count invariant) and stays exact.
 pub fn init_matrix(
     device: &wgpu::Device,
     row_offsets: &[u32],
     col_indices: &[u32],
+    capacity: CapacityPlan,
 ) -> MatrixResources {
     let num_nonzeros = row_offsets.last().cloned().unwrap_or(0);
+    let nnz_cap = capacity.capacity_elems(num_nonzeros as usize) as u64;
 
     let b_row_offsets = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Row Offsets Buffer"),
         contents: bytemuck::cast_slice(row_offsets),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
     });
 
-    let b_col_indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Col Indices Buffer"),
-        contents: bytemuck::cast_slice(col_indices),
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-    });
+    let b_col_indices = create_buffer_with_capacity(
+        device,
+        "Col Indices Buffer",
+        bytemuck::cast_slice(col_indices),
+        nnz_cap * 4,
+        wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
+    );
 
     let b_matrix_values = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("Matrix Values Buffer"),
-        size: (num_nonzeros as u64) * 4,
+        size: nnz_cap * 4,
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_DST
             | wgpu::BufferUsages::COPY_SRC,

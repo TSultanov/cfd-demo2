@@ -213,6 +213,51 @@ pub fn lloyd_relax(
     stats
 }
 
+/// A CVT mesh together with the authoritative seed set that produced it —
+/// the input the moving-mesh driver (roadmap M4) owns so it can advect the
+/// seeds and regenerate the mesh deterministically. `seeds`/`kinds` are the
+/// POST-Lloyd relaxed set (seed `i` == cell `i`), `spec` the boundary loops,
+/// and `domain`/`min_cell_size` the two scalars `MeshgenTolerances` and the
+/// engine config are derived from — everything [`assemble_meshless_from_seeds`]
+/// needs to reproduce `mesh` byte-for-byte.
+pub struct CvtMeshSeeds {
+    pub mesh: Mesh,
+    pub seeds: Vec<Point2<f64>>,
+    pub kinds: Vec<SeedKind>,
+    pub spec: BoundarySpec,
+    pub domain: Vector2<f64>,
+    pub min_cell_size: f64,
+}
+
+/// Regenerate the meshless Voronoi `Mesh` from a fixed seed set: build the
+/// diagram (per-cell clip, deterministic) and canonically assemble it — the
+/// exact tail of [`generate_cvt_mesh`]. Because `MeshgenTolerances`,
+/// `EngineConfig`, `build_diagram` and `assemble_mesh` are all deterministic
+/// pure functions of `(seeds, kinds, spec, domain, min_cell_size)`, calling
+/// this with the [`CvtMeshSeeds`] the mesh was generated from reproduces that
+/// mesh BYTE-FOR-BYTE. That byte-reproducibility is the M4 "frozen-seed
+/// do-no-harm" foundation: a moving-mesh step that has not moved the seeds
+/// regenerates the identical mesh, so the swept-quad fluxes are exactly zero.
+pub fn assemble_meshless_from_seeds(
+    seeds: &[Point2<f64>],
+    kinds: &[SeedKind],
+    spec: &BoundarySpec,
+    domain: Vector2<f64>,
+    min_cell_size: f64,
+) -> Mesh {
+    let tol = MeshgenTolerances::from_geometry(min_cell_size, domain);
+    let input = MeshlessInput {
+        seeds,
+        kinds,
+        boundary: spec,
+        domain,
+        tol: &tol,
+        cfg: EngineConfig::default(),
+    };
+    let diagram = build_diagram(&input);
+    assemble_mesh(&input, &diagram)
+}
+
 /// CVT entry point: loop-derived boundary seeds + Poisson interior fill
 /// (Morton-sorted inside `meshless_seed_points`) → Lloyd relaxation →
 /// diagram → canonical assembly. The sizing closure is the exact Poisson
@@ -228,6 +273,30 @@ pub fn generate_cvt_mesh(
     domain_size: Vector2<f64>,
     lloyd: &LloydConfig,
 ) -> Mesh {
+    generate_cvt_mesh_with_seeds(
+        geo,
+        min_cell_size,
+        max_cell_size,
+        growth_rate,
+        domain_size,
+        lloyd,
+    )
+    .mesh
+}
+
+/// [`generate_cvt_mesh`] that also RETURNS the authoritative seed set (and the
+/// boundary spec / tolerance scalars) alongside the `Mesh`, so a caller can
+/// own the seeds and regenerate via [`assemble_meshless_from_seeds`]. The
+/// `mesh` field is produced through that same helper, so it is byte-identical
+/// to what `generate_cvt_mesh` returns and to a later regen from `seeds`.
+pub fn generate_cvt_mesh_with_seeds(
+    geo: &(impl Geometry + Sync),
+    min_cell_size: f64,
+    max_cell_size: f64,
+    growth_rate: f64,
+    domain_size: Vector2<f64>,
+    lloyd: &LloydConfig,
+) -> CvtMeshSeeds {
     let (mut seeds, kinds, spec) =
         meshless_seed_points(geo, min_cell_size, max_cell_size, growth_rate, domain_size);
     let tol = MeshgenTolerances::from_geometry(min_cell_size, domain_size);
@@ -240,16 +309,17 @@ pub fn generate_cvt_mesh(
     lloyd_relax(
         &mut seeds, &kinds, &spec, &sizing, domain_size, &tol, &cfg, lloyd,
     );
-    let input = MeshlessInput {
-        seeds: &seeds,
-        kinds: &kinds,
-        boundary: &spec,
+    // Assemble through the shared seed→mesh helper so the returned `mesh` is
+    // byte-identical to a later `assemble_meshless_from_seeds(&seeds, …)`.
+    let mesh = assemble_meshless_from_seeds(&seeds, &kinds, &spec, domain_size, min_cell_size);
+    CvtMeshSeeds {
+        mesh,
+        seeds,
+        kinds,
+        spec,
         domain: domain_size,
-        tol: &tol,
-        cfg,
-    };
-    let diagram = build_diagram(&input);
-    assemble_mesh(&input, &diagram)
+        min_cell_size,
+    }
 }
 
 #[cfg(test)]

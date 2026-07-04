@@ -33,7 +33,10 @@ pub use assemble::{
     assemble_mesh, generate_meshless_voronoi_mesh, reset_mutual_orphan_stats,
     MUTUAL_ORPHAN_MAX_GAP, MUTUAL_ORPHAN_UNIONS,
 };
-pub use lloyd::{generate_cvt_mesh, lloyd_relax, LloydConfig, LloydStats};
+pub use lloyd::{
+    assemble_meshless_from_seeds, generate_cvt_mesh, generate_cvt_mesh_with_seeds, lloyd_relax,
+    CvtMeshSeeds, LloydConfig, LloydStats,
+};
 pub use boundary::{
     boundary_seeds, circle_loop, distance_to_loops, meshless_seed_points, point_in_fluid,
     polyline_loop, shielding_violations, tag_boundary_type, BoundaryLoop, BoundarySpec, SeedKind,

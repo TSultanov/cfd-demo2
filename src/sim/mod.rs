@@ -12,9 +12,13 @@
 //! `ui`-gated `Fluid`), so it is usable from `meshgen`-only tests.
 
 mod driver;
+mod moving_mesh_driver;
 mod outcome;
 mod params;
 
 pub use driver::{DriverBuild, SolverDriver};
+pub use moving_mesh_driver::{
+    MeshMotionSpec, MovingMeshDriver, MovingMeshStats, DEFAULT_MESH_CFL,
+};
 pub use outcome::{DivergeReason, FieldStats, Readback, RunResult, StepOutcome};
 pub use params::RuntimeParams;

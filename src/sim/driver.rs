@@ -780,4 +780,41 @@ impl SolverDriver {
     pub fn params(&self) -> &RuntimeParams {
         &self.params
     }
+
+    /// Re-apply the params-derived boundary conditions after a **topology**
+    /// refresh reset the per-face BC overrides
+    /// ([`MeshRefreshReport::bc_overrides_reset`](crate::solver::MeshRefreshReport)).
+    ///
+    /// The topology rebuild re-scatters the bc tables from the model's stored
+    /// per-TYPE defaults, dropping any per-FACE override a live setter installed
+    /// (`set_inlet_velocity` writes a per-face override, not a per-type table).
+    /// This mirrors exactly the BC block of [`apply_params`](Self::apply_params)
+    /// — the incompressible inlet velocity — so the
+    /// [`MovingMeshDriver`](crate::sim::MovingMeshDriver) restores the inflow
+    /// after each `begin_ale_step_topology`, the same way the ALE gates
+    /// re-apply their inlet override by hand. Touches only the BC buffers.
+    ///
+    /// v1 ALE is incompressible-only (`incompressible_momentum_ale`), so only
+    /// the incompressible inlet is re-applied; the compressible / all-Mach
+    /// inlet+pressure BCs of `apply_params` are intentionally not mirrored here.
+    pub fn reapply_boundary_conditions(&mut self) {
+        let params = self.params;
+        if !self.compressible {
+            let _ = self.solver.set_inlet_velocity(params.inlet_velocity);
+        }
+    }
+
+    /// Pin the fixed timestep (the moving-mesh dt handshake, review-solver-ale
+    /// F2). Sets both the driver's `params.requested_dt` — the value
+    /// [`Self::step`] pins when `adaptive_dt` is off — and the live solver dt,
+    /// so a subsequent non-adaptive `step()` marches with exactly `dt`. The
+    /// [`MovingMeshDriver`](crate::sim::MovingMeshDriver) calls this AFTER
+    /// applying the mesh-motion CFL cap and BEFORE closing the swept mesh
+    /// fluxes, so the fluxes and the step share one dt (else the GCL breaks).
+    /// Touches nothing but the timestep — static, non-ALE callers are
+    /// unaffected.
+    pub fn set_requested_dt(&mut self, dt: f32) {
+        self.params.requested_dt = dt;
+        self.solver.set_dt(dt);
+    }
 }

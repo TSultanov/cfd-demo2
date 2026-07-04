@@ -226,7 +226,9 @@ face-kernel dispatch), plus `SolverDriver.min_cell_size`.
   set / adjacency / nnz change at an INVARIANT cell count) both land on GPU and CPU.
   `refresh_mesh(Topology)` rebuilds both CSR layouts (factored
   `build_{sorted,diag_first}_scalar_csr`, gated byte-equal to the historical inline
-  builders), reallocates every face/nnz buffer (capacity-reserved + sized bindings),
+  builders), reallocates every face/nnz buffer (capacity-reserved; the scalar-CSR + face
+  mesh buffers bind as sized ranges, block-CSR named buffers bind entire under an EXACT
+  guard — see *Capacity policy* below),
   re-scatters the bc tables + `boundary_faces`, and rebuilds bind groups. The M3 ALE
   rotation is FUSED with the topology rebuild via `begin_ale_step_topology` (rotate volume
   history → topology rebuild → geometry → mesh-flux upload, in that order); plain
@@ -256,8 +258,9 @@ face-kernel dispatch), plus `SolverDriver.min_cell_size`.
   (the GENERATED model kernels take the in-place bind-group rebuild — no codegen recompile,
   byte-identity preserved). This re-zeroes the warm-start `x`. Consequence for the ALE
   topology-seam GCL: on GPU each step restarts the coupled solve COLD → a bounded, SATURATED
-  ~1.5e-3 free-stream residual (non-compounding: late≈max, a convergence artifact NOT a GCL
-  violation), vs the CPU's surgical refresh (preserves `x`) holding the M3 ~1e-6 scale.
+  ~1.5e-3 free-stream residual (non-compounding, asserted as late-quarter ≤ 1.5× an EARLY
+  post-cold-start window — a convergence artifact NOT a GCL violation), vs the CPU's surgical
+  refresh (preserves `x`) holding the M3 ~1e-6 scale.
   Warm-start preservation across the GPU rebuild needs the `x`-readback/upload plumbing
   stage-3 deferred (GPU exposes only `read_state_bytes`) → M4.
 
@@ -277,10 +280,18 @@ face-kernel dispatch), plus `SolverDriver.min_cell_size`.
   the per-step motion loop.
 
 - *Capacity policy.* `CapacityPlan::EXACT` (headroom 1.0) is the byte-neutral default: each
-  refresh reallocates at the new exact size and binds sized ranges (so `arrayLength` guards
-  stay correct). Headroom>1 + reuse-on-fit ("reallocate only on overflow" ⇒ reallocations
-  stop after the first growth to max-seen) is wired at the buffer helper (`capacity.rs`) but
-  NOT yet exercised by the refresh path — that reuse loop is the M4 per-step optimization.
+  refresh reallocates at the new exact size. The **scalar-CSR + face mesh buffers** (the ones
+  carrying `arrayLength` guards) resolve through `MeshResources::binding_resource_for` as
+  **sized ranges** (`BufferBinding{offset:0, size:logical}`), so under headroom>1 their
+  `arrayLength` sees the logical face/nnz count, not the padded allocation — the
+  `ResourceRegistry::resolve` mesh arm is wired to this (stage-5 review fix; byte-neutral at
+  EXACT, proven by the no-op byte gates). The **block-CSR named buffers** (`matrix_values`/
+  `col_indices`, bound ENTIRE via `with_buffer` across FGMRES/AMG/Schur) are NOT yet sized;
+  `init_matrix` therefore ASSERTS `headroom == 1.0` — a loud guard against the silent
+  arrayLength-into-the-tail corruption until those named buffers get a sized-binding path.
+  Headroom>1 + reuse-on-fit ("reallocate only on overflow" ⇒ reallocations stop after the
+  first growth to max-seen) is wired at the buffer helper (`capacity.rs`) but NOT yet
+  enabled — the block-CSR sized bindings + the reuse loop are the M4 per-step optimization.
 
 - *Flip deferral (crisp — what is missing).* The ALE topology seam is validated as the
   no-op-TOPOLOGY case (structured mesh, fixed face set, real vertex motion): the full rebuild
@@ -423,6 +434,17 @@ amortized — viable. The wall candidates, in order: M0 engine regen, AMG policy
    refresh(A→B)≡fresh(B)+restore gate is green both backends; it caught one real confound
    (the adaptive-AMG `schur_amg_active` mode carried by the snapshot vs reset by the refresh —
    isolated, not a leak) and otherwise proves every buffer + CSR field byte-identical.
+   *Coverage scope (honest):* the CPU leg exercises the FULL BDF2 history (5-step-evolved
+   state, `state_old`/`state_old_old` weighting) — the strong stale-cache detector. The GPU
+   snapshot is current-state-only (`has_history=false`, `step_count=0` — GPU exposes only
+   `read_state_bytes`), so its post-refresh step runs the Euler startup fallback, not BDF2;
+   it still catches gross topology-inventory staleness (CSR / bc / geometry / face-dispatch /
+   boundary_faces) but not a stale buffer that surfaces ONLY through `state_old_old` weighting
+   or warm-start `x` carry — those await the `x`/history readback (M4). A companion gate
+   (`topology_refresh_face_count_change_matches_fresh_build_{cpu,gpu}`) additionally exercises
+   a genuine face-count/nnz CHANGE (8×12↔4×24 structured, equal cell count), so the
+   buffer-REALLOCATION-at-a-different-length path — not just the equal-size adjacency flip —
+   is covered on both backends.
 10. **Near-moving-wall cell quality** (M6 near-wall instrument; M4 soak precursors).
     Mitigation: rigid boundary seed layers + wall-aware Lloyd weights.
 

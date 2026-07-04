@@ -131,10 +131,18 @@ struct GclRun {
     /// transient of the first few steps).
     max_du: f32,
     max_dp: f32,
+    /// Worst drift over an EARLY post-cold-start window (second quarter of the
+    /// run, steps [STEPS/4, STEPS/2)): the cold-start linear-solve transient
+    /// (step ≤10) has settled, so this is the baseline the late window is
+    /// compared against. A compounding GCL error makes `late ≫ early`; a
+    /// saturated solve-noise floor makes `late ≈ early`.
+    early_du: f32,
+    early_dp: f32,
     /// Worst drift over the FINAL QUARTER of the run — the actual GCL
     /// statement: a conservation-law violation compounds step over step,
     /// while solve noise saturates/decays (the traces show the maximum at
-    /// step ≤10 decaying ~50× by the end).
+    /// step ≤10 decaying ~50× by the end). Compared against `early_*` (NOT
+    /// against `max_*`, which trivially dominates the final quarter).
     late_du: f32,
     late_dp: f32,
     max_scl_defect: f64,
@@ -203,6 +211,8 @@ fn run_gcl_arm(
     let mut out = GclRun {
         max_du: 0.0,
         max_dp: 0.0,
+        early_du: 0.0,
+        early_dp: 0.0,
         late_du: 0.0,
         late_dp: 0.0,
         max_scl_defect: 0.0,
@@ -282,6 +292,10 @@ fn run_gcl_arm(
         }
         out.max_du = out.max_du.max(step_du);
         out.max_dp = out.max_dp.max(step_dp);
+        if (STEPS / 4..STEPS / 2).contains(&step) {
+            out.early_du = out.early_du.max(step_du);
+            out.early_dp = out.early_dp.max(step_dp);
+        }
         if step >= 3 * STEPS / 4 {
             out.late_du = out.late_du.max(step_du);
             out.late_dp = out.late_dp.max(step_dp);
@@ -407,7 +421,10 @@ fn gcl_topology_seam_preserves_uniform_flow_cpu_bdf2() {
 /// preservation across the GPU topology rebuild needs the `x`-readback/upload
 /// plumbing stage 3 deferred (GPU has only `read_state_bytes` today); it is the
 /// M4 per-step-loop optimization. Caps here are pinned to the saturated
-/// magnitude and assert non-compounding (late within 1.5× of max).
+/// magnitude and assert non-compounding by comparing the FINAL-quarter drift
+/// against an EARLY post-cold-start window (late within 1.5× of early — a
+/// secular GCL error would make late ≫ early; solve-noise saturation keeps them
+/// comparable).
 #[test]
 fn gcl_topology_seam_preserves_uniform_flow_gpu() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -429,16 +446,21 @@ fn gcl_topology_seam_preserves_uniform_flow_gpu() {
         // Bounded at the cold-restart (under-converged) magnitude (~2× measured).
         assert!(out.max_du < 3e-3, "[{label}] U drift {:.3e} above pinned cap", out.max_du);
         assert!(out.max_dp < 1.2e-2, "[{label}] p drift {:.3e} above pinned cap", out.max_dp);
-        // Non-compounding: the residual is SATURATED (late ≈ max), not secular.
+        // Non-compounding: compare the FINAL quarter against an EARLY
+        // post-cold-start window (NOT against `max`, which trivially dominates
+        // the final quarter — that made the old assertion vacuous). A secular
+        // GCL error grows the late window well past early; the saturated
+        // solve-noise floor keeps late ≈ early. The `.max(floor)` guards against
+        // a degenerate tiny early baseline (floor ≪ the ~1.5e-3 saturated scale).
         assert!(
-            out.late_du <= out.max_du * 1.5 && out.late_du < 3e-3,
-            "[{label}] late U drift {:.3e} vs max {:.3e}: GCL error compounds",
-            out.late_du, out.max_du
+            out.late_du <= (out.early_du * 1.5).max(2e-4) && out.late_du < 3e-3,
+            "[{label}] late U drift {:.3e} vs early {:.3e}: GCL error compounds",
+            out.late_du, out.early_du
         );
         assert!(
-            out.late_dp <= out.max_dp * 1.5 && out.late_dp < 1.2e-2,
-            "[{label}] late p drift {:.3e} vs max {:.3e}: GCL error compounds",
-            out.late_dp, out.max_dp
+            out.late_dp <= (out.early_dp * 1.5).max(8e-4) && out.late_dp < 1.2e-2,
+            "[{label}] late p drift {:.3e} vs early {:.3e}: GCL error compounds",
+            out.late_dp, out.early_dp
         );
     }
 }

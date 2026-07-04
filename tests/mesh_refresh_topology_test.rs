@@ -548,6 +548,144 @@ fn csr_rebuild_correctness() {
     );
 }
 
+// ─── 5. face-count / nnz CHANGE across the refresh (reallocation path) ────────
+
+/// A structured mesh of `nx`×`ny` UNIT-square (h=0.1) cells. Two different
+/// factorizations of the same cell count (e.g. 8×12 vs 4×24 = 96 cells) have
+/// genuinely different face and nnz counts, while every cell stays h×h square
+/// (well-conditioned — no thin-cell stiffness in the 1-step probe).
+fn structured_square(nx: usize, ny: usize) -> Mesh {
+    let h = 0.1;
+    generate_structured_rect_mesh(
+        nx,
+        ny,
+        nx as f64 * h,
+        ny as f64 * h,
+        BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
+        },
+    )
+}
+
+/// The meshless A/B pair (`meshless_ab`) flips ADJACENCY at an EQUAL face count
+/// (fa==fb for a single-seed shift), so it never resizes a buffer — it leaves
+/// the buffer-REALLOCATION-at-a-different-length path (the core Tier B
+/// capability: `refresh_face_count(new != old)`, `matrix_values`/`mesh_fluxes`/
+/// block-CSR realloc at a new nnz, `init_matrix` capacity sizing on a size
+/// delta) unexercised. Two structured meshes with the SAME cell count but a
+/// different factorization (8×12 vs 4×24 = 96 square cells) have DIFFERENT face
+/// and nnz counts, so refreshing between them resizes every topology-sized
+/// buffer. Same equivalence contract as the meshless gate: refresh(A→B) must
+/// step byte-identically to a fresh build on B — now across a size delta. Also
+/// asserts the scalar CSR nnz genuinely changed (the reallocation happened).
+#[test]
+#[cfg(feature = "cpu")]
+fn topology_refresh_face_count_change_matches_fresh_build_cpu() {
+    with_cpu_backend(|| {
+        // Same AMG pin rationale as `topology_refresh_matches_fresh_build_cpu`:
+        // isolate the mesh-rebuild correctness from the adaptive Jacobi→AMG flip.
+        std::env::set_var("CFD2_CPU_SCHUR_AMG", "0");
+
+        let mesh_a = structured_square(8, 12);
+        let mesh_b = structured_square(4, 24);
+        assert_eq!(mesh_a.num_cells(), mesh_b.num_cells(), "cell count must be invariant");
+        assert_ne!(
+            mesh_a.num_faces(),
+            mesh_b.num_faces(),
+            "this gate REQUIRES a face-count change (got {}=={})",
+            mesh_a.num_faces(),
+            mesh_b.num_faces()
+        );
+
+        let mut src = build_driver_ic(&mesh_a, None, None, (1.0, 0.0));
+        run_steps(&mut src, 5, "cpu-fcc-src");
+        let snap = src.snapshot();
+        assert!(snap.has_history, "CPU snapshot must carry full history");
+
+        // Leg 1: fresh-on-A, restore, refresh A→B (resizes buffers), one step.
+        let mut leg1 = build_driver_ic(&mesh_a, None, None, (1.0, 0.0));
+        leg1.restore(&snap).expect("restore");
+        let nnz_a = leg1.solver().debug_scalar_csr().expect("cpu csr").1.len();
+        leg1.refresh_mesh(&mesh_b, MeshRefreshLevel::Topology).expect("refresh A->B");
+        leg1.apply_params(&test_params());
+        let nnz_b = leg1.solver().debug_scalar_csr().expect("cpu csr").1.len();
+        assert_ne!(nnz_a, nnz_b, "refresh must resize the scalar CSR (nnz {nnz_a} unchanged)");
+        run_steps(&mut leg1, 1, "cpu-fcc-leg1");
+        let bits1 = state_bits(&leg1);
+
+        // Leg 2: fresh-on-B, restore, one step.
+        let mut leg2 = build_driver_ic(&mesh_b, None, None, (1.0, 0.0));
+        leg2.restore(&snap).expect("restore");
+        run_steps(&mut leg2, 1, "cpu-fcc-leg2");
+        let bits2 = state_bits(&leg2);
+
+        std::env::remove_var("CFD2_CPU_SCHUR_AMG");
+        assert_bits_equal(&bits1, &bits2, "cpu-fcc-refresh-vs-fresh");
+        println!(
+            "[mesh-refresh] CPU refresh(A→B) matches fresh(B) across a FACE-COUNT change \
+             ({}c, {}f→{}f, {}→{} nnz) over {} slots",
+            mesh_a.num_cells(),
+            mesh_a.num_faces(),
+            mesh_b.num_faces(),
+            nnz_a,
+            nnz_b,
+            bits1.len()
+        );
+    });
+}
+
+/// GPU leg of the face-count-change equivalence. This is the path that resizes
+/// the block-expanded CSR (`matrix_values`/`col_indices`, ~S²× the scalar nnz —
+/// review-F7) and the FGMRES/AMG/Schur bind groups over the reallocated buffers
+/// (review-F10). Same current-state-snapshot contract as the equal-size GPU
+/// gate; f32-exact per device (waiver hatch).
+#[test]
+fn topology_refresh_face_count_change_matches_fresh_build_gpu() {
+    let _guard = lock_env();
+    std::env::remove_var("CFD2_BACKEND");
+    let ctx = match pollster::block_on(GpuContext::new(None, None)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[mesh-refresh] no GPU adapter ({e}); skipping GPU face-count-change gate");
+            return;
+        }
+    };
+    let mesh_a = structured_square(8, 12);
+    let mesh_b = structured_square(4, 24);
+    assert_eq!(mesh_a.num_cells(), mesh_b.num_cells(), "cell count must be invariant");
+    assert_ne!(mesh_a.num_faces(), mesh_b.num_faces(), "this gate REQUIRES a face-count change");
+
+    let mut src = build_driver_ic(&mesh_a, Some(ctx.device.clone()), Some(ctx.queue.clone()), (1.0, 0.0));
+    assert!(!src.solver().is_cpu(), "expected the GPU backend");
+    run_steps(&mut src, 5, "gpu-fcc-src");
+    let snap = src.snapshot();
+
+    let mut leg1 = build_driver_ic(&mesh_a, Some(ctx.device.clone()), Some(ctx.queue.clone()), (1.0, 0.0));
+    leg1.restore(&snap).expect("restore");
+    leg1.refresh_mesh(&mesh_b, MeshRefreshLevel::Topology).expect("refresh A->B");
+    leg1.apply_params(&test_params());
+    run_steps(&mut leg1, 1, "gpu-fcc-leg1");
+    let bits1 = state_bits(&leg1);
+
+    let mut leg2 = build_driver_ic(&mesh_b, Some(ctx.device.clone()), Some(ctx.queue.clone()), (1.0, 0.0));
+    leg2.restore(&snap).expect("restore");
+    run_steps(&mut leg2, 1, "gpu-fcc-leg2");
+    let bits2 = state_bits(&leg2);
+
+    assert_gpu_state_match(&bits1, &bits2, "gpu-fcc-refresh-vs-fresh");
+    println!(
+        "[mesh-refresh] GPU refresh(A→B) matches fresh(B) across a FACE-COUNT change \
+         ({}c, {}f→{}f) over {} slots",
+        mesh_a.num_cells(),
+        mesh_a.num_faces(),
+        mesh_b.num_faces(),
+        bits1.len()
+    );
+}
+
 // ─── refresh-cost benchmark (deliverable 4; `#[ignore]`d — run explicitly) ────
 
 /// A structured grid sized to ~`target` cells (returns the actual mesh).

@@ -21,6 +21,22 @@ pub fn init_matrix(
     col_indices: &[u32],
     capacity: CapacityPlan,
 ) -> MatrixResources {
+    // GUARD (M2 Tier B): the block-CSR `col_indices`/`matrix_values` are bound
+    // ENTIRE (`ResourceRegistry::with_buffer` → `as_entire_buffer_binding`) by
+    // every LA-stack consumer (FGMRES, AMG, Schur). Unlike the scalar mesh CSR —
+    // whose buffers resolve through `binding_resource_for` as sized ranges —
+    // there is no sized-binding path for these named buffers yet, so a capacity
+    // headroom would make their WGSL `arrayLength` over-report into the
+    // zero-padded tail and SpMV would iterate phantom nnz. Refuse headroom here
+    // until the block-CSR named buffers are wired to sized bindings (M4). Exact
+    // capacity (the default) is byte-neutral.
+    assert!(
+        capacity.headroom == 1.0,
+        "init_matrix: block-CSR buffers are bound entire; capacity headroom \
+         (got {}) would corrupt arrayLength. Wire sized bindings for the \
+         matrix_values/col_indices named buffers before enabling headroom (M4).",
+        capacity.headroom
+    );
     let num_nonzeros = row_offsets.last().cloned().unwrap_or(0);
     let nnz_cap = capacity.capacity_elems(num_nonzeros as usize) as u64;
 

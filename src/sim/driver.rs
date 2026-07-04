@@ -681,12 +681,26 @@ impl SolverDriver {
     ) -> Result<(), String> {
         self.solver.refresh_mesh(mesh, level)?;
         // Same reduction as `build` (driver.rs `min_cell_size` construction).
+        // Level-agnostic: both Geometry and Topology may change cell volumes.
         self.min_cell_size = mesh
             .cell_vol
             .iter()
             .map(|&v| v.sqrt())
             .fold(f64::INFINITY, f64::min);
         Ok(())
+    }
+
+    /// Capture the solver's stepping state (passthrough to
+    /// [`UnifiedSolver::snapshot`]). The driver's own mesh-derived cache
+    /// (`min_cell_size`) is a pure function of the mesh, not solver state, so it
+    /// is recomputed by `refresh_mesh` on the rebuild rather than snapshotted.
+    pub fn snapshot(&self) -> crate::solver::SolverStateSnapshot {
+        self.solver.snapshot()
+    }
+
+    /// Restore a snapshot (passthrough to [`UnifiedSolver::restore`]).
+    pub fn restore(&mut self, snap: &crate::solver::SolverStateSnapshot) -> Result<(), String> {
+        self.solver.restore(snap)
     }
 
     /// ALE step entry (passthrough to [`UnifiedSolver::begin_ale_step`]:

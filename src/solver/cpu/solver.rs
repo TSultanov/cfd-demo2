@@ -25,7 +25,8 @@ use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe, SteppingMode};
 use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams, PreconditionerType};
 use crate::solver::ir::DispatchDomain;
-use crate::solver::mesh::refresh::{mesh_geometry_f32, MeshTopology};
+use crate::solver::mesh::refresh::{mesh_geometry_f32, MeshRefreshReport, MeshTopology};
+use crate::solver::snapshot::SolverStateSnapshot;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::SchemeRegistry;
 use crate::solver::model::ModelSpec;
@@ -176,6 +177,16 @@ pub struct CpuSolver {
 
     // Faces grouped by boundary type index (`GpuBoundaryType as u32`).
     boundary_faces: Vec<Vec<u32>>,
+
+    /// Flux-table stride (floats per face). Kept so a Tier-B topology refresh
+    /// can re-size the face-indexed `fluxes` buffer (the face count changes).
+    flux_stride: usize,
+    /// Per-boundary-type BC tables (`ModelSpec::boundaries::to_gpu_tables`),
+    /// kept so a Tier-B topology refresh can re-scatter them onto the NEW face
+    /// indexing without the full `ModelSpec` (design §1.4.4 / review R8).
+    /// Length `BOUNDARY_TYPE_COUNT * S`.
+    bc_kind_by_type: Vec<u32>,
+    bc_value_by_type: Vec<f32>,
 
     /// Host snapshot of the topology this solver was built on, kept so a
     /// `Geometry`-level `refresh_mesh` can validate the incoming mesh is
@@ -428,8 +439,12 @@ impl CpuSolver {
         buffers.insert_f32("x", vec![0.0; num_cells * s]);
         buffers.insert_f32("y", vec![0.0; num_cells * s]);
 
-        // Boundary conditions: per face x coupled-unknown component.
-        let (bc_kind, bc_value) = build_bc_tables(mesh, &model, s)?;
+        // Boundary conditions: per face x coupled-unknown component. The
+        // per-boundary-type tables are kept (a Tier-B topology refresh
+        // re-scatters them onto the new faces); the scatter yields the
+        // per-face seed the kernels read.
+        let (bc_kind_by_type, bc_value_by_type) = model_bc_type_tables(&model, s)?;
+        let (bc_kind, bc_value) = scatter_bc_tables(mesh, &bc_kind_by_type, &bc_value_by_type, s);
         buffers.insert_u32("bc_kind", bc_kind);
         buffers.insert_f32("bc_value", bc_value);
 
@@ -483,6 +498,9 @@ impl CpuSolver {
             diagonal_indices,
             coupled_offsets,
             boundary_faces,
+            flux_stride,
+            bc_kind_by_type,
+            bc_value_by_type,
             mesh_topology: MeshTopology::from_mesh(mesh),
             constants,
             low_mach: GpuLowMachParams::default(),
@@ -566,6 +584,159 @@ impl CpuSolver {
         // 3. Upload the closed mesh fluxes verbatim (already f32 — the SCL
         //    closure must survive byte-exactly).
         self.buffers.copy_into_f32("mesh_fluxes", mesh_fluxes);
+        Ok(())
+    }
+
+    /// Tier-B topology refresh (M2): rebuild every mesh-topology-derived CPU
+    /// resource for a new mesh with the SAME cell count but a possibly changed
+    /// face set / adjacency / boundary classification / nnz. Cell-indexed state
+    /// (`state` ×3, `grad_state`, warm-start `x`, `cell_vols_old{,_old}`) is
+    /// left UNTOUCHED — a cell keeps its identity across the refresh (unlike the
+    /// GPU arm, which reconstructs its linear-algebra pipelines and re-zeroes
+    /// `x`; the CPU solver has no baked pipelines, so this refresh is fully
+    /// surgical and byte-invisible at ANY step, not just step 0).
+    ///
+    /// Buffer-swap safety (deliverable 1): each rebuilt buffer is REPLACED in
+    /// the `Buffers` map via `insert_*` (a fresh `AtomicU32` backing of the new
+    /// length). No stale handle survives: the interpreter resolves buffers by
+    /// NAME on every load/store (`Buffers::load`/`store`), and the transpiled
+    /// engine calls `Buffers::atom(name)` once per DISPATCH inside `run_kernel`
+    /// (never cached across steps) — so the next step sees the new backing.
+    ///
+    /// Runtime per-face BC overrides (keyed by the OLD face indices) are lost;
+    /// the returned [`MeshRefreshReport`] flags `bc_overrides_reset` so the
+    /// caller re-applies them against the new faces (design §1.4.4 / review R8).
+    pub fn refresh_mesh_topology(&mut self, mesh: &Mesh) -> Result<MeshRefreshReport, String> {
+        // Cell count is the Tier-B invariant (seed↔cell identity is what lets
+        // cell-indexed state survive untouched); faces/adjacency/nnz may change.
+        if mesh.num_cells() != self.num_cells {
+            return Err(format!(
+                "topology refresh requires an unchanged cell count ({} -> {})",
+                self.num_cells,
+                mesh.num_cells()
+            ));
+        }
+        let s = self.unknowns_per_cell;
+        let num_faces = mesh.num_faces();
+
+        // 1. Rebuild the diag-first scalar CSR from the factored builder (the
+        //    single source of truth the build path uses — byte-identical
+        //    structure for a no-op refresh, gated by csr_builder_equivalence).
+        let (scalar_row_offsets, col_indices, diagonal_indices, cell_face_matrix_indices) =
+            build_csr_topology(mesh);
+        let nnz_blocks = *scalar_row_offsets.last().unwrap() as usize;
+
+        // 2. Update the F4 Tier-B struct fields: `num_faces` drives the
+        //    face-kernel dispatch count, and the block linear solvers read the
+        //    CSR duplicates directly (not via `Buffers`).
+        self.num_faces = num_faces;
+        self.scalar_row_offsets = scalar_row_offsets.clone();
+        self.col_indices = col_indices.clone();
+        self.diagonal_indices = diagonal_indices.clone();
+
+        // 3. Re-upload the mesh geometry/topology `Buffers` entries + the CSR
+        //    index buffers. `upload_mesh` replaces the Stores (new backing of
+        //    the new length); the cell-indexed Stores it does NOT touch (state
+        //    ×3, state_iter, grad_state, x/rhs/y, cell_vols_old{,_old}) are left
+        //    in place — cell count is invariant.
+        upload_mesh(&mut self.buffers, mesh);
+        self.buffers.insert_u32("scalar_row_offsets", scalar_row_offsets.clone());
+        self.buffers.insert_u32("row_offsets", scalar_row_offsets);
+        self.buffers.insert_u32("col_indices", col_indices);
+        self.buffers.insert_u32("diagonal_indices", diagonal_indices);
+        self.buffers.insert_u32("cell_face_matrix_indices", cell_face_matrix_indices);
+
+        // 4. Resize the face-indexed + nnz-sized data buffers (zero-filled:
+        //    `fluxes` and the assembled `matrix_values` are recomputed every
+        //    outer iteration; a static mesh's zero `mesh_fluxes` reproduce
+        //    static physics bitwise, exactly as the build path seeds them).
+        self.buffers.insert_f32("fluxes", vec![0.0; num_faces * self.flux_stride]);
+        self.buffers.insert_f32("mesh_fluxes", vec![0.0; num_faces]);
+        self.buffers.insert_f32("matrix_values", vec![0.0; nnz_blocks * s * s]);
+
+        // 5. Re-scatter the bc tables from the stored per-type tables onto the
+        //    new faces + rebuild the boundary-face groups. Runtime per-face BC
+        //    overrides are lost (see the method doc / `bc_overrides_reset`).
+        let (bc_kind, bc_value) =
+            scatter_bc_tables(mesh, &self.bc_kind_by_type, &self.bc_value_by_type, s);
+        self.buffers.insert_u32("bc_kind", bc_kind);
+        self.buffers.insert_f32("bc_value", bc_value);
+        self.boundary_faces = group_boundary_faces(mesh);
+
+        // 6. Refresh the topology snapshot (so a later Geometry refresh
+        //    validates against the CURRENT topology) and clear the AMG caches:
+        //    the lazily-built Schur pressure-block hierarchy was aggregated on
+        //    the OLD CSR pattern, and the adaptive Jacobi→AMG flip re-evaluates
+        //    from cheap on the new sparsity (review F8 stale-aggregation).
+        self.mesh_topology = MeshTopology::from_mesh(mesh);
+        self.amg_hier = std::cell::OnceCell::new();
+        self.schur_amg_active.set(false);
+
+        Ok(MeshRefreshReport {
+            bc_overrides_reset: true,
+        })
+    }
+
+    // ── snapshot / restore (M2 Tier B stage 3) ───────────────────────────
+
+    /// Capture the full stepping state (see [`SolverStateSnapshot`] for the
+    /// inventory + exclusions). Every field is filled (`has_history = true`), so
+    /// a fresh solver built on the same mesh + restored reproduces the next step
+    /// byte-identically.
+    pub fn snapshot(&self) -> SolverStateSnapshot {
+        SolverStateSnapshot {
+            num_cells: self.num_cells,
+            num_faces: self.num_faces,
+            state_stride: self.state_stride,
+            unknowns_per_cell: self.unknowns_per_cell,
+            state: self.buffers.f32_vec("state"),
+            state_old: self.buffers.f32_vec("state_old"),
+            state_old_old: self.buffers.f32_vec("state_old_old"),
+            x: self.buffers.f32_vec("x"),
+            cell_vols_old: self.buffers.f32_vec("cell_vols_old"),
+            cell_vols_old_old: self.buffers.f32_vec("cell_vols_old_old"),
+            mesh_fluxes: self.buffers.f32_vec("mesh_fluxes"),
+            time: self.time,
+            dt: self.dt,
+            dt_old: self.dt_old,
+            dtau: self.dtau,
+            step_count: self.step_count,
+            last_rel_delta: self.last_rel_delta,
+            schur_amg_active: self.schur_amg_active.get(),
+            has_history: true,
+        }
+    }
+
+    /// Restore a snapshot into this solver. The cell layout must match
+    /// (`num_cells`, `state_stride`); the face-indexed `mesh_fluxes` is only
+    /// restored when the face count also matches (a remesh recomputes it).
+    pub fn restore(&mut self, snap: &SolverStateSnapshot) -> Result<(), String> {
+        snap.check_compatible(self.num_cells, self.state_stride)?;
+        self.buffers.copy_into_f32("state", &snap.state);
+        if snap.has_history {
+            self.buffers.copy_into_f32("state_old", &snap.state_old);
+            self.buffers.copy_into_f32("state_old_old", &snap.state_old_old);
+            self.buffers.copy_into_f32("x", &snap.x);
+            self.buffers.copy_into_f32("cell_vols_old", &snap.cell_vols_old);
+            self.buffers.copy_into_f32("cell_vols_old_old", &snap.cell_vols_old_old);
+            if snap.num_faces == self.num_faces {
+                self.buffers.copy_into_f32("mesh_fluxes", &snap.mesh_fluxes);
+            }
+        } else {
+            // Current-state-only snapshot (GPU capture): re-seed the history
+            // from the restored state (IC semantics) so a subsequent step has a
+            // consistent `state_old`/`x`. Exact for single-step schemes.
+            self.buffers.copy_into_f32("state_old", &snap.state);
+            self.buffers.copy_into_f32("state_old_old", &snap.state);
+            self.sync_x_from_state();
+        }
+        self.time = snap.time;
+        self.dt = snap.dt;
+        self.dt_old = snap.dt_old;
+        self.dtau = snap.dtau;
+        self.step_count = snap.step_count;
+        self.last_rel_delta = snap.last_rel_delta;
+        self.schur_amg_active.set(snap.schur_amg_active);
         Ok(())
     }
 
@@ -1600,21 +1771,30 @@ fn build_csr_topology(mesh: &Mesh) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>) {
     )
 }
 
-/// Build per-face `(bc_kind, bc_value)` tables (length `num_faces * S`) by
-/// scattering the model's per-boundary-type tables onto boundary faces — exactly
-/// as the GPU generic-coupled backend does (`row_base(i) = i * S`). Interior and
-/// `None`-typed faces stay zero (kernels guard with `is_boundary`). The values
-/// are *seeds*; `set_boundary_values_per_face` overrides them at runtime and the
-/// `bc_expr` kernel refreshes expression-valued entries each iteration.
-fn build_bc_tables(
-    mesh: &Mesh,
-    model: &ModelSpec,
-    s: usize,
-) -> Result<(Vec<u32>, Vec<f32>), String> {
-    let (kind_by_type, value_by_type) = model
+/// The model's per-boundary-type `(bc_kind, bc_value)` tables (length
+/// `BOUNDARY_TYPE_COUNT * S`), the source both the build-time scatter and a
+/// Tier-B topology re-scatter consume. Kept on the solver so a topology refresh
+/// can re-derive the per-face tables without the full `ModelSpec`.
+fn model_bc_type_tables(model: &ModelSpec, _s: usize) -> Result<(Vec<u32>, Vec<f32>), String> {
+    model
         .boundaries
         .to_gpu_tables(&model.system)
-        .map_err(|e| format!("failed to build BC tables: {e}"))?;
+        .map_err(|e| format!("failed to build BC tables: {e}"))
+}
+
+/// Scatter the model's per-boundary-type tables onto per-face `(bc_kind,
+/// bc_value)` seeds (length `num_faces * S`) — exactly as the GPU generic-coupled
+/// backend does (`row_base(i) = i * S`). Interior and `None`-typed faces stay
+/// zero (kernels guard with `is_boundary`). The values are *seeds*;
+/// `set_boundary_values_per_face` overrides them at runtime and the `bc_expr`
+/// kernel refreshes expression-valued entries each iteration. Deterministic
+/// (dense face sweep, no hash iteration) so a no-op refresh is byte-identical.
+fn scatter_bc_tables(
+    mesh: &Mesh,
+    kind_by_type: &[u32],
+    value_by_type: &[f32],
+    s: usize,
+) -> (Vec<u32>, Vec<f32>) {
     let num_faces = mesh.num_faces();
     let mut bc_kind = vec![0u32; num_faces * s];
     let mut bc_value = vec![0.0f32; num_faces * s];
@@ -1634,7 +1814,7 @@ fn build_bc_tables(
         bc_kind[dst..dst + s].copy_from_slice(&kind_by_type[src..src + s]);
         bc_value[dst..dst + s].copy_from_slice(&value_by_type[src..src + s]);
     }
-    Ok((bc_kind, bc_value))
+    (bc_kind, bc_value)
 }
 
 /// Group boundary faces by `BoundaryType::bc_table_index()` (== `GpuBoundaryType

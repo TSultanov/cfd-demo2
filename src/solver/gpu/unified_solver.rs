@@ -772,11 +772,62 @@ impl GpuUnifiedSolver {
             MeshRefreshLevel::Topology => match &mut self.backend {
                 SolverBackend::Gpu(p) => p.refresh_mesh_topology(mesh),
                 #[cfg(feature = "cpu")]
-                SolverBackend::Cpu(_) => Err(
-                    "CPU topology refresh is not yet implemented (M2 Tier B, later stage)".into(),
-                ),
+                SolverBackend::Cpu(c) => c.refresh_mesh_topology(mesh),
             },
         }
+    }
+
+    /// Capture the solver's stepping state (M2 Tier B stage 3) — see
+    /// [`crate::solver::SolverStateSnapshot`]. The **CPU** backend captures the
+    /// full time/warm-start/volume history (`has_history == true`), so a fresh
+    /// solver restored from it reproduces the next step byte-identically. The
+    /// **GPU** backend captures the current state + scalars only
+    /// (`has_history == false`); history/warm-start readback plumbing is a later
+    /// stage, so a GPU restore re-seeds the history from the current state.
+    pub fn snapshot(&self) -> crate::solver::SolverStateSnapshot {
+        #[cfg(feature = "cpu")]
+        if let Some(c) = self.cpu_ref() {
+            return c.snapshot();
+        }
+        let state = pollster::block_on(self.read_state_f32());
+        crate::solver::SolverStateSnapshot {
+            num_cells: self.num_cells() as usize,
+            num_faces: 0,
+            state_stride: self.model.state_layout.stride(),
+            unknowns_per_cell: self.model.system.unknowns_per_cell() as usize,
+            state,
+            state_old: Vec::new(),
+            state_old_old: Vec::new(),
+            x: Vec::new(),
+            cell_vols_old: Vec::new(),
+            cell_vols_old_old: Vec::new(),
+            mesh_fluxes: Vec::new(),
+            time: self.time(),
+            dt: self.dt(),
+            dt_old: self.dt(),
+            dtau: 0.0,
+            step_count: 0,
+            last_rel_delta: f64::INFINITY,
+            schur_amg_active: false,
+            has_history: false,
+        }
+    }
+
+    /// Restore a snapshot (M2 Tier B stage 3). CPU restores the full history
+    /// byte-exactly; GPU writes the current state (initial-condition semantics
+    /// propagate it to the time-history buffers) — exact for single-step
+    /// schemes, a documented startup fallback for BDF2.
+    pub fn restore(&mut self, snap: &crate::solver::SolverStateSnapshot) -> Result<(), String> {
+        #[cfg(feature = "cpu")]
+        if let Some(c) = self.cpu_mut() {
+            return c.restore(snap);
+        }
+        snap.check_compatible(self.num_cells() as usize, self.model.state_layout.stride())?;
+        self.write_state_f32(&snap.state)?;
+        if snap.dt > 0.0 {
+            self.set_dt(snap.dt);
+        }
+        Ok(())
     }
 
     /// ALE step entry (M3.2 of the meshless/moving-mesh roadmap): after the

@@ -338,14 +338,95 @@ fn refresh_rejects_topology_mismatch() {
             .expect_err("refresh with different boundary tags must fail");
         assert!(err.contains("face_boundary"), "unexpected error: {err}");
 
-        // Topology level: implemented for the GPU backend (M2 Tier B stage 2);
-        // the CPU backend arm is still pending, so on this CPU driver it fails.
+        // Topology level with a different cell count is rejected (the Tier-B
+        // invariant is an unchanged cell count; faces/adjacency may change).
         let err = driver
-            .refresh_mesh(&mesh, MeshRefreshLevel::Topology)
-            .expect_err("CPU Topology refresh is not yet implemented");
-        assert!(err.contains("not yet implemented"), "unexpected error: {err}");
+            .refresh_mesh(&coarse, MeshRefreshLevel::Topology)
+            .expect_err("CPU Topology refresh with a different cell count must fail");
+        assert!(err.contains("cell count"), "unexpected error: {err}");
 
-        println!("[mesh-refresh] topology-mismatch and Topology-level rejections verified");
+        // Topology level with the SAME mesh now succeeds (CPU Tier B stage 3).
+        driver
+            .refresh_mesh(&mesh, MeshRefreshLevel::Topology)
+            .expect("CPU no-op Topology refresh succeeds");
+
+        println!("[mesh-refresh] topology-mismatch and cell-count rejections verified (CPU)");
+    });
+}
+
+/// A no-op CPU Topology refresh (refresh to the SAME mesh) is byte-invisible:
+/// it rebuilds the CSR + reallocates every face/nnz buffer from a deterministic
+/// builder and re-scatters the bc tables, leaving cell-indexed state untouched.
+/// So refresh-then-step-N == step-N, compared at the exact f32-bit level. We
+/// refresh at step 0 and re-apply params (mirroring the GPU topology byte gate):
+/// a Topology refresh resets the bc tables to the model seeds (the documented
+/// `bc_overrides_reset` contract), so the runtime inlet-velocity override must be
+/// re-applied — exactly as a real caller (the GUI/driver) must. Re-applying
+/// `apply_params` MID-run would itself re-seed inlet-adjacent state and confound
+/// the gate; the mid-run survival of the cell-indexed state (history, warm-start
+/// `x`, counters) is instead proven byte-exactly by the snapshot/restore gate
+/// above. This gate isolates "the topology-refresh machinery corrupts nothing".
+#[test]
+#[cfg(feature = "cpu")]
+fn noop_topology_refresh_byte_identical_cpu() {
+    with_cpu_backend(|| {
+        let mesh = channel_mesh();
+
+        let mut refreshed = build_driver(&mesh, None, None);
+        assert!(refreshed.solver().is_cpu(), "expected the CPU backend");
+        refreshed
+            .refresh_mesh(&mesh, MeshRefreshLevel::Topology)
+            .expect("no-op topology refresh");
+        refreshed.apply_params(&test_params());
+        run_steps(&mut refreshed, 8, "cpu-topo-refresh");
+        let bits_refreshed = state_bits(&refreshed);
+
+        let mut straight = build_driver(&mesh, None, None);
+        run_steps(&mut straight, 8, "cpu-topo-straight");
+        let bits_straight = state_bits(&straight);
+
+        assert_bits_equal(&bits_refreshed, &bits_straight, "cpu-topology");
+        println!(
+            "[mesh-refresh] CPU no-op topology refresh byte-identical over {} state slots",
+            bits_straight.len()
+        );
+    });
+}
+
+/// Snapshot → fresh-build → restore reproduces the NEXT step byte-identically
+/// on the CPU backend (M2 Tier B stage 3 deliverable). Reference: step 6, then a
+/// 7th step. Restored: capture the snapshot after step 6, build a fresh solver,
+/// restore, then take ONE step — the resulting state must match the reference's
+/// step-7 bits exactly. This proves the snapshot captures the entire stepping
+/// state the next step reads (history, warm-start `x`, `step_count` — so the
+/// BDF2 path, not the Euler startup, is taken — and the scalar counters). The
+/// 2k-cell channel keeps the CPU Schur inner solve on Jacobi (AMG never
+/// activates), so the adaptivity flip does not perturb the byte comparison.
+#[test]
+#[cfg(feature = "cpu")]
+fn snapshot_restore_next_step_byte_identical_cpu() {
+    with_cpu_backend(|| {
+        let mesh = channel_mesh();
+
+        let mut reference = build_driver(&mesh, None, None);
+        assert!(reference.solver().is_cpu(), "expected the CPU backend");
+        run_steps(&mut reference, 6, "cpu-snap-ref");
+        let snap = reference.snapshot();
+        assert!(snap.has_history, "CPU snapshot must capture full history");
+        run_steps(&mut reference, 1, "cpu-snap-ref");
+        let bits_ref = state_bits(&reference);
+
+        let mut restored = build_driver(&mesh, None, None);
+        restored.restore(&snap).expect("restore snapshot");
+        run_steps(&mut restored, 1, "cpu-snap-restored");
+        let bits_restored = state_bits(&restored);
+
+        assert_bits_equal(&bits_restored, &bits_ref, "cpu-snapshot");
+        println!(
+            "[snapshot] CPU fresh-build+restore reproduces the next step byte-identically \
+             over {} state slots",
+            bits_ref.len()
+        );
     });
 }
 
@@ -453,6 +534,44 @@ fn geometry_refresh_perturbed_smoke_gpu() {
         assert!(rb.stats.p_finite, "[gpu-perturb] step {i}: non-finite p");
     }
     println!("[mesh-refresh] perturbed-geometry refresh ran 10 finite steps (GPU)");
+}
+
+/// GPU snapshot/restore roundtrip preserves the CURRENT state exactly (M2 Tier B
+/// stage 3). The GPU capture is current-state-only (`has_history == false`); its
+/// restore uses the exact `write_state`/`read_state` path, so a fresh solver
+/// restored from a snapshot has bit-identical CURRENT state. (Full GPU history
+/// capture — needed to reproduce the next *step* byte-identically on the GPU —
+/// is a later stage; the byte-exact next-step proof lives on the CPU above.)
+#[test]
+fn snapshot_restore_current_state_roundtrip_gpu() {
+    let _guard = lock_env();
+    std::env::remove_var("CFD2_BACKEND");
+
+    let ctx = match pollster::block_on(GpuContext::new(None, None)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[snapshot] no GPU adapter ({e}); skipping GPU snapshot roundtrip");
+            return;
+        }
+    };
+
+    let mesh = channel_mesh();
+    let mut a = build_driver(&mesh, Some(ctx.device.clone()), Some(ctx.queue.clone()));
+    assert!(!a.solver().is_cpu(), "expected the GPU backend");
+    run_steps(&mut a, 5, "gpu-snap-a");
+    let snap = a.snapshot();
+    assert!(!snap.has_history, "GPU snapshot is current-state-only");
+    let bits_a = state_bits(&a);
+
+    let mut b = build_driver(&mesh, Some(ctx.device.clone()), Some(ctx.queue.clone()));
+    b.restore(&snap).expect("restore snapshot");
+    let bits_b = state_bits(&b);
+
+    assert_bits_equal(&bits_a, &bits_b, "gpu-snapshot-state");
+    println!(
+        "[snapshot] GPU snapshot/restore preserves the current state exactly over {} slots",
+        bits_a.len()
+    );
 }
 
 // ─── GPU Topology refresh (M2 Tier B stage 2) ────────────────────────────────

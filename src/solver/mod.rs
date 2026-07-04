@@ -10,6 +10,7 @@ pub mod mesh;
 pub mod model;
 pub mod scheme;
 pub mod shared;
+pub mod snapshot;
 pub mod units;
 
 pub use gpu::enums::{GpuBcKind, GpuBoundaryType, GpuLowMachPrecondModel, TimeScheme};
@@ -20,3 +21,4 @@ pub use gpu::{
 	FgmresSizing, GpuUnifiedSolver as UnifiedSolver, OuterStepStatus, SolverConfig, UiPortSet,
 };
 pub use mesh::{MeshRefreshLevel, MeshRefreshReport};
+pub use snapshot::SolverStateSnapshot;

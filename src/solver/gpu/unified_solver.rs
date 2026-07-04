@@ -364,6 +364,16 @@ impl GpuUnifiedSolver {
         }
     }
 
+    /// Test/diagnostic accessor: the CPU backend's scalar-CSR topology (the
+    /// four arrays); `None` on the GPU backend (no CSR readback plumbing —
+    /// the GPU CSR-rebuild correctness is covered by the deterministic-builder
+    /// gate + the no-op topology byte gate). Used by `csr_rebuild_correctness`.
+    #[doc(hidden)]
+    #[cfg(feature = "cpu")]
+    pub fn debug_scalar_csr(&self) -> Option<(Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>)> {
+        self.cpu_ref().map(|c| c.debug_scalar_csr())
+    }
+
     /// True if this solver is running on the CPU backend.
     pub fn is_cpu(&self) -> bool {
         #[cfg(feature = "cpu")]
@@ -876,6 +886,57 @@ impl GpuUnifiedSolver {
         }
         self.ale_step_armed = true;
         Ok(())
+    }
+
+    /// ALE step entry for a **topology-changing** mesh move (M2 Tier B): like
+    /// [`Self::begin_ale_step`] but for a mesh whose face set / adjacency / nnz
+    /// changed (same cell count). Rotates the volume history, rebuilds the whole
+    /// topology-derived solver stack (CSR, linear system, bc tables,
+    /// preconditioner, bind groups), then uploads the closed mesh fluxes — the
+    /// M2 Tier B topology refresh fused with the M3 ALE rotation, in the correct
+    /// order (rotate → rebuild → geometry → fluxes).
+    ///
+    /// Returns the [`MeshRefreshReport`] so the caller re-applies any per-face
+    /// BC overrides against the new face indexing (`bc_overrides_reset`). The
+    /// same M3 sequencing guards apply: the SRD stabilizer is refused, and
+    /// double-arming without an intervening `step()` is rejected (it would
+    /// double-rotate the volume history).
+    ///
+    /// NOTE (v1 scope): the closed `mesh_fluxes` a caller can supply today come
+    /// from [`crate::solver::mesh::ale::swept_mesh_fluxes_closed`], which needs
+    /// a fixed vertex set with linear motion (a persistent face↔swept-quad
+    /// correspondence). A genuine Voronoi *flip* regenerates the mesh with a new
+    /// vertex/face set, for which no swept-quad correspondence exists — that
+    /// conservative remap is M4. This arm is the machinery: it correctly fuses
+    /// the topology rebuild with the ALE rotation for any mesh whose fluxes are
+    /// validly closed (proven by the topology-driven GCL gate).
+    pub fn begin_ale_step_topology(
+        &mut self,
+        mesh: &Mesh,
+        mesh_fluxes: &[f32],
+    ) -> Result<crate::solver::MeshRefreshReport, String> {
+        if self.srd_enabled && self.srd.is_some() {
+            return Err(
+                "ALE stepping is unsupported with the SRD stabilizer enabled (its operator \
+                 bakes build-time mesh geometry)"
+                    .into(),
+            );
+        }
+        if self.ale_step_armed {
+            return Err(
+                "begin_ale_step_topology called twice without an intervening step(): this \
+                 would double-rotate the volume history (V^n <- V^{n+1}) and corrupt the \
+                 moving-volume ddt. Call step() (or roll back and rebuild) first."
+                    .into(),
+            );
+        }
+        let report = match &mut self.backend {
+            SolverBackend::Gpu(p) => p.begin_ale_step_topology(mesh, mesh_fluxes)?,
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(c) => c.begin_ale_step_topology(mesh, mesh_fluxes)?,
+        };
+        self.ale_step_armed = true;
+        Ok(report)
     }
 
     pub fn enable_detailed_profiling(&mut self, enable: bool) -> Result<(), String> {

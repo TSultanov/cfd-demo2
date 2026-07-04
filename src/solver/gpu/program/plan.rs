@@ -507,6 +507,21 @@ impl GpuProgramPlan {
         self.resources.backend.begin_ale_step(mesh, mesh_fluxes)
     }
 
+    /// ALE step entry for a topology-changing move (M2 Tier B): rotate the
+    /// volume history, rebuild the whole topology-derived stack, then upload
+    /// the closed mesh fluxes (see
+    /// [`GenericCoupledProgramResources::begin_ale_step_topology`]). Returns the
+    /// topology-refresh report (`bc_overrides_reset`).
+    pub fn begin_ale_step_topology(
+        &mut self,
+        mesh: &crate::solver::mesh::Mesh,
+        mesh_fluxes: &[f32],
+    ) -> Result<crate::solver::mesh::MeshRefreshReport, String> {
+        self.resources
+            .backend
+            .begin_ale_step_topology(mesh, mesh_fluxes)
+    }
+
     /// Write the current state only, preserving the `old`/`old_old` time history
     /// (unlike `write_state_bytes`, which has initial-condition semantics).
     pub fn write_state_bytes_current(&self, bytes: &[u8]) -> Result<(), String> {

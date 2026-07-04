@@ -198,7 +198,24 @@ impl MeshResources {
             ));
         }
         // 1. Rotate the volume history: old_old <- old, old <- current.
-        //    (cell_vols_old carries COPY_SRC|COPY_DST; cell_vols COPY_SRC.)
+        self.rotate_volume_history(device, queue);
+        // 2. Upload the new geometry (validates topology-identity; writes the
+        //    new cell_vols = V^{n+1}).
+        self.refresh_geometry(queue, mesh)?;
+        // 3. Upload the closed mesh fluxes.
+        self.upload_mesh_fluxes(queue, mesh_fluxes);
+        Ok(())
+    }
+
+    /// Rotate the ALE volume history one step: `old_old ← old`, `old ←
+    /// current`. Factored out of [`Self::begin_ale_step`] so the Tier B
+    /// ALE-topology hook (`begin_ale_step_topology` in `generic_coupled.rs`)
+    /// can capture `V^n` from the CURRENT buffers **before** the topology
+    /// rebuild replaces the whole `MeshResources` (the rebuild preserves the
+    /// two history buffers via swap — see [`Self::refresh_topology`]).
+    ///
+    /// (`cell_vols_old` carries COPY_SRC|COPY_DST; `cell_vols` COPY_SRC.)
+    pub fn rotate_volume_history(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
         let size = self.b_cell_vols.size();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("ALE volume history rotate"),
@@ -206,12 +223,14 @@ impl MeshResources {
         encoder.copy_buffer_to_buffer(&self.b_cell_vols_old, 0, &self.b_cell_vols_old_old, 0, size);
         encoder.copy_buffer_to_buffer(&self.b_cell_vols, 0, &self.b_cell_vols_old, 0, size);
         queue.submit(std::iter::once(encoder.finish()));
-        // 2. Upload the new geometry (validates topology-identity; writes the
-        //    new cell_vols = V^{n+1}).
-        self.refresh_geometry(queue, mesh)?;
-        // 3. Upload the closed mesh fluxes.
+    }
+
+    /// Upload the f32-closed per-face mesh fluxes verbatim (no cast — the SCL
+    /// closure must survive byte-exactly). Factored out of
+    /// [`Self::begin_ale_step`] so the ALE-topology hook can write the fluxes
+    /// into the freshly-reallocated `b_mesh_fluxes` after the topology rebuild.
+    pub fn upload_mesh_fluxes(&self, queue: &wgpu::Queue, mesh_fluxes: &[f32]) {
         queue.write_buffer(&self.b_mesh_fluxes, 0, bytemuck::cast_slice(mesh_fluxes));
-        Ok(())
     }
 
     /// Seed the ALE volume history: `cell_vols_old = cell_vols_old_old =

@@ -736,6 +736,40 @@ impl SolverDriver {
         Ok(())
     }
 
+    /// ALE step entry for a **topology-changing** move (M2 Tier B; passthrough
+    /// to [`UnifiedSolver::begin_ale_step_topology`]): rotate the volume
+    /// history → rebuild the topology-derived stack → upload the closed mesh
+    /// fluxes, then recompute the driver's `min_cell_size`. Use this instead of
+    /// [`Self::begin_ale_step`] when the move changed the face set / adjacency
+    /// (a re-tessellation), not just vertex positions. Returns the
+    /// [`MeshRefreshReport`] (`bc_overrides_reset` — re-apply any per-face BC
+    /// overrides against the new faces).
+    ///
+    /// Same dt handshake as [`Self::begin_ale_step`]: adaptive dt is rejected
+    /// (the fluxes are SCL-closed against a fixed dt).
+    pub fn begin_ale_step_topology(
+        &mut self,
+        mesh: &Mesh,
+        mesh_fluxes: &[f32],
+    ) -> Result<crate::solver::MeshRefreshReport, String> {
+        if self.params.adaptive_dt {
+            return Err(
+                "begin_ale_step_topology: adaptive dt is incompatible with ALE stepping (the \
+                 mesh fluxes are SCL-closed against a fixed dt; an adaptive recompute after the \
+                 closure silently violates the GCL). Set params.adaptive_dt = false and close \
+                 the fluxes against params.requested_dt."
+                    .into(),
+            );
+        }
+        let report = self.solver.begin_ale_step_topology(mesh, mesh_fluxes)?;
+        self.min_cell_size = mesh
+            .cell_vol
+            .iter()
+            .map(|&v| v.sqrt())
+            .fold(f64::INFINITY, f64::min);
+        Ok(report)
+    }
+
     /// Whether the model is density-based compressible (carries the full
     /// conservative state).
     pub fn compressible(&self) -> bool {

@@ -220,6 +220,79 @@ face-kernel dispatch), plus `SolverDriver.min_cell_size`.
   and face fluxes — flagged API prerequisite).
 - **Standalone value:** the seam any future adaptivity (AMR, r-refinement) needs.
 
+**M2 as-shipped notes (Tier A + Tier B, July 2026 — SHIPPED both backends):**
+
+- *Scope delivered.* Tier A (geometry-only, byte-invisible) and Tier B (topology: face
+  set / adjacency / nnz change at an INVARIANT cell count) both land on GPU and CPU.
+  `refresh_mesh(Topology)` rebuilds both CSR layouts (factored
+  `build_{sorted,diag_first}_scalar_csr`, gated byte-equal to the historical inline
+  builders), reallocates every face/nnz buffer (capacity-reserved + sized bindings),
+  re-scatters the bc tables + `boundary_faces`, and rebuilds bind groups. The M3 ALE
+  rotation is FUSED with the topology rebuild via `begin_ale_step_topology` (rotate volume
+  history → topology rebuild → geometry → mesh-flux upload, in that order); plain
+  `refresh_mesh` stays REJECTED on ALE models; the M3 sequencing guards (adaptive-dt Err,
+  double-arm Err, SRD Err) extend to the topology arm. **Zero codegen change** — the
+  generated WGSL is untouched (host-side only), `static_wgsl_snapshot` byte-identical.
+
+- *Gates (all green).* no-op Geometry+Topology refresh byte-identical both backends;
+  **refresh(A→B) ≡ fresh-build(B)+restore** (CPU byte-exact, GPU f32-exact — THE
+  stale-cache detector); 20-cycle alternating A↔B stable + deterministic-rebuild + bounded
+  logical sizes; CSR-rebuild byte-equals a fresh build (CPU solver-level + both-layout
+  builder determinism); ALE topology-seam GCL (below). `tests/mesh_refresh_topology_test.rs`.
+
+- *Stale-cache finding (the refresh≡fresh gate earned its keep).* The equivalence gate
+  first failed at EXACTLY `schur_amg_active`: on the 243-cell meshless CUT-CELL mesh the CPU
+  adaptive Jacobi→AMG flip fires within a few steps, so the snapshot carries
+  `schur_amg_active=true`, while the topology refresh correctly RESETS it (F8
+  stale-aggregation — the AMG aggregation is invalid on the new sparsity). That is an
+  adaptive-solver-MODE difference, orthogonal to mesh-rebuild correctness; the equivalence
+  gate pins `CFD2_CPU_SCHUR_AMG=0` to isolate the rebuild. Every buffer + CSR struct field
+  is otherwise byte-identical between the refreshed and fresh legs (verified by
+  fingerprinting during the hunt) — the topology rebuild leaks nothing.
+
+- *GPU LA-stack reconstruction (stage-2 deviation, cost now measured).* The GPU topology
+  refresh RECONSTRUCTS the linear-algebra modules (scalar CG, FGMRES, Schur/AMG, monitors)
+  rather than surgically rebinding, which recompiles their STATIC hand-written pipelines
+  (the GENERATED model kernels take the in-place bind-group rebuild — no codegen recompile,
+  byte-identity preserved). This re-zeroes the warm-start `x`. Consequence for the ALE
+  topology-seam GCL: on GPU each step restarts the coupled solve COLD → a bounded, SATURATED
+  ~1.5e-3 free-stream residual (non-compounding: late≈max, a convergence artifact NOT a GCL
+  violation), vs the CPU's surgical refresh (preserves `x`) holding the M3 ~1e-6 scale.
+  Warm-start preservation across the GPU rebuild needs the `x`-readback/upload plumbing
+  stage-3 deferred (GPU exposes only `read_state_bytes`) → M4.
+
+- *Measured topology-refresh cost* (median-of-5; a NO-OP topology refresh does the FULL
+  Tier B rebuild, so the cost is faithful; Apple-Silicon integrated Metal / f64 CPU, via
+  `bench_topology_refresh_cost` `#[ignore]`):
+
+  | cells / faces | GPU | CPU |
+  |---|---|---|
+  | ~20k / 40k | 21.7 ms | 0.40 ms |
+  | ~300k / 600k | 98.3 ms | 7.9 ms |
+
+  GPU is dominated by the LA-pipeline recompile (fixed cost — visible as the 20k number) +
+  block-CSR re-expansion (~9× scalar nnz) + uploads; CPU is the surgical CSR rebuild +
+  buffer reallocation only. The M4 surgical-GPU-refresh optimization (threaded pipeline
+  cache + in-place LA rebind + warm-start preservation) targets closing the GPU→CPU gap for
+  the per-step motion loop.
+
+- *Capacity policy.* `CapacityPlan::EXACT` (headroom 1.0) is the byte-neutral default: each
+  refresh reallocates at the new exact size and binds sized ranges (so `arrayLength` guards
+  stay correct). Headroom>1 + reuse-on-fit ("reallocate only on overflow" ⇒ reallocations
+  stop after the first growth to max-seen) is wired at the buffer helper (`capacity.rs`) but
+  NOT yet exercised by the refresh path — that reuse loop is the M4 per-step optimization.
+
+- *Flip deferral (crisp — what is missing).* The ALE topology seam is validated as the
+  no-op-TOPOLOGY case (structured mesh, fixed face set, real vertex motion): the full rebuild
+  machinery runs EVERY step and preserves the GCL free-stream. A genuine Voronoi FLIP under
+  motion regenerates the mesh with a NEW vertex/face set, for which
+  `swept_mesh_fluxes_closed` cannot produce fluxes — it needs a persistent face↔swept-quad
+  correspondence (a born face has no old counterpart, a dead face no new one). Supplying
+  SCL-consistent fluxes across a re-tessellation (a conservative-remap / generalized
+  swept-volume accounting that still telescopes to per-cell ΔV) is **M4** (the mesh-motion
+  loop). The topology-refresh machinery this milestone ships is exactly what such a flux
+  path will drive; only the flux construction is deferred.
+
 ### M3 — ALE physics in the EDSL/codegen  [Track B]
 
 - **`mesh_fluxes` face buffer** (swept volume/dt, owner-signed): new codegen storage item in
@@ -244,9 +317,15 @@ face-kernel dispatch), plus `SolverDriver.min_cell_size`.
   GPU-only, CPU needs its recipe tolerance set).
   *As-shipped deltas (July 2026, recorded honestly):* the GCL gate runs 220 steps (not 500 —
   2.2 motion periods with a late-window no-compounding split; per-step drift margin for a
-  sign/weighting error is 10²–10⁴×, so extra periods add wall time, not power) and the
-  flip-inducing case is DEFERRED to M2 Tier-B/M4 (topology refresh is not shipped; geometry-only
-  seam cannot induce flips). Measured spatial order is 1.387, skew-limited (pre-existing
+  sign/weighting error is 10²–10⁴×, so extra periods add wall time, not power). The
+  flip-inducing case is STILL deferred to M4, but its precondition — the Tier B topology
+  refresh — is now SHIPPED (M2): the ALE topology seam (`begin_ale_step_topology`) is gated
+  by a GCL free-stream driven through a per-step FULL topology rebuild
+  (`gcl_topology_seam_preserves_uniform_flow_{cpu_euler,cpu_bdf2,gpu}`), which proves the
+  rebuild+rotation machinery preserves the GCL on the no-op-topology (fixed-face-set) case.
+  What a real flip still needs is the swept-flux correspondence across a re-tessellation
+  (born/dead faces have no swept quad) — a conservative remap, which is M4, not the refresh
+  machinery. Measured spatial order is 1.387, skew-limited (pre-existing
   non-orthogonal spatial band, localized by three probes); the gate pins ≥1.35 PLUS an in-test
   moving ≡ static-on-deformed-geometry equivalence assert (±5%), which is the actual
   ALE-correctness statement.
@@ -340,7 +419,10 @@ amortized — viable. The wall candidates, in order: M0 engine regen, AMG policy
    coupling). Off-ramp: add the mesh-flux term inside `derive_rhie_chow`.
 8. **Determinism loss** (M0 thread-count byte gate; M2 byte gates). Designed out up front.
 9. **Stale mesh-derived caches** (refresh≡fresh-build catches any by construction — the reason
-   that gate exists). Complete inventory is the M2 deliverable.
+   that gate exists). Complete inventory is the M2 deliverable. **Retired (M2 shipped):** the
+   refresh(A→B)≡fresh(B)+restore gate is green both backends; it caught one real confound
+   (the adaptive-AMG `schur_amg_active` mode carried by the snapshot vs reset by the refresh —
+   isolated, not a leak) and otherwise proves every buffer + CSR field byte-identical.
 10. **Near-moving-wall cell quality** (M6 near-wall instrument; M4 soak precursors).
     Mitigation: rigid boundary seed layers + wall-aware Lloyd weights.
 

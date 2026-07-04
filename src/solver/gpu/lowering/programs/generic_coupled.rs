@@ -670,6 +670,57 @@ impl GenericCoupledProgramResources {
         )
     }
 
+    /// ALE step entry for a **topology-changing** move (M2 Tier B): the mesh's
+    /// face set / adjacency / nnz may differ (same cell count), so the whole
+    /// mesh-topology-derived GPU stack must be rebuilt AND the volume history
+    /// rotated — in this order (each step depends on the previous):
+    ///   1. `rotate_volume_history` — capture the CURRENT `cell_vols` as `V^n`
+    ///      into `cell_vols_old`, BEFORE the rebuild replaces `MeshResources`
+    ///      (the rebuild carries the two history buffers over via swap).
+    ///   2. `refresh_mesh_topology` — reallocate every topology-derived buffer
+    ///      (CSR, block CSR, linear system, bc tables, `mesh_fluxes` zero-
+    ///      filled), rebuild the preconditioner + bind groups. This also
+    ///      uploads the NEW geometry (`cell_vols = V^{n+1}`).
+    ///   3. `upload_mesh_fluxes` — write the f32-closed swept fluxes into the
+    ///      freshly-reallocated `b_mesh_fluxes`.
+    ///
+    /// Returns the topology-refresh report (`bc_overrides_reset` — the caller
+    /// re-applies any per-face BC overrides against the new faces).
+    ///
+    /// Flux-length is validated against the NEW face count up front so a
+    /// mismatched flux vector fails before any buffer is mutated.
+    pub(crate) fn begin_ale_step_topology(
+        &mut self,
+        mesh: &crate::solver::mesh::Mesh,
+        mesh_fluxes: &[f32],
+    ) -> Result<MeshRefreshReport, String> {
+        if mesh_fluxes.len() != mesh.num_faces() {
+            return Err(format!(
+                "begin_ale_step_topology: mesh_fluxes has {} entries, mesh has {} faces",
+                mesh_fluxes.len(),
+                mesh.num_faces()
+            ));
+        }
+        // 1. Rotate the volume history on the CURRENT (pre-rebuild) buffers.
+        {
+            let common = &self.runtime.common;
+            common
+                .mesh
+                .rotate_volume_history(&common.context.device, &common.context.queue);
+        }
+        // 2. Rebuild the whole topology-derived stack (preserves the rotated
+        //    history via swap; uploads V^{n+1}; reallocates mesh_fluxes zero).
+        let report = self.refresh_mesh_topology(mesh)?;
+        // 3. Upload the closed mesh fluxes into the new b_mesh_fluxes.
+        {
+            let common = &self.runtime.common;
+            common
+                .mesh
+                .upload_mesh_fluxes(&common.context.queue, mesh_fluxes);
+        }
+        Ok(report)
+    }
+
     /// Seed the ALE volume history buffers (`cell_vols_old{,_old}` :=
     /// `cell_vols`); see [`MeshResources::seed_volume_history`]. Invoked from
     /// `GpuProgramPlan::initialize_history` for every model — numerically a

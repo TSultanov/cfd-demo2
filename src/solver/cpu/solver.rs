@@ -587,6 +587,46 @@ impl CpuSolver {
         Ok(())
     }
 
+    /// ALE step entry for a **topology-changing** move (M2 Tier B): rotate the
+    /// volume history, rebuild every mesh-topology-derived CPU resource, then
+    /// upload the f32-closed mesh fluxes — in that order. Mirrors the GPU
+    /// `GenericCoupledProgramResources::begin_ale_step_topology`.
+    ///
+    /// Ordering (review F3): the rotation captures the CURRENT `cell_vols` as
+    /// `V^n` into `cell_vols_old` BEFORE `refresh_mesh_topology` overwrites
+    /// `cell_vols` with `V^{n+1}` (via `upload_mesh`). The two history buffers
+    /// are cell-indexed and never touched by the topology rebuild (cell count
+    /// invariant), so the rotated `V^n`/`V^{n-1}` survive it. The rebuild
+    /// reallocates `mesh_fluxes` zero-filled at the NEW face count; step 3
+    /// fills it with the closed swept fluxes.
+    ///
+    /// Returns the topology-refresh report (`bc_overrides_reset`).
+    pub fn begin_ale_step_topology(
+        &mut self,
+        mesh: &Mesh,
+        mesh_fluxes: &[f32],
+    ) -> Result<MeshRefreshReport, String> {
+        if mesh_fluxes.len() != mesh.num_faces() {
+            return Err(format!(
+                "begin_ale_step_topology: mesh_fluxes has {} entries, mesh has {} faces",
+                mesh_fluxes.len(),
+                mesh.num_faces()
+            ));
+        }
+        // 1. Rotate the volume history on the CURRENT buffers: old_old <- old,
+        //    old <- current (V^n). Both are cell-indexed → survive step 2.
+        let old = self.buffers.f32_vec("cell_vols_old");
+        self.buffers.copy_into_f32("cell_vols_old_old", &old);
+        let cur = self.buffers.f32_vec("cell_vols");
+        self.buffers.copy_into_f32("cell_vols_old", &cur);
+        // 2. Rebuild the topology-derived stack (uploads V^{n+1}; reallocates
+        //    mesh_fluxes zero-filled at the new face count).
+        let report = self.refresh_mesh_topology(mesh)?;
+        // 3. Upload the closed mesh fluxes verbatim (already f32).
+        self.buffers.copy_into_f32("mesh_fluxes", mesh_fluxes);
+        Ok(report)
+    }
+
     /// Tier-B topology refresh (M2): rebuild every mesh-topology-derived CPU
     /// resource for a new mesh with the SAME cell count but a possibly changed
     /// face set / adjacency / boundary classification / nnz. Cell-indexed state
@@ -953,6 +993,24 @@ impl CpuSolver {
                 .set_f32("bc_value", face as usize * stride + u_idx, value_for_face(face));
         }
         Ok(())
+    }
+
+    /// Test/diagnostic accessor: the current scalar-CSR topology as the four
+    /// arrays `(row_offsets, col_indices, diagonal_indices,
+    /// cell_face_matrix_indices)`. Used by the Tier B `csr_rebuild_correctness`
+    /// gate to assert a refreshed-to-B solver holds the byte-identical CSR a
+    /// fresh-built-on-B solver does (both go through the deterministic
+    /// `build_csr_topology`). `row_offsets`/`col_indices`/`diagonal_indices`
+    /// come from the F4 struct fields; `cell_face_matrix_indices` from the
+    /// `Buffers` map (the assembly kernels consume it there).
+    #[doc(hidden)]
+    pub fn debug_scalar_csr(&self) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>) {
+        (
+            self.scalar_row_offsets.clone(),
+            self.col_indices.clone(),
+            self.diagonal_indices.clone(),
+            self.buffers.u32_vec("cell_face_matrix_indices"),
+        )
     }
 
     pub fn set_boundary_scalar(

@@ -481,6 +481,19 @@ impl GpuProgramPlan {
         self.resources.backend.refresh_mesh_geometry(mesh)
     }
 
+    /// Tier B topology refresh (M2): rebuild the mesh-topology-derived GPU
+    /// resources for a new mesh with the same cell count but changed
+    /// faces/adjacency (see
+    /// [`GenericCoupledProgramResources::refresh_mesh_topology`]). Returns a
+    /// report whose `bc_overrides_reset` flag tells the caller the bc tables
+    /// were rebuilt from the model spec (per-face runtime overrides dropped).
+    pub fn refresh_mesh_topology(
+        &mut self,
+        mesh: &crate::solver::mesh::Mesh,
+    ) -> Result<crate::solver::mesh::MeshRefreshReport, String> {
+        self.resources.backend.refresh_mesh_topology(mesh)
+    }
+
     /// ALE step entry (M3.2): rotate the volume history (old_old ← old ←
     /// current), then upload the new geometry, then upload the f32-closed
     /// mesh face fluxes. Call once per step, BEFORE `step()`, after moving

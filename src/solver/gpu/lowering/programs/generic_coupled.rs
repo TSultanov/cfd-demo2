@@ -7,6 +7,9 @@ use crate::solver::gpu::modules::generic_coupled_schur::{
     GenericCoupledSchurSetupBindGroupInputs,
 };
 use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, RuntimeDims};
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
+use crate::solver::gpu::program::generic_coupled_backend::scatter_bc_tables;
+use crate::solver::mesh::MeshRefreshReport;
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_solver::{
@@ -37,6 +40,7 @@ use crate::solver::model::backend::ast::FieldKind;
 use crate::solver::model::ports::PortRegistry;
 use crate::solver::model::{ModelPreconditionerSpec, ModelSpec};
 use bytemuck::bytes_of;
+use wgpu::util::DeviceExt;
 use cfd2_codegen::solver::codegen::bc_table::{HostBcTable, BOUNDARY_TYPE_COUNT};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -223,6 +227,13 @@ pub(crate) struct GenericCoupledProgramResources {
     _b_bc_kind: wgpu::Buffer,
     _b_bc_value: wgpu::Buffer,
     boundary_faces: Vec<Vec<u32>>,
+    /// Model + recipe clones kept so a Tier B topology refresh can reconstruct
+    /// the mesh-topology-derived resources (bc scatter needs `model.boundaries`
+    /// + `model.system`; the generated-kernel bind-group rebuild needs
+    /// `model.id` + `recipe.kernels`; the Schur/krylov + convergence-monitor
+    /// rebuild needs both). Cheap relative to the GPU buffers they gate.
+    model: ModelSpec,
+    recipe: SolverRecipe,
 }
 
 /// Controls whether coupled outer iterations use host-side adaptive break logic.
@@ -462,6 +473,8 @@ impl GenericCoupledProgramResources {
             _b_bc_kind: b_bc_kind,
             _b_bc_value: b_bc_value,
             boundary_faces,
+            model: model.clone(),
+            recipe: recipe.clone(),
         })
     }
 }
@@ -486,6 +499,152 @@ impl GenericCoupledProgramResources {
     ) -> Result<(), String> {
         let common = &self.runtime.common;
         common.mesh.refresh_geometry(&common.context.queue, mesh)
+    }
+
+    /// Tier B topology refresh (M2): rebuild every mesh-topology-derived GPU
+    /// resource for a new mesh with the SAME cell count but a possibly changed
+    /// face set / adjacency / boundary classification / nnz. Cell-indexed
+    /// solver state (`state` ×3, gradients, iteration snapshot, warm-start is
+    /// re-zeroed — see below) survives untouched; a cell keeps its identity.
+    ///
+    /// Sequence (each stage depends on the previous):
+    /// 1. `runtime.refresh_topology` — reallocate mesh buffers + rebuild the
+    ///    host/device CSR + block CSR + the scalar-CG linear system.
+    /// 2. `fields.refresh_face_count` — reallocate the per-face flux buffer
+    ///    (zero-filled; recomputed every outer iteration).
+    /// 3. Re-scatter the bc tables from the model spec + new `face_boundary`
+    ///    and rebuild `boundary_faces`. **Runtime per-face BC overrides are
+    ///    lost** (they were keyed by the old face indices) — reported via
+    ///    `bc_overrides_reset` so the caller re-applies them (design §1.4.4).
+    /// 4. Rebuild the Schur / krylov preconditioner + FGMRES workspace and the
+    ///    outer-convergence monitor/gate against the refreshed linear system.
+    /// 5. Rebuild every generated-kernel bind group in place, WITHOUT
+    ///    recompiling any generated pipeline (the WGSL is unchanged — only the
+    ///    buffers moved).
+    ///
+    /// DEVIATION (honestly noted): stages 1 and 4 currently RECONSTRUCT the
+    /// linear-algebra modules (scalar CG, FGMRES, Schur/krylov, AMG, monitors),
+    /// which recompiles their *static, hand-written* WGSL pipelines. The
+    /// generated model kernels (the codegen output the "no recompile" rule
+    /// primarily protects, and the thing byte-identity guards) are NOT
+    /// recompiled — they take the in-place bind-group rebuild (stage 5). This
+    /// reconstruction also makes an in-place `GenericCoupledSchurPreconditioner::reset()`
+    /// unnecessary here: the rebuilt Schur has a fresh AMG hierarchy
+    /// (`prepares_seen = 0`), so coarse operators cannot go stale (review F8c is
+    /// satisfied by construction). Surgical in-place refresh of the LA pipelines
+    /// (via a threaded pipeline cache) is the follow-up perf optimization for
+    /// the per-step M4 loop; it does not change this stage's correctness gates.
+    pub(crate) fn refresh_mesh_topology(
+        &mut self,
+        mesh: &crate::solver::mesh::Mesh,
+    ) -> Result<MeshRefreshReport, String> {
+        let upc = self.model.system.unknowns_per_cell();
+
+        // 1. Mesh buffers + CSR + block CSR + scalar-CG linear system.
+        self.runtime.refresh_topology(mesh, upc)?;
+
+        let device = self.runtime.common.context.device.clone();
+        let queue = self.runtime.common.context.queue.clone();
+        let num_cells = self.runtime.common.num_cells;
+        let num_faces = self.runtime.common.num_faces;
+
+        // 2. Per-face flux buffer (only face-indexed field buffer).
+        self.fields.refresh_face_count(&device, num_faces);
+
+        // 3. Re-scatter bc tables + boundary_faces from the model spec.
+        let scattered = scatter_bc_tables(mesh, &self.model, num_faces as usize, upc)?;
+        self._b_bc_kind = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("GenericCoupled bc_kind (refresh)"),
+            contents: bytemuck::cast_slice(&scattered.bc_kind),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        self._b_bc_value = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("GenericCoupled bc_value (refresh)"),
+            contents: bytemuck::cast_slice(&scattered.bc_value),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        self.boundary_faces = scattered.boundary_faces;
+
+        // 4a. Preconditioner (Schur or plain FGMRES/krylov) over the new system.
+        let schur = build_generic_schur(
+            &self.model,
+            &self.recipe,
+            &self.runtime,
+            &self.runtime.common.mesh.b_scalar_row_offsets,
+            &self.runtime.common.mesh.b_scalar_col_indices,
+        )?;
+        let krylov = if schur.is_some() {
+            None
+        } else {
+            build_generic_krylov(&self.recipe, &self.runtime)?
+        };
+        self.schur = schur;
+        self.krylov = krylov;
+
+        // 4b. Outer-convergence monitor + adaptive gate (the monitor captures
+        //     the warm-start `x` buffer, which the linear-system rebuild
+        //     reallocated; the gate is sized by num_faces).
+        let unknown_mapping = resolve_unknown_mapping_runtime(&self.model, &self.recipe.port_registry)?;
+        let outer_convergence = OuterConvergenceMonitor::new(
+            &device,
+            &queue,
+            &self.model,
+            num_cells,
+            self.runtime.linear_port_space.buffer(self.runtime.linear_ports.x),
+            &unknown_mapping,
+        )?;
+        let outer_gate = outer_convergence.as_ref().map(|oc| {
+            OuterAdaptiveGate::new(
+                &device,
+                &queue,
+                num_cells,
+                num_faces,
+                device.limits().max_compute_workgroups_per_dimension,
+                &oc.b_break_status,
+            )
+        });
+        self.outer_convergence = outer_convergence;
+        self.outer_gate = outer_gate;
+
+        // 5. Generated-kernel bind groups: in-place rebuild over the refreshed
+        //    buffers, cached pipelines reused (no generated-WGSL recompile).
+        //    Direct field access keeps the `&mut self.kernels` borrow disjoint
+        //    from the immutable registry borrows of the other fields.
+        let registry = ResourceRegistry::new()
+            .with_mesh(&self.runtime.common.mesh)
+            .with_unified_fields(&self.fields)
+            .with_buffer(
+                "matrix_values",
+                self.runtime.linear_port_space.buffer(self.runtime.linear_ports.values),
+            )
+            .with_buffer(
+                "rhs",
+                self.runtime.linear_port_space.buffer(self.runtime.linear_ports.rhs),
+            )
+            .with_buffer(
+                "x",
+                self.runtime.linear_port_space.buffer(self.runtime.linear_ports.x),
+            )
+            .with_buffer(
+                "row_offsets",
+                self.runtime.linear_port_space.buffer(self.runtime.linear_ports.row_offsets),
+            )
+            .with_buffer(
+                "col_indices",
+                self.runtime.linear_port_space.buffer(self.runtime.linear_ports.col_indices),
+            )
+            .with_buffer("bc_kind", &self._b_bc_kind)
+            .with_buffer("bc_value", &self._b_bc_value)
+            .with_buffer(
+                "y",
+                self.runtime.linear_port_space.buffer(self.runtime.linear_ports.rhs),
+            );
+        self.kernels
+            .rebuild_bind_groups(&device, self.model.id, &self.recipe, &registry)?;
+
+        Ok(MeshRefreshReport {
+            bc_overrides_reset: true,
+        })
     }
 
     /// ALE step entry: rotate the volume history, THEN upload the new

@@ -7,7 +7,7 @@ pub mod structured;
 
 pub use ale::{swept_mesh_fluxes_closed, SweptMeshFluxes};
 pub use csr::{build_diag_first_scalar_csr, build_sorted_scalar_csr, ScalarCsr};
-pub use refresh::MeshRefreshLevel;
+pub use refresh::{MeshRefreshLevel, MeshRefreshReport};
 pub use structs::{BoundaryType, Mesh};
 pub use structured::{
     generate_graded_rect_mesh, generate_structured_backwards_step_mesh,

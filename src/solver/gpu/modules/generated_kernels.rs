@@ -106,6 +106,62 @@ impl GeneratedKernelsModule {
         })
     }
 
+    /// Tier B topology refresh (M2): rebuild every kernel's ping-pong bind
+    /// groups against a fresh [`ResourceRegistry`] WITHOUT recompiling any
+    /// pipeline (the generated WGSL is unchanged — only the buffers the bind
+    /// groups point at were reallocated by the topology refresh). This is the
+    /// bind-group section of [`Self::new_from_recipe`] re-run over the cached
+    /// pipelines (`pipeline.get_bind_group_layout` reuses the compiled layout).
+    ///
+    /// `registry` must already resolve the post-refresh buffers (mesh, fields,
+    /// linear system, bc tables). The 3 ping-pong phases are rebuilt exactly as
+    /// at init so index-rotated stepping stays correct.
+    pub fn rebuild_bind_groups(
+        &mut self,
+        device: &wgpu::Device,
+        model_id: &str,
+        recipe: &SolverRecipe,
+        registry: &ResourceRegistry<'_>,
+    ) -> Result<(), String> {
+        let mut bind_groups = HashMap::new();
+        for kernel in &recipe.kernels {
+            let id = kernel.id;
+            let source = kernel_registry::kernel_source_by_id(model_id, id)?;
+            let pipeline = self.pipelines.get(&id).ok_or_else(|| {
+                format!("rebuild_bind_groups: missing cached pipeline for {id:?}")
+            })?;
+
+            let max_group = source.bindings.iter().map(|b| b.group).max().unwrap_or(0);
+            let mut groups_ping_pong = Vec::with_capacity((max_group as usize) + 1);
+            for group in 0..=max_group {
+                if !source.bindings.iter().any(|b| b.group == group) {
+                    groups_ping_pong.push(Vec::new());
+                    continue;
+                }
+                let bgl = pipeline.get_bind_group_layout(group);
+                let mut ping_pong = Vec::with_capacity(3);
+                for phase in 0..3 {
+                    let registry = registry.clone().at_ping_pong_phase(phase);
+                    let label =
+                        format!("GeneratedKernels(refresh): {id:?} group {group} phase {phase}");
+                    let bg = wgsl_reflect::create_bind_group_from_bindings(
+                        device,
+                        &label,
+                        &bgl,
+                        source.bindings,
+                        group,
+                        |name| registry.resolve(name),
+                    )?;
+                    ping_pong.push(bg);
+                }
+                groups_ping_pong.push(ping_pong);
+            }
+            bind_groups.insert(id, KernelBindGroups { groups_ping_pong });
+        }
+        self.bind_groups = bind_groups;
+        Ok(())
+    }
+
     fn step_index(&self) -> usize {
         self.state_step_index.load(Ordering::Relaxed) % 3
     }

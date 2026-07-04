@@ -64,6 +64,48 @@ impl GpuCsrRuntime {
         })
     }
 
+    /// Tier B topology refresh (M2): rebuild every mesh-topology-derived
+    /// resource in place for a new mesh with the SAME cell count (the invariant)
+    /// but a possibly different face set / adjacency / nnz.
+    ///
+    /// Steps: (1) refresh the mesh buffers + host CSR ([`MeshResources::refresh_topology`]);
+    /// (2) update `num_faces`; (3) rebuild the block-expanded CSR (F7: ~S²× the
+    /// scalar nnz — the dominant upload) and re-init the scalar-CG linear system
+    /// over it. `num_dofs` is invariant (cells × unknowns). The scalar-CG
+    /// module + its bind groups + the linear port space are replaced with fresh
+    /// ones (the block CSR buffers changed size); callers that hold bind groups
+    /// over the linear system (FGMRES, Schur, generated kernels) MUST rebuild
+    /// them afterward.
+    pub fn refresh_topology(
+        &mut self,
+        mesh: &Mesh,
+        unknowns_per_cell: u32,
+    ) -> Result<(), String> {
+        let device = self.common.context.device.clone();
+        self.common.mesh.refresh_topology(&device, mesh)?;
+        self.common.num_faces = mesh.face_owner.len() as u32;
+
+        let (row_offsets, col_indices) = build_block_csr(
+            &self.common.mesh.scalar_row_offsets,
+            &self.common.mesh.scalar_col_indices,
+            unknowns_per_cell,
+        );
+
+        let cg = linear_solver::init_scalar_cg(
+            &device,
+            self.num_dofs,
+            &row_offsets,
+            &col_indices,
+            self.common.mesh.capacity,
+        )?;
+
+        self.num_nonzeros = cg.num_nonzeros;
+        self.linear_ports = cg.ports;
+        self.linear_port_space = cg.port_space;
+        self.scalar_cg = cg.scalar_cg;
+        Ok(())
+    }
+
     pub fn solve_linear_system_cg(&self, max_iters: u32, tol: f32) -> LinearSolverStats {
         self.scalar_cg
             .solve(&self.common.context, self.num_dofs, max_iters, tol)

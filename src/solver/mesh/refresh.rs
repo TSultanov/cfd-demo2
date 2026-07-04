@@ -13,6 +13,22 @@
 
 use super::structs::Mesh;
 
+/// Outcome flags a [`MeshRefreshLevel::Topology`] refresh reports back to the
+/// caller (a `Geometry` refresh reports the default — nothing was reset).
+///
+/// The load-bearing field is `bc_overrides_reset`: a topology refresh
+/// re-derives the boundary-condition tables from the model spec and the new
+/// `face_boundary` classification, so any per-face runtime overrides the caller
+/// applied via `set_boundary_values_per_face` (keyed by the OLD face indices)
+/// are gone. The caller owns re-applying them against the new face indexing
+/// (design §1.4.4 / review R8).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MeshRefreshReport {
+    /// `true` when the BC tables were rebuilt from the model spec and any
+    /// runtime per-face BC overrides were dropped (Topology refresh only).
+    pub bc_overrides_reset: bool,
+}
+
 /// How much of the mesh changed since the solver was built / last refreshed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeshRefreshLevel {
@@ -103,6 +119,13 @@ impl MeshTopology {
     /// `cell_face_matrix_indices` buffers).
     pub fn cell_faces_len(&self) -> usize {
         self.cell_faces.len()
+    }
+
+    /// Cell count of the snapshotted topology (the refresh invariant: a
+    /// Topology refresh may change faces/adjacency but NEVER the cell count —
+    /// seed↔cell identity is what lets cell-indexed state survive untouched).
+    pub fn num_cells(&self) -> usize {
+        self.num_cells
     }
 
     pub fn from_mesh(mesh: &Mesh) -> Self {

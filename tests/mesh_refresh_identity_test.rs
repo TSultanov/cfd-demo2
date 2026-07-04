@@ -22,8 +22,16 @@
 //! `dev-tests`-gated.
 #![cfg(feature = "meshgen")]
 
+use cfd2::meshgen::meshless::{
+    assemble_mesh, build_diagram, meshless_seed_points, EngineConfig, MeshlessInput, SeedKind,
+};
+use cfd2::meshgen::MeshgenTolerances;
 use cfd2::sim::{DriverBuild, RuntimeParams, SolverDriver};
-use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
+use cfd2::solver::gpu::context::GpuContext;
+use cfd2::solver::mesh::{
+    generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh, RectangularChannel,
+};
+use nalgebra::{Point2, Vector2};
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::model::incompressible_momentum_model;
 use cfd2::solver::scheme::Scheme;
@@ -330,10 +338,11 @@ fn refresh_rejects_topology_mismatch() {
             .expect_err("refresh with different boundary tags must fail");
         assert!(err.contains("face_boundary"), "unexpected error: {err}");
 
-        // Topology level is Tier B.
+        // Topology level: implemented for the GPU backend (M2 Tier B stage 2);
+        // the CPU backend arm is still pending, so on this CPU driver it fails.
         let err = driver
             .refresh_mesh(&mesh, MeshRefreshLevel::Topology)
-            .expect_err("Topology refresh is not yet implemented");
+            .expect_err("CPU Topology refresh is not yet implemented");
         assert!(err.contains("not yet implemented"), "unexpected error: {err}");
 
         println!("[mesh-refresh] topology-mismatch and Topology-level rejections verified");
@@ -444,4 +453,210 @@ fn geometry_refresh_perturbed_smoke_gpu() {
         assert!(rb.stats.p_finite, "[gpu-perturb] step {i}: non-finite p");
     }
     println!("[mesh-refresh] perturbed-geometry refresh ran 10 finite steps (GPU)");
+}
+
+// ─── GPU Topology refresh (M2 Tier B stage 2) ────────────────────────────────
+
+/// Build a driver with a uniform initial velocity (an all-wall meshless cavity
+/// needs a non-rest IC for the coupled solve to do real work each step).
+fn build_driver_ic(
+    mesh: &Mesh,
+    device: Option<wgpu::Device>,
+    queue: Option<wgpu::Queue>,
+    u0: (f64, f64),
+) -> SolverDriver {
+    let params = test_params();
+    let n = mesh.num_cells();
+    let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
+        mesh,
+        incompressible_momentum_model().expect("model"),
+        &params,
+        &vec![u0; n],
+        &vec![0.0; n],
+        device,
+        queue,
+    ))
+    .expect("driver build");
+    driver.apply_params(&params);
+    driver
+}
+
+/// A meshless-Voronoi channel with an optionally shifted interior seed. Same
+/// seed set ⇒ same cell count (seed `i` = cell `i`); shifting one interior seed
+/// flips the local Voronoi adjacency, so the face set / nnz genuinely differ —
+/// exactly the "same cells, different topology" input a Tier B refresh must
+/// absorb. Built via the low-level seed path so the seed set is controlled.
+fn meshless_channel(shift_interior: Option<f64>) -> Mesh {
+    let geo = RectangularChannel {
+        length: 2.0,
+        height: 1.0,
+    };
+    let min_cell = 0.08;
+    let domain = Vector2::new(2.0, 1.0);
+    let (mut seeds, kinds, spec) =
+        meshless_seed_points(&geo, min_cell, min_cell, 1.2, domain);
+    if let Some(amp) = shift_interior {
+        // Shift the first interior seed nearest the domain centre by `amp` ×
+        // min_cell in a fixed diagonal direction (deterministic).
+        let target = seeds
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| matches!(kinds[*i], SeedKind::Interior))
+            .min_by(|(_, a), (_, b)| {
+                let da = (a.x - 1.0).hypot(a.y - 0.5);
+                let db = (b.x - 1.0).hypot(b.y - 0.5);
+                da.partial_cmp(&db).unwrap()
+            })
+            .map(|(i, _)| i)
+            .expect("mesh has an interior seed");
+        seeds[target] = Point2::new(seeds[target].x + amp * min_cell, seeds[target].y + amp * min_cell);
+    }
+    let tol = MeshgenTolerances::from_geometry(min_cell, domain);
+    let input = MeshlessInput {
+        seeds: &seeds,
+        kinds: &kinds,
+        boundary: &spec,
+        domain,
+        tol: &tol,
+        cfg: EngineConfig::default(),
+    };
+    let diagram = build_diagram(&input);
+    assemble_mesh(&input, &diagram)
+}
+
+/// A no-op Topology refresh (refresh to the SAME mesh, before stepping) must be
+/// byte-invisible: it reallocates every face/nnz buffer + rebuilds all bind
+/// groups from a *deterministic* CSR, so a solver that refreshes then runs N
+/// steps is bit-identical to one that just runs N steps. This is the
+/// "topology-refresh machinery corrupts nothing" gate (design §1.4 acceptance
+/// (b)). We refresh at step 0 because the Tier B refresh reconstructs the
+/// linear system (re-zeroing the warm-start `x`); at step 0 `x` is zero on both
+/// legs, so the gate is unconditional. Exact per-device; the
+/// `CFD2_ALLOW_GPU_BYTE_WAIVE=1` escape mirrors the geometry gate.
+#[test]
+fn noop_topology_refresh_byte_identical_gpu() {
+    let _guard = lock_env();
+    std::env::remove_var("CFD2_BACKEND");
+
+    let ctx = match pollster::block_on(GpuContext::new(None, None)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[mesh-refresh] no GPU adapter ({e}); skipping GPU topology byte gate");
+            return;
+        }
+    };
+
+    let mesh = channel_mesh();
+
+    let mut refreshed = build_driver(&mesh, Some(ctx.device.clone()), Some(ctx.queue.clone()));
+    assert!(!refreshed.solver().is_cpu(), "expected the GPU backend");
+    refreshed
+        .refresh_mesh(&mesh, MeshRefreshLevel::Topology)
+        .expect("no-op topology refresh");
+    // A Topology refresh re-derives the bc tables from the model spec, so the
+    // runtime inlet-velocity override (applied at build via `apply_params`) is
+    // reset — this is the documented `bc_overrides_reset` caller contract. Re-
+    // apply it, exactly as a real caller (the GUI/driver) must on a refresh.
+    refreshed.apply_params(&test_params());
+    run_steps(&mut refreshed, 8, "gpu-topo-refresh");
+    let bits_refreshed = state_bits(&refreshed);
+
+    let mut straight = build_driver(&mesh, Some(ctx.device.clone()), Some(ctx.queue.clone()));
+    run_steps(&mut straight, 8, "gpu-topo-straight");
+    let bits_straight = state_bits(&straight);
+
+    let waive = std::env::var("CFD2_ALLOW_GPU_BYTE_WAIVE").as_deref() == Ok("1");
+    if waive {
+        let maxd = max_abs_diff(&bits_refreshed, &bits_straight);
+        eprintln!(
+            "[mesh-refresh] *** GPU TOPOLOGY BYTE GATE WAIVED: max|diff| = {maxd:.3e} ***"
+        );
+        assert!(maxd < 1e-6, "no-op topology refresh diff {maxd:.3e} exceeds waived 1e-6");
+    } else {
+        assert_bits_equal(&bits_refreshed, &bits_straight, "gpu-topology");
+        println!(
+            "[mesh-refresh] GPU no-op topology refresh byte-identical over {} state slots",
+            bits_straight.len()
+        );
+    }
+}
+
+/// Refresh to a *genuinely different* topology (same cell count, one interior
+/// Voronoi seed moved to flip adjacency ⇒ different faces/nnz): the solver
+/// rebuilds its mesh/CSR/linear stack/bind groups and keeps stepping — finite,
+/// non-divergent, with the coupled FGMRES/Schur solve converging on the new
+/// sparsity (design §1.4 acceptance, Tier B). Skips when no GPU is available.
+#[test]
+fn topology_refresh_different_mesh_converges_gpu() {
+    let _guard = lock_env();
+    std::env::remove_var("CFD2_BACKEND");
+
+    let ctx = match pollster::block_on(GpuContext::new(None, None)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[mesh-refresh] no GPU adapter ({e}); skipping GPU topology smoke");
+            return;
+        }
+    };
+
+    // Cell/face-adjacency signature: a Voronoi seed move swaps neighbours (the
+    // face COUNT can stay fixed while the adjacency — owner/neighbour of each
+    // face, hence the CSR column pattern — genuinely changes). That is exactly
+    // the topology change a Tier B refresh must rebuild, so we discriminate on
+    // the adjacency signature, not the face count.
+    let adjacency = |m: &Mesh| -> Vec<(usize, i64)> {
+        m.face_owner
+            .iter()
+            .zip(m.face_neighbor.iter())
+            .map(|(&o, n)| (o, n.map(|x| x as i64).unwrap_or(-1)))
+            .collect::<Vec<_>>()
+    };
+    let mesh_a = meshless_channel(None);
+    let adj_a = adjacency(&mesh_a);
+    let mesh_b = [0.4f64, 0.6, 0.8, 1.0]
+        .into_iter()
+        .map(|s| meshless_channel(Some(s)))
+        .find(|m| m.num_cells() == mesh_a.num_cells() && adjacency(m) != adj_a)
+        .expect("some interior-seed shift yields a same-cell-count, different-topology mesh");
+    let adjdiff = adjacency(&mesh_b)
+        .iter()
+        .zip(&adj_a)
+        .filter(|(x, y)| x != y)
+        .count();
+
+    let mut driver = build_driver_ic(
+        &mesh_a,
+        Some(ctx.device.clone()),
+        Some(ctx.queue.clone()),
+        (1.0, 0.0),
+    );
+    assert!(!driver.solver().is_cpu(), "expected the GPU backend");
+    run_steps(&mut driver, 5, "topoB-pre");
+
+    driver
+        .refresh_mesh(&mesh_b, MeshRefreshLevel::Topology)
+        .expect("topology refresh to a genuinely different mesh");
+
+    for i in 0..12 {
+        let out = driver.step(true);
+        assert!(
+            out.diverged.is_none(),
+            "[topoB] step {i} after topology refresh diverged: {:?}",
+            out.diverged
+        );
+        let rb = out.readback.expect("readback requested");
+        assert_eq!(rb.stats.nonfinite_u, 0, "[topoB] step {i}: non-finite u");
+        assert!(rb.stats.p_finite, "[topoB] step {i}: non-finite p");
+    }
+    let state = pollster::block_on(driver.solver().read_state_f32());
+    assert!(
+        state.iter().all(|v| v.is_finite()),
+        "[topoB] non-finite state after topology refresh + stepping"
+    );
+    println!(
+        "[mesh-refresh] GPU topology refresh {}c/{}f (adjacency changed in {adjdiff} faces) \
+         ran 12 finite steps",
+        mesh_a.num_cells(),
+        mesh_a.num_faces()
+    );
 }

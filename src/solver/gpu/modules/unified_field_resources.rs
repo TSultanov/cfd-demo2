@@ -190,6 +190,32 @@ impl UnifiedFieldResources {
         }
     }
 
+    /// Tier B topology refresh (M2): the only face-indexed field buffer is the
+    /// per-face flux buffer; a topology refresh changes the face count, so it is
+    /// reallocated at the new size, zero-filled. Zero is safe: the flux module
+    /// recomputes `fluxes` from scratch every outer iteration, so the buffer is
+    /// write-before-read within a step (design §1.4 step 6). All other field
+    /// buffers (state ×3, gradients, snapshot, constants) are cell-indexed and
+    /// survive a topology refresh untouched (cell count invariant), so they are
+    /// deliberately NOT touched here. Callers holding bind groups over the flux
+    /// buffer must rebuild them.
+    pub fn refresh_face_count(&mut self, device: &wgpu::Device, num_faces: u32) {
+        self.num_faces = num_faces;
+        if self.flux_buffer.is_some() {
+            let flux_size = num_faces as usize * self.flux_stride as usize;
+            let zero_flux = vec![0.0f32; flux_size];
+            self.flux_buffer = (num_faces > 0).then(|| {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("UnifiedField flux buffer (refresh)"),
+                    contents: cast_slice(&zero_flux),
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::COPY_SRC,
+                })
+            });
+        }
+    }
+
     fn create_state_buffer(device: &wgpu::Device, data: &[f32], label: &str) -> wgpu::Buffer {
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(label),

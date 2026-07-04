@@ -131,6 +131,42 @@ impl MeshResources {
         Ok(())
     }
 
+    /// Tier B topology refresh (M2): the incoming mesh keeps the SAME cell
+    /// count (invariant) but may have a different face set, adjacency and
+    /// boundary classification. Every topology-derived buffer is rebuilt from
+    /// `mesh` at its new exact size (per design §1.4: reallocate rather than
+    /// pad — bind groups and `arrayLength` guards are size-load-bearing) by
+    /// delegating to [`init_mesh`], which is the single source of truth for the
+    /// CSR builders and buffer layout. Only the two ALE volume-history buffers
+    /// (`cell_vols_old{,_old}`) are carried over untouched — they are
+    /// cell-indexed, so a cell keeps its `V^n`/`V^{n-1}` across a topology
+    /// change (the cell count is invariant).
+    ///
+    /// After this returns, every buffer object in `self` (except the two
+    /// preserved history buffers) is a FRESH allocation: callers that hold bind
+    /// groups over these buffers MUST rebuild them (the topology-refresh path in
+    /// `generic_coupled` does exactly that).
+    pub fn refresh_topology(&mut self, device: &wgpu::Device, mesh: &Mesh) -> Result<(), String> {
+        if mesh.num_cells() != self.topology.num_cells() {
+            return Err(format!(
+                "topology refresh requires an invariant cell count ({} -> {})",
+                self.topology.num_cells(),
+                mesh.num_cells()
+            ));
+        }
+        // Rebuild the entire resource set from the new mesh (reuses the CSR
+        // builders + buffer layout — init and refresh can never drift), at the
+        // SAME capacity plan this solver was built with.
+        let mut fresh = init_mesh(device, mesh, self.capacity)?;
+        // Preserve the ALE volume history across the topology change: swap the
+        // freshly-seeded history buffers OUT of `fresh` (they will be dropped)
+        // and our existing ones IN, so `*self = fresh` carries them over.
+        std::mem::swap(&mut self.b_cell_vols_old, &mut fresh.b_cell_vols_old);
+        std::mem::swap(&mut self.b_cell_vols_old_old, &mut fresh.b_cell_vols_old_old);
+        *self = fresh;
+        Ok(())
+    }
+
     /// ALE step entry (M3.2): rotate the volume history, upload the new
     /// geometry, upload the (f32-closed) mesh face fluxes — in that order.
     ///

@@ -732,13 +732,11 @@ impl GpuUnifiedSolver {
     /// Note: the opt-in SRD operator (cut-cell sliver stabilizer) bakes mesh
     /// geometry at build and is NOT rebuilt here; refresh is refused while SRD
     /// is enabled (it is default-off, and unsupported with mesh motion in v1).
-    pub fn refresh_mesh(&mut self, mesh: &Mesh, level: MeshRefreshLevel) -> Result<(), String> {
-        match level {
-            MeshRefreshLevel::Topology => {
-                return Err("topology refresh not yet implemented".into());
-            }
-            MeshRefreshLevel::Geometry => {}
-        }
+    pub fn refresh_mesh(
+        &mut self,
+        mesh: &Mesh,
+        level: MeshRefreshLevel,
+    ) -> Result<crate::solver::MeshRefreshReport, String> {
         if self.srd_enabled && self.srd.is_some() {
             return Err(
                 "mesh refresh is unsupported with the SRD stabilizer enabled (its operator \
@@ -752,6 +750,8 @@ impl GpuUnifiedSolver {
         // then sees an inconsistent (V^{n+1}, V^n) pair and the SCL breaks
         // silently. The ALE seam is `begin_ale_step` (rotation + geometry +
         // fluxes in the correct order); use it for any mid-run mesh change.
+        // Same hazard applies to a Topology refresh (it reallocates the mesh
+        // fluxes zero-filled), so both levels are rejected on ALE models.
         if self.model.system.is_ale() {
             return Err(
                 "refresh_mesh on an ALE model is rejected: it would update cell volumes \
@@ -760,12 +760,23 @@ impl GpuUnifiedSolver {
                     .into(),
             );
         }
-        match &mut self.backend {
-            SolverBackend::Gpu(p) => p.refresh_mesh_geometry(mesh)?,
-            #[cfg(feature = "cpu")]
-            SolverBackend::Cpu(c) => c.refresh_mesh_geometry(mesh)?,
+        match level {
+            MeshRefreshLevel::Geometry => {
+                match &mut self.backend {
+                    SolverBackend::Gpu(p) => p.refresh_mesh_geometry(mesh)?,
+                    #[cfg(feature = "cpu")]
+                    SolverBackend::Cpu(c) => c.refresh_mesh_geometry(mesh)?,
+                }
+                Ok(crate::solver::MeshRefreshReport::default())
+            }
+            MeshRefreshLevel::Topology => match &mut self.backend {
+                SolverBackend::Gpu(p) => p.refresh_mesh_topology(mesh),
+                #[cfg(feature = "cpu")]
+                SolverBackend::Cpu(_) => Err(
+                    "CPU topology refresh is not yet implemented (M2 Tier B, later stage)".into(),
+                ),
+            },
         }
-        Ok(())
     }
 
     /// ALE step entry (M3.2 of the meshless/moving-mesh roadmap): after the

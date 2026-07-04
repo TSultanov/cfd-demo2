@@ -22,6 +22,85 @@ pub(crate) struct GenericCoupledBuilt {
     pub backend: GenericCoupledProgramResources,
 }
 
+/// The per-face BC tables + boundary-face groups a coupled solver binds,
+/// scattered from the model's boundary-type tables onto the mesh's boundary
+/// faces. Produced at build AND rebuilt on a Tier B topology refresh (the face
+/// set / boundary classification changed), so the logic lives in one function.
+pub(crate) struct ScatteredBcTables {
+    /// Per-face × unknown-component BC kind codes, length `num_faces * stride`.
+    pub bc_kind: Vec<u32>,
+    /// Per-face × unknown-component BC values, length `num_faces * stride`.
+    pub bc_value: Vec<f32>,
+    /// Boundary faces grouped by `bc_table_index`, length `BOUNDARY_TYPE_COUNT`.
+    pub boundary_faces: Vec<Vec<u32>>,
+}
+
+/// Expand the model-defined boundary-type tables onto the mesh's boundary faces
+/// (interior faces get zeros — kernels ignore them). Deterministic: iterates
+/// faces in index order. Shared by init and the Tier B topology-refresh path.
+pub(crate) fn scatter_bc_tables(
+    mesh: &Mesh,
+    model: &ModelSpec,
+    num_faces: usize,
+    unknowns_per_cell: u32,
+) -> Result<ScatteredBcTables, String> {
+    let (bc_kind_by_type, bc_value_by_type) = model
+        .boundaries
+        .to_gpu_tables(&model.system)
+        .map_err(|e| format!("failed to build BC tables: {e}"))?;
+
+    let coupled_stride = unknowns_per_cell as usize;
+    let mut boundary_faces: Vec<Vec<u32>> = vec![Vec::new(); BOUNDARY_TYPE_COUNT];
+    for (face_idx, neigh) in mesh.face_neighbor.iter().enumerate() {
+        if neigh.is_some() {
+            continue; // interior face
+        }
+        let boundary_idx = match mesh.face_boundary.get(face_idx).copied().flatten() {
+            None => 0usize,
+            Some(bt) => bt.bc_table_index(),
+        };
+        boundary_faces[boundary_idx].push(face_idx as u32);
+    }
+
+    let table = HostBcTable::new(coupled_stride);
+    let mut bc_kind = vec![0u32; num_faces * coupled_stride];
+    let mut bc_value = vec![0.0_f32; num_faces * coupled_stride];
+    for face_idx in 0..num_faces {
+        if mesh
+            .face_neighbor
+            .get(face_idx)
+            .copied()
+            .unwrap_or(None)
+            .is_some()
+        {
+            continue; // interior face
+        }
+
+        let boundary_idx = match mesh.face_boundary.get(face_idx).copied().flatten() {
+            None => 0usize,
+            Some(bt) => bt.bc_table_index(),
+        };
+
+        // Only boundary faces use bc_kind/bc_value at runtime; interior entries are ignored.
+        if boundary_idx == 0 {
+            continue;
+        }
+
+        let src_base = table.row_base(boundary_idx);
+        let dst_base = table.row_base(face_idx);
+        bc_kind[dst_base..dst_base + coupled_stride]
+            .copy_from_slice(&bc_kind_by_type[src_base..src_base + coupled_stride]);
+        bc_value[dst_base..dst_base + coupled_stride]
+            .copy_from_slice(&bc_value_by_type[src_base..src_base + coupled_stride]);
+    }
+
+    Ok(ScatteredBcTables {
+        bc_kind,
+        bc_value,
+        boundary_faces,
+    })
+}
+
 pub(crate) async fn build_generic_coupled_backend(
     mesh: &Mesh,
     model: ModelSpec,
@@ -61,59 +140,12 @@ pub(crate) async fn build_generic_coupled_backend(
     );
 
     // Boundary-condition buffers are stored per-face x unknown-component so flux modules
-    // and assembly use the same indexing semantics.
-    //
-    // We expand the model-defined boundary-type tables onto boundary faces.
-    let (bc_kind_by_type, bc_value_by_type) = model
-        .boundaries
-        .to_gpu_tables(&model.system)
-        .map_err(|e| format!("failed to build BC tables: {e}"))?;
-
-    let coupled_stride = unknowns_per_cell as usize;
-    let mut boundary_faces: Vec<Vec<u32>> = vec![Vec::new(); BOUNDARY_TYPE_COUNT];
-    for (face_idx, neigh) in mesh.face_neighbor.iter().enumerate() {
-        if neigh.is_some() {
-            continue; // interior face
-        }
-        let boundary_idx = match mesh.face_boundary.get(face_idx).copied().flatten() {
-            None => 0usize,
-            Some(bt) => bt.bc_table_index(),
-        };
-        boundary_faces[boundary_idx].push(face_idx as u32);
-    }
-
-    let table = HostBcTable::new(coupled_stride);
-    let num_faces = runtime.common.num_faces as usize;
-    let mut bc_kind = vec![0u32; num_faces * coupled_stride];
-    let mut bc_value = vec![0.0_f32; num_faces * coupled_stride];
-    for face_idx in 0..num_faces {
-        if mesh
-            .face_neighbor
-            .get(face_idx)
-            .copied()
-            .unwrap_or(None)
-            .is_some()
-        {
-            continue; // interior face
-        }
-
-        let boundary_idx = match mesh.face_boundary.get(face_idx).copied().flatten() {
-            None => 0usize,
-            Some(bt) => bt.bc_table_index(),
-        };
-
-        // Only boundary faces use bc_kind/bc_value at runtime; interior entries are ignored.
-        if boundary_idx == 0 {
-            continue;
-        }
-
-        let src_base = table.row_base(boundary_idx);
-        let dst_base = table.row_base(face_idx);
-        bc_kind[dst_base..dst_base + coupled_stride]
-            .copy_from_slice(&bc_kind_by_type[src_base..src_base + coupled_stride]);
-        bc_value[dst_base..dst_base + coupled_stride]
-            .copy_from_slice(&bc_value_by_type[src_base..src_base + coupled_stride]);
-    }
+    // and assembly use the same indexing semantics (see `scatter_bc_tables`).
+    let ScatteredBcTables {
+        bc_kind,
+        bc_value,
+        boundary_faces,
+    } = scatter_bc_tables(mesh, &model, runtime.common.num_faces as usize, unknowns_per_cell)?;
 
     let b_bc_kind = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("GenericCoupled bc_kind"),

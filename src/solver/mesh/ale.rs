@@ -103,6 +103,7 @@ fn swept_area_along_normal(
     face: usize,
     old_vx: &[f64],
     old_vy: &[f64],
+    allow_degenerate: bool,
 ) -> Result<f64, String> {
     let v1 = mesh.face_v1[face];
     let v2 = mesh.face_v2[face];
@@ -123,6 +124,15 @@ fn swept_area_along_normal(
     let ty = p2oy - p1oy;
     let cross_tn = tx * mesh.face_ny[face] - ty * mesh.face_nx[face];
     if cross_tn == 0.0 {
+        // A zero-length old face or a normal parallel to the old tangent — a
+        // collapsing (near-flip) face with no reliable swept quad. In the flip
+        // path the closure absorbs a zero swept contribution onto the slack face
+        // (per-cell conservation preserved), so tolerate it there; the
+        // persistent path must still hard-fail (its telescoping identity is the
+        // load-bearing correctness check).
+        if allow_degenerate {
+            return Ok(0.0);
+        }
         return Err(format!(
             "swept_mesh_fluxes: face {face} has a degenerate tangent/normal pair \
              (zero-length face or normal parallel to tangent)"
@@ -267,7 +277,7 @@ fn swept_closed_impl(
                 continue;
             }
         }
-        swept[f] = swept_area_along_normal(mesh, f, old_vx, old_vy)?;
+        swept[f] = swept_area_along_normal(mesh, f, old_vx, old_vy, born_mask.is_some())?;
     }
 
     // Old cell volumes for the closure target + identity diagnostic. Persistent

@@ -66,9 +66,10 @@ use crate::meshgen::meshless::{
     LloydConfig, SeedKind,
 };
 use crate::meshgen::MeshgenTolerances;
+use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::mesh::{
     align_old_vertices_by_seed_set, detect_flips, swept_mesh_fluxes_closed,
-    swept_mesh_fluxes_closed_flip, FlipReport, Mesh,
+    swept_mesh_fluxes_closed_flip, BoundaryType, FlipReport, Mesh,
 };
 use crate::solver::model::incompressible_momentum_ale_model;
 
@@ -256,6 +257,16 @@ pub struct MovingMeshDriver {
     /// stage 2's `MovingWall` Dirichlet BC (the Dirichlet U at the wall must be
     /// the wall's material velocity). All-zero until the first moving step.
     w_wall: Vec<[f64; 2]>,
+    /// M6 stage 2: feed the moving wall's material velocity into the fluid.
+    /// When `true` (opt-in via [`set_moving_wall_bc`]) AND a `RigidLoop`
+    /// boundary motion is declared, each regenerated mesh's moving-loop open
+    /// faces are re-tagged [`BoundaryType::MovingWall`] (from the engine's
+    /// default `Wall`) and, after the ALE refresh, their per-face Dirichlet
+    /// velocity `bc_value` is set to `w_wall[owner]` — so the no-slip ghost at
+    /// the wall carries the wall's material velocity (no-penetration +
+    /// no-slip). Static + fixed walls stay `Wall`/`Slip`. Default `false`
+    /// (stage-1 behaviour: the obstacle stays a static-velocity `Wall`).
+    moving_wall_bc: bool,
     /// Mesh-motion CFL cap factor.
     mesh_cfl: f64,
     /// Whether `step` regenerates + refreshes each step. `false` = the
@@ -361,6 +372,7 @@ impl MovingMeshDriver {
             motion,
             boundary_motion: BoundaryMotionSpec::Static,
             w_wall: vec![[0.0, 0.0]; n_seeds],
+            moving_wall_bc: false,
             mesh_cfl: DEFAULT_MESH_CFL,
             boundary_retag: None,
             regen_each_step: true,
@@ -449,6 +461,21 @@ impl MovingMeshDriver {
         &self.w_wall
     }
 
+    /// M6 stage 2: enable feeding the moving wall's material velocity into the
+    /// fluid (opt-in; default off). With this on AND a
+    /// [`BoundaryMotionSpec::RigidLoop`] declared, each regenerated mesh's
+    /// moving-loop open faces are re-tagged [`BoundaryType::MovingWall`] and
+    /// their per-face Dirichlet velocity `bc_value` is set to `w_wall[owner]`
+    /// after the ALE refresh, so the fluid satisfies no-slip AND no-penetration
+    /// at the wall's material velocity (`U_wall = w_wall`; the convective part
+    /// already sees the relative velocity `phi − ρ·mesh_flux` from the M3 ALE
+    /// path — this is the other half, the Dirichlet wall value). Inert under
+    /// `Static` (no moving seeds ⇒ no faces tagged) and byte-neutral for a run
+    /// that never enables it (stage-1 keeps the obstacle a static `Wall`).
+    pub fn set_moving_wall_bc(&mut self, enable: bool) {
+        self.moving_wall_bc = enable;
+    }
+
     /// Disable per-step regeneration: `step` becomes a pure `SolverDriver::step`
     /// passthrough (no seed advection, no regen, no ALE refresh). The
     /// do-no-harm anchor — byte-identical to a static ALE run — used by the
@@ -533,6 +560,14 @@ impl MovingMeshDriver {
         // into its own bucket so the overhead split stays honest.
         let plan_ms = ms_since(plan_start);
 
+        // M6: record the per-seed material velocity w_wall = (new − old)/dt for
+        // THIS step's wall motion, while `self.seeds` still holds the t^n set. It
+        // is computed here (before the solve, not after) so the stage-2
+        // `MovingWall` Dirichlet BC applied below feeds this step's solve the
+        // wall velocity consistent with the mesh motion swept during [t^n,t^{n+1}].
+        // Zero for interior + static-boundary seeds (a no-op under `Static`).
+        self.record_wall_velocity(&new_seeds, dt);
+
         // 3. Regenerate the mesh from the advected seeds (deterministic; a
         //    frozen seed set reproduces `self.mesh` byte-for-byte).
         let regen_start = Instant::now();
@@ -549,6 +584,11 @@ impl MovingMeshDriver {
         if let Some(retag) = self.boundary_retag {
             retag(&mut new_mesh);
         }
+        // M6 stage 2: re-tag the moving loop's open faces MovingWall (from the
+        // engine's default Wall) so the ALE seam builds a MovingWall face list to
+        // receive the wall velocity below. face_boundary only — no effect on the
+        // swept fluxes or the topology-diff. No-op unless moving_wall_bc is on.
+        self.retag_moving_wall_faces(&mut new_mesh);
         let regen_ms = ms_since(regen_start);
         if new_mesh.num_cells() != self.mesh.num_cells() {
             return Err(format!(
@@ -665,6 +705,12 @@ impl MovingMeshDriver {
         } else {
             self.driver.begin_ale_step(&new_mesh, &swept.fluxes)?;
         }
+        // M6 stage 2: feed the moving wall's material velocity into the fluid.
+        // AFTER the refresh (the seam just rebuilt the MovingWall face list + BC
+        // tables) and BEFORE the solve, set each MovingWall face's Dirichlet
+        // velocity to w_wall[owner] — no-slip + no-penetration at the wall's
+        // material velocity. No-op unless moving_wall_bc is on.
+        self.apply_moving_wall_velocity(&new_mesh)?;
         let refresh_ms = ms_since(refresh_start);
         let topo_changed = face_arrays_differ || is_flip;
 
@@ -679,9 +725,8 @@ impl MovingMeshDriver {
         self.prev_vx = new_mesh.vx.clone();
         self.prev_vy = new_mesh.vy.clone();
         self.mesh = new_mesh;
-        // M6: record the per-seed material velocity w_wall = (new − old)/dt for
-        // stage 2's MovingWall BC — BEFORE `self.seeds` is overwritten.
-        self.record_wall_velocity(&new_seeds, dt);
+        // (w_wall was recorded before the solve — see above — so the MovingWall
+        // BC fed this step's solve the correct wall velocity.)
         self.seeds = new_seeds;
         self.time = new_time;
         self.step_index += 1;
@@ -870,6 +915,63 @@ impl MovingMeshDriver {
                 self.w_wall[i] = [0.0, 0.0];
             }
         }
+    }
+
+    /// M6 stage 2: re-tag the moving loop's open (boundary) faces as
+    /// [`BoundaryType::MovingWall`] on a freshly regenerated mesh. An open face
+    /// whose OWNER cell is a moving-boundary seed lies on the moving obstacle
+    /// contour (the boundary seeds sit ON the wall; their cells' only open face
+    /// is the clipped obstacle edge), so this catches exactly the moving wall
+    /// while leaving the fixed channel walls / inlet / outlet untouched. Only
+    /// `face_boundary` is rewritten (geometry/adjacency untouched ⇒ swept fluxes
+    /// and the topology-diff are unaffected). A no-op unless `moving_wall_bc` is
+    /// on and a `RigidLoop` is declared. Must run BEFORE the ALE seam so the
+    /// solver builds a `MovingWall` boundary-face list to receive the velocity.
+    fn retag_moving_wall_faces(&self, mesh: &mut Mesh) {
+        if !self.moving_wall_bc || self.moving_loop_range().is_none() {
+            return;
+        }
+        for f in 0..mesh.num_faces() {
+            if mesh.face_neighbor[f].is_none() && self.is_moving_boundary_seed(mesh.face_owner[f]) {
+                mesh.face_boundary[f] = Some(BoundaryType::MovingWall);
+            }
+        }
+    }
+
+    /// M6 stage 2: push the per-face Dirichlet wall velocity into the solver for
+    /// the current step. Each `MovingWall` open face gets `bc_value = w_wall`
+    /// of its owner cell (the rigid wall material velocity, uniform under pure
+    /// translation, varying under rotation). Re-applied EVERY step: the topology
+    /// seam re-scatters the bc tables from the model's per-type defaults
+    /// (MovingWall Dirichlet 0) dropping the per-face override, and `w_wall`
+    /// itself changes each step. A no-op unless `moving_wall_bc` is on. Called
+    /// AFTER the refresh (so the `MovingWall` face list + tables are rebuilt)
+    /// and BEFORE the solve (so this step feels this step's wall velocity).
+    fn apply_moving_wall_velocity(&mut self, mesh: &Mesh) -> Result<(), String> {
+        if !self.moving_wall_bc || self.moving_loop_range().is_none() {
+            return Ok(());
+        }
+        // Index against `mesh` — the just-refreshed NEW mesh whose face ordering
+        // the solver's MovingWall face list matches (`self.mesh` is still the t^n
+        // mesh at this point). Precompute per-face x/y wall velocity into owned
+        // locals so the closures do not borrow `self` while `solver_mut()` does.
+        let nf = mesh.num_faces();
+        let (mut vx, mut vy) = (vec![0.0f32; nf], vec![0.0f32; nf]);
+        for f in 0..nf {
+            if mesh.face_neighbor[f].is_none()
+                && matches!(mesh.face_boundary[f], Some(BoundaryType::MovingWall))
+            {
+                let owner = mesh.face_owner[f];
+                vx[f] = self.w_wall[owner][0] as f32;
+                vy[f] = self.w_wall[owner][1] as f32;
+            }
+        }
+        let solver = self.driver.solver_mut();
+        // Field name is "U" (upper) in the ALE model; fall back to "u" to match
+        // `set_inlet_velocity`'s upper/lower convention.
+        set_moving_wall_component(solver, 0, &vx)?;
+        set_moving_wall_component(solver, 1, &vy)?;
+        Ok(())
     }
 
     /// Pin the fixed dt and produce the advected seed set for the current
@@ -1107,6 +1209,26 @@ impl MovingMeshDriver {
 #[inline]
 fn ms_since(start: Instant) -> f32 {
     start.elapsed().as_secs_f32() * 1000.0
+}
+
+/// Set one component of the per-face `MovingWall` Dirichlet velocity, resolving
+/// the velocity field name as `"U"` (upper) with a `"u"` (lower) fallback —
+/// mirroring [`set_inlet_velocity`](crate::solver::model::helpers) so the caller
+/// need not know the model's field-name casing.
+fn set_moving_wall_component(
+    solver: &mut crate::solver::UnifiedSolver,
+    component: u32,
+    values: &[f32],
+) -> Result<(), String> {
+    solver
+        .set_boundary_values_per_face(GpuBoundaryType::MovingWall, "U", component, &|f| {
+            values[f as usize]
+        })
+        .or_else(|_| {
+            solver.set_boundary_values_per_face(GpuBoundaryType::MovingWall, "u", component, &|f| {
+                values[f as usize]
+            })
+        })
 }
 
 /// Mark geometrically degenerate NEW faces (near-zero length at t^n via the

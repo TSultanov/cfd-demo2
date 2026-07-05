@@ -400,3 +400,379 @@ fn static_boundary_is_byte_identical_do_no_harm() {
         println!("static_boundary_is_byte_identical_do_no_harm[{label}]: 15 steps byte-identical");
     }
 }
+
+// =============================================================================
+// M6 stage 2 — MovingWall ALE BC: the fluid feels the wall's material velocity.
+//
+// The BC path (documented in the report): `MovingWall` (bc index 5) is ALREADY
+// a per-face Dirichlet velocity in the incompressible_momentum(_ale) model,
+// consumed by the assembly identically to the Inlet Dirichlet (kind 1 →
+// `bc_neighbor_scalar` returns the prescribed value). Stage 2 reuses it: each
+// regen re-tags the moving obstacle's open faces `MovingWall` and, after the ALE
+// refresh, sets their per-face `bc_value` to the recorded wall velocity `w_wall`
+// (re-applied every step because the topology seam resets per-face overrides).
+// No codegen / WGSL change — the smallest correct path.
+// =============================================================================
+
+/// Obstacle+free-stream translation velocity for the rigid-body gate.
+const W_TRANS: f64 = 0.1;
+
+/// Rigidly TRANSLATING obstacle: constant velocity `W_TRANS` in x, identity at
+/// t=0 (the build-mesh contract). Small total displacement over the short run
+/// keeps the fixed interior seeds from being swallowed.
+fn translate(t: f64, p: [f64; 2]) -> [f64; 2] {
+    [p[0] + W_TRANS * t, p[1]]
+}
+
+/// Slip-channel retag that stamps ONLY the outer domain box (Inlet left, Outlet
+/// right, SlipWall top/bottom) and LEAVES the obstacle contour faces for the
+/// driver's `MovingWall` retag. A uniform free stream `(W_TRANS,0)` satisfies
+/// inlet Dirichlet, outlet zero-gradient and slip walls, so any drift off it is
+/// a GCL / wall-BC artifact — never outer-BC physics.
+fn tag_slip_box(mesh: &mut Mesh) {
+    let eps = 1e-6;
+    for f in 0..mesh.num_faces() {
+        if mesh.face_neighbor[f].is_some() {
+            continue;
+        }
+        let (x, y) = (mesh.face_cx[f], mesh.face_cy[f]);
+        let bt = if x < eps {
+            BoundaryType::Inlet
+        } else if x > LX - eps {
+            BoundaryType::Outlet
+        } else if y < eps || y > LY - eps {
+            BoundaryType::SlipWall
+        } else {
+            continue; // obstacle contour — left for the MovingWall retag
+        };
+        mesh.face_boundary[f] = Some(bt);
+    }
+}
+
+/// Tag every outer domain-box face `Wall` (closed box); obstacle contour faces
+/// are left for the driver's `MovingWall` retag.
+fn tag_wall_box(mesh: &mut Mesh) {
+    let eps = 1e-6;
+    for f in 0..mesh.num_faces() {
+        if mesh.face_neighbor[f].is_some() {
+            continue;
+        }
+        let (x, y) = (mesh.face_cx[f], mesh.face_cy[f]);
+        if x < eps || x > LX - eps || y < eps || y > LY - eps {
+            mesh.face_boundary[f] = Some(BoundaryType::Wall);
+        }
+    }
+}
+
+/// Read per-cell `(U, p)` from the solver state (f64-widened f32).
+fn read_state(moving: &MovingMeshDriver) -> (Vec<[f32; 2]>, Vec<f32>) {
+    let layout = moving.driver().solver().model().state_layout.clone();
+    let stride = layout.stride() as usize;
+    let u_off = layout.offset_for("U").expect("U offset") as usize;
+    let p_off = layout.offset_for("p").expect("p offset") as usize;
+    let state = pollster::block_on(moving.driver().solver().read_state_f32());
+    let n = moving.mesh().num_cells();
+    let mut uv = Vec::with_capacity(n);
+    let mut pr = Vec::with_capacity(n);
+    for c in 0..n {
+        uv.push([state[c * stride + u_off], state[c * stride + u_off + 1]]);
+        pr.push(state[c * stride + p_off]);
+    }
+    (uv, pr)
+}
+
+struct FsOut {
+    /// max over cells of |U − U0| (U0 = the free stream = wall velocity).
+    max_du: f32,
+    /// max over cells of |p| (gauge 0).
+    max_dp: f32,
+    /// max over MovingWall faces of |(U_owner − w)·n| — the no-penetration
+    /// residual (the fluid does not cross the moving wall).
+    max_no_pen: f32,
+    /// max per-step SCL defect.
+    max_scl: f64,
+    /// how many MovingWall faces were seen (the wall is actually tagged/driven).
+    n_wall_faces: usize,
+    /// how many steps flipped the Voronoi adjacency.
+    flips: usize,
+}
+
+/// Drive a rigidly-translating obstacle through a uniform free stream equal to
+/// the obstacle velocity. With `moving_wall_on` the MovingWall Dirichlet BC =
+/// `w_wall`; with it off (control) the obstacle stays a zero-velocity `Wall`
+/// while the mesh moves identically — so the only difference is the wall BC.
+fn run_freestream(scheme: TimeScheme, moving_wall_on: bool) -> FsOut {
+    const STEPS_FS: usize = 12;
+    let cvt = build_cvt();
+    let n = cvt.mesh.num_cells();
+    let mut params = base_params(0.01);
+    params.time_scheme = scheme;
+    params.inlet_velocity = W_TRANS as f32; // free stream carried by the scalar inlet BC
+
+    let mut moving = pollster::block_on(MovingMeshDriver::build(
+        cvt,
+        &params,
+        MeshMotionSpec::Frozen, // interior frozen; only the obstacle translates
+        &vec![(W_TRANS, 0.0); n],
+        &vec![0.0; n],
+        None,
+        None,
+    ))
+    .expect("build freestream driver");
+    moving.set_boundary_retag(Some(tag_slip_box));
+    moving.driver_mut().apply_params(&params);
+    moving.set_boundary_motion(BoundaryMotionSpec::RigidLoop {
+        loop_index: OBSTACLE_LOOP,
+        transform: translate,
+    });
+    moving.set_moving_wall_bc(moving_wall_on);
+
+    let mut out = FsOut {
+        max_du: 0.0,
+        max_dp: 0.0,
+        max_no_pen: 0.0,
+        max_scl: 0.0,
+        n_wall_faces: 0,
+        flips: 0,
+    };
+
+    for step in 0..STEPS_FS {
+        let (outcome, stats) = moving
+            .step(false)
+            .unwrap_or_else(|e| panic!("step {step} (moving_wall={moving_wall_on}) failed: {e}"));
+        assert!(outcome.diverged.is_none(), "step {step} diverged");
+        assert_eq!(stats.n_cells, n, "step {step}: cell count changed (seed swallowed)");
+        out.max_scl = out.max_scl.max(stats.scl_defect);
+        if stats.flipped {
+            out.flips += 1;
+        }
+
+        let (uv, pr) = read_state(&moving);
+        let w_wall = moving.w_wall();
+        let mesh = moving.mesh();
+        for c in 0..n {
+            out.max_du = out
+                .max_du
+                .max((uv[c][0] - W_TRANS as f32).abs())
+                .max((uv[c][1] - 0.0).abs());
+            out.max_dp = out.max_dp.max(pr[c].abs());
+        }
+        // No-penetration on the moving wall: fluid normal velocity relative to
+        // the wall's material velocity.
+        let mut wall_faces = 0usize;
+        for f in 0..mesh.num_faces() {
+            if mesh.face_neighbor[f].is_none()
+                && mesh.face_boundary[f] == Some(BoundaryType::MovingWall)
+            {
+                wall_faces += 1;
+                let owner = mesh.face_owner[f];
+                let rel = [
+                    uv[owner][0] as f64 - w_wall[owner][0],
+                    uv[owner][1] as f64 - w_wall[owner][1],
+                ];
+                let rn = (rel[0] * mesh.face_nx[f] + rel[1] * mesh.face_ny[f]).abs();
+                out.max_no_pen = out.max_no_pen.max(rn as f32);
+            }
+        }
+        out.n_wall_faces = out.n_wall_faces.max(wall_faces);
+    }
+    out
+}
+
+fn run_freestream_cpu(scheme: TimeScheme, moving_wall_on: bool) -> FsOut {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    let result = std::panic::catch_unwind(|| run_freestream(scheme, moving_wall_on));
+    std::env::remove_var("CFD2_BACKEND");
+    match result {
+        Ok(o) => o,
+        Err(e) => std::panic::resume_unwind(e),
+    }
+}
+
+/// The core stage-2 physics gate: a rigidly translating obstacle in a uniform
+/// free stream equal to its velocity. With the MovingWall BC ON the fluid moves
+/// WITH the wall (free stream preserved, no-penetration to GCL scale); with it
+/// OFF (identical mesh motion, wall BC = 0) the fluid is dragged off the free
+/// stream — proving the wall's material velocity actually drives the fluid.
+fn moving_wall_freestream(scheme: TimeScheme, label: &str) {
+    let on = run_freestream_cpu(scheme, true);
+    let off = run_freestream_cpu(scheme, false);
+    println!(
+        "[m6.2-freestream] cpu/{label} ON : max|U-U0| = {:.3e}, max|p| = {:.3e}, \
+         no-pen = {:.3e}, SCL = {:.3e}, wall faces = {}, flips = {}",
+        on.max_du, on.max_dp, on.max_no_pen, on.max_scl, on.n_wall_faces, on.flips
+    );
+    println!(
+        "[m6.2-freestream] cpu/{label} OFF: max|U-U0| = {:.3e}, max|p| = {:.3e} (control)",
+        off.max_du, off.max_dp
+    );
+
+    // The wall is actually tagged MovingWall and driven.
+    assert!(on.n_wall_faces > 10, "too few MovingWall faces: {}", on.n_wall_faces);
+    // GCL: the swept fluxes stay closed even through the moving-wall motion.
+    assert!(on.max_scl < 1e-6, "SCL defect {:.3e}", on.max_scl);
+    // No-penetration: the fluid does not cross the moving wall (relative normal
+    // velocity is at the solve/GCL scale, ≪ the wall speed W_TRANS).
+    assert!(
+        (on.max_no_pen as f64) < 0.1 * W_TRANS,
+        "no-penetration residual {:.3e} not ≪ wall speed {W_TRANS}",
+        on.max_no_pen
+    );
+    // Free stream preserved with the wall velocity fed in: U stays ≈ U0.
+    assert!(
+        (on.max_du as f64) < 0.1 * W_TRANS,
+        "free stream drift {:.3e} too large (wall velocity not preserving U0)",
+        on.max_du
+    );
+    // The controlled experiment: the zero-velocity wall (OFF) drags the fluid
+    // off the free stream far more than the material-velocity wall (ON). This is
+    // the proof the fluid FEELS the wall velocity — identical mesh motion, only
+    // the BC differs.
+    assert!(
+        off.max_du > 3.0 * on.max_du.max(1e-6),
+        "moving-wall BC made no difference: ON drift {:.3e} vs OFF {:.3e}",
+        on.max_du, off.max_du
+    );
+}
+
+#[test]
+fn moving_wall_freestream_preserved_cpu_euler() {
+    moving_wall_freestream(TimeScheme::Euler, "euler");
+}
+
+#[test]
+fn moving_wall_freestream_preserved_cpu_bdf2() {
+    moving_wall_freestream(TimeScheme::BDF2, "bdf2");
+}
+
+/// Conservation: a closed all-walls box with a rigidly OSCILLATING internal
+/// MovingWall obstacle. The rigid obstacle's area is invariant, so the fluid
+/// area (box − obstacle) is constant ⇒ Σρ·V must not drift, and from rest the
+/// wall-driven flow stays bounded.
+#[test]
+fn conservation_moving_wall_closed_box_cpu() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    let result = std::panic::catch_unwind(|| {
+        let cvt = build_cvt();
+        let n = cvt.mesh.num_cells();
+        let params = base_params(0.01);
+        let rho = params.density as f64;
+
+        let mut moving = pollster::block_on(MovingMeshDriver::build(
+            cvt,
+            &params,
+            MeshMotionSpec::Frozen,
+            &vec![(0.0, 0.0); n], // from rest
+            &vec![0.0; n],
+            None,
+            None,
+        ))
+        .expect("build closed-box driver");
+        moving.set_boundary_retag(Some(tag_wall_box));
+        moving.driver_mut().apply_params(&params);
+        moving.set_boundary_motion(BoundaryMotionSpec::RigidLoop {
+            loop_index: OBSTACLE_LOOP,
+            transform: oscillate,
+        });
+        moving.set_moving_wall_bc(true);
+
+        let mass = |m: &Mesh| -> f64 { rho * m.cell_vol.iter().sum::<f64>() };
+        let m0 = mass(moving.mesh());
+        let mut m_prev = m0;
+        let (mut max_step, mut max_total, mut max_u, mut max_scl) = (0.0, 0.0, 0.0f32, 0.0);
+        let mut saw_moving_wall = false;
+
+        for step in 0..30usize {
+            let (outcome, stats) = moving
+                .step(false)
+                .unwrap_or_else(|e| panic!("step {step} failed: {e}"));
+            assert!(outcome.diverged.is_none(), "step {step} diverged");
+            assert_eq!(stats.n_cells, n, "step {step}: cell count changed");
+            max_scl = f64::max(max_scl, stats.scl_defect);
+
+            let m_n = mass(moving.mesh());
+            max_step = f64::max(max_step, (m_n - m_prev).abs() / m0);
+            max_total = f64::max(max_total, (m_n - m0).abs() / m0);
+            m_prev = m_n;
+
+            let mesh = moving.mesh();
+            saw_moving_wall |= (0..mesh.num_faces())
+                .any(|f| mesh.face_boundary[f] == Some(BoundaryType::MovingWall));
+
+            let (uv, _p) = read_state(&moving);
+            for c in 0..n {
+                assert!(uv[c][0].is_finite() && uv[c][1].is_finite(), "step {step}: non-finite U");
+                max_u = max_u.max(uv[c][0].abs()).max(uv[c][1].abs());
+            }
+        }
+        (max_step, max_total, max_u, max_scl, saw_moving_wall)
+    });
+    std::env::remove_var("CFD2_BACKEND");
+    let (max_step, max_total, max_u, max_scl, saw_moving_wall) = match result {
+        Ok(o) => o,
+        Err(e) => std::panic::resume_unwind(e),
+    };
+    println!(
+        "[m6.2-conservation] cpu/bdf2: per-step mass drift = {:.3e}, total = {:.3e}, \
+         max|U| = {:.3e}, SCL = {:.3e}, moving-wall tagged = {saw_moving_wall} (30 steps)",
+        max_step, max_total, max_u, max_scl
+    );
+    assert!(saw_moving_wall, "obstacle was never tagged MovingWall");
+    // Closed rigid box+hole: fluid area is invariant ⇒ Σρ·V is constant to f64.
+    assert!(max_step < 1e-12, "per-step mass drift {:.3e}", max_step);
+    assert!(max_total < 1e-12, "total mass drift {:.3e}", max_total);
+    // The wall-driven flow stays bounded (no blow-up from the moving BC).
+    assert!(max_u.is_finite() && max_u < 1.0, "unbounded wall-driven velocity {:.3e}", max_u);
+    assert!(max_scl < 1e-6, "SCL defect {:.3e}", max_scl);
+}
+
+/// Do-no-harm: enabling `moving_wall_bc` on a STATIC boundary must change
+/// nothing — no face is tagged MovingWall, the regen is byte-identical, w_wall
+/// stays zero. (Complements the stage-1 static do-no-harm anchor.)
+#[test]
+fn moving_wall_bc_static_do_no_harm() {
+    let _g = ENV_LOCK.lock().unwrap();
+    let cvt_ref = build_cvt();
+    let vx0 = cvt_ref.mesh.vx.clone();
+    let vy0 = cvt_ref.mesh.vy.clone();
+    let n_cells = cvt_ref.mesh.num_cells();
+    drop(cvt_ref);
+
+    let cvt = build_cvt();
+    let params = base_params(0.01);
+    let mut moving = pollster::block_on(MovingMeshDriver::build(
+        cvt,
+        &params,
+        MeshMotionSpec::Frozen,
+        &vec![(1.0, 0.0); n_cells],
+        &vec![0.0; n_cells],
+        None,
+        None,
+    ))
+    .expect("build");
+    moving.driver_mut().apply_params(&params);
+    // Enable the moving-wall BC but leave the boundary Static.
+    moving.set_moving_wall_bc(true);
+    moving.set_boundary_motion(BoundaryMotionSpec::Static);
+
+    for step in 0..12 {
+        let (_o, stats) = moving.step(false).expect("step");
+        let mesh = moving.mesh();
+        assert!(
+            mesh.vx == vx0 && mesh.vy == vy0,
+            "step {step}: regen NOT byte-identical with moving_wall_bc on a Static boundary"
+        );
+        assert_eq!(stats.scl_defect, 0.0, "step {step}: nonzero SCL on a static step");
+        assert!(
+            (0..mesh.num_faces()).all(|f| mesh.face_boundary[f] != Some(BoundaryType::MovingWall)),
+            "step {step}: a face was tagged MovingWall under a Static boundary"
+        );
+        assert!(
+            moving.w_wall().iter().all(|w| *w == [0.0, 0.0]),
+            "step {step}: nonzero w_wall under a Static boundary"
+        );
+    }
+    println!("moving_wall_bc_static_do_no_harm: 12 steps byte-identical, no MovingWall faces");
+}

@@ -55,10 +55,12 @@ mod emit;
 mod engine;
 mod lloyd;
 mod scan;
+mod solver_mesh;
 mod swept_gpu;
 mod wgsl;
 
 pub use cell_geom::{CellGeometry, GpuCellGeometry};
+pub use solver_mesh::assemble_solver_mesh;
 pub use csr_gpu::{GpuCsr, GpuCsrArrays};
 pub use derive::{DeriveFaces, DerivedFaceOffsets, ScanOffsets};
 pub use emit::{EmitFaces, GpuFaceGeometry};

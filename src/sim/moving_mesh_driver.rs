@@ -137,15 +137,24 @@ pub enum BoundaryMotionSpec {
     /// A rigidly-moving boundary loop. `loop_index` selects the loop in the
     /// [`BoundarySpec`] that moves (e.g. the obstacle circle is loop 1 of a
     /// [`crate::meshgen::ChannelWithObstacle`]); `transform(t, p)` maps a t=0
-    /// point to its position at absolute time `t` by a RIGID map
-    /// (translation/rotation). It is applied to BOTH the loop's polyline points
-    /// (so the regen clips against the moved wall) and the loop's boundary
-    /// seeds (so seed `i` stays on the moving wall). **Contract:**
+    /// point to its position at absolute time `t`. It is applied to BOTH the
+    /// loop's polyline points (so the regen clips against the moved wall) and the
+    /// loop's boundary seeds (so seed `i` stays on the moving wall). **Contract:**
     /// `transform(0, p) == p` — the driver is built on the t=0 mesh, so the
     /// motion law must be the identity at t=0 (an oscillation `A·sin(ω t)`
-    /// satisfies this). A rigid map preserves chord lengths ⇒ the loop's seed
-    /// count and segment structure are invariant, so the fixed-seed-count and
-    /// watertightness guarantees carry over unchanged.
+    /// satisfies this).
+    ///
+    /// **v1 scope: pure TRANSLATION.** A rigid translation preserves chord lengths
+    /// ⇒ the loop's seed count / segment structure are invariant (fixed-seed +
+    /// watertightness carry over), and — critically for the `MovingWall` BC — the
+    /// per-seed material velocity `w_wall` recorded from the seed's `(new−old)/dt`
+    /// is UNIFORM across the seed's wall face, exactly matching the per-vertex
+    /// swept `mesh_flux` (all chords sweep the same displacement). A ROTATION would
+    /// break that match: the face's vertices sit at different radii/angles than the
+    /// seed, so the uniform seed-velocity Dirichlet no longer cancels the per-face
+    /// swept flux (a spurious wall mass flux O(ω·Δr)). Rotation is left to a future
+    /// stage that evaluates `w_wall` per wall-face rather than per seed; do not
+    /// pass a rotating `transform` in v1.
     RigidLoop {
         loop_index: usize,
         transform: fn(f64, [f64; 2]) -> [f64; 2],
@@ -995,8 +1004,9 @@ impl MovingMeshDriver {
 
     /// M6 stage 2: push the per-face Dirichlet wall velocity into the solver for
     /// the current step. Each `MovingWall` open face gets `bc_value = w_wall`
-    /// of its owner cell (the rigid wall material velocity, uniform under pure
-    /// translation, varying under rotation). Re-applied EVERY step: the topology
+    /// of its owner cell (the rigid wall material velocity — uniform across the
+    /// face under the v1 pure-translation scope; a rotating wall would need a
+    /// per-face `w_wall`, out of v1). Re-applied EVERY step: the topology
     /// seam re-scatters the bc tables from the model's per-type defaults
     /// (MovingWall Dirichlet 0) dropping the per-face override, and `w_wall`
     /// itself changes each step. A no-op unless `moving_wall_bc` is on. Called
@@ -1333,13 +1343,27 @@ fn force_degenerate_faces_born(
 }
 
 /// Whether two meshes with the same cell count differ in face set / adjacency
-/// (a Voronoi flip). Compares the face count and the per-face owner/neighbor
-/// and per-cell face lists — the connectivity the topology refresh rebuilds.
-/// Cheap (O(faces)); byte-identical regen ⇒ `false`.
+/// (a Voronoi flip) OR in per-face boundary TAGS. Compares the face count, the
+/// per-face owner/neighbor and per-cell face lists — the connectivity the
+/// topology refresh rebuilds — AND `face_boundary` (by `bc_table_index`).
+///
+/// The `face_boundary` comparison is load-bearing for the M6 `Wall → MovingWall`
+/// retag (review July 2026, HIGH): the geometry seam ([`Mesh::refresh_mesh_geometry`])
+/// asserts identical `face_boundary` and hard-errors on a tag flip, but a step
+/// whose motion is too small to change connectivity (e.g. the GUI slider minima)
+/// would otherwise take that seam and die on step 0. Including the tags here
+/// routes any tag change through `begin_ale_step_topology`, which rebuilds the BC
+/// tables + `face_boundary` snapshot; `apply_moving_wall_velocity` then repopulates
+/// the values. Byte-neutral under `Static`/no-retag (tags identical ⇒ `false`),
+/// and it hardens every `boundary_retag` path too. Cheap (O(faces)).
 fn topology_differs(a: &Mesh, b: &Mesh) -> bool {
     a.num_faces() != b.num_faces()
         || a.face_owner != b.face_owner
         || a.face_neighbor != b.face_neighbor
         || a.cell_face_offsets != b.cell_face_offsets
         || a.cell_faces != b.cell_faces
+        || a.face_boundary.iter().zip(&b.face_boundary).any(|(x, y)| {
+            x.map(|t| t.bc_table_index()).unwrap_or(0)
+                != y.map(|t| t.bc_table_index()).unwrap_or(0)
+        })
 }

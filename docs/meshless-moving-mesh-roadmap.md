@@ -437,10 +437,12 @@ seed_advect/Lloyd kernels, orchestrated as separate submissions around the solve
 
 Boundary-bound seeds moving rigidly with a prescribed boundary motion (oscillating cylinder
 in channel): regenerate boundary loops per step, `MovingWall` BC velocity = boundary motion.
-Gates: obstacle-contour faces exist and tagged every step; no-penetration
-(U_f−w_f)·n < 1e-3·U_max on moving walls; bounded solution over 2 forcing periods; near-wall
-quality instrument (skew/min-vol within 3 layers). Renderer: capacity/resize regression gate
-(per-cell vertex counts drift every step; ea2c421 crash precedent).
+Gates: obstacle-contour faces exist and tagged every step; no-penetration at the moving wall
+(enforced at the FACE by the Dirichlet `U_face = w_wall` + ALE mesh flux ⇒ zero relative flux —
+structural; the near-wall OWNER-cell residual is inherently O(wall speed) and is instead gated by
+an ON-vs-OFF control, review July 2026 stage-4); bounded solution over 2 forcing periods;
+near-wall quality instrument (skew/min-vol within 3 layers). Renderer: capacity/resize regression
+gate (per-cell vertex counts drift every step; ea2c421 crash precedent).
 
 **Shipped (v1 scope): rigid PRESCRIBED boundary motion, FIXED seed count** — the obstacle
 changes shape/position, not seed count; seed `i` ≡ cell `i` for the whole run. Built additively
@@ -477,22 +479,36 @@ Three stages, all on the CPU (`incompressible_momentum_ale` model):
   **Flow response:** signed downstream wake-mean transverse velocity oscillates with peak-to-peak
   **6.2e-2** in the forced run vs **1.2e-3** in the static control (**≈50×** — a measurable forced
   signal; NOT a shedding lock-in claim: Re≈10 ⇒ the static case is steady + symmetric).
-- *No-penetration / free-stream GCL* (`moving_wall_freestream_preserved_cpu_{euler,bdf2}`): a
-  rigidly-translating obstacle in a free stream = its own velocity — no-penetration
-  `(U−w)·n = 3.1e-8`, free-stream drift `2.1e-7`, SCL `1.5e-9`; the wall-BC-OFF control drifts
-  ~5 orders more (proves the wall drives the fluid), through adjacency flips.
-- *Conservation* (`conservation_moving_wall_closed_box_cpu`): closed box + oscillating internal
-  MovingWall obstacle, from rest — Σρ·V drift **2.25e-16** per step and total; bounded `max|U|`.
+- *Free-stream preservation / GCL* (`moving_wall_freestream_preserved_cpu_{euler,bdf2}`): a
+  rigidly-translating obstacle in a free stream = its own velocity (a CO-MOVING field, `U ≡ w_wall`)
+  — the field stays on the free stream, drift `2.1e-7`, SCL `1.5e-9`; the wall-BC-OFF control drifts
+  ~5 orders more (proves the wall drives the fluid), through adjacency flips. (This is
+  free-stream preservation, NOT an independent no-penetration measure — see below.)
+- *No-penetration, non-co-moving control* (`no_penetration_cross_stream_oscillation_cpu`, review
+  stage-4 FINDING 2): a cross-stream-oscillating cylinder in a QUIESCENT closed box (`w_wall·n ≠ 0`,
+  the only motion is wall-driven, `|U−w| = 0.35` = a genuinely disturbed field). Exact no-penetration
+  is structural at the wall FACE; the OWNER-cell residual `|(U−w)·n|` is inherently O(wall speed), so
+  the gate is a CONTROL: imposing `w_wall` (ON) pulls it to **0.157**, ≈33% below the zero-velocity-wall
+  control (OFF **0.233** = the full wall normal speed A·ω). SCL `3.4e-9`. Also asserts the MovingWall
+  tag set equals the geometric contour set every step (FINDING 5 — no static-Wall hole).
+- *Area preservation + boundedness* (`rigid_obstacle_area_preserved_and_bounded_cpu`, review
+  stage-4 FINDING 1): closed box + oscillating internal MovingWall obstacle, from rest. Σρ·V drift
+  **2.25e-16** per step/total — a GEOMETRIC identity (a rigid polygon's area is invariant), NOT a
+  statement about the solved field; the genuine per-cell **mass conservation under mesh motion** is
+  the SCL defect `3.2e-9`. The from-rest wall-driven flow stays finite + bounded (`max|U| = 0.29`).
 - *GUI worker path* (`moving_mesh_gui_test`, Part 4): the oscillating-obstacle driver through the
   real solver worker — 30 `MeshRefreshed` emitted, 614 cells fixed, SCL `1e-9`, obstacle
   demonstrably moved, and every emitted mesh replayed through the renderer capacity path (no
   overflow/truncation — the ea2c421 regression gate).
 
 **v1 scope / limits (honest):** rigid PRESCRIBED motion only (no fluid-structure coupling — the
-wall trajectory is analytic); fixed seed count (rigid motion, small amplitude < near-wall cell
-spacing so the frozen interior seeds are never swallowed — an amplitude that swallows a seed is a
-hard `Err`, by design); CPU-first (GPU moving mesh is M5); interior seeds are `Frozen` in the
-demos (the obstacle deforms the near-wall cells, which the near-wall instrument watches).
+wall trajectory is analytic); pure TRANSLATION only — a rotating wall is NOT supported in v1
+(the per-seed `w_wall`, uniform across the wall face, matches the per-vertex swept `mesh_flux`
+only for translation; rotation needs a per-wall-face `w_wall`, deferred, review stage-4 FINDING 3);
+fixed seed count (rigid motion, small amplitude < near-wall cell spacing so the frozen interior
+seeds are never swallowed — an amplitude that swallows a seed is a hard `Err`, by design); CPU-first
+(GPU moving mesh is M5); interior seeds are `Frozen` in the demos (the obstacle deforms the
+near-wall cells, which the near-wall instrument watches).
 Headless / test-driven; the live GPU-render animation is the manual smoke below.
 
 **Manual GUI smoke — oscillating obstacle** (needs a display; not covered by CI):

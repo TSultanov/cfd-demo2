@@ -390,6 +390,17 @@ pub struct MovingWorkerSmoke {
     pub saw_empty_cells: bool,
     /// A refresh carried a non-finite `MovingMeshStats` field.
     pub saw_nonfinite_stats: bool,
+    /// Max post-closure per-cell SCL defect over all refreshes — the GCL health
+    /// of the moving-mesh run (should stay at f32-roundoff scale; a physical
+    /// moving mesh conserves volume). 0 if no refresh was seen.
+    pub max_scl_defect: f64,
+    /// Max mesh skew over all refreshes — the quality watchdog.
+    pub max_skew: f64,
+    /// The emitted per-refresh cell polygons (exactly the `cached_cells` the UI
+    /// thread re-tessellates + uploads). Collected so a headless test can replay
+    /// the live render loop's `build_mesh_vertices` → `update_mesh` capacity path
+    /// on the REAL moving meshes. Empty unless `collect_meshes` was requested.
+    pub meshes: Vec<Vec<Vec<[f64; 2]>>>,
     /// The worker reported an error (step failure / divergence).
     pub error: Option<String>,
 }
@@ -410,12 +421,23 @@ fn moving_stats_finite(s: &MovingMeshStats) -> bool {
 
 /// Headless test hook (no window): drive the *real* private solver worker through
 /// the moving-mesh message path — `SetSolver { MovingMesh }`, `SetRunning(true)`,
-/// collect `MeshRefreshed` events for `run_ms`, then shut it down. Returns
-/// per-run observations so `tests/moving_mesh_gui_test.rs` can assert the actual
-/// channel plumbing without a display. `pub` only because the worker + command /
-/// event enums are otherwise private to this module.
+/// collect `MeshRefreshed` events, then shut it down. Returns per-run
+/// observations so `tests/moving_mesh_gui_test.rs` can assert the actual channel
+/// plumbing without a display. `pub` only because the worker + command / event
+/// enums are otherwise private to this module.
+///
+/// Stops at whichever comes first: `target_refreshes` refreshes collected (0 =
+/// no count target, run the whole budget) or `run_ms` elapsed. `collect_meshes`
+/// retains each emitted `cached_cells` polygon set on `smoke.meshes` so a test
+/// can replay the renderer's re-tessellation / capacity-growth path on the REAL
+/// moving meshes (the closest headless proxy for the live render loop).
 #[doc(hidden)]
-pub fn moving_mesh_worker_smoke(moving: MovingMeshDriver, run_ms: u64) -> MovingWorkerSmoke {
+pub fn moving_mesh_worker_smoke(
+    moving: MovingMeshDriver,
+    run_ms: u64,
+    target_refreshes: usize,
+    collect_meshes: bool,
+) -> MovingWorkerSmoke {
     use std::time::{Duration, Instant};
 
     let handle = SolverWorkerHandle::spawn();
@@ -427,7 +449,7 @@ pub fn moving_mesh_worker_smoke(moving: MovingMeshDriver, run_ms: u64) -> Moving
 
     let mut smoke = MovingWorkerSmoke::default();
     let deadline = Instant::now() + Duration::from_millis(run_ms);
-    while Instant::now() < deadline {
+    'outer: while Instant::now() < deadline {
         while let Ok(evt) = handle.rx.try_recv() {
             match evt {
                 SolverWorkerEvent::MeshRefreshed {
@@ -443,6 +465,14 @@ pub fn moving_mesh_worker_smoke(moving: MovingMeshDriver, run_ms: u64) -> Moving
                     smoke.max_cells = Some(smoke.max_cells.map_or(n, |m| m.max(n)));
                     if !moving_stats_finite(&stats) {
                         smoke.saw_nonfinite_stats = true;
+                    }
+                    smoke.max_scl_defect = smoke.max_scl_defect.max(stats.scl_defect);
+                    smoke.max_skew = smoke.max_skew.max(stats.max_skew);
+                    if collect_meshes {
+                        smoke.meshes.push(cached_cells);
+                    }
+                    if target_refreshes != 0 && smoke.mesh_refresh_events >= target_refreshes {
+                        break 'outer;
                     }
                 }
                 SolverWorkerEvent::Error(e) => smoke.error = Some(e),
@@ -3565,14 +3595,17 @@ impl eframe::App for CFDApp {
                                 m.n_cells,
                                 m.n_faces,
                                 if m.flipped {
-                                    format!(" (flip: {} born / {} died)", m.born_faces, m.died_faces)
+                                    format!(
+                                        " (flip: {} born / {} died, {} cells)",
+                                        m.born_faces, m.died_faces, m.flipped_cells
+                                    )
                                 } else {
                                     String::new()
                                 }
                             ));
                             ui.label(format!(
-                                "ALE: dt={:.2e} skew={:.3} SCL={:.1e}",
-                                m.dt, m.max_skew, m.scl_defect,
+                                "ALE: dt={:.2e} skew={:.3} SCL={:.1e} flip_defect={:.1e}",
+                                m.dt, m.max_skew, m.scl_defect, m.flip_defect,
                             ));
                             ui.label(format!(
                                 "ALE time (ms): plan={:.1} regen={:.1} swept={:.1} refresh={:.1}",

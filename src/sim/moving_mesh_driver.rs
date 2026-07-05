@@ -76,6 +76,22 @@ pub const DEFAULT_QUALITY_SKEW_TARGET: f64 = 0.5;
 /// Inert under `Frozen` (max|w| = 0).
 pub const DEFAULT_MESH_CFL: f64 = 0.2;
 
+/// Anti-swallow cap on a [`BoundaryMotionSpec::Oscillation`] amplitude, as a
+/// fraction of the mesh's near-wall cell spacing (`min_cell_size`, the meshgen
+/// length scale). The `v1` moving-mesh driver holds a FIXED seed count — cells
+/// change shape, never existence — and the frozen/flow interior seeds adjacent
+/// to a rigidly-moving wall do NOT step aside for it. If the wall's PEAK
+/// displacement (its amplitude) exceeds the near-wall cell spacing, the wall
+/// sweeps THROUGH those seeds and swallows them: the clipped near-wall cells
+/// collapse to slivers / invert, and the swept-quad telescoping identity fails
+/// (a mesh tangle) or the moving-wall velocity on a near-degenerate cell blows
+/// the local CFL. The whole test envelope keeps `amplitude < cell spacing` by
+/// construction (see `tests/moving_boundary_test.rs`); this clamps
+/// `set_boundary_motion` to enforce that contract for every caller (the GUI
+/// slider ranges up to 6× the cell size). `0.6` leaves the validated gates
+/// (ratios ≤ 0.5) untouched while capping the too-large GUI default.
+pub const OSC_AMPLITUDE_CELL_FRACTION: f64 = 0.6;
+
 /// How the seeds move each step.
 #[derive(Clone, Copy)]
 pub enum MeshMotionSpec {
@@ -505,6 +521,14 @@ impl MovingMeshDriver {
     /// each step. Orthogonal to [`set_motion`]: the interior seeds still follow
     /// the [`MeshMotionSpec`]. Panics if a `RigidLoop` `loop_index` is out of
     /// range for the current boundary spec.
+    ///
+    /// An [`BoundaryMotionSpec::Oscillation`] amplitude is CLAMPED to
+    /// [`OSC_AMPLITUDE_CELL_FRACTION`] × the near-wall cell spacing (the fixed
+    /// `min_cell_size`): a wall whose peak displacement exceeds the cell spacing
+    /// swallows the frozen interior seeds it sweeps into and tangles the mesh
+    /// (see [`OSC_AMPLITUDE_CELL_FRACTION`]). The clamp is a no-op for a `RigidLoop`
+    /// (its motion is baked into an opaque `fn`, kept within envelope by its
+    /// caller) and for any in-envelope amplitude.
     pub fn set_boundary_motion(&mut self, boundary_motion: BoundaryMotionSpec) {
         if let Some(loop_index) = boundary_motion.loop_index() {
             assert!(
@@ -514,7 +538,30 @@ impl MovingMeshDriver {
                 self.spec.loops.len()
             );
         }
-        self.boundary_motion = boundary_motion;
+        self.boundary_motion = self.clamp_oscillation_amplitude(boundary_motion);
+    }
+
+    /// Clamp an [`BoundaryMotionSpec::Oscillation`] amplitude to the anti-swallow
+    /// cap (peak displacement < near-wall cell spacing). Other variants pass
+    /// through unchanged. See [`OSC_AMPLITUDE_CELL_FRACTION`].
+    fn clamp_oscillation_amplitude(&self, spec: BoundaryMotionSpec) -> BoundaryMotionSpec {
+        match spec {
+            BoundaryMotionSpec::Oscillation {
+                loop_index,
+                amplitude,
+                omega,
+                axis,
+            } if self.min_cell_size.is_finite() && self.min_cell_size > 0.0 => {
+                let cap = OSC_AMPLITUDE_CELL_FRACTION * self.min_cell_size;
+                BoundaryMotionSpec::Oscillation {
+                    loop_index,
+                    amplitude: amplitude.min(cap),
+                    omega,
+                    axis,
+                }
+            }
+            other => other,
+        }
     }
 
     /// Per-seed material velocity `w_wall` (seed `i` == cell `i`) of the last
@@ -1235,6 +1282,13 @@ impl MovingMeshDriver {
     /// The current realized mesh.
     pub fn mesh(&self) -> &Mesh {
         &self.mesh
+    }
+
+    /// The EFFECTIVE boundary-motion spec (an [`BoundaryMotionSpec::Oscillation`]
+    /// amplitude reflects the anti-swallow clamp applied by [`set_boundary_motion`],
+    /// not the requested value). Lets a caller/gate observe the realized motion.
+    pub fn boundary_motion(&self) -> BoundaryMotionSpec {
+        self.boundary_motion
     }
 
     /// The authoritative seed positions (seed `i` == cell `i`).

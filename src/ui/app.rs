@@ -23,7 +23,7 @@ use std::thread;
 use crate::meshgen::meshless::{generate_cvt_mesh_with_seeds, CvtMeshSeeds};
 use crate::sim::{
     BoundaryMotionSpec, DivergeReason, DriverBuild, MeshMotionSpec, MovingMeshDriver,
-    MovingMeshStats, OscAxis, RuntimeParams, SolverDriver,
+    MovingMeshStats, OscAxis, RuntimeParams, SolverDriver, OSC_AMPLITUDE_CELL_FRACTION,
 };
 
 /// Rendering mode for the mesh visualization
@@ -732,7 +732,12 @@ impl CFDApp {
             moving_motion: MovingMotionChoice::default(),
             moving_regularization: 0.5,
             moving_oscillate_obstacle: false,
-            moving_osc_amplitude: 0.05,
+            // Below the default near-wall cell spacing (min_cell_size 0.025): a
+            // larger peak displacement sweeps the rigidly-moving obstacle through
+            // the frozen interior seeds and tangles the mesh. The driver clamps
+            // this to `OSC_AMPLITUDE_CELL_FRACTION × cell spacing` regardless, but
+            // an honest default keeps the slider value == the realized motion.
+            moving_osc_amplitude: 0.01,
             moving_osc_frequency: 0.5,
             cached_moving_stats: None,
             solver_is_moving: false,
@@ -2904,17 +2909,27 @@ impl eframe::App for CFDApp {
                                      Initialize / Reset.",
                                 );
                                 if self.moving_oscillate_obstacle {
+                                    // Cap the slider MAX at the driver's anti-swallow clamp
+                                    // (`OSC_AMPLITUDE_CELL_FRACTION × near-wall spacing`) so the
+                                    // displayed amplitude can never exceed the REALIZED motion —
+                                    // the driver clamps larger requests, which would otherwise
+                                    // show a value the obstacle never reaches. The cap tracks the
+                                    // mesh-size slider (finer mesh ⇒ smaller safe amplitude).
+                                    let osc_cap =
+                                        (OSC_AMPLITUDE_CELL_FRACTION * self.min_cell_size).max(0.005);
                                     ui.add(
                                         adaptive_slider(
                                             &mut self.moving_osc_amplitude,
-                                            0.005..=0.15,
+                                            0.005..=osc_cap,
                                         )
                                         .text("Amplitude"),
                                     )
                                     .on_hover_text(
                                         "Cross-stream oscillation amplitude (domain units). \
-                                         Keep below the near-wall cell spacing so the frozen \
-                                         interior seeds are not swallowed.",
+                                         Capped at the near-wall cell spacing (0.6× the mesh size): \
+                                         a larger peak displacement sweeps the moving obstacle \
+                                         through the frozen interior seeds and tangles the mesh, so \
+                                         the driver clamps it — the slider max is that clamp.",
                                     );
                                     ui.add(
                                         adaptive_slider(

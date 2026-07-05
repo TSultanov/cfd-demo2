@@ -499,3 +499,176 @@ fn allmach_pressure_ale_runs_on_channel_obstacle_cpu() {
 fn allmach_thermal_ale_runs_on_channel_obstacle_cpu() {
     run_obstacle_smoke(true);
 }
+
+// ---------------------------------------------------------------------------
+// Gate 4 (regression): an OSCILLATING obstacle whose amplitude exceeds the
+// near-wall cell spacing must NOT tangle the mesh / diverge.
+//
+// The GUI "moving obstacle" demo (allmach_thermal_ale + FlowCoupled interior +
+// a cross-stream oscillating obstacle + MovingWall BC) shipped a default
+// amplitude of 0.05 on a 0.025 mesh — 2× the cell spacing. With a FIXED seed
+// count the frozen/flow interior seeds adjacent to the wall do not step aside,
+// so a wall whose PEAK displacement exceeds the cell spacing sweeps THROUGH them
+// and swallows them: the clipped near-wall cells collapse/invert and the
+// swept-quad telescoping identity fails (`swept_mesh_fluxes` errors out of
+// `step`) a few real-time seconds in — the reported "diverges + weird remeshing"
+// bug. `MovingMeshDriver::set_boundary_motion` now clamps an `Oscillation`
+// amplitude to `OSC_AMPLITUDE_CELL_FRACTION × min_cell_size`, enforcing the
+// documented `amplitude < cell spacing` anti-swallow contract for every caller.
+//
+// Part A is a direct unit check of the clamp; Part B is the end-to-end smoke
+// that a GUI-scale (2× cell) requested amplitude now runs bounded through the
+// full moving loop where it used to tangle (~step 75 on this mesh).
+// ---------------------------------------------------------------------------
+
+use cfd2::sim::{BoundaryMotionSpec, OscAxis, OSC_AMPLITUDE_CELL_FRACTION};
+
+/// The GUI ChannelObstacle geometry + a uniform CVT at `cell` spacing.
+fn obstacle_cvt(cell: f64) -> cfd2::meshgen::meshless::CvtMeshSeeds {
+    let geo = ChannelWithObstacle {
+        length: 3.0,
+        height: 1.0,
+        obstacle_center: Point2::new(1.0, 0.51),
+        obstacle_radius: 0.1,
+    };
+    let domain = Vector2::new(3.0, 1.0);
+    generate_cvt_mesh_with_seeds(&geo, cell, cell, 1.0, domain, &LloydConfig::default())
+}
+
+#[test]
+fn oscillating_obstacle_amplitude_is_clamped_to_cell_spacing() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    let result = std::panic::catch_unwind(|| {
+        let cell = 0.05;
+        let cvt = obstacle_cvt(cell);
+        let n = cvt.mesh.num_cells();
+        let params = test_params(TimeScheme::BDF2, PSI);
+        let mut moving = pollster::block_on(MovingMeshDriver::build_with_model(
+            cvt,
+            allmach_thermal_ale_model().expect("thermal ale"),
+            &params,
+            MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+            &vec![(params.inlet_velocity as f64, 0.0); n],
+            &vec![0.0; n],
+            None,
+            None,
+        ))
+        .expect("moving driver build");
+
+        let cap = OSC_AMPLITUDE_CELL_FRACTION * cell;
+
+        // A grossly-too-large amplitude (6× cell) is clamped down to the cap.
+        moving.set_boundary_motion(BoundaryMotionSpec::Oscillation {
+            loop_index: 1,
+            amplitude: 6.0 * cell,
+            omega: std::f64::consts::TAU * 0.5,
+            axis: OscAxis::CrossStream,
+        });
+        match moving.boundary_motion() {
+            BoundaryMotionSpec::Oscillation { amplitude, .. } => assert!(
+                (amplitude - cap).abs() <= 1e-12,
+                "too-large amplitude not clamped: {amplitude} vs cap {cap}"
+            ),
+            _ => panic!("expected Oscillation"),
+        }
+
+        // An in-envelope amplitude (0.3× cell, well below the cap) passes through
+        // unchanged — the clamp never tightens a validated-scale request.
+        let small = 0.3 * cell;
+        moving.set_boundary_motion(BoundaryMotionSpec::Oscillation {
+            loop_index: 1,
+            amplitude: small,
+            omega: std::f64::consts::TAU * 0.5,
+            axis: OscAxis::CrossStream,
+        });
+        match moving.boundary_motion() {
+            BoundaryMotionSpec::Oscillation { amplitude, .. } => assert!(
+                (amplitude - small).abs() <= 1e-12,
+                "in-envelope amplitude perturbed: {amplitude} vs {small}"
+            ),
+            _ => panic!("expected Oscillation"),
+        }
+        println!("[allmach-ale-osc-clamp] cap = {cap:.4} (= {OSC_AMPLITUDE_CELL_FRACTION}×{cell})");
+    });
+    std::env::remove_var("CFD2_BACKEND");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+#[test]
+fn oscillating_obstacle_gui_scale_stays_bounded_cpu() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    // Transpiled engine keeps this real-geometry moving run fast enough for CI
+    // (the physics is engine-independent; the zero-flux gate covers interpreter).
+    std::env::set_var("CFD2_CPU_ENGINE", "transpiled");
+    let result = std::panic::catch_unwind(|| {
+        // ChannelObstacle at a moderate cell spacing (kept coarse enough for CI;
+        // the swallow trigger is the amplitude/cell RATIO, not the absolute size).
+        let cell = 0.05;
+        let cvt = obstacle_cvt(cell);
+        let n = cvt.mesh.num_cells();
+        let mut params = test_params(TimeScheme::BDF2, PSI);
+        params.inlet_velocity = 0.011; // ALLMACH obstacle default (Re≈150 shed)
+        params.viscosity = 1.81e-5;
+        params.density = 1.225;
+
+        let mut moving = pollster::block_on(MovingMeshDriver::build_with_model(
+            cvt,
+            allmach_thermal_ale_model().expect("thermal ale"),
+            &params,
+            MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+            &vec![(params.inlet_velocity as f64, 0.0); n],
+            &vec![0.0; n],
+            None,
+            None,
+        ))
+        .expect("moving driver build");
+        moving.driver_mut().apply_params(&params);
+        // The shipped GUI-default amplitude: 2× the cell spacing. Pre-fix this
+        // tangled the near-wall mesh at ~step 75; the clamp caps it to
+        // OSC_AMPLITUDE_CELL_FRACTION×cell so the run stays bounded.
+        moving.set_boundary_motion(BoundaryMotionSpec::Oscillation {
+            loop_index: 1,
+            amplitude: 2.0 * cell,
+            omega: std::f64::consts::TAU * 0.5,
+            axis: OscAxis::CrossStream,
+        });
+        moving.set_moving_wall_bc(true);
+
+        let layout = moving.driver().solver().model().state_layout.clone();
+        let stride = layout.stride() as usize;
+        let u_off = layout.offset_for("U").expect("U offset") as usize;
+
+        // Past the pre-fix tangle step (~75) with margin.
+        const STEPS: usize = 120;
+        let mut max_u = 0.0f32;
+        for step in 0..STEPS {
+            let (outcome, stats) = moving.step(false).unwrap_or_else(|e| {
+                panic!("oscillating-obstacle step {step} tangled/failed: {e}")
+            });
+            assert!(outcome.diverged.is_none(), "step {step} diverged: {:?}", outcome.diverged);
+            assert!(stats.scl_defect < 1e-6, "step {step} SCL defect {:.3e}", stats.scl_defect);
+            let state = pollster::block_on(moving.driver().solver().read_state_f32());
+            for c in 0..n {
+                let (ux, uy) = (state[c * stride + u_off], state[c * stride + u_off + 1]);
+                assert!(ux.is_finite() && uy.is_finite(), "step {step}: non-finite U");
+                max_u = max_u.max(ux.hypot(uy));
+            }
+        }
+        // A healthy forced wake stays within a few× the max wall speed
+        // (amplitude_clamped × omega ≈ 0.03 × π ≈ 0.094).
+        assert!(max_u < 2.0, "max|U| {max_u:.3e} unbounded over {STEPS} steps");
+        println!(
+            "[allmach-ale-osc-obstacle] {STEPS} steps bounded on channel-obstacle, \
+             max|U| = {max_u:.3e}, cells = {n}"
+        );
+    });
+    std::env::remove_var("CFD2_BACKEND");
+    std::env::remove_var("CFD2_CPU_ENGINE");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}

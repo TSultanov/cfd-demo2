@@ -48,6 +48,7 @@
 //! absolute-f32 quantum (~1e-7 at x≈2) is larger than the 1e-5·h parity
 //! tolerance, while relative coordinates are O(h) with ~1e-10 ulps.
 
+mod cell_geom;
 mod csr_gpu;
 mod derive;
 mod emit;
@@ -56,6 +57,7 @@ mod lloyd;
 mod scan;
 mod wgsl;
 
+pub use cell_geom::{CellGeometry, GpuCellGeometry};
 pub use csr_gpu::{GpuCsr, GpuCsrArrays};
 pub use derive::{DeriveFaces, DerivedFaceOffsets, ScanOffsets};
 pub use emit::{EmitFaces, GpuFaceGeometry};

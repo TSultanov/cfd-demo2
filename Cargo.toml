@@ -216,6 +216,11 @@ name = "ui_incompressible_air_smoke_test"
 path = "tests/ui_incompressible_air_smoke_test.rs"
 required-features = ["meshgen", "dev-tests"]
 
+[[test]]
+name = "moving_mesh_gui_test"
+path = "tests/moving_mesh_gui_test.rs"
+required-features = ["ui"]
+
 [[bench]]
 name = "mesh_benchmark"
 harness = false

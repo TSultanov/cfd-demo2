@@ -4,7 +4,8 @@ use crate::solver::mesh::{
     BoundaryType, ChannelWithObstacle, LloydConfig, Mesh, Nozzle,
 };
 use crate::solver::model::{
-    all_models, compressible_model_with_eos, ModelPreconditionerSpec, ModelSpec,
+    all_models, compressible_model_with_eos, incompressible_momentum_ale_model,
+    ModelPreconditionerSpec, ModelSpec,
 };
 use crate::solver::scheme::Scheme;
 use crate::solver::{
@@ -20,7 +21,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
-use crate::sim::{DivergeReason, DriverBuild, RuntimeParams, SolverDriver};
+use crate::meshgen::meshless::{generate_cvt_mesh_with_seeds, CvtMeshSeeds};
+use crate::sim::{
+    DivergeReason, DriverBuild, MeshMotionSpec, MovingMeshDriver, MovingMeshStats, RuntimeParams,
+    SolverDriver,
+};
 
 /// Rendering mode for the mesh visualization
 #[derive(PartialEq, Clone, Copy)]
@@ -96,6 +101,68 @@ impl Default for MeshType {
     }
 }
 
+/// Seed-motion law for the moving-mesh (ALE) GUI mode. Maps to
+/// [`MeshMotionSpec`]; the analytic-swirl variant supplies the concrete
+/// [`prescribed_swirl`] function pointer the driver requires.
+#[derive(PartialEq, Clone, Copy)]
+enum MovingMotionChoice {
+    /// Seeds never move — the do-no-harm anchor (a regen from an unchanged seed
+    /// set reproduces the mesh byte-for-byte, so the swept fluxes are zero).
+    Frozen,
+    /// A fixed analytic swirl, independent of the flow (prescribed motion).
+    PrescribedSwirl,
+    /// Seeds follow the flow (cell velocity + AREPO centroid steering).
+    FlowCoupled,
+}
+
+impl MovingMotionChoice {
+    const ALL: [MovingMotionChoice; 3] = [
+        MovingMotionChoice::Frozen,
+        MovingMotionChoice::PrescribedSwirl,
+        MovingMotionChoice::FlowCoupled,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            MovingMotionChoice::Frozen => "Frozen (do-no-harm)",
+            MovingMotionChoice::PrescribedSwirl => "Prescribed swirl",
+            MovingMotionChoice::FlowCoupled => "Flow-coupled",
+        }
+    }
+
+    /// Convert to the driver's motion spec. `regularization` is the FlowCoupled
+    /// centroid-steering strength χ (ignored by the other variants).
+    fn to_spec(self, regularization: f64) -> MeshMotionSpec {
+        match self {
+            MovingMotionChoice::Frozen => MeshMotionSpec::Frozen,
+            MovingMotionChoice::PrescribedSwirl => MeshMotionSpec::Prescribed(prescribed_swirl),
+            MovingMotionChoice::FlowCoupled => MeshMotionSpec::FlowCoupled { regularization },
+        }
+    }
+}
+
+impl Default for MovingMotionChoice {
+    fn default() -> Self {
+        Self::FlowCoupled
+    }
+}
+
+/// A small, bounded analytic swirl about the domain mid-line, used by the GUI's
+/// "Prescribed swirl" moving-mesh motion. Rotates each interior seed by a
+/// time-oscillating angle that decays away from the centre, so the mesh visibly
+/// deforms and relaxes without depending on the flow solution — a demonstrator
+/// for the prescribed-motion path. The amplitude is kept tiny so the per-step
+/// seed displacement stays inside the swept-quad / flip-remap regime.
+fn prescribed_swirl(seed0: [f64; 2], t: f64) -> [f64; 2] {
+    let (cx, cy) = (1.0, 0.5);
+    let dx = seed0[0] - cx;
+    let dy = seed0[1] - cy;
+    let r2 = dx * dx + dy * dy;
+    let ang = 0.15 * t.sin() * (-2.0 * r2).exp();
+    let (s, c) = ang.sin_cos();
+    [cx + c * dx - s * dy, cy + s * dx + c * dy]
+}
+
 #[derive(PartialEq, Clone, Copy)]
 enum PlotField {
     Pressure,
@@ -144,13 +211,19 @@ struct SolverInitRequest {
     // (built via `current_runtime_params`) that the shared `SolverDriver` consumes.
     current_fluid: Fluid,
     params: RuntimeParams,
+    // Moving-mesh (ALE) request: when `enable_moving_mesh`, build a
+    // `MovingMeshDriver` (forcing the CVT mesh + incompressible ALE model)
+    // instead of a plain `SolverDriver`.
+    enable_moving_mesh: bool,
+    moving_motion: MovingMotionChoice,
+    moving_regularization: f64,
     wgpu_device: Option<wgpu::Device>,
     wgpu_queue: Option<wgpu::Queue>,
     target_format: wgpu::TextureFormat,
 }
 
 struct SolverInitOutcome {
-    driver: SolverDriver,
+    mode: SolverMode,
     mesh: Mesh,
     cached_cells: Vec<Vec<[f64; 2]>>,
     actual_min_cell_size: f64,
@@ -192,9 +265,40 @@ struct CachedGpuStats {
     step_time_ms: f32,
 }
 
+/// What the solver worker is driving. The `Static` arm is the pre-existing
+/// [`SolverDriver`] path (byte-unchanged — every existing model/mesh/backend
+/// selection runs through it exactly as before). `MovingMesh` is the additive,
+/// opt-in ALE path: a [`MovingMeshDriver`] that re-generates the CVT-Voronoi mesh
+/// each step. Both delegate field/stats/params access to the wrapped
+/// [`SolverDriver`] via [`SolverMode::driver`]/[`SolverMode::driver_mut`], so the
+/// worker's telemetry, trace, and `apply_params` plumbing is shared and the step
+/// dispatch is the only fork.
+enum SolverMode {
+    Static(SolverDriver),
+    MovingMesh(MovingMeshDriver),
+}
+
+impl SolverMode {
+    /// The wrapped solver driver (shared telemetry/params/trace access).
+    fn driver(&self) -> &SolverDriver {
+        match self {
+            SolverMode::Static(d) => d,
+            SolverMode::MovingMesh(m) => m.driver(),
+        }
+    }
+
+    /// Mutable access to the wrapped solver driver.
+    fn driver_mut(&mut self) -> &mut SolverDriver {
+        match self {
+            SolverMode::Static(d) => d,
+            SolverMode::MovingMesh(m) => m.driver_mut(),
+        }
+    }
+}
+
 enum SolverWorkerCommand {
     SetSolver {
-        driver: SolverDriver,
+        mode: SolverMode,
         viz_field: Option<VizFieldBuffers>,
     },
     ClearSolver,
@@ -219,6 +323,15 @@ enum SolverWorkerEvent {
         u: Vec<(f64, f64)>,
         p: Vec<f64>,
         stats: CachedGpuStats,
+    },
+    /// The moving-mesh (ALE) path re-generated the mesh this step: carries the
+    /// re-tessellation input (per-cell polygons, seed `i` == cell `i`) and the
+    /// per-step moving-mesh telemetry. Emitted every moving step; the UI thread
+    /// coalesces (only the latest matters) and re-tessellates at the frame
+    /// boundary. Empty on the static path (never sent).
+    MeshRefreshed {
+        cached_cells: Vec<Vec<[f64; 2]>>,
+        stats: MovingMeshStats,
     },
     Message(String),
     Error(String),
@@ -260,6 +373,86 @@ impl Drop for SolverWorkerHandle {
             let _ = handle.join();
         }
     }
+}
+
+/// Observations from a headless moving-mesh worker smoke run (see
+/// [`moving_mesh_worker_smoke`]).
+#[doc(hidden)]
+#[derive(Default, Debug)]
+pub struct MovingWorkerSmoke {
+    /// Number of `MeshRefreshed` events the worker emitted.
+    pub mesh_refresh_events: usize,
+    /// Min / max cell count across all emitted refreshes (should be equal —
+    /// fixed-seed v1). `None` if no refresh was seen.
+    pub min_cells: Option<usize>,
+    pub max_cells: Option<usize>,
+    /// A refresh carried an empty / degenerate (< 3 vertex) polygon set.
+    pub saw_empty_cells: bool,
+    /// A refresh carried a non-finite `MovingMeshStats` field.
+    pub saw_nonfinite_stats: bool,
+    /// The worker reported an error (step failure / divergence).
+    pub error: Option<String>,
+}
+
+/// Are the numeric [`MovingMeshStats`] fields all finite? (The discrete counts
+/// are always finite; this guards the float telemetry the gates watch.)
+fn moving_stats_finite(s: &MovingMeshStats) -> bool {
+    s.plan_ms.is_finite()
+        && s.regen_ms.is_finite()
+        && s.swept_ms.is_finite()
+        && s.refresh_ms.is_finite()
+        && s.scl_defect.is_finite()
+        && s.identity_err.is_finite()
+        && s.max_skew.is_finite()
+        && s.flip_defect.is_finite()
+        && s.dt.is_finite()
+}
+
+/// Headless test hook (no window): drive the *real* private solver worker through
+/// the moving-mesh message path — `SetSolver { MovingMesh }`, `SetRunning(true)`,
+/// collect `MeshRefreshed` events for `run_ms`, then shut it down. Returns
+/// per-run observations so `tests/moving_mesh_gui_test.rs` can assert the actual
+/// channel plumbing without a display. `pub` only because the worker + command /
+/// event enums are otherwise private to this module.
+#[doc(hidden)]
+pub fn moving_mesh_worker_smoke(moving: MovingMeshDriver, run_ms: u64) -> MovingWorkerSmoke {
+    use std::time::{Duration, Instant};
+
+    let handle = SolverWorkerHandle::spawn();
+    handle.send(SolverWorkerCommand::SetSolver {
+        mode: SolverMode::MovingMesh(moving),
+        viz_field: None,
+    });
+    handle.send(SolverWorkerCommand::SetRunning(true));
+
+    let mut smoke = MovingWorkerSmoke::default();
+    let deadline = Instant::now() + Duration::from_millis(run_ms);
+    while Instant::now() < deadline {
+        while let Ok(evt) = handle.rx.try_recv() {
+            match evt {
+                SolverWorkerEvent::MeshRefreshed {
+                    cached_cells,
+                    stats,
+                } => {
+                    smoke.mesh_refresh_events += 1;
+                    if cached_cells.is_empty() || cached_cells.iter().any(|c| c.len() < 3) {
+                        smoke.saw_empty_cells = true;
+                    }
+                    let n = cached_cells.len();
+                    smoke.min_cells = Some(smoke.min_cells.map_or(n, |m| m.min(n)));
+                    smoke.max_cells = Some(smoke.max_cells.map_or(n, |m| m.max(n)));
+                    if !moving_stats_finite(&stats) {
+                        smoke.saw_nonfinite_stats = true;
+                    }
+                }
+                SolverWorkerEvent::Error(e) => smoke.error = Some(e),
+                _ => {}
+            }
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    // `handle` drops here: sends Shutdown + joins the worker thread.
+    smoke
 }
 
 /// Compute-backend dropdown choice (env-driven; applied on Initialize / Reset).
@@ -311,6 +504,17 @@ pub struct CFDApp {
     mesh: Option<Mesh>,
     cached_cells: Vec<Vec<[f64; 2]>>,
     actual_min_cell_size: f64,
+    // --- Moving-mesh (ALE) opt-in mode. Additive; the static path ignores these. ---
+    /// Enable the moving-mesh (ALE) path on the next Initialize / Reset. Only
+    /// selectable on a CPU backend (GPU moving mesh is roadmap M5). Enabling it
+    /// steers the mesh to Voronoi (CVT) and the model to incompressible ALE.
+    enable_moving_mesh: bool,
+    /// How the CVT seeds move each step (Frozen / prescribed swirl / flow-coupled).
+    moving_motion: MovingMotionChoice,
+    /// FlowCoupled centroid-steering strength χ (0 = pure flow advection).
+    moving_regularization: f64,
+    /// Latest per-step moving-mesh telemetry (from `MeshRefreshed`), for display.
+    cached_moving_stats: Option<MovingMeshStats>,
     min_cell_size: f64,
     max_cell_size: f64,
     growth_rate: f64,
@@ -464,6 +668,10 @@ impl CFDApp {
             mesh: None,
             cached_cells: Vec::new(),
             actual_min_cell_size: 0.01,
+            enable_moving_mesh: false,
+            moving_motion: MovingMotionChoice::default(),
+            moving_regularization: 0.5,
+            cached_moving_stats: None,
             min_cell_size: 0.025,
             max_cell_size: 0.025,
             growth_rate: 1.2,
@@ -816,6 +1024,9 @@ impl CFDApp {
             growth_rate: self.growth_rate,
             current_fluid: self.current_fluid.clone(),
             params: self.current_runtime_params(),
+            enable_moving_mesh: self.enable_moving_mesh,
+            moving_motion: self.moving_motion,
+            moving_regularization: self.moving_regularization,
             wgpu_device: self.wgpu_device.clone(),
             wgpu_queue: self.wgpu_queue.clone(),
             target_format: self.target_format,
@@ -873,6 +1084,7 @@ impl CFDApp {
         self.snapshot_seq = 0;
         self.invalidate_plot_cache();
         self.cached_gpu_stats = CachedGpuStats::default();
+        self.cached_moving_stats = None;
         self.cached_error = None;
         self.cached_message = None;
         self.last_init_trace_events.clear();
@@ -1399,6 +1611,20 @@ impl CFDApp {
                     self.cached_gpu_stats = stats;
                     self.cached_error = None;
                 }
+                SolverWorkerEvent::MeshRefreshed {
+                    cached_cells,
+                    stats,
+                } => {
+                    // The moving mesh re-generated: adopt the new polygons (the
+                    // egui-plot fallback renders them directly; the GPU renderer's
+                    // per-refresh re-tessellation + capacity growth lands in a
+                    // later stage). Coalesced — only the latest per frame matters.
+                    self.cached_cells = cached_cells;
+                    self.cached_moving_stats = Some(stats);
+                    self.snapshot_seq = self.snapshot_seq.wrapping_add(1);
+                    self.invalidate_plot_cache();
+                    self.cached_error = None;
+                }
                 SolverWorkerEvent::Message(message) => {
                     self.cached_message = Some(message);
                 }
@@ -1430,7 +1656,7 @@ impl CFDApp {
 
     fn apply_init_outcome(&mut self, outcome: SolverInitOutcome) {
         let SolverInitOutcome {
-            driver,
+            mode,
             mesh,
             cached_cells,
             actual_min_cell_size,
@@ -1465,11 +1691,12 @@ impl CFDApp {
         self.last_init_trace_events = trace_init_events;
 
         self.cached_gpu_stats = CachedGpuStats::default();
+        self.cached_moving_stats = None;
         self.cached_error = None;
         self.cached_message = None;
 
         self.solver_worker.send(SolverWorkerCommand::SetSolver {
-            driver,
+            mode,
             viz_field,
         });
         self.sync_worker_params();
@@ -1485,96 +1712,20 @@ impl CFDApp {
         let init_start = std::time::Instant::now();
         let mut trace_init_events: Vec<tracefmt::TraceInitEvent> = Vec::new();
 
-        let mesh = CFDApp::build_mesh_with(
-            request.selected_geometry,
-            request.mesh_type,
-            request.min_cell_size,
-            request.max_cell_size,
-            request.growth_rate,
-            &mut trace_init_events,
-        );
-
-        let fields_start = std::time::Instant::now();
-        let n_cells = mesh.num_cells();
-        let initial_u = CFDApp::build_initial_velocity_with(
-            &mesh,
-            request.selected_geometry,
-            request.max_cell_size,
-            request.params.inlet_velocity,
-        );
-        let initial_p = vec![0.0; n_cells];
-        CFDApp::push_trace_init_event(
-            &mut trace_init_events,
-            "init.fields",
-            fields_start.elapsed(),
-            Some(format!("cells={n_cells}")),
-        );
-
-        let model = if request.model_id == "compressible" {
-            compressible_model_with_eos(request.current_fluid.eos)?
+        // Build the mesh + driver. The static path (byte-unchanged) builds the
+        // selected mesh + model and a plain `SolverDriver`; the moving-mesh path
+        // builds a CVT mesh WITH its seeds and wraps a `MovingMeshDriver` around
+        // the incompressible ALE model. Both yield the same downstream tuple, so
+        // the renderer / viz / return tail below is shared.
+        let (mode, mesh, cached_u, cached_p, mut model_caps) = if request.enable_moving_mesh {
+            CFDApp::build_moving_init(&request, &mut trace_init_events)?
         } else {
-            all_models()?
-                .into_iter()
-                .find(|m| m.id == request.model_id)
-                .ok_or_else(|| format!("unknown model id '{}'", request.model_id))?
+            CFDApp::build_static_init(&request, &mut trace_init_events)?
         };
-
-        let named_params = model.named_param_keys();
-        let supports_preconditioner = named_params.iter().any(|&k| k == "preconditioner");
-
-        // Build initial model_caps from layout (will be updated after solver creation
-        // to use PortRegistry-based ui_ports when available)
-        let ui_ports_fallback = UiPortSet::from_layout(&model.state_layout);
-
-        let mut model_caps = ModelUiCaps {
-            plot_stride: ui_ports_fallback.stride,
-            plot_u_offset: ui_ports_fallback.u_offset.unwrap_or(0),
-            plot_p_offset: ui_ports_fallback.p_offset.unwrap_or(0),
-            plot_has_u: ui_ports_fallback.u_offset.is_some(),
-            plot_has_p: ui_ports_fallback.p_offset.is_some(),
-            supports_preconditioner,
-            model_owns_preconditioner: model
-                .linear_solver
-                .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
-                .unwrap_or(false),
-            unknowns_per_cell: model.system.unknowns_per_cell(),
-            supports_outer_iters: named_params.iter().any(|&k| k == "outer_iters"),
-            supports_dtau: named_params.iter().any(|&k| k == "dtau"),
-            supports_low_mach: named_params.iter().any(|&k| k == "low_mach.model"),
-            supports_alpha_u: named_params.iter().any(|&k| k == "alpha_u"),
-            supports_alpha_p: named_params.iter().any(|&k| k == "alpha_p"),
-            supports_eos_tuning: named_params.iter().any(|&k| k == "eos.gamma"),
-        };
-
-        // The shared driver derives the `SolverConfig` (stepping mode + effective
-        // preconditioner), constructs the solver, and applies the phase-1 setters +
-        // initial / boundary conditions. Phase-2 knobs arrive via `sync_worker_params`
-        // (→ `apply_params`) after `SetSolver`, exactly as before.
-        let solver_start = std::time::Instant::now();
-        let init_guard = tracefmt::install_init_collector(&mut trace_init_events);
-        let DriverBuild {
-            driver,
-            cached_u,
-            cached_p,
-        } = pollster::block_on(SolverDriver::build(
-            &mesh,
-            model,
-            &request.params,
-            &initial_u,
-            &initial_p,
-            request.wgpu_device.clone(),
-            request.wgpu_queue.clone(),
-        ))?;
-        drop(init_guard);
-        CFDApp::push_trace_init_event(
-            &mut trace_init_events,
-            "solver.new",
-            solver_start.elapsed(),
-            Some(format!("model_id={} cells={}", request.model_id, n_cells)),
-        );
+        let n_cells = mesh.num_cells();
 
         // Update model_caps from the solver's ui_ports() (prefers PortRegistry over StateLayout)
-        let ui_ports = driver.solver().ui_ports();
+        let ui_ports = mode.driver().solver().ui_ports();
         model_caps.plot_stride = ui_ports.stride;
         model_caps.plot_u_offset = ui_ports.u_offset.unwrap_or(0);
         model_caps.plot_p_offset = ui_ports.p_offset.unwrap_or(0);
@@ -1618,21 +1769,21 @@ impl CFDApp {
                     label: Some("cfd_viz:init_copy_state"),
                 });
                 encoder.copy_buffer_to_buffer(
-                    driver.solver().state_buffer(),
+                    mode.driver().solver().state_buffer(),
                     0,
                     &viz_buffer,
                     0,
                     state_size_bytes,
                 );
                 encoder.copy_buffer_to_buffer(
-                    driver.solver().state_buffer(),
+                    mode.driver().solver().state_buffer(),
                     0,
                     &viz_buffer_1,
                     0,
                     state_size_bytes,
                 );
                 encoder.copy_buffer_to_buffer(
-                    driver.solver().state_buffer(),
+                    mode.driver().solver().state_buffer(),
                     0,
                     &viz_buffer_2,
                     0,
@@ -1699,7 +1850,7 @@ impl CFDApp {
         );
 
         Ok(SolverInitOutcome {
-            driver,
+            mode,
             mesh,
             cached_cells,
             actual_min_cell_size,
@@ -1710,6 +1861,288 @@ impl CFDApp {
             viz_field,
             trace_init_events,
         })
+    }
+
+    /// Initial (layout-derived) UI capabilities for a model. Refined from the
+    /// built solver's `ui_ports()` afterwards. Shared by the static and
+    /// moving-mesh init paths so both report caps identically.
+    fn model_ui_caps(model: &ModelSpec) -> ModelUiCaps {
+        let named_params = model.named_param_keys();
+        let ui_ports_fallback = UiPortSet::from_layout(&model.state_layout);
+        ModelUiCaps {
+            plot_stride: ui_ports_fallback.stride,
+            plot_u_offset: ui_ports_fallback.u_offset.unwrap_or(0),
+            plot_p_offset: ui_ports_fallback.p_offset.unwrap_or(0),
+            plot_has_u: ui_ports_fallback.u_offset.is_some(),
+            plot_has_p: ui_ports_fallback.p_offset.is_some(),
+            supports_preconditioner: named_params.iter().any(|&k| k == "preconditioner"),
+            model_owns_preconditioner: model
+                .linear_solver
+                .map(|s| matches!(s.preconditioner, ModelPreconditionerSpec::Schur { .. }))
+                .unwrap_or(false),
+            unknowns_per_cell: model.system.unknowns_per_cell(),
+            supports_outer_iters: named_params.iter().any(|&k| k == "outer_iters"),
+            supports_dtau: named_params.iter().any(|&k| k == "dtau"),
+            supports_low_mach: named_params.iter().any(|&k| k == "low_mach.model"),
+            supports_alpha_u: named_params.iter().any(|&k| k == "alpha_u"),
+            supports_alpha_p: named_params.iter().any(|&k| k == "alpha_p"),
+            supports_eos_tuning: named_params.iter().any(|&k| k == "eos.gamma"),
+        }
+    }
+
+    /// Static (non-moving) init path — the pre-existing behaviour, factored out
+    /// verbatim so the moving-mesh branch is purely additive: build the selected
+    /// mesh + model and a plain `SolverDriver`.
+    fn build_static_init(
+        request: &SolverInitRequest,
+        trace_init_events: &mut Vec<tracefmt::TraceInitEvent>,
+    ) -> Result<(SolverMode, Mesh, Vec<(f64, f64)>, Vec<f64>, ModelUiCaps), String> {
+        let mesh = CFDApp::build_mesh_with(
+            request.selected_geometry,
+            request.mesh_type,
+            request.min_cell_size,
+            request.max_cell_size,
+            request.growth_rate,
+            trace_init_events,
+        );
+
+        let fields_start = std::time::Instant::now();
+        let n_cells = mesh.num_cells();
+        let initial_u = CFDApp::build_initial_velocity_with(
+            &mesh,
+            request.selected_geometry,
+            request.max_cell_size,
+            request.params.inlet_velocity,
+        );
+        let initial_p = vec![0.0; n_cells];
+        CFDApp::push_trace_init_event(
+            trace_init_events,
+            "init.fields",
+            fields_start.elapsed(),
+            Some(format!("cells={n_cells}")),
+        );
+
+        let model = if request.model_id == "compressible" {
+            compressible_model_with_eos(request.current_fluid.eos)?
+        } else {
+            all_models()?
+                .into_iter()
+                .find(|m| m.id == request.model_id)
+                .ok_or_else(|| format!("unknown model id '{}'", request.model_id))?
+        };
+        let model_caps = CFDApp::model_ui_caps(&model);
+
+        // The shared driver derives the `SolverConfig` (stepping mode + effective
+        // preconditioner), constructs the solver, and applies the phase-1 setters +
+        // initial / boundary conditions. Phase-2 knobs arrive via `sync_worker_params`
+        // (→ `apply_params`) after `SetSolver`, exactly as before.
+        let solver_start = std::time::Instant::now();
+        let init_guard = tracefmt::install_init_collector(trace_init_events);
+        let DriverBuild {
+            driver,
+            cached_u,
+            cached_p,
+        } = pollster::block_on(SolverDriver::build(
+            &mesh,
+            model,
+            &request.params,
+            &initial_u,
+            &initial_p,
+            request.wgpu_device.clone(),
+            request.wgpu_queue.clone(),
+        ))?;
+        drop(init_guard);
+        CFDApp::push_trace_init_event(
+            trace_init_events,
+            "solver.new",
+            solver_start.elapsed(),
+            Some(format!("model_id={} cells={}", request.model_id, n_cells)),
+        );
+
+        Ok((
+            SolverMode::Static(driver),
+            mesh,
+            cached_u,
+            cached_p,
+            model_caps,
+        ))
+    }
+
+    /// Moving-mesh (ALE) init path: build a CVT mesh WITH its authoritative seeds
+    /// and wrap a [`MovingMeshDriver`] around the incompressible ALE model
+    /// (CPU-first). The mesh type is forced to CVT-Voronoi and the model to
+    /// `incompressible_momentum_ale`; `adaptive_dt` is forced off (the swept mesh
+    /// fluxes are SCL-closed against a fixed dt — the driver rejects an adaptive
+    /// re-scale). `cached_u`/`cached_p` are the seeded IC (the driver's initial
+    /// state), used for the initial plot before the first readback.
+    fn build_moving_init(
+        request: &SolverInitRequest,
+        trace_init_events: &mut Vec<tracefmt::TraceInitEvent>,
+    ) -> Result<(SolverMode, Mesh, Vec<(f64, f64)>, Vec<f64>, ModelUiCaps), String> {
+        let cvt = CFDApp::build_cvt_seeds_with(
+            request.selected_geometry,
+            request.min_cell_size,
+            request.max_cell_size,
+            request.growth_rate,
+            trace_init_events,
+        );
+        // Keep a copy of the realized mesh for the outcome; `cvt` is consumed by
+        // `MovingMeshDriver::build`.
+        let mesh = cvt.mesh.clone();
+
+        let fields_start = std::time::Instant::now();
+        let n_cells = mesh.num_cells();
+        let initial_u = CFDApp::build_initial_velocity_with(
+            &mesh,
+            request.selected_geometry,
+            request.max_cell_size,
+            request.params.inlet_velocity,
+        );
+        let initial_p = vec![0.0; n_cells];
+        CFDApp::push_trace_init_event(
+            trace_init_events,
+            "init.fields",
+            fields_start.elapsed(),
+            Some(format!("cells={n_cells} (moving)")),
+        );
+
+        let model = incompressible_momentum_ale_model()?;
+        let model_caps = CFDApp::model_ui_caps(&model);
+
+        // Fixed dt for the ALE seam (adaptive re-scale would break the GCL).
+        let mut params = request.params;
+        params.adaptive_dt = false;
+        let motion = request.moving_motion.to_spec(request.moving_regularization);
+
+        let solver_start = std::time::Instant::now();
+        let init_guard = tracefmt::install_init_collector(trace_init_events);
+        let moving = pollster::block_on(MovingMeshDriver::build(
+            cvt,
+            &params,
+            motion,
+            &initial_u,
+            &initial_p,
+            request.wgpu_device.clone(),
+            request.wgpu_queue.clone(),
+        ))?;
+        drop(init_guard);
+        CFDApp::push_trace_init_event(
+            trace_init_events,
+            "solver.new",
+            solver_start.elapsed(),
+            Some(format!(
+                "model_id=incompressible_momentum_ale motion={} cells={}",
+                request.moving_motion.label(),
+                n_cells
+            )),
+        );
+
+        Ok((
+            SolverMode::MovingMesh(moving),
+            mesh,
+            initial_u,
+            initial_p,
+            model_caps,
+        ))
+    }
+
+    /// Build a CVT-Voronoi mesh together with its authoritative seed set
+    /// ([`CvtMeshSeeds`]) for the selected geometry — the moving-mesh driver owns
+    /// the seeds so it can advect + regenerate deterministically. Mirrors the
+    /// geometry construction + size sanitisation of [`build_mesh_with`] (same
+    /// `MIN_CELL_SIZE` floor so a hand-typed size cannot OOM the base grid), but
+    /// returns the seeds instead of discarding them.
+    fn build_cvt_seeds_with(
+        selected_geometry: GeometryType,
+        min_cell_size: f64,
+        max_cell_size: f64,
+        growth_rate: f64,
+        trace_init_events: &mut Vec<tracefmt::TraceInitEvent>,
+    ) -> CvtMeshSeeds {
+        const MIN_CELL_SIZE: f64 = 1e-3;
+        let max_cell_size = if max_cell_size.is_finite() {
+            max_cell_size.max(MIN_CELL_SIZE)
+        } else {
+            0.05
+        };
+        let min_cell_size = if min_cell_size.is_finite() {
+            min_cell_size.clamp(MIN_CELL_SIZE, max_cell_size)
+        } else {
+            max_cell_size
+        };
+        let growth_rate = if growth_rate.is_finite() {
+            growth_rate.max(1.0)
+        } else {
+            1.2
+        };
+        let lloyd = LloydConfig::default();
+        let gen_start = std::time::Instant::now();
+        let cvt = match selected_geometry {
+            GeometryType::BackwardsStep => {
+                let domain = Vector2::new(3.5, 1.0);
+                let geo = BackwardsStep {
+                    length: 3.5,
+                    height_inlet: 0.5,
+                    height_outlet: 1.0,
+                    step_x: 0.5,
+                };
+                generate_cvt_mesh_with_seeds(
+                    &geo,
+                    min_cell_size,
+                    max_cell_size,
+                    growth_rate,
+                    domain,
+                    &lloyd,
+                )
+            }
+            GeometryType::ChannelObstacle => {
+                let domain = Vector2::new(3.0, 1.0);
+                let geo = ChannelWithObstacle {
+                    length: 3.0,
+                    height: 1.0,
+                    obstacle_center: Point2::new(1.0, 0.51),
+                    obstacle_radius: 0.1,
+                };
+                generate_cvt_mesh_with_seeds(
+                    &geo,
+                    min_cell_size,
+                    max_cell_size,
+                    growth_rate,
+                    domain,
+                    &lloyd,
+                )
+            }
+            GeometryType::Nozzle => {
+                let domain = Vector2::new(3.0, 1.0);
+                let geo = Nozzle {
+                    length: 3.0,
+                    height: 1.0,
+                    throat_height: 0.40,
+                    throat_frac: 0.40,
+                    exit_height: 0.80,
+                };
+                generate_cvt_mesh_with_seeds(
+                    &geo,
+                    min_cell_size,
+                    max_cell_size,
+                    growth_rate,
+                    domain,
+                    &lloyd,
+                )
+            }
+        };
+        CFDApp::push_trace_init_event(
+            trace_init_events,
+            "mesh.generate.voronoi_cvt.moving",
+            gen_start.elapsed(),
+            Some(format!(
+                "min={min_cell_size:.4e} max={max_cell_size:.4e} growth={growth_rate:.3} cells={} faces={} seeds={}",
+                cvt.mesh.num_cells(),
+                cvt.mesh.num_faces(),
+                cvt.seeds.len()
+            )),
+        );
+        cvt
     }
 
     fn invalidate_plot_cache(&mut self) {
@@ -2201,6 +2634,64 @@ impl eframe::App for CFDApp {
                                  skewness (no post-generation vertex smoothing).",
                             );
                     });
+
+                        ui.group(|ui| {
+                        ui.label("Moving Mesh (ALE)");
+                        // CPU-first: the moving solver is correct on the CPU backend
+                        // (GPU moving mesh is roadmap M5). Gate the toggle to CPU and
+                        // steer the mesh/model selections the moving path requires.
+                        let cpu = self.backend.is_cpu();
+                        let mut enable = self.enable_moving_mesh;
+                        ui.add_enabled(
+                            cpu,
+                            egui::Checkbox::new(&mut enable, "Enable Moving Mesh (ALE)"),
+                        )
+                        .on_hover_text(if cpu {
+                            "Advect the CVT-Voronoi mesh with the flow (CPU incompressible \
+                             ALE). Locks Mesh Type to Voronoi (CVT) and the model to \
+                             incompressible ALE, and pins a fixed timestep. Applied on \
+                             Initialize / Reset."
+                        } else {
+                            "GPU moving mesh is not yet supported (roadmap M5). Select a CPU \
+                             compute backend to enable the moving-mesh path."
+                        });
+                        if enable != self.enable_moving_mesh {
+                            self.enable_moving_mesh = enable;
+                            if enable {
+                                // Steer the dependent selections; the user then clicks
+                                // Initialize / Reset (mesh changes rebuild, as ever).
+                                self.mesh_type = MeshType::VoronoiCvt;
+                                self.model_id = "incompressible_momentum_ale";
+                                self.adaptive_dt = false;
+                                self.refresh_model_caps();
+                            }
+                        }
+                        if self.enable_moving_mesh && cpu {
+                            egui::ComboBox::from_label("Seed motion")
+                                .selected_text(self.moving_motion.label())
+                                .show_ui(ui, |ui| {
+                                    for choice in MovingMotionChoice::ALL {
+                                        ui.selectable_value(
+                                            &mut self.moving_motion,
+                                            choice,
+                                            choice.label(),
+                                        );
+                                    }
+                                });
+                            if self.moving_motion == MovingMotionChoice::FlowCoupled {
+                                ui.add(
+                                    adaptive_slider(&mut self.moving_regularization, 0.0..=2.0)
+                                        .text("Regularization χ"),
+                                )
+                                .on_hover_text(
+                                    "Centroid-steering strength for flow-coupled motion: \
+                                     0 = pure flow advection; higher pulls seeds toward \
+                                     cell centroids to hold mesh quality.",
+                                );
+                            }
+                            ui.label("Applied on Initialize / Reset.");
+                        }
+                        });
 
                         ui.group(|ui| {
                         ui.label("Fluid Properties");
@@ -2911,6 +3402,12 @@ impl eframe::App for CFDApp {
                                  levels — a rounding-level result change, fastest \
                                  on solve-heavy runs.",
                             );
+                        // Moving mesh is CPU-only (GPU moving is M5): a switch to the
+                        // GPU backend disables it so init never takes the moving path
+                        // on the GPU.
+                        if !self.backend.is_cpu() {
+                            self.enable_moving_mesh = false;
+                        }
                         if self.backend.is_cpu() {
                             ui.add(
                                 adaptive_slider(&mut self.cpu_threads, 1..=16).text("Cores"),
@@ -3026,6 +3523,29 @@ impl eframe::App for CFDApp {
                             ));
                         }
                         ui.label(format!("Step time: {:.1} ms", stats.step_time_ms));
+
+                        // Moving-mesh (ALE) per-step telemetry, when active.
+                        if let Some(m) = &self.cached_moving_stats {
+                            ui.separator();
+                            ui.label(format!(
+                                "ALE mesh: {} cells, {} faces{}",
+                                m.n_cells,
+                                m.n_faces,
+                                if m.flipped {
+                                    format!(" (flip: {} born / {} died)", m.born_faces, m.died_faces)
+                                } else {
+                                    String::new()
+                                }
+                            ));
+                            ui.label(format!(
+                                "ALE: dt={:.2e} skew={:.3} SCL={:.1e}",
+                                m.dt, m.max_skew, m.scl_defect,
+                            ));
+                            ui.label(format!(
+                                "ALE time (ms): plan={:.1} regen={:.1} swept={:.1} refresh={:.1}",
+                                m.plan_ms, m.regen_ms, m.swept_ms, m.refresh_ms
+                            ));
+                        }
                     }
                 });
         });
@@ -3072,13 +3592,13 @@ fn trace_runtime_params_from_worker(params: RuntimeParams) -> tracefmt::TraceRun
 
 fn solver_worker_stop_trace(
     trace: &mut Option<SolverTraceSession>,
-    driver: &mut Option<SolverDriver>,
+    mode: &mut Option<SolverMode>,
 ) {
     let Some(mut session) = trace.take() else {
         return;
     };
 
-    if let Some(s) = driver.as_mut().map(|d| d.solver_mut()) {
+    if let Some(s) = mode.as_mut().map(|m| m.driver_mut().solver_mut()) {
         s.set_collect_trace(false);
         let _ = s.enable_detailed_profiling(false);
         if session.profiling_enabled {
@@ -3203,7 +3723,7 @@ fn solver_worker_main(
     cmd_rx: mpsc::Receiver<SolverWorkerCommand>,
     evt_tx: mpsc::Sender<SolverWorkerEvent>,
 ) {
-    let mut driver: Option<SolverDriver> = None;
+    let mut mode: Option<SolverMode> = None;
     let mut trace: Option<SolverTraceSession> = None;
     let mut model_id: &'static str = "<uninitialized>";
     let mut viz_field: Option<VizFieldBuffers> = None;
@@ -3245,7 +3765,7 @@ fn solver_worker_main(
         while let Ok(cmd) = cmd_rx.try_recv() {
             if !solver_worker_handle_cmd(
                 cmd,
-                &mut driver,
+                &mut mode,
                 &mut trace,
                 &mut model_id,
                 &mut viz_field,
@@ -3265,7 +3785,7 @@ fn solver_worker_main(
                 Ok(cmd) => {
                     if !solver_worker_handle_cmd(
                         cmd,
-                        &mut driver,
+                        &mut mode,
                         &mut trace,
                         &mut model_id,
                         &mut viz_field,
@@ -3285,7 +3805,7 @@ fn solver_worker_main(
             continue;
         }
 
-        let Some(driver) = driver.as_mut() else {
+        let Some(mode) = mode.as_mut() else {
             running = false;
             let _ = evt_tx.send(SolverWorkerEvent::Error(
                 "solver worker entered running state without an initialized solver".to_string(),
@@ -3305,7 +3825,28 @@ fn solver_worker_main(
         // detection all live in the shared driver now (was an inline adaptive-dt
         // block + `step_with_stats` + readback). GUI-only concerns — viz upload,
         // publishing, trace — stay here.
-        let outcome = driver.step(should_readback);
+        //
+        // Static vs moving is the ONLY step-dispatch fork: the static arm is the
+        // pre-existing `SolverDriver::step` (byte-unchanged); the moving arm runs
+        // the ALE cycle (advect → regen → swept fluxes → refresh → step), and
+        // yields the re-generated polygons + per-step telemetry to publish.
+        let (outcome, moving_refresh) = match mode {
+            SolverMode::Static(d) => (d.step(should_readback), None),
+            SolverMode::MovingMesh(m) => match m.step(should_readback) {
+                Ok((o, mstats)) => {
+                    let cells = CFDApp::cache_cells(m.mesh());
+                    (o, Some((cells, mstats)))
+                }
+                Err(err) => {
+                    running = false;
+                    let _ = evt_tx.send(SolverWorkerEvent::Error(format!(
+                        "moving-mesh step failed: {err}"
+                    )));
+                    let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                    continue;
+                }
+            },
+        };
         if let Some(DivergeReason::StepError(err)) = &outcome.diverged {
             running = false;
             let _ =
@@ -3313,7 +3854,15 @@ fn solver_worker_main(
             let _ = evt_tx.send(SolverWorkerEvent::Running(false));
             continue;
         }
-        let solver = driver.solver();
+        // Publish the re-generated mesh (moving only). Emitted every moving step;
+        // the UI thread coalesces and re-tessellates at the frame boundary.
+        if let Some((cached_cells, mstats)) = moving_refresh {
+            let _ = evt_tx.send(SolverWorkerEvent::MeshRefreshed {
+                cached_cells,
+                stats: mstats,
+            });
+        }
+        let solver = mode.driver().solver();
         let step_time_ms = outcome.step_time_ms;
 
         if let Some(viz_field) = viz_field.as_ref() {
@@ -3530,7 +4079,7 @@ fn solver_worker_main(
 
 fn solver_worker_handle_cmd(
     cmd: SolverWorkerCommand,
-    driver: &mut Option<SolverDriver>,
+    mode: &mut Option<SolverMode>,
     trace: &mut Option<SolverTraceSession>,
     model_id: &mut &'static str,
     viz_field: &mut Option<VizFieldBuffers>,
@@ -3543,14 +4092,14 @@ fn solver_worker_handle_cmd(
 ) -> bool {
     match cmd {
         SolverWorkerCommand::SetSolver {
-            driver: next,
+            mode: next,
             viz_field: next_viz_field,
         } => {
             if trace.is_some() {
-                solver_worker_stop_trace(trace, driver);
+                solver_worker_stop_trace(trace, mode);
             }
-            *model_id = next.solver().model().id;
-            *driver = Some(next);
+            *model_id = next.driver().solver().model().id;
+            *mode = Some(next);
             *viz_field = next_viz_field;
             *running = false;
             *step_idx = 0;
@@ -3561,13 +4110,13 @@ fn solver_worker_handle_cmd(
 
             // Phase-2 parameter application (was `solver_worker_apply_params`), in
             // the same order as before: build sets phase 1, this sets phase 2.
-            if let Some(d) = driver.as_mut() {
-                d.apply_params(params);
+            if let Some(m) = mode.as_mut() {
+                m.driver_mut().apply_params(params);
             }
         }
         SolverWorkerCommand::ClearSolver => {
-            solver_worker_stop_trace(trace, driver);
-            *driver = None;
+            solver_worker_stop_trace(trace, mode);
+            *mode = None;
             *model_id = "<uninitialized>";
             *running = false;
             *step_idx = 0;
@@ -3578,7 +4127,7 @@ fn solver_worker_handle_cmd(
             let _ = evt_tx.send(SolverWorkerEvent::Running(false));
         }
         SolverWorkerCommand::SetRunning(next_running) => {
-            if next_running && driver.is_none() {
+            if next_running && mode.is_none() {
                 let _ = evt_tx.send(SolverWorkerEvent::Error(
                     "cannot start solver: no solver is initialized".to_string(),
                 ));
@@ -3597,20 +4146,20 @@ fn solver_worker_handle_cmd(
         }
         SolverWorkerCommand::UpdateParams(next_params) => {
             *params = next_params;
-            if let Some(d) = driver.as_mut() {
-                d.apply_params(params);
+            if let Some(m) = mode.as_mut() {
+                m.driver_mut().apply_params(params);
             }
-            if let (Some(trace), Some(d)) = (trace.as_mut(), driver.as_ref()) {
+            if let (Some(trace), Some(m)) = (trace.as_mut(), mode.as_ref()) {
                 let event = tracefmt::TraceEvent::Params(tracefmt::TraceParamsEvent {
                     step: *step_idx,
-                    sim_time: d.solver().time(),
+                    sim_time: m.driver().solver().time(),
                     params: trace_runtime_params_from_worker(*params),
                 });
                 let _ = trace.writer.write_event(&event);
             }
         }
         SolverWorkerCommand::StartTrace { path, header } => {
-            solver_worker_stop_trace(trace, driver);
+            solver_worker_stop_trace(trace, mode);
 
             match tracefmt::TraceWriter::create(&path) {
                 Ok(mut writer) => {
@@ -3618,7 +4167,7 @@ fn solver_worker_handle_cmd(
                     let event = tracefmt::TraceEvent::Header(Box::new(header));
                     let _ = writer.write_event(&event);
 
-                    if let Some(s) = driver.as_mut().map(|d| d.solver_mut()) {
+                    if let Some(s) = mode.as_mut().map(|m| m.driver_mut().solver_mut()) {
                         s.set_collect_trace(true);
                         let _ = s.enable_detailed_profiling(profiling_enabled);
                         if profiling_enabled {
@@ -3647,7 +4196,7 @@ fn solver_worker_handle_cmd(
             }
         }
         SolverWorkerCommand::StopTrace => {
-            solver_worker_stop_trace(trace, driver);
+            solver_worker_stop_trace(trace, mode);
         }
         SolverWorkerCommand::Shutdown => return false,
     }

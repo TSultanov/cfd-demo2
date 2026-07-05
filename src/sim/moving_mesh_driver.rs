@@ -31,6 +31,18 @@
 //! **Model scope (v1)**: `incompressible_momentum_ale` only. The constructor
 //! builds that model; no other model is accepted.
 //!
+//! **Moving boundaries (roadmap M6, stage 1)**: [`BoundaryMotionSpec`] is
+//! orthogonal to [`MeshMotionSpec`] — the interior seeds follow the mesh-motion
+//! law, and additionally a declared moving boundary
+//! ([`BoundaryMotionSpec::RigidLoop`]) moves its boundary-bound seeds RIGIDLY
+//! each step (they keep their parametric position on the moving wall) while the
+//! regen clips against the moved loops. `moved_spec`/`apply_boundary_motion`
+//! evaluate the rigid transform from the t=0 labels (no drift); the SAME
+//! `align_old_vertices_by_seed_set` + `swept_mesh_fluxes_closed` path closes the
+//! now-real boundary-face swept areas; and `w_wall` records the per-seed
+//! material velocity for stage 2's `MovingWall` Dirichlet BC. `Static` (the
+//! default) is byte-identical to the M4 static-boundary path.
+//!
 //! Scope so far: [`MeshMotionSpec::Frozen`] (stage 1 — the static-limit
 //! plumbing) and [`MeshMotionSpec::Prescribed`] (stage 2 — analytic seed motion
 //! through the full Voronoi-regen + swept-flux path; stage 3 — Voronoi
@@ -103,6 +115,40 @@ pub enum MeshMotionSpec {
     /// Flow-coupled motion (cell velocity + AREPO centroid steering); the
     /// `regularization` is the steering strength χ (stage 4).
     FlowCoupled { regularization: f64 },
+}
+
+/// How the *boundary* moves (roadmap M6). Orthogonal to [`MeshMotionSpec`],
+/// which governs the INTERIOR seeds: the interior seeds always follow the
+/// `MeshMotionSpec` law, and additionally, when a boundary is declared moving
+/// here, its boundary-bound seeds move RIGIDLY with it each step (staying
+/// exactly on the moving boundary) while the mesh regenerates against the moved
+/// loops.
+///
+/// `Static` is the M0–M4 behaviour (all boundary seeds held); the moving-mesh
+/// path is byte-identical to a static-boundary run under it. `RigidLoop`
+/// prescribes an analytic rigid transform for ONE boundary loop (the obstacle):
+/// an oscillating cylinder is `transform(t, p) = [p.x + A·sin(ω t), p.y]`.
+#[derive(Clone, Copy)]
+pub enum BoundaryMotionSpec {
+    /// All boundaries fixed (v1 default). The moving-mesh loop under this is
+    /// byte-identical to the M4 static-boundary path (the do-no-harm anchor).
+    Static,
+    /// A rigidly-moving boundary loop. `loop_index` selects the loop in the
+    /// [`BoundarySpec`] that moves (e.g. the obstacle circle is loop 1 of a
+    /// [`crate::meshgen::ChannelWithObstacle`]); `transform(t, p)` maps a t=0
+    /// point to its position at absolute time `t` by a RIGID map
+    /// (translation/rotation). It is applied to BOTH the loop's polyline points
+    /// (so the regen clips against the moved wall) and the loop's boundary
+    /// seeds (so seed `i` stays on the moving wall). **Contract:**
+    /// `transform(0, p) == p` — the driver is built on the t=0 mesh, so the
+    /// motion law must be the identity at t=0 (an oscillation `A·sin(ω t)`
+    /// satisfies this). A rigid map preserves chord lengths ⇒ the loop's seed
+    /// count and segment structure are invariant, so the fixed-seed-count and
+    /// watertightness guarantees carry over unchanged.
+    RigidLoop {
+        loop_index: usize,
+        transform: fn(f64, [f64; 2]) -> [f64; 2],
+    },
 }
 
 /// Per-step moving-mesh telemetry (the always-on diagnostics the M4 gates and
@@ -200,8 +246,16 @@ pub struct MovingMeshDriver {
     /// Vertex positions of `mesh` at t^n (the swept-quad `old` positions).
     prev_vx: Vec<f64>,
     prev_vy: Vec<f64>,
-    /// Seed motion law.
+    /// Seed motion law (INTERIOR seeds).
     motion: MeshMotionSpec,
+    /// Boundary motion law (roadmap M6). `Static` ⇒ the M4 path (byte-identical).
+    boundary_motion: BoundaryMotionSpec,
+    /// Per-seed material velocity `w_wall = (new_pos − old_pos)/dt` of the last
+    /// committed step, seed `i` == cell `i`. Zero for interior + static-boundary
+    /// seeds; the rigid boundary velocity for moving-wall seeds. Stored here for
+    /// stage 2's `MovingWall` Dirichlet BC (the Dirichlet U at the wall must be
+    /// the wall's material velocity). All-zero until the first moving step.
+    w_wall: Vec<[f64; 2]>,
     /// Mesh-motion CFL cap factor.
     mesh_cfl: f64,
     /// Whether `step` regenerates + refreshes each step. `false` = the
@@ -289,6 +343,7 @@ impl MovingMeshDriver {
 
         let prev_vx = mesh.vx.clone();
         let prev_vy = mesh.vy.clone();
+        let n_seeds = seeds.len();
 
         Ok(Self {
             driver: build.driver,
@@ -304,6 +359,8 @@ impl MovingMeshDriver {
             prev_vx,
             prev_vy,
             motion,
+            boundary_motion: BoundaryMotionSpec::Static,
+            w_wall: vec![[0.0, 0.0]; n_seeds],
             mesh_cfl: DEFAULT_MESH_CFL,
             boundary_retag: None,
             regen_each_step: true,
@@ -365,6 +422,31 @@ impl MovingMeshDriver {
     /// solver state carry over untouched; the next `step` advects from here.
     pub fn set_motion(&mut self, motion: MeshMotionSpec) {
         self.motion = motion;
+    }
+
+    /// Declare a moving boundary (roadmap M6). `Static` (the default) is the
+    /// M4 path; [`BoundaryMotionSpec::RigidLoop`] moves one loop's boundary
+    /// seeds rigidly each step. Orthogonal to [`set_motion`]: the interior
+    /// seeds still follow the [`MeshMotionSpec`]. Panics if a `RigidLoop`
+    /// `loop_index` is out of range for the current boundary spec.
+    pub fn set_boundary_motion(&mut self, boundary_motion: BoundaryMotionSpec) {
+        if let BoundaryMotionSpec::RigidLoop { loop_index, .. } = boundary_motion {
+            assert!(
+                loop_index < self.spec.loops.len(),
+                "BoundaryMotionSpec::RigidLoop loop_index {loop_index} out of range \
+                 ({} loops)",
+                self.spec.loops.len()
+            );
+        }
+        self.boundary_motion = boundary_motion;
+    }
+
+    /// Per-seed material velocity `w_wall` (seed `i` == cell `i`) of the last
+    /// committed step — zero for interior + static-boundary seeds, the rigid
+    /// wall velocity for moving-wall seeds. The stage-2 `MovingWall` BC reads
+    /// this to set the Dirichlet wall velocity per boundary face.
+    pub fn w_wall(&self) -> &[[f64; 2]] {
+        &self.w_wall
     }
 
     /// Disable per-step regeneration: `step` becomes a pure `SolverDriver::step`
@@ -430,15 +512,23 @@ impl MovingMeshDriver {
         //        AREPO distortion-ramped centroid steering, clamped to a
         //        fraction of the local cell radius.
         let plan_start = Instant::now();
-        let (dt, new_seeds) = self.plan_seed_motion()?;
+        let (dt, mut new_seeds) = self.plan_seed_motion()?;
         let new_time = self.time + dt;
+        // M6: move the boundary-bound seeds RIGIDLY with the moving boundary at
+        // t^{n+1} — overwrites the moving loop's boundary seeds (they keep their
+        // parametric position on the moving wall); interior + static-boundary
+        // seeds are untouched. A no-op under `BoundaryMotionSpec::Static`.
+        self.apply_boundary_motion(new_time, &mut new_seeds);
+        // The boundary spec at t^{n+1}: the moved loops the regen clips against
+        // (an identity clone of `self.spec` under Static ⇒ byte-identical regen).
+        let step_spec = self.moved_spec(new_time);
 
         // 2b. FlowCoupled quality escalation: if the advected seed set would
         //     regenerate a too-skewed mesh, run a gentle Lloyd regularization
         //     pass (reusing the meshgen Lloyd machinery) to pull it back toward
         //     CVT before the authoritative regen — "more steering if quality
         //     rises". A no-op for Frozen/Prescribed and for well-shaped sets.
-        let (new_seeds, escalated) = self.maybe_quality_escalate(new_seeds);
+        let (new_seeds, escalated) = self.maybe_quality_escalate(&step_spec, new_seeds);
         // The pre-regen planning cost (readback + escalation probe regen): timed
         // into its own bucket so the overhead split stays honest.
         let plan_ms = ms_since(plan_start);
@@ -449,7 +539,7 @@ impl MovingMeshDriver {
         let mut new_mesh = assemble_meshless_from_seeds(
             &new_seeds,
             &self.kinds,
-            &self.spec,
+            &step_spec,
             self.domain,
             self.min_cell_size,
         );
@@ -589,6 +679,9 @@ impl MovingMeshDriver {
         self.prev_vx = new_mesh.vx.clone();
         self.prev_vy = new_mesh.vy.clone();
         self.mesh = new_mesh;
+        // M6: record the per-seed material velocity w_wall = (new − old)/dt for
+        // stage 2's MovingWall BC — BEFORE `self.seeds` is overwritten.
+        self.record_wall_velocity(&new_seeds, dt);
         self.seeds = new_seeds;
         self.time = new_time;
         self.step_index += 1;
@@ -670,22 +763,136 @@ impl MovingMeshDriver {
         w_max
     }
 
+    // -----------------------------------------------------------------------
+    // M6 — moving boundary (rigidly-moving boundary seeds + moved loop spec).
+    // -----------------------------------------------------------------------
+
+    /// The `[lo, hi)` global-segment range of the moving loop, or `None` under
+    /// `Static`. A boundary seed whose adjacent segment falls in this range is a
+    /// moving-wall seed.
+    fn moving_loop_range(&self) -> Option<(usize, usize)> {
+        match self.boundary_motion {
+            BoundaryMotionSpec::Static => None,
+            BoundaryMotionSpec::RigidLoop { loop_index, .. } => Some((
+                self.spec.seg_offsets[loop_index],
+                self.spec.seg_offsets[loop_index + 1],
+            )),
+        }
+    }
+
+    /// Whether seed `i` is a boundary seed bound to the moving loop.
+    fn is_moving_boundary_seed(&self, i: usize) -> bool {
+        match (self.moving_loop_range(), self.kinds[i]) {
+            (Some((lo, hi)), SeedKind::Boundary { seg_next, .. }) => {
+                let s = seg_next as usize;
+                s >= lo && s < hi
+            }
+            _ => false,
+        }
+    }
+
+    /// The boundary spec at absolute time `t`: the t=0 label spec with the
+    /// moving loop's polyline points rigidly transformed. Under `Static` this is
+    /// a byte-identical clone of `self.spec`, so the regen reproduces the mesh
+    /// byte-for-byte (the do-no-harm anchor). A rigid transform preserves chord
+    /// lengths, so segment tags/structure are unchanged — only the points move.
+    fn moved_spec(&self, t: f64) -> BoundarySpec {
+        let mut spec = self.spec.clone();
+        if let BoundaryMotionSpec::RigidLoop {
+            loop_index,
+            transform,
+        } = self.boundary_motion
+        {
+            for p in spec.loops[loop_index].pts.iter_mut() {
+                let q = transform(t, [p.x, p.y]);
+                *p = Point2::new(q[0], q[1]);
+            }
+        }
+        spec
+    }
+
+    /// Overwrite the moving loop's boundary seeds with their rigidly-transformed
+    /// t=0 positions at absolute time `t` (interior + static-boundary seeds
+    /// untouched). Evaluating from the t=0 label `seed0_i` keeps the seed exactly
+    /// on the moving wall with no incremental drift. A no-op under `Static`.
+    fn apply_boundary_motion(&self, t: f64, seeds: &mut [Point2<f64>]) {
+        let transform = match self.boundary_motion {
+            BoundaryMotionSpec::Static => return,
+            BoundaryMotionSpec::RigidLoop { transform, .. } => transform,
+        };
+        for i in 0..seeds.len() {
+            if self.is_moving_boundary_seed(i) {
+                let s0 = self.seeds0[i];
+                let q = transform(t, [s0.x, s0.y]);
+                seeds[i] = Point2::new(q[0], q[1]);
+            }
+        }
+    }
+
+    /// Max moving-boundary-seed speed over the upcoming base step, a
+    /// finite-difference estimate `|w(t+dt) − w(t)|/dt` used only to size the
+    /// mesh-motion CFL cap. Zero under `Static`.
+    fn max_boundary_speed(&self, dt_base: f64) -> f64 {
+        let transform = match self.boundary_motion {
+            BoundaryMotionSpec::Static => return 0.0,
+            BoundaryMotionSpec::RigidLoop { transform, .. } => transform,
+        };
+        if dt_base <= 0.0 {
+            return 0.0;
+        }
+        let mut w_max = 0.0f64;
+        for i in 0..self.seeds0.len() {
+            if !self.is_moving_boundary_seed(i) {
+                continue;
+            }
+            let s0 = [self.seeds0[i].x, self.seeds0[i].y];
+            let a = transform(self.time, s0);
+            let b = transform(self.time + dt_base, s0);
+            let w = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt() / dt_base;
+            w_max = w_max.max(w);
+        }
+        w_max
+    }
+
+    /// Record the per-seed material velocity `w_wall = (new − old)/dt` for the
+    /// committed step (seed `i` == cell `i`) — the rigid wall velocity on moving
+    /// boundary seeds, zero elsewhere. Called with the OLD `self.seeds` still in
+    /// place. `dt > 0` by the CFL cap; guarded anyway.
+    fn record_wall_velocity(&mut self, new_seeds: &[Point2<f64>], dt: f64) {
+        let inv_dt = if dt > 0.0 { 1.0 / dt } else { 0.0 };
+        for i in 0..self.w_wall.len() {
+            if self.is_moving_boundary_seed(i) {
+                self.w_wall[i] = [
+                    (new_seeds[i].x - self.seeds[i].x) * inv_dt,
+                    (new_seeds[i].y - self.seeds[i].y) * inv_dt,
+                ];
+            } else {
+                self.w_wall[i] = [0.0, 0.0];
+            }
+        }
+    }
+
     /// Pin the fixed dt and produce the advected seed set for the current
     /// [`MeshMotionSpec`]. This is the whole dt-handshake + advection front of a
     /// step, factored so the regen→swept→refresh→step tail is motion-agnostic.
     fn plan_seed_motion(&mut self) -> Result<(f64, Vec<Point2<f64>>), String> {
         match self.motion {
-            // Frozen: no motion. `advect_to` returns the labels; dt is uncapped
-            // (max|w| = 0) so a frozen step pins exactly `requested_dt`.
+            // Frozen: no INTERIOR motion. `advect_to` returns the labels; the dt
+            // is capped only by the moving BOUNDARY speed (M6), zero otherwise —
+            // so a fully static step pins exactly `requested_dt`.
             MeshMotionSpec::Frozen => {
-                let dt = self.pin_dt(0.0);
+                let w_max = self.max_boundary_speed(self.configured_dt);
+                let dt = self.pin_dt(w_max);
                 Ok((dt, self.advect_to(self.time + dt)))
             }
             // Prescribed: FD-estimate max seed speed over the base step, cap dt,
-            // then sample the analytic law at the pinned t^{n+1}.
+            // then sample the analytic law at the pinned t^{n+1}. The moving
+            // boundary speed (M6) also enters the cap.
             MeshMotionSpec::Prescribed(_) => {
                 let dt_base = self.configured_dt;
-                let w_max = self.max_seed_speed(dt_base);
+                let w_max = self
+                    .max_seed_speed(dt_base)
+                    .max(self.max_boundary_speed(dt_base));
                 let dt = self.pin_dt(w_max);
                 Ok((dt, self.advect_to(self.time + dt)))
             }
@@ -721,7 +928,9 @@ impl MovingMeshDriver {
             }
             w_flow_max = w_flow_max.max((ux * ux + uy * uy).sqrt());
         }
-        let dt = self.pin_dt(w_flow_max);
+        // The moving boundary speed (M6) also enters the dt cap.
+        let w_max = w_flow_max.max(self.max_boundary_speed(self.configured_dt));
+        let dt = self.pin_dt(w_max);
 
         let eta = self.arepo_eta;
         let cap_frac = self.flow_disp_cap;
@@ -798,7 +1007,11 @@ impl MovingMeshDriver {
     /// return the regularized seeds. Returns `(seeds, escalated?)`. A no-op for
     /// non-FlowCoupled motion, when escalation is disabled, or when the mesh is
     /// already well-shaped — so it never perturbs the frozen/prescribed gates.
-    fn maybe_quality_escalate(&self, seeds: Vec<Point2<f64>>) -> (Vec<Point2<f64>>, bool) {
+    fn maybe_quality_escalate(
+        &self,
+        spec: &BoundarySpec,
+        seeds: Vec<Point2<f64>>,
+    ) -> (Vec<Point2<f64>>, bool) {
         if !matches!(self.motion, MeshMotionSpec::FlowCoupled { .. })
             || self.lloyd_escalation_iters == 0
         {
@@ -807,7 +1020,7 @@ impl MovingMeshDriver {
         let probe = assemble_meshless_from_seeds(
             &seeds,
             &self.kinds,
-            &self.spec,
+            spec,
             self.domain,
             self.min_cell_size,
         );
@@ -831,7 +1044,7 @@ impl MovingMeshDriver {
         lloyd_relax(
             &mut relaxed,
             &self.kinds,
-            &self.spec,
+            spec,
             &sizing,
             self.domain,
             &tol,

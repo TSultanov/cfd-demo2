@@ -4,8 +4,7 @@ use crate::solver::mesh::{
     BoundaryType, ChannelWithObstacle, LloydConfig, Mesh, Nozzle,
 };
 use crate::solver::model::{
-    all_models, compressible_model_with_eos, incompressible_momentum_ale_model,
-    ModelPreconditionerSpec, ModelSpec,
+    all_models, compressible_model_with_eos, ModelPreconditionerSpec, ModelSpec,
 };
 use crate::solver::scheme::Scheme;
 use crate::solver::{
@@ -540,9 +539,14 @@ pub struct CFDApp {
     actual_min_cell_size: f64,
     // --- Moving-mesh (ALE) opt-in mode ---
     /// Enable the moving-mesh (ALE) path on the next Initialize / Reset.
-    /// Selectable on both compute backends. Enabling it steers the mesh to
-    /// Voronoi (CVT) and the model to incompressible ALE.
+    /// Selectable on both compute backends. Enabling it locks Mesh Type to
+    /// Voronoi (CVT) + a fixed dt and maps the user's Model to its ALE variant at
+    /// build time (never silently swaps the model). Disabled for models without
+    /// an ALE variant (see [`CFDApp::ale_model_for`]).
     enable_moving_mesh: bool,
+    /// The Mesh Type the user had selected before enabling moving mesh; restored
+    /// when moving mesh is disabled (moving locks Mesh Type to Voronoi (CVT)).
+    pre_moving_mesh_type: Option<MeshType>,
     /// How the CVT seeds move each step (Frozen / prescribed swirl / flow-coupled).
     moving_motion: MovingMotionChoice,
     /// FlowCoupled centroid-steering strength χ (0 = pure flow advection).
@@ -724,6 +728,7 @@ impl CFDApp {
             cached_cells: Vec::new(),
             actual_min_cell_size: 0.01,
             enable_moving_mesh: false,
+            pre_moving_mesh_type: None,
             moving_motion: MovingMotionChoice::default(),
             moving_regularization: 0.5,
             moving_oscillate_obstacle: false,
@@ -994,6 +999,26 @@ impl CFDApp {
             "allmach_pressure" => "All-Mach (pressure-based)",
             "allmach_thermal" => "All-Mach (pressure-based, thermal)",
             other => other,
+        }
+    }
+
+    /// The moving-mesh (ALE) model id for a selected base model, or `None` if the
+    /// model has no ALE variant. This is the single source of truth for "does
+    /// this model support moving mesh": the toggle is disabled (with a tooltip)
+    /// for models that return `None`, and `build_moving_init` maps the user's
+    /// chosen model to this variant at build time. The user's model selection is
+    /// therefore NEVER silently overwritten — enabling moving mesh keeps the same
+    /// physics family and only substitutes the mesh-relative (ALE) discretization.
+    fn ale_model_for(model_id: &str) -> Option<&'static str> {
+        match model_id {
+            "incompressible_momentum" | "incompressible_momentum_ale" => {
+                Some("incompressible_momentum_ale")
+            }
+            "allmach_pressure" | "allmach_pressure_ale" => Some("allmach_pressure_ale"),
+            "allmach_thermal" | "allmach_thermal_ale" => Some("allmach_thermal_ale"),
+            // Density-based `compressible` has no ALE variant (roadmap off-ramp:
+            // it stays the static true-supersonic solver). Any unknown id: no ALE.
+            _ => None,
         }
     }
 
@@ -2120,7 +2145,17 @@ impl CFDApp {
             Some(format!("cells={n_cells} (moving)")),
         );
 
-        let model = incompressible_momentum_ale_model()?;
+        // Map the user's selected model to its ALE (moving-mesh) variant — same
+        // physics family, mesh-relative convection. The base model is never
+        // silently swapped; models without an ALE variant are gated out of the
+        // toggle in the UI, so reaching here with an unsupported model is a
+        // programming error (surfaced as an init Err, not a wrong-physics run).
+        let ale_id = CFDApp::ale_model_for(request.model_id)
+            .ok_or_else(|| format!("model '{}' has no moving-mesh (ALE) variant", request.model_id))?;
+        let model = all_models()?
+            .into_iter()
+            .find(|m| m.id == ale_id)
+            .ok_or_else(|| format!("unknown ALE model id '{ale_id}'"))?;
         let model_caps = CFDApp::model_ui_caps(&model);
 
         // Fixed dt for the ALE seam (adaptive re-scale would break the GCL).
@@ -2130,8 +2165,12 @@ impl CFDApp {
 
         let solver_start = std::time::Instant::now();
         let init_guard = tracefmt::install_init_collector(trace_init_events);
-        let mut moving = pollster::block_on(MovingMeshDriver::build(
+        // `build_with_model` seeds any model-specific state (psi/psi_precond/rho/
+        // dt_local≡0 for the all-Mach models) via `SolverDriver::build`, and
+        // applies the nozzle pressure-inlet BCs when `params.pressure_inlet`.
+        let mut moving = pollster::block_on(MovingMeshDriver::build_with_model(
             cvt,
+            model,
             &params,
             motion,
             &initial_u,
@@ -2163,7 +2202,7 @@ impl CFDApp {
             "solver.new",
             solver_start.elapsed(),
             Some(format!(
-                "model_id=incompressible_momentum_ale motion={} cells={}",
+                "model_id={ale_id} motion={} cells={}",
                 request.moving_motion.label(),
                 n_cells
             )),
@@ -2744,50 +2783,86 @@ impl eframe::App for CFDApp {
                         }
                         ui.separator();
                         ui.label("Mesh Type");
-                        // The body-fitted structured grid is only meaningful for the
-                        // nozzle (it conforms to the CD-nozzle walls), so offer it only
-                        // there. The unstructured meshers work for every geometry.
-                        if self.selected_geometry == GeometryType::Nozzle {
-                            ui.radio_value(&mut self.mesh_type, MeshType::Fitted, "Fitted")
+                        // Moving mesh locks Mesh Type to Voronoi (CVT) — grey the
+                        // radios (rather than silently overriding them) so the lock
+                        // is visible and the selection can't diverge from what runs.
+                        let mesh_locked = self.enable_moving_mesh || self.solver_is_moving;
+                        let mesh_resp = ui.add_enabled_ui(!mesh_locked, |ui| {
+                            // The body-fitted structured grid is only meaningful for the
+                            // nozzle (it conforms to the CD-nozzle walls), so offer it only
+                            // there. The unstructured meshers work for every geometry.
+                            if self.selected_geometry == GeometryType::Nozzle {
+                                ui.radio_value(&mut self.mesh_type, MeshType::Fitted, "Fitted")
+                                    .on_hover_text(
+                                        "Body-fitted curvilinear structured grid conforming to \
+                                         the nozzle walls. The validated configuration — \
+                                         recommended for this case.",
+                                    );
+                            }
+                            ui.radio_value(&mut self.mesh_type, MeshType::CutCell, "CutCell");
+                            ui.radio_value(&mut self.mesh_type, MeshType::Delaunay, "Delaunay");
+                            ui.radio_value(&mut self.mesh_type, MeshType::Voronoi, "Voronoi");
+                            ui.radio_value(&mut self.mesh_type, MeshType::VoronoiCvt, "Voronoi (CVT)")
                                 .on_hover_text(
-                                    "Body-fitted curvilinear structured grid conforming to \
-                                     the nozzle walls. The validated configuration — \
-                                     recommended for this case.",
+                                    "Meshless Voronoi mesh with Lloyd/CVT seed relaxation: \
+                                     near-hexagonal cells with close-to-zero interior-face \
+                                     skewness (no post-generation vertex smoothing).",
                                 );
-                        }
-                        ui.radio_value(&mut self.mesh_type, MeshType::CutCell, "CutCell");
-                        ui.radio_value(&mut self.mesh_type, MeshType::Delaunay, "Delaunay");
-                        ui.radio_value(&mut self.mesh_type, MeshType::Voronoi, "Voronoi");
-                        ui.radio_value(&mut self.mesh_type, MeshType::VoronoiCvt, "Voronoi (CVT)")
-                            .on_hover_text(
-                                "Meshless Voronoi mesh with Lloyd/CVT seed relaxation: \
-                                 near-hexagonal cells with close-to-zero interior-face \
-                                 skewness (no post-generation vertex smoothing).",
+                        });
+                        if mesh_locked {
+                            mesh_resp.response.on_hover_text(
+                                "Locked to Voronoi (CVT) while Moving Mesh (ALE) is enabled.",
                             );
+                        }
                     });
 
                         ui.group(|ui| {
                         ui.label("Moving Mesh (ALE)");
-                        // The moving solver runs on both backends. The toggle steers
-                        // the mesh/model selections the moving path requires.
+                        // Moving mesh keeps the user's SELECTED model — it maps it to
+                        // the same-physics ALE variant at build (`build_moving_init`),
+                        // never silently swaps it. Only models that have an ALE variant
+                        // may enable it; the rest disable the toggle with an
+                        // explanatory tooltip so the choice is never quietly discarded.
+                        let ale_variant = CFDApp::ale_model_for(self.model_id);
                         let mut enable = self.enable_moving_mesh;
-                        ui.add(egui::Checkbox::new(&mut enable, "Enable Moving Mesh (ALE)"))
-                            .on_hover_text(
-                                "Advect the CVT-Voronoi mesh with the flow (incompressible \
-                                 ALE). Runs on the selected compute backend — GPU (surgical \
-                                 topology refresh, M5) or CPU. Locks Mesh Type to Voronoi \
-                                 (CVT) and the model to incompressible ALE, and pins a fixed \
-                                 timestep. Applied on Initialize / Reset.",
-                            );
+                        let checkbox = ui.add_enabled(
+                            ale_variant.is_some() || self.enable_moving_mesh,
+                            egui::Checkbox::new(&mut enable, "Enable Moving Mesh (ALE)"),
+                        );
+                        if ale_variant.is_some() {
+                            checkbox.on_hover_text(format!(
+                                "Advect the CVT-Voronoi mesh with the flow (ALE) using the \
+                                 selected solver's moving-mesh variant ({}). Runs on the \
+                                 selected compute backend — GPU (surgical topology refresh) or \
+                                 CPU. While enabled, Mesh Type is locked to Voronoi (CVT) and a \
+                                 fixed timestep is pinned; the Model selection is kept (mapped to \
+                                 its ALE variant), not changed. Applied on Initialize / Reset.",
+                                CFDApp::model_label(ale_variant.unwrap()),
+                            ));
+                        } else {
+                            checkbox.on_hover_text(format!(
+                                "Moving Mesh (ALE) is not available for the '{}' solver (it has \
+                                 no moving-mesh variant). Select an incompressible or all-Mach \
+                                 model to enable it.",
+                                CFDApp::model_label(self.model_id),
+                            ));
+                        }
                         if enable != self.enable_moving_mesh {
                             self.enable_moving_mesh = enable;
                             if enable {
-                                // Steer the dependent selections; the user then clicks
-                                // Initialize / Reset (mesh changes rebuild, as ever).
+                                // Save the pre-moving mesh selection so disabling
+                                // restores it; the model selection is untouched.
+                                self.pre_moving_mesh_type = Some(self.mesh_type);
+                                // Moving mesh requires the meshless CVT-Voronoi mesh and
+                                // a fixed dt (the swept fluxes are SCL-closed against it).
+                                // The MODEL is left as the user chose it — mapped to its
+                                // ALE variant only at build time.
                                 self.mesh_type = MeshType::VoronoiCvt;
-                                self.model_id = "incompressible_momentum_ale";
                                 self.adaptive_dt = false;
                                 self.refresh_model_caps();
+                            } else if let Some(prev) = self.pre_moving_mesh_type.take() {
+                                // Restore the mesh selection the user had before.
+                                self.mesh_type = prev;
                             }
                         }
                         if self.enable_moving_mesh {
@@ -3549,13 +3624,28 @@ impl eframe::App for CFDApp {
                         ui.separator();
                         ui.label("Model");
                         let prev_model_id = self.model_id;
-                        egui::ComboBox::from_label("Model")
-                            .selected_text(CFDApp::model_label(self.model_id))
-                            .show_ui(ui, |ui| {
-                                for (id, label) in CFDApp::supported_ui_models() {
-                                    ui.selectable_value(&mut self.model_id, id, label);
-                                }
-                            });
+                        // Moving mesh keeps the user's model and runs it as its ALE
+                        // variant — grey the dropdown (rather than overwriting it)
+                        // so the running physics is the model shown, and the lock is
+                        // visible instead of a silent swap.
+                        let model_locked = self.enable_moving_mesh || self.solver_is_moving;
+                        let model_combo = ui.add_enabled_ui(!model_locked, |ui| {
+                            egui::ComboBox::from_label("Model")
+                                .selected_text(CFDApp::model_label(self.model_id))
+                                .show_ui(ui, |ui| {
+                                    for (id, label) in CFDApp::supported_ui_models() {
+                                        ui.selectable_value(&mut self.model_id, id, label);
+                                    }
+                                });
+                        });
+                        if model_locked {
+                            model_combo.response.on_hover_text(format!(
+                                "Locked while Moving Mesh (ALE) is enabled — the '{}' solver \
+                                 runs as its moving-mesh (ALE) variant. Disable Moving Mesh to \
+                                 change the model.",
+                                CFDApp::model_label(self.model_id),
+                            ));
+                        }
                         if prev_model_id != self.model_id {
                             // Re-seed every solver knob from the per-model defaults
                             // (scheme, relaxation, outer cap, adaptive-dt target,

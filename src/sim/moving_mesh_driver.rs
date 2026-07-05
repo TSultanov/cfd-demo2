@@ -345,16 +345,47 @@ pub struct MovingMeshDriver {
 
 impl MovingMeshDriver {
     /// Build a moving-mesh driver from an initial CVT mesh + its authoritative
-    /// seeds ([`crate::meshgen::meshless::generate_cvt_mesh_with_seeds`]).
-    ///
-    /// Constructs the wrapped [`SolverDriver`] with the `incompressible_momentum_ale`
-    /// model on `cvt.mesh`, seeded with `initial_u`/`initial_p`. `params` must
-    /// have `adaptive_dt == false` (the ALE seam SCL-closes fluxes against a
-    /// fixed dt; an adaptive re-scale would break the GCL — rejected here, up
-    /// front, rather than at the first `begin_ale_step_topology`).
+    /// seeds ([`crate::meshgen::meshless::generate_cvt_mesh_with_seeds`]), using
+    /// the default `incompressible_momentum_ale` model. For the all-Mach
+    /// compressible ALE variants use [`MovingMeshDriver::build_with_model`].
     #[allow(clippy::too_many_arguments)]
     pub async fn build(
         cvt: CvtMeshSeeds,
+        params: &RuntimeParams,
+        motion: MeshMotionSpec,
+        initial_u: &[(f64, f64)],
+        initial_p: &[f64],
+        device: Option<wgpu::Device>,
+        queue: Option<wgpu::Queue>,
+    ) -> Result<Self, String> {
+        Self::build_with_model(
+            cvt,
+            incompressible_momentum_ale_model()?,
+            params,
+            motion,
+            initial_u,
+            initial_p,
+            device,
+            queue,
+        )
+        .await
+    }
+
+    /// Build a moving-mesh driver with an explicit ALE `model` (e.g.
+    /// `incompressible_momentum_ale` or `allmach_pressure_ale`). The wrapped
+    /// [`SolverDriver`] is constructed on `cvt.mesh`, seeded with
+    /// `initial_u`/`initial_p` (plus any model-specific state — psi/psi_precond/
+    /// rho/dt_local for the all-Mach models — via `SolverDriver::build`). `params`
+    /// must have `adaptive_dt == false` (the ALE seam SCL-closes fluxes against a
+    /// fixed dt; an adaptive re-scale would break the GCL — rejected here, up
+    /// front, rather than at the first `begin_ale_step_topology`). The model MUST
+    /// be an ALE model (its convection is `.with_mesh_relative()`); a static model
+    /// is rejected by the `begin_ale_step*` seam. All-Mach models keep
+    /// `dt_local ≡ 0` under motion (time-accurate global dt).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn build_with_model(
+        cvt: CvtMeshSeeds,
+        model: crate::solver::model::ModelSpec,
         params: &RuntimeParams,
         motion: MeshMotionSpec,
         initial_u: &[(f64, f64)],
@@ -371,7 +402,6 @@ impl MovingMeshDriver {
                     .into(),
             );
         }
-        let model = incompressible_momentum_ale_model()?;
         let CvtMeshSeeds {
             mesh,
             seeds,

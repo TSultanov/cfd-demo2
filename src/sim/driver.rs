@@ -206,9 +206,23 @@ impl SolverDriver {
         // but carry extra `psi`/`rho`/`dt_local` state fields to seed. The `thermal`
         // variant additionally carries a temperature `T` and its EOS reference
         // `rho_t_ref` (the on-device density recovery `rho = rho_t_ref/T + psi*p`).
-        let model_id = solver.model().id;
-        let allmach = model_id == "allmach_pressure" || model_id == "allmach_thermal";
-        let thermal = model_id == "allmach_thermal";
+        //
+        // Derived from the model's MATH (its state layout), NOT its id — like the
+        // `compressible` split above — so renames / new all-Mach variants (incl.
+        // the moving-mesh `_ale` ones) stay correct without a name list. An
+        // all-Mach pressure-based model is exactly one carrying the compressibility
+        // `psi` (the `ddt(psi,p)` acoustic term) as state: incompressible has no
+        // `psi`, and the density-based `compressible` carries `rho_u`/`rho_e`
+        // instead. The thermal variant additionally solves `T` with `rho_t_ref`.
+        // The `_mms` verification variants carry a manufactured `mms_src_U` source
+        // and are seeded from their manufactured solution by the MMS harness, so
+        // the production IC seeding here is gated off for them (matching the prior
+        // behaviour without depending on the `_mms` suffix).
+        let has_state_field =
+            |name: &str| solver.model().state_layout.offset_for(name).is_some();
+        let is_mms = has_state_field("mms_src_U");
+        let allmach = has_state_field("psi") && !is_mms;
+        let thermal = allmach && has_state_field("rho_t_ref");
 
         let (cached_u, cached_p) = if compressible {
             let p_ref = params.eos.pressure_for_density(params.density as f64);

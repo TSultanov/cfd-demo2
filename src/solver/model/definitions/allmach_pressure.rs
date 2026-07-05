@@ -192,6 +192,7 @@ fn build_allmach_system(
     _fields: &AllMachPressureFields,
     with_mms_source: bool,
     thermal: bool,
+    ale: bool,
 ) -> EquationSystem {
     let u_typed = TypedFieldRef::<Velocity, Vector2>::new("U");
     let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
@@ -215,7 +216,17 @@ fn build_allmach_system(
 
     // Momentum equation (identical to incompressible_momentum).
     let ddt_term = typed_fvm::ddt_coeff(rho_coeff, u_typed);
-    let div_term = typed_fvm::div(phi_typed, u_typed).bounded();
+    // On a moving mesh the momentum convection consumes the mesh-relative mass
+    // flux `phi - rho_f * mesh_fluxes[face]` (variable-density `rho_f`; see
+    // `Term::relative_to_mesh` and unified_assembly `ale_relative_flux_expr`).
+    let div_term = {
+        let d = typed_fvm::div(phi_typed, u_typed).bounded();
+        if ale {
+            d.with_mesh_relative()
+        } else {
+            d
+        }
+    };
     let laplacian_term = typed_fvm::laplacian(mu_coeff, u_typed);
     let grad_term = typed_fvc::grad(p_typed);
 
@@ -256,13 +267,21 @@ fn build_allmach_system(
     // unchanged. Omitted on the `_mms` variant; identically zero when `psi = 0`.
     let p_div_flux_term = {
         let term = typed_fvm::div_flux(phi_typed, p_typed);
-        if with_mms_source {
+        let term = if with_mms_source {
             term
         } else {
             let psi_lin = TypedCoeff::from_field(TypedFieldRef::<Compressibility, Scalar>::new(
                 "psi",
             ));
             term.with_pressure_flux_linearization(psi_lin)
+        };
+        // Continuity on the moving mesh is mesh-relative too: the compensating
+        // volume-change source `+rho_ref*(V^{n+1}-V^n)/dt` (barotropic split;
+        // exact by SCL construction) lands with the moving-volume ddt.
+        if ale {
+            term.with_mesh_relative()
+        } else {
+            term
         }
     };
 
@@ -309,10 +328,20 @@ fn build_allmach_system(
         // subtracts T*div(phi) = +T*d(rho)/dt, cancelling the conservative-form
         // defect (ddt(rho,T)+div(phi,T) = rho*DT/Dt - T*d(rho)/dt). The `_mms`
         // variant keeps the conservative form (compression terms zero at steady state).
-        let t_div = if with_mms_source {
-            typed_fvm::div(phi_typed, t_typed)
-        } else {
-            typed_fvm::div(phi_typed, t_typed).bounded()
+        let t_div = {
+            let d = if with_mms_source {
+                typed_fvm::div(phi_typed, t_typed)
+            } else {
+                typed_fvm::div(phi_typed, t_typed).bounded()
+            };
+            // Temperature is advected by the SOLVED mass flux, so on a moving
+            // mesh it consumes the mesh-relative flux like the momentum/pressure
+            // convection.
+            if ale {
+                d.with_mesh_relative()
+            } else {
+                d
+            }
         };
         let k_over_cp: TypedCoeff<KOverCpUnit> = TypedCoeff::constant(ALLMACH_K_OVER_CP);
         let t_lap = typed_fvm::laplacian(k_over_cp, t_typed);
@@ -381,17 +410,17 @@ fn build_allmach_system(
 
 pub fn allmach_pressure_system() -> EquationSystem {
     let fields = AllMachPressureFields::new();
-    build_allmach_system(&fields, false, false)
+    build_allmach_system(&fields, false, false, false)
 }
 
 pub fn allmach_pressure_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(false, false)
+    allmach_pressure_model_impl(false, false, false)
 }
 
 /// `allmach_pressure` plus manufactured momentum + continuity source fields for
 /// MMS order tests.
 pub fn allmach_pressure_mms_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(true, false)
+    allmach_pressure_model_impl(true, false, false)
 }
 
 /// Thermal all-Mach: `allmach_pressure` + a temperature transport equation and
@@ -400,13 +429,45 @@ pub fn allmach_pressure_mms_model() -> Result<ModelSpec, String> {
 /// kernel — no hand-written kernel). The barotropic model is the `T = T_ref`
 /// limit.
 pub fn allmach_thermal_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(false, true)
+    allmach_pressure_model_impl(false, true, false)
 }
 
 /// `allmach_thermal` plus manufactured momentum + continuity + temperature
 /// source fields for MMS order tests.
 pub fn allmach_thermal_mms_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(true, true)
+    allmach_pressure_model_impl(true, true, false)
+}
+
+/// ALE (moving-mesh) variant of `allmach_pressure`: the barotropic all-Mach
+/// compressible solver with mesh-relative convection. `div(phi,U).bounded()` and
+/// `div_flux(phi,p)` are declared `.with_mesh_relative()`, so assembly consumes
+/// `phi_rel = phi - rho_f * mesh_fluxes[face]` with the variable-density face
+/// density `rho_f`; the moving-volume ddt and the barotropic continuity volume
+/// source (`+rho_ref*(V^{n+1}-V^n)/dt`) are emitted by the shared ALE codegen.
+/// Its own model id ⇒ own generated kernels; with `mesh_fluxes` zero-filled and
+/// equal volume history it reproduces the static `allmach_pressure` bitwise.
+pub fn allmach_pressure_ale_model() -> Result<ModelSpec, String> {
+    allmach_pressure_model_impl(false, false, true)
+}
+
+/// `allmach_pressure_ale` + manufactured sources (prescribed-motion compressible
+/// MMS order test).
+pub fn allmach_pressure_ale_mms_model() -> Result<ModelSpec, String> {
+    allmach_pressure_model_impl(true, false, true)
+}
+
+/// ALE (moving-mesh) variant of `allmach_thermal`: the thermal all-Mach solver
+/// with mesh-relative convection on momentum, continuity AND temperature. The
+/// cross-variable thermal-expansion / compression-heating ddt terms get the same
+/// moving-volume weighting as the primary ddts.
+pub fn allmach_thermal_ale_model() -> Result<ModelSpec, String> {
+    allmach_pressure_model_impl(false, true, true)
+}
+
+/// `allmach_thermal_ale` + manufactured sources (prescribed-motion thermal
+/// compressible MMS order test).
+pub fn allmach_thermal_ale_mms_model() -> Result<ModelSpec, String> {
+    allmach_pressure_model_impl(true, true, true)
 }
 
 /// In-place flip of an all-Mach model's Inlet/Outlet boundary KINDS to CD-nozzle
@@ -454,9 +515,13 @@ pub fn apply_pressure_inlet_nozzle_bcs(model: &mut ModelSpec) {
     }
 }
 
-fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<ModelSpec, String> {
+fn allmach_pressure_model_impl(
+    with_mms_source: bool,
+    thermal: bool,
+    ale: bool,
+) -> Result<ModelSpec, String> {
     let fields = AllMachPressureFields::new();
-    let system = build_allmach_system(&fields, with_mms_source, thermal);
+    let system = build_allmach_system(&fields, with_mms_source, thermal, ale);
 
     // Keep U,p,d_p,grad_p,grad_p_old at the same offsets as incompressible
     // (0,2,3,4,6); append psi (and any MMS sources) after. Offsets are load-bearing.
@@ -754,11 +819,15 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
     Ok(ModelSpec {
-        id: match (thermal, with_mms_source) {
-            (true, true) => "allmach_thermal_mms",
-            (true, false) => "allmach_thermal",
-            (false, true) => "allmach_pressure_mms",
-            (false, false) => "allmach_pressure",
+        id: match (thermal, with_mms_source, ale) {
+            (true, true, false) => "allmach_thermal_mms",
+            (true, false, false) => "allmach_thermal",
+            (false, true, false) => "allmach_pressure_mms",
+            (false, false, false) => "allmach_pressure",
+            (true, true, true) => "allmach_thermal_ale_mms",
+            (true, false, true) => "allmach_thermal_ale",
+            (false, true, true) => "allmach_pressure_ale_mms",
+            (false, false, true) => "allmach_pressure_ale",
         },
         system,
         state_layout: layout,

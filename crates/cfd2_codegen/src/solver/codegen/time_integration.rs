@@ -101,19 +101,20 @@ fn local_dual_time_scale_setup() -> Vec<Stmt> {
 ///   equal volumes vanish bitwise. The bounded-correction augmentation needs
 ///   the ddt part of the mass residual `ρ·d(V)/dt` at the SAME weights as the
 ///   momentum ddt, else a uniform flow is not a fixed point (GCL fails).
-fn ale_volume_locals_setup(slots: &ResolvedStateSlotsSpec) -> Vec<Stmt> {
+fn ale_volume_locals_setup(_slots: &ResolvedStateSlotsSpec) -> Vec<Stmt> {
     use super::dsl::EnumExpr;
     use crate::solver::gpu::enums::TimeScheme;
 
-    // The ALE volume rates divide by the GLOBAL dt; a per-cell `dt_local`
-    // (LTS) would make them inconsistent with the ddt's `dt_eff`. Fail fast at
-    // codegen since no ALE model carries dt_local (incompressible only).
-    assert!(
-        !slots.slots.iter().any(|s| s.name == "dt_local"),
-        "ALE (relative_to_mesh) + local time stepping (dt_local) is unsupported: \
-         the ALE volume rates use the global constants.dt"
-    );
-
+    // The ALE volume rates divide by the GLOBAL dt (they must match the
+    // host-computed swept mesh fluxes, which are closed against the global step
+    // dt: `Σ_f mesh_fluxes == (V^{n+1}-V^n)/dt_global`). A per-cell `dt_local`
+    // (LTS) would make the ddt's `dt_eff` inconsistent with these rates and break
+    // the GCL. The all-Mach models carry a `dt_local` field for steady-state LTS
+    // acceleration, but the moving-mesh driver keeps it ≡ 0 (a moving mesh is
+    // time-accurate, not a steady march), so `dt_eff` falls back to the global
+    // `constants.dt` and the rates stay consistent. The presence of the field is
+    // therefore permitted under ALE; a nonzero `dt_local` under motion is a driver
+    // contract violation, not a codegen one.
     let dt = Expr::ident("constants").field("dt");
     let dt_old = Expr::ident("constants").field("dt_old");
     let time_scheme =
@@ -415,16 +416,6 @@ pub fn emit_ddt_contributions(
                     ));
                 }
             } else {
-                // Cross-variable ddt on a moving mesh would need the same
-                // V^n-weighted history treatment; no ALE model declares one
-                // (incompressible only). Fail fast rather than mis-weight.
-                assert!(
-                    !ale,
-                    "cross-variable ddt (d({})/dt in the '{}' equation) is unsupported on \
-                     ALE models (v1)",
-                    ddt_op.field.name(),
-                    equation.target.name()
-                );
                 // ---- cross-variable d/dt: IMPLICIT off-diagonal coupling ----
                 // ddt(coeff, field) with field != target (e.g. the thermal-
                 // expansion rho_dT*dT/dt in the continuity/pressure row). BDF1
@@ -470,7 +461,20 @@ pub fn emit_ddt_contributions(
                     dsl::array_access("matrix_values", entry_index),
                     base_coeff.clone(),
                 ));
-                // BDF1 old-time part.
+                // BDF1 old-time part. NOTE: a cross-variable ddt on a moving mesh
+                // is NOT conservative-weighted. These terms are the `V·∂ρ/∂ξ·dξ/dt`
+                // pieces of the non-conservative continuity expansion
+                // `dρ/dt = V(ψ·dp/dt + ρ_dT·dT/dt) + ρ·dV/dt` (e.g. the thermal
+                // expansion `ρ_dT·dT/dt` in the pressure row, the compression
+                // heating `dp/dt` in the temperature row): an INTENSIVE rate times
+                // the CURRENT volume, `V^{n+1}·coeff·(ξ^{n+1}-ξ^n)/dt`. Both times
+                // therefore carry `V^{n+1}` (the `base_coeff`), with NO `V^n/V^{n+1}`
+                // weight — weighting `ξ^n` would make it `d(coeff·ξ·V)/dt`, which
+                // spuriously injects `coeff·ξ·dV/dt` at a uniform field (`dξ/dt = 0`
+                // but `ξ ≠ 0`), breaking free-stream preservation on a moving mesh.
+                // The `ρ·dV/dt` piece lives in the barotropic continuity volume
+                // source; the conservative moving-volume weighting is applied only
+                // to the PRIMARY ddts (paired with the bounded correction).
                 stmts.push(acc.add_rhs(eqn_offset, base_coeff * field_old));
             }
         }

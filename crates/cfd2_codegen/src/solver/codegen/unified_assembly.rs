@@ -50,12 +50,15 @@ fn unified_assembly_needs_mesh_fluxes(system: &DiscreteSystem) -> bool {
 ///   continuity source emitted but NO flux subtraction — an inconsistent ALE
 ///   discretization.
 ///
-/// * **Variable density**: `ale_relative_flux_expr` hardcodes the flux's
-///   density factor as the uniform `constants.density`, valid only when the
-///   state layout has NO `rho` field. A state-layout `rho` means the flux
-///   carries an upwinded face density and the subtraction would be wrong-by-ρ.
-///   ALE scope is constant-density (incompressible) only.
-fn validate_ale_unified_assembly(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) {
+/// * **Variable density**: when the state layout carries a `rho` field the flux
+///   is a variable-density mass flux `phi = rho_f*(U·n)A`, so the mesh-relative
+///   subtraction must use the SAME face density `rho_f` (not `constants.density`).
+///   `ale_relative_flux_expr` reconstructs `rho_f` from the per-cell `rho` state
+///   (distance-symmetric face average, uniform-exact so a uniform free stream is
+///   preserved bitwise), keeping the constant-density path byte-identical for
+///   incompressible models. This lifts the former constant-density-only scope to
+///   the all-Mach compressible (`allmach_*_ale`) models.
+fn validate_ale_unified_assembly(system: &DiscreteSystem, _slots: &ResolvedStateSlotsSpec) {
     for eq in &system.equations {
         for op in &eq.ops {
             assert!(
@@ -69,14 +72,6 @@ fn validate_ale_unified_assembly(system: &DiscreteSystem, slots: &ResolvedStateS
             );
         }
     }
-    assert!(
-        !slots.slots.iter().any(|s| s.name == "rho"),
-        "ALE (relative_to_mesh) on a variable-density model is unsupported: the state \
-         layout carries a 'rho' field, so the derived face flux uses an upwinded face \
-         density, while the ALE subtraction assumes the uniform constants.density \
-         (v1 constant-density scope; a variable-density ALE flux needs a persisted \
-         face density)"
-    );
 }
 
 /// `mesh_fluxes` storage binding (group 0 / binding 8): per-face volumetric
@@ -122,19 +117,34 @@ fn ale_vols_history_items() -> Vec<Item> {
 /// consistent relative flux. This is the single subtraction point for the
 /// whole assembly; every downstream consumer reads the accumulator.
 ///
-/// `rho_f` is the constant density coefficient (`constants.density`): ALE scope
-/// is constant-density mass fluxes where `phi = rho * (U·n) A` uses the same
-/// constant. Variable-density fluxes are not supported here.
+/// `rho_f` is: the constant density coefficient (`constants.density`) when the
+/// state layout has NO `rho` field (constant-density incompressible mass flux
+/// `phi = rho*(U·n)A`); or the variable-density FACE density otherwise —
+/// reconstructed as the distance-symmetric average `0.5*(rho[idx]+rho[other_idx])`
+/// of the per-cell `rho` state. The average is uniform-exact (a uniform density
+/// gives `rho_f == rho` at every face, so a compressible free stream is preserved
+/// bitwise) and O(h²) for smooth density (MMS). Both cells of a shared face see
+/// the same `rho_f` (symmetric in idx/other_idx), and `other_idx == idx` on a
+/// boundary face, so the read is always a valid index. The incompressible path is
+/// byte-unchanged (no `rho` slot ⇒ `constants.density`), preserving the zero-flux
+/// equivalence and static-model gates.
 fn ale_relative_flux_expr(
     conv_op: &crate::solver::codegen::ir::DiscreteOp,
     flux_val_expr: Expr,
+    slots: &ResolvedStateSlotsSpec,
 ) -> Expr {
     if !conv_op.relative_to_mesh {
         return flux_val_expr;
     }
-    flux_val_expr
-        - Expr::ident("constants").field("density")
-            * dsl::array_access("mesh_fluxes", Expr::ident("face_idx"))
+    let rho_f = match slots.slots.iter().find(|s| s.name == "rho") {
+        Some(rho_slot) => {
+            let rho_idx = state_component_slot(slots.stride, "state", "idx", rho_slot, 0);
+            let rho_other = state_component_slot(slots.stride, "state", "other_idx", rho_slot, 0);
+            Expr::from(0.5) * (rho_idx + rho_other)
+        }
+        None => Expr::ident("constants").field("density"),
+    };
+    flux_val_expr - rho_f * dsl::array_access("mesh_fluxes", Expr::ident("face_idx"))
 }
 
 pub fn generate_unified_assembly_wgsl(
@@ -1268,7 +1278,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             flux_stride,
                             u_idx,
                         );
-                        let flux_val_expr = ale_relative_flux_expr(conv_op, flux_val_expr);
+                        let flux_val_expr = ale_relative_flux_expr(conv_op, flux_val_expr, slots);
 
                         body.push(acc.declare_phi(u_idx, flux_val_expr));
                         body.push(dsl::if_block_expr(
@@ -1393,7 +1403,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             flux_stride,
                             u_idx,
                         );
-                        let flux_val_expr = ale_relative_flux_expr(conv_op, flux_val_expr);
+                        let flux_val_expr = ale_relative_flux_expr(conv_op, flux_val_expr, slots);
                         body.push(acc.declare_phi(u_idx, flux_val_expr));
                         body.push(dsl::if_block_expr(
                             Expr::ident("owner").ne(Expr::ident("idx")),
@@ -1652,12 +1662,20 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
     // identity `x + 0.0` (the accumulated sum is never `-0.0`: +0-initialized
     // f32 additions cannot produce it), keeping the zero-flux equivalence
     // gate bitwise.
+    // Variable-density models: the mass residual's ddt part is `rho_P·dV/dt` at
+    // the per-cell density (matching the `ddt(rho,U)` momentum coefficient), so a
+    // uniform-velocity but spatially-varying-density field stays a fixed point.
+    // Incompressible models (no `rho` slot) keep `constants.density` bitwise.
+    let ale_bounded_density = match slots.slots.iter().find(|s| s.name == "rho") {
+        Some(rho_slot) => state_component_slot(slots.stride, "state", "idx", rho_slot, 0),
+        None => Expr::ident("constants").field("density"),
+    };
     for &(u_idx, ale) in &bounded_unknowns {
         if ale {
             stmts.push(dsl::assign_op_expr(
                 AssignOp::Add,
                 Expr::ident(format!("bounded_sum_phi_{u_idx}")),
-                Expr::ident("constants").field("density") * Expr::ident("ale_dvdt_ddt"),
+                ale_bounded_density.clone() * Expr::ident("ale_dvdt_ddt"),
             ));
         }
         stmts.push(acc.sub_diag(u_idx, Expr::ident(format!("bounded_sum_phi_{u_idx}"))));

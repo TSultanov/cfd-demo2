@@ -109,6 +109,13 @@ pub enum MeshMotionSpec {
 /// the UI observe).
 #[derive(Clone, Copy, Debug)]
 pub struct MovingMeshStats {
+    /// Wall time of the pre-regen seed-motion planning (ms): the dt handshake,
+    /// seed advection, the FlowCoupled velocity readback, AND the quality-escalation
+    /// PROBE regen (which runs a full `assemble_meshless_from_seeds` before the
+    /// authoritative regen). Counted separately so the moving-mesh overhead split
+    /// is HONEST — this work would otherwise fall into the `solve` residual (review
+    /// July 2026). 0 on the skip-regen passthrough.
+    pub plan_ms: f32,
     /// Wall time to regenerate the mesh from the advected seeds (ms).
     pub regen_ms: f32,
     /// Wall time to compute + SCL-close the swept mesh fluxes (ms).
@@ -181,6 +188,13 @@ pub struct MovingMeshDriver {
     /// Meshgen length scale — reconstructs the tolerances + engine config so a
     /// regen reproduces the mesh byte-for-byte.
     min_cell_size: f64,
+    /// The dt the driver was CONFIGURED with at build (`params.requested_dt`,
+    /// f64-widened) — the immutable base the mesh-motion CFL cap is applied to
+    /// each step. Caching it (rather than reading back the already-capped
+    /// `params.requested_dt`) keeps the pinned dt from ratcheting monotonically
+    /// downward: a transient fast step must not permanently lower the timestep
+    /// after the flow slows (review July 2026).
+    configured_dt: f64,
     /// The current realized mesh (owned; the driver holds it across steps).
     mesh: Mesh,
     /// Vertex positions of `mesh` at t^n (the swept-quad `old` positions).
@@ -285,6 +299,7 @@ impl MovingMeshDriver {
             spec,
             domain,
             min_cell_size,
+            configured_dt: params.requested_dt as f64,
             mesh,
             prev_vx,
             prev_vy,
@@ -363,6 +378,21 @@ impl MovingMeshDriver {
     /// Advance one moving-mesh step; returns the solver outcome + the per-step
     /// moving-mesh telemetry.
     pub fn step(&mut self, readback: bool) -> Result<(StepOutcome, MovingMeshStats), String> {
+        // Re-assert the dt handshake invariant on EVERY path (review July 2026):
+        // `adaptive_dt` is rejected at build and at both ALE seams, but the
+        // skip-regen passthrough never reaches an ALE seam, so a caller that
+        // flipped it on via `driver_mut().apply_params(..)` after build could
+        // otherwise silently step on an adaptive dt (ignoring the pinned value)
+        // with no seam to catch it. Guard here, up front, for both paths.
+        if self.driver.params().adaptive_dt {
+            return Err(
+                "MovingMeshDriver::step: adaptive_dt was enabled after build — the swept mesh \
+                 fluxes are SCL-closed against the driver-pinned fixed dt, and an adaptive \
+                 re-scale silently violates the GCL. Keep adaptive_dt == false."
+                    .into(),
+            );
+        }
+
         // Skip-regen (do-no-harm) variant: pin the fixed dt and step. No seed
         // motion, no regen, no ALE refresh — a pure passthrough, byte-identical
         // to a static ALE run driven by `SolverDriver::step`.
@@ -371,6 +401,7 @@ impl MovingMeshDriver {
             let outcome = self.driver.step(readback);
             self.step_index += 1;
             let stats = MovingMeshStats {
+                plan_ms: 0.0,
                 regen_ms: 0.0,
                 swept_ms: 0.0,
                 refresh_ms: 0.0,
@@ -398,6 +429,7 @@ impl MovingMeshDriver {
         //        the flow speed, then displace each seed by `U_i·dt` plus an
         //        AREPO distortion-ramped centroid steering, clamped to a
         //        fraction of the local cell radius.
+        let plan_start = Instant::now();
         let (dt, new_seeds) = self.plan_seed_motion()?;
         let new_time = self.time + dt;
 
@@ -407,6 +439,9 @@ impl MovingMeshDriver {
         //     CVT before the authoritative regen — "more steering if quality
         //     rises". A no-op for Frozen/Prescribed and for well-shaped sets.
         let (new_seeds, escalated) = self.maybe_quality_escalate(new_seeds);
+        // The pre-regen planning cost (readback + escalation probe regen): timed
+        // into its own bucket so the overhead split stays honest.
+        let plan_ms = ms_since(plan_start);
 
         // 3. Regenerate the mesh from the advected seeds (deterministic; a
         //    frozen seed set reproduces `self.mesh` byte-for-byte).
@@ -465,6 +500,13 @@ impl MovingMeshDriver {
         let (old_vx_aligned, old_vy_aligned, unmatched) =
             align_old_vertices_by_seed_set(&self.mesh, &new_mesh)?;
         let mut flip = detect_flips(&self.mesh, &new_mesh)?;
+        // A GENUINE flip — an actual adjacency change (born/died face) or a born
+        // vertex — captured BEFORE the degeneracy forcing below. On a genuine flip
+        // the born faces legitimately break the telescoping identity and the
+        // closure is the sole guarantee. On a step that is NOT a genuine flip but
+        // has a sliver face, the identity is still load-bearing everywhere else, so
+        // we keep the hard check alive there (see the `hard_assert_exclude` arg).
+        let genuine_flip = flip.is_flip() || unmatched != 0;
         // Robustness: a face that is geometrically DEGENERATE (near-zero length at
         // t^n or t^{n+1}) is a collapsing/near-flip face the adjacency scan did
         // not flag — it has no reliable swept quad and the persistent path would
@@ -477,8 +519,17 @@ impl MovingMeshDriver {
             &mut flip,
             self.min_cell_size,
         );
-        let is_flip = flip.is_flip() || unmatched != 0 || degen > 0;
+        let is_flip = genuine_flip || degen > 0;
         let swept = if is_flip {
+            // Degeneracy-ONLY step (no genuine adjacency change): keep the >1e-9
+            // telescoping-identity assert LIVE on every cell not incident to a
+            // forced-degenerate face — a lone sliver must not disable the whole-step
+            // guard (review July 2026 F1). On a genuine flip, pass None (relaxed).
+            let hard_assert_exclude = if genuine_flip {
+                None
+            } else {
+                Some(flip.cell_flipped.as_slice())
+            };
             // The actual t^n cell volumes (`self.mesh` is still the old mesh
             // here) are the closure target's old-volume — the born vertices'
             // aligned old positions cannot reconstruct the old polygon across a
@@ -489,6 +540,7 @@ impl MovingMeshDriver {
                 &old_vy_aligned,
                 &self.mesh.cell_vol,
                 &flip.born_face_mask,
+                hard_assert_exclude,
                 dt,
             )?
         } else {
@@ -549,6 +601,7 @@ impl MovingMeshDriver {
         // telescoping residual, reported as `identity_err` and asserted by the
         // GCL gates.
         let stats = MovingMeshStats {
+            plan_ms,
             regen_ms,
             swept_ms,
             refresh_ms,
@@ -631,7 +684,7 @@ impl MovingMeshDriver {
             // Prescribed: FD-estimate max seed speed over the base step, cap dt,
             // then sample the analytic law at the pinned t^{n+1}.
             MeshMotionSpec::Prescribed(_) => {
-                let dt_base = self.driver.params().requested_dt as f64;
+                let dt_base = self.configured_dt;
                 let w_max = self.max_seed_speed(dt_base);
                 let dt = self.pin_dt(w_max);
                 Ok((dt, self.advect_to(self.time + dt)))
@@ -794,7 +847,10 @@ impl MovingMeshDriver {
     /// f64-widened f32 (`params.requested_dt as f64`) — the exact value the
     /// swept-flux closure must use so the flux dt == the step dt.
     fn pin_dt(&mut self, w_max: f64) -> f64 {
-        let mut dt = self.driver.params().requested_dt as f64;
+        // Base off the IMMUTABLE configured dt, not the previously-pinned
+        // `params.requested_dt` — else the cap would ratchet the timestep down
+        // permanently (a momentary fast step could never recover).
+        let mut dt = self.configured_dt;
         if w_max > 1e-30 {
             let cap = self.mesh_cfl * self.driver.min_cell() / w_max;
             if cap.is_finite() && cap < dt {
@@ -847,6 +903,12 @@ fn ms_since(start: Instant) -> f32 {
 /// threshold is a small fraction of the cell size, so only truly collapsing
 /// faces (whose real swept volume is negligible) are caught. Returns how many
 /// faces were newly forced born.
+///
+/// Keeps the flip telemetry honest (review July 2026): a forced-degenerate face
+/// marks its incident cells in `flip.cell_flipped` and re-derives
+/// `flip.flipped_cells`, so a degeneracy-only step reports `flipped_cells > 0`
+/// (not a `flipped=true, flipped_cells=0` phantom). That per-cell flag is ALSO
+/// the hard-assert exclude set the caller passes to the flip closure.
 fn force_degenerate_faces_born(
     mesh: &Mesh,
     old_vx: &[f64],
@@ -867,8 +929,15 @@ fn force_degenerate_faces_born(
         if nlen2 < tol2 || olen2 < tol2 {
             flip.born_face_mask[f] = true;
             flip.born_faces += 1;
+            flip.cell_flipped[mesh.face_owner[f]] = true;
+            if let Some(nb) = mesh.face_neighbor[f] {
+                flip.cell_flipped[nb] = true;
+            }
             added += 1;
         }
+    }
+    if added > 0 {
+        flip.flipped_cells = flip.cell_flipped.iter().filter(|&&b| b).count();
     }
     added
 }

@@ -384,11 +384,15 @@ closure) → surgical geometry/topology seam (owns vols rotation) → step. `Mes
     gate ≥ static − 2 pts).** The flow-following mesh nearly eliminates the advective dissipation
     of the vortex peak — the milestone premise, demonstrated, not assumed.
   - **Quality soak (`#[ignore]`, `CFD2_SOAK=1`):** zero negative/zero volumes ever, max skew
-    bounded < 0.6, mean-skew drift stationary, flip rate stationary under the Lloyd steering.
-  - **Perf budget (`CFD2_BENCH_MOVING=1`):** per-step {regen, swept, refresh, solve} split; the
-    moving-mesh overhead (regen+swept+refresh) is ≪ 1× the CPU coupled solve (e.g. 1.7 ms
-    overhead vs a ~1 s solve at 844 cells → 0.00× — the CPU coupled solve dominates by orders of
-    magnitude, so the M4 loop is never the bottleneck).
+    bounded < 0.6 *under the soak's aggressive escalation (target 0.4, 2 Lloyd sweeps)*, mean-skew
+    drift stationary, flip rate stationary under the Lloyd steering. (The bound is
+    escalation-config-dependent: the premise gate's lighter default escalation — target 0.5, 1
+    sweep — runs at max skew ≈ 0.62, which it tolerates because it asserts retention, not skew.)
+  - **Perf budget (`CFD2_BENCH_MOVING=1`):** per-step {plan, regen, swept, refresh, solve} split
+    (plan = the pre-regen velocity readback + quality-escalation probe); the moving-mesh overhead
+    (plan+regen+swept+refresh) is ≪ 1× the CPU coupled solve (e.g. ~2 ms overhead vs a ~1 s solve
+    at 844 cells → 0.00× — the CPU coupled solve dominates by orders of magnitude, so the M4 loop
+    is never the bottleneck).
   - **Obstacle Kármán street on a FlowCoupled mesh (`#[ignore]`, documented finding):** the
     static meshless CVT mesh DOES shed a vigorous street (warm-up wake `u_y` std ≈ 0.48·U, ~22
     reversals). Handed off to a FlowCoupled moving mesh it stays BOUNDED/STABLE (max|u| ≈ 1.73·U,

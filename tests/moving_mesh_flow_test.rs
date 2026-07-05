@@ -698,7 +698,7 @@ fn perf() {
     moving.set_boundary_retag(Some(tag_slip_3x1));
     moving.driver_mut().apply_params(&params);
 
-    let (mut regen, mut swept, mut refresh) = (0.0f64, 0.0f64, 0.0f64);
+    let (mut plan, mut regen, mut swept, mut refresh) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
     let mut solve = 0.0f64;
     for step in 0..warm + measure {
         let t0 = std::time::Instant::now();
@@ -707,19 +707,29 @@ fn perf() {
         if step < warm {
             continue;
         }
+        plan += stats.plan_ms as f64;
         regen += stats.regen_ms as f64;
         swept += stats.swept_ms as f64;
         refresh += stats.refresh_ms as f64;
-        // Solve = whole wall minus the measured moving-mesh phases.
-        solve += (wall - stats.regen_ms as f64 - stats.swept_ms as f64 - stats.refresh_ms as f64).max(0.0);
+        // Solve = whole wall minus ALL measured moving-mesh phases (incl. the
+        // pre-regen planning: velocity readback + quality-escalation probe).
+        solve += (wall
+            - stats.plan_ms as f64
+            - stats.regen_ms as f64
+            - stats.swept_ms as f64
+            - stats.refresh_ms as f64)
+            .max(0.0);
     }
     let m = measure as f64;
-    let (regen, swept, refresh, solve) = (regen / m, swept / m, refresh / m, solve / m);
-    let overhead = regen + swept + refresh;
+    let (plan, regen, swept, refresh, solve) =
+        (plan / m, regen / m, swept / m, refresh / m, solve / m);
+    // Overhead is EVERY moving-mesh phase, planning included (review July 2026:
+    // the escalation probe + readback must not hide in the solve residual).
+    let overhead = plan + regen + swept + refresh;
     let ratio = overhead / solve;
     println!(
-        "[m4.4-perf] {n} cells: regen={regen:.2}ms swept={swept:.2}ms refresh={refresh:.2}ms \
-         solve={solve:.2}ms | overhead={overhead:.2}ms = {ratio:.2}x solve"
+        "[m4.4-perf] {n} cells: plan={plan:.2}ms regen={regen:.2}ms swept={swept:.2}ms \
+         refresh={refresh:.2}ms solve={solve:.2}ms | overhead={overhead:.2}ms = {ratio:.2}x solve"
     );
     assert!(
         ratio <= 1.0,

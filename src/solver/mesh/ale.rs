@@ -210,12 +210,23 @@ pub fn swept_mesh_fluxes_closed(
 /// `(V_i^{n+1} − V_i^n)/dt` consistent with the moving-volume ddt, which is
 /// exactly the GCL condition. Cell `i` == cell `i` across the regen (fixed
 /// seeds), so the volumes are directly comparable.
+///
+/// `hard_assert_exclude` (review July 2026, F1): when `Some(exclude)`, the caller
+/// asserts this step is NOT a genuine adjacency flip — the only faces forced to
+/// zero are geometrically DEGENERATE (sliver) faces — so the load-bearing >1e-9
+/// telescoping-identity check must stay LIVE on every cell NOT incident to such a
+/// face (`exclude[i] == false`). This prevents a single sliver face from disabling
+/// the whole-step identity guard (which would let the f32 closure launder an
+/// arbitrarily-wrong per-face swept flux into a correct per-cell sum). `None`
+/// (a genuine flip, or the windmill unit test) keeps the relaxed check: born faces
+/// are EXPECTED to break the identity and the closure alone is the guarantee.
 pub fn swept_mesh_fluxes_closed_flip(
     mesh: &Mesh,
     old_vx: &[f64],
     old_vy: &[f64],
     old_cell_vol: &[f64],
     born_mask: &[bool],
+    hard_assert_exclude: Option<&[bool]>,
     dt: f64,
 ) -> Result<SweptMeshFluxes, String> {
     if born_mask.len() != mesh.num_faces() {
@@ -232,7 +243,22 @@ pub fn swept_mesh_fluxes_closed_flip(
             mesh.num_cells()
         ));
     }
-    swept_closed_impl(mesh, old_vx, old_vy, Some((born_mask, old_cell_vol)), dt)
+    if let Some(ex) = hard_assert_exclude {
+        if ex.len() != mesh.num_cells() {
+            return Err(format!(
+                "swept_mesh_fluxes_closed_flip: hard_assert_exclude length {} != num_cells {}",
+                ex.len(),
+                mesh.num_cells()
+            ));
+        }
+    }
+    swept_closed_impl(
+        mesh,
+        old_vx,
+        old_vy,
+        Some((born_mask, old_cell_vol, hard_assert_exclude)),
+        dt,
+    )
 }
 
 /// Shared core for the persistent ([`swept_mesh_fluxes_closed`]) and flip
@@ -240,14 +266,18 @@ pub fn swept_mesh_fluxes_closed_flip(
 /// persistent path (hard identity check, no forced-zero faces); `Some(mask)`
 /// forces the marked faces' swept area to zero and RELAXES the identity check
 /// (the flip defect is the diagnostic, the forest closure the guarantee).
+#[allow(clippy::type_complexity)]
 fn swept_closed_impl(
     mesh: &Mesh,
     old_vx: &[f64],
     old_vy: &[f64],
-    flip: Option<(&[bool], &[f64])>,
+    flip: Option<(&[bool], &[f64], Option<&[bool]>)>,
     dt: f64,
 ) -> Result<SweptMeshFluxes, String> {
-    let born_mask: Option<&[bool]> = flip.map(|(m, _)| m);
+    let born_mask: Option<&[bool]> = flip.map(|(m, _, _)| m);
+    // Some(exclude): a degeneracy-only step — hard-assert the telescoping identity
+    // on every cell NOT incident to a forced-degenerate face (review July 2026 F1).
+    let hard_assert_exclude: Option<&[bool]> = flip.and_then(|(_, _, ex)| ex);
     let num_cells = mesh.num_cells();
     let num_faces = mesh.num_faces();
     if old_vx.len() != mesh.vx.len() || old_vy.len() != mesh.vy.len() {
@@ -288,7 +318,7 @@ fn swept_closed_impl(
     // `swept_mesh_fluxes_closed_flip`).
     let recon_old_vols = cell_volumes_from(mesh, old_vx, old_vy);
     let old_vols: &[f64] = match flip {
-        Some((_, actual)) => actual,
+        Some((_, actual, _)) => actual,
         None => &recon_old_vols,
     };
     let sign = |cell: usize, face: usize| -> f64 {
@@ -300,6 +330,9 @@ fn swept_closed_impl(
     };
 
     let mut max_identity_err_rel = 0.0f64;
+    // On a degeneracy-only step, the max identity residual over cells NOT incident
+    // to a forced-degenerate face — the subset on which the hard check stays live.
+    let mut max_hard_err_rel = 0.0f64;
     for i in 0..num_cells {
         let mut sum = 0.0f64;
         for k in mesh.cell_face_offsets[i]..mesh.cell_face_offsets[i + 1] {
@@ -309,6 +342,11 @@ fn swept_closed_impl(
         let dv = mesh.cell_vol[i] - old_vols[i];
         let err = (sum - dv).abs() / mesh.cell_vol[i].max(f64::MIN_POSITIVE);
         max_identity_err_rel = max_identity_err_rel.max(err);
+        if let Some(exclude) = hard_assert_exclude {
+            if !exclude[i] {
+                max_hard_err_rel = max_hard_err_rel.max(err);
+            }
+        }
     }
 
     // The identity is f64-roundoff exact (≲1e-13 measured) whenever the
@@ -338,6 +376,19 @@ fn swept_closed_impl(
              positions are inconsistent with the mesh geometry (stale recalculate_geometry, \
              wrong old positions, or inverted/degenerate cells)",
             max_identity_err_rel
+        ));
+    }
+    // Degeneracy-only step (F1): the only forced-zero faces are slivers, so the
+    // identity is still load-bearing on every cell away from them. Keep the hard
+    // check there — a sliver must not silently disable it for the whole step.
+    if hard_assert_exclude.is_some() && max_hard_err_rel > 1e-9 {
+        return Err(format!(
+            "swept_mesh_fluxes: telescoping identity violated on a non-degenerate cell (max rel \
+             residual {:.3e} > 1e-9 away from the forced-degenerate faces): a degenerate face \
+             was forced born, but the swept-quad geometry is inconsistent on cells that are NOT \
+             incident to one — the sliver did not cause it (stale recalculate_geometry, wrong \
+             old positions, or an inverted cell)",
+            max_hard_err_rel
         ));
     }
     if born_mask.is_some() && !max_identity_err_rel.is_finite() {
@@ -480,8 +531,15 @@ pub struct FlipReport {
     pub born_faces: usize,
     /// Number of old adjacencies with no counterpart in the new mesh.
     pub died_faces: usize,
-    /// Number of NEW-mesh cells incident to at least one born face.
+    /// Number of NEW-mesh cells incident to at least one born face
+    /// (`= cell_flipped.iter().filter(..).count()`).
     pub flipped_cells: usize,
+    /// Per-cell flag: cell `c` is incident to at least one born face — the cells
+    /// whose telescoping identity a flip (or a forced-degenerate face) legitimately
+    /// breaks. Consumed by the driver both as the flip-rate telemetry source and as
+    /// the hard-assert EXCLUDE set on a degeneracy-only step (the identity stays
+    /// enforced on every cell NOT in this set).
+    pub cell_flipped: Vec<bool>,
 }
 
 impl FlipReport {
@@ -549,6 +607,7 @@ pub fn detect_flips(old_mesh: &Mesh, new_mesh: &Mesh) -> Result<FlipReport, Stri
         born_faces,
         died_faces,
         flipped_cells,
+        cell_flipped,
     })
 }
 
@@ -759,6 +818,61 @@ mod tests {
             err.contains("telescoping identity violated"),
             "unexpected error: {err}"
         );
+    }
+
+    /// The degeneracy-only escape hatch must NOT disable the load-bearing
+    /// telescoping-identity assert for the whole step (review July 2026, F1):
+    /// when the only forced-zero faces are slivers (no genuine adjacency flip),
+    /// the flip path still hard-asserts the identity on every cell NOT incident
+    /// to a forced face. So an inconsistency (a wrong old volume) on a FAR cell
+    /// is still rejected, while a matching inconsistency on an EXCLUDED
+    /// (degen-incident) cell is tolerated.
+    #[test]
+    fn degenerate_only_step_keeps_identity_assert_on_far_cells() {
+        let mut mesh = test_mesh();
+        let h = 1.5 / 24.0;
+        let (ovx, ovy) = displace(&mut mesh, 0.15 * h, 1.5, 1.0);
+        // Persistent topology ⇒ the reconstructed old ring volumes ARE the actual
+        // old cell volumes (the closure target the driver would pass).
+        let old_vols = cell_volumes_from(&mesh, &ovx, &ovy);
+
+        // Force ONE interior face "degenerate" (born) and exclude its two cells —
+        // exactly what the driver does on a sliver step with no genuine flip.
+        let f = (0..mesh.num_faces())
+            .find(|&f| mesh.face_neighbor[f].is_some())
+            .expect("an interior face");
+        let mut born = vec![false; mesh.num_faces()];
+        born[f] = true;
+        let mut exclude = vec![false; mesh.num_cells()];
+        exclude[mesh.face_owner[f]] = true;
+        exclude[mesh.face_neighbor[f].unwrap()] = true;
+
+        // (a) Consistent geometry ⇒ Ok: the sliver's zeroing is absorbed on its
+        //     own cells; every far cell satisfies the identity.
+        swept_mesh_fluxes_closed_flip(&mesh, &ovx, &ovy, &old_vols, &born, Some(&exclude), 1e-2)
+            .expect("degen-only step with consistent geometry must pass");
+
+        // (b) Corrupt a FAR (non-excluded) cell's old volume ⇒ the hard assert on
+        //     the non-degenerate cells fires — the sliver did NOT disable it.
+        let far = (0..mesh.num_cells())
+            .find(|&c| !exclude[c])
+            .expect("a far cell");
+        let mut bad_far = old_vols.clone();
+        bad_far[far] *= 1.001;
+        let err =
+            swept_mesh_fluxes_closed_flip(&mesh, &ovx, &ovy, &bad_far, &born, Some(&exclude), 1e-2)
+                .expect_err("a far-cell inconsistency must still be rejected");
+        assert!(
+            err.contains("non-degenerate cell"),
+            "unexpected error: {err}"
+        );
+
+        // (c) The SAME corruption on an excluded (degen-incident) cell is tolerated
+        //     — the identity is legitimately relaxed there.
+        let mut bad_near = old_vols.clone();
+        bad_near[mesh.face_owner[f]] *= 1.001;
+        swept_mesh_fluxes_closed_flip(&mesh, &ovx, &ovy, &bad_near, &born, Some(&exclude), 1e-2)
+            .expect("an excluded-cell inconsistency is tolerated (relaxed there)");
     }
 
     /// No motion ⇒ all-zero fluxes and zero defect (the closure must not
@@ -990,6 +1104,7 @@ mod tests {
             &ovy,
             &old_mesh.cell_vol,
             &flip.born_face_mask,
+            None, // genuine flip: relaxed identity check
             dt,
         )
         .expect("flip swept fluxes");
@@ -1050,6 +1165,7 @@ mod tests {
             &ovy,
             &old_mesh.cell_vol,
             &flip.born_face_mask,
+            None,
             dt,
         )
         .expect("flip swept fluxes 2");

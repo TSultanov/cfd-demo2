@@ -853,6 +853,18 @@ impl CFDApp {
         self.target_cfl = d.target_cfl;
         self.timestep = d.timestep;
         self.adaptive_dt = d.adaptive_dt;
+        // Moving mesh (ALE) pins a fixed dt for the GCL dt handshake, so it must
+        // never run with adaptive dt. `incompressible_momentum_ale` maps to the
+        // INCOMPRESSIBLE gui defaults, whose `adaptive_dt` is `true` — so a
+        // re-application of the per-model defaults (geometry/scenario preset,
+        // model dropdown, startup) while the moving path is selected or a moving
+        // driver is live would silently re-enable adaptive dt behind the (greyed)
+        // "Adaptive Timestep" checkbox, and a stale `true` could reach the driver
+        // via `sync_worker_params` whose next step() rejects it and halts the sim.
+        // Enforce the invariant at the reset source.
+        if self.enable_moving_mesh || self.solver_is_moving {
+            self.adaptive_dt = false;
+        }
         // Pseudo-transient continuation: the low-Mach stabilizer for the
         // compressible default (see model_defaults). Off for incompressible.
         self.dual_time = d.dual_time;
@@ -3092,6 +3104,13 @@ impl eframe::App for CFDApp {
                         // (the user may un-tick Enable without reinitializing).
                         let adaptive_dt_allowed =
                             !(self.enable_moving_mesh || self.solver_is_moving);
+                        // Authoritative every frame: the moving path can never run
+                        // adaptive dt, so force it off before drawing the (disabled)
+                        // checkbox — this guarantees the box never displays a stale
+                        // checked state and no stale `true` survives to a param sync.
+                        if !adaptive_dt_allowed {
+                            self.adaptive_dt = false;
+                        }
                         if ui
                             .add_enabled(
                                 adaptive_dt_allowed,

@@ -11,7 +11,6 @@ use cfd2::solver::model::incompressible_momentum_model;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use nalgebra::Vector2;
 
-/// Setup a solver for benchmarking
 fn setup_solver(cell_size: f64) -> (GpuUnifiedSolver, usize) {
     let length = 3.5;
     let domain_size = Vector2::new(length, 1.0);
@@ -27,7 +26,7 @@ fn setup_solver(cell_size: f64) -> (GpuUnifiedSolver, usize) {
 
     let num_cells = mesh.num_cells();
 
-    let model = incompressible_momentum_model();
+    let model = incompressible_momentum_model().expect("model");
     let config = SolverConfig::default();
     let mut solver = pollster::block_on(GpuUnifiedSolver::new(&mesh, model, config, None, None))
         .expect("should create solver");
@@ -36,7 +35,7 @@ fn setup_solver(cell_size: f64) -> (GpuUnifiedSolver, usize) {
     solver.set_density(1.0).unwrap();
     solver.set_alpha_p(0.3).unwrap();
     solver.set_alpha_u(0.7).unwrap();
-    // Note: scheme is set via config in the new API
+    // scheme is set via config
 
     solver.initialize_history();
 

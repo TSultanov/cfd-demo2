@@ -203,8 +203,7 @@ fn seed_bcs_cpu(s: &mut CpuSolver, mesh: &Mesh) {
 // IGNORED: `set_linear_system` expects a different matrix layout than the
 // assembly's block-CSR SoA `matrix_values`, so the injected-matrix comparison is
 // inconclusive (returns O(1) garbage). Kept as a harness for when a matching
-// matrix-injection format is available. See cpu_compressible_order_test.rs for
-// the compressible CPU-backend investigation notes.
+// matrix-injection format is available.
 #[ignore]
 #[test]
 fn cpu_gpu_same_matrix_solve() {
@@ -212,7 +211,6 @@ fn cpu_gpu_same_matrix_solve() {
     let n = 12;
     let mesh = inlet_box(n);
 
-    // CPU: build, set state, assemble.
     let model = compressible_mms_model().expect("model");
     let mut c = CpuSolver::with_stepping(
         &mesh, model, Scheme::Upwind, TimeScheme::BDF2,
@@ -236,9 +234,8 @@ fn cpu_gpu_same_matrix_solve() {
     let (sro, col, diag, ss) = c.debug_topology();
     let nn = cells * ss;
 
-    // CPU solve.
-    let a = BlockCsr { s: ss, scalar_row_offsets: sro, col_indices: col, diagonal_indices: diag, values: &matrix, threads: 1 };
-    let pc = PointJacobi::new(&a);
+    let a = BlockCsr { s: ss, scalar_row_offsets: sro, col_indices: col, diagonal_indices: diag, values: &matrix, threads: 1, simd: false };
+    let pc = PointJacobi::<f32>::new(&a);
     let mut x_cpu = vec![0.0f32; nn];
     fgmres(&a, &rhs, &mut x_cpu, &pc, 60, 5000, 1e-6, false);
 
@@ -261,7 +258,6 @@ fn cpu_gpu_same_matrix_solve() {
 // IGNORED: the CPU and GPU agree per-step only to ~4e-3 on the compressible
 // path (energy-dominated), and the marched solution diverges where the GPU
 // converges — an unresolved CPU-backend issue isolated to the linear solve.
-// See cpu_compressible_order_test.rs::cpu_compressible_mms_second_order.
 #[ignore]
 #[test]
 fn cpu_matches_gpu_compressible() {

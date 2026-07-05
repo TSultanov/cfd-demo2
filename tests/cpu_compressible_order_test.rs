@@ -1,15 +1,10 @@
-//! CPU-backend compressible MMS order study: the manufactured subsonic
-//! Navier–Stokes solution from `mms_compressible_order_test` solved entirely on
-//! the CPU (no GPU adapter) through the coupled path — KT/vanLeer flux, EOS
-//! recovery rows, implicit viscous/conduction laplacians, expression-valued
-//! inlet BCs, block-CSR FGMRES+block-Jacobi. Verifies the CPU reproduces the
-//! design (~2nd) order; this is the decisive Phase-1 compressible milestone.
-//!
-//! Source derivation mirrors `mms_compressible_order_test.rs` (physical-NS
-//! operator, EXTRA_SHEAR = 0); see that file for the operator-contract history.
+//! CPU-backend compressible MMS: the manufactured subsonic Navier–Stokes
+//! solution solved through the coupled path (KT/vanLeer flux, EOS recovery rows,
+//! implicit viscous/conduction laplacians, expression-valued inlet BCs, block-CSR
+//! FGMRES+block-Jacobi). Source derivation mirrors the manufactured-NS operator
+//! (EXTRA_SHEAR = 0).
 #![cfg(feature = "cpu")]
-// Several helpers (march_to_plateau_cpu, read_state, read_errors_cpu, …) are used
-// only by the `dev-tests`-gated diagnostics; without that feature they are dead.
+// Helpers are used only by the `dev-tests`-gated diagnostics; dead without it.
 #![allow(dead_code)]
 
 use cfd2::solver::cpu::{CpuBackendConfig, CpuSolver};
@@ -173,8 +168,7 @@ fn l2_scalar(mesh: &Mesh, f: &[f64], exact: impl Fn(f64, f64) -> f64) -> f64 {
     (num / den).sqrt()
 }
 
-/// Advection scheme for the setups; overridable via `CFD2_TEST_SCHEME` (e.g.
-/// `upwind`) so diagnostics can isolate the gradient-reconstruction path.
+/// Advection scheme for the setups; overridable via `CFD2_TEST_SCHEME`.
 fn test_scheme() -> Scheme {
     std::env::var("CFD2_TEST_SCHEME")
         .ok()
@@ -188,9 +182,8 @@ fn setup(n: usize, cfg: CpuBackendConfig) -> (CpuSolver, Mesh) {
 }
 
 /// Generalized setup: `biharmonic` selects the ∇⁴-dissipation compressible model
-/// and `eps4` sets its coefficient (the GPU's cure for the interior marginal
-/// instability). The manufactured solution + sources are identical (the eps4 term
-/// is a consistent O(h²) dissipation).
+/// and `eps4` sets its coefficient. Manufactured solution + sources are identical
+/// (the eps4 term is a consistent O(h²) dissipation).
 #[allow(clippy::type_complexity)]
 fn setup_g(n: usize, cfg: CpuBackendConfig, biharmonic: bool, eps4: f32) -> (CpuSolver, Mesh) {
     let mesh = generate_structured_rect_mesh(
@@ -282,8 +275,8 @@ fn setup_g(n: usize, cfg: CpuBackendConfig, biharmonic: bool, eps4: f32) -> (Cpu
     s.set_field_scalar("T", &t0v).unwrap();
     s.set_field_vec2("u", &u0).unwrap();
     if biharmonic {
-        // The reworked implicit biharmonic reads its coefficient from the per-cell
-        // `bih_eps4` storage field (uniform-valued, like mu) — NOT `low_mach.eps4`.
+        // Implicit biharmonic reads its coefficient from the per-cell `bih_eps4`
+        // storage field (uniform-valued, like mu) — NOT `low_mach.eps4`.
         s.set_field_scalar("bih_eps4", &vec![eps4 as f64; cells]).unwrap();
     }
     s.initialize_history();
@@ -309,10 +302,10 @@ fn solve(
     (mesh, rho, u, p, t, rho_e, rho_u)
 }
 
-/// CPU-only consistency check: assemble at the EXACT solution and compute the
-/// per-equation discrete residual r = rhs - A x_exact. A correct assembly leaves
-/// r = O(h^2) for every equation; a large component pinpoints the mis-assembled
-/// equation. (Coupled-unknown order: rho, rho_u_x, rho_u_y, rho_e, u_x, u_y, p, T.)
+/// Assemble at the EXACT solution and compute the per-equation discrete residual
+/// r = rhs - A x_exact. Correct assembly leaves r = O(h^2) for every equation; a
+/// large component pinpoints the mis-assembled equation. (Coupled-unknown order:
+/// rho, rho_u_x, rho_u_y, rho_e, u_x, u_y, p, T.)
 #[ignore]
 #[ignore] // diagnostic (informational prints; slow); run explicitly
 #[test]
@@ -371,13 +364,13 @@ fn residual_at(n: usize) {
             diagonal_indices: diag_idx,
             values: &matrix,
             threads: 1,
+            simd: false,
         };
-        let pc = PointJacobi::new(&a);
+        let pc = PointJacobi::<f32>::new(&a);
         let mut xg: Vec<f32> = xe.iter().map(|&v| v as f32).collect();
         let st = fgmres(&a, &rhs, &mut xg, &pc, 60, 5000, 1e-8, false);
         // Independent dense LU cross-check (small n only): confirms FGMRES +
-        // block_spmv solve the assembled system correctly (vs the matrix-layout
-        // read formula being self-consistent but wrong).
+        // block_spmv solve the assembled system, not just a self-consistent read.
         if n == 8 {
             let dof = cells * ss;
             let mut dense = nalgebra::DMatrix::<f64>::zeros(dof, dof);
@@ -397,8 +390,7 @@ fn residual_at(n: usize) {
             let bvec = nalgebra::DVector::<f64>::from_iterator(dof, rhs.iter().map(|&v| v as f64));
             let xdense = dense.clone().lu().solve(&bvec).expect("dense lu");
             let dd = (0..dof).map(|i| (xg[i] as f64 - xdense[i]).abs()).fold(0.0, f64::max);
-            // Condition number (SVD) to gauge how f32-assembly-ordering noise
-            // (~1e-6 per entry) amplifies into the per-step cross-backend diff.
+            // Condition number (SVD): how f32-assembly noise (~1e-6/entry) amplifies.
             let svals = dense.singular_values();
             let smax = svals[0];
             let smin = svals[svals.len() - 1];
@@ -438,9 +430,8 @@ fn residual_at(n: usize) {
     println!();
 }
 
-/// CPU-vs-GPU step-1 comparison on the EXACT MMS setup (clean, near-steady),
-/// per field. Distinguishes "step-1 already diverges" (per-step operator/solve
-/// difference) from "slow instability" (step-1 matches, diverges over steps).
+/// CPU-vs-GPU step-1 comparison on the EXACT MMS setup, per field. Distinguishes
+/// a per-step operator/solve difference from a slow multi-step instability.
 #[ignore]
 #[cfg(feature = "dev-tests")]
 #[ignore] // diagnostic (informational prints); run explicitly
@@ -648,11 +639,9 @@ fn setup_gpu(n: usize, mesh: &Mesh) -> cfd2::solver::UnifiedSolver {
     g
 }
 
-/// Lockstep CPU-vs-GPU compressible march: do CPU and GPU TRACK each other over
-/// many steps, or does the CPU diverge faster? Reports, at intervals, each
-/// backend's L2-vs-exact error AND the max|CPU-GPU| per field. If both drift
-/// together, the march instability is shared (physics/discretization, handled by
-/// the GPU's plateau-acceptance); if CPU-GPU grows, the CPU has a real bug.
+/// Lockstep CPU-vs-GPU compressible march: reports, at intervals, each backend's
+/// L2-vs-exact error and the max|CPU-GPU| per field. Both drifting together means
+/// a shared physics/discretization instability; a growing CPU-GPU gap is a CPU bug.
 #[ignore]
 #[cfg(feature = "dev-tests")]
 #[test]
@@ -681,15 +670,13 @@ fn diag_cpu_vs_gpu_march() {
     }
 }
 
-/// Matrix-level isolation: compare the CPU's assembled block-CSR matrix + rhs to
-/// the GPU's at the EXACT state (step 1, outer_iters=1 — the only assembly). The
-/// block-CSR layout is identical on both backends (start_row_0 = scalar_offset*S²,
-/// start_row_r += num_neighbors*S*r; block (r,c) for neighbour rank at
-/// start_row_r + rank*S + c), so values are comparable element-wise IF the
-/// neighbour ordering matches (verified by the per-equation A*x_exact residual
-/// being O(h²) for the GPU matrix read through the CPU topology). Pinpoints
-/// whether the marched divergence is a genuine operator (matrix/rhs) difference
-/// or f32-noise on a structurally-identical operator.
+/// Compare the CPU's assembled block-CSR matrix + rhs to the GPU's at the EXACT
+/// state (step 1, outer_iters=1 — the only assembly). Block-CSR layout is identical
+/// on both backends (start_row_0 = scalar_offset*S²; start_row_r += num_neighbors*S*r;
+/// block (r,c) for neighbour rank at start_row_r + rank*S + c), so values compare
+/// element-wise IF the neighbour ordering matches (verified by the per-equation
+/// A*x_exact residual being O(h²)). Pinpoints a genuine operator difference vs
+/// f32-noise on a structurally-identical operator.
 #[ignore]
 #[cfg(feature = "dev-tests")]
 #[test]
@@ -821,7 +808,6 @@ fn diag_compressible_trajectory() {
         BoundarySides { left: BoundaryType::Inlet, right: BoundaryType::Inlet, bottom: BoundaryType::Inlet, top: BoundaryType::Inlet },
     );
     let _ = (&mesh, steps);
-    // Reuse solve() with step-by-step reporting by calling it for increasing counts.
     for st in [1usize, 10, 30, 60, 120] {
         let (m, rho, _u, p, _t, rho_e, rho_u) = solve(n, st, CpuBackendConfig::default());
         let er = l2_scalar(&m, &rho, exact_rho);
@@ -842,10 +828,9 @@ fn diag_compressible_trajectory() {
     }
 }
 
-/// Does the biharmonic ∇⁴ dissipation (the GPU's documented cure for the interior
-/// marginal instability) keep the CPU compressible march BOUNDED where the plain
-/// model blows up? Sweeps eps4 and reports the rho_e L2 error over a long march.
-/// eps4=0 is the control (plain behaviour); eps4>0 should stay bounded + converge.
+/// Does the biharmonic ∇⁴ dissipation keep the CPU compressible march BOUNDED
+/// where the plain model blows up? Sweeps eps4 (eps4=0 is the control) and reports
+/// the rho_e L2 error over a long march.
 #[ignore]
 #[test]
 fn diag_biharmonic_march() {
@@ -866,11 +851,10 @@ fn diag_biharmonic_march() {
     }
 }
 
-/// Build a CPU compressible solver on a fully-PERIODIC [0,2]² box (the
-/// manufactured solution is periodic there). Zero boundary faces ⇒ no BCs; the
-/// manufactured sources are mean-projected to zero (the closed-system constraint).
-/// `eps4` sets the biharmonic dissipation field (`bih_eps4`). Used to isolate the
-/// interior compressible operator from the boundary closure.
+/// Build a CPU compressible solver on a fully-PERIODIC [0,2]² box (the manufactured
+/// solution is periodic there). Zero boundary faces ⇒ no BCs; the manufactured
+/// sources are mean-projected to zero (closed-system constraint). `eps4` sets the
+/// biharmonic dissipation field. Isolates the interior operator from the boundary.
 #[allow(clippy::type_complexity)]
 fn setup_periodic(n: usize, eps4: f32, mu: f64) -> (CpuSolver, Mesh) {
     let mesh = generate_structured_rect_mesh_periodic(n, n, 2.0, 2.0);
@@ -924,10 +908,9 @@ fn setup_periodic(n: usize, eps4: f32, mu: f64) -> (CpuSolver, Mesh) {
     (s, mesh)
 }
 
-/// PERIODIC march: the all-inlet (Dirichlet) box's blow-up is documented as a
-/// BOUNDARY-closure instability; a periodic box isolates the interior operator.
-/// If THIS march stays BOUNDED where the Dirichlet one blows up, the CPU's
-/// interior compressible operator is stable and matches the GPU.
+/// PERIODIC march: a periodic box isolates the interior operator from the
+/// boundary closure. Staying BOUNDED here where the Dirichlet box blows up means
+/// the interior compressible operator is stable.
 #[ignore]
 #[test]
 fn diag_periodic_biharmonic_march() {
@@ -949,29 +932,16 @@ fn diag_periodic_biharmonic_march() {
 
 /// CPU compressible PERIODIC-box order DIAGNOSTIC: marches the interior operator
 /// (boundary closure excluded) and reports the error/order across n + eps4.
-///
-/// FINDING (2026-06-15): unlike the all-inlet box (which BLOWS UP), the periodic
-/// march stays BOUNDED — so the CPU's interior compressible operator is stable in
-/// the sense the Dirichlet one is not, confirming the all-inlet blow-up is a
-/// BOUNDARY-closure instability. BUT the periodic error does not converge at
-/// design order; measured orders are negative (error grows with n):
-///   - mu=0.05 eps4=0:    rho 4.6e-2@n16 -> 7.2e-2@n32 (order -0.64)
-///   - mu=0.05 eps4=0.10: higher (-0.62) — eps4 ADDS error, doesn't cure
-///   - mu=0.2  eps4=0:    higher still (-0.97) — more viscosity doesn't rescue it
-/// i.e. a refinement-amplified marginal interior mode (matching the GPU's periodic
-/// probe, which shows the instability is interior). Two reasons a clean order
-/// needs more work: (1) eps4>0 here lacks the consistent `+eps4*∇⁴X_exact` source
-/// term, so the biharmonic perturbs the MMS instead of curing it (the GPU
-/// biharmonic MMS carries that term); (2) the CPU's implicit lap-constraint /
-/// static-diagonal machinery may not damp identically to the GPU. Printed, not
-/// asserted (the GPU's periodic biharmonic order is likewise an `#[ignore]` probe).
+/// The periodic march stays BOUNDED but does NOT converge at design order — a
+/// refinement-amplified marginal interior mode (error grows with n). eps4>0 here
+/// lacks the consistent `+eps4*∇⁴X_exact` source term, so the biharmonic perturbs
+/// the MMS instead of curing it. Printed, not asserted (bounded is the only claim).
 #[ignore]
 #[test]
 fn diag_cpu_compressible_periodic_order() {
     let steps = 300;
     // mu=0.05 = the MMS const (marginal interior); mu=0.2 = a viscosity-stable
-    // regime where the interior mode is physically damped, so the CPU interior
-    // operator should show design order with no biharmonic.
+    // regime where the interior mode is physically damped.
     for (eps4, mu) in [(0.0_f32, MU), (0.1_f32, MU), (0.0_f32, 0.2_f64)] {
         let levels = [16usize, 32];
         let mut errs: [Vec<f64>; 4] = [vec![], vec![], vec![], vec![]];
@@ -1030,10 +1000,9 @@ fn ls_order(hs: &[f64], es: &[f64]) -> f64 {
 }
 
 /// Per-equation volume-weighted L2 of the discrete residual `r = rhs - A x_exact`
-/// over INTERIOR cells (the boundary-closure truncation is a separate, localized
-/// first-order effect, excluded). This is the operator's truncation error; its
-/// convergence rate is the discretization's CONSISTENCY order. Pure assembly (no
-/// marching, no solve), so it is fast and immune to the marginal-march dynamics.
+/// over INTERIOR cells (boundary-closure truncation is a separate first-order
+/// effect, excluded). This truncation error's convergence rate is the
+/// discretization's CONSISTENCY order. Pure assembly — no marching, no solve.
 fn interior_residual_l2(n: usize) -> [f64; 8] {
     let (mut s, mesh) = setup(n, CpuBackendConfig::default());
     let (matrix, rhs) = s.debug_assemble();
@@ -1088,35 +1057,19 @@ fn interior_residual_l2(n: usize) -> [f64; 8] {
     out
 }
 
-/// CPU compressible operator — 2nd-order CONSISTENCY certification (the honest,
-/// robust order validation for this marginally-unstable MMS).
+/// CPU compressible operator — 2nd-order CONSISTENCY certification.
 ///
-/// WHY CONSISTENCY (truncation error), NOT A MARCHED SOLUTION ORDER: this
+/// Certifies the truncation-error order rather than a marched solution order: the
 /// manufactured subsonic-NS steady state is MARGINALLY UNSTABLE with a tiny
-/// stability basin (a >=20% velocity perturbation escapes it and blows up — see
-/// `diag_cpu_perturbed_ic`). The step-1 assembled block matrix + rhs match the GPU
-/// to f32 (`diag_cpu_vs_gpu_matrix`, after five operator fixes: gradient ordering,
-/// `bc_expr` end-of-iter timing, BlockJacobi for coupled S>1, `x` warm-start, BDF2
-/// Euler-startup) — so the OPERATOR is identical to the GPU's to f32. The only
-/// difference is the linear-solve PRECISION: the GPU solves the whole step in f32,
-/// whose rounding noise keeps the iterate jiggling inside the basin (a bounded
-/// limit cycle the GPU runner plateau-accepts at O(h^2)); the CPU's native Krylov
-/// is f64 (deterministic), so it either freezes near the exact IC (fine mesh, where
-/// the exact state is ~the discrete steady state — `diag_cpu_allinlet_boundedness`)
-/// or amplifies the mode to blow-up (coarse mesh). Neither dtau (`diag_cpu_dtau_sweep`)
-/// nor higher viscosity (`diag_cpu_mu_sweep`) is a clean fix — both interact with
-/// the f32 state / destabilize further. So a marched solution-error order is not
-/// robustly measurable on the deterministic f64 backend for THIS marginal MMS.
+/// stability basin (a >=20% velocity perturbation escapes it and blows up). The
+/// operator itself matches the GPU to f32; the deterministic f64 solve either
+/// freezes near the exact IC (fine mesh) or amplifies the mode to blow-up (coarse
+/// mesh), so a marched solution-error order is not robustly measurable here.
 ///
-/// The CONSISTENCY order is the robust, backend-independent statement of operator
-/// correctness: the interior discrete residual at the exact solution converges at
-/// ~O(h^3.5) in L2 for every conserved equation (measured: rho 3.8 / rho_u 3.5 /
-/// rho_e 3.5 — the cell-integrated conservative residual super-converges above the
-/// 2nd-order design rate; the global SOLUTION order is the boundary-limited 2 the
-/// GPU oracle measures). So the CPU compressible operator is comfortably >= 2nd-
-/// order accurate — which, together with the proven f32 match to the GPU operator
-/// (`diag_cpu_vs_gpu_matrix`), is the compressible parity result. (The other four
-/// model families + the Ghia benchmark certify the full SOLUTION-order path on CPU.)
+/// The interior discrete residual at the exact solution converges at ~O(h^3.5) in
+/// L2 for every conserved equation (the cell-integrated conservative residual
+/// super-converges above the 2nd-order design rate; the global SOLUTION order is
+/// the boundary-limited 2). So the operator is comfortably >= 2nd-order accurate.
 #[test]
 fn cpu_compressible_operator_second_order() {
     let levels = [16usize, 32, 64];
@@ -1130,9 +1083,9 @@ fn cpu_compressible_operator_second_order() {
         }
         println!();
     }
-    // Conserved-equation truncation error must converge at >= ~2nd order
-    // (measured ~2.8-3.0). Band the upper side so a freeze/precision artifact
-    // (spuriously high apparent order) fails rather than passes.
+    // Conserved-equation truncation error must converge at >= ~2nd order. Band
+    // the upper side so a freeze/precision artifact (spuriously high apparent
+    // order) fails rather than passes.
     for u in [0usize, 1, 2, 3] {
         let es: Vec<f64> = resids.iter().map(|r| r[u]).collect();
         let ord = ls_order(&hs, &es);
@@ -1152,17 +1105,16 @@ fn cpu_compressible_operator_second_order() {
     }
 }
 
-// Plateau-acceptance constants mirroring the GPU runner
-// (`mms_compressible_order_test.rs`): the compressible MMS is marginally unstable
-// on BOTH backends, so the order test accepts at a per-step delta PLATEAU rather
-// than a fixed step. Kept in sync with the GPU constants.
+// Plateau-acceptance constants mirroring the GPU runner: the compressible MMS is
+// marginally unstable on both backends, so the order test accepts at a per-step
+// delta PLATEAU rather than a fixed step. Kept in sync with the GPU constants.
 const STEADY_TOL: f64 = 1e-5;
 const STEADY_MAX_STEPS: usize = 1600;
 const PLATEAU_WINDOW: usize = 80;
 const MIN_STEPS: usize = 600;
 const LONG_MARCH_ACCEPT_STEPS: usize = 1200;
 
-/// Per-step max delta over (u, rho, T) — the GPU runner's "steady" watch metric.
+/// Per-step max delta over (u, rho, T) — the "steady" watch metric.
 fn max_delta_state(c: &CpuSolver, prev: &(Vec<(f64, f64)>, Vec<f64>, Vec<f64>)) -> f64 {
     let u = c.get_field_vec2("u").unwrap();
     let rho = c.get_field_scalar("rho").unwrap();
@@ -1188,17 +1140,11 @@ fn read_state(c: &CpuSolver) -> (Vec<(f64, f64)>, Vec<f64>, Vec<f64>) {
     )
 }
 
-/// CPU mirror of the GPU runner's `march_to_plateau`
-/// (`mms_compressible_order_test.rs`): march until the watched per-step max delta
-/// over (u, rho, T) drops below `STEADY_TOL`, or its best value plateaus (no >2%
-/// improvement for `PLATEAU_WINDOW` steps after `MIN_STEPS`), or
-/// `LONG_MARCH_ACCEPT_STEPS`. Same constants/policy as the GPU so the CPU order
-/// test accepts the marginal MMS at the same point.
-///
-/// Retained as documented infrastructure: the marched solution-order path is not
-/// robustly measurable on the deterministic f64 CPU for this marginally-unstable
-/// MMS (see `cpu_compressible_operator_second_order`), so the order test certifies
-/// CONSISTENCY instead; this mirror of the GPU policy is kept for reference.
+/// CPU mirror of the GPU `march_to_plateau`: march until the watched per-step max
+/// delta over (u, rho, T) drops below `STEADY_TOL`, or its best value plateaus (no
+/// >2% improvement for `PLATEAU_WINDOW` steps after `MIN_STEPS`), or
+/// `LONG_MARCH_ACCEPT_STEPS`. Kept for reference; the order test certifies
+/// CONSISTENCY instead (see `cpu_compressible_operator_second_order`).
 #[allow(dead_code)]
 fn march_to_plateau_cpu(c: &mut CpuSolver) {
     let mut prev = read_state(c);
@@ -1245,8 +1191,7 @@ fn march_to_plateau_cpu(c: &mut CpuSolver) {
     panic!("no steady tolerance or plateau within {STEADY_MAX_STEPS} steps (best={best:.3e})");
 }
 
-/// Volume-weighted L2 errors (rho, u, p, T) vs the exact solution — the GPU
-/// runner's `read_errors` metric set.
+/// Volume-weighted L2 errors (rho, u, p, T) vs the exact solution.
 fn read_errors_cpu(mesh: &Mesh, c: &CpuSolver) -> (f64, f64, f64, f64) {
     let rho = c.get_field_scalar("rho").unwrap();
     let u = c.get_field_vec2("u").unwrap();
@@ -1268,11 +1213,9 @@ fn read_errors_cpu(mesh: &Mesh, c: &CpuSolver) -> (f64, f64, f64, f64) {
 }
 
 /// CPU all-inlet boundedness probe: does the marginal compressible march stay
-/// bounded through the GPU's MIN_STEPS=600 acceptance window (like the GPU), or
-/// blow up first? Prints per-25-step max_delta (the plateau metric), the rho_e
-/// L2 error, and max|rho_e| (blow-up sentinel). CPU-only (no GPU) so it can push
-/// to many steps cheaply. This is the decisive datum for whether the plateau
-/// harness alone suffices or a stabilization (Track 3) is required.
+/// bounded through the 600-step acceptance window, or blow up first? Prints
+/// per-25-step max_delta (the plateau metric), the rho_e L2 error, and max|rho_e|
+/// (blow-up sentinel).
 #[ignore]
 #[cfg(feature = "dev-tests")]
 #[test]
@@ -1312,13 +1255,11 @@ fn diag_cpu_allinlet_boundedness() {
 }
 
 /// Perturbed-IC probe: initializing AT the exact solution makes the f32 march
-/// freeze near the IC at fine mesh (the exact state ~ the discrete steady state, so
-/// the residual is tiny and the f32 update underflows before reaching the true
-/// discrete steady state — giving anti-scaling, artificially-low errors). Starting
-/// FAR from steady (here: velocity scaled by `vfac`) forces a real convergence to
-/// the discrete steady state (a stable attractor at n>=32), so the frozen state is
-/// the true steady state and the error is the genuine O(h^2) discretization error.
-/// This probe checks the converged error scales ~O(h^2) across n.
+/// freeze near the IC at fine mesh (residual tiny, f32 update underflows before
+/// reaching the discrete steady state → artificially-low errors). Starting FAR
+/// from steady (velocity scaled by `vfac`) forces a real convergence to the stable
+/// discrete steady state, so the error is the genuine O(h^2) discretization error.
+/// Checks the converged error scales ~O(h^2) across n.
 #[ignore]
 #[cfg(feature = "dev-tests")]
 #[test]
@@ -1335,9 +1276,8 @@ fn diag_cpu_perturbed_ic() {
         for &n in &[32usize, 48] {
             let (mut c, mesh) = setup(n, cfg);
             let cells = mesh.num_cells();
-            // Consistent perturbed state: velocity scaled by vfac (rho, p kept
-            // exact; rho_u and rho_e re-derived so the state is thermodynamically
-            // consistent).
+            // Perturbed state: velocity scaled by vfac; rho, p kept exact; rho_u
+            // and rho_e re-derived so the state stays thermodynamically consistent.
             let rho: Vec<f64> = (0..cells).map(|i| exact_rho(mesh.cell_cx[i], mesh.cell_cy[i])).collect();
             let p: Vec<f64> = (0..cells).map(|i| exact_p(mesh.cell_cx[i], mesh.cell_cy[i])).collect();
             let u: Vec<(f64, f64)> = (0..cells)
@@ -1383,12 +1323,10 @@ fn diag_cpu_perturbed_ic() {
     }
 }
 
-/// CPU viscosity sweep: at what `mu` is the all-inlet compressible MMS a GENUINELY
-/// STABLE discrete steady state (so the CPU f64 solve converges cleanly, no
-/// blow-up, no f32-freeze artifact) at design order? The GPU's mu=0.05 envelope is
-/// marginally unstable (the GPU's f32 solver drifts/plateaus; the CPU f64 solve
-/// amplifies → blows up). Higher physical viscosity damps the convective mode into
-/// a stable attractor both backends reach. Reports boundedness + end-error order.
+/// CPU viscosity sweep: at what `mu` is the all-inlet compressible MMS a genuinely
+/// STABLE discrete steady state (CPU f64 solve converges cleanly at design order)?
+/// mu=0.05 is marginally unstable; higher physical viscosity damps the convective
+/// mode into a stable attractor. Reports boundedness + end-error order.
 #[ignore]
 #[cfg(feature = "dev-tests")]
 #[test]
@@ -1407,7 +1345,7 @@ fn diag_cpu_mu_sweep() {
             let cells = mesh.num_cells();
             c.set_viscosity(mu as f32);
             // Re-derive the mu-dependent momentum/energy sources (the rho-source
-            // mass-compatibility projection is mu-independent, so it is left as-is).
+            // mass-compatibility projection is mu-independent, left as-is).
             let su: Vec<(f64, f64)> = (0..cells)
                 .map(|i| source_rho_u(mesh.cell_cx[i], mesh.cell_cy[i], mu))
                 .collect();
@@ -1443,15 +1381,11 @@ fn diag_cpu_mu_sweep() {
     }
 }
 
-/// CPU pseudo-transient (dtau) stabilization sweep. The marginal compressible
-/// mode blows up at dtau=0 (see `diag_cpu_allinlet_boundedness`); the GPU stays
-/// bounded because its f32 solver damps the mode, while the CPU's f64 solve
-/// resolves+amplifies it. Pseudo-transient continuation adds a (state-state_iter)
-/// /dtau term that vanishes at steady state — so it changes only the PATH, not the
-/// converged discrete steady state (the order is preserved). The GPU probe
-/// documents dtau=dt damps this mode. This sweep finds the smallest dtau that
-/// keeps the CPU march bounded AND lets the error SETTLE (stop growing) at the
-/// O(h^2) discretization level.
+/// CPU pseudo-transient (dtau) stabilization sweep. The marginal compressible mode
+/// blows up at dtau=0. Pseudo-transient continuation adds a (state-state_iter)/dtau
+/// term that vanishes at steady state, so it changes only the PATH, not the
+/// converged discrete steady state (order preserved). Finds the smallest dtau that
+/// keeps the CPU march bounded AND lets the error SETTLE at the O(h^2) level.
 #[ignore]
 #[cfg(feature = "dev-tests")]
 #[test]

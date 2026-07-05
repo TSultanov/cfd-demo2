@@ -11,7 +11,7 @@ pub mod init;
 pub mod linear_solver;
 pub(crate) mod lowering;
 pub mod modules;
-pub(crate) mod pipeline_cache;
+pub mod pipeline_cache;
 pub mod profiling_types;
 pub mod profiling;
 pub(crate) mod program;
@@ -23,8 +23,7 @@ pub mod srd;
 pub mod structs;
 pub mod submission_counter;
 pub mod unified_solver;
-/// GPU meshless Voronoi engine (roadmap M1); depends on the M0 CPU engine's
-/// shared types, hence the `meshgen` gate.
+/// GPU meshless Voronoi engine; depends on the CPU engine's shared types, hence the `meshgen` gate.
 #[cfg(feature = "meshgen")]
 pub mod voronoi;
 pub(crate) mod wgsl_reflect;

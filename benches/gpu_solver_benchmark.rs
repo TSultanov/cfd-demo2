@@ -18,7 +18,7 @@ fn gpu_solver_step_benchmark(c: &mut Criterion) {
     let mut mesh = generate_cut_cell_mesh(&geo, 0.02, 0.02, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
 
-    let model = incompressible_momentum_model();
+    let model = incompressible_momentum_model().expect("model");
     let config = SolverConfig::default();
     let mut solver = pollster::block_on(GpuUnifiedSolver::new(&mesh, model, config, None, None))
         .expect("should create solver");
@@ -27,8 +27,7 @@ fn gpu_solver_step_benchmark(c: &mut Criterion) {
     solver.set_density(1000.0).unwrap();
     solver.set_alpha_p(1.0).unwrap();
 
-    // Note: Initial conditions are set via write_state_bytes in the new API
-    // For simplicity in benchmarks, we skip custom initial conditions and use defaults
+    // Skip custom initial conditions; benchmark uses defaults.
     solver.initialize_history();
 
     let mut group = c.benchmark_group("gpu_solver_step");

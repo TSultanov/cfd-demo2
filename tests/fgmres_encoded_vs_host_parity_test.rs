@@ -190,6 +190,7 @@ fn encoded_fgmres_matches_host_fgmres_on_small_system() {
     let b_diag_p = device_buffer_f32(&ctx.device, &diag_inv, "diag_p");
     let precond_bg = FgmresWorkspace::build_precond_bind_group(
         &ctx.device,
+        &ctx.pipeline_cache,
         "test FGMRES precond BG",
         |name| match name {
             "diag_u" => Some(b_diag_u.as_entire_binding()),
@@ -203,6 +204,7 @@ fn encoded_fgmres_matches_host_fgmres_on_small_system() {
     let max_restart = n as usize; // Big enough to converge in one restart cycle.
     let fgmres = FgmresWorkspace::new_from_system(
         &ctx.device,
+        &ctx.pipeline_cache,
         n,
         n, // num_cells = n (for dispatch sizing)
         max_restart,
@@ -343,11 +345,11 @@ fn tridiag_residual_norm(rhs: &[f32], x: &[f64]) -> f64 {
 /// and a warm start where ||r0|| << ||b||, both paths must declare
 /// convergence against rel_scale = min(||b||, ||r0||).
 ///
-/// The host loop has always used min(||b||, ||r0||); the encoded path
-/// computes RHS_NORM = ||b|| on the GPU and (without the clamp_rel_scale
-/// kernel) would accept a residual that only beat tol * ||b|| — orders of
-/// magnitude looser than the host on near-converged warm starts. This test
-/// fails without the gmres_logic/clamp_rel_scale dispatch.
+/// The host loop uses min(||b||, ||r0||); the encoded path computes
+/// RHS_NORM = ||b|| on the GPU and (without the clamp_rel_scale kernel) would
+/// accept a residual that only beat tol * ||b|| — orders of magnitude looser
+/// than the host on near-converged warm starts. This test fails without the
+/// gmres_logic/clamp_rel_scale dispatch.
 #[test]
 fn encoded_fgmres_warm_start_uses_min_b_r0_scale() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -409,6 +411,7 @@ fn encoded_fgmres_warm_start_uses_min_b_r0_scale() {
     let b_diag_p = device_buffer_f32(&ctx.device, &diag_inv, "diag_p");
     let precond_bg = FgmresWorkspace::build_precond_bind_group(
         &ctx.device,
+        &ctx.pipeline_cache,
         "test FGMRES precond BG",
         |name| match name {
             "diag_u" => Some(b_diag_u.as_entire_binding()),
@@ -421,6 +424,7 @@ fn encoded_fgmres_warm_start_uses_min_b_r0_scale() {
     let max_restart = 32usize;
     let fgmres = FgmresWorkspace::new_from_system(
         &ctx.device,
+        &ctx.pipeline_cache,
         n,
         n,
         max_restart,

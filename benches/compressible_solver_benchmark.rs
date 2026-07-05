@@ -33,7 +33,7 @@ fn setup_backstep_solver(cell_size: f64) -> UnifiedSolver {
 
     let mut solver = pollster::block_on(UnifiedSolver::new(
         &mesh,
-        compressible_model_with_eos(eos),
+        compressible_model_with_eos(eos).expect("model"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
             time_scheme: TimeScheme::Euler,

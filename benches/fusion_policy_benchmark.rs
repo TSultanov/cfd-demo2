@@ -36,7 +36,7 @@ fn setup_solver(policy: KernelFusionPolicy) -> GpuUnifiedSolver {
     let mut mesh = generate_cut_cell_mesh(&geo, 0.02, 0.02, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
 
-    let mut model = incompressible_momentum_model();
+    let mut model = incompressible_momentum_model().expect("model");
     let mut linear_solver = model
         .linear_solver
         .expect("incompressible model missing linear solver");
@@ -79,7 +79,7 @@ fn setup_solver_batched(policy: KernelFusionPolicy, outer_batched_mode: bool) ->
     let mut mesh = generate_cut_cell_mesh(&geo, 0.02, 0.02, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
 
-    let mut model = incompressible_momentum_model();
+    let mut model = incompressible_momentum_model().expect("model");
     let mut linear_solver = model
         .linear_solver
         .expect("incompressible model missing linear solver");
@@ -157,7 +157,7 @@ fn bench_fusion_policy(c: &mut Criterion) {
 /// Benchmark one-submission vs multi-submission (host-driven) outer loop.
 fn bench_submission_path(c: &mut Criterion) {
     std::env::set_var("CFD2_QUIET", "1");
-    // Clear legacy tuning knobs.
+    // Clear tuning knobs.
     std::env::remove_var("CFD2_ONE_SUBMISSION_SOLUTION_OMEGA");
     std::env::remove_var("CFD2_ONE_SUBMISSION_TAIL_OMEGA");
     std::env::remove_var("CFD2_ONE_SUBMISSION_CHUNKS");

@@ -49,12 +49,14 @@
 //! tolerance, while relative coordinates are O(h) with ~1e-10 ulps.
 
 mod derive;
+mod emit;
 mod engine;
 mod lloyd;
 mod scan;
 mod wgsl;
 
-pub use derive::{DeriveFaces, DerivedFaceOffsets};
+pub use derive::{DeriveFaces, DerivedFaceOffsets, ScanOffsets};
+pub use emit::{EmitFaces, GpuFaceGeometry};
 pub use engine::{
     boundary_spec_f32, GpuVoronoiCells, GpuVoronoiEngine, VoronoiResolveReport,
 };

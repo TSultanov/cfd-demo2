@@ -47,6 +47,17 @@ pub struct DerivedFaceOffsets {
     pub total: u32,
 }
 
+/// Count → scan result with the per-cell base offsets kept ON DEVICE (for the
+/// emit pass to consume directly) plus the scalar `num_faces` total. Only the
+/// n-u32 offsets/counts (the addressing, not the O(num_faces) face geometry) are
+/// read back to compute the total.
+pub struct ScanOffsets {
+    /// Per-cell exclusive-scan base offsets, on device (size `n * 4` bytes).
+    pub b_offsets: wgpu::Buffer,
+    /// Grand total = new `num_faces`.
+    pub total: u32,
+}
+
 /// The `count_owned_faces` pipeline (the scan is owned separately).
 pub struct DeriveFaces {
     count_pipeline: wgpu::ComputePipeline,
@@ -105,20 +116,22 @@ impl DeriveFaces {
         Self { count_pipeline, bgl, scan: GpuScan::new(device) }
     }
 
-    /// Run count → scan over the engine's current cell-major outputs and read
-    /// back the per-cell owned-face counts + offsets + total.
-    pub fn derive_offsets(
+    /// Count → scan over the engine's cell-major outputs, producing the per-cell
+    /// owned-face count buffer + exclusive-scan offset buffer ON DEVICE (one
+    /// encoder, no intermediate readback). Both buffers have `COPY_SRC` so the
+    /// caller can read them back (`derive_offsets`) or feed them straight to the
+    /// emit pass (`encode_offsets`).
+    fn run_count_scan(
         &self,
         ctx: &GpuContext,
-        cache: &StagingBufferCache,
         engine: &GpuVoronoiEngine,
-    ) -> DerivedFaceOffsets {
+    ) -> (wgpu::Buffer, wgpu::Buffer) {
         use wgpu::BufferUsages as U;
         let n = engine.n_seeds();
-        assert!(n > 0, "derive_offsets called before a regen (n_seeds == 0)");
+        assert!(n > 0, "run_count_scan called before a regen (n_seeds == 0)");
         assert!(
             n <= super::MAX_SCAN_ELEMS,
-            "derive_offsets: {n} cells exceeds the two-level scan ceiling \
+            "run_count_scan: {n} cells exceeds the two-level scan ceiling \
              ({} = 2^20); needs the v2 multi-level scan (design-gpu §4.1)",
             super::MAX_SCAN_ELEMS,
         );
@@ -199,7 +212,20 @@ impl DeriveFaces {
             n,
         );
         ctx.queue.submit(Some(encoder.finish()));
+        (b_owned, b_offsets)
+    }
 
+    /// Run count → scan and read back the per-cell owned-face counts + offsets +
+    /// total (the inspection/validation path — `gpu_derive_faces_test`).
+    pub fn derive_offsets(
+        &self,
+        ctx: &GpuContext,
+        cache: &StagingBufferCache,
+        engine: &GpuVoronoiEngine,
+    ) -> DerivedFaceOffsets {
+        let n = engine.n_seeds();
+        let counts_bytes = (n as u64) * 4;
+        let (b_owned, b_offsets) = self.run_count_scan(ctx, engine);
         let prof = ProfilingStats::new();
         let owned_bytes = pollster::block_on(read_buffer_cached(
             ctx, cache, &prof, &b_owned, counts_bytes, "derive:read_owned",
@@ -212,6 +238,33 @@ impl DeriveFaces {
         let last = n as usize - 1;
         let total = offsets[last] + owned_counts[last];
         DerivedFaceOffsets { owned_counts, offsets, total }
+    }
+
+    /// Run count → scan, keeping the per-cell offsets buffer ON DEVICE for the
+    /// emit pass and returning the scalar `num_faces`. Only the n-u32
+    /// owned/offsets addressing is read back (to compute the total); the
+    /// O(num_faces) face geometry never round-trips.
+    pub fn encode_offsets(
+        &self,
+        ctx: &GpuContext,
+        cache: &StagingBufferCache,
+        engine: &GpuVoronoiEngine,
+    ) -> ScanOffsets {
+        let n = engine.n_seeds();
+        let counts_bytes = (n as u64) * 4;
+        let (b_owned, b_offsets) = self.run_count_scan(ctx, engine);
+        let prof = ProfilingStats::new();
+        let owned_bytes = pollster::block_on(read_buffer_cached(
+            ctx, cache, &prof, &b_owned, counts_bytes, "derive:read_owned_total",
+        ));
+        let off_bytes = pollster::block_on(read_buffer_cached(
+            ctx, cache, &prof, &b_offsets, counts_bytes, "derive:read_offsets_total",
+        ));
+        let owned: Vec<u32> = bytemuck::cast_slice(&owned_bytes).to_vec();
+        let offsets: Vec<u32> = bytemuck::cast_slice(&off_bytes).to_vec();
+        let last = n as usize - 1;
+        let total = offsets[last] + owned[last];
+        ScanOffsets { b_offsets, total }
     }
 }
 

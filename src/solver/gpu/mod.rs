@@ -11,6 +11,7 @@ pub mod init;
 pub mod linear_solver;
 pub(crate) mod lowering;
 pub mod modules;
+pub(crate) mod pipeline_cache;
 pub mod profiling_types;
 pub mod profiling;
 pub(crate) mod program;

@@ -76,10 +76,15 @@ pub struct GenericCoupledSchurPreconditioner {
 }
 
 impl GenericCoupledSchurPreconditioner {
-    pub fn new(device: &wgpu::Device, inputs: GenericCoupledSchurPreconditionerInputs<'_>) -> Result<Self, String> {
+    pub fn new(
+        device: &wgpu::Device,
+        cache: std::sync::Arc<crate::solver::gpu::pipeline_cache::PipelineCache>,
+        inputs: GenericCoupledSchurPreconditionerInputs<'_>,
+    ) -> Result<Self, String> {
         Ok(Self {
             schur: CoupledSchurModule::new(
                 device,
+                cache,
                 CoupledSchurInputs {
                     num_cells: inputs.num_cells,
                     pressure_row_offsets: inputs.pressure_row_offsets,
@@ -115,13 +120,15 @@ impl GenericCoupledSchurPreconditioner {
         })
     }
 
-    pub fn build_setup_pipeline(device: &wgpu::Device) -> Result<wgpu::ComputePipeline, String> {
-        let src = kernel_registry::kernel_source_by_id(
+    pub fn build_setup_pipeline(
+        device: &wgpu::Device,
+        cache: &crate::solver::gpu::pipeline_cache::PipelineCache,
+    ) -> Result<wgpu::ComputePipeline, String> {
+        cache.pipeline(
+            device,
             "",
             KernelId::GENERIC_COUPLED_SCHUR_SETUP_BUILD_DIAG_AND_PRESSURE,
         )
-        .map_err(|e| format!("generic_coupled_schur_setup shader missing: {e}"))?;
-        Ok((src.create_pipeline)(device))
     }
 
     pub fn build_setup_bind_group(

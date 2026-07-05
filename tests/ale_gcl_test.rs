@@ -135,8 +135,13 @@ struct GclRun {
     /// run, steps [STEPS/4, STEPS/2)): the cold-start linear-solve transient
     /// (step ≤10) has settled, so this is the baseline the late window is
     /// compared against. A compounding GCL error makes `late ≫ early`; a
-    /// saturated solve-noise floor makes `late ≈ early`.
+    /// saturated solve-noise floor makes `late ≈ early`. Retained as an
+    /// instrument (the GPU topology-seam gate compared against it before M5
+    /// stage 1's warm-start carry brought that seam down to the geometry-seam
+    /// late-window floor, which is now an absolute cap).
+    #[allow(dead_code)]
     early_du: f32,
+    #[allow(dead_code)]
     early_dp: f32,
     /// Worst drift over the FINAL QUARTER of the run — the actual GCL
     /// statement: a conservation-law violation compounds step over step,
@@ -408,23 +413,21 @@ fn gcl_topology_seam_preserves_uniform_flow_cpu_bdf2() {
 
 /// GPU, both schemes, through the topology seam.
 ///
-/// HONEST DEVIATION — the GPU drift is BOUNDED but ~100× the geometry seam's,
-/// and this is a solver-convergence artifact, NOT a GCL violation. The GPU
-/// topology refresh RECONSTRUCTS the linear-algebra stack (stage-2 deviation),
-/// which re-zeroes the warm-start `x`; so every step's coupled solve restarts
-/// COLD from a uniform-`x` guess and only runs 6 outers, leaving a ~1.5e-3
-/// under-converged residual that is RE-INJECTED each step (never warm-started
-/// away). The tell that it is convergence, not conservation: the drift is
-/// SATURATED — late ≈ max (measured euler U 1.53e-3 / p 5.46e-3, late 1.53e-3 /
-/// 5.45e-3) — a compounding GCL error would make late ≫ early. The CPU seam,
-/// whose surgical refresh PRESERVES `x`, holds the M3 ~1e-6 scale. Warm-start
-/// preservation across the GPU topology rebuild needs the `x`-readback/upload
-/// plumbing stage 3 deferred (GPU has only `read_state_bytes` today); it is the
-/// M4 per-step-loop optimization. Caps here are pinned to the saturated
-/// magnitude and assert non-compounding by comparing the FINAL-quarter drift
-/// against an EARLY post-cold-start window (late within 1.5× of early — a
-/// secular GCL error would make late ≫ early; solve-noise saturation keeps them
-/// comparable).
+/// M5 STAGE 1 — the GPU topology seam now holds the SAME drift scale as the GPU
+/// geometry seam. The topology refresh still reconstructs the hand-written LA
+/// modules (to resize their bind groups), but (a) the compiled pipelines are
+/// served from a per-device cache so nothing recompiles, and (b) the warm-start
+/// `x` (a cell-indexed = dof-indexed iterate, invariant across the refresh) is
+/// carried forward with an on-device buffer→buffer copy instead of being
+/// re-zeroed. So every step's coupled solve resumes WARM from the previous
+/// converged iterate — no cold-restart residual is re-injected. Measured drop
+/// (Apple M-series): euler max|U-U0| 1.53e-3 → 5.5e-5, late 1.53e-3 → 1.3e-6
+/// (the CPU-surgical ~1e-6 scale); bdf2 max 9.6e-5 / late 2.6e-6. These now
+/// match `gcl_uniform_flow_preserved_gpu_euler_and_bdf2` (the geometry seam):
+/// the residual is the same f32 step-0 cold-START transient that decays ~50× to
+/// a ~1e-6 steady band, NOT a topology-seam artifact. Caps are therefore pinned
+/// to the geometry-seam magnitudes; a regression back to the re-zeroed cold
+/// restart (or a real compounding GCL error) blows the late-window caps.
 #[test]
 fn gcl_topology_seam_preserves_uniform_flow_gpu() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -443,24 +446,20 @@ fn gcl_topology_seam_preserves_uniform_flow_gpu() {
              (late {:.3e}), max SCL defect = {:.3e} ({STEPS} steps)",
             out.max_du, out.late_du, out.max_dp, out.late_dp, out.max_scl_defect
         );
-        // Bounded at the cold-restart (under-converged) magnitude (~2× measured).
-        assert!(out.max_du < 3e-3, "[{label}] U drift {:.3e} above pinned cap", out.max_du);
-        assert!(out.max_dp < 1.2e-2, "[{label}] p drift {:.3e} above pinned cap", out.max_dp);
-        // Non-compounding: compare the FINAL quarter against an EARLY
-        // post-cold-start window (NOT against `max`, which trivially dominates
-        // the final quarter — that made the old assertion vacuous). A secular
-        // GCL error grows the late window well past early; the saturated
-        // solve-noise floor keeps late ≈ early. The `.max(floor)` guards against
-        // a degenerate tiny early baseline (floor ≪ the ~1.5e-3 saturated scale).
+        // Pinned to the geometry-seam scale (warm-start preserved): full-run caps
+        // carry the f32 cold-START headroom (~2.5× measured euler 5.5e-5 / bdf2
+        // 9.6e-5), the late-window caps are the actual no-compounding GCL floor.
+        assert!(out.max_du < 2.5e-4, "[{label}] U drift {:.3e} above pinned cap", out.max_du);
+        assert!(out.max_dp < 4e-4, "[{label}] p drift {:.3e} above pinned cap", out.max_dp);
         assert!(
-            out.late_du <= (out.early_du * 1.5).max(2e-4) && out.late_du < 3e-3,
-            "[{label}] late U drift {:.3e} vs early {:.3e}: GCL error compounds",
-            out.late_du, out.early_du
+            out.late_du < 1e-5,
+            "[{label}] late U drift {:.3e}: GCL violation compounds (warm-start lost?)",
+            out.late_du
         );
         assert!(
-            out.late_dp <= (out.early_dp * 1.5).max(8e-4) && out.late_dp < 1.2e-2,
-            "[{label}] late p drift {:.3e} vs early {:.3e}: GCL error compounds",
-            out.late_dp, out.early_dp
+            out.late_dp < 8e-5,
+            "[{label}] late p drift {:.3e}: GCL violation compounds (warm-start lost?)",
+            out.late_dp
         );
     }
 }

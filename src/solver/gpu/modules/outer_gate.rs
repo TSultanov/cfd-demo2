@@ -5,7 +5,6 @@
 //! convergence flag into the FGMRES/CG solver scalars buffer so subsequent
 //! linear solver iterations become near-zero-cost).
 
-use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::model::KernelId;
 
 /// GPU-side adaptive outer break gate resources.
@@ -33,6 +32,7 @@ impl OuterAdaptiveGate {
     pub(crate) fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        cache: &crate::solver::gpu::pipeline_cache::PipelineCache,
         num_cells: u32,
         num_faces: u32,
         max_workgroups_per_dim: u32,
@@ -94,10 +94,10 @@ impl OuterAdaptiveGate {
             mapped_at_creation: false,
         }));
 
-        // Gate pipeline (pre-compiled infrastructure kernel)
-        let gate_src = kernel_registry::kernel_source_by_id("", KernelId::OUTER_GATE)
+        // Gate pipeline (pre-compiled infrastructure kernel, cached per device)
+        let gate_pipeline = cache
+            .pipeline(device, "", KernelId::OUTER_GATE)
             .expect("missing outer_gate infrastructure kernel");
-        let gate_pipeline = (gate_src.create_pipeline)(device);
         let gate_bgl = gate_pipeline.get_bind_group_layout(0);
         let gate_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("outer_gate:gate_bg"),
@@ -131,18 +131,14 @@ impl OuterAdaptiveGate {
         });
 
         // STOP-inject pipeline for FGMRES (pre-compiled infrastructure kernel)
-        let stop_inject_src = kernel_registry::kernel_source_by_id(
-            "",
-            KernelId::OUTER_STOP_INJECT_FGMRES,
-        )
-        .expect("missing outer_stop_inject_fgmres infrastructure kernel");
-        let stop_inject_pipeline = (stop_inject_src.create_pipeline)(device);
+        let stop_inject_pipeline = cache
+            .pipeline(device, "", KernelId::OUTER_STOP_INJECT_FGMRES)
+            .expect("missing outer_stop_inject_fgmres infrastructure kernel");
 
         // STOP-inject pipeline for CG (pre-compiled infrastructure kernel)
-        let cg_stop_inject_src =
-            kernel_registry::kernel_source_by_id("", KernelId::OUTER_STOP_INJECT_CG)
-                .expect("missing outer_stop_inject_cg infrastructure kernel");
-        let cg_stop_inject_pipeline = (cg_stop_inject_src.create_pipeline)(device);
+        let cg_stop_inject_pipeline = cache
+            .pipeline(device, "", KernelId::OUTER_STOP_INJECT_CG)
+            .expect("missing outer_stop_inject_cg infrastructure kernel");
 
         Self {
             gate_pipeline,

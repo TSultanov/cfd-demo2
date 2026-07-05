@@ -2,6 +2,7 @@ use super::matrix::MatrixResources;
 use super::state::StateResources;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
+use crate::solver::gpu::pipeline_cache::PipelineCache;
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
 
@@ -20,37 +21,26 @@ pub struct PipelineResources {
 
 pub fn init_pipelines(
     device: &wgpu::Device,
+    cache: &PipelineCache,
     matrix: &MatrixResources,
     state: &StateResources,
 ) -> Result<PipelineResources, String> {
-    // Pipelines
+    // Pipelines (cached by KernelId so a topology refresh reuses the compiled
+    // shader instead of recompiling it). `linear_src`/`dot_src` are still fetched
+    // for their `.bindings` (used to build the bind groups below).
     let linear_src = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_SPMV_P_V)
         .map_err(|e| format!("missing linear_solver/spmv_p_v kernel: {e}"))?;
-    let pipeline_spmv_p_v = (linear_src.create_pipeline)(device);
+    let pipeline_spmv_p_v = cache.pipeline(device, "", KernelId::LINEAR_SOLVER_SPMV_P_V)?;
 
     let dot_src = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT)
         .map_err(|e| format!("missing dot_product kernel: {e}"))?;
-    let pipeline_dot = (dot_src.create_pipeline)(device);
+    let pipeline_dot = cache.pipeline(device, "", KernelId::DOT_PRODUCT)?;
 
-    let dot_pair_src = kernel_registry::kernel_source_by_id("", KernelId::DOT_PRODUCT_PAIR)
-        .map_err(|e| format!("missing dot_product_pair kernel: {e}"))?;
-    let pipeline_dot_pair = (dot_pair_src.create_pipeline)(device);
+    let pipeline_dot_pair = cache.pipeline(device, "", KernelId::DOT_PRODUCT_PAIR)?;
 
-    let pipeline_cg_update_x_r = {
-        let source =
-            kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_CG_UPDATE_X_R)
-                .map_err(|e| {
-                    format!("missing linear_solver/cg_update_x_r kernel: {e}")
-                })?;
-        (source.create_pipeline)(device)
-    };
-    let pipeline_cg_update_p = {
-        let source = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_CG_UPDATE_P)
-            .map_err(|e| {
-                format!("missing linear_solver/cg_update_p kernel: {e}")
-            })?;
-        (source.create_pipeline)(device)
-    };
+    let pipeline_cg_update_x_r =
+        cache.pipeline(device, "", KernelId::LINEAR_SOLVER_CG_UPDATE_X_R)?;
+    let pipeline_cg_update_p = cache.pipeline(device, "", KernelId::LINEAR_SOLVER_CG_UPDATE_P)?;
 
     let bgl_linear_state = pipeline_spmv_p_v.get_bind_group_layout(0);
     let bgl_linear_matrix = pipeline_spmv_p_v.get_bind_group_layout(1);

@@ -208,6 +208,7 @@ pub(crate) async fn build_generic_coupled_backend(
         timestamp_query: runtime.common.context.timestamp_query,
         timestamps_inside_encoders: runtime.common.context.timestamps_inside_encoders,
         timestamp_period_ns: runtime.common.context.timestamp_period_ns,
+        pipeline_cache: runtime.common.context.pipeline_cache.clone(),
     };
     let profiling_stats = std::sync::Arc::clone(&runtime.common.profiling_stats);
 

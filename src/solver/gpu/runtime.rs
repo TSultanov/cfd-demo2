@@ -48,6 +48,7 @@ impl GpuCsrRuntime {
 
         let cg = linear_solver::init_scalar_cg(
             &common.context.device,
+            &common.context.pipeline_cache,
             num_dofs,
             &row_offsets,
             &col_indices,
@@ -93,6 +94,7 @@ impl GpuCsrRuntime {
 
         let cg = linear_solver::init_scalar_cg(
             &device,
+            &self.common.context.pipeline_cache,
             self.num_dofs,
             &row_offsets,
             &col_indices,

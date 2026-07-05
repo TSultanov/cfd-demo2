@@ -7,6 +7,7 @@ use crate::solver::gpu::init::scalars;
 use crate::solver::gpu::modules::linear_system::LinearSystemPorts;
 use crate::solver::gpu::modules::ports::{BufF32, BufU32, PortSpace};
 use crate::solver::gpu::modules::scalar_cg::{ScalarCgModule, ScalarCgModuleInputs};
+use crate::solver::gpu::pipeline_cache::PipelineCache;
 
 pub struct ScalarLinearSolverResources {
     pub b_row_offsets: wgpu::Buffer,
@@ -48,6 +49,7 @@ pub struct ScalarCgInit {
 
 pub fn init_scalar_linear_solver(
     device: &wgpu::Device,
+    cache: &PipelineCache,
     num_cells: u32,
     scalar_row_offsets: &[u32],
     scalar_col_indices: &[u32],
@@ -82,7 +84,7 @@ pub fn init_scalar_linear_solver(
         }
     };
 
-    let pipeline_res = pipelines::init_pipelines(device, &matrix_res, &state_res)?;
+    let pipeline_res = pipelines::init_pipelines(device, cache, &matrix_res, &state_res)?;
 
     Ok(ScalarLinearSolverResources {
         b_row_offsets: matrix_res.b_row_offsets,
@@ -118,6 +120,7 @@ pub fn init_scalar_linear_solver(
 
 pub fn init_scalar_cg(
     device: &wgpu::Device,
+    cache: &PipelineCache,
     num_cells: u32,
     scalar_row_offsets: &[u32],
     scalar_col_indices: &[u32],
@@ -125,12 +128,13 @@ pub fn init_scalar_cg(
 ) -> Result<ScalarCgInit, String> {
     let linear_res = init_scalar_linear_solver(
         device,
+        cache,
         num_cells,
         scalar_row_offsets,
         scalar_col_indices,
         capacity,
     )?;
-    let scalar_cg = build_scalar_cg(device, num_cells, &linear_res)?;
+    let scalar_cg = build_scalar_cg(device, cache, num_cells, &linear_res)?;
 
     Ok(ScalarCgInit {
         num_nonzeros: linear_res.num_nonzeros,
@@ -142,11 +146,13 @@ pub fn init_scalar_cg(
 
 fn build_scalar_cg(
     device: &wgpu::Device,
+    cache: &PipelineCache,
     num_cells: u32,
     linear_res: &ScalarLinearSolverResources,
 ) -> Result<ScalarCgModule, String> {
     let scalar_res = scalars::init_scalars(
         device,
+        cache,
         &linear_res.b_scalars,
         &linear_res.b_dot_result,
         &linear_res.b_dot_result_2,

@@ -1,6 +1,7 @@
 use crate::solver::gpu::linear_solver::fgmres::dispatch_2d;
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
+use crate::solver::gpu::pipeline_cache::PipelineCache;
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
 use std::collections::HashMap;
@@ -253,25 +254,27 @@ pub struct AmgParams {
 }
 
 impl AmgResources {
-    pub fn new(device: &wgpu::Device, fine_matrix: &CsrMatrix, max_levels: usize) -> Result<Self, String> {
+    pub fn new(
+        device: &wgpu::Device,
+        cache: &PipelineCache,
+        fine_matrix: &CsrMatrix,
+        max_levels: usize,
+    ) -> Result<Self, String> {
         let mut levels = Vec::new();
         let mut current_matrix = fine_matrix.clone();
 
-        let smooth_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_SMOOTH_OP)
-            .map_err(|e| format!("amg/smooth_op shader missing: {e}"))?;
+        // `restrict_src` is still fetched for its `.bindings`; the pipelines are
+        // served from the per-device cache (no recompile across a refresh).
         let restrict_src =
             kernel_registry::kernel_source_by_id("", KernelId::AMG_RESTRICT_RESIDUAL)
                 .map_err(|e| format!("amg/restrict_residual shader missing: {e}"))?;
         let bindings = restrict_src.bindings;
-        let prolongate_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_PROLONGATE_OP)
-            .map_err(|e| format!("amg/prolongate_op shader missing: {e}"))?;
-        let clear_src = kernel_registry::kernel_source_by_id("", KernelId::AMG_CLEAR)
-            .map_err(|e| format!("amg/clear shader missing: {e}"))?;
 
-        let pipeline_smooth = (smooth_src.create_pipeline)(device);
-        let pipeline_restrict_residual = (restrict_src.create_pipeline)(device);
-        let pipeline_prolongate = (prolongate_src.create_pipeline)(device);
-        let pipeline_clear = (clear_src.create_pipeline)(device);
+        let pipeline_smooth = cache.pipeline(device, "", KernelId::AMG_SMOOTH_OP)?;
+        let pipeline_restrict_residual =
+            cache.pipeline(device, "", KernelId::AMG_RESTRICT_RESIDUAL)?;
+        let pipeline_prolongate = cache.pipeline(device, "", KernelId::AMG_PROLONGATE_OP)?;
+        let pipeline_clear = cache.pipeline(device, "", KernelId::AMG_CLEAR)?;
 
         let bgl_matrix = pipeline_restrict_residual.get_bind_group_layout(0);
         let bgl_state = pipeline_restrict_residual.get_bind_group_layout(1);

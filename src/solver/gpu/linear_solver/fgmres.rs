@@ -2,6 +2,7 @@ use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, PrecondContext};
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
+use crate::solver::gpu::pipeline_cache::PipelineCache;
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::linear_solver::FgmresSolutionUpdateStrategy;
 use crate::solver::model::KernelId;
@@ -262,12 +263,13 @@ impl FgmresWorkspace {
     /// ```
     pub fn build_precond_bind_group<'a>(
         device: &wgpu::Device,
+        cache: &PipelineCache,
         label: &str,
         resolve: impl FnMut(&str) -> Option<wgpu::BindingResource<'a>>,
     ) -> Result<wgpu::BindGroup, String> {
         let ops_src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_SPMV)
             .map_err(|e| format!("gmres_ops/spmv shader missing: {e}"))?;
-        let pipeline = (ops_src.create_pipeline)(device);
+        let pipeline = cache.pipeline(device, "", KernelId::GMRES_OPS_SPMV)?;
         let bgl_precond = pipeline.get_bind_group_layout(2);
         wgsl_reflect::create_bind_group_from_bindings(
             device,
@@ -288,6 +290,7 @@ impl FgmresWorkspace {
     /// bound — the caller decides the layout.
     pub fn new_from_system(
         device: &wgpu::Device,
+        cache: &PipelineCache,
         n: u32,
         num_cells: u32,
         max_restart: usize,
@@ -494,58 +497,27 @@ impl FgmresWorkspace {
             .map_err(|e| format!("gmres_ops/spmv shader missing: {e}"))?;
         let ops_bindings = ops_spmv_src.bindings;
 
-        let pipeline_spmv = (ops_spmv_src.create_pipeline)(device);
-        let pipeline_axpy_fused_from_y = {
-            let src = kernel_registry::kernel_source_by_id(
-                "",
-                KernelId("gmres_update_fused/accumulate_solution"),
-            )
-            .map_err(|e| format!("gmres_update_fused/accumulate_solution shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_axpby = {
-            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_AXPBY)
-                .map_err(|e| format!("gmres_ops/axpby shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_scale = {
-            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_SCALE)
-                .map_err(|e| format!("gmres_ops/scale shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_scale_in_place = {
-            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_SCALE_IN_PLACE)
-                .map_err(|e| format!("gmres_ops/scale_in_place shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_copy = {
-            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_COPY)
-                .map_err(|e| format!("gmres_ops/copy shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_norm_sq = {
-            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_NORM_SQ_PARTIAL)
-                .map_err(|e| format!("gmres_ops/norm_sq_partial shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_reduce_final = {
-            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_OPS_REDUCE_FINAL)
-                .map_err(|e| format!("gmres_ops/reduce_final shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_reduce_final_and_finish_norm = {
-            let src = kernel_registry::kernel_source_by_id(
-                "",
-                KernelId::GMRES_OPS_REDUCE_FINAL_AND_FINISH_NORM,
-            )
-            .map_err(|e| format!("gmres_ops/reduce_final_and_finish_norm shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_guard_copy = {
-            let src = kernel_registry::kernel_source_by_id("", KernelId("gmres_ops/guard_copy"))
-                .map_err(|e| format!("gmres_ops/guard_copy shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
+        let pipeline_spmv = cache.pipeline(device, "", KernelId::GMRES_OPS_SPMV)?;
+        let pipeline_axpy_fused_from_y = cache.pipeline(
+            device,
+            "",
+            KernelId("gmres_update_fused/accumulate_solution"),
+        )?;
+        let pipeline_axpby = cache.pipeline(device, "", KernelId::GMRES_OPS_AXPBY)?;
+        let pipeline_scale = cache.pipeline(device, "", KernelId::GMRES_OPS_SCALE)?;
+        let pipeline_scale_in_place =
+            cache.pipeline(device, "", KernelId::GMRES_OPS_SCALE_IN_PLACE)?;
+        let pipeline_copy = cache.pipeline(device, "", KernelId::GMRES_OPS_COPY)?;
+        let pipeline_norm_sq = cache.pipeline(device, "", KernelId::GMRES_OPS_NORM_SQ_PARTIAL)?;
+        let pipeline_reduce_final =
+            cache.pipeline(device, "", KernelId::GMRES_OPS_REDUCE_FINAL)?;
+        let pipeline_reduce_final_and_finish_norm = cache.pipeline(
+            device,
+            "",
+            KernelId::GMRES_OPS_REDUCE_FINAL_AND_FINISH_NORM,
+        )?;
+        let pipeline_guard_copy =
+            cache.pipeline(device, "", KernelId("gmres_ops/guard_copy"))?;
 
         let bgl_vectors = pipeline_spmv.get_bind_group_layout(0);
         let bgl_matrix = pipeline_spmv.get_bind_group_layout(1);
@@ -616,25 +588,14 @@ impl FgmresWorkspace {
             KernelId::GMRES_LOGIC_UPDATE_HESSENBERG_GIVENS,
         )
         .map_err(|e| format!("gmres_logic/update_hessenberg_givens shader missing: {e}"))?;
-        let pipeline_update_hessenberg = (logic_update_src.create_pipeline)(device);
-        let pipeline_solve_triangular = {
-            let src =
-                kernel_registry::kernel_source_by_id("", KernelId::GMRES_LOGIC_SOLVE_TRIANGULAR)
-                    .map_err(|e| format!("gmres_logic/solve_triangular shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_restart_guard = {
-            let src =
-                kernel_registry::kernel_source_by_id("", KernelId("gmres_logic/restart_guard"))
-                    .map_err(|e| format!("gmres_logic/restart_guard shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_clamp_rel_scale = {
-            let src =
-                kernel_registry::kernel_source_by_id("", KernelId("gmres_logic/clamp_rel_scale"))
-                    .map_err(|e| format!("gmres_logic/clamp_rel_scale shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
+        let pipeline_update_hessenberg =
+            cache.pipeline(device, "", KernelId::GMRES_LOGIC_UPDATE_HESSENBERG_GIVENS)?;
+        let pipeline_solve_triangular =
+            cache.pipeline(device, "", KernelId::GMRES_LOGIC_SOLVE_TRIANGULAR)?;
+        let pipeline_restart_guard =
+            cache.pipeline(device, "", KernelId("gmres_logic/restart_guard"))?;
+        let pipeline_clamp_rel_scale =
+            cache.pipeline(device, "", KernelId("gmres_logic/clamp_rel_scale"))?;
 
         let bgl_logic = pipeline_update_hessenberg.get_bind_group_layout(0);
         let bgl_logic_params = pipeline_update_hessenberg.get_bind_group_layout(1);
@@ -674,29 +635,14 @@ impl FgmresWorkspace {
 
         let cgs_calc_src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_CGS_CALC_DOTS)
             .map_err(|e| format!("gmres_cgs/calc_dots_cgs shader missing: {e}"))?;
-        let pipeline_calc_dots_cgs = (cgs_calc_src.create_pipeline)(device);
-        let pipeline_reduce_dots_cgs = {
-            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_CGS_REDUCE_DOTS)
-                .map_err(|e| format!("gmres_cgs/reduce_dots_cgs shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_update_w_cgs = {
-            let src = kernel_registry::kernel_source_by_id("", KernelId::GMRES_CGS_UPDATE_W)
-                .map_err(|e| format!("gmres_cgs/update_w_cgs shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_reduce_dots_cgs_reortho = {
-            let src =
-                kernel_registry::kernel_source_by_id("", KernelId("gmres_cgs/reduce_dots_cgs_reortho"))
-                    .map_err(|e| format!("gmres_cgs/reduce_dots_cgs_reortho shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_update_w_cgs_reortho = {
-            let src =
-                kernel_registry::kernel_source_by_id("", KernelId("gmres_cgs/update_w_cgs_reortho"))
-                    .map_err(|e| format!("gmres_cgs/update_w_cgs_reortho shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
+        let pipeline_calc_dots_cgs = cache.pipeline(device, "", KernelId::GMRES_CGS_CALC_DOTS)?;
+        let pipeline_reduce_dots_cgs =
+            cache.pipeline(device, "", KernelId::GMRES_CGS_REDUCE_DOTS)?;
+        let pipeline_update_w_cgs = cache.pipeline(device, "", KernelId::GMRES_CGS_UPDATE_W)?;
+        let pipeline_reduce_dots_cgs_reortho =
+            cache.pipeline(device, "", KernelId("gmres_cgs/reduce_dots_cgs_reortho"))?;
+        let pipeline_update_w_cgs_reortho =
+            cache.pipeline(device, "", KernelId("gmres_cgs/update_w_cgs_reortho"))?;
 
         let bgl_cgs = pipeline_calc_dots_cgs.get_bind_group_layout(0);
         let bg_cgs = {

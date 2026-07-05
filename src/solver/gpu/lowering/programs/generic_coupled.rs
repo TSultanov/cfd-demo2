@@ -409,6 +409,7 @@ impl GenericCoupledProgramResources {
         let outer_convergence = OuterConvergenceMonitor::new(
             &runtime.common.context.device,
             &runtime.common.context.queue,
+            &runtime.common.context.pipeline_cache,
             model,
             runtime.common.num_cells,
             runtime.linear_port_space.buffer(runtime.linear_ports.x),
@@ -419,6 +420,7 @@ impl GenericCoupledProgramResources {
             OuterAdaptiveGate::new(
                 &runtime.common.context.device,
                 &runtime.common.context.queue,
+                &runtime.common.context.pipeline_cache,
                 runtime.common.num_cells,
                 runtime.common.num_faces,
                 runtime
@@ -540,8 +542,48 @@ impl GenericCoupledProgramResources {
     ) -> Result<MeshRefreshReport, String> {
         let upc = self.model.system.unknowns_per_cell();
 
+        let _prof = std::env::var("CFD2_REFRESH_PROFILE").is_ok();
+        macro_rules! tick { ($t:expr, $label:literal) => { if _prof { eprintln!("[refresh-prof] {}: {:.2} ms", $label, $t.elapsed().as_secs_f64()*1e3); $t = std::time::Instant::now(); } }; }
+        let mut _t = std::time::Instant::now();
+
+        // Warm-start carry-forward (M5 stage 1): the coupled FGMRES uses the `x`
+        // buffer as its initial guess (absolute unknown values, not a
+        // correction — see `solve_fgmres`). A cell keeps its identity across a
+        // topology refresh (cell count invariant, so `num_dofs` is invariant),
+        // so the previous step's converged iterate is still a good seed. Capture
+        // the OLD `x` (an Arc-backed handle that outlives the reallocation) and
+        // its logical length here, BEFORE step 1 reallocates the linear system,
+        // then copy it into the fresh `x` below. Re-zeroing instead forces a
+        // cold restart every refresh — the GPU topology-seam GCL cost this stage
+        // targets. At step 0 (the byte-gate path) the old `x` is still zero, so
+        // this is byte-identical to a fresh build; the benefit is mid-run only.
+        let old_x = self
+            .runtime
+            .linear_port_space
+            .buffer(self.runtime.linear_ports.x)
+            .clone();
+        let x_carry_bytes = (self.runtime.num_dofs as u64) * 4;
+
         // 1. Mesh buffers + CSR + block CSR + scalar-CG linear system.
         self.runtime.refresh_topology(mesh, upc)?;
+
+        // Copy the captured warm-start into the freshly-reallocated `x`. Both
+        // buffers are sized for the invariant `num_dofs`; the copy is a device
+        // buffer→buffer blit (no CPU readback).
+        {
+            let new_x = self
+                .runtime
+                .linear_port_space
+                .buffer(self.runtime.linear_ports.x);
+            let mut enc = self.runtime.common.context.device.create_command_encoder(
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("GenericCoupled refresh: warm-start x carry"),
+                },
+            );
+            enc.copy_buffer_to_buffer(&old_x, 0, new_x, 0, x_carry_bytes);
+            self.runtime.common.context.queue.submit(Some(enc.finish()));
+        }
+        tick!(_t, "1.runtime.refresh_topology(csr+scalar_cg)");
 
         let device = self.runtime.common.context.device.clone();
         let queue = self.runtime.common.context.queue.clone();
@@ -550,6 +592,7 @@ impl GenericCoupledProgramResources {
 
         // 2. Per-face flux buffer (only face-indexed field buffer).
         self.fields.refresh_face_count(&device, num_faces);
+        tick!(_t, "2.refresh_face_count");
 
         // 3. Re-scatter bc tables + boundary_faces from the model spec.
         let scattered = scatter_bc_tables(mesh, &self.model, num_faces as usize, upc)?;
@@ -564,6 +607,7 @@ impl GenericCoupledProgramResources {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
         self.boundary_faces = scattered.boundary_faces;
+        tick!(_t, "3.scatter_bc_tables");
 
         // 4a. Preconditioner (Schur or plain FGMRES/krylov) over the new system.
         let schur = build_generic_schur(
@@ -580,6 +624,7 @@ impl GenericCoupledProgramResources {
         };
         self.schur = schur;
         self.krylov = krylov;
+        tick!(_t, "4a.build_schur/krylov(fgmres+amg)");
 
         // 4b. Outer-convergence monitor + adaptive gate (the monitor captures
         //     the warm-start `x` buffer, which the linear-system rebuild
@@ -588,6 +633,7 @@ impl GenericCoupledProgramResources {
         let outer_convergence = OuterConvergenceMonitor::new(
             &device,
             &queue,
+            &self.runtime.common.context.pipeline_cache,
             &self.model,
             num_cells,
             self.runtime.linear_port_space.buffer(self.runtime.linear_ports.x),
@@ -597,6 +643,7 @@ impl GenericCoupledProgramResources {
             OuterAdaptiveGate::new(
                 &device,
                 &queue,
+                &self.runtime.common.context.pipeline_cache,
                 num_cells,
                 num_faces,
                 device.limits().max_compute_workgroups_per_dimension,
@@ -605,6 +652,7 @@ impl GenericCoupledProgramResources {
         });
         self.outer_convergence = outer_convergence;
         self.outer_gate = outer_gate;
+        tick!(_t, "4b.outer_convergence+gate");
 
         // 5. Generated-kernel bind groups: in-place rebuild over the refreshed
         //    buffers, cached pipelines reused (no generated-WGSL recompile).
@@ -641,6 +689,7 @@ impl GenericCoupledProgramResources {
             );
         self.kernels
             .rebuild_bind_groups(&device, self.model.id, &self.recipe, &registry)?;
+        tick!(_t, "5.rebuild_bind_groups(generated)");
 
         Ok(MeshRefreshReport {
             bc_overrides_reset: true,
@@ -850,6 +899,7 @@ fn build_generic_schur(
     };
 
     let device = &runtime.common.context.device;
+    let cache = &runtime.common.context.pipeline_cache;
     let num_cells = runtime.common.num_cells;
     let num_dofs = runtime.num_dofs;
     let scalar_nnz = runtime.common.mesh.scalar_col_indices.len() as u64;
@@ -923,7 +973,7 @@ fn build_generic_schur(
         mapped_at_creation: false,
     });
 
-    let setup_pipeline = GenericCoupledSchurPreconditioner::build_setup_pipeline(device)?;
+    let setup_pipeline = GenericCoupledSchurPreconditioner::build_setup_pipeline(device, cache)?;
     let matrix_values = runtime
         .linear_port_space
         .buffer(runtime.linear_ports.values);
@@ -954,6 +1004,7 @@ fn build_generic_schur(
 
     let precond_bg = FgmresWorkspace::build_precond_bind_group(
         device,
+        cache,
         "generic_coupled FGMRES precond BG",
         |name| match name {
             "diag_u" => Some(b_diag_u.as_entire_binding()),
@@ -964,6 +1015,7 @@ fn build_generic_schur(
     )?;
     let fgmres = FgmresWorkspace::new_from_system(
         device,
+        cache,
         num_dofs,
         num_cells,
         max_restart,
@@ -975,6 +1027,7 @@ fn build_generic_schur(
 
     let precond = GenericCoupledSchurPreconditioner::new(
         device,
+        cache.clone(),
         GenericCoupledSchurPreconditionerInputs {
             num_cells,
             pressure_row_offsets: scalar_row_offsets,
@@ -1022,6 +1075,7 @@ fn build_generic_krylov(
     };
 
     let device = &runtime.common.context.device;
+    let cache = &runtime.common.context.pipeline_cache;
     let num_cells = runtime.common.num_cells;
     let n = runtime.num_dofs;
 
@@ -1053,6 +1107,7 @@ fn build_generic_krylov(
 
     let precond_bg = FgmresWorkspace::build_precond_bind_group(
         device,
+        cache,
         "generic_coupled FGMRES precond BG",
         |name| match name {
             "diag_u" => Some(b_diag_u.as_entire_binding()),
@@ -1064,6 +1119,7 @@ fn build_generic_krylov(
 
     let fgmres = FgmresWorkspace::new_from_system(
         device,
+        cache,
         n,
         num_cells,
         max_restart.max(1),
@@ -1097,7 +1153,11 @@ fn build_generic_krylov(
     };
     let solver = KrylovSolveModule::new(
         fgmres,
-        RuntimePreconditionerModule::new(device, precond_inputs),
+        RuntimePreconditionerModule::new(
+            device,
+            runtime.common.context.pipeline_cache.clone(),
+            precond_inputs,
+        ),
     );
     let dispatch = DispatchGrids::for_sizes(n, num_cells);
 
@@ -1523,6 +1583,7 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
         timestamp_query: plan.context.timestamp_query,
         timestamps_inside_encoders: plan.context.timestamps_inside_encoders,
         timestamp_period_ns: plan.context.timestamp_period_ns,
+        pipeline_cache: plan.context.pipeline_cache.clone(),
     };
 
     let is_first_outer = plan.step_linear_stats.is_empty();
@@ -2224,6 +2285,7 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
         timestamp_query: plan.context.timestamp_query,
         timestamps_inside_encoders: plan.context.timestamps_inside_encoders,
         timestamp_period_ns: plan.context.timestamp_period_ns,
+        pipeline_cache: plan.context.pipeline_cache.clone(),
     };
 
     let start = std::time::Instant::now();

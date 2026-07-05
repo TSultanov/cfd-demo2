@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::generic_linear_solver::IdentityPreconditioner;
 use crate::solver::gpu::modules::krylov_precond::{PrecondContext, PreconditionerModule};
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
+use crate::solver::gpu::pipeline_cache::PipelineCache;
 use crate::solver::gpu::structs::PreconditionerType;
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
@@ -38,10 +41,18 @@ pub(crate) struct RuntimePreconditionerModule {
     row_offsets: Vec<u32>,
     col_indices: Vec<u32>,
     matrix_values: wgpu::Buffer,
+    /// Per-device pipeline cache, kept so the lazily-compiled Jacobi /
+    /// block-Jacobi / AMG pipelines reuse cached compiled shaders after a
+    /// topology refresh reconstructed this module (M5 stage 1).
+    cache: Arc<PipelineCache>,
 }
 
 impl RuntimePreconditionerModule {
-    pub(crate) fn new(device: &wgpu::Device, inputs: RuntimePreconditionerInputs) -> Self {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        cache: Arc<PipelineCache>,
+        inputs: RuntimePreconditionerInputs,
+    ) -> Self {
         let b_rhs = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("runtime_preconditioner:rhs"),
             size: (inputs.num_dofs as u64) * 4,
@@ -67,6 +78,7 @@ impl RuntimePreconditionerModule {
             row_offsets: inputs.row_offsets,
             col_indices: inputs.col_indices,
             matrix_values: inputs.matrix_values,
+            cache,
         }
     }
 
@@ -93,31 +105,35 @@ impl RuntimePreconditionerModule {
         const APPLY_DIAG_INV: KernelId = KernelId("gmres_ops/apply_diag_inv");
 
         if self.pipeline_extract_diag_inv.is_none() {
-            let src = kernel_registry::kernel_source_by_id("", EXTRACT_DIAG_INV)
-                .expect("gmres_ops/extract_diag_inv shader missing from kernel registry");
-            self.pipeline_extract_diag_inv = Some((src.create_pipeline)(device));
+            self.pipeline_extract_diag_inv = Some(
+                self.cache
+                    .pipeline(device, "", EXTRACT_DIAG_INV)
+                    .expect("gmres_ops/extract_diag_inv shader missing from kernel registry"),
+            );
         }
         if self.pipeline_apply_diag_inv.is_none() {
-            let src = kernel_registry::kernel_source_by_id("", APPLY_DIAG_INV)
-                .expect("gmres_ops/apply_diag_inv shader missing from kernel registry");
-            self.pipeline_apply_diag_inv = Some((src.create_pipeline)(device));
+            self.pipeline_apply_diag_inv = Some(
+                self.cache
+                    .pipeline(device, "", APPLY_DIAG_INV)
+                    .expect("gmres_ops/apply_diag_inv shader missing from kernel registry"),
+            );
         }
     }
 
     fn ensure_block_jacobi_pipelines(&mut self, device: &wgpu::Device) {
         if self.pipeline_block_jacobi_build.is_none() {
-            let src =
-                kernel_registry::kernel_source_by_id("", KernelId::BLOCK_PRECOND_BUILD_BLOCK_INV)
-                    .expect("block_precond/build_block_inv shader missing from kernel registry");
-            self.pipeline_block_jacobi_build = Some((src.create_pipeline)(device));
+            self.pipeline_block_jacobi_build = Some(
+                self.cache
+                    .pipeline(device, "", KernelId::BLOCK_PRECOND_BUILD_BLOCK_INV)
+                    .expect("block_precond/build_block_inv shader missing from kernel registry"),
+            );
         }
         if self.pipeline_block_jacobi_apply.is_none() {
-            let src = kernel_registry::kernel_source_by_id(
-                "",
-                KernelId::BLOCK_PRECOND_APPLY_BLOCK_PRECOND,
-            )
-            .expect("block_precond/apply_block_precond shader missing from kernel registry");
-            self.pipeline_block_jacobi_apply = Some((src.create_pipeline)(device));
+            self.pipeline_block_jacobi_apply = Some(
+                self.cache
+                    .pipeline(device, "", KernelId::BLOCK_PRECOND_APPLY_BLOCK_PRECOND)
+                    .expect("block_precond/apply_block_precond shader missing from kernel registry"),
+            );
         }
     }
 
@@ -231,7 +247,7 @@ impl RuntimePreconditionerModule {
             num_cols: self.num_dofs as usize,
         };
 
-        self.amg = match AmgResources::new(device, &matrix, 20) {
+        self.amg = match AmgResources::new(device, &self.cache, &matrix, 20) {
             Ok(amg) => Some(amg),
             Err(_err) => {
                 self.amg_init_failed = true;

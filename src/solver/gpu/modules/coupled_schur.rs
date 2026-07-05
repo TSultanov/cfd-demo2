@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use crate::solver::gpu::linear_solver::amg::{AmgResources, CsrMatrix};
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::modules::krylov_precond::{PrecondContext, PreconditionerModule};
 use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
+use crate::solver::gpu::pipeline_cache::PipelineCache;
 use crate::solver::gpu::structs::PreconditionerType;
 use crate::solver::gpu::wgsl_reflect;
 use crate::solver::model::KernelId;
@@ -116,10 +119,18 @@ pub struct CoupledSchurModule {
 
     amg: Option<AmgResources>,
     amg_level0_state_override: Option<wgpu::BindGroup>,
+    /// Per-device pipeline cache, kept so the lazily-built AMG hierarchy
+    /// ([`Self::ensure_amg_resources`]) reuses cached compiled pipelines after a
+    /// topology refresh reconstructed this module (M5 stage 1).
+    cache: Arc<PipelineCache>,
 }
 
 impl CoupledSchurModule {
-    pub fn new(device: &wgpu::Device, inputs: CoupledSchurInputs<'_>) -> Result<Self, String> {
+    pub fn new(
+        device: &wgpu::Device,
+        cache: Arc<PipelineCache>,
+        inputs: CoupledSchurInputs<'_>,
+    ) -> Result<Self, String> {
         let b_temp_p = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Schur temp_p"),
             size: (inputs.num_cells as u64) * 4,
@@ -142,17 +153,12 @@ impl CoupledSchurModule {
             .map_err(|e| format!("schur_precond predict_and_form shader missing: {e}"))?;
         let schur_bindings = schur_src.bindings;
 
-        let pipeline_predict_and_form = (schur_src.create_pipeline)(device);
-        let pipeline_relax_pressure = {
-            let src = kernel_registry::kernel_source_by_id("", inputs.kernels.relax_pressure)
-                .map_err(|e| format!("schur_precond relax_pressure shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
-        let pipeline_correct_vel = {
-            let src = kernel_registry::kernel_source_by_id("", inputs.kernels.correct_velocity)
-                .map_err(|e| format!("schur_precond correct_velocity shader missing: {e}"))?;
-            (src.create_pipeline)(device)
-        };
+        let pipeline_predict_and_form =
+            cache.pipeline(device, "", inputs.kernels.predict_and_form)?;
+        let pipeline_relax_pressure =
+            cache.pipeline(device, "", inputs.kernels.relax_pressure)?;
+        let pipeline_correct_vel =
+            cache.pipeline(device, "", inputs.kernels.correct_velocity)?;
 
         let bgl_schur_vectors = pipeline_predict_and_form.get_bind_group_layout(0);
         let bgl_schur_precond = pipeline_predict_and_form.get_bind_group_layout(2);
@@ -202,6 +208,7 @@ impl CoupledSchurModule {
             pipeline_correct_vel,
             amg: None,
             amg_level0_state_override: None,
+            cache,
         })
     }
 
@@ -221,7 +228,7 @@ impl CoupledSchurModule {
         if self.amg.is_some() {
             return Ok(());
         }
-        let amg = AmgResources::new(device, &matrix, 20)?;
+        let amg = AmgResources::new(device, &self.cache, &matrix, 20)?;
 
         let level0 = &amg.levels[0];
         let override_bg = amg.create_state_override_bind_group(

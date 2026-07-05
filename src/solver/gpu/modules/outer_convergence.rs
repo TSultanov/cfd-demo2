@@ -4,7 +4,6 @@
 //! (delta maxima) and state scale values, then evaluate a convergence break
 //! criterion.  Used by both host-driven and one-submission batched outer loops.
 
-use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::gpu::program::plan::GpuProgramPlan;
 use crate::solver::model::{KernelId, ModelSpec};
 use bytemuck::{bytes_of, Pod, Zeroable};
@@ -74,6 +73,7 @@ impl OuterConvergenceMonitor {
     pub(crate) fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        cache: &crate::solver::gpu::pipeline_cache::PipelineCache,
         model: &ModelSpec,
         num_cells: u32,
         x: &wgpu::Buffer,
@@ -153,20 +153,15 @@ impl OuterConvergenceMonitor {
             ));
         }
 
-        let pipeline = {
-            let src = kernel_registry::kernel_source_by_id(
-                "",
-                crate::solver::model::KernelId::OUTER_CONVERGENCE,
-            )?;
-            (src.create_pipeline)(device)
-        };
-        let bgl = pipeline.get_bind_group_layout(0);
-        let break_src = kernel_registry::kernel_source_by_id(
+        let pipeline = cache.pipeline(
+            device,
             "",
-            KernelId::OUTER_CONVERGENCE_BREAK,
-        )
-        .map_err(|e| format!("missing outer_convergence_break infrastructure kernel: {e}"))?;
-        let break_pipeline = (break_src.create_pipeline)(device);
+            crate::solver::model::KernelId::OUTER_CONVERGENCE,
+        )?;
+        let bgl = pipeline.get_bind_group_layout(0);
+        let break_pipeline = cache
+            .pipeline(device, "", KernelId::OUTER_CONVERGENCE_BREAK)
+            .map_err(|e| format!("missing outer_convergence_break infrastructure kernel: {e}"))?;
 
         let b_params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outer_convergence:params_x"),

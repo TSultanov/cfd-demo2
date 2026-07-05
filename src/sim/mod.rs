@@ -18,7 +18,8 @@ mod params;
 
 pub use driver::{DriverBuild, SolverDriver};
 pub use moving_mesh_driver::{
-    BoundaryMotionSpec, MeshMotionSpec, MovingMeshDriver, MovingMeshStats, DEFAULT_MESH_CFL,
+    BoundaryMotionSpec, MeshMotionSpec, MovingMeshDriver, MovingMeshStats, OscAxis,
+    DEFAULT_MESH_CFL,
 };
 pub use outcome::{DivergeReason, FieldStats, Readback, RunResult, StepOutcome};
 pub use params::RuntimeParams;

@@ -37,6 +37,11 @@
 //!     more centroid steering to hold cell quality).
 //!  5. Click **Initialize / Reset**, then **Run**.
 //!
+//! For the **oscillating-obstacle** demo instead: pick Geometry → *Channel with
+//! obstacle*, then in the Moving Mesh group tick **Oscillating obstacle** and set
+//! Amplitude / Frequency (Seed motion can stay *Frozen*). See the roadmap M6
+//! "Manual GUI smoke — oscillating obstacle" for the full steps.
+//!
 //! Expected: the Voronoi cells visibly advect / distort with the flow and the
 //! wireframe re-tessellates every step (no flicker, no crash, no buffer-overflow
 //! validation error even as per-cell vertex counts drift). The stats panel shows
@@ -47,14 +52,15 @@
 //! compute backend to **GPU** disables the toggle and reverts to the static path.
 #![cfg(feature = "ui")]
 
+use cfd2::meshgen::ChannelWithObstacle;
 use cfd2::solver::mesh::{BackwardsStep, LloydConfig};
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{GpuLowMachPrecondModel, PreconditionerType, TimeScheme};
-use cfd2::sim::{MeshMotionSpec, MovingMeshDriver, RuntimeParams};
+use cfd2::sim::{BoundaryMotionSpec, MeshMotionSpec, MovingMeshDriver, OscAxis, RuntimeParams};
 use cfd2::ui::app::moving_mesh_worker_smoke;
 use cfd2::ui::cfd_renderer;
-use nalgebra::Vector2;
+use nalgebra::{Point2, Vector2};
 
 /// Fixed-dt incompressible params for the ALE model (adaptive_dt MUST be off —
 /// the swept mesh fluxes are SCL-closed against a fixed dt).
@@ -125,6 +131,52 @@ fn build_driver(motion: MeshMotionSpec, u0: (f64, f64)) -> (MovingMeshDriver, us
     .expect("MovingMeshDriver::build (CPU ALE) must succeed");
     // Phase-2 knobs (outer_iters / relaxation), exactly as the worker's SetSolver.
     driver.driver_mut().apply_params(&params);
+    (driver, n_cells)
+}
+
+/// Build a moving-mesh driver on a ChannelWithObstacle CVT with a cross-stream
+/// OSCILLATING obstacle + the MovingWall BC — exactly as the GUI's
+/// `build_moving_init` does when "Oscillating obstacle" is ticked (obstacle =
+/// loop 1). Frozen interior seeds; only the obstacle loop moves. Returns the
+/// driver + its (fixed) cell count.
+fn build_oscillating_obstacle_driver() -> (MovingMeshDriver, usize) {
+    let domain = Vector2::new(3.0, 1.0);
+    let geo = ChannelWithObstacle {
+        length: 3.0,
+        height: 1.0,
+        obstacle_center: Point2::new(1.0, 0.51),
+        obstacle_radius: 0.1,
+    };
+    let cvt = cfd2::meshgen::meshless::generate_cvt_mesh_with_seeds(
+        &geo,
+        0.06,
+        0.06,
+        1.0,
+        domain,
+        &LloydConfig::default(),
+    );
+    let n_cells = cvt.mesh.num_cells();
+    assert!(n_cells > 20, "expected a non-trivial CVT mesh, got {n_cells} cells");
+    let params = ale_params();
+    let mut driver = pollster::block_on(MovingMeshDriver::build(
+        cvt,
+        &params,
+        MeshMotionSpec::Frozen, // interior frozen; only the obstacle oscillates
+        &vec![(params.inlet_velocity as f64, 0.0); n_cells],
+        &vec![0.0; n_cells],
+        None,
+        None,
+    ))
+    .expect("MovingMeshDriver::build (oscillating obstacle) must succeed");
+    driver.driver_mut().apply_params(&params);
+    // The obstacle is loop 1 of ChannelWithObstacle; cross-stream oscillation.
+    driver.set_boundary_motion(BoundaryMotionSpec::Oscillation {
+        loop_index: 1,
+        amplitude: 0.03,
+        omega: std::f64::consts::TAU * 0.5,
+        axis: OscAxis::CrossStream,
+    });
+    driver.set_moving_wall_bc(true);
     (driver, n_cells)
 }
 
@@ -252,8 +304,68 @@ fn moving_mesh_gui_worker_and_driver_smoke() {
     // capacity-growth path.
     replay_through_renderer(&fc.meshes, fc_cells);
 
+    // Part 4 (M6): the MOVING-BOUNDARY worker path. Drive an oscillating-obstacle
+    // ChannelObstacle driver (the "Oscillating obstacle" GUI toggle) through the
+    // real worker, collect the emitted meshes, and assert the obstacle actually
+    // MOVED (the near-obstacle geometry changes across refreshes) while the cell
+    // count stays fixed and the mesh stays conservative + renderable.
+    let (osc_driver, osc_cells) = build_oscillating_obstacle_driver();
+    let osc = moving_mesh_worker_smoke(osc_driver, 120_000, 30, true);
+    println!(
+        "[moving-gui][osc-obstacle] refreshes={} cells=[{:?},{:?}] max_scl={:.2e} \
+         max_skew={:.3} meshes={} err={:?}",
+        osc.mesh_refresh_events,
+        osc.min_cells,
+        osc.max_cells,
+        osc.max_scl_defect,
+        osc.max_skew,
+        osc.meshes.len(),
+        osc.error,
+    );
+    assert!(osc.error.is_none(), "oscillating-obstacle worker reported an error: {:?}", osc.error);
+    assert!(
+        osc.mesh_refresh_events >= 20,
+        "expected >=20 oscillating-obstacle regens, got {}",
+        osc.mesh_refresh_events
+    );
+    assert!(!osc.saw_empty_cells, "an oscillating-obstacle refresh carried empty/degenerate cells");
+    assert!(!osc.saw_nonfinite_stats, "an oscillating-obstacle refresh carried non-finite stats");
+    assert_eq!(
+        (osc.min_cells, osc.max_cells),
+        (Some(osc_cells), Some(osc_cells)),
+        "oscillating-obstacle cell count must stay fixed at {osc_cells}"
+    );
+    assert!(osc.max_scl_defect < 1e-3, "oscillating-obstacle SCL defect too large: {:.3e}", osc.max_scl_defect);
+    // The obstacle demonstrably MOVED: some cell's polygon differs between the
+    // first refresh and a later one (a rigid boundary displacement re-tessellates
+    // the near-wall cells). This is the moving-boundary analogue of the flow-
+    // coupled "mesh advects" observation, through the message path.
+    let mesh_moved = osc.meshes.len() >= 2
+        && osc.meshes.iter().skip(1).any(|m| moved_relative_to(&osc.meshes[0], m));
+    assert!(mesh_moved, "oscillating-obstacle mesh never changed across refreshes (obstacle did not move)");
+    replay_through_renderer(&osc.meshes, osc_cells);
+
     std::env::remove_var("CFD2_BACKEND");
     std::env::remove_var("CFD2_CPU_ENGINE");
+}
+
+/// Whether two emitted cell-polygon sets differ meaningfully (any vertex moved
+/// by more than a roundoff epsilon) — the "the obstacle moved" discriminator.
+fn moved_relative_to(a: &[Vec<[f64; 2]>], b: &[Vec<[f64; 2]>]) -> bool {
+    if a.len() != b.len() {
+        return true;
+    }
+    for (ca, cb) in a.iter().zip(b) {
+        if ca.len() != cb.len() {
+            return true;
+        }
+        for (pa, pb) in ca.iter().zip(cb) {
+            if (pa[0] - pb[0]).abs() > 1e-9 || (pa[1] - pb[1]).abs() > 1e-9 {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Replay the GUI's per-refresh re-tessellation + renderer upload on a SEQUENCE

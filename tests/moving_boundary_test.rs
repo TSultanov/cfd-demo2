@@ -25,7 +25,7 @@
 
 use cfd2::meshgen::meshless::generate_cvt_mesh_with_seeds;
 use cfd2::meshgen::{ChannelWithObstacle, LloydConfig};
-use cfd2::sim::{BoundaryMotionSpec, MeshMotionSpec, MovingMeshDriver, RuntimeParams};
+use cfd2::sim::{BoundaryMotionSpec, MeshMotionSpec, MovingMeshDriver, OscAxis, RuntimeParams};
 use cfd2::solver::mesh::{BoundaryType, Mesh};
 use cfd2::solver::model::eos::EosSpec;
 use cfd2::solver::scheme::Scheme;
@@ -775,4 +775,357 @@ fn moving_wall_bc_static_do_no_harm() {
         );
     }
     println!("moving_wall_bc_static_do_no_harm: 12 steps byte-identical, no MovingWall faces");
+}
+
+// =============================================================================
+// M6 stage 3 — the headline demo: an oscillating cylinder in the channel.
+//
+// A cross-stream forced sinusoidal cylinder oscillation (the new first-class
+// `BoundaryMotionSpec::Oscillation`) driven through the FULL M4 moving-mesh loop
+// + the stage-2 MovingWall BC over 2+ forcing periods, with:
+//   * bounded/finite solution (max|U| < 10·U_scale over the whole run),
+//   * wall boundary integrity every step (obstacle faces tagged MovingWall,
+//     watertight, zero untagged, positive volumes, SCL closed),
+//   * a NEAR-WALL QUALITY instrument (max skew + min cell volume within 3 cell
+//     layers of the moving wall) reported + bounded every step (roadmap risk 10:
+//     seeds crowding/starving at a moving wall),
+//   * a measurable FLOW RESPONSE to the forcing: the downstream transverse
+//     velocity in the forced run is many times the static-control run (the
+//     honest signal — NOT a claim of a specific shedding lock-in; Re is low so
+//     the static case is steady/symmetric and any transverse signal is forced).
+// =============================================================================
+
+/// Cross-stream oscillation amplitude (< H so the frozen interior seeds near the
+/// obstacle are squeezed but never swallowed — the near-wall instrument watches
+/// exactly this margin).
+const OSC_AMP: f64 = 0.015;
+/// Oscillation period (s). `OMEGA` above (period 0.4) is reused via `OSC_OMEGA`.
+const OSC_OMEGA: f64 = std::f64::consts::TAU / 0.4;
+/// Free-stream / forcing velocity scale for the demo (low Re ⇒ steady symmetric
+/// static control, so the forced transverse response is unambiguous).
+const U_SCALE: f32 = 0.5;
+
+/// A downstream wake probe box (just behind the obstacle, spanning the wake) —
+/// where a genuine flow RESPONSE to the cross-stream forcing shows up as
+/// transverse velocity, as opposed to the transverse velocity the MovingWall BC
+/// imposes right AT the wall.
+fn in_wake_probe(x: f64, y: f64) -> bool {
+    x > OBS_CX + 1.5 * OBS_R && x < OBS_CX + 6.0 * OBS_R && y > 0.3 && y < 0.7
+}
+
+/// Near-wall cell quality within `layers` cell layers of the moving wall.
+/// Returns `(max_skew, min_vol, n_near_cells)` over the near-wall cell set:
+/// `max_skew` is the worst face skew `1 − |d̂·n̂|` on any face incident to a
+/// near-wall cell (same definition as `Mesh::calculate_max_skewness`), `min_vol`
+/// the smallest near-wall cell area. Wall cells = owners of a `MovingWall` face;
+/// the set is grown `layers` times over the cell-face adjacency (BFS).
+fn near_wall_quality(mesh: &Mesh, layers: usize) -> (f64, f64, usize) {
+    let n = mesh.num_cells();
+    let mut near = vec![false; n];
+    // Seed: cells owning a MovingWall boundary face.
+    for f in 0..mesh.num_faces() {
+        if mesh.face_neighbor[f].is_none()
+            && mesh.face_boundary[f] == Some(BoundaryType::MovingWall)
+        {
+            near[mesh.face_owner[f]] = true;
+        }
+    }
+    // Grow the layer set over face adjacency.
+    for _ in 0..layers {
+        let mut add = vec![false; n];
+        for c in 0..n {
+            if !near[c] {
+                continue;
+            }
+            let (s, e) = (mesh.cell_face_offsets[c], mesh.cell_face_offsets[c + 1]);
+            for &f in &mesh.cell_faces[s..e] {
+                let other = if mesh.face_owner[f] == c {
+                    mesh.face_neighbor[f]
+                } else {
+                    Some(mesh.face_owner[f])
+                };
+                if let Some(o) = other {
+                    add[o] = true;
+                }
+            }
+        }
+        for c in 0..n {
+            near[c] |= add[c];
+        }
+    }
+    let mut max_skew = 0.0f64;
+    let mut min_vol = f64::INFINITY;
+    let mut count = 0usize;
+    for c in 0..n {
+        if !near[c] {
+            continue;
+        }
+        count += 1;
+        min_vol = min_vol.min(mesh.cell_vol[c]);
+        let (s, e) = (mesh.cell_face_offsets[c], mesh.cell_face_offsets[c + 1]);
+        for &f in &mesh.cell_faces[s..e] {
+            let owner = mesh.face_owner[f];
+            let (dx, dy) = if let Some(nb) = mesh.face_neighbor[f] {
+                (mesh.cell_cx[nb] - mesh.cell_cx[owner], mesh.cell_cy[nb] - mesh.cell_cy[owner])
+            } else {
+                (mesh.face_cx[f] - mesh.cell_cx[owner], mesh.face_cy[f] - mesh.cell_cy[owner])
+            };
+            let dn = (dx * dx + dy * dy).sqrt();
+            if dn > 1e-12 {
+                let dot = (dx / dn) * mesh.face_nx[f] + (dy / dn) * mesh.face_ny[f];
+                max_skew = max_skew.max(1.0 - dot.abs());
+            }
+        }
+    }
+    if !min_vol.is_finite() {
+        min_vol = 0.0;
+    }
+    (max_skew, min_vol, count)
+}
+
+struct DemoOut {
+    /// Peak |U| over all cells and steps (bounded-solution watchdog).
+    max_u: f32,
+    /// Peak |v| (transverse) anywhere — dominated by the imposed wall BC.
+    max_v_global: f32,
+    max_scl: f64,
+    /// Worst near-wall skew and smallest near-wall cell area over the run.
+    worst_near_skew: f64,
+    min_near_vol: f64,
+    n_wall_faces: usize,
+    flips: usize,
+    steps: usize,
+    periods: f64,
+    saw_nonfinite: bool,
+    /// Per-step SIGNED spatial mean of the transverse velocity `v` over the
+    /// symmetric downstream wake box. In the steady + symmetric static control
+    /// the up/down `v` cancels ⇒ this is ~0 and flat in time; cross-stream
+    /// forcing pushes the wake fluid coherently ⇒ it oscillates with the
+    /// forcing. Its temporal amplitude (peak-to-peak over the tail) is the
+    /// honest forced-response signal (steady spatial |v| is a bad discriminator
+    /// — flow diverting around a cylinder has large local |v| even when steady).
+    wake_mean_v: Vec<f32>,
+}
+
+/// Drive the oscillating (or, as the control, static) cylinder demo. With
+/// `oscillate_on` the obstacle cross-stream-oscillates and the MovingWall BC is
+/// live; the control holds the obstacle static (`Frozen` interior, `Static`
+/// boundary) in the identical channel so the ONLY difference is the forcing.
+fn run_demo(oscillate_on: bool) -> DemoOut {
+    let cvt = build_cvt();
+    let n = cvt.mesh.num_cells();
+    let mut params = base_params(0.01);
+    params.viscosity = 1e-2;
+    params.inlet_velocity = U_SCALE;
+    params.time_scheme = TimeScheme::BDF2;
+
+    let mut moving = pollster::block_on(MovingMeshDriver::build(
+        cvt,
+        &params,
+        MeshMotionSpec::Frozen, // interior seeds frozen; only the wall moves
+        &vec![(U_SCALE as f64, 0.0); n],
+        &vec![0.0; n],
+        None,
+        None,
+    ))
+    .expect("build oscillating-cylinder demo driver");
+    moving.driver_mut().apply_params(&params);
+    if oscillate_on {
+        moving.set_boundary_motion(BoundaryMotionSpec::Oscillation {
+            loop_index: OBSTACLE_LOOP,
+            amplitude: OSC_AMP,
+            omega: OSC_OMEGA,
+            axis: OscAxis::CrossStream,
+        });
+        moving.set_moving_wall_bc(true);
+    }
+
+    let steps = 100usize; // 2.5 forcing periods at dt=0.01, period 0.4
+    let mut out = DemoOut {
+        max_u: 0.0,
+        max_v_global: 0.0,
+        max_scl: 0.0,
+        worst_near_skew: 0.0,
+        min_near_vol: f64::INFINITY,
+        n_wall_faces: 0,
+        flips: 0,
+        steps,
+        periods: 0.0,
+        saw_nonfinite: false,
+        wake_mean_v: Vec::with_capacity(steps),
+    };
+    let mut sim_t = 0.0f64;
+
+    for step in 0..steps {
+        let (outcome, stats) = moving
+            .step(false)
+            .unwrap_or_else(|e| panic!("demo step {step} (osc={oscillate_on}) failed: {e}"));
+        assert!(outcome.diverged.is_none(), "demo step {step} diverged");
+        assert_eq!(stats.n_cells, n, "demo step {step}: cell count changed (seed swallowed)");
+        sim_t += stats.dt;
+        out.max_scl = out.max_scl.max(stats.scl_defect);
+        if stats.flipped {
+            out.flips += 1;
+        }
+
+        let mesh = moving.mesh();
+
+        // --- wall boundary integrity every step ---------------------------
+        if oscillate_on {
+            // Obstacle contour tagged MovingWall + watertight + zero untagged.
+            let cy = OBS_CY + OSC_AMP * (OSC_OMEGA * sim_t).sin();
+            let center = Point2::new(OBS_CX, cy);
+            let contour = obstacle_faces(mesh, center, OBS_R);
+            let mut wall_len = 0.0;
+            let mut wall_faces = 0usize;
+            for &f in &contour {
+                assert_eq!(
+                    mesh.face_boundary[f],
+                    Some(BoundaryType::MovingWall),
+                    "demo step {step}: obstacle face {f} not tagged MovingWall"
+                );
+                wall_len += mesh.face_area[f];
+                wall_faces += 1;
+            }
+            out.n_wall_faces = out.n_wall_faces.max(wall_faces);
+            let circ = std::f64::consts::TAU * OBS_R;
+            assert!(
+                wall_len > 0.9 * circ && wall_len < 1.05 * circ,
+                "demo step {step}: obstacle wall length {wall_len:.4} vs circumference {circ:.4}"
+            );
+        }
+        assert_eq!(
+            untagged_boundary_faces(mesh),
+            0,
+            "demo step {step}: untagged boundary faces (free-slip holes)"
+        );
+        let (worst_closure, nonpos) = mesh_health(mesh);
+        assert_eq!(nonpos, 0, "demo step {step}: {nonpos} non-positive cell volumes");
+        assert!(worst_closure < 1e-6, "demo step {step}: worst closure {worst_closure:.3e}");
+        assert!(stats.scl_defect < 1e-6, "demo step {step}: SCL defect {:.3e}", stats.scl_defect);
+
+        // --- near-wall quality instrument (roadmap risk 10) ---------------
+        if oscillate_on {
+            let (near_skew, near_min_vol, near_n) = near_wall_quality(mesh, 3);
+            out.worst_near_skew = out.worst_near_skew.max(near_skew);
+            out.min_near_vol = out.min_near_vol.min(near_min_vol);
+            assert!(near_n > 0, "demo step {step}: empty near-wall cell set");
+            assert!(
+                near_skew < 0.7,
+                "demo step {step}: near-wall skew {near_skew:.3} exceeded 0.7 (seeds crowding)"
+            );
+            assert!(
+                near_min_vol > 0.0,
+                "demo step {step}: near-wall min cell volume {near_min_vol:.3e} not positive (starved)"
+            );
+        }
+
+        // --- bounded/finite + response signal -----------------------------
+        let (uv, _p) = read_state(&moving);
+        let (mut wake_sum, mut wake_n) = (0.0f64, 0usize);
+        for c in 0..n {
+            let (u, v) = (uv[c][0], uv[c][1]);
+            if !u.is_finite() || !v.is_finite() {
+                out.saw_nonfinite = true;
+            }
+            out.max_u = out.max_u.max(u.abs()).max(v.abs());
+            out.max_v_global = out.max_v_global.max(v.abs());
+            if in_wake_probe(mesh.cell_cx[c], mesh.cell_cy[c]) {
+                wake_sum += v as f64;
+                wake_n += 1;
+            }
+        }
+        out.wake_mean_v
+            .push(if wake_n > 0 { (wake_sum / wake_n as f64) as f32 } else { 0.0 });
+    }
+    if !out.min_near_vol.is_finite() {
+        out.min_near_vol = 0.0;
+    }
+    out.periods = sim_t / 0.4;
+    out
+}
+
+/// The headline M6 demo gate: an oscillating cylinder in the channel, forced for
+/// 2+ periods on the CPU, bounded + wall-integrity + near-wall quality + a
+/// measurable flow response vs the static control.
+#[test]
+fn oscillating_cylinder_demo_responds_to_forcing_cpu() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    let result = std::panic::catch_unwind(|| {
+        let forced = run_demo(true);
+        let control = run_demo(false);
+        (forced, control)
+    });
+    std::env::remove_var("CFD2_BACKEND");
+    let (forced, control) = match result {
+        Ok(o) => o,
+        Err(e) => std::panic::resume_unwind(e),
+    };
+
+    // Temporal peak-to-peak of the signed wake-mean transverse velocity over the
+    // TAIL (last 1.5 periods = 60 steps) — skips the startup transient. This is
+    // the forced-response amplitude: the steady symmetric control is ~flat, the
+    // forcing oscillates it.
+    let peak_to_peak = |series: &[f32]| -> f32 {
+        let tail = &series[series.len().saturating_sub(60)..];
+        let (mut lo, mut hi) = (f32::INFINITY, f32::NEG_INFINITY);
+        for &x in tail {
+            lo = lo.min(x);
+            hi = hi.max(x);
+        }
+        if hi >= lo { hi - lo } else { 0.0 }
+    };
+    let forced_amp = peak_to_peak(&forced.wake_mean_v);
+    let control_amp = peak_to_peak(&control.wake_mean_v);
+
+    println!(
+        "[m6.3-demo] FORCED  : {} steps ({:.2} periods), max|U| = {:.3e}, max|v|(global) = {:.3e}, \
+         wake-mean-v pk-pk = {:.3e}, near-wall skew = {:.3}, near-wall min vol = {:.3e}, \
+         SCL = {:.3e}, wall faces = {}, flips = {}",
+        forced.steps, forced.periods, forced.max_u, forced.max_v_global, forced_amp,
+        forced.worst_near_skew, forced.min_near_vol, forced.max_scl, forced.n_wall_faces,
+        forced.flips
+    );
+    println!(
+        "[m6.3-demo] CONTROL : max|U| = {:.3e}, max|v|(global) = {:.3e}, wake-mean-v pk-pk = {:.3e} \
+         (static obstacle, identical channel)",
+        control.max_u, control.max_v_global, control_amp
+    );
+
+    // At least 2 forcing periods actually elapsed.
+    assert!(forced.periods >= 2.0, "only {:.2} forcing periods elapsed", forced.periods);
+    // The obstacle was actually tagged + driven as a MovingWall.
+    assert!(forced.n_wall_faces > 10, "too few MovingWall faces: {}", forced.n_wall_faces);
+    // Bounded + finite over the whole run.
+    assert!(!forced.saw_nonfinite, "forced run produced a non-finite velocity");
+    assert!(
+        (forced.max_u as f64) < 10.0 * U_SCALE as f64,
+        "forced max|U| {:.3e} not bounded by 10·U_scale = {}",
+        forced.max_u, 10.0 * U_SCALE as f64
+    );
+    // GCL held through the whole forced run.
+    assert!(forced.max_scl < 1e-6, "forced SCL defect {:.3e}", forced.max_scl);
+    // Near-wall quality stayed healthy for the whole run.
+    assert!(
+        forced.worst_near_skew < 0.7 && forced.min_near_vol > 0.0,
+        "near-wall quality degraded: skew {:.3}, min vol {:.3e}",
+        forced.worst_near_skew, forced.min_near_vol
+    );
+    // FLOW RESPONSE: the forced run's downstream wake oscillates transversely
+    // many times more than the steady symmetric control — a measurable signal
+    // correlated with the forcing (NOT a claim of a specific shedding lock-in;
+    // Re is low so the static case is steady + symmetric ⇒ ~flat wake-mean v).
+    assert!(
+        forced_amp > 5.0 * control_amp.max(1e-4),
+        "no measurable forced response: forced wake-mean-v pk-pk {:.3e} vs control {:.3e}",
+        forced_amp, control_amp
+    );
+    // The response is a real fraction of the wall speed (the transverse momentum
+    // the wall injects reaches the wake).
+    assert!(
+        (forced_amp as f64) > 0.02 * (OSC_AMP * OSC_OMEGA),
+        "forced wake response {:.3e} implausibly small vs wall speed {:.3e}",
+        forced_amp, OSC_AMP * OSC_OMEGA
+    );
 }

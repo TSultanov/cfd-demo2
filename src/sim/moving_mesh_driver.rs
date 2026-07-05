@@ -150,6 +150,68 @@ pub enum BoundaryMotionSpec {
         loop_index: usize,
         transform: fn(f64, [f64; 2]) -> [f64; 2],
     },
+    /// A sinusoidally-oscillating boundary loop (the headline M6 demo — an
+    /// oscillating cylinder). A first-class variant that carries its own
+    /// `amplitude`/`omega`/`axis` so the analytic rigid map is `p ↦ p +
+    /// amplitude·sin(ω t)·ê_axis` — identity at t=0 (`sin 0 = 0`), so the
+    /// build-mesh contract holds — WITHOUT a captured closure (the `RigidLoop`
+    /// `fn` pointer cannot carry runtime-tuned parameters, e.g. from the GUI
+    /// sliders). It is a pure rigid translation, so the chord-length /
+    /// fixed-seed / watertightness invariants carry over exactly as for
+    /// `RigidLoop`. `axis` selects in-line (`InLine`, cross-stream-free) vs
+    /// cross-stream (`CrossStream`) forcing.
+    Oscillation {
+        loop_index: usize,
+        amplitude: f64,
+        omega: f64,
+        axis: OscAxis,
+    },
+}
+
+/// The axis a [`BoundaryMotionSpec::Oscillation`] translates the loop along:
+/// `InLine` = streamwise (x), `CrossStream` = transverse (y). Cross-stream is
+/// the clean forcing signal for a channel demo (a symmetric static obstacle
+/// yields ~zero transverse velocity, so any measured `v` is the forced
+/// response).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum OscAxis {
+    /// Streamwise (x) oscillation.
+    InLine,
+    /// Cross-stream (y) oscillation.
+    CrossStream,
+}
+
+impl BoundaryMotionSpec {
+    /// The moving loop's index, or `None` under [`Static`](Self::Static).
+    fn loop_index(&self) -> Option<usize> {
+        match *self {
+            BoundaryMotionSpec::Static => None,
+            BoundaryMotionSpec::RigidLoop { loop_index, .. }
+            | BoundaryMotionSpec::Oscillation { loop_index, .. } => Some(loop_index),
+        }
+    }
+
+    /// The rigid map applied to the moving loop's points + boundary seeds at
+    /// absolute time `t`. Identity under `Static` (and required to be the
+    /// identity at `t = 0` for every variant — the build-mesh contract).
+    fn eval(&self, t: f64, p: [f64; 2]) -> [f64; 2] {
+        match *self {
+            BoundaryMotionSpec::Static => p,
+            BoundaryMotionSpec::RigidLoop { transform, .. } => transform(t, p),
+            BoundaryMotionSpec::Oscillation {
+                amplitude,
+                omega,
+                axis,
+                ..
+            } => {
+                let d = amplitude * (omega * t).sin();
+                match axis {
+                    OscAxis::InLine => [p[0] + d, p[1]],
+                    OscAxis::CrossStream => [p[0], p[1] + d],
+                }
+            }
+        }
+    }
 }
 
 /// Per-step moving-mesh telemetry (the always-on diagnostics the M4 gates and
@@ -442,10 +504,10 @@ impl MovingMeshDriver {
     /// seeds still follow the [`MeshMotionSpec`]. Panics if a `RigidLoop`
     /// `loop_index` is out of range for the current boundary spec.
     pub fn set_boundary_motion(&mut self, boundary_motion: BoundaryMotionSpec) {
-        if let BoundaryMotionSpec::RigidLoop { loop_index, .. } = boundary_motion {
+        if let Some(loop_index) = boundary_motion.loop_index() {
             assert!(
                 loop_index < self.spec.loops.len(),
-                "BoundaryMotionSpec::RigidLoop loop_index {loop_index} out of range \
+                "BoundaryMotionSpec moving loop_index {loop_index} out of range \
                  ({} loops)",
                 self.spec.loops.len()
             );
@@ -816,13 +878,12 @@ impl MovingMeshDriver {
     /// `Static`. A boundary seed whose adjacent segment falls in this range is a
     /// moving-wall seed.
     fn moving_loop_range(&self) -> Option<(usize, usize)> {
-        match self.boundary_motion {
-            BoundaryMotionSpec::Static => None,
-            BoundaryMotionSpec::RigidLoop { loop_index, .. } => Some((
+        self.boundary_motion.loop_index().map(|loop_index| {
+            (
                 self.spec.seg_offsets[loop_index],
                 self.spec.seg_offsets[loop_index + 1],
-            )),
-        }
+            )
+        })
     }
 
     /// Whether seed `i` is a boundary seed bound to the moving loop.
@@ -843,13 +904,9 @@ impl MovingMeshDriver {
     /// lengths, so segment tags/structure are unchanged — only the points move.
     fn moved_spec(&self, t: f64) -> BoundarySpec {
         let mut spec = self.spec.clone();
-        if let BoundaryMotionSpec::RigidLoop {
-            loop_index,
-            transform,
-        } = self.boundary_motion
-        {
+        if let Some(loop_index) = self.boundary_motion.loop_index() {
             for p in spec.loops[loop_index].pts.iter_mut() {
-                let q = transform(t, [p.x, p.y]);
+                let q = self.boundary_motion.eval(t, [p.x, p.y]);
                 *p = Point2::new(q[0], q[1]);
             }
         }
@@ -861,14 +918,13 @@ impl MovingMeshDriver {
     /// untouched). Evaluating from the t=0 label `seed0_i` keeps the seed exactly
     /// on the moving wall with no incremental drift. A no-op under `Static`.
     fn apply_boundary_motion(&self, t: f64, seeds: &mut [Point2<f64>]) {
-        let transform = match self.boundary_motion {
-            BoundaryMotionSpec::Static => return,
-            BoundaryMotionSpec::RigidLoop { transform, .. } => transform,
-        };
+        if matches!(self.boundary_motion, BoundaryMotionSpec::Static) {
+            return;
+        }
         for i in 0..seeds.len() {
             if self.is_moving_boundary_seed(i) {
                 let s0 = self.seeds0[i];
-                let q = transform(t, [s0.x, s0.y]);
+                let q = self.boundary_motion.eval(t, [s0.x, s0.y]);
                 seeds[i] = Point2::new(q[0], q[1]);
             }
         }
@@ -878,10 +934,9 @@ impl MovingMeshDriver {
     /// finite-difference estimate `|w(t+dt) − w(t)|/dt` used only to size the
     /// mesh-motion CFL cap. Zero under `Static`.
     fn max_boundary_speed(&self, dt_base: f64) -> f64 {
-        let transform = match self.boundary_motion {
-            BoundaryMotionSpec::Static => return 0.0,
-            BoundaryMotionSpec::RigidLoop { transform, .. } => transform,
-        };
+        if matches!(self.boundary_motion, BoundaryMotionSpec::Static) {
+            return 0.0;
+        }
         if dt_base <= 0.0 {
             return 0.0;
         }
@@ -891,8 +946,8 @@ impl MovingMeshDriver {
                 continue;
             }
             let s0 = [self.seeds0[i].x, self.seeds0[i].y];
-            let a = transform(self.time, s0);
-            let b = transform(self.time + dt_base, s0);
+            let a = self.boundary_motion.eval(self.time, s0);
+            let b = self.boundary_motion.eval(self.time + dt_base, s0);
             let w = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt() / dt_base;
             w_max = w_max.max(w);
         }

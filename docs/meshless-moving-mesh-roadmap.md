@@ -433,7 +433,7 @@ seed_advect/Lloyd kernels, orchestrated as separate submissions around the solve
 - **Gates:** no-op regen ≡ static within f32 tol; GCL through GPU path; overhead gate;
   1000-step soak with zero unresolved statuses and bounded capacity growth.
 
-### M6 — Moving boundaries + applications
+### M6 — Moving boundaries + applications — **SHIPPED (v1, CPU)**
 
 Boundary-bound seeds moving rigidly with a prescribed boundary motion (oscillating cylinder
 in channel): regenerate boundary loops per step, `MovingWall` BC velocity = boundary motion.
@@ -441,6 +441,77 @@ Gates: obstacle-contour faces exist and tagged every step; no-penetration
 (U_f−w_f)·n < 1e-3·U_max on moving walls; bounded solution over 2 forcing periods; near-wall
 quality instrument (skew/min-vol within 3 layers). Renderer: capacity/resize regression gate
 (per-cell vertex counts drift every step; ea2c421 crash precedent).
+
+**Shipped (v1 scope): rigid PRESCRIBED boundary motion, FIXED seed count** — the obstacle
+changes shape/position, not seed count; seed `i` ≡ cell `i` for the whole run. Built additively
+on the M4 moving-mesh loop (static + M0–M4 + UI paths byte-identical / do-no-harm anchored).
+Three stages, all on the CPU (`incompressible_momentum_ale` model):
+
+- **Stage 1 — rigidly-moving boundary seeds + per-step moved-loop regen.** A new
+  `BoundaryMotionSpec` (orthogonal to the interior `MeshMotionSpec`) moves one boundary loop's
+  seeds rigidly from their t=0 labels (absolute sampling, no drift) and clips the regen against
+  the moved loop. A rigid map preserves chord lengths ⇒ the loop's seed count / segment tags /
+  watertightness are invariant. The M4 `align_old_vertices_by_seed_set` + swept-flux +
+  born/dead-face closure path handles the now-moving boundary vertices unchanged.
+- **Stage 2 — the fluid feels the wall (MovingWall ALE BC).** BC path (smallest correct):
+  `MovingWall` (bc index 5) is ALREADY a per-face Dirichlet velocity in the
+  `incompressible_momentum(_ale)` model — no codegen / WGSL change. Each regen re-tags the moving
+  loop's open faces `MovingWall` (owner-is-moving-seed) and, after the ALE refresh, sets their
+  per-face `bc_value = w_wall[owner] = (new−old)/dt` (re-applied every step; the topology seam
+  resets per-face overrides). The convective half already sees the relative velocity
+  `phi − ρ·mesh_flux` from the M3 ALE path; this is the Dirichlet half (no-slip + no-penetration
+  at the wall's material velocity). Opt-in (`set_moving_wall_bc`); default off ⇒ static-velocity
+  `Wall`.
+- **Stage 3 — headline demo + near-wall instrument + GUI + docs.** A first-class
+  `BoundaryMotionSpec::Oscillation { loop_index, amplitude, omega, axis }` variant (carries its
+  own params so the GUI sliders can drive it — a bare `fn` pointer cannot). The GUI exposes an
+  "Oscillating obstacle" toggle + amplitude/frequency in the Moving Mesh (ALE) panel
+  (ChannelObstacle only), reusing the stage-1/2 driver path.
+
+**Measured (CPU, meshless/dev-tests; `tests/moving_boundary_test.rs` + `tests/moving_mesh_gui_test.rs`):**
+
+- *Oscillating-cylinder demo* (`oscillating_cylinder_demo_responds_to_forcing_cpu`): cross-stream
+  forced cylinder, 100 steps = **2.5 forcing periods**, ~580 cells. Bounded `max|U| = 0.88 < 10·U_scale`,
+  finite; obstacle contour tagged `MovingWall` + watertight every step; **SCL defect ≤ 3.4e-9**;
+  **near-wall quality** (3 layers): worst skew **0.031 (< 0.7)**, min cell vol **1.2e-3 > 0**.
+  **Flow response:** signed downstream wake-mean transverse velocity oscillates with peak-to-peak
+  **6.2e-2** in the forced run vs **1.2e-3** in the static control (**≈50×** — a measurable forced
+  signal; NOT a shedding lock-in claim: Re≈10 ⇒ the static case is steady + symmetric).
+- *No-penetration / free-stream GCL* (`moving_wall_freestream_preserved_cpu_{euler,bdf2}`): a
+  rigidly-translating obstacle in a free stream = its own velocity — no-penetration
+  `(U−w)·n = 3.1e-8`, free-stream drift `2.1e-7`, SCL `1.5e-9`; the wall-BC-OFF control drifts
+  ~5 orders more (proves the wall drives the fluid), through adjacency flips.
+- *Conservation* (`conservation_moving_wall_closed_box_cpu`): closed box + oscillating internal
+  MovingWall obstacle, from rest — Σρ·V drift **2.25e-16** per step and total; bounded `max|U|`.
+- *GUI worker path* (`moving_mesh_gui_test`, Part 4): the oscillating-obstacle driver through the
+  real solver worker — 30 `MeshRefreshed` emitted, 614 cells fixed, SCL `1e-9`, obstacle
+  demonstrably moved, and every emitted mesh replayed through the renderer capacity path (no
+  overflow/truncation — the ea2c421 regression gate).
+
+**v1 scope / limits (honest):** rigid PRESCRIBED motion only (no fluid-structure coupling — the
+wall trajectory is analytic); fixed seed count (rigid motion, small amplitude < near-wall cell
+spacing so the frozen interior seeds are never swallowed — an amplitude that swallows a seed is a
+hard `Err`, by design); CPU-first (GPU moving mesh is M5); interior seeds are `Frozen` in the
+demos (the obstacle deforms the near-wall cells, which the near-wall instrument watches).
+Headless / test-driven; the live GPU-render animation is the manual smoke below.
+
+**Manual GUI smoke — oscillating obstacle** (needs a display; not covered by CI):
+
+1. `cargo run --release --features "cpu ui"` (a CPU backend is required — GPU moving mesh is M5).
+2. Left panel → **Compute backend** → a CPU option (Interpreter / Transpiled).
+3. **Geometry** → *Channel with obstacle* (the oscillating-obstacle controls appear only for it —
+   the obstacle is loop 1 of its boundary spec).
+4. **Moving Mesh (ALE)** group → tick **Enable Moving Mesh (ALE)** (auto-steers Mesh Type →
+   Voronoi (CVT), model → incompressible ALE, fixed dt). Leave **Seed motion** on *Frozen* (or
+   *Flow-coupled*) — the interior-seed law is orthogonal to the obstacle motion.
+5. Tick **Oscillating obstacle**; set **Amplitude** (keep below the near-wall cell spacing, e.g.
+   0.03–0.06) and **Frequency (Hz)**.
+6. Click **Initialize / Reset**, then **Run**.
+
+Expected: the cylinder visibly oscillates cross-stream, its boundary cells re-tessellate with it
+(no flicker/crash/overflow), the fluid follows the moving wall (a transverse wake response), and
+the ALE stats block shows a bounded SCL defect + healthy skew every step. A too-large amplitude
+that swallows an interior seed surfaces as a worker error (fixed-seed v1), not a crash.
 
 ## 5. Cost model (300k cells, honest)
 

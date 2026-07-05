@@ -23,8 +23,8 @@ use std::thread;
 
 use crate::meshgen::meshless::{generate_cvt_mesh_with_seeds, CvtMeshSeeds};
 use crate::sim::{
-    DivergeReason, DriverBuild, MeshMotionSpec, MovingMeshDriver, MovingMeshStats, RuntimeParams,
-    SolverDriver,
+    BoundaryMotionSpec, DivergeReason, DriverBuild, MeshMotionSpec, MovingMeshDriver,
+    MovingMeshStats, OscAxis, RuntimeParams, SolverDriver,
 };
 
 /// Rendering mode for the mesh visualization
@@ -217,6 +217,12 @@ struct SolverInitRequest {
     enable_moving_mesh: bool,
     moving_motion: MovingMotionChoice,
     moving_regularization: f64,
+    // M6: oscillating-obstacle boundary motion (ChannelObstacle only). When set,
+    // `build_moving_init` declares the obstacle loop a cross-stream
+    // `BoundaryMotionSpec::Oscillation` and enables the MovingWall BC.
+    moving_oscillate_obstacle: bool,
+    moving_osc_amplitude: f64,
+    moving_osc_frequency: f64,
     wgpu_device: Option<wgpu::Device>,
     wgpu_queue: Option<wgpu::Queue>,
     target_format: wgpu::TextureFormat,
@@ -543,6 +549,16 @@ pub struct CFDApp {
     moving_motion: MovingMotionChoice,
     /// FlowCoupled centroid-steering strength χ (0 = pure flow advection).
     moving_regularization: f64,
+    /// M6: cross-stream-oscillate the obstacle (ChannelObstacle geometry only).
+    /// The obstacle loop's boundary seeds move rigidly with it and its contour
+    /// faces carry the moving-wall material velocity (MovingWall BC). Orthogonal
+    /// to `moving_motion` (which governs the interior seeds). Applied on
+    /// Initialize / Reset.
+    moving_oscillate_obstacle: bool,
+    /// Oscillating-obstacle cross-stream amplitude (domain units).
+    moving_osc_amplitude: f64,
+    /// Oscillating-obstacle forcing frequency (Hz); `ω = 2π·f`.
+    moving_osc_frequency: f64,
     /// Latest per-step moving-mesh telemetry (from `MeshRefreshed`), for display.
     cached_moving_stats: Option<MovingMeshStats>,
     /// Whether the driver the worker is *actually running* is a moving-mesh
@@ -712,6 +728,9 @@ impl CFDApp {
             enable_moving_mesh: false,
             moving_motion: MovingMotionChoice::default(),
             moving_regularization: 0.5,
+            moving_oscillate_obstacle: false,
+            moving_osc_amplitude: 0.05,
+            moving_osc_frequency: 0.5,
             cached_moving_stats: None,
             solver_is_moving: false,
             min_cell_size: 0.025,
@@ -1070,6 +1089,9 @@ impl CFDApp {
             enable_moving_mesh: self.enable_moving_mesh,
             moving_motion: self.moving_motion,
             moving_regularization: self.moving_regularization,
+            moving_oscillate_obstacle: self.moving_oscillate_obstacle,
+            moving_osc_amplitude: self.moving_osc_amplitude,
+            moving_osc_frequency: self.moving_osc_frequency,
             wgpu_device: self.wgpu_device.clone(),
             wgpu_queue: self.wgpu_queue.clone(),
             target_format: self.target_format,
@@ -2100,7 +2122,7 @@ impl CFDApp {
 
         let solver_start = std::time::Instant::now();
         let init_guard = tracefmt::install_init_collector(trace_init_events);
-        let moving = pollster::block_on(MovingMeshDriver::build(
+        let mut moving = pollster::block_on(MovingMeshDriver::build(
             cvt,
             &params,
             motion,
@@ -2110,6 +2132,24 @@ impl CFDApp {
             request.wgpu_queue.clone(),
         ))?;
         drop(init_guard);
+
+        // M6: an oscillating obstacle (ChannelObstacle only — the obstacle is
+        // loop 1 of its boundary spec). Cross-stream sinusoidal rigid motion; the
+        // MovingWall BC feeds the wall's material velocity into the fluid. A
+        // no-op for any other geometry (no obstacle loop) or when off — so the
+        // FlowCoupled / Frozen / swirl interior-motion demos are unchanged.
+        if request.moving_oscillate_obstacle
+            && request.selected_geometry == GeometryType::ChannelObstacle
+        {
+            const OBSTACLE_LOOP: usize = 1;
+            moving.set_boundary_motion(BoundaryMotionSpec::Oscillation {
+                loop_index: OBSTACLE_LOOP,
+                amplitude: request.moving_osc_amplitude,
+                omega: std::f64::consts::TAU * request.moving_osc_frequency,
+                axis: OscAxis::CrossStream,
+            });
+            moving.set_moving_wall_bc(true);
+        }
         CFDApp::push_trace_init_event(
             trace_init_events,
             "solver.new",
@@ -2772,6 +2812,47 @@ impl eframe::App for CFDApp {
                                      0 = pure flow advection; higher pulls seeds toward \
                                      cell centroids to hold mesh quality.",
                                 );
+                            }
+                            // M6: oscillating obstacle (ChannelObstacle only — its
+                            // boundary spec has the obstacle as loop 1).
+                            if self.selected_geometry == GeometryType::ChannelObstacle {
+                                ui.separator();
+                                ui.checkbox(
+                                    &mut self.moving_oscillate_obstacle,
+                                    "Oscillating obstacle",
+                                )
+                                .on_hover_text(
+                                    "Cross-stream sinusoidally oscillate the cylinder. Its \
+                                     boundary seeds move rigidly with it and the contour \
+                                     carries the wall's material velocity (MovingWall BC), so \
+                                     the fluid feels the moving wall. Applied on \
+                                     Initialize / Reset.",
+                                );
+                                if self.moving_oscillate_obstacle {
+                                    ui.add(
+                                        adaptive_slider(
+                                            &mut self.moving_osc_amplitude,
+                                            0.005..=0.15,
+                                        )
+                                        .text("Amplitude"),
+                                    )
+                                    .on_hover_text(
+                                        "Cross-stream oscillation amplitude (domain units). \
+                                         Keep below the near-wall cell spacing so the frozen \
+                                         interior seeds are not swallowed.",
+                                    );
+                                    ui.add(
+                                        adaptive_slider(
+                                            &mut self.moving_osc_frequency,
+                                            0.1..=3.0,
+                                        )
+                                        .text("Frequency (Hz)"),
+                                    )
+                                    .on_hover_text(
+                                        "Forcing frequency; ω = 2π·f. A faster wall shrinks \
+                                         the mesh-motion-CFL-capped timestep.",
+                                    );
+                                }
                             }
                             ui.label("Applied on Initialize / Reset.");
                         }

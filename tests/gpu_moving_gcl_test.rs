@@ -232,6 +232,68 @@ fn movingmesh_driver_gpu_freestream_reference() {
     eprintln!("[gpu-ref-movingmesh] GPU-backend MovingMeshDriver free-stream: max|U-U0| = {max_du:.3e}");
 }
 
+/// Production path: the SAME free stream driven by `MovingMeshDriver` with the
+/// opt-in `set_gpu_regen(true)` — the driver reconstructs the mesh entirely on
+/// the GPU each step (no CPU assemble / swept) through its normal `step()`.
+#[test]
+fn movingmesh_driver_gpu_regen_freestream() {
+    use cfd2::meshgen::meshless::generate_cvt_mesh_with_seeds;
+    use cfd2::meshgen::LloydConfig;
+    use cfd2::sim::{MeshMotionSpec, MovingMeshDriver};
+    let Some(ctx) = gpu_context() else { return };
+    let geo = RectangularChannel { length: LX, height: LY };
+    let domain = Vector2::new(LX, LY);
+    let mut cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.0, domain, &LloydConfig::default());
+    tag_channel(&mut cvt.mesh);
+    let n = cvt.mesh.num_cells();
+    let params = test_params();
+    let mut moving = pollster::block_on(MovingMeshDriver::build_with_model(
+        cvt,
+        allmach_pressure_ale_model().expect("model"),
+        &params,
+        MeshMotionSpec::Prescribed(swirl),
+        &vec![(U0.0 as f64, U0.1 as f64); n],
+        &vec![0.0; n],
+        Some(ctx.device.clone()),
+        Some(ctx.queue.clone()),
+    ))
+    .expect("gpu moving driver");
+    moving.set_gpu_regen(true);
+    assert!(moving.gpu_regen_active(), "gpu_regen should be active on the GPU backend");
+    moving.set_boundary_retag(Some(tag_channel));
+    moving.driver_mut().apply_params(&params);
+    let layout = moving.driver().solver().model().state_layout.clone();
+    let stride = layout.stride() as usize;
+    let u_off = layout.offset_for("U").expect("U") as usize;
+    let mut max_du = 0.0f32;
+    let mut max_scl = 0.0f64;
+    for step in 0..STEPS {
+        let (outcome, stats) = moving
+            .step(false)
+            .unwrap_or_else(|e| panic!("gpu_regen step {step}: {e}"));
+        assert!(outcome.diverged.is_none(), "step {step} diverged");
+        max_scl = max_scl.max(stats.scl_defect);
+        // On-device per-step SCL defect: the f32 gap between two INDEPENDENT
+        // regens' canonical areas at the shared seed positions (different ring
+        // orders ⇒ different shoelace summation ~1e-7), plus a one-time ~1.4e-6
+        // seam at step 0 (V^n is the CPU-built initial mesh). Tiny; the free-stream
+        // drift below is the load-bearing GCL gate.
+        assert!(stats.scl_defect < 5e-6, "step {step}: on-device SCL defect {:.3e}", stats.scl_defect);
+        let state = pollster::block_on(moving.driver().solver().read_state_f32());
+        let mut du = 0.0f32;
+        for c in 0..n {
+            du = du.max((state[c * stride + u_off] - U0.0).abs())
+                .max((state[c * stride + u_off + 1] - U0.1).abs());
+        }
+        max_du = max_du.max(du);
+    }
+    println!(
+        "[gpu-regen-driver] MovingMeshDriver::step with set_gpu_regen(true): {STEPS} steps, \
+         max|U-U0| = {max_du:.3e}, max on-device SCL defect = {max_scl:.3e}"
+    );
+    assert!(max_du < 1e-4, "free-stream U drift {max_du:.3e} via the driver gpu_regen path");
+}
+
 #[test]
 fn device_regen_freestream_gcl() {
     let Some(ctx) = gpu_context() else { return };

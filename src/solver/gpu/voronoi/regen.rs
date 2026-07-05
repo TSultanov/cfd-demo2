@@ -1,0 +1,99 @@
+//! On-device mesh regeneration orchestrator (Phase C stage D4): bundles the GPU
+//! Voronoi engine + the four device passes (emit → csr → cell_geom → swept) and
+//! rebuilds a solver-ready [`Mesh`] + ALE mesh fluxes from a seed set ENTIRELY on
+//! device, with no CPU `assemble_meshless_from_seeds` and no CPU swept path.
+//!
+//! This is the library form of the loop the `gpu_moving_gcl_test` proves: one
+//! [`GpuMeshRegen::regen`] call per moving step yields the vertex-less solver
+//! mesh (see [`assemble_solver_mesh`]) and the per-face `mesh_fluxes` the solver
+//! consumes. The caller (e.g. `MovingMeshDriver`) tags boundaries, feeds the
+//! result to `begin_ale_step_topology`, and MUST `reapply_boundary_conditions`
+//! after (the topology refresh drops runtime BC overrides).
+//!
+//! Non-flip only: the swept quads assume a persistent adjacency (a Voronoi flip
+//! that births/kills faces has no valid device swept). The caller compares the
+//! returned mesh's adjacency across steps and falls back to the CPU path on a
+//! flip; `needs_cpu` additionally flags sub-tolerance sliver faces (polyline
+//! BOUNDARY-segment endpoints, not yet ported).
+
+use crate::solver::gpu::context::GpuContext;
+use crate::solver::gpu::readback::StagingBufferCache;
+use crate::solver::mesh::Mesh;
+use crate::meshgen::meshless::{BoundarySpec, SeedKind};
+use nalgebra::Vector2;
+
+use super::cell_geom::CellGeometry;
+use super::csr_gpu::GpuCsr;
+use super::emit::EmitFaces;
+use super::engine::GpuVoronoiEngine;
+use super::solver_mesh::assemble_solver_mesh;
+use super::swept_gpu::SweptFluxGeometry;
+use crate::meshgen::MeshgenTolerances;
+
+/// The result of one on-device regen.
+pub struct GpuRegenResult {
+    /// Vertex-less solver mesh (boundary faces untagged — the caller tags them).
+    pub mesh: Mesh,
+    /// Per-face ALE mesh flux (`swept_area / dt`), in the mesh's face order.
+    pub mesh_fluxes: Vec<f32>,
+    /// Number of faces the device could not build (sub-tolerance slivers /
+    /// unported polyline endpoints) — `> 0` ⇒ the caller must use the CPU path.
+    pub needs_cpu: usize,
+}
+
+/// Bundles the GPU Voronoi engine + the device mesh-build passes for repeated
+/// (per-step) regeneration at a fixed seed count.
+pub struct GpuMeshRegen {
+    engine: GpuVoronoiEngine,
+    emit: EmitFaces,
+    csr: GpuCsr,
+    cellgeom: CellGeometry,
+    swept: SweptFluxGeometry,
+    cache: StagingBufferCache,
+    flags: Vec<u32>,
+}
+
+impl GpuMeshRegen {
+    /// Build the engine + passes for `n` seeds over `domain` at tolerance `tol`.
+    pub fn new(device: &wgpu::Device, n: usize, domain: Vector2<f64>, tol: &MeshgenTolerances) -> Self {
+        Self {
+            engine: GpuVoronoiEngine::new(device, n as u32, domain, tol),
+            emit: EmitFaces::new(device),
+            csr: GpuCsr::new(device),
+            cellgeom: CellGeometry::new(device),
+            swept: SweptFluxGeometry::new(device),
+            cache: StagingBufferCache::default(),
+            flags: vec![0u32; n],
+        }
+    }
+
+    /// Regenerate the solver mesh + ALE fluxes at `new_seeds` (interleaved f32
+    /// x/y), with `old_seeds` (the previous step's positions) for the swept
+    /// fluxes. `dt` is the step the fluxes are closed against. `kinds`/`spec`
+    /// classify the seeds + boundary loops (as `upload_case` expects).
+    pub fn regen(
+        &mut self,
+        ctx: &GpuContext,
+        new_seeds: &[f32],
+        old_seeds: &[f32],
+        kinds: &[SeedKind],
+        spec: &BoundarySpec,
+        dt: f32,
+    ) -> GpuRegenResult {
+        self.engine.upload_case(&ctx.device, &ctx.queue, new_seeds, &self.flags, kinds, spec);
+        let idx = self.engine.run_regen(&ctx.device, &ctx.queue);
+        let _ = ctx.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: None });
+        let _ = self.engine.resolve_flagged(ctx, &self.cache);
+
+        let faces = self.emit.emit(ctx, &self.cache, &self.engine);
+        let csr = self.csr.build_csr(ctx, &self.cache, &self.engine);
+        let cells = self.cellgeom.build(ctx, &self.cache, &self.engine);
+        let sw = self.swept.compute(ctx, &self.cache, &self.engine, old_seeds);
+        let needs_cpu = sw.needs_cpu.iter().filter(|&&x| x != 0).count();
+
+        let mesh = assemble_solver_mesh(&faces, &csr, &cells, &sw)
+            .expect("assemble on-device solver mesh");
+        let mesh_fluxes: Vec<f32> = sw.swept.iter().map(|&s| s / dt).collect();
+        GpuRegenResult { mesh, mesh_fluxes, needs_cpu }
+    }
+}

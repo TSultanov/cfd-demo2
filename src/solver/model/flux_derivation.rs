@@ -1,10 +1,8 @@
 // Derivation of flux-module kernels from declarative flux definitions.
 //
-// Models declare *what* a flux is in math terms (e.g. "the volumetric flux of
-// advecting velocity field `U_adv`"); this module lowers the declaration to a
-// `FluxModuleKernelSpec` consumed by the generic flux-module codegen. No
-// model-specific WGSL or face-expression assembly lives in the model definition.
-// (Regular comments: this file is also include!()'d into build.rs.)
+// Models declare *what* a flux is in math terms; this module lowers the
+// declaration to a `FluxModuleKernelSpec` for the generic flux-module codegen.
+// This file is also include!()'d into build.rs, so only regular comments here.
 
 use crate::solver::ir::{
     FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec,
@@ -13,10 +11,6 @@ use crate::solver::model::backend::ast::EquationSystem;
 use crate::solver::model::backend::state_layout::StateLayout;
 use crate::solver::model::ports::dimensions::{Density, Temperature, Velocity};
 use crate::solver::model::ports::PortRegistry;
-
-// ============================================================================
-// Derived Rhie–Chow flux
-// ============================================================================
 
 /// A derived Rhie–Chow flux: the flux-module kernel plus the auxiliary
 /// kernel bundle (dp_init / dp_update / grad_p maintenance) it requires.
@@ -100,25 +94,20 @@ fn derive_rhie_chow_flux(
         }
     }
 
-    // Create a PortRegistry for runtime validation of fields
     let registry = PortRegistry::new(layout.clone());
 
     fn density_face_expr(registry: &PortRegistry) -> Result<S, String> {
-        // Prefer a state-layout density when present (variable-density extension);
-        // otherwise fall back to the global constant density uniform.
-        // Use PortRegistry validation to check for existence, kind, and dimension.
+        // Prefer a state-layout density when present; else fall back to the
+        // global constant density uniform.
         match registry.validate_scalar_field::<Density>("derive_rhie_chow", "rho") {
             Ok(()) => {
                 let rho_o = S::state(FaceSide::Owner, "rho");
                 let rho_n = S::state(FaceSide::Neighbor, "rho");
-                // Density UPWINDING for the real-compressibility (pressure-based
-                // COMPRESSIBLE) model, gated on the presence of the Stage-B real-EOS
-                // marker field `t_ref`. For transonic/supersonic robustness the face
-                // density must be upwinded by the face-normal velocity sign: central
-                // averaging is dispersive and over-expands the diverging section
-                // (M_throat > M_exit). Models without `t_ref` — incompressible, the
-                // non-thermal/MMS all-Mach variants — keep the central `Lerp`,
-                // byte-identical, so the MMS order test is unaffected.
+                // Upwind face density (by face-normal velocity sign) for the
+                // real-EOS compressible model, gated on the marker field `t_ref`:
+                // central averaging is dispersive and over-expands the diverging
+                // section (M_throat > M_exit). Without `t_ref` keep the central
+                // `Lerp`, byte-identical, so MMS order is unaffected.
                 let upwind = registry
                     .validate_scalar_field::<Temperature>("derive_rhie_chow", "t_ref")
                     .is_ok();
@@ -238,7 +227,6 @@ fn derive_rhie_chow_flux(
     };
     let mut coeff_fields = Vec::new();
     collect_coeff_fields(coeff, &mut coeff_fields);
-    // Use PortRegistry validation to filter for scalar fields with D_P dimension
     let mut d_p_candidates: Vec<String> = Vec::new();
     for f in &coeff_fields {
         match registry
@@ -270,16 +258,8 @@ fn derive_rhie_chow_flux(
 
     // Rhie–Chow-style mass flux:
     //   phi = rho * (u_f · n) * area  -  rho * d_p_f * ((p_N - p_O) / dist) * area
-    //
-    // Notes:
-    // - `d_p` is inferred from the pressure equation Laplacian coefficient and is expected to be
-    //   updated by the coupled pressure/momentum preconditioner (and seeded by `dp_init`).
-    // - The pressure gradient term uses the same face-normal distance projection (`dist`) as the
-    //   Laplacian discretization, so the pressure equation's Laplacian term and this correction
-    //   term stay numerically consistent.
-    //
-    // This definition is intentionally "general": it only relies on the model-declared
-    // momentum/pressure coupling and the presence of `(d_p, grad_p)` in the state layout.
+    // The pressure-gradient term uses the same face-normal distance projection
+    // (`dist`) as the Laplacian discretization, so the two stay consistent.
     let rho_face = density_face_expr(&registry)?;
 
     let d_p_face = S::Lerp(
@@ -287,10 +267,8 @@ fn derive_rhie_chow_flux(
         Box::new(S::state(FaceSide::Neighbor, d_p.clone())),
     );
 
-    // Rhie–Chow uses the momentum predictor `HbyA` for the "predicted" mass flux on the RHS
-    // of the pressure equation, then subtracts an explicit pressure correction flux.
-    //
-    // Approximate `HbyA` from the current cell-centered velocity and pressure gradient:
+    // `HbyA` is the momentum predictor for the "predicted" mass flux (pressure
+    // equation RHS); the explicit pressure correction is subtracted after.
     //   HbyA ≈ U + d_p * grad(p)
     let grad_p_field = format!("grad_{}", pressure);
     let u_face = V::Lerp(
@@ -327,14 +305,11 @@ fn derive_rhie_chow_flux(
     );
     let phi_corr = S::Sub(Box::new(phi_pred.clone()), Box::new(phi_p));
 
-    // Pressure equation needs the *predicted* mass flux (phi_pred) on the RHS:
-    //   -div(rho*d_p*grad(p)) + div(phi_pred) = 0
-    //
-    // Momentum equation convection uses the corrected mass flux (phi_corr) to reduce
-    // pressure–velocity decoupling on collocated grids (Rhie–Chow).
-    //
-    // The flux buffer is indexed by coupled unknown component, so we can provide different
-    // values for `p` vs `U` while still using a single scalar flux module kernel.
+    // Pressure equation uses the *predicted* mass flux (phi_pred) on its RHS;
+    // momentum convection uses the corrected flux (phi_corr) to reduce
+    // pressure–velocity decoupling on collocated grids (Rhie–Chow). The flux
+    // buffer is indexed by coupled unknown component, so `p` and `U` slots can
+    // differ within a single scalar flux-module kernel.
     let flux_layout = FluxLayout::from_system(system);
     let components: Vec<String> = flux_layout
         .components

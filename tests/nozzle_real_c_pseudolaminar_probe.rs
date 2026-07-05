@@ -1,18 +1,14 @@
-//! PROBE (`#[ignore]`'d): does the current (Stage B/C real-compressibility + density-
-//! upwind) all-Mach nozzle CONVERGE to a bounded PSEUDO-LAMINAR solution at the REAL
+//! PROBE (`#[ignore]`'d): does the all-Mach nozzle (real-compressibility +
+//! density-upwind) converge to a bounded pseudo-laminar solution at the REAL
 //! speed of sound (no compressibility exaggeration), driven by a pressure inlet?
+//! The numerical questions at real c≈347: does preconditioning tame the acoustic
+//! stiffness, and does gauge-pressure stay above the EOS vacuum floor (P_abs > 0)
+//! while the flow goes transonic?
 //!
-//! The "laminar solver can't do turbulent Re" objection is wrong: the laminar NS
-//! equations are well-posed at any Re and converge to a (physically-invalid but
-//! numerically-valid) pseudo-laminar solution. The REAL questions at real c≈347 are
-//! numerical: does preconditioning tame the acoustic stiffness, and does the
-//! gauge-pressure stay above the EOS vacuum floor (P_abs > 0) while the flow goes
-//! transonic? This settles it empirically.
-//!
-//! Setup: exaggeration ×1 ⇒ psi = air's real 1/c² ≈ 8.3e-6, c ≈ 347, P_REF = rho/psi
-//! ≈ 1.48e5. To reach M~1 the pressure drop is O(½ρc²) ≈ 7e4, so we sweep inlet
-//! pressures of that magnitude (vs the exaggerated demo's 0.07). Velocity-scaled
-//! adaptive dt so step 1 is in-bounds at the ~100s-of-m/s throughflow.
+//! Setup: exaggeration ×1 ⇒ psi = air's real 1/c² ≈ 8.3e-6, c ≈ 347, P_REF =
+//! rho/psi ≈ 1.48e5. To reach M~1 the pressure drop is O(½ρc²) ≈ 7e4, so we sweep
+//! inlet pressures of that magnitude. Velocity-scaled adaptive dt keeps step 1
+//! in-bounds at the ~100s-of-m/s throughflow.
 //!
 //! Run: cargo test --features "dev-tests ui" --test nozzle_real_c_pseudolaminar_probe -- --ignored --nocapture
 
@@ -67,7 +63,7 @@ struct Out {
 }
 
 fn run(air: &Fluid, mesh: &Mesh, p_inlet: f32, steps: usize) -> Out {
-    // psi is now always the REAL air.compressibility() = 1/c² (no exaggeration).
+    // psi = real air.compressibility() = 1/c² (no exaggeration).
     let mut d = ALLMACH_THERMAL_NOZZLE; // pressure_inlet = true
     d.inlet_pressure = p_inlet;
     // Throughflow scale for the preconditioner + CFL ~ Bernoulli sqrt(2*dP/rho).

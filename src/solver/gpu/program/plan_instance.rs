@@ -91,7 +91,6 @@ pub(crate) trait PlanLinearSystemDebug: Send {
     fn get_linear_solution(&self) -> PlanFuture<'_, Result<Vec<f32>, String>>;
 
     /// Read back the assembled block-CSR matrix values (length = num_nonzeros).
-    /// Debug-only: used for CPU↔GPU matrix-level isolation.
     fn get_linear_matrix(&self) -> PlanFuture<'_, Result<Vec<f32>, String>>;
 
     /// Read back the assembled right-hand side (length = num_dofs).

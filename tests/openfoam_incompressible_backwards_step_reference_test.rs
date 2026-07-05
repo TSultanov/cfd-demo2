@@ -11,15 +11,10 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 
 /// Test incompressible backwards step against OpenFOAM reference.
 ///
-/// # Mismatch classification (June 2026)
-/// Same class as the incompressible lid (see the detailed measured
-/// decomposition in that test): the max-cell u error (8.2%) sits in the
-/// first cell at the re-entrant step corner (x=1.05, y=0.45; corner at
-/// (1.0, 0.5)) and the p max just downstream in the recirculation shear
-/// layer — singular-corner-adjacent formulation differences vs pimpleFoam
-/// (RC d_p coefficient, missing dev2 transpose term), not a solver defect
-/// reachable by any single fix. The d_p-from-diagonal path (plan 3.2b) is
-/// the recorded lever.
+/// The max-cell u error sits in the first cell at the re-entrant step corner
+/// and the p max just downstream in the recirculation shear layer:
+/// singular-corner-adjacent formulation differences vs pimpleFoam (RC d_p
+/// coefficient, missing dev2 transpose term), not a solver defect.
 ///
 /// # Timeout
 /// This test requires extended timeout (~60-120s) due to GPU compute.
@@ -60,11 +55,8 @@ fn openfoam_incompressible_backwards_step_matches_reference_field() {
     ))
     .expect("solver init");
 
-    // Canonical configuration dt = 0.02 / alpha_u = 0.7: d_p ∝ alpha_u*dt
-    // is part of cfd2's spatial discretization, so dt changes the discrete
-    // steady state (this case measured u 0.0734 at dt=0.02 vs 0.0437 at
-    // dt=0.05 — better there, but a coincidental dissipation match) — dt=0.02 matches the reference's own dt and the historical
-    // d_p. See the lid test header for the full d_p-sensitivity record.
+    // d_p ∝ alpha_u*dt is part of cfd2's spatial discretization, so dt changes
+    // the discrete steady state; dt=0.02 matches the reference's own dt.
     solver.set_dt(0.02);
     solver.set_dtau(0.0).unwrap();
     solver.set_density(1.0).unwrap();
@@ -78,10 +70,9 @@ fn openfoam_incompressible_backwards_step_matches_reference_field() {
     solver.initialize_history();
 
 
-    // March to steady state: the reference is the machine-converged steady
-    // end state (final pimpleFoam initial residuals at the noise floor), so
-    // the transient path -- dt, time scheme, outer iterations -- drops out
-    // of the comparison; both codes compare converged states.
+    // March to steady state: the reference is machine-converged, so the
+    // transient path (dt, time scheme, outer iterations) drops out of the
+    // comparison; both codes compare converged states.
     const CHECK_EVERY: usize = 25;
     const STEADY_TOL: f64 = 1e-7;
     const MAX_STEPS: usize = 3000;

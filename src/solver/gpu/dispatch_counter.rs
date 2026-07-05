@@ -7,20 +7,14 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-/// Tracks dispatch statistics for GPU compute operations
 #[derive(Debug, Default)]
 pub struct DispatchCounter {
-    /// Total dispatches this frame
     total_dispatches: AtomicU64,
-    /// Dispatches by category
     by_category: Mutex<HashMap<&'static str, u64>>,
-    /// Dispatches by kernel label
     by_kernel: Mutex<HashMap<String, u64>>,
-    /// Whether counting is enabled
-    enabled: AtomicU64, // Using u64 for lock-free atomic bool pattern
+    enabled: AtomicU64, // u64 for a lock-free atomic bool
 }
 
-/// Statistics from a dispatch counting session
 #[derive(Debug, Clone)]
 pub struct DispatchStats {
     pub total_dispatches: u64,
@@ -29,27 +23,22 @@ pub struct DispatchStats {
 }
 
 impl DispatchCounter {
-    /// Create a new dispatch counter
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Enable dispatch counting
     pub fn enable(&self) {
         self.enabled.store(1, Ordering::Relaxed);
     }
 
-    /// Disable dispatch counting
     pub fn disable(&self) {
         self.enabled.store(0, Ordering::Relaxed);
     }
 
-    /// Check if counting is enabled
     pub fn is_enabled(&self) -> bool {
         self.enabled.load(Ordering::Relaxed) != 0
     }
 
-    /// Record a single dispatch
     pub fn record(&self, category: &'static str, kernel_label: &str) {
         if !self.is_enabled() {
             return;
@@ -66,7 +55,6 @@ impl DispatchCounter {
         }
     }
 
-    /// Reset counters for a new frame
     pub fn reset(&self) {
         self.total_dispatches.store(0, Ordering::Relaxed);
         if let Ok(mut by_cat) = self.by_category.lock() {
@@ -77,7 +65,6 @@ impl DispatchCounter {
         }
     }
 
-    /// Get current statistics
     pub fn get_stats(&self) -> DispatchStats {
         DispatchStats {
             total_dispatches: self.total_dispatches.load(Ordering::Relaxed),
@@ -86,19 +73,16 @@ impl DispatchCounter {
         }
     }
 
-    /// Print dispatch statistics
     pub fn print_stats(&self) {
         let stats = self.get_stats();
         Self::print_stats_static(&stats);
     }
 
-    /// Print static dispatch statistics
     pub fn print_stats_static(stats: &DispatchStats) {
         println!("\n============ GPU Dispatch Statistics ============\n");
         println!("Total dispatches: {}", stats.total_dispatches);
         println!();
 
-        // By category
         println!("Dispatches by Category:");
         println!("{:<30} {:>10} {:>10}", "Category", "Count", "%");
         println!("{}", "-".repeat(52));
@@ -115,7 +99,6 @@ impl DispatchCounter {
             println!("{:<30} {:>10} {:>9.1}%", category, count, pct);
         }
 
-        // Top kernels
         println!("\nTop 15 Kernels by Dispatch Count:");
         println!("{:<50} {:>10}", "Kernel", "Count");
         println!("{}", "-".repeat(62));
@@ -132,7 +115,6 @@ impl DispatchCounter {
             println!("{:<50} {:>10}", label, count);
         }
 
-        // Analysis
         println!("\nAnalysis:");
         if stats.total_dispatches > 100 {
             println!("  WARNING: High dispatch count (>100) may indicate overhead.");
@@ -143,7 +125,6 @@ impl DispatchCounter {
             println!("  GOOD: Low dispatch count indicates efficient batching.");
         }
 
-        // Check for repeated kernels
         let repeated: Vec<_> = stats.by_kernel.iter().filter(|(_, c)| **c > 10).collect();
         if !repeated.is_empty() {
             println!("\n  Note: Some kernels dispatched >10 times:");
@@ -158,13 +139,11 @@ impl DispatchCounter {
 
 use std::sync::OnceLock;
 
-/// Global dispatch counter for tracking across the solver
 pub fn global_dispatch_counter() -> &'static DispatchCounter {
     static COUNTER: OnceLock<DispatchCounter> = OnceLock::new();
     COUNTER.get_or_init(DispatchCounter::new)
 }
 
-/// Categories for dispatch counting
 pub mod categories {
     pub const LINEAR_SOLVER: &str = "Linear Solver";
     pub const PRECONDITIONER: &str = "Preconditioner";
@@ -178,7 +157,6 @@ pub mod categories {
     pub const OTHER: &str = "Other";
 }
 
-/// Macro to count a dispatch
 #[macro_export]
 macro_rules! count_dispatch {
     ($category:expr, $label:expr) => {
@@ -209,7 +187,6 @@ impl Drop for DispatchScope {
     }
 }
 
-/// Get dispatch stats for the current scope
 pub fn get_dispatch_stats() -> DispatchStats {
     global_dispatch_counter().get_stats()
 }

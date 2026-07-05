@@ -1,8 +1,8 @@
-//! The GUI nozzle case can now be meshed with every mesh type, not just the
+//! The GUI nozzle case can be meshed with every mesh type, not just the
 //! body-fitted structured grid. This test validates the mesh-generation side of
 //! that feature (`src/ui/app.rs` `build_mesh_with`, `GeometryType::Nozzle`):
 //!
-//!  - the `Fitted` option reproduces the validated `generate_structured_nozzle_mesh`;
+//!  - the `Fitted` option reproduces `generate_structured_nozzle_mesh`;
 //!  - the unstructured options (CutCell / Delaunay / Voronoi) conform to the same
 //!    wall profile via the `Nozzle` SDF geometry and, after the same open-face
 //!    → wall fallback the GUI applies, form a closed nozzle domain with the
@@ -160,7 +160,7 @@ fn nozzle_voronoi_mesh_is_valid_and_tagged() {
 
 #[test]
 fn nozzle_fitted_structured_mesh_still_valid() {
-    // The `Fitted` option is unchanged from the validated structured path.
+    // The `Fitted` option is the structured path.
     let mesh = generate_structured_nozzle_mesh(
         96,
         32,

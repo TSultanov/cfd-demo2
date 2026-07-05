@@ -1,16 +1,15 @@
-//! Meshless engine fuzz battery (M0.6, design §9): adversarial seed sets
-//! must produce *statuses*, never panics, and never NaNs. Four classes:
+//! Meshless engine fuzz battery: adversarial seed sets must produce
+//! *statuses*, never panics, and never NaNs. Classes:
 //!
 //! (a) min-separation-filtered white noise — the engine's design input;
-//! (b) perturbed regular grid, perturbation swept 0 → 0.49h — from exact
-//!     cocircularity down to barely-separated pairs;
+//! (b) perturbed regular grid, perturbation swept 0 → 0.49h;
 //! (c) EXACT cocircular lattice — every interior Voronoi vertex is exactly
-//!     4-cocircular and every kNN distance ties (the adversarial case the
-//!     (d², id) total order + eps-inside policy exist for);
-//! (d) Gaussian density cluster, enriched with near-duplicate twins and
-//!     boundary-hugging seeds — deliberately violates the smooth-density
-//!     assumption; REPORT-ONLY on the success fraction (the engine must
-//!     still not panic and Ok cells must still be valid geometry).
+//!     4-cocircular and every kNN distance ties (exercises the (d², id) total
+//!     order + eps-inside policy);
+//! (d) Gaussian density cluster with near-duplicate twins and boundary-hugging
+//!     seeds — violates the smooth-density assumption; REPORT-ONLY on the
+//!     success fraction (must still not panic; Ok cells must still be valid
+//!     geometry).
 //!
 //! Contracts asserted per diagram: no panic (`catch_unwind`), status/slot
 //! consistency for every cell, convexity + positive area + seed containment
@@ -18,15 +17,12 @@
 //! overflow spills), success fraction ≥ 99.9% for classes a–c, and the
 //! partition of unity (Σ areas == bbox) whenever no cell is Empty/Failed.
 //!
-//! Whenever a diagram is clean (no Empty/Failed cells) the battery ALSO runs
-//! `assemble_mesh` on it — the shipped pipeline's last pass must share the
-//! "statuses, never panics" contract on legal inputs (review F-1: a
-//! knife-edge twin pair used to trip the non-reciprocal-face panic when the
-//! two cells eps-disagreed about a sub-tolerance face; class (e) pins that
-//! reproducer down).
+//! Clean diagrams (no Empty/Failed) ALSO run `assemble_mesh` — the last
+//! pipeline pass must share the "statuses, never panics" contract on legal
+//! inputs; class (e) pins the knife-edge twin reproducer.
 //!
-//! RNG seeds are explicit per (class, run, sub-case) — nothing relies on the
-//! crate's global fixed seed. Scale with CFD2_MESHLESS_FUZZ_RUNS (default 4):
+//! RNG seeds are explicit per (class, run, sub-case). Scale with
+//! CFD2_MESHLESS_FUZZ_RUNS (default 4):
 //!
 //! ```sh
 //! CFD2_MESHLESS_FUZZ_RUNS=16 cargo test --features meshgen \
@@ -53,8 +49,7 @@ fn fuzz_runs() -> usize {
 }
 
 /// Explicit per-case RNG seed: class tag in the top byte, run and sub-case
-/// below — deterministic, documented, and independent of the crate's global
-/// fixed seed (0x5EED_CFD2).
+/// below; independent of the crate's global fixed seed.
 fn seed_for(class: u8, run: usize, sub: usize) -> u64 {
     0xF0_22_00_00_00_00_00_00u64
         | ((class as u64) << 48)
@@ -180,10 +175,8 @@ fn check_diagram(case: &FuzzCase) -> (MeshlessDiagram, (usize, usize, usize, usi
 
     let counts = d.status_counts();
 
-    // 4. Assembly must share the never-panics contract on clean diagrams
-    //    (review F-1: build_diagram alone left the last pipeline pass
-    //    unfuzzed). Sanity on the result: seed-i == cell-i and the cell
-    //    volumes still partition the bbox.
+    // 4. Assembly must share the never-panics contract on clean diagrams.
+    //    Sanity: seed-i == cell-i and cell volumes still partition the bbox.
     let (_, _, _, empty, failed) = counts;
     if empty + failed == 0 {
         let mesh = catch_unwind(AssertUnwindSafe(|| assemble_mesh(&input, &d)))
@@ -317,7 +310,7 @@ fn fuzz_exact_cocircular_lattice() {
     // Power-of-two spacing: coordinates and their differences are exact in
     // f64, so every interior Voronoi vertex is exactly 4-cocircular and all
     // candidate distances tie exactly — the id tie-break carries the day.
-    let s = 0.0625f64; // 1/16
+    let s = 0.0625f64;
     for run in 0..fuzz_runs() {
         let (nx, ny) = (16 + 8 * run, 8 + 4 * run);
         let domain = Vector2::new(nx as f64 * s, ny as f64 * s);
@@ -353,10 +346,10 @@ fn fuzz_exact_cocircular_lattice() {
 }
 
 // ---------------------------------------------------------------------------
-// Class (e): knife-edge twins in a Poisson-like set, THROUGH assembly
-//            (the review F-1 reproducer: a twin pair's sub-tolerance face can
-//            be Cut for one cell and Redundant for the other; assembly must
-//            symmetrize, not panic "non-reciprocal face")
+// Class (e): knife-edge twins in a Poisson-like set, THROUGH assembly.
+//            A twin pair's sub-tolerance face can be Cut for one cell and
+//            Redundant for the other; assembly must symmetrize, not panic
+//            "non-reciprocal face".
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -405,8 +398,8 @@ fn fuzz_knife_edge_twins_through_assembly() {
             domain,
             h,
         };
-        // check_diagram assembles clean diagrams — the panic this class
-        // exists for happened inside assemble_mesh, not build_diagram.
+        // check_diagram runs assemble_mesh on clean diagrams — the panic this
+        // class targets lives there, not in build_diagram.
         let (_, (ok, esc, ovf, empty, failed)) = check_diagram(&case);
         assert_eq!(empty + failed, 0, "{}: twins must not drop cells", case.name);
         println!(
@@ -418,10 +411,10 @@ fn fuzz_knife_edge_twins_through_assembly() {
 }
 
 // ---------------------------------------------------------------------------
-// Class (f): exact + sub-pitch duplicates — the coalescing contract
-//            (design M0.6 named "duplicated" seeds; they must produce
-//            STATUSES: lowest-index bin sibling keeps the whole cell, the
-//            rest are EmptyCell, and the partition of unity still holds)
+// Class (f): exact + sub-pitch duplicates — the coalescing contract.
+//            Duplicated seeds must produce STATUSES: lowest-index bin sibling
+//            keeps the whole cell, the rest are EmptyCell, and the partition
+//            of unity still holds.
 // ---------------------------------------------------------------------------
 
 #[test]

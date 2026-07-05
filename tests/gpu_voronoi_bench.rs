@@ -1,6 +1,5 @@
-//! M1 GPU Voronoi engine benchmark (design §8.2) — REPORT-ONLY, no perf
-//! gates (this machine is an Apple-Silicon integrated adapter; the design's
-//! 2-5 ms @300k estimate is for discrete GPUs, ×4-8 integrated).
+//! GPU Voronoi engine benchmark — REPORT-ONLY, no perf gates (integrated
+//! GPUs run ~4-8x slower than the discrete-GPU numbers this targets).
 //!
 //! Per seed count (default 100k and 300k): per-phase wall times for
 //! seed generation (CPU Poisson, context only), `SeedGrid::build` (the CPU
@@ -9,8 +8,8 @@
 //! validation readback (`read_cells`), the f64 fallback (`resolve_flagged`,
 //! including its reciprocity readback), and chained Lloyd iterations
 //! (per-iteration cost of `lloyd_update` + max-reduce + regen). Plus the
-//! design gate-4 conservation sanity: Σ cell areas vs the boundary-loop
-//! shoelace area (f64 sum over the f32 outputs).
+//! conservation sanity: Σ cell areas vs the boundary-loop shoelace area
+//! (f64 sum over the f32 outputs).
 //!
 //! Env knobs:
 //!   CFD2_BENCH_SEEDS        comma list of target seed counts (default
@@ -78,8 +77,8 @@ fn gpu_voronoi_bench() {
     let fluid_area = 3.0 - std::f64::consts::PI * 0.1 * 0.1;
 
     for &target in &targets {
-        // Poisson-disk density on this geometry measured ≈ 0.716 seeds/h²
-        // (stage-3 cases); pick h to land near the target count.
+        // Poisson-disk density on this geometry ≈ 0.716 seeds/h²; pick h to
+        // land near the target count.
         let h = (0.716 * fluid_area / target as f64).sqrt();
 
         let t = Instant::now();
@@ -147,9 +146,9 @@ fn gpu_voronoi_bench() {
         let report = engine.resolve_flagged(&ctx, &cache);
         let t_fallback = ms(t);
 
-        // Conservation sanity (design gate 4): Σ areas of the RESOLVED
-        // pre-Lloyd diagram vs the boundary-loop shoelace area — captured
-        // before Lloyd perturbs the outputs.
+        // Conservation sanity: Σ areas of the RESOLVED pre-Lloyd diagram vs
+        // the boundary-loop shoelace area — captured before Lloyd perturbs
+        // the outputs.
         let merged = engine_area_sum(&ctx, &cache, &engine, n);
         let expected: f64 = spec.loops.iter().map(|lp| lp.signed_area()).sum();
 
@@ -187,8 +186,7 @@ fn gpu_voronoi_bench() {
         println!(
             "  conservation: sum areas {merged:.6} vs loop shoelace {expected:.6} (rel {cons_rel:.2e}); overflows {overflows}"
         );
-        // Design gate 4, asserted (stage-5 review: was report-only;
-        // measured 1.85e-8 at 100k, so 1e-4 is free).
+        // Asserted: measured ~1.85e-8 at 100k, so 1e-4 is generous.
         assert!(
             cons_rel <= 1e-4,
             "conservation broken: sum of cell areas off by rel {cons_rel:.3e}"

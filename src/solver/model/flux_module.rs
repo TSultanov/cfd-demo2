@@ -2,8 +2,6 @@
 ///
 /// Models declare *which* flux method to use (KT, Rhie-Chow, etc.) without
 /// implementing the WGSL generation. Codegen lowers these specs to kernels.
-///
-/// Flux computation module specification.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FluxModuleSpec {
     /// A model-provided flux kernel specification expressed in IR terms.

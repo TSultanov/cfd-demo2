@@ -26,8 +26,6 @@ impl CoupledAccumulators {
         Self { coupled_stride }
     }
 
-    // ── Name helpers ──────────────────────────────────────────────────
-
     fn diag_name(index: u32) -> String {
         format!("diag_{index}")
     }
@@ -43,8 +41,6 @@ impl CoupledAccumulators {
     fn start_row_name(row: u32) -> String {
         format!("start_row_{row}")
     }
-
-    // ── Expr accessors ────────────────────────────────────────────────
 
     /// Returns `Expr::ident("diag_{index}")`.
     pub fn diag(&self, index: impl Into<AccIndex>) -> Expr {
@@ -65,8 +61,6 @@ impl CoupledAccumulators {
     pub fn start_row(&self, row: u32) -> Expr {
         Expr::ident(Self::start_row_name(row))
     }
-
-    // ── Declaration statements ────────────────────────────────────────
 
     /// Emits `let start_row_0 = base_expr;` followed by
     /// `let start_row_i = start_row_0 + num_neighbors * coupled_stride * i;`
@@ -114,8 +108,6 @@ impl CoupledAccumulators {
         )
     }
 
-    // ── Accumulation statements ───────────────────────────────────────
-
     /// `diag_{index} += value`
     pub fn add_diag(&self, index: impl Into<AccIndex>, value: impl Into<Expr>) -> Stmt {
         dsl::assign_op_expr(AssignOp::Add, self.diag(index), value)
@@ -145,8 +137,6 @@ impl CoupledAccumulators {
     pub fn set_rhs(&self, index: impl Into<AccIndex>, value: impl Into<Expr>) -> Stmt {
         dsl::assign_expr(self.rhs(index), value)
     }
-
-    // ── Write-back ────────────────────────────────────────────────────
 
     /// Emits the standard write-back loop:
     /// ```wgsl

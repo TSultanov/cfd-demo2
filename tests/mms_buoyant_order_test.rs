@@ -1,4 +1,4 @@
-//! Coupled MMS for the buoyant (Boussinesq) capstone model: manufactured
+//! Coupled MMS for the buoyant (Boussinesq) model: manufactured
 //! (U, p, T) with the buoyancy feedback ACTIVE, solved through the full
 //! coupled path (derived Rhie–Chow flux, Schur preconditioner, bounded
 //! convection, directional buoyancy source, T advected by the solved flux).
@@ -234,9 +234,8 @@ fn volume_mean(mesh: &Mesh, f: &[f64]) -> f64 {
     sum / vol
 }
 
-/// The capstone acceptance test: manufactured (U, p, T) with active
-/// Boussinesq coupling converges at second order (SOU) through the coupled
-/// path, with the model defined purely as declarations.
+/// Acceptance test: manufactured (U, p, T) with active Boussinesq coupling
+/// converges at second order (SOU) through the coupled path.
 #[test]
 fn steady_buoyant_coupled_second_order() {
     let mut hs = Vec::new();
@@ -264,13 +263,10 @@ fn steady_buoyant_coupled_second_order() {
         p_errs.push(p_err);
     }
     assert_convergence_order("buoyant_u", &hs, &u_errs, 2.0, 0.35, 1.0e-3);
-    // T converges at second order (observed 2.04, finest err 1.12e-4 at
-    // n=64). It briefly measured 0.75 because the packed-state gradients
-    // kernel keyed grad_state by unknown RANK while the assembly reads by
-    // STATE OFFSET: T (the first solved unknown placed behind aux fields in
-    // the state layout) had its gradient slot never written, silently
-    // degrading its SOU reconstruction to first-order upwind. This test is
-    // the regression guard for that slot-mapping contract.
+    // Regression guard for the grad_state slot-mapping contract: the gradients
+    // kernel must key grad_state by STATE OFFSET, not unknown rank, or T (the
+    // first solved unknown, placed behind aux fields) gets no gradient slot and
+    // its SOU reconstruction silently degrades to first-order upwind.
     assert_convergence_order("buoyant_T", &hs, &t_errs, 2.0, 0.35, 3.0e-4);
     let p_order = mms_support::fit_order(&hs, &p_errs);
     println!("[mms][buoyant] pressure order {p_order:.3}");
@@ -283,13 +279,10 @@ fn steady_buoyant_coupled_second_order() {
 /// Diagnostic probe: same manufactured problem with NO outlet faces (right
 /// boundary is Inlet type, pressure all-Neumann), plus ring-binned errors
 /// and a host replication of the derived face flux split into its
-/// face-averaged-velocity and Rhie-Chow bracket pieces. Built while chasing
-/// T's first-order regression (root cause: grad_state slot-mapping bug, see
-/// the main test); kept because the flux/ring diagnostics are reusable and
-/// it documents a real secondary observation: the outlet-face Rhie-Chow
-/// closure costs pressure ~0.3 orders (p order 1.36 with an outlet vs 1.64
-/// all-Neumann; the cell-centered grad_p vs one-sided compact difference
-/// mismatch at outlet faces is O(h) on faces where p'' is nonzero).
+/// face-averaged-velocity and Rhie-Chow bracket pieces. Documents that the
+/// outlet-face Rhie-Chow closure costs pressure ~0.3 orders (p order 1.36
+/// with an outlet vs 1.64 all-Neumann; the cell-centered grad_p vs one-sided
+/// compact difference mismatch at outlet faces is O(h) where p'' is nonzero).
 #[test]
 #[ignore]
 fn probe_buoyant_no_outlet_t_order() {

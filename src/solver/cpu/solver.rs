@@ -50,17 +50,14 @@ struct CpuKernel {
     stmts: Vec<Stmt>,
 }
 
-/// Kernel-id groups partitioned from the schedule ONCE at construction (the
-/// schedule never changes). The step loop drives these in recipe order, which
-/// is the order the GPU executes. Timing contract (load-bearing, mirrors the
-/// GPU generic-coupled loop): the recurring `bc_expr` refresh runs at the END
-/// of each outer iteration — after the update, NOT before the assembly — so an
-/// iteration's gradients/flux/assembly see the ghosts produced by the PRIOR
-/// iteration (seeded values on the very first step). Running bc_expr before
-/// the assembly instead fed step-1 the refreshed ghosts and biased the
-/// boundary energy row (rho_e drift that broke the long MMS march). Once-only
-/// Preparation kernels (e.g. rhie_chow dp_init) run before the loop; the CPU
-/// linear solve replaces the LinearSolve phase after assembly; Apply is
+/// Kernel-id groups partitioned from the (immutable) schedule once at
+/// construction. The step loop drives these in recipe order (the GPU's
+/// execution order). Timing contract (load-bearing): the recurring `bc_expr`
+/// refresh runs at the END of each outer iteration — after the update, NOT
+/// before the assembly — so an iteration's gradients/flux/assembly see the
+/// ghosts produced by the PRIOR iteration (seeded values on the first step).
+/// Once-only Preparation kernels (e.g. rhie_chow dp_init) run before the loop;
+/// the CPU linear solve replaces the LinearSolve phase after assembly; Apply is
 /// monitor-only (skipped); Update/PrimitiveRecovery apply the solution.
 struct ScheduleGroups {
     /// Once-per-step Preparation kernels (non-bc_expr).
@@ -74,9 +71,8 @@ struct ScheduleGroups {
     /// Rhie-Chow grad_p refresher ([`KernelId::refreshes_grad_p`]) — that
     /// kernel already wrote the identical Green-Gauss pressure gradient
     /// (same stencil, same boundary closure) and nothing modifies `p` in
-    /// between, so the recompute is redundant. Mirrors the GPU
-    /// `assembly_graph_tail`; `CFD2_NO_GRADP_SKIP=1` disables (then this
-    /// equals `per_iter`).
+    /// between, so the recompute is redundant. `CFD2_NO_GRADP_SKIP=1` disables
+    /// (then this equals `per_iter`).
     per_iter_tail: Vec<String>,
     /// Update + PrimitiveRecovery kernels.
     update: Vec<String>,
@@ -118,13 +114,12 @@ impl ScheduleGroups {
         } else {
             per_iter.clone()
         };
-        // Frozen-matrix variant: the AssemblyRhsOnly kernels ONLY. The v1
-        // frozen group re-ran the Gradients/FluxComputation kernels, which
-        // BROKE the deferred-correction pairing (the dc RHS was recomputed
-        // from FRESH fluxes against a matrix built from OLD ones — the
-        // measured 614 s/step refutation). Freezing the fluxes/gradients WITH
-        // the matrix keeps every implicit/explicit pair consistent by
-        // construction. Empty when the model declares no RHS-only kernels.
+        // Frozen-matrix variant: the AssemblyRhsOnly kernels ONLY. Freezing
+        // the fluxes/gradients WITH the matrix keeps every implicit/explicit
+        // deferred-correction pair consistent by construction (re-running the
+        // Gradients/FluxComputation kernels would recompute the dc RHS from
+        // fresh fluxes against a matrix built from old ones). Empty when the
+        // model declares no RHS-only kernels.
         let has_rhs_only = schedule.iter().any(|s| s.phase == KernelPhase::AssemblyRhsOnly);
         let per_iter_frozen = if has_rhs_only {
             schedule
@@ -151,7 +146,7 @@ pub struct CpuSolver {
     /// Matrix-freeze eligibility: models with `linearize_pressure_flux`
     /// terms are EXCLUDED — that term's RHS piece is recomputed from live
     /// state inside the RHS-only kernel, so it would decouple from the
-    /// frozen matrix's Jacobian (an a_lin cache is the future fix).
+    /// frozen matrix's Jacobian.
     freeze_eligible: bool,
     num_cells: usize,
     num_faces: usize,
@@ -178,13 +173,12 @@ pub struct CpuSolver {
     // Faces grouped by boundary type index (`GpuBoundaryType as u32`).
     boundary_faces: Vec<Vec<u32>>,
 
-    /// Flux-table stride (floats per face). Kept so a Tier-B topology refresh
-    /// can re-size the face-indexed `fluxes` buffer (the face count changes).
+    /// Flux-table stride (floats per face). Kept so a topology refresh can
+    /// re-size the face-indexed `fluxes` buffer (the face count changes).
     flux_stride: usize,
     /// Per-boundary-type BC tables (`ModelSpec::boundaries::to_gpu_tables`),
-    /// kept so a Tier-B topology refresh can re-scatter them onto the NEW face
-    /// indexing without the full `ModelSpec` (design §1.4.4 / review R8).
-    /// Length `BOUNDARY_TYPE_COUNT * S`.
+    /// kept so a topology refresh can re-scatter them onto the NEW face
+    /// indexing without the full `ModelSpec`. Length `BOUNDARY_TYPE_COUNT * S`.
     bc_kind_by_type: Vec<u32>,
     bc_value_by_type: Vec<f32>,
 
@@ -440,7 +434,7 @@ impl CpuSolver {
         buffers.insert_f32("y", vec![0.0; num_cells * s]);
 
         // Boundary conditions: per face x coupled-unknown component. The
-        // per-boundary-type tables are kept (a Tier-B topology refresh
+        // per-boundary-type tables are kept (a topology refresh
         // re-scatters them onto the new faces); the scatter yields the
         // per-face seed the kernels read.
         let (bc_kind_by_type, bc_value_by_type) = model_bc_type_tables(&model, s)?;
@@ -534,7 +528,7 @@ impl CpuSolver {
         })
     }
 
-    // ── mesh refresh (M2 Tier A) ─────────────────────────────────────────
+    // ── mesh refresh ─────────────────────────────────────────────────────
 
     /// Geometry-only mesh refresh: overwrite the six geometry entries of
     /// `Buffers` (`face_areas`/`face_normals`/`face_centers`/`face_wrap_shift`/
@@ -559,12 +553,11 @@ impl CpuSolver {
         Ok(())
     }
 
-    /// ALE step entry (M3.2): rotate the volume history, THEN upload the new
-    /// geometry, THEN upload the (f32-closed) mesh face fluxes — mirroring
-    /// the GPU `MeshResources::begin_ale_step`. Ordering contract (review
-    /// F3): the rotation must capture the CURRENT `cell_vols` as `V^n` before
-    /// `refresh_mesh_geometry` overwrites them with `V^{n+1}`, which is why
-    /// this seam — not the `step()` prologue (it runs after the upload) —
+    /// ALE step entry: rotate the volume history, THEN upload the new
+    /// geometry, THEN upload the (f32-closed) mesh face fluxes. Ordering
+    /// contract: the rotation must capture the CURRENT `cell_vols` as `V^n`
+    /// before `refresh_mesh_geometry` overwrites them with `V^{n+1}`, which is
+    /// why this seam — not the `step()` prologue (it runs after the upload) —
     /// owns the rotation. Call once per step, before `step()`.
     pub fn begin_ale_step(&mut self, mesh: &Mesh, mesh_fluxes: &[f32]) -> Result<(), String> {
         if mesh_fluxes.len() != self.num_faces {
@@ -587,12 +580,11 @@ impl CpuSolver {
         Ok(())
     }
 
-    /// ALE step entry for a **topology-changing** move (M2 Tier B): rotate the
-    /// volume history, rebuild every mesh-topology-derived CPU resource, then
-    /// upload the f32-closed mesh fluxes — in that order. Mirrors the GPU
-    /// `GenericCoupledProgramResources::begin_ale_step_topology`.
+    /// ALE step entry for a **topology-changing** move: rotate the volume
+    /// history, rebuild every mesh-topology-derived CPU resource, then upload
+    /// the f32-closed mesh fluxes — in that order.
     ///
-    /// Ordering (review F3): the rotation captures the CURRENT `cell_vols` as
+    /// Ordering: the rotation captures the CURRENT `cell_vols` as
     /// `V^n` into `cell_vols_old` BEFORE `refresh_mesh_topology` overwrites
     /// `cell_vols` with `V^{n+1}` (via `upload_mesh`). The two history buffers
     /// are cell-indexed and never touched by the topology rebuild (cell count
@@ -627,27 +619,26 @@ impl CpuSolver {
         Ok(report)
     }
 
-    /// Tier-B topology refresh (M2): rebuild every mesh-topology-derived CPU
-    /// resource for a new mesh with the SAME cell count but a possibly changed
-    /// face set / adjacency / boundary classification / nnz. Cell-indexed state
-    /// (`state` ×3, `grad_state`, warm-start `x`, `cell_vols_old{,_old}`) is
-    /// left UNTOUCHED — a cell keeps its identity across the refresh (unlike the
-    /// GPU arm, which reconstructs its linear-algebra pipelines and re-zeroes
-    /// `x`; the CPU solver has no baked pipelines, so this refresh is fully
-    /// surgical and byte-invisible at ANY step, not just step 0).
+    /// Topology refresh: rebuild every mesh-topology-derived CPU resource for a
+    /// new mesh with the SAME cell count but a possibly changed face set /
+    /// adjacency / boundary classification / nnz. Cell-indexed state (`state`
+    /// ×3, `grad_state`, warm-start `x`, `cell_vols_old{,_old}`) is left
+    /// UNTOUCHED — a cell keeps its identity across the refresh. The CPU solver
+    /// has no baked pipelines, so this refresh is fully surgical and
+    /// byte-invisible at ANY step, not just step 0.
     ///
-    /// Buffer-swap safety (deliverable 1): each rebuilt buffer is REPLACED in
-    /// the `Buffers` map via `insert_*` (a fresh `AtomicU32` backing of the new
-    /// length). No stale handle survives: the interpreter resolves buffers by
-    /// NAME on every load/store (`Buffers::load`/`store`), and the transpiled
-    /// engine calls `Buffers::atom(name)` once per DISPATCH inside `run_kernel`
-    /// (never cached across steps) — so the next step sees the new backing.
+    /// Buffer-swap safety: each rebuilt buffer is REPLACED in the `Buffers` map
+    /// via `insert_*` (a fresh `AtomicU32` backing of the new length). No stale
+    /// handle survives: the interpreter resolves buffers by NAME on every
+    /// load/store (`Buffers::load`/`store`), and the transpiled engine calls
+    /// `Buffers::atom(name)` once per DISPATCH inside `run_kernel` (never cached
+    /// across steps) — so the next step sees the new backing.
     ///
     /// Runtime per-face BC overrides (keyed by the OLD face indices) are lost;
     /// the returned [`MeshRefreshReport`] flags `bc_overrides_reset` so the
-    /// caller re-applies them against the new faces (design §1.4.4 / review R8).
+    /// caller re-applies them against the new faces.
     pub fn refresh_mesh_topology(&mut self, mesh: &Mesh) -> Result<MeshRefreshReport, String> {
-        // Cell count is the Tier-B invariant (seed↔cell identity is what lets
+        // Cell count is the invariant (seed↔cell identity is what lets
         // cell-indexed state survive untouched); faces/adjacency/nnz may change.
         if mesh.num_cells() != self.num_cells {
             return Err(format!(
@@ -661,14 +652,14 @@ impl CpuSolver {
 
         // 1. Rebuild the diag-first scalar CSR from the factored builder (the
         //    single source of truth the build path uses — byte-identical
-        //    structure for a no-op refresh, gated by csr_builder_equivalence).
+        //    structure for a no-op refresh).
         let (scalar_row_offsets, col_indices, diagonal_indices, cell_face_matrix_indices) =
             build_csr_topology(mesh);
         let nnz_blocks = *scalar_row_offsets.last().unwrap() as usize;
 
-        // 2. Update the F4 Tier-B struct fields: `num_faces` drives the
-        //    face-kernel dispatch count, and the block linear solvers read the
-        //    CSR duplicates directly (not via `Buffers`).
+        // 2. Update the struct fields: `num_faces` drives the face-kernel
+        //    dispatch count, and the block linear solvers read the CSR
+        //    duplicates directly (not via `Buffers`).
         self.num_faces = num_faces;
         self.scalar_row_offsets = scalar_row_offsets.clone();
         self.col_indices = col_indices.clone();
@@ -707,7 +698,7 @@ impl CpuSolver {
         //    validates against the CURRENT topology) and clear the AMG caches:
         //    the lazily-built Schur pressure-block hierarchy was aggregated on
         //    the OLD CSR pattern, and the adaptive Jacobi→AMG flip re-evaluates
-        //    from cheap on the new sparsity (review F8 stale-aggregation).
+        //    from cheap on the new sparsity.
         self.mesh_topology = MeshTopology::from_mesh(mesh);
         self.amg_hier = std::cell::OnceCell::new();
         self.schur_amg_active.set(false);
@@ -717,7 +708,7 @@ impl CpuSolver {
         })
     }
 
-    // ── snapshot / restore (M2 Tier B stage 3) ───────────────────────────
+    // ── snapshot / restore ───────────────────────────────────────────────
 
     /// Capture the full stepping state (see [`SolverStateSnapshot`] for the
     /// inventory + exclusions). Every field is filled (`has_history = true`), so
@@ -997,11 +988,8 @@ impl CpuSolver {
 
     /// Test/diagnostic accessor: the current scalar-CSR topology as the four
     /// arrays `(row_offsets, col_indices, diagonal_indices,
-    /// cell_face_matrix_indices)`. Used by the Tier B `csr_rebuild_correctness`
-    /// gate to assert a refreshed-to-B solver holds the byte-identical CSR a
-    /// fresh-built-on-B solver does (both go through the deterministic
-    /// `build_csr_topology`). `row_offsets`/`col_indices`/`diagonal_indices`
-    /// come from the F4 struct fields; `cell_face_matrix_indices` from the
+    /// cell_face_matrix_indices)`. `row_offsets`/`col_indices`/`diagonal_indices`
+    /// come from the struct fields; `cell_face_matrix_indices` from the
     /// `Buffers` map (the assembly kernels consume it there).
     #[doc(hidden)]
     pub fn debug_scalar_csr(&self) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>) {
@@ -1103,16 +1091,15 @@ impl CpuSolver {
         let per_iter = &self.groups.per_iter;
         let per_iter_tail = &self.groups.per_iter_tail;
         let update_group = &self.groups.update;
-        // Matrix freezing v2 (default off): re-linearize on outer 0 and every
+        // Matrix freezing (default off): re-linearize on outer 0 and every
         // `matrix_freeze_period`-th outer; frozen outers re-run ONLY the
         // RHS-only assembly against the frozen matrix AND the frozen
         // fluxes/gradients, so every deferred-correction implicit/explicit
-        // pair stays consistent (the v1 frozen group re-ran FluxComputation —
-        // the measured 614 s/step refutation). Outer 1 always re-linearizes:
-        // step 0's first matrix has a zero pressure diagonal (d_p is seeded by
-        // the first Update), and freezing it poisoned the AMG hierarchy.
-        // Ineligible for models with `linearize_pressure_flux` (see the field
-        // doc). `CFD2_MATRIX_FREEZE=k` enables.
+        // pair stays consistent. Outer 1 always re-linearizes: step 0's first
+        // matrix has a zero pressure diagonal (d_p is seeded by the first
+        // Update), and freezing it poisoned the AMG hierarchy. Ineligible for
+        // models with `linearize_pressure_flux` (see the field doc).
+        // `CFD2_MATRIX_FREEZE=k` enables.
         let freeze_period: usize = std::env::var("CFD2_MATRIX_FREEZE")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -1219,8 +1206,6 @@ impl CpuSolver {
 
         for outer_idx in 0..self.outer_iters {
             // Snapshot current iterate (dual-time reference + outer-break delta).
-            // Threaded marshals: two full-state passes per outer (~24 MB each
-            // on the 750k nozzle) were serial.
             let snap = self.buffers.f32_vec_threaded("state", self.config.threads);
             self.buffers
                 .copy_into_f32_threaded("state_iter", &snap, self.config.threads);
@@ -1705,8 +1690,7 @@ fn run_kernel(
     // Transpiled engine: run the compiled-Rust kernel if one was generated for
     // this (model, kernel); otherwise fall back to the interpreter. The
     // generated entry points take an index RANGE so buffer handles resolve
-    // once per chunk, not once per index (a HashMap lookup per handle —
-    // measured ~25-30% of the assembly phase at 750k cells).
+    // once per chunk, not once per index (a HashMap lookup per handle).
     if engine == CpuEngine::Transpiled {
         if let Some(f) = crate::solver::cpu::generated::lookup(model_id, id) {
             crate::solver::cpu::parallel::parallel_ranges(domain, threads, |start, end| {
@@ -1813,12 +1797,9 @@ fn upload_mesh(buffers: &mut Buffers, mesh: &Mesh) {
 /// Construct the scalar CSR topology consistent with the assembly kernel's index
 /// maps: each row holds the diagonal (rank 0) followed by one entry per interior
 /// face. Returns `(row_offsets, col_indices, diagonal_indices,
-/// cell_face_matrix_indices)`.
-/// CPU diag-first scalar-CSR topology. Delegates to the factored builder
-/// (`solver::mesh::csr::build_diag_first_scalar_csr`) so init and a Tier-B
-/// topology refresh rebuild byte-identical structure from one source of truth;
-/// byte-equivalence to the historical inlined logic is gated by
-/// `tests/csr_builder_equivalence_test.rs`.
+/// cell_face_matrix_indices)`. Delegates to the factored builder
+/// (`solver::mesh::csr::build_diag_first_scalar_csr`) so init and a topology
+/// refresh rebuild byte-identical structure from one source of truth.
 fn build_csr_topology(mesh: &Mesh) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>) {
     let csr = crate::solver::mesh::csr::build_diag_first_scalar_csr(mesh);
     (
@@ -1831,7 +1812,7 @@ fn build_csr_topology(mesh: &Mesh) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>) {
 
 /// The model's per-boundary-type `(bc_kind, bc_value)` tables (length
 /// `BOUNDARY_TYPE_COUNT * S`), the source both the build-time scatter and a
-/// Tier-B topology re-scatter consume. Kept on the solver so a topology refresh
+/// topology re-scatter consume. Kept on the solver so a topology refresh
 /// can re-derive the per-face tables without the full `ModelSpec`.
 fn model_bc_type_tables(model: &ModelSpec, _s: usize) -> Result<(Vec<u32>, Vec<f32>), String> {
     model

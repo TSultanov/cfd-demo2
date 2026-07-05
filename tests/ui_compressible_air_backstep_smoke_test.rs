@@ -2,10 +2,8 @@
 
 //! Smoke test: the desktop GUI's compressible-default construction (uniform-freestream
 //! IC + inlet BC + acoustic-aware adaptive timestep) + step loop, built through the
-//! shared [`SolverDriver`] **without the `ui` feature** (primitives only — no `Fluid`,
-//! no `model_defaults`). The load-bearing proof that the driver is `ui`-independent for
-//! the compressible path too. The full shipped-default behavior (low-Mach + dual-time)
-//! is tuned by `tests/gui_default_convergence_test.rs`.
+//! shared [`SolverDriver`] without the `ui` feature (primitives only). Proves the driver
+//! is `ui`-independent for the compressible path.
 
 use cfd2::sim::{DriverBuild, RuntimeParams, SolverDriver};
 use cfd2::solver::mesh::{generate_cut_cell_mesh, BackwardsStep};
@@ -37,8 +35,8 @@ fn ui_compressible_air_backstep_smoke() {
         temperature: 300.0,
     };
     // GUI-like compressible runtime knobs for Air, as primitives. `adaptive_dt` with
-    // `low_mach_model: Off` reproduces the original smoke test's full-sound-speed
-    // acoustic CFL update; the driver applies the uniform-freestream IC internally.
+    // `low_mach_model: Off` gives the full-sound-speed acoustic CFL update; the driver
+    // applies the uniform-freestream IC internally.
     let params = RuntimeParams {
         adaptive_dt: true,
         target_cfl: 0.95,

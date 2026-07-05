@@ -58,7 +58,6 @@ fn gpu_incompressible_schur_smoke() {
     solver.set_p(&p0);
     solver.initialize_history();
 
-    // Smoke: run a couple of steps and ensure the fields stay finite.
     for _ in 0..2 {
         solver.step();
     }

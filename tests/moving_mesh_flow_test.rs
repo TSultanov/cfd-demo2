@@ -1,25 +1,16 @@
-//! M4.4 gates (meshless/moving-mesh roadmap §M4): FLOW-COUPLED seed motion.
+//! Flow-coupled moving-mesh gates: seeds move with the readback cell velocity
+//! plus AREPO-style centroid steering (`χ·(centroid − seed)`), clamped per step
+//! to a fraction of the local cell radius, with an optional Lloyd escalation
+//! when the regenerated mesh's skew rises. The motion is closed on the solution:
 //!
-//! The seeds move with the readback cell velocity plus an AREPO-style
-//! distortion-ramped centroid steering (`χ·(centroid − seed)`), clamped per
-//! step to a fraction of the local cell radius, with an optional Lloyd
-//! regularization escalation when the regenerated mesh's skew rises. Unlike the
-//! M4.2/M4.3 PRESCRIBED gates (analytic seed law), here the motion is closed on
-//! the solution, so these are the physics gates:
-//!
-//!   * `gresho_or_advected_vortex_moving_vs_static` — THE PREMISE gate: a
-//!     compact Gaussian vortex advected by a uniform free stream in an
-//!     inlet/outlet channel, on (a) a static CVT mesh and (b) a FlowCoupled
-//!     moving mesh. A moving mesh that follows the flow should reduce advective
-//!     dissipation ⇒ retain the vortex peak velocity at least as well as static.
-//!     BOTH numbers are always printed; if moving cannot beat static the
-//!     milestone premise is visibly challenged (reported, not papered over).
-//!   * `moving_mesh_obstacle_sheds_vortex_street` — a FlowCoupled obstacle case
-//!     must still shed a bounded Kármán street (the 3 wake-oscillation
-//!     assertions from `gui_default_convergence_test`).
+//!   * `gresho_or_advected_vortex_moving_vs_static` — a compact Gaussian vortex
+//!     advected by a free stream, on a static CVT mesh vs a FlowCoupled moving
+//!     mesh. A flow-following mesh should reduce advective dissipation ⇒ retain
+//!     the vortex peak velocity at least as well as static.
+//!   * `moving_mesh_obstacle_sheds_vortex_street` — FlowCoupled obstacle case.
 //!   * `moving_mesh_quality_soak` (`#[ignore]`, `CFD2_SOAK=1`) — long run: zero
-//!     negative/zero volumes EVER, max skew bounded, mean-skew drift stationary,
-//!     flip rate stationary (the steering holds quality without drift).
+//!     negative/zero volumes ever, max skew bounded, mean-skew and flip rate
+//!     stationary.
 //!   * `moving_mesh_perf_budget` (`CFD2_BENCH_MOVING=1`) — per-step
 //!     {regen, swept, refresh, solve} split; regen+swept+refresh ≤ 1× solve.
 #![cfg(all(feature = "meshgen", feature = "cpu"))]
@@ -93,7 +84,7 @@ fn tag_slip_channel(lx: f64, ly: f64) -> impl Fn(&mut Mesh) + Copy {
 }
 
 /// The `fn`-pointer the driver's per-regen retag hook wants (a 3.0×1.0 slip
-/// channel; the vortex gate's geometry).
+/// channel).
 fn tag_slip_3x1(mesh: &mut Mesh) {
     tag_slip_channel(3.0, 1.0)(mesh)
 }
@@ -212,9 +203,8 @@ fn run_vortex(flow_coupled: bool) -> VortexOut {
     }
 }
 
-/// THE PREMISE gate. A moving mesh that follows the flow should dissipate the
-/// advected vortex LESS than a static mesh — its peak-velocity retention must be
-/// at least `static − 2%`. Both numbers are always printed.
+/// A flow-following mesh should dissipate the advected vortex LESS than a static
+/// mesh — its peak-velocity retention must be at least `static − 2%`.
 #[test]
 fn gresho_or_advected_vortex_moving_vs_static() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -258,8 +248,7 @@ fn gresho_or_advected_vortex_moving_vs_static() {
 // ─── Obstacle vortex street on a FlowCoupled moving mesh ──────────────────────
 
 /// Oscillation statistics of a wake `u_y` series over its second half:
-/// `(std, sign_changes_around_mean, tail_min, tail_max)` — verbatim from
-/// `gui_default_convergence_test::wake_oscillation_stats`.
+/// `(std, sign_changes_around_mean, tail_min, tail_max)`.
 fn wake_oscillation_stats(uy: &[f64]) -> (f64, usize, f64, f64) {
     let half = uy.len() / 2;
     let tail = &uy[half..];
@@ -280,31 +269,16 @@ fn wake_oscillation_stats(uy: &[f64]) -> (f64, usize, f64, f64) {
     (std, sign_changes, tmin, tmax)
 }
 
-/// Obstacle Kármán street on a FlowCoupled moving mesh. `#[ignore]`d, with an
-/// HONEST, measured finding rather than a gate that cannot be met in v1:
-///
-/// A confined cylinder at Re≈150 (ν=1.33e-3, U=1, D=0.2, VanLeer) on the static
-/// meshless CVT mesh DOES shed a vigorous Kármán street (warm-up phase: wake
-/// `u_y` std ≈ 0.48·U, ~22 sign reversals). Handing that developed street off to
-/// a FlowCoupled moving mesh, the flow stays BOUNDED and STABLE (max|u| ≈ 1.73·U,
-/// no divergence at mesh_cfl 0.2 — the regime the soak validates) AND the wake
-/// vortex is held at FULL STRENGTH (the Eulerian probe reads `u_y` frozen near
-/// −0.58·U, i.e. a strong vortex, NOT decayed). But the fixed-probe `u_y`
-/// OSCILLATION is suppressed (std ≈ 0.008·U).
-///
-/// This is not an implementation defect — it is the defining property of a
-/// flow-following mesh, and the SAME mechanism the premise gate rewards: a
-/// near-Lagrangian mesh transports the shed vortices ALONG WITH IT, so there is
-/// no advection of the pattern PAST a fixed spatial point — exactly the advective
-/// transport a fixed-probe `u_y` time series measures. The mesh removing that
-/// transport is why it wins the premise gate (+10.6 pts vortex retention) and why
-/// a fixed-probe shedding signal (an Eulerian observable) cannot be reproduced on
-/// a Lagrangian mesh. Seeing the street on a moving mesh requires a mesh-frame /
-/// vorticity-field observable, not a fixed-point time series. So this gate is
-/// retained as a documented, always-runnable EXPERIMENT (asserts what IS true:
-/// the static mesh sheds, the moving mesh stays bounded and preserves the vortex)
-/// and marked `#[ignore]` because the specified fixed-probe-oscillation criterion
-/// is conceptually incompatible with a flow-following mesh (reported, not widened).
+/// Obstacle Kármán street on a FlowCoupled moving mesh. `#[ignore]`d: a
+/// confined cylinder at Re≈150 sheds a real street on the static CVT mesh, and
+/// handing that developed street to a FlowCoupled mesh stays bounded/stable and
+/// holds the wake vortex at strength — but the fixed-probe `u_y` OSCILLATION is
+/// suppressed. That is the defining property of a near-Lagrangian mesh: it
+/// transports the shed vortices along with it, so there is no advection of the
+/// pattern past a fixed spatial point (the very transport a fixed-probe time
+/// series measures). Seeing the street on a moving mesh needs a mesh-frame /
+/// vorticity observable, not a fixed-point series — so the assertions only check
+/// what IS true (static sheds; moving stays bounded and preserves the vortex).
 #[test]
 #[ignore = "documented v1 finding: a Lagrangian FlowCoupled mesh preserves the wake vortex \
             but cannot reproduce a fixed-probe Eulerian shedding oscillation; run to inspect"]
@@ -340,9 +314,8 @@ fn moving_mesh_obstacle_sheds_vortex_street() {
         uy_max / u0,
         move_peak / u0
     );
-    // The verifiable, honest facts (NOT the incompatible fixed-probe-oscillation
-    // criterion): the static mesh sheds a real street, and the FlowCoupled mesh
-    // stays bounded/stable while HOLDING the wake vortex at strength.
+    // Assert only what holds: the static mesh sheds a real street, and the
+    // FlowCoupled mesh stays bounded/stable while holding the wake vortex.
     assert!(
         wstd > 0.05 * u0 && wsc > 3,
         "static warm-up did not shed a street (std={:.3}xU, sign_changes={wsc})",
@@ -362,12 +335,12 @@ fn moving_mesh_obstacle_sheds_vortex_street() {
 }
 
 /// Warm-start-then-move. The FlowCoupled mesh is near-Lagrangian (dt ≈ 0.2h/|U|),
-/// so developing a Kármán street from rest under the mesh-CFL cap costs thousands
-/// of tiny-dt flip steps. Instead: (1) develop the street on a CHEAP static pass
-/// (`Frozen` + skip-regen ⇒ pure `SolverDriver::step`, uncapped dt, no regen /
-/// topology cost), then (2) hand off to `FlowCoupled` (`set_motion`) and show the
-/// moving mesh SUSTAINS the shedding. The assertions run on the MOVING-phase wake
-/// series. Returns `(max|u|, warmup_uy, moving_uy, u0, diverged, flips, cells)`.
+/// so developing a street from rest under the mesh-CFL cap costs thousands of
+/// tiny-dt flip steps. Instead: (1) develop the street on a cheap static pass
+/// (`Frozen` + skip-regen ⇒ uncapped dt, no regen cost), then (2) hand off to
+/// `FlowCoupled` and show the moving mesh sustains the shedding. Assertions run
+/// on the moving-phase wake series.
+/// Returns `(max|u|, warmup_uy, moving_uy, u0, diverged, flips, cells)`.
 fn run_obstacle_shed() -> (f64, Vec<f64>, Vec<f64>, f64, bool, usize, usize) {
     let (lx, ly) = (2.0, 1.0);
     let h = std::env::var("CFD2_SHED_H")
@@ -380,7 +353,7 @@ fn run_obstacle_shed() -> (f64, Vec<f64>, Vec<f64>, f64, bool, usize, usize) {
     let mesh_cfl = std::env::var("CFD2_SHED_MESHCFL")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(0.2); // the stable regime the soak validated for through-flow
+        .unwrap_or(0.2); // stable through-flow regime
     let warm_steps: usize = std::env::var("CFD2_SHED_WARM")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -723,8 +696,8 @@ fn perf() {
     let m = measure as f64;
     let (plan, regen, swept, refresh, solve) =
         (plan / m, regen / m, swept / m, refresh / m, solve / m);
-    // Overhead is EVERY moving-mesh phase, planning included (review July 2026:
-    // the escalation probe + readback must not hide in the solve residual).
+    // Overhead is EVERY moving-mesh phase, planning included (the escalation
+    // probe + readback must not hide in the solve residual).
     let overhead = plan + regen + swept + refresh;
     let ratio = overhead / solve;
     println!(

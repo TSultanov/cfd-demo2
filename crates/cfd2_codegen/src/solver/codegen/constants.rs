@@ -9,18 +9,11 @@ use cfd2_ir::ports::ParamSpec;
 
 /// Build the standard WGSL `Constants` struct definition.
 ///
-/// # Arguments
-///
-/// * `extra_params` - Optional extra parameter specs to append to the base constants.
-///   These are typically EOS module parameters (`eos_gamma`, `eos_gm1`, etc.).
-///
-/// # Returns
-///
-/// A `StructDef` containing the complete `Constants` struct with all fields.
+/// `extra_params` (typically EOS module params like `eos_gamma`, `eos_gm1`) are
+/// appended after the base constants.
 pub fn constants_struct(extra_params: &[ParamSpec]) -> StructDef {
     let mut fields = base_constant_fields();
 
-    // Append extra params from the slice (e.g., EOS module params)
     for param in extra_params {
         let ty = wgsl_type_to_ast_type(param.wgsl_type);
         fields.push(StructField::new(param.wgsl_field, ty));
@@ -107,9 +100,8 @@ mod tests {
     fn constants_struct_with_no_extra_params_has_base_fields_only() {
         let def = constants_struct(&[]);
         assert_eq!(def.name, "Constants");
-        assert_eq!(def.fields.len(), 12); // Base fields only
+        assert_eq!(def.fields.len(), 12);
 
-        // Verify first and last base fields
         assert_eq!(def.fields[0].name, "dt");
         assert_eq!(def.fields[11].name, "time_scheme");
     }
@@ -134,7 +126,6 @@ mod tests {
         let def = constants_struct(&extra);
         assert_eq!(def.fields.len(), 14); // 12 base + 2 extra
 
-        // Verify extra fields are appended after base fields
         assert_eq!(def.fields[12].name, "eos_gamma");
         assert_eq!(def.fields[12].ty, Type::F32);
         assert_eq!(def.fields[13].name, "eos_gm1");

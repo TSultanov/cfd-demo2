@@ -7,7 +7,7 @@ pub enum GradientStorage {
     None,
     /// Gradients are stored per field name (e.g. `grad_U`, `grad_p`).
     ///
-    /// This is the legacy convention used by incompressible/coupled kernels.
+    /// Convention used by incompressible/coupled kernels.
     PerFieldName,
     /// Gradients are stored per field component (e.g. `grad_rho_u_x`).
     PerFieldComponents,

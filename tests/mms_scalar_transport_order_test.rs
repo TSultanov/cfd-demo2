@@ -1,4 +1,4 @@
-//! MMS convergence verification for the scalar transport vertical slice
+//! MMS convergence verification for the scalar transport
 //! (`scalar_transport` / `scalar_transport_sou` models): advection-diffusion of a
 //! passive scalar with a declared (not hand-built) advecting flux.
 //!

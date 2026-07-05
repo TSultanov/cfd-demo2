@@ -1,8 +1,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum EosSpec {
     /// Ideal gas equation of state with constant gamma.
-    ///
-    /// Used by the current EI Euler implementation.
     IdealGas {
         gamma: f64,
         gas_constant: f64,
@@ -20,8 +18,7 @@ pub enum EosSpec {
 
     /// Incompressible (or otherwise non-thermodynamic) model: EOS does not depend on state.
     ///
-    /// This is intentionally minimal for now; methods that require thermodynamic closure
-    /// (e.g. Euler EI) should reject this variant.
+    /// Methods that require thermodynamic closure (e.g. Euler EI) should reject this variant.
     #[default]
     Constant,
 }
@@ -84,13 +81,12 @@ impl EosSpec {
     }
 
     /// Isentropic compressibility `psi = d(rho)/d(p) = 1/c^2` [s^2/m^2] — the
-    /// physical value of the all-Mach `psi` field, derived from the material's real
-    /// thermodynamics instead of an artificial constant. For `IdealGas` this is
+    /// physical value of the all-Mach `psi` field. For `IdealGas` this is
     /// `1/(gamma*R*T)`; for `LinearCompressibility` it is `rho/K = 1/dp_drho`.
     ///
-    /// Returns `0.0` for the `Constant` (incompressible) EOS — exactly the `psi = 0`
-    /// limit at which the all-Mach pressure equation reduces to incompressible — so a
-    /// `Constant`-EOS fluid stays byte-identical to the incompressible solver.
+    /// Returns `0.0` for the `Constant` (incompressible) EOS — the `psi = 0` limit
+    /// at which the all-Mach pressure equation reduces to incompressible, keeping a
+    /// `Constant`-EOS fluid byte-identical to the incompressible solver.
     pub fn compressibility(&self, rho: f64) -> f64 {
         let c = self.sound_speed(rho);
         if c > 0.0 {

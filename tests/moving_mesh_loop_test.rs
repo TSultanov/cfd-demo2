@@ -1,29 +1,10 @@
-//! M4.1 gate (meshless/moving-mesh roadmap §M4): the `MovingMeshDriver`
-//! frozen-seed static limit.
+//! `MovingMeshDriver` frozen-seed static limit.
 //!
-//! The loop (dt handshake → advect seeds → regen via the M0 engine → swept-quad
-//! mesh fluxes → topology refresh → step) is proven here in its EASY case:
-//! `MeshMotionSpec::Frozen`, where the seeds never move. Because a regen from an
-//! unchanged seed set reproduces the mesh byte-for-byte (deterministic M0
-//! pipeline), the swept fluxes are exactly zero and the moving loop must
-//! reproduce a plain static `incompressible_momentum_ale` run.
-//!
-//! Two do-no-harm statements:
-//!   * `moving_loop_frozen_seeds_matches_static_cpu` — the FULL loop (regen +
-//!     topology refresh + zero-flux ALE step) vs a static ALE solver on the same
-//!     initial mesh. The test measures whether the match is byte-identical or
-//!     only f32-exact and REPORTS which (it is the M4 do-no-harm claim). It also
-//!     runs the skip-regen variant (a pure `SolverDriver::step` passthrough),
-//!     which MUST be byte-identical.
-//!   * `moving_loop_dt_pinned` — a regression guard for the F2 dt-ownership
-//!     hazard: the swept-flux dt equals the step dt exactly, and adaptive dt
-//!     stays off across the ALE step.
-//!
-//! The static-path gates (mesh_refresh_identity, ale_zero_flux_equivalence,
-//! WGSL snapshots) are unchanged and run from their own files.
-//!
-//! Feature gate: `meshgen` (the M0 engine + the `sim` drivers) + `cpu` — the
-//! CPU-first M4 loop, per the roadmap's validation program.
+//! The moving loop (dt handshake → advect seeds → regen → swept-quad mesh fluxes →
+//! topology refresh → step) is tested in its EASY case: `MeshMotionSpec::Frozen`, where
+//! the seeds never move. Because a regen from an unchanged seed set reproduces the mesh
+//! byte-for-byte (deterministic pipeline), the swept fluxes are exactly zero and the
+//! moving loop must reproduce a plain static `incompressible_momentum_ale` run.
 #![cfg(all(feature = "meshgen", feature = "cpu"))]
 
 use cfd2::meshgen::meshless::{assemble_meshless_from_seeds, generate_cvt_mesh_with_seeds};
@@ -121,9 +102,9 @@ fn build_static(mesh: &cfd2::solver::mesh::Mesh, params: &RuntimeParams) -> Solv
     driver
 }
 
-/// THE M4.1 do-no-harm gate. Frozen-seed moving loop vs a static ALE run on the
-/// identical initial mesh: measure and report byte-identity vs f32-exactness,
-/// and assert the skip-regen variant is byte-identical.
+/// Frozen-seed moving loop vs a static ALE run on the identical initial mesh: measure
+/// and report byte-identity vs f32-exactness, and assert the skip-regen variant is
+/// byte-identical.
 #[test]
 fn moving_loop_frozen_seeds_matches_static_cpu() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -304,8 +285,8 @@ fn moving_loop_frozen_seeds_matches_static_cpu() {
     }
 }
 
-/// F2 dt-handshake regression guard: the swept-flux dt equals the step dt
-/// exactly, and adaptive dt stays off across the ALE step.
+/// dt-handshake regression guard: the swept-flux dt equals the step dt exactly, and
+/// adaptive dt stays off across the ALE step.
 #[test]
 fn moving_loop_dt_pinned() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());

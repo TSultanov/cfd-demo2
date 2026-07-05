@@ -10,12 +10,7 @@
 //   [`EnergyDensity`], [`InvTime`], etc.)
 // - Conversion to runtime [`UnitDim`](crate::solver::units::UnitDim)
 //
-// # Migration Note
-//
-// This module previously contained a duplicate dimension system using `i8` exponents,
-// and later had ports-specific aliases for CFD-related dimensions. All dimension
-// aliases have now been moved to the canonical dimension system in `cfd2_ir`.
-// This module now only provides ports-specific additions like [`AnyDimension`].
+// It also provides ports-specific additions like [`AnyDimension`].
 //
 // # Example
 //
@@ -35,7 +30,6 @@
 // type PG = PressureGradient;
 // ```
 
-// Re-export everything from the canonical dimension system
 pub use crate::solver::dimensions::*;
 
 /// Any dimension - escape hatch for dynamic/unknown dimensions.
@@ -57,7 +51,6 @@ pub struct AnyDimension;
 const ANY_DIMENSION_EXPONENT: (i32, i32) = (1000, 1);
 
 impl UnitDimension for AnyDimension {
-    // Use a unique sentinel value that won't match any real dimension
     const M: (i32, i32) = ANY_DIMENSION_EXPONENT;
     const L: (i32, i32) = ANY_DIMENSION_EXPONENT;
     const T: (i32, i32) = ANY_DIMENSION_EXPONENT;
@@ -71,7 +64,6 @@ mod tests {
 
     #[test]
     fn canonical_dimensions_re_exported() {
-        // Verify all base dimensions are available
         let _: UnitDim = Dimensionless::to_runtime();
         let _: UnitDim = Mass::to_runtime();
         let _: UnitDim = Length::to_runtime();
@@ -81,7 +73,6 @@ mod tests {
 
     #[test]
     fn derived_dimensions_work() {
-        // Test that type constructors work correctly
         type TestVel = DivDim<Length, Time>;
         assert_eq!(TestVel::to_runtime(), UnitDim::new(0, 1, -1));
 
@@ -103,7 +94,6 @@ mod tests {
     fn port_specific_dimensions_match_si() {
         use crate::solver::units::si;
 
-        // These are re-exported from the canonical dimension system
         assert_eq!(PressureGradient::UNIT, si::PRESSURE_GRADIENT);
         assert_eq!(D_P::UNIT, si::D_P);
         assert_eq!(MassFlux::UNIT, si::MASS_FLUX);

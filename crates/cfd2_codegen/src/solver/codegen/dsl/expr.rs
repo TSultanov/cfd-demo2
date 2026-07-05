@@ -40,10 +40,6 @@ impl fmt::Display for DslError {
 
 impl std::error::Error for DslError {}
 
-// ============================================================================
-// Dynamic Expression (runtime unit tracking) - Escape hatch for dynamic units
-// ============================================================================
-
 /// A dynamically-typed expression with runtime unit checking.
 ///
 /// This is the escape hatch for when units are not known at compile time,
@@ -341,10 +337,6 @@ impl std::ops::Neg for DynExpr {
     }
 }
 
-// ============================================================================
-// Typed Expression (compile-time unit checking via type-level dimensions)
-// ============================================================================
-
 /// A type-safe expression parameterized by a dimension type `D: UnitDimension`.
 ///
 /// Unit correctness is enforced at compile time by the Rust type system.
@@ -389,7 +381,6 @@ impl<D: UnitDimension> TypedExpr<D> {
     }
 }
 
-// Addition: only for identical dimensions
 impl<D: UnitDimension> std::ops::Add for TypedExpr<D> {
     type Output = Self;
 
@@ -399,7 +390,6 @@ impl<D: UnitDimension> std::ops::Add for TypedExpr<D> {
     }
 }
 
-// Subtraction: only for identical dimensions
 impl<D: UnitDimension> std::ops::Sub for TypedExpr<D> {
     type Output = Self;
 
@@ -409,7 +399,6 @@ impl<D: UnitDimension> std::ops::Sub for TypedExpr<D> {
     }
 }
 
-// Negation
 impl<D: UnitDimension> std::ops::Neg for TypedExpr<D> {
     type Output = Self;
 
@@ -418,7 +407,6 @@ impl<D: UnitDimension> std::ops::Neg for TypedExpr<D> {
     }
 }
 
-// Multiplication: yields MulDim<A, B>
 impl<A: UnitDimension, B: UnitDimension> std::ops::Mul<TypedExpr<B>> for TypedExpr<A> {
     type Output = TypedExpr<MulDim<A, B>>;
 
@@ -436,7 +424,6 @@ impl<A: UnitDimension, B: UnitDimension> std::ops::Mul<TypedExpr<B>> for TypedEx
     }
 }
 
-// Division: yields DivDim<A, B>
 impl<A: UnitDimension, B: UnitDimension> std::ops::Div<TypedExpr<B>> for TypedExpr<A> {
     type Output = TypedExpr<DivDim<A, B>>;
 
@@ -449,7 +436,6 @@ impl<A: UnitDimension, B: UnitDimension> std::ops::Div<TypedExpr<B>> for TypedEx
     }
 }
 
-// Extension trait for sqrt operation
 pub trait TypedSqrt {
     type Output;
     fn sqrt(self) -> Self::Output;
@@ -474,10 +460,6 @@ mod tests {
     use crate::solver::codegen::dsl::types::{DslType, Shape};
     use crate::solver::codegen::dsl::units::UnitDim;
     use cfd2_ir::dimensions::{Dimensionless, Length, Time, Velocity};
-
-    // ============================================================================
-    // Dynamic expression tests (runtime unit checking)
-    // ============================================================================
 
     #[test]
     fn dyn_expr_rejects_unit_mismatch_on_add() {
@@ -520,10 +502,6 @@ mod tests {
         assert!(matches!(result, Err(DslError::UnitMismatch { .. })));
     }
 
-    // ============================================================================
-    // Typed expression tests (compile-time unit checking)
-    // ============================================================================
-
     #[test]
     fn typed_expr_length_addition_requires_same_dimension() {
         let a: TypedExpr<Length> = TypedExpr::f32(1.0);
@@ -538,7 +516,6 @@ mod tests {
         let time: TypedExpr<Time> = TypedExpr::ident("t", DslType::f32());
         let velocity: TypedExpr<Velocity> = length / time;
         assert_eq!(velocity.expr.to_string(), "x / t");
-        // Verify the unit matches Velocity
         assert_eq!(<Velocity as UnitDimension>::UNIT, UnitDim::new(0, 1, -1));
     }
 
@@ -547,14 +524,12 @@ mod tests {
         let length: TypedExpr<Length> = TypedExpr::ident("x", DslType::f32());
         let sqrt_len = length.sqrt();
 
-        // Verify the expression is correct
         assert_eq!(sqrt_len.expr.to_string(), "sqrt(x)");
 
-        // Verify the dimension is SqrtDim<Length>
         // sqrt(Length) has L exponent of 1/2
         assert_eq!(<SqrtDim<Length> as UnitDimension>::L, (1, 2));
 
-        // Verify that (sqrt(Length))^2 = Length
+        // (sqrt(Length))^2 = Length
         type SqrtLengthSquared = MulDim<SqrtDim<Length>, SqrtDim<Length>>;
         assert_eq!(<SqrtLengthSquared as UnitDimension>::L, (1, 1));
     }
@@ -573,11 +548,9 @@ mod tests {
             TypedExpr::ident("m", DslType::f32());
         let velocity: TypedExpr<Velocity> = TypedExpr::ident("v", DslType::f32());
 
-        // Mass * Velocity = MomentumDensity (or Mass * L / T)
         type Momentum = MulDim<cfd2_ir::dimensions::Mass, Velocity>;
         let _momentum: TypedExpr<Momentum> = mass * velocity;
 
-        // Momentum should have M: 1, L: 1, T: -1
         assert_eq!(<Momentum as UnitDimension>::M, (1, 1));
         assert_eq!(<Momentum as UnitDimension>::L, (1, 1));
         assert_eq!(<Momentum as UnitDimension>::T, (-1, 1));

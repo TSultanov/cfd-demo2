@@ -1,12 +1,7 @@
-//! CPU-backend biharmonic-compressible smoke: feasibility check that the CPU runs
-//! the biharmonic-dissipation compressible model (the GPU's shipped cure for the
-//! interior marginal instability — `lap_<conserved>` unknowns + multi-diffusion
-//! assembly + the `+eps4*(lap_neigh-lap_own)` flux term). A uniform stagnant gas
-//! is an exact steady state for which the ∇⁴ term is inert (lap==0), so this only
-//! exercises that the biharmonic kernels LOWER and RUN on the CPU (block-CSR at
-//! the larger stride, primitive recovery, the static-diagonal lap rows). If this
-//! passes, the biharmonic path is viable on the CPU and the convergent compressible
-//! variant is reachable; if it panics, the biharmonic kernels need CPU support.
+//! CPU-backend biharmonic-compressible smoke: checks that the biharmonic-dissipation
+//! kernels lower and run on the CPU. A uniform stagnant gas is an exact steady state
+//! for which the ∇⁴ term is inert (lap==0), so this only exercises the kernel machinery
+//! (block-CSR at the larger stride, primitive recovery, static-diagonal lap rows).
 #![cfg(feature = "cpu")]
 
 use cfd2::solver::cpu::{CpuBackendConfig, CpuSolver};

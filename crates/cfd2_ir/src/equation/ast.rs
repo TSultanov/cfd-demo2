@@ -90,8 +90,6 @@ pub enum Coefficient {
     },
     Field(FieldRef),
     /// Magnitude-squared of a field (scalar: φ²; vector: |u|²).
-    ///
-    /// This is treated as a scalar coefficient evaluated from the current state.
     MagSqr(FieldRef),
     Product(Box<Coefficient>, Box<Coefficient>),
 }
@@ -205,12 +203,9 @@ pub struct Term {
     pub field: FieldRef,
     pub flux: Option<FluxRef>,
     pub coeff: Option<Coefficient>,
-    /// Scheme declared on the term itself (part of the model's math declaration).
-    ///
-    /// `Some(_)` takes precedence over both the build-time `SchemeRegistry`
-    /// default and the runtime `constants.scheme` knob: codegen bakes the
-    /// declared scheme as a literal for this term. `None` keeps the term on
-    /// the registry default / runtime knob.
+    /// Per-term scheme override. `Some(_)` is baked as a literal, taking
+    /// precedence over the `SchemeRegistry` default and the runtime
+    /// `constants.scheme` knob; `None` keeps the registry default / runtime knob.
     pub scheme: Option<crate::scheme::Scheme>,
     /// Bounded convection form (OpenFOAM's `bounded Gauss`): assembly
     /// subtracts the continuity defect `(div phi) * phi_P` from the
@@ -246,39 +241,32 @@ pub struct Term {
     /// integrated unit.
     pub static_diag: bool,
     /// Deferred-correction Newton linearization of a `DivFlux` mass-flux term
-    /// with respect to the equation's (pressure) field. `Some(coeff)` attaches
-    /// the flux's pressure-sensitivity `coeff = d(rho_face)/dp` (the physical
-    /// compressibility `psi`): assembly additionally emits an implicit upwind
-    /// convection of the pressure by the flux `a_f = coeff_face * (U_f.n) * A`
-    /// (the Jacobian `d(div phi)/dp`), while adding the SAME operator applied to
-    /// the frozen state pressure to the RHS. The two cancel exactly at outer
-    /// convergence, so the converged solution — and hence every low-Mach and
-    /// steady-MMS result — is unchanged; only the ITERATION is damped, which is
-    /// what makes the elliptic pressure row well-posed (hyperbolic/upwind) at a
-    /// supersonic outlet where the explicit `div(rho_f U)` feedback otherwise
-    /// runs the exit density to vacuum. Only meaningful on implicit `DivFlux`
-    /// terms whose target is the pressure; the `_mms` variants omit it to stay
-    /// byte-identical (their steady solution never approaches the runaway).
+    /// against the equation's (pressure) field. `Some(coeff)` attaches the
+    /// flux's pressure-sensitivity `coeff = d(rho_face)/dp` (compressibility
+    /// `psi`): assembly emits an implicit upwind convection of the pressure
+    /// `a_f = coeff_face * (U_f.n) * A` (the Jacobian `d(div phi)/dp`) plus the
+    /// same operator on the frozen-state pressure to the RHS. The two cancel at
+    /// outer convergence (converged solution unchanged), damping only the
+    /// iteration so the pressure row stays well-posed (upwind) at a supersonic
+    /// outlet where explicit `div(rho_f U)` feedback would run the exit density
+    /// to vacuum. Only meaningful on implicit `DivFlux` terms targeting the
+    /// pressure.
     pub linearize_pressure_flux: Option<Coefficient>,
-    /// ALE (moving-mesh) convection: the face flux consumed by this term is
-    /// taken RELATIVE to the mesh motion, `phi_rel = phi - rho_f * meshPhi_f`,
-    /// where `meshPhi_f` is the per-face volumetric swept rate (`mesh_fluxes`
-    /// runtime buffer, Volume/Time, signed along the stored face normal /
-    /// owner convention — exactly like `phi`) and `rho_f` is the flux's
-    /// density factor (the constant `rho` coefficient for incompressible
-    /// models; variable-density fluxes need a persisted face density and are
-    /// out of v1 scope). The subtraction happens assembly-side at every
-    /// convective consumption point of the term (upwind matrix coefficients,
-    /// deferred correction, `bounded` diagonal correction, `DivFlux` RHS), so
-    /// the stored `fluxes` buffer keeps holding the ABSOLUTE mass flux.
+    /// ALE (moving-mesh) convection: the face flux is taken RELATIVE to the mesh
+    /// motion, `phi_rel = phi - rho_f * meshPhi_f`, where `meshPhi_f` is the
+    /// per-face volumetric swept rate (`mesh_fluxes` buffer, Volume/Time, signed
+    /// along the stored face normal / owner convention like `phi`) and `rho_f`
+    /// is the flux's density factor (the constant `rho` coefficient for
+    /// incompressible models). The subtraction happens assembly-side at every
+    /// convective consumption point (upwind coefficients, deferred correction,
+    /// `bounded` diagonal correction, `DivFlux` RHS), so the stored `fluxes`
+    /// buffer keeps the ABSOLUTE mass flux.
     ///
-    /// Zero-filled `mesh_fluxes` makes `phi_rel ≡ phi` bitwise (`x - rho*0.0`
-    /// is an IEEE identity), so an ALE model over a static mesh reproduces
-    /// the static model. Models with any flagged term get the `mesh_fluxes`
-    /// storage binding emitted into their assembly kernels; static models'
-    /// generated code is untouched (no runtime branch — separate `*_ale`
-    /// kernels, like the `_mms` variants). Only meaningful on implicit `Div`
-    /// / `DivFlux` terms.
+    /// Zero-filled `mesh_fluxes` makes `phi_rel ≡ phi` bitwise (`x - rho*0.0` is
+    /// an IEEE identity), so an ALE model over a static mesh reproduces the
+    /// static model. Flagged models get the `mesh_fluxes` binding emitted into
+    /// separate `*_ale` assembly kernels (no runtime branch). Only meaningful on
+    /// implicit `Div` / `DivFlux` terms.
     pub relative_to_mesh: bool,
 }
 
@@ -897,9 +885,9 @@ mod tests {
         assert!(matches!(err, CodegenError::NonScalarCoefficient { .. }));
     }
 
-    /// ALE flag scope (adversarial review, July 2026): the mesh-relative
-    /// subtraction only exists at the implicit convection assembly sites, so
-    /// an explicit flagged term would silently keep the absolute flux.
+    /// The mesh-relative subtraction only exists at the implicit convection
+    /// assembly sites, so an explicit flagged term would silently keep the
+    /// absolute flux.
     #[test]
     #[should_panic(expected = "only valid on IMPLICIT terms")]
     fn with_mesh_relative_rejects_explicit_terms() {

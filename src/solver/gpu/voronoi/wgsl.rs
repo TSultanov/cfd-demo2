@@ -1,65 +1,45 @@
-//! WGSL source for the `voronoi_cell` kernel (stage 3: boundary segments +
-//! seed kinds on top of the stage-2 epsilon filter / f64-fallback flagging).
-//!
-//! One thread per seed; the cell starts as the seed-relative domain bbox,
-//! `SeedKind::Boundary` seeds then clip their OWN segment line(s) first
-//! (mirroring the M0 `own_planes`/`clip_own` order: `seg_prev`, then
-//! `seg_next` if different — those lines pass through the seed, i.e.
-//! distance 0, so they precede every bisector in distance order), and the
-//! bisector planes stream in Chebyshev grid-ring order (see `mod.rs` for the
-//! traversal decision) with the security-radius stop `d² > 4·R²`. All
-//! arithmetic is seed-relative f32; function-scope arrays follow the shipped
-//! `block_precond.wgsl` precedent.
+//! WGSL source for the `voronoi_cell` kernel: one thread per seed, all
+//! arithmetic seed-relative f32. The cell starts as the seed-relative domain
+//! bbox; `SeedKind::Boundary` seeds clip their own segment line(s) first (they
+//! pass through the seed, distance 0, so precede every bisector), then bisector
+//! planes stream in Chebyshev grid-ring order with the security-radius stop
+//! `d² > 4·R²`.
 //!
 //! ## Edge-tag encoding (kernel-internal AND `b_face_bc` output)
 //!
-//! A clip plane is identified by one u32 `tag` mirroring the CPU `PlaneTag`:
+//! A clip plane is one u32 `tag` mirroring the CPU `PlaneTag`:
+//! - `tag < TAG_SEG_FLAG (0x8000_0000)` — `Bisector(tag)`, the neighbor seed id;
+//! - `TAG_SEG_FLAG ≤ tag < TAG_BOX_BASE` — `Boundary(tag & 0x7fff_ffff)`, a
+//!   boundary-segment id into the uploaded segment table;
+//! - `tag ≥ TAG_BOX_BASE (0xffff_fff0)` — `Box(tag − TAG_BOX_BASE)`, a bbox side
+//!   (0=left, 1=right, 2=bottom, 3=top).
 //!
-//! - `tag < TAG_SEG_FLAG (0x8000_0000)` — `Bisector(tag)`, the neighbor
-//!   seed id (seed counts are far below 2³¹);
-//! - `TAG_SEG_FLAG ≤ tag < TAG_BOX_BASE` — `Boundary(tag & 0x7fff_ffff)`,
-//!   a global boundary-segment id into the uploaded segment table;
-//! - `tag ≥ TAG_BOX_BASE (0xffff_fff0)` — `Box(tag − TAG_BOX_BASE)`, a
-//!   domain-bbox side (0=left, 1=right, 2=bottom, 3=top).
+//! `b_nbr_ids` holds the canonicalized seed id for bisector faces and `NBR_NONE`
+//! otherwise; `b_face_bc` holds the box side id (< 4) or the `TAG_SEG_FLAG|seg`
+//! boundary tag, `BC_NONE` for interior/unused slots.
 //!
-//! Output slots keep the stage-1/2 shape: `b_nbr_ids` holds the
-//! (canonicalized) seed id for bisector faces and `NBR_NONE` otherwise;
-//! `b_face_bc` holds the box side id (< 4) or the `TAG_SEG_FLAG|seg`
-//! boundary-segment tag, `BC_NONE` for interior/unused slots.
+//! ## Canonical vertices + certified error bounds
 //!
-//! ## Canonical vertex construction + certified error bounds
+//! Every intersection vertex is the 2×2 solve of its two defining edge planes
+//! (plane coefficients are pure functions of the f32 inputs — no chain error),
+//! NOT the Sutherland-Hodgman lerp. A per-vertex COMPONENTWISE error bound
+//! `ve = (ve_x, ve_y)` is carried: componentwise matters because axis-aligned
+//! boundary structures produce coordinates that are EXACT in both f32 and f64,
+//! and a scalar norm bound would flag every such cell.
 //!
-//! Every intersection vertex is created as the 2×2 solve of its two defining
-//! edge planes (plane coefficients are pure functions of the f32 seeds /
-//! segment endpoints — no chain error), NOT as the Sutherland-Hodgman lerp.
-//! A per-vertex COMPONENTWISE error bound `ve = (ve_x, ve_y)` is carried:
-//! componentwise matters because the structured boundary cases (axis-aligned
-//! walls coinciding with bbox sides, own lines through the seed) produce
-//! coordinates that are EXACT in both f32 and f64, and a scalar norm bound
-//! would flag every such cell (measured: it flags all straight-wall boundary
-//! seeds; the componentwise bound keeps them silent while staying certified).
+//! ## Conservative epsilon filter (one-sided by design)
 //!
-//! ## Conservative epsilon filter (design §5.4, one-sided by design)
-//!
-//! `NEEDS_EXACT` is flagged whenever f32 cannot certify agreement with the
-//! f64 oracle on the same f32-rounded inputs. The classification band is a
-//! RUNNING-ERROR bound (stage-3 change from the stage-2 norm-product bound):
-//! `|s − eps| ≤ C_DOT_EPS·(|v.x·q.x| + |v.y·q.y| + 2|off|) + |q.x|·ve_x +
-//! |q.y|·ve_y + oerr`, where `oerr` is the plane's own offset-computation
-//! error (nonzero only for segment lines whose offset does not cancel
-//! exactly; see `segment_plane`). The running form is what lets exact
-//! structured arithmetic (products that are exactly zero / cancel exactly in
-//! BOTH precisions) produce a zero band instead of a domain-scale one.
-//! Near-parallel plane pairs no longer flag on a det threshold alone: the
-//! certified vertex bound (which includes the numerator-magnitude and
-//! offset-error terms, so it is honest under cancellation) propagates into
-//! the bands and the final `VE_MAX_REL` check; only an exactly-degenerate
-//! det (≤ DET_ZERO·scale) falls back to the lerp vertex and flags. This is
-//! load-bearing for boundary support: a straight-wall vertex seed's two own
-//! lines meet at the seed with a det of order 1e-6·scale (f32 rounding of
-//! collinear subdivision points), but both offsets are EXACTLY zero, so the
-//! solve yields exactly (0,0) with a zero certified bound — the stage-2 hard
-//! threshold would have flagged ~half of all straight-diagonal-wall seeds.
+//! `NEEDS_EXACT` is flagged whenever f32 cannot certify agreement with the f64
+//! oracle on the same f32-rounded inputs. The classification band is a
+//! RUNNING-ERROR bound so exactly-zero / exactly-cancelling structured
+//! arithmetic yields a zero band instead of a domain-scale one. Near-parallel
+//! plane pairs do not flag on a det threshold alone: the certified vertex bound
+//! (honest under cancellation) propagates into the bands and the final
+//! `VE_MAX_REL` check; only an exactly-degenerate det (≤ DET_ZERO·scale) falls
+//! back to the lerp vertex and flags. Load-bearing for boundary support: a
+//! straight-wall vertex seed's two own lines meet with a det of order 1e-6·scale
+//! but both offsets are EXACTLY zero, so the solve yields exactly (0,0) with a
+//! zero certified bound.
 
 use super::{status, BC_NONE, K_FACE_MAX, MAX_VERTS, NBR_NONE};
 
@@ -82,7 +62,7 @@ pub(super) const C_VERT_EPS: f32 = 4.8e-7;
 /// but scales like `(|A|+|B|)/sin θ`, so slack here directly multiplies
 /// the flag rate on moderate-angle plane pairs.
 ///
-/// HEADROOM NOTE (stage-5 review): the `/det` in the canonical solve is
+/// HEADROOM NOTE: the `/det` in the canonical solve is
 /// only 2.5 ULP under the WGSL accuracy spec (division is NOT correctly
 /// rounded). The bound still covers it because `dmag/|det| ≥ 1` makes the
 /// `dmag·|vi|` term contribute ≥ 4u and `|num|/det ≈ |vi|` adds another
@@ -104,14 +84,13 @@ pub(super) const DET_ZERO: f32 = 1e-12;
 pub(super) const EPS_SHORT: f32 = 4e-6;
 
 /// Max tolerated certified vertex error BOUND in units of `h_min`, matching
-/// the `1e-5·h` geometry parity tolerance (see stage-2 notes in git history
-/// for the measured tuning; the bound carries ≥ 8× slack over the real
-/// rounding error).
+/// the `1e-5·h` geometry parity tolerance; the bound carries ≥ 8× slack over
+/// the real rounding error.
 pub(super) const VE_MAX_REL: f32 = 1e-5;
 
 /// Relative security-radius margin: the ring-sweep stop requires
-/// `lb²·(1−SECURITY_MARGIN) > 4·R²`. Budget (stage-5 review fix — the old
-/// 3e-5 did not cover it): on an UNFLAGGED cell every vertex may carry a
+/// `lb²·(1−SECURITY_MARGIN) > 4·R²`. Budget: on an UNFLAGGED cell every vertex
+/// may carry a
 /// certified componentwise error up to `VE_MAX_REL·h_min` (norm ≤ √2×),
 /// and R can be as small as `h_min/2`, so `4·r2` can undersell the true
 /// `4·R²` by up to `~4·√2·VE_MAX_REL ≈ 5.7e-5` relative; 1e-4 carries

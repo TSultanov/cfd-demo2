@@ -1,25 +1,16 @@
-//! M2 Tier-A mesh-refresh seam gates (meshless/moving-mesh roadmap,
-//! docs/meshless-moving-mesh-roadmap.md §M2).
+//! Mesh-refresh seam gates.
 //!
-//! The load-bearing property: a no-op `refresh_mesh(same mesh, Geometry)` must
-//! be **byte-invisible** — it rewrites the geometry buffers with identical
-//! bytes, so stepping after the refresh is bit-identical to never refreshing.
-//! This is the "stale mesh-derived caches" detector: any solver-side cache of
-//! geometry that a refresh misses would show up here as a byte diff (and the
-//! perturbed-refresh smoke exercises the genuinely-changed-geometry path).
+//! Load-bearing property: a no-op `refresh_mesh(same mesh, Geometry)` must be
+//! byte-invisible — it rewrites the geometry buffers with identical bytes, so
+//! stepping after the refresh is bit-identical to never refreshing. Any
+//! solver-side geometry cache a refresh misses shows up here as a byte diff.
 //!
-//! Precision note (verified against src/solver/cpu/interpreter.rs): CPU kernel
-//! state is stored as **f32 bits in `AtomicU32`** (`Store::F32`); the linear
-//! solve's f64 internals never persist beyond `x`. `read_state_f32` marshals
-//! those bits 1:1 (`f32::from_bits`), so comparing its output by bit pattern
-//! IS the strongest (exact, lossless) comparison the CPU backend exposes.
-//! The GPU state buffer is f32; the staging readback in `read_state_f32` is
-//! likewise exact.
+//! Precision: CPU kernel state is stored as f32 bits in `AtomicU32`
+//! (`Store::F32`); `read_state_f32` marshals them 1:1 (`f32::from_bits`), so a
+//! bit-pattern comparison is the exact/lossless comparison the CPU backend
+//! exposes. The GPU state buffer and its staging readback are likewise f32-exact.
 //!
-//! Feature gate: `meshgen` (the `sim::SolverDriver` seam lives under it);
-//! CPU-backend tests additionally need `cpu`. These are Tier-1 always-on gates
-//! under `--features meshgen,cpu` per the roadmap's validation program — not
-//! `dev-tests`-gated.
+//! Feature gate: `meshgen` (the `sim::SolverDriver` seam); CPU tests also need `cpu`.
 #![cfg(feature = "meshgen")]
 
 use cfd2::meshgen::meshless::{
@@ -164,7 +155,7 @@ fn assert_bits_equal(a: &[u32], b: &[u32], label: &str) {
 
 /// Deterministically perturb every interior vertex by `amp` × cell size and
 /// recompute the geometry. Topology (faces, adjacency, boundary tags) is
-/// untouched — exactly a Tier-A `Geometry` refresh input.
+/// untouched — exactly a `Geometry` refresh input.
 fn perturbed_mesh(mesh: &Mesh, amp: f64) -> Mesh {
     let mut m = mesh.clone();
     let h = LX / NX as f64;
@@ -181,8 +172,6 @@ fn perturbed_mesh(mesh: &Mesh, amp: f64) -> Mesh {
     m.recalculate_geometry();
     m
 }
-
-// ─── CPU backend ────────────────────────────────────────────────────────────
 
 /// Run `body` with the CPU backend selected (env-based, hence the lock).
 #[cfg(feature = "cpu")]
@@ -229,7 +218,7 @@ fn noop_refresh_byte_identical_cpu() {
 /// Geometry refresh to a genuinely perturbed mesh (interior vertices moved by
 /// ~2% of the cell size, `recalculate_geometry`): the solve keeps running and
 /// stays finite. No byte gate — refresh≡fresh-build equivalence needs full
-/// snapshot/restore (Tier B scope).
+/// snapshot/restore.
 #[test]
 #[cfg(feature = "cpu")]
 fn geometry_refresh_perturbed_smoke() {
@@ -301,8 +290,7 @@ fn refresh_recomputes_min_cell_size() {
     });
 }
 
-/// A `Geometry`-level refresh with mismatched topology must be rejected, and
-/// `Topology` level is not yet implemented (Tier B).
+/// A `Geometry`-level refresh with mismatched topology must be rejected.
 #[test]
 #[cfg(feature = "cpu")]
 fn refresh_rejects_topology_mismatch() {
@@ -338,14 +326,14 @@ fn refresh_rejects_topology_mismatch() {
             .expect_err("refresh with different boundary tags must fail");
         assert!(err.contains("face_boundary"), "unexpected error: {err}");
 
-        // Topology level with a different cell count is rejected (the Tier-B
-        // invariant is an unchanged cell count; faces/adjacency may change).
+        // Topology refresh requires an unchanged cell count; faces/adjacency
+        // may change.
         let err = driver
             .refresh_mesh(&coarse, MeshRefreshLevel::Topology)
             .expect_err("CPU Topology refresh with a different cell count must fail");
         assert!(err.contains("cell count"), "unexpected error: {err}");
 
-        // Topology level with the SAME mesh now succeeds (CPU Tier B stage 3).
+        // No-op Topology refresh (same mesh) succeeds.
         driver
             .refresh_mesh(&mesh, MeshRefreshLevel::Topology)
             .expect("CPU no-op Topology refresh succeeds");
@@ -356,16 +344,11 @@ fn refresh_rejects_topology_mismatch() {
 
 /// A no-op CPU Topology refresh (refresh to the SAME mesh) is byte-invisible:
 /// it rebuilds the CSR + reallocates every face/nnz buffer from a deterministic
-/// builder and re-scatters the bc tables, leaving cell-indexed state untouched.
-/// So refresh-then-step-N == step-N, compared at the exact f32-bit level. We
-/// refresh at step 0 and re-apply params (mirroring the GPU topology byte gate):
-/// a Topology refresh resets the bc tables to the model seeds (the documented
-/// `bc_overrides_reset` contract), so the runtime inlet-velocity override must be
-/// re-applied — exactly as a real caller (the GUI/driver) must. Re-applying
-/// `apply_params` MID-run would itself re-seed inlet-adjacent state and confound
-/// the gate; the mid-run survival of the cell-indexed state (history, warm-start
-/// `x`, counters) is instead proven byte-exactly by the snapshot/restore gate
-/// above. This gate isolates "the topology-refresh machinery corrupts nothing".
+/// builder and re-scatters the bc tables, leaving cell-indexed state untouched,
+/// so refresh-then-step-N == step-N at the exact f32-bit level. Refresh is at
+/// step 0 with a re-`apply_params`: a Topology refresh resets the bc tables to
+/// the model seeds (`bc_overrides_reset` contract), so the runtime inlet-velocity
+/// override must be re-applied, exactly as a real caller must.
 #[test]
 #[cfg(feature = "cpu")]
 fn noop_topology_refresh_byte_identical_cpu() {
@@ -394,14 +377,14 @@ fn noop_topology_refresh_byte_identical_cpu() {
 }
 
 /// Snapshot → fresh-build → restore reproduces the NEXT step byte-identically
-/// on the CPU backend (M2 Tier B stage 3 deliverable). Reference: step 6, then a
-/// 7th step. Restored: capture the snapshot after step 6, build a fresh solver,
-/// restore, then take ONE step — the resulting state must match the reference's
-/// step-7 bits exactly. This proves the snapshot captures the entire stepping
-/// state the next step reads (history, warm-start `x`, `step_count` — so the
-/// BDF2 path, not the Euler startup, is taken — and the scalar counters). The
-/// 2k-cell channel keeps the CPU Schur inner solve on Jacobi (AMG never
-/// activates), so the adaptivity flip does not perturb the byte comparison.
+/// on the CPU backend. Reference: step 6, then a 7th step. Restored: snapshot
+/// after step 6, build a fresh solver, restore, take ONE step — its state must
+/// match the reference's step-7 bits exactly. This proves the snapshot captures
+/// the entire stepping state the next step reads (history, warm-start `x`,
+/// `step_count` — so the BDF2 path, not the Euler startup, is taken — and the
+/// scalar counters). The 2k-cell channel keeps the CPU Schur inner solve on
+/// Jacobi (AMG never activates), so the adaptivity flip does not perturb the
+/// byte comparison.
 #[test]
 #[cfg(feature = "cpu")]
 fn snapshot_restore_next_step_byte_identical_cpu() {
@@ -429,8 +412,6 @@ fn snapshot_restore_next_step_byte_identical_cpu() {
         );
     });
 }
-
-// ─── GPU backend ────────────────────────────────────────────────────────────
 
 /// No-op geometry refresh is byte-invisible on the GPU backend (the refresh
 /// path re-uploads identical bytes into the same buffer objects, so the step
@@ -536,12 +517,11 @@ fn geometry_refresh_perturbed_smoke_gpu() {
     println!("[mesh-refresh] perturbed-geometry refresh ran 10 finite steps (GPU)");
 }
 
-/// GPU snapshot/restore roundtrip preserves the CURRENT state exactly (M2 Tier B
-/// stage 3). The GPU capture is current-state-only (`has_history == false`); its
-/// restore uses the exact `write_state`/`read_state` path, so a fresh solver
-/// restored from a snapshot has bit-identical CURRENT state. (Full GPU history
-/// capture — needed to reproduce the next *step* byte-identically on the GPU —
-/// is a later stage; the byte-exact next-step proof lives on the CPU above.)
+/// GPU snapshot/restore roundtrip preserves the CURRENT state exactly. The GPU
+/// capture is current-state-only (`has_history == false`); its restore uses the
+/// exact `write_state`/`read_state` path, so a fresh solver restored from a
+/// snapshot has bit-identical CURRENT state. (The byte-exact next-step proof
+/// lives on the CPU above, which captures full history.)
 #[test]
 fn snapshot_restore_current_state_roundtrip_gpu() {
     let _guard = lock_env();
@@ -574,8 +554,6 @@ fn snapshot_restore_current_state_roundtrip_gpu() {
     );
 }
 
-// ─── GPU Topology refresh (M2 Tier B stage 2) ────────────────────────────────
-
 /// Build a driver with a uniform initial velocity (an all-wall meshless cavity
 /// needs a non-rest IC for the coupled solve to do real work each step).
 fn build_driver_ic(
@@ -603,8 +581,8 @@ fn build_driver_ic(
 /// A meshless-Voronoi channel with an optionally shifted interior seed. Same
 /// seed set ⇒ same cell count (seed `i` = cell `i`); shifting one interior seed
 /// flips the local Voronoi adjacency, so the face set / nnz genuinely differ —
-/// exactly the "same cells, different topology" input a Tier B refresh must
-/// absorb. Built via the low-level seed path so the seed set is controlled.
+/// a "same cells, different topology" refresh input. Built via the low-level
+/// seed path so the seed set is controlled.
 fn meshless_channel(shift_interior: Option<f64>) -> Mesh {
     let geo = RectangularChannel {
         length: 2.0,
@@ -646,11 +624,10 @@ fn meshless_channel(shift_interior: Option<f64>) -> Mesh {
 /// A no-op Topology refresh (refresh to the SAME mesh, before stepping) must be
 /// byte-invisible: it reallocates every face/nnz buffer + rebuilds all bind
 /// groups from a *deterministic* CSR, so a solver that refreshes then runs N
-/// steps is bit-identical to one that just runs N steps. This is the
-/// "topology-refresh machinery corrupts nothing" gate (design §1.4 acceptance
-/// (b)). We refresh at step 0 because the Tier B refresh reconstructs the
-/// linear system (re-zeroing the warm-start `x`); at step 0 `x` is zero on both
-/// legs, so the gate is unconditional. Exact per-device; the
+/// steps is bit-identical to one that just runs N steps ("topology-refresh
+/// machinery corrupts nothing"). Refresh is at step 0 because the refresh
+/// reconstructs the linear system (re-zeroing the warm-start `x`); at step 0 `x`
+/// is zero on both legs, so the gate is unconditional. Exact per-device; the
 /// `CFD2_ALLOW_GPU_BYTE_WAIVE=1` escape mirrors the geometry gate.
 #[test]
 fn noop_topology_refresh_byte_identical_gpu() {
@@ -672,10 +649,9 @@ fn noop_topology_refresh_byte_identical_gpu() {
     refreshed
         .refresh_mesh(&mesh, MeshRefreshLevel::Topology)
         .expect("no-op topology refresh");
-    // A Topology refresh re-derives the bc tables from the model spec, so the
-    // runtime inlet-velocity override (applied at build via `apply_params`) is
-    // reset — this is the documented `bc_overrides_reset` caller contract. Re-
-    // apply it, exactly as a real caller (the GUI/driver) must on a refresh.
+    // A Topology refresh re-derives the bc tables from the model spec, resetting
+    // the runtime inlet-velocity override (`bc_overrides_reset` contract), so a
+    // caller must re-apply it.
     refreshed.apply_params(&test_params());
     run_steps(&mut refreshed, 8, "gpu-topo-refresh");
     let bits_refreshed = state_bits(&refreshed);
@@ -704,7 +680,7 @@ fn noop_topology_refresh_byte_identical_gpu() {
 /// Voronoi seed moved to flip adjacency ⇒ different faces/nnz): the solver
 /// rebuilds its mesh/CSR/linear stack/bind groups and keeps stepping — finite,
 /// non-divergent, with the coupled FGMRES/Schur solve converging on the new
-/// sparsity (design §1.4 acceptance, Tier B). Skips when no GPU is available.
+/// sparsity. Skips when no GPU is available.
 #[test]
 fn topology_refresh_different_mesh_converges_gpu() {
     let _guard = lock_env();
@@ -720,9 +696,8 @@ fn topology_refresh_different_mesh_converges_gpu() {
 
     // Cell/face-adjacency signature: a Voronoi seed move swaps neighbours (the
     // face COUNT can stay fixed while the adjacency — owner/neighbour of each
-    // face, hence the CSR column pattern — genuinely changes). That is exactly
-    // the topology change a Tier B refresh must rebuild, so we discriminate on
-    // the adjacency signature, not the face count.
+    // face, hence the CSR column pattern — genuinely changes), so we
+    // discriminate on the adjacency signature, not the face count.
     let adjacency = |m: &Mesh| -> Vec<(usize, i64)> {
         m.face_owner
             .iter()

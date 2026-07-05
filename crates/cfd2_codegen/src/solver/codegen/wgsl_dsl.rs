@@ -1,7 +1,5 @@
 use super::wgsl_ast::{AssignOp, Block, Expr, ForInit, ForStep, Stmt, Type};
 
-// ── Builtin math functions ──────────────────────────────────────────────
-
 pub fn abs(x: impl Into<Expr>) -> Expr {
     Expr::call_named("abs", vec![x.into()])
 }
@@ -85,8 +83,6 @@ pub fn pow(base: impl Into<Expr>, exponent: impl Into<Expr>) -> Expr {
     Expr::call_named("pow", vec![base.into(), exponent.into()])
 }
 
-// ── Type conversion / reinterpretation ──────────────────────────────────
-
 /// `bitcast<T>(expr)` — reinterprets bits as another type.
 pub fn bitcast(ty: &str, x: impl Into<Expr>) -> Expr {
     Expr::call_named(&format!("bitcast<{}>", ty), vec![x.into()])
@@ -112,8 +108,6 @@ pub fn bool_cast(x: impl Into<Expr>) -> Expr {
     Expr::call_named("bool", vec![x.into()])
 }
 
-// ── Synchronization barriers ────────────────────────────────────────────
-
 pub fn workgroup_barrier() -> Stmt {
     Stmt::Call(Expr::call_named("workgroupBarrier", vec![]))
 }
@@ -121,8 +115,6 @@ pub fn workgroup_barrier() -> Stmt {
 pub fn storage_barrier() -> Stmt {
     Stmt::Call(Expr::call_named("storageBarrier", vec![]))
 }
-
-// ── Atomic operations ───────────────────────────────────────────────────
 
 pub fn atomic_load(ptr: impl Into<Expr>) -> Expr {
     Expr::call_named("atomicLoad", vec![ptr.into()])
@@ -146,8 +138,6 @@ pub fn atomic_max(ptr: impl Into<Expr>, value: impl Into<Expr>) -> Expr {
 pub fn atomic_min(ptr: impl Into<Expr>, value: impl Into<Expr>) -> Expr {
     Expr::call_named("atomicMin", vec![ptr.into(), value.into()])
 }
-
-// ── Array intrinsics ────────────────────────────────────────────────────
 
 /// `arrayLength(&buffer)` — returns the runtime-sized array length.
 pub fn array_length(ptr: impl Into<Expr>) -> Expr {

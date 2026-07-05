@@ -28,7 +28,6 @@ fn lid_driven_cavity_compressible_vs_incompressible() {
     let dt = 1e-5f32;
     let n_steps = 300;
 
-    // Incompressible solver
     let mesh_inc = generate_structured_rect_mesh(
         nx,
         ny,
@@ -59,7 +58,7 @@ fn lid_driven_cavity_compressible_vs_incompressible() {
     solver_inc.set_dt(dt);
     solver_inc.set_dtau(0.0).unwrap();
     solver_inc.set_viscosity(viscosity).unwrap();
-    solver_inc.set_uniform_state(1.0, [0.0, 0.0], 0.0); // rho=1, u=0, p=0
+    solver_inc.set_uniform_state(1.0, [0.0, 0.0], 0.0);
     solver_inc
         .set_boundary_vec2(GpuBoundaryType::MovingWall, "U", [u_lid, 0.0])
         .unwrap();
@@ -71,7 +70,6 @@ fn lid_driven_cavity_compressible_vs_incompressible() {
 
     let u_inc = pollster::block_on(solver_inc.get_u());
 
-    // Compressible solver
     let mesh_comp = generate_structured_rect_mesh(
         nx,
         ny,
@@ -131,7 +129,6 @@ fn lid_driven_cavity_compressible_vs_incompressible() {
 
     let u_comp = pollster::block_on(solver_comp.get_u());
 
-    // Compute max velocity magnitude for scaling
     let u_inc_mag: Vec<f64> = u_inc
         .iter()
         .map(|(ux, uy)| (ux * ux + uy * uy).sqrt())
@@ -148,7 +145,6 @@ fn lid_driven_cavity_compressible_vs_incompressible() {
     println!("Compressible max velocity: {:.6}", max_comp);
     println!("Ratio (comp/inc): {:.3}", max_comp / max_inc);
 
-    // Compute RMS error between solutions
     let mut sum_sq_diff = 0.0;
     let mut sum_sq_inc = 0.0;
     for (i, ((ux_inc, uy_inc), (ux_comp, uy_comp))) in u_inc.iter().zip(u_comp.iter()).enumerate() {
@@ -157,7 +153,6 @@ fn lid_driven_cavity_compressible_vs_incompressible() {
         sum_sq_diff += dx * dx + dy * dy;
         sum_sq_inc += ux_inc * ux_inc + uy_inc * uy_inc;
 
-        // Print first few cells for debugging
         if i < 5 {
             let mag_inc = (ux_inc * ux_inc + uy_inc * uy_inc).sqrt();
             let mag_comp = (ux_comp * ux_comp + uy_comp * uy_comp).sqrt();
@@ -176,8 +171,8 @@ fn lid_driven_cavity_compressible_vs_incompressible() {
     println!("RMS difference: {:.6}", rms_diff);
     println!("Relative error (RMS): {:.2}%", rel_error * 100.0);
 
-    // At low Mach, compressible and incompressible should be within ~10%
-    // If compressible has much higher velocities, it indicates under-dissipation
+    // At low Mach these solutions should be close; a large gap indicates the
+    // compressible path is under-dissipating.
     assert!(rel_error < 0.50,
         "Compressible and incompressible solutions differ by {:.1}%. This suggests viscous flux issues.",
         rel_error * 100.0);

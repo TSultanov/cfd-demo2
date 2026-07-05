@@ -1,12 +1,10 @@
 //! A tree-walking interpreter over the backend-agnostic kernel IR
 //! (`cfd2_ir::ast`).
 //!
-//! This is the Phase-1 CPU "reference" executor: it runs the *exact same* typed
-//! `Stmt`/`Expr` AST that the WGSL emitter consumes
+//! It runs the *exact same* typed `Stmt`/`Expr` AST that the WGSL emitter consumes
 //! (`lower_kernel_program_to_wgsl`), one dispatch index (cell/face) at a time,
-//! against CPU-side `Vec<f32>` / `Vec<u32>` buffers. Because it consumes the same
-//! AST, it tracks the codegen automatically — there is no second emitter to keep
-//! in sync (that trade-off is what Phase 3's transpiler buys speed with).
+//! against CPU-side `Vec<f32>` / `Vec<u32>` buffers, so it tracks codegen
+//! automatically — there is no second emitter to keep in sync.
 //!
 //! ## WGSL → CPU semantics
 //! - Floating-point math is `f32` (matching the GPU); indices are `u32`.
@@ -14,12 +12,10 @@
 //! - GPU-only constructs map to CPU equivalents:
 //!   - `arrayLength(&b)` → `b.len()`
 //!   - `workgroupBarrier()` / `storageBarrier()` → no-ops (per-index granularity)
-//!   - `atomicAdd`/`atomicStore`/… → plain serial ops (Phase 1 is single-threaded)
+//!   - `atomicAdd`/`atomicStore`/… → plain serial ops
 //!
-//! The interpreter here is intentionally decoupled from `KernelProgram`/buffer
-//! allocation/scheduling: it operates on `&[Stmt]` + a [`Buffers`] store + a
-//! per-invocation [`Ctx`]. Wiring it to real generated `KernelProgram`s and the
-//! recipe-driven schedule is the next step.
+//! Decoupled from `KernelProgram`/buffer allocation/scheduling: it operates on
+//! `&[Stmt]` + a [`Buffers`] store + a per-invocation [`Ctx`].
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -225,7 +221,7 @@ impl Buffers {
     /// `threads` workers over disjoint contiguous chunks. Bit-identical to
     /// [`f32_vec`] (same `from_bits` values); it only splits the copy across cores.
     /// Used for the large assembled `matrix_values` buffer (tens of millions of
-    /// entries), which the serial marshal turned into a per-solve bottleneck.
+    /// entries).
     pub fn f32_vec_threaded(&self, name: &str, threads: usize) -> Vec<f32> {
         let data = match self.map.get(name) {
             Some(Store::F32 { data, .. }) => data,
@@ -280,8 +276,7 @@ impl Buffers {
 
     /// [`Self::copy_into_f32`] parallelized over disjoint contiguous chunks
     /// (bit-identical: same `to_bits` stores). Counterpart of
-    /// [`Self::f32_vec_threaded`] for the write direction — the per-outer
-    /// full-state snapshot restore was a serial ~24 MB pass on the nozzle.
+    /// [`Self::f32_vec_threaded`] for the write direction.
     pub fn copy_into_f32_threaded(&self, name: &str, src: &[f32], threads: usize) {
         let data = match self.map.get(name) {
             Some(Store::F32 { data, .. }) => data,
@@ -851,7 +846,7 @@ impl<'a> Interpreter<'a> {
         let (buf, idx) = self.atomic_target(ptr, frame);
         let v = self.eval(value, frame);
         let old = self.buffers.load(&buf, idx);
-        // Phase 1 is single-threaded: a plain read-modify-write is correct.
+        // Single-threaded: a plain read-modify-write is correct.
         let new = match old {
             Value::F32(o) => Value::F32(f(o, v.as_f32())),
             Value::U32(o) => Value::U32(f(o as f32, v.as_f32()) as u32),

@@ -317,7 +317,6 @@ pub fn generate_voronoi_mesh(
         generators.push(points[i]);
     }
 
-    // Recalculate geometry to ensure areas and centroids are correct
     mesh.recalculate_geometry();
 
     // 9. Fix Concave Cells

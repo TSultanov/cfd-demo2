@@ -1,19 +1,9 @@
-//! Validation for the all-Mach f32 pressure-based model (`allmach_pressure`).
-//!
-//! The model is `incompressible_momentum` plus a compressibility time term
-//! `ddt(psi,p)` in the continuity/pressure equation (`psi = 1/c^2`). Two
-//! properties are asserted here:
-//!
-//!  1. **Incompressible limit (the core thesis).** With `psi = 0` the added term
-//!     is exactly inert, so the model must reproduce the incompressible solver —
-//!     in particular it must still shed a Kármán vortex street on the channel +
-//!     obstacle default (the case the density-based compressible solver cannot
-//!     resolve in f32). This proves the pressure-based formulation is correct and
-//!     f32-safe (gauge pressure, full-precision grad p).
-//!
-//!  2. **Compressibility active + stable.** With `psi > 0` the compressibility
-//!     term is live (the implicit acoustic term sits on the pressure diagonal) and
-//!     the solve stays bounded (no checkerboard / blow-up).
+//! Validation for the all-Mach f32 pressure-based model (`allmach_pressure`):
+//! `incompressible_momentum` plus a compressibility time term `ddt(psi,p)` in the
+//! continuity/pressure equation (`psi = 1/c^2`). Asserts two properties: at `psi = 0`
+//! the added term is inert and the model reproduces the incompressible solver (still
+//! shedding a Kármán street); at `psi > 0` the implicit acoustic term sits on the
+//! pressure diagonal and the solve stays bounded.
 
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
@@ -90,16 +80,14 @@ fn build_allmach(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh, psi: f64) -> 
         .set_field_scalar("psi", &vec![psi; n])
         .expect("set psi field");
     // The pressure-row ddt reads the decoupled `psi_precond` (low-Mach preconditioning is
-    // a driver-only transient device). This raw-solver test drives the solver directly and
-    // pins the compressibility itself, so seed psi_precond = psi to keep the acoustic time
-    // term at the intended psi (byte-identical to the pre-preconditioning behaviour).
+    // a driver-only transient device). This raw-solver test pins compressibility directly,
+    // so seed psi_precond = psi to keep the acoustic time term at the intended psi.
     solver
         .set_field_scalar("psi_precond", &vec![psi; n])
         .expect("set psi_precond field");
-    // `rho` is now a state-layout field (variable-density support); the driver's
-    // `set_density` only sets the uniform constant, so initialise the per-cell field
-    // to rho_ref here. With no refresh it stays constant (== the incompressible
-    // behaviour); a barotropic refresh `rho = rho_ref + psi*p` makes it compressible.
+    // `rho` is a state-layout field (variable-density support); the driver's `set_density`
+    // only sets the uniform constant, so initialise the per-cell field to rho_ref. With no
+    // refresh it stays constant (incompressible); a barotropic refresh makes it compressible.
     solver
         .set_field_scalar("rho", &vec![fluid.density as f64; n])
         .expect("init rho field");
@@ -184,11 +172,9 @@ fn wake_stats(uy: &[f64]) -> (f64, f64, f64) {
     (var.sqrt(), tmin, tmax)
 }
 
-/// CORE THESIS: at `psi = 0` the all-Mach pressure-based model reduces exactly to
-/// the incompressible solver and must shed a Kármán vortex street on the obstacle
-/// default — bounded, with a self-sustained bidirectional `u_y` oscillation in the
-/// wake. (Same signature the incompressible gate asserts; this proves the new
-/// pressure-based model is correct and f32-safe.)
+/// At `psi = 0` the all-Mach pressure-based model reduces exactly to the incompressible
+/// solver and must shed a Kármán vortex street on the obstacle default — bounded, with a
+/// self-sustained bidirectional `u_y` oscillation in the wake.
 #[test]
 fn allmach_psi_zero_sheds_vortex_street() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -304,8 +290,7 @@ fn drive_allmach_steady(
             .iter()
             .map(|(x, y)| (x * x + y * y).sqrt())
             .fold(0.0_f64, f64::max);
-        // The global (time-accurate) dt ramps safely from rest, throttled by the
-        // smallest cut-cell sliver: dt_global = cfl*min_cell/adv_speed.
+        // Global (time-accurate) dt = cfl*min_cell/adv_speed, throttled by the smallest sliver.
         let gdt = convective_next_dt(d, prev_max, min_cell, solver.dt() as f64);
         solver.set_dt(gdt as f32);
         if lts {
@@ -328,14 +313,10 @@ fn drive_allmach_steady(
     ke_curve
 }
 
-/// TRUE COMPRESSIBILITY (variable density): refresh `rho = rho_ref + psi*p` from the
-/// barotropic EOS each step, so the Rhie–Chow mass flux carries a per-cell density and
-/// the continuity is genuinely compressible (`div(rho*U)=0`, not `div(U)=0`). The
-/// feedback loop rho<->p<->U must stay bounded and stable, and the density must vary
-/// across the domain in response to the pressure field. This is the property the
-/// density-based solver loses in f32 (it can't resolve the O(1e-4) pressure signal);
-/// here `p` is gauge pressure so both `p` and the induced `rho` variation are
-/// full-precision.
+/// Variable density: refresh `rho = rho_ref + psi*p` from the barotropic EOS each step,
+/// so the Rhie–Chow mass flux carries a per-cell density and the continuity is genuinely
+/// compressible (`div(rho*U)=0`, not `div(U)=0`). The feedback loop rho<->p<->U must stay
+/// bounded and the density must vary across the domain in response to the pressure field.
 #[test]
 fn allmach_variable_density_compressible() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -356,7 +337,7 @@ fn allmach_variable_density_compressible() {
     let mut prev_max = 0.0;
     let mut diverged = false;
     for _ in 0..400 {
-        refresh_rho(&mut solver, rho_ref, psi); // variable density from the EOS
+        refresh_rho(&mut solver, rho_ref, psi);
         let gdt = convective_next_dt(&d, prev_max, min_cell, solver.dt() as f64);
         solver.set_dt(gdt as f32);
         if solver.step_with_stats().is_err() {
@@ -395,13 +376,12 @@ fn allmach_variable_density_compressible() {
     );
 }
 
-/// LOCAL PSEUDO-TIME (Local Time Stepping) steady-state acceleration: on a genuinely
-/// sliver-throttled steady case (Re~33, kept steady by higher viscosity but at a speed
-/// high enough that the global time-accurate dt is throttled to the tiny cut-cell
-/// sliver CFL), per-cell `dt_local` lets each bulk cell march at the global dt scaled
-/// by its size (capped). Within a fixed iteration budget LTS must develop the global
-/// flow (total kinetic energy) substantially more than the throttled global march, and
-/// stay bounded (the earlier unbounded `cfl*h/|u|` form blew up to ~1e14 from rest).
+/// Local Time Stepping steady-state acceleration: on a sliver-throttled steady case
+/// (Re~33, kept steady by higher viscosity but fast enough that the global time-accurate
+/// dt is throttled to the tiny cut-cell sliver CFL), per-cell `dt_local` lets each bulk
+/// cell march at the global dt scaled by its size (capped). Within a fixed iteration
+/// budget LTS must develop the global flow (total kinetic energy) substantially more than
+/// the throttled global march, and stay bounded.
 #[test]
 fn lts_accelerates_steady_obstacle() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -439,7 +419,7 @@ fn lts_accelerates_steady_obstacle() {
         at(&lts, 50) / norm, at(&lts, 150) / norm, l_final / norm
     );
     assert!(l_final.is_finite() && g_final.is_finite() && l_final > 0.0, "non-finite/zero KE");
-    // Bounded: LTS must not blow up (the earlier unbounded `cfl*h/|u|` dt_local hit ~1e14).
+    // Bounded: LTS must not blow up.
     let lmax = lts.iter().cloned().fold(0.0_f64, f64::max);
     assert!(
         lmax < 1e6 * g_final.max(1e-12),

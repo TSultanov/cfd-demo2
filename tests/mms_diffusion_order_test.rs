@@ -3,7 +3,7 @@
 //! upload per-cell source values and verify the discrete solution converges to the exact
 //! solution at design order under mesh refinement.
 //!
-//! Discrete equation solved (see `unified_assembly.rs` sign conventions):
+//! Discrete equation solved:
 //!   dphi/dt - kappa * lap(phi) = S       with kappa = 1
 //! so a manufactured `phi*` requires `S = dphi*/dt - lap(phi*)`.
 #![cfg(feature = "dev-tests")]
@@ -25,9 +25,8 @@ use cfd2::solver::{SolverConfig, TimeScheme, UnifiedSolver};
 use mms_support::{assert_convergence_order, field_errors, max_cell_extent, run_to_steady};
 use std::f64::consts::PI;
 
-// Absolute steady-state detection threshold. The f32 state jitters at a few ULPs of the
-// O(1) solution amplitude (up to ~2.5e-6 observed for the Neumann case at n=64), so this
-// is the practical floor; it stays orders of magnitude below the finest-level
+// Absolute steady-state threshold: f32 jitters a few ULPs of the O(1) solution
+// amplitude, so this is the practical floor; still well below the finest-level
 // discretization error (~1e-4).
 const STEADY_TOL: f64 = 4e-6;
 const STEADY_MAX_STEPS: usize = 200;
@@ -199,11 +198,10 @@ fn steady_perface_dirichlet_second_order() {
 }
 
 /// The per-face Dirichlet study repeated on a two-sided geometrically graded
-/// mesh (Arc M generality gate): smallest cells at every wall, center/wall
-/// ratio 4 on both axes. Orders are fitted against the MAX cell extent (see
-/// `max_cell_extent`) — second order must hold, proving the discretization
-/// (including the distance-weighted face-coefficient interpolation) is not
-/// uniform-mesh-only.
+/// mesh: smallest cells at every wall, center/wall ratio 4 on both axes. Orders
+/// are fitted against the MAX cell extent — second order must hold, proving the
+/// discretization (including the distance-weighted face-coefficient
+/// interpolation) is not uniform-mesh-only.
 #[test]
 fn steady_perface_dirichlet_graded_second_order() {
     let exact = |x: f64, y: f64| (PI * x).cos() * (PI * y).cos();
@@ -249,9 +247,8 @@ fn steady_perface_dirichlet_graded_second_order() {
         hs.push(max_cell_extent(&mesh));
         errs.push(field_errors(&mesh, &phi, exact).l2);
     }
-    // Measured June 2026 (first run): order 2.150, finest l2 7.95e-5 at
-    // h_eff 0.0287 — better than the uniform line at matched h_eff (the
-    // refinement sits where the boundary-layer curvature is). Cap ~2x.
+    // Graded beats the uniform line at matched h_eff (refinement sits where the
+    // boundary-layer curvature is). Cap ~2x measured.
     assert_convergence_order("steady_perface_dirichlet_graded", &hs, &errs, 2.0, 0.25, 1.6e-4);
 }
 
@@ -326,7 +323,6 @@ fn transient_bdf2_temporal_second_order() {
         dts.push(dt);
         errs.push(err.l2);
     }
-    // Observed error constant: err ~ 0.5*dt^2 (3.3e-4 at dt = 0.025).
     assert_convergence_order("transient_bdf2", &dts, &errs, 2.0, 0.3, 5e-4);
 }
 

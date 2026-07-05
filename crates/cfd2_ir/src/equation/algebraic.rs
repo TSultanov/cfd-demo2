@@ -4,8 +4,7 @@
 // solved fields -- primitive-variable recovery (`rho*u = rho_u`), equation-of-
 // state closures (`p = (gamma-1)*rho_e - ...`), and similar constraints -- as
 // math, and mechanically lowers them to the implicit/explicit source rows the
-// coupled assembly already understands. This replaces hand-written
-// "pseudo-source equation" blocks in model definitions.
+// coupled assembly already understands.
 //
 // Compilation contexts: like `typed_ast.rs`, this file is compiled both as
 // `cfd2_ir::equation::algebraic` and (via include!) inside build.rs as a
@@ -30,8 +29,7 @@
 // Every row is scaled by the engine coefficient `inv_dt` (1/dt, preferring
 // dtau during dual-time stepping) so algebraic rows match the magnitude of
 // the `ddt(..)` rows they couple to. The coefficient construction rule is
-// deterministic and reproduces the historical hand-written compressible
-// recovery rows bit-for-bit:
+// deterministic:
 //
 //   - factors multiply left-to-right in declaration order: sign (`-1` if the
 //     signed summand is negative), then non-mag_sqr frozen factors, then
@@ -53,10 +51,6 @@ use crate::dimensions::{Dimensionless, DivDim, InvTime, MulDim, UnitDimension};
 // `UnitDim` is the runtime unit representation; reachable in both compilation
 // contexts through the `dimensions` re-export.
 use crate::dimensions::UnitDim;
-
-// ============================================================================
-// Untyped algebraic expression tree
-// ============================================================================
 
 /// Reference to a named uniform model parameter (e.g. `eos_gm1`).
 ///
@@ -117,10 +111,6 @@ pub struct AlgebraicEquation {
     pub lhs: AlgExpr,
     pub rhs: AlgExpr,
 }
-
-// ============================================================================
-// Lowering
-// ============================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Factor {
@@ -498,10 +488,6 @@ pub fn add_algebraic_equation(
     Ok(())
 }
 
-// ============================================================================
-// Typed wrappers
-// ============================================================================
-
 /// Typed reference to a named uniform model parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TypedParamRef<D: UnitDimension> {
@@ -688,7 +674,7 @@ mod tests {
 
     #[test]
     fn velocity_recovery_lowers_to_handwritten_shape() {
-        // rho_u = rho * u, target u: matches the historical hand-written form
+        // rho_u = rho * u, target u lowers to:
         //   fvm::source_coeff(-1 * (rho * inv_dt), u) + fvm::source_coeff(inv_dt, rho_u)
         let eq = equation(
             u(),

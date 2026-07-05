@@ -1,39 +1,28 @@
 //! EVIDENCE probe for the GPU zero-flux BDF2 tolerance gate
 //! (tests/ale_zero_flux_equivalence_test.rs): the moving-volume BDF2 ddt of
-//! the ALE kernels — with the volume-ratio weights pinned to an EXACT 1.0 by
-//! the `select(vol_old/vol, 1.0, vol_old == vol)` guard — still compiles to
+//! the ALE kernels — with the volume-ratio weights pinned to EXACT 1.0 by the
+//! `select(vol_old/vol, 1.0, vol_old == vol)` guard — still compiles to
 //! bitwise-different arithmetic than the static ddt on Metal, because the
-//! shader compiler's fast-math reassociation of the (textually different)
-//! rhs chains makes different rounding choices. This kernel reproduces the
-//! generated static and ALE ddt blocks verbatim on equal volume histories
-//! and measures the difference: ~23% of lanes differ by exactly 1 ulp
-//! (measured maxd = 2.4e-7 on rhs values of order 1-10, July 2026, Apple
-//! M-series).
+//! shader compiler's fast-math reassociation of the (textually different) rhs
+//! chains rounds differently. This kernel reproduces the generated static and
+//! ALE ddt blocks verbatim on equal volume histories and measures the
+//! difference: ~23% of lanes differ by exactly 1 ulp (maxd = 2.4e-7 on rhs
+//! values of order 1-10, Apple M-series).
 //!
-//! Consequences (per the M3.2 stage contract: "target byte-identical on CPU;
-//! if reassociation genuinely prevents it, document with evidence and gate
-//! at <= 1 ulp"):
-//!   * CPU zero-flux equivalence stays BITWISE (both engines execute the IR
-//!    /transpiled Rust with strict IEEE semantics — verified green).
+//! Contract: target byte-identical; if reassociation genuinely prevents it,
+//! gate at <= 1 ulp. Consequences:
+//!   * CPU zero-flux equivalence stays BITWISE (strict IEEE IR/transpiled Rust).
 //!   * GPU/Euler zero-flux equivalence stays BITWISE (the Euler path's ALE
-//!     deltas are IEEE identities the compiler cannot reassociate away —
-//!     verified green).
+//!     deltas are IEEE identities the compiler cannot reassociate away).
 //!   * GPU/BDF2 zero-flux equivalence is gated at a small tolerance (the
-//!     1-ulp/step assembly difference is amplified through the nonlinear
-//!     solve feedback over 20 steps to ~6e-5).
+//!     1-ulp/step assembly difference amplifies through the nonlinear solve
+//!     over 20 steps to ~6e-5).
 //! This test asserts the per-evaluation difference stays at the <= 1-ulp
-//! scale — if it ever grows beyond that, the reassociation excuse no longer
-//! holds and the ALE ddt emission must be revisited.
-//!
-//! STALENESS GUARD (adversarial review, July 2026): the WGSL below is a hand
-//! transcription of the July-2026 `emit_ddt_contributions` output shape. If
-//! the emission changes, the evidence kernel would silently test a stale
-//! shape while the zero-flux BDF2 gate keeps its cap. The
-//! `transcription_matches_generated_ddt_shape` test below re-derives the key
-//! transcribed lines from the committed generated WGSL
-//! (generic_coupled_assembly_incompressible_momentum{,_ale}.wgsl — the same
-//! files the hash-pinned snapshot covers), so any ddt-shape change fails HERE
-//! too, prompting a transcription refresh.
+//! scale; if it grows beyond that, the reassociation excuse no longer holds
+//! and the ALE ddt emission must be revisited. The companion
+//! `transcription_matches_generated_ddt_shape` test re-derives the key
+//! transcribed lines from the committed generated WGSL so any ddt-shape change
+//! fails here too, prompting a transcription refresh.
 #![cfg(feature = "meshgen")]
 
 const WGSL: &str = r#"

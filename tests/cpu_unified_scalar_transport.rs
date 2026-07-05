@@ -2,7 +2,7 @@
 //! the existing MMS tests and the GUI use), selected via the `CFD2_BACKEND`
 //! environment variables. Validates that the scalar-transport manufactured
 //! solution converges on the CPU backend for both engines (interpreter and
-//! transpiled) — i.e. the existing harness works on the CPU backend, GPU-free.
+//! transpiled).
 #![cfg(feature = "cpu")]
 
 use cfd2::solver::gpu::enums::GpuBoundaryType;
@@ -114,7 +114,6 @@ fn solve_steady_unified(n: usize) -> (Mesh, Vec<f64>) {
 
 #[test]
 fn cpu_unified_scalar_transport_converges() {
-    // Validate the CPU backend through UnifiedSolver for both engines.
     for engine in ["interpreter", "transpiled"] {
         std::env::set_var("CFD2_BACKEND", "cpu");
         std::env::set_var("CFD2_CPU_ENGINE", engine);

@@ -1,44 +1,31 @@
 //! Persistent worker pool: the execution mechanism behind [`super::parallel`].
 //!
-//! The scoped-thread body it replaces spawned and joined fresh OS threads for
-//! EVERY parallel region (~100-280 µs per region at 16 threads on this class of
-//! hardware, flat in region size). The obstacle bench issues ~15-20k regions
-//! per step inside the Schur inner solve alone, which made the CPU backend
-//! launch-LATENCY-bound rather than bandwidth-bound: a 118k-cell BLAS-1 op
-//! measured 283 µs on 16 scoped threads vs 66 µs serial. Persistent workers
-//! park between bursts and spin briefly between back-to-back regions, cutting
-//! region launch overhead to the few-µs range.
+//! Persistent workers avoid spawning/joining fresh OS threads for every parallel
+//! region; they park between bursts and spin briefly between back-to-back regions.
 //!
-//! Handoff design notes (each rejected alternative was MEASURED to regress the
-//! fat-chunk nozzle regime):
+//! Handoff design (each choice matters for the heterogeneous-core regime):
 //! - Per-worker `AtomicPtr` job slots + `park`/`unpark`, NOT a shared
-//!   mutex+condvar: `notify_all` makes 15 woken workers serially re-acquire one
-//!   mutex (thundering-herd convoy), delaying region STARTUP enough to inflate
-//!   every fat parallel phase ~10-20%.
+//!   mutex+condvar: `notify_all` makes woken workers serially re-acquire one
+//!   mutex (thundering-herd convoy), delaying region startup.
 //! - DYNAMIC task claiming (atomic counter), with callers OVER-SPLITTING fat
-//!   regions into more tasks than workers: this machine class is
-//!   heterogeneous (12 P + 4 E cores), so equal static chunks make the E-core
-//!   chunks the region's critical path — static assignment measured ~15%
-//!   SLOWER than scoped threads at 16 threads (a parked pool worker stays on
-//!   its E-core with a full-size chunk; fresh scoped threads get re-placed
-//!   every region). With over-split dynamic claiming, fast cores absorb more
-//!   tasks and a late-waking or slow worker costs at most one small task, not
-//!   a full chunk. Task boundaries never affect results (per-element
-//!   arithmetic is index-determined; reductions use fixed sub-chunks).
+//!   regions into more tasks than workers: on heterogeneous cores (P + E) equal
+//!   static chunks make the E-core chunk the critical path. With over-split
+//!   dynamic claiming a slow worker costs at most one small task, not a full
+//!   chunk. Task boundaries never affect results (per-element arithmetic is
+//!   index-determined; reductions use fixed sub-chunks).
 //! - The job lives on the caller's stack; no per-region allocation.
 //!
 //! The pool owns NO chunking policy: callers pass a task count and a task body,
 //! and every index in `0..tasks` runs exactly once on some thread (the calling
 //! thread participates too). Which thread runs which task is irrelevant to
-//! results — the bit-exactness contract lives entirely in the callers' chunk
-//! math, which is unchanged from the scoped-thread era.
+//! results — the bit-exactness contract lives entirely in the callers' chunk math.
 //!
 //! Concurrency: one job runs at a time. A caller that finds the pool busy
 //! (another solver instance mid-region, or a nested call) executes its tasks
-//! inline on its own thread — correct (same arithmetic), merely unaccelerated —
-//! so concurrent test solvers and accidental nesting can never deadlock.
+//! inline on its own thread — correct, merely unaccelerated — so concurrent test
+//! solvers and accidental nesting can never deadlock.
 //!
-//! `CFD2_CPU_POOL=0` restores the scoped-thread mechanism (A/B + escape hatch);
+//! `CFD2_CPU_POOL=0` restores the scoped-thread mechanism;
 //! `CFD2_CPU_POOL_SPIN` overrides the worker spin budget (0 = park immediately).
 
 use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
@@ -46,10 +33,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::Thread;
 
 /// Base pointer of a caller-owned `&mut [T]`, for reconstructing DISJOINT
-/// sub-slices inside pool tasks (the closure-capture equivalent of the
-/// `split_at_mut` chains the scoped-thread code used). Callers guarantee the
-/// ranges they reconstruct never overlap and that the backing slice outlives
-/// the (blocking) [`run`] call.
+/// sub-slices inside pool tasks. Callers guarantee the ranges they reconstruct
+/// never overlap and that the backing slice outlives the (blocking) [`run`] call.
 pub(crate) struct MutSlicePtr<T>(*mut T);
 unsafe impl<T: Send> Send for MutSlicePtr<T> {}
 unsafe impl<T: Send> Sync for MutSlicePtr<T> {}
@@ -72,10 +57,9 @@ impl<T> MutSlicePtr<T> {
 /// One parallel region. Heap-allocated (`Arc`): each published mailbox slot
 /// holds an OWNED reference (`Arc::into_raw`), so a straggler worker that only
 /// wakes after the region completed still finds live memory — it claims
-/// `next >= tasks` and exits without ever touching the closure. (A stack-job
-/// variant segfaulted exactly there: with dynamic claiming, fast threads can
-/// finish ALL tasks and let [`run`] return while a slow worker's mailbox still
-/// points at the dead stack frame.)
+/// `next >= tasks` and exits without ever touching the closure. (A stack-owned
+/// job would dangle: fast threads can finish ALL tasks and let [`run`] return
+/// while a slow worker's mailbox still points at the freed frame.)
 ///
 /// `data`/`call` type-erase the caller's closure without a fat-pointer
 /// transmute: `call` is a monomorphized shim that downcasts. `data` borrows
@@ -117,10 +101,8 @@ const MAX_WORKERS: usize = 64;
 
 /// Chunk-helper over-split factor: regions are split into up to
 /// `workers * OVERSPLIT` tasks so dynamic claiming can balance heterogeneous
-/// (P/E) cores — a slow core finishes early tasks late but only ever holds one
-/// small task, not a `1/workers` share of the region. Measured on the 750k-cell
-/// nozzle at 16 threads (12P+4E): equal static chunks lose ~15% to the E-core
-/// critical path. Task boundaries never affect results (see module docs).
+/// (P/E) cores — a slow core only ever holds one small task, not a `1/workers`
+/// share of the region. Task boundaries never affect results (see module docs).
 pub(crate) const OVERSPLIT: usize = 4;
 
 struct Shared {
@@ -289,9 +271,8 @@ pub(crate) fn run<F: Fn(usize) + Sync>(tasks: usize, workers: usize, f: F) {
     }
 }
 
-/// Scoped-thread mechanism behind `CFD2_CPU_POOL=0` (A/B + escape hatch):
-/// fresh threads per region as before the pool, with the same dynamic task
-/// claiming as the pool path.
+/// Scoped-thread mechanism behind `CFD2_CPU_POOL=0`: fresh threads per region,
+/// with the same dynamic task claiming as the pool path.
 fn run_scoped<F: Fn(usize) + Sync>(tasks: usize, workers: usize, f: &F) {
     let next = AtomicUsize::new(0);
     std::thread::scope(|s| {

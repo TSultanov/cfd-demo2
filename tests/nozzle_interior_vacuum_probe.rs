@@ -1,25 +1,12 @@
 //! GATE: the shipping CD-nozzle demo never reaches true vacuum, anywhere.
 //!
 //! The all-Mach gauge-pressure EOS has absolute pressure `P_abs = P_REF + p`, with
-//! `P_REF = rho_ref / psi` (≈ 0.0245 at the demo's effective psi ≈ 50). VACUUM is
-//! `P_abs = 0`, i.e. gauge `p = -P_REF`. The shipping nozzle is now driven by a
-//! PRESSURE INLET + SUPERSONIC (extrapolated) OUTLET (`ALLMACH_THERMAL_NOZZLE`):
-//! the inlet gauge pressure is pinned POSITIVE (P_abs ≈ +0.09) and the outlet FLOATS —
-//! there is no specified back-pressure at all, so there is not even a sub-vacuum
-//! *target* anywhere. This gate LOCKS IN the empirical fact that the realized absolute
-//! pressure stays strictly POSITIVE everywhere (interior AND outlet region), and the
-//! density never approaches the EOS floor — the demo never realizes vacuum.
-//!
-//! (Historical note: an earlier velocity-inlet demo pinned a sub-vacuum *target*
-//! `-0.045` at the outlet that the solution always relaxed above; that "soft target"
-//! finding is preserved in `tests/nozzle_backpressure_sweep_probe.rs`. The pressure-inlet
-//! driving removes the sub-vacuum specification entirely; see
-//! `tests/nozzle_pressure_inlet_probe.rs`.) The shipped density floor
-//! (`rho ≥ psi·1e-5`, commit 2e62297) independently guarantees positive density.
-//!
-//! Build: the bundled CD nozzle (`generate_structured_nozzle_mesh`) driven with the
-//! `ALLMACH_THERMAL_NOZZLE` GUI defaults (pressure inlet, effective psi ≈ 50), exactly
-//! as the shipping demo, via the shared `SolverDriver`.
+//! `P_REF = rho_ref / psi`. VACUUM is `P_abs = 0`, i.e. gauge `p = -P_REF`. The nozzle
+//! is driven by a PRESSURE INLET + SUPERSONIC (extrapolated) OUTLET
+//! (`ALLMACH_THERMAL_NOZZLE`): the inlet gauge pressure is pinned POSITIVE and the
+//! outlet FLOATS — no specified back-pressure. This gate asserts the realized absolute
+//! pressure stays strictly POSITIVE everywhere (interior AND outlet region) and the
+//! density never approaches the EOS floor (`rho ≥ psi·1e-5`).
 
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
@@ -58,21 +45,16 @@ fn nozzle(nx: usize, ny: usize) -> Mesh {
     )
 }
 
-/// Build the nozzle with the SHIPPING GUI defaults (`ALLMACH_THERMAL_NOZZLE`): the
-/// driver derives the effective `psi` from the fluid's real EOS times the demo
-/// exaggeration, and `apply_params` pins the negative outlet back-pressure. We seed
-/// the all-Mach state fields (psi / psi_precond / rho / rho_t_ref / T) the same way
-/// the validated raw-solver supersonic test does, using that SAME derived `psi`.
+/// Build the nozzle with the `ALLMACH_THERMAL_NOZZLE` GUI defaults: the driver derives
+/// the effective `psi` from the fluid's real EOS times the demo exaggeration, and
+/// `apply_params` pins the inlet pressure. Returns the derived `psi`.
 fn build_nozzle(fluid: &Fluid, mesh: &Mesh) -> (UnifiedSolver, f64) {
-    let d = ALLMACH_THERMAL_NOZZLE; // real psi≈8.3e-6, pressure inlet = 1 MPa gauge
+    let d = ALLMACH_THERMAL_NOZZLE;
     let params = d.to_runtime_params(fluid.density as f32, fluid.viscosity as f32, fluid.eos);
     let psi = params.compressibility_psi.max(0.0) as f64;
     let n = mesh.num_cells();
-    // Exactly the SHIPPING GUI path: develop FROM REST (rest velocity + flat gauge p=0)
-    // and let the driver seed the all-Mach EOS fields (psi / psi_precond floored for
-    // acoustic damping / rho / rho_t_ref / T) and pin the 1 MPa inlet pressure. No
-    // manual freestream / no-preconditioning seeding — that produced an unphysical
-    // near-inlet low-density artifact at the rocket-scale pressure.
+    // Develop FROM REST (rest velocity + flat gauge p=0); the driver seeds the all-Mach
+    // EOS fields (psi / psi_precond / rho / rho_t_ref / T) and pins the inlet pressure.
     let DriverBuild { mut driver, .. } = pollster::block_on(SolverDriver::build(
         mesh,
         allmach_thermal_model().expect("allmach_thermal model"),
@@ -95,8 +77,8 @@ fn nozzle_interior_vacuum_probe() {
     let inlet_pressure = ALLMACH_THERMAL_NOZZLE.inlet_pressure as f64; // pressure-inlet drive
     let (mut solver, psi) = build_nozzle(&air, &mesh);
 
-    // From rest the flow develops slower; run long enough to reach the choked,
-    // supersonic CD profile (matching the demo's 1200-step horizon, trimmed).
+    // From rest the flow develops slowly; run long enough to reach the choked,
+    // supersonic CD profile.
     let steps = 1000;
     for s in 0..steps {
         if solver.step_with_stats().is_err() {
@@ -178,10 +160,8 @@ fn nozzle_interior_vacuum_probe() {
          pins a POSITIVE inlet gauge and the outlet floats — no sub-vacuum spec anywhere."
     );
 
-    // GATE. The demo NEVER reaches vacuum: absolute pressure is strictly positive over
-    // the whole field — both the interior AND the outlet region, even though the outlet
-    // back-pressure (-0.045) names a sub-vacuum target. If a future change made the
-    // outlet pin actually realize vacuum (or drove the interior below it), these fail.
+    // GATE. Absolute pressure must be strictly positive over the whole field — both the
+    // interior AND the outlet region.
     assert!(all.5 == n, "scan should cover all cells");
     assert!(
         interior_min_pabs > 0.0,
@@ -193,11 +173,9 @@ fn nozzle_interior_vacuum_probe() {
         "outlet region realized sub-vacuum: min P_abs = {outlet_min_pabs:+.6} (the soft \
          Dirichlet target became a hard sub-vacuum pin)"
     );
-    // The EOS density floor (= psi * absolute-pressure floor, ~8e-11) must stay orders
-    // of magnitude below the realized density — an independent guarantee that the flow
-    // is nowhere near the vacuum limit. (At 1 MPa the supersonic expansion legitimately
-    // drives the density well below the old low-pressure case, so the guarantee is a
-    // large margin over the floor, not a fixed absolute density.)
+    // The EOS density floor (= psi * absolute-pressure floor) must stay orders of
+    // magnitude below the realized density — an independent guarantee that the flow is
+    // nowhere near the vacuum limit.
     let floor = psi * 1.0e-5;
     assert!(
         all.4 > 1.0e6 * floor,

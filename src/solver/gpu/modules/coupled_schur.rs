@@ -34,14 +34,9 @@ pub struct CoupledSchurKernelIds {
 
 /// Default inner pressure-relaxation sweep count for the Schur preconditioner.
 ///
-/// With the heavy-ball relaxation (see [`heavy_ball_omega`]) far fewer sweeps
-/// are needed than the old plain-Jacobi count of `min(20 + sqrt(n)/2, 200)`:
-/// measured on the fine channel-obstacle (118k cells) the optimum is ~48-64
-/// sweeps, while the GUI default meshes (~5k cells) sit near 30. `sweeps_cap`
-/// comes from the model's `ModelPreconditionerSpec::Schur` (64 for
+/// `sweeps_cap` comes from the model's `ModelPreconditionerSpec::Schur` (64 for
 /// Poisson-like symmetric pressure blocks; 32 for the mass-term-boosted
-/// all-Mach block, which saturates by ~24-32 sweeps).
-/// `CFD2_GPU_SCHUR_SWEEPS` overrides.
+/// all-Mach block). `CFD2_GPU_SCHUR_SWEEPS` overrides.
 pub fn default_pressure_sweeps(num_cells: u32, sweeps_cap: u32) -> usize {
     std::env::var("CFD2_GPU_SCHUR_SWEEPS")
         .ok()
@@ -57,18 +52,14 @@ pub fn default_pressure_sweeps(num_cells: u32, sweeps_cap: u32) -> usize {
 /// `x_{k+1} = (1-w)*x_{k-1} + w*(x_k + D^-1 r_k)`, i.e. second-order
 /// Richardson (heavy ball) with momentum `w-1`. For a SYMMETRIC
 /// Jacobi-preconditioned pressure block the spectrum sits on (0, 2), for
-/// which this form is the optimal stationary second-order iteration, and its
-/// stability threshold (eigenvalues < 2) is the same one plain Jacobi
-/// (`w = 1`) already relies on. `w = 1.95` measured best on the fine-mesh
-/// channel-obstacle (FGMRES 60 -> ~15 iters/solve, step 2.45 -> 0.59s).
+/// which this form is the optimal stationary second-order iteration; `w = 1.95`
+/// is the tuned default.
 ///
 /// CAVEAT: the stability region is an ellipse that collapses onto the real
 /// interval as `w -> 2` (imaginary tolerance ~0.025 at 1.95, ~0.28 at 1.6).
 /// Models whose pressure row is upwinded/non-symmetric (the all-Mach family's
-/// deferred-Newton flux Jacobian) must declare a lower explicit omega in
-/// their `ModelPreconditionerSpec::Schur`; at 1.95 the rocket-scale nozzle
-/// demo excites the near-vacuum degeneracy (see
-/// `tests/nozzle_interior_vacuum_probe.rs`). `CFD2_GPU_SCHUR_OMEGA` overrides.
+/// deferred-Newton flux Jacobian) must declare a lower explicit omega in their
+/// `ModelPreconditionerSpec::Schur`. `CFD2_GPU_SCHUR_OMEGA` overrides.
 pub fn heavy_ball_omega(model_omega: f32) -> f32 {
     let base = if model_omega == 1.0 { 1.95 } else { model_omega };
     std::env::var("CFD2_GPU_SCHUR_OMEGA")
@@ -120,8 +111,8 @@ pub struct CoupledSchurModule {
     amg: Option<AmgResources>,
     amg_level0_state_override: Option<wgpu::BindGroup>,
     /// Per-device pipeline cache, kept so the lazily-built AMG hierarchy
-    /// ([`Self::ensure_amg_resources`]) reuses cached compiled pipelines after a
-    /// topology refresh reconstructed this module (M5 stage 1).
+    /// ([`Self::ensure_amg_resources`]) reuses cached pipelines after a topology
+    /// refresh reconstructs this module.
     cache: Arc<PipelineCache>,
 }
 

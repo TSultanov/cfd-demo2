@@ -1,16 +1,7 @@
-//! Compare compressible and incompressible lid-driven cavity solutions
-//!
-//! NOTE: Both solvers ALREADY use FGMRES by default:
-//! - Incompressible: max_restart=30, tol=1e-6, max_iters=100
-//! - Compressible: max_restart=60, tol=1e-10, max_iters=200
-//!
-//! The compressible solver uses TIGHTER tolerances and MORE iterations,
-//! yet still shows ~46% disagreement with the incompressible solver.
-//!
-//! This test documents the current disagreement and investigates if the
-//! difference is due to:
-//! 1. Linear solver accuracy (already using FGMRES for both)
-//! 2. Physical formulation differences (viscous flux, pressure coupling)
+//! Compare compressible and incompressible lid-driven cavity solutions.
+//! Both use FGMRES; the compressible solver uses tighter tolerances yet still
+//! disagrees ~46%, so the difference is physical (viscous flux / pressure
+//! coupling), not linear-solver accuracy.
 
 use cfd2::solver::gpu::enums::GpuBoundaryType;
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
@@ -198,8 +189,7 @@ fn lid_driven_cavity_compressible_vs_incompressible_both_fgmres() {
     println!("  or explicit vs implicit treatment of certain terms.");
     println!("========================================\n");
 
-    // At low Mach, compressible and incompressible should be within ~10%
-    // Current: ~46% error (known limitation)
+    // Low-Mach should agree within ~10%; currently ~46% (known limitation), so the bound is loose.
     assert!(rel_error < 0.50,
         "Compressible and incompressible solutions differ by {:.1}%. This suggests viscous flux issues.",
         rel_error * 100.0);

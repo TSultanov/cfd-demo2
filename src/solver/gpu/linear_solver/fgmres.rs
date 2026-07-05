@@ -891,11 +891,9 @@ impl FgmresWorkspace {
     ///
     /// Together with [`Self::restore_x`] this implements the restart-boundary
     /// monotonicity guard: f32 Arnoldi can lose orthogonality on hard
-    /// preconditioned systems, and a restart cycle may then APPLY a solution
-    /// update that increases the true residual (observed June 2026 on the
-    /// coupled incompressible system: residual growing across restarts by
-    /// orders of magnitude, ending in NaN). The host restart loop snapshots
-    /// the best-so-far `x` and restores it when a cycle made things worse.
+    /// preconditioned systems, so a restart cycle may apply a solution update
+    /// that increases the true residual. The host restart loop snapshots the
+    /// best-so-far `x` and restores it when a cycle made things worse.
     pub fn snapshot_x<'a>(&'a self, core: &FgmresCore<'a>, x: &'a wgpu::Buffer, label: &str) {
         let workgroups = workgroups_for_size(self.n);
         let (dispatch_x, dispatch_y) = dispatch_2d(workgroups);
@@ -1318,7 +1316,7 @@ impl FgmresWorkspace {
             crate::count_submission!("FGMRES", "norm_sq_reduce_final");
         }
 
-        // Restore params for subsequent vector ops, just in case.
+        // Restore params for subsequent vector ops.
         write_params(&core, &partial_params);
 
         // Read scalar via async map + polling loop (avoids blocking the whole device).
@@ -1465,9 +1463,8 @@ fn create_vector_bind_group<'a>(
 /// The inner restart loop needs, for each Arnoldi column `j`, four `bgl_vectors`
 /// bind groups (SpMV input, norm-partial, norm-reduce, basis-normalize). Every one
 /// binds only workspace-owned buffers (`basis`, `z_storage`, `w`, `temp`,
-/// `dot_partial`) at fixed offsets, so they are identical on every solve. Building
-/// them per iteration was the dominant CPU cost of the coupled solve (~4 reflection
-/// `device.create_bind_group` calls × ~hundreds of iterations per step). Because a
+/// `dot_partial`) at fixed offsets, so they are identical on every solve; building
+/// them per iteration was the dominant CPU cost of the coupled solve. Because a
 /// `wgpu::BindGroup` is an owned Arc handle (not a Rust borrow) these can live on
 /// the workspace and be indexed by `j` in the hot loop instead.
 struct VectorBgCache {
@@ -1484,7 +1481,7 @@ struct VectorBgCache {
 /// Build the [`VectorBgCache`]. The `(vec_x, vec_y, vec_z)` operand order for each
 /// bind group MUST match the inner loop in
 /// [`encode_fgmres_solve_once_with_preconditioner`] exactly, so the cached bind
-/// groups are byte-for-byte substitutes for the ones that loop used to build.
+/// groups are byte-for-byte substitutes for what that loop would build inline.
 #[allow(clippy::too_many_arguments)]
 fn build_vector_bg_cache(
     device: &wgpu::Device,
@@ -2350,14 +2347,13 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         let params_offset = (j as u64) * FGMRES_PARAMS_STRIDE_BYTES;
         let iter_offset = (j as u64) * FGMRES_ITER_PARAMS_STRIDE_BYTES;
 
-        // Select this column's params into their dedicated buffers in ONE batched
-        // blit section at the iteration top. Because each distinct concurrently-live
-        // value now has its own buffer (b_params=iter, b_params_reduce=reduce,
-        // b_iter_params=j, b_iter_params_hess=hessenberg-index), nothing has to be
-        // swapped or restored mid-iteration, so all the compute passes below run as
-        // one uninterrupted compute-encoder run (3 blit sections -> 1). Byte-identical:
-        // every pass reads the same table row it read before (only the reduce-final
-        // pass rebinds to the dedicated buffers via `bg_params_reduce`).
+        // Select this column's params into their dedicated buffers in one batched
+        // blit section at the iteration top. Each concurrently-live value has its
+        // own buffer (b_params=iter, b_params_reduce=reduce, b_iter_params=j,
+        // b_iter_params_hess=hessenberg-index), so nothing has to be swapped or
+        // restored mid-iteration and all the compute passes below run as one
+        // uninterrupted compute-encoder run. Only the reduce-final pass rebinds to
+        // the dedicated buffers, via `bg_params_reduce`.
         encoder.copy_buffer_to_buffer(
             core.b_params_table_iter,
             params_offset,
@@ -2392,8 +2388,7 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
 
         precondition(j, encoder, vj, z_buf.clone());
 
-        // Cached per-column bind group: identical to
-        // `(vec_x=z_storage[j], vec_y=w, vec_z=temp)` built inline before.
+        // Cached per-column bind group `(vec_x=z_storage[j], vec_y=w, vec_z=temp)`.
         let spmv_bg = &core.spmv_bgs[j];
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -2491,7 +2486,7 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         // Reduce-Final reads the *reduce* params (n=num_dot_groups) and the
         // hessenberg-index iter_params — supplied by `bg_params_reduce`, which binds
         // the dedicated `b_params_reduce` / `b_iter_params_hess` buffers written at
-        // the loop top. (Was: two mid-iteration copies clobbering b_params/b_iter_params.)
+        // the loop top.
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("FGMRES Reduce Final & Finish Norm"),
@@ -2505,14 +2500,12 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
             pass.dispatch_workgroups(1, 1, 1);
         }
 
-        // Cached per-column bind group: identical to
-        // `(vec_x=w, vec_y=basis[j+1], vec_z=temp)` built inline before.
+        // Cached per-column bind group `(vec_x=w, vec_y=basis[j+1], vec_z=temp)`.
         let scale_bg = &core.scale_bgs[j];
 
         // Normalize reads b_params.n = n (iter value) — still live from the loop-top
         // copy (b_params was never clobbered because the reduce pass used its own
-        // buffer), and b_iter_params = j (also from the loop top). Both mid-iteration
-        // "restore" copies that used to sit here are now gone.
+        // buffer), and b_iter_params = j (also from the loop top).
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("FGMRES Normalize & Copy"),

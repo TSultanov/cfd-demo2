@@ -1,7 +1,4 @@
-//! GMRES operations kernel generator implementation.
-//!
-//! This module contains the implementation of generate_gmres_ops() which was
-//! ported from the handwritten src/solver/gpu/shaders/gmres_ops.wgsl file.
+//! GMRES/FGMRES operations kernel generator.
 
 use crate::solver::codegen::kernel_wgsl::KernelWgsl;
 use crate::solver::codegen::wgsl_ast::*;
@@ -12,8 +9,6 @@ pub fn generate_gmres_ops() -> KernelWgsl {
     let mut m = Module::new();
 
     m.push(Item::Comment("GMRES/FGMRES GPU Operations".into()));
-
-    // ── Structs ─────────────────────────────────────────────────────────────
 
     m.push(Item::Struct(StructDef::new(
         "GmresParams",
@@ -39,8 +34,6 @@ pub fn generate_gmres_ops() -> KernelWgsl {
         ],
     )));
 
-    // ── Constants ───────────────────────────────────────────────────────────
-
     m.push(Item::Const {
         name: "WORKGROUP_SIZE".into(),
         ty: Type::U32,
@@ -59,9 +52,6 @@ pub fn generate_gmres_ops() -> KernelWgsl {
         expr: Expr::lit_u32(17),
     });
 
-    // ── Helper functions ────────────────────────────────────────────────────
-
-    // global_index
     m.push(Item::Function(Function::new(
         "global_index",
         vec![
@@ -77,7 +67,6 @@ pub fn generate_gmres_ops() -> KernelWgsl {
         )]),
     )));
 
-    // workgroup_index
     m.push(Item::Function(Function::new(
         "workgroup_index",
         vec![
@@ -92,7 +81,6 @@ pub fn generate_gmres_ops() -> KernelWgsl {
         )]),
     )));
 
-    // safe_inverse
     m.push(Item::Function(Function::new(
         "safe_inverse",
         vec![Param::new("val", Type::F32, vec![])],
@@ -115,8 +103,6 @@ pub fn generate_gmres_ops() -> KernelWgsl {
             return_expr(Expr::lit_f32(0.0)),
         ]),
     )));
-
-    // ── Global variables ────────────────────────────────────────────────────
 
     // Group 0: Vectors
     m.push(Item::GlobalVar(GlobalVar::new(
@@ -224,7 +210,6 @@ pub fn generate_gmres_ops() -> KernelWgsl {
         vec![Attribute::Group(3), Attribute::Binding(4)],
     )));
 
-    // Workgroup variable
     m.push(Item::GlobalVar(GlobalVar::new(
         "partial_sums",
         Type::sized_array(Type::F32, 64),
@@ -232,8 +217,6 @@ pub fn generate_gmres_ops() -> KernelWgsl {
         None,
         vec![],
     )));
-
-    // ── Standard parameters for compute shaders ─────────────────────────────
 
     let std_params = vec![
         Param::new(
@@ -938,10 +921,9 @@ pub fn generate_gmres_ops() -> KernelWgsl {
 
     // ── Entry point: guard_copy ─────────────────────────────────────────────
     //
-    // Companion to gmres_logic/restart_guard: conditionally snapshots or
-    // restores the solution vector based on scalars[SCALAR_GUARD_FLAG].
-    // Bind the solution x as vec_y (read_write) and the snapshot buffer as
-    // vec_z (read_write); vec_x is unused.
+    // Snapshots or restores the solution based on scalars[SCALAR_GUARD_FLAG].
+    // Bind solution x as vec_y (read_write) and the snapshot as vec_z
+    // (read_write); vec_x is unused.
     //   flag == 1.0: vec_z = vec_y (snapshot the improved x)
     //   flag == 2.0: vec_y = vec_z (restore the best x after growth)
     {

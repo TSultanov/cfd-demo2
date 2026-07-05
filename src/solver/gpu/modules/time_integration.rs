@@ -21,8 +21,8 @@ impl TimeIntegrationModule {
     pub fn set_dt(&mut self, dt: f32, constants: &mut ConstantsModule, queue: &wgpu::Queue) {
         self.dt = dt;
 
-        // If this is the very first configuration (time=0, step=0), seed dt_old
-        // so that schemes like BDF2 start with a valid ratio (dt/dt_old = 1).
+        // On the very first configuration (time=0, step=0), seed dt_old so BDF2
+        // starts with a valid ratio (dt/dt_old = 1).
         if self.step_count == 0 && self.time == 0.0 {
             self.dt_old = dt;
         }
@@ -79,8 +79,7 @@ impl TimeIntegrationModule {
     ) {
         self.time = time;
         self.dt = dt;
-        self.dt_old = dt; // Best guess on restart if unknown
-                          // step_count? Keep as is or reset? Probably keep as 0 if unknown.
+        self.dt_old = dt; // best guess on restart if unknown
 
         let values = constants.values_mut();
         values.time = self.time as f32;

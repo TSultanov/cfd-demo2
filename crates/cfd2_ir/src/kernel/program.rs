@@ -134,8 +134,7 @@ pub struct KernelProgram {
     /// Typed AST body statements (the main kernel computation).
     pub body: Vec<crate::ast::Stmt>,
     pub side_effects: SideEffectMetadata,
-    /// EOS parameters referenced by this kernel (structured declaration that replaces
-    /// string-scan heuristic in `constants_extra_params_for_program`).
+    /// EOS parameters referenced by this kernel.
     pub eos_params: Vec<ParamSpec>,
 }
 

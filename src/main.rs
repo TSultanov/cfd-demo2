@@ -13,9 +13,6 @@ fn main() -> Result<(), eframe::Error> {
                         let adapter_limits = adapter.limits();
                         let mut limits = adapter_limits.clone();
                         limits.max_storage_buffers_per_shader_stage = 31;
-                        // Ensure we don't exceed adapter limits (though we started with them)
-                        // limits.max_buffer_size = adapter_limits.max_buffer_size;
-                        // limits.max_storage_buffer_binding_size = adapter_limits.max_storage_buffer_binding_size;
 
                         wgpu::DeviceDescriptor {
                             label: Some("CFD Device"),

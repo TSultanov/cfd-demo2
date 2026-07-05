@@ -149,7 +149,6 @@ impl<D: UnitDimension> TypedCoeff<D> {
     /// This is only available for scalar-typed fields, enforcing the constraint
     /// that coefficients must be scalars at compile time.
     pub fn from_field(field: TypedFieldRef<D, Scalar>) -> Self {
-        // We know the field is scalar by construction, so this always succeeds
         let untyped = field.to_untyped();
         Self {
             inner: Coefficient::Field(untyped),
@@ -953,7 +952,6 @@ mod tests {
         let u = TypedFieldRef::<Velocity, Vector2>::new("U");
         let term = typed_fvm::ddt(u);
 
-        // Verify the term can be created and converted
         let untyped = term.to_untyped();
         assert_eq!(untyped.op, TermOp::Ddt);
         assert_eq!(untyped.discretization, Discretization::Implicit);

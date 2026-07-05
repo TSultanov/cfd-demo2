@@ -141,7 +141,6 @@ impl<T: ParamType, D: UnitDimension> ParamPort<T, D> {
         self.wgsl_field_name
     }
 
-    /// Get the runtime physical dimension.
     pub fn runtime_dimension(&self) -> UnitDim {
         self.runtime_dim
     }
@@ -187,22 +186,18 @@ pub struct ParamPortSet {
 }
 
 impl ParamPortSet {
-    /// Get the name of this parameter set.
     pub fn name(&self) -> &'static str {
         self.name
     }
 
-    /// Get the parameter entries in this set.
     pub fn ports(&self) -> &[ParamPortEntry] {
         &self.ports
     }
 
-    /// Get the number of parameters in this set.
     pub fn len(&self) -> usize {
         self.ports.len()
     }
 
-    /// Check if this set is empty.
     pub fn is_empty(&self) -> bool {
         self.ports.is_empty()
     }

@@ -1,63 +1,47 @@
-//! Diagram -> `Mesh` assembly for the meshless engine (M0.4, design §5).
+//! Diagram -> `Mesh` assembly for the meshless engine.
 //!
 //! The per-cell rings of a `MeshlessDiagram` are stitched into one classic
 //! static-pipeline `Mesh` in four passes:
 //!
-//! 1. **Tag-canonical vertex re-evaluation + quantized dedup.** Every ring
-//!    vertex is the intersection of the two planes that created its incident
-//!    edges (`PlaneTag` pair). Instead of trusting the clipped coordinates —
-//!    which differ in last ulps between the 2–3 cells sharing the vertex,
-//!    each having clipped in its own seed-relative frame — the vertex is
-//!    re-evaluated *canonically* from the tag pair: a `Bisector`/`Bisector`
-//!    pair seen from cell `i` is the circumcenter of the sorted seed triple
-//!    `{i, j, k}` computed relative to the smallest-id seed, so all incident
-//!    cells produce the exact same bits; `Bisector`/`Boundary` (or `Box`) is
-//!    the canonical `bisector(min,max)` ∩ line solve; `Boundary`/`Boundary`
-//!    and `Box` corners come from global polyline/domain constants. Dedup on
-//!    the `quantize_point` grid then only has to absorb the *cocircular*
-//!    coincidences it was designed for (different triples of one degenerate
-//!    vertex), exactly like the incumbent (`voronoi.rs:84-92`).
-//! 2. **Sub-tolerance edge merge.** Union-find over the deduped vertices for
-//!    ring edges shorter than `edge_len_eps` — a verbatim policy transplant
-//!    of the incumbent's `DisjointSet` merge (`voronoi.rs:24-51,204-216`,
-//!    smaller-root-wins), iterated with the ring rebuild until stable. Both
-//!    cells incident to a collapsing face see the same merged vertex ids,
-//!    so faces disappear symmetrically and no ring gaps can open.
-//! 3. **Face resolution by canonical vertex pair** (review F-1). Interior
-//!    faces are paired GEOMETRICALLY — two ring edges sharing the same
-//!    unordered deduped-vertex-id pair are one face — because tag
-//!    reciprocity is not sound: the clip's Cut-vs-Redundant verdict is per
-//!    cell, so near-coincident seed pairs make a shared neighbor swallow
-//!    one twin's plane into the other's (a long, real, one-sided edge
+//! 1. **Tag-canonical vertex re-evaluation + quantized dedup.** Each ring
+//!    vertex is re-evaluated *canonically* from the `PlaneTag` pair of its
+//!    incident edges rather than from the clipped coordinates (which differ
+//!    in last ulps between the 2–3 cells sharing it, each clipping in its own
+//!    seed-relative frame): a `Bisector`/`Bisector` pair from cell `i` is the
+//!    circumcenter of the sorted triple `{i, j, k}` relative to the smallest
+//!    id, so all incident cells produce identical bits; `Bisector`/`Boundary`
+//!    (or `Box`) is the canonical bisector ∩ line solve; `Boundary`/`Boundary`
+//!    and `Box` corners come from polyline/domain constants. Quantized dedup
+//!    then only absorbs the cocircular coincidences it is designed for.
+//! 2. **Sub-tolerance edge merge.** Union-find over deduped vertices for ring
+//!    edges shorter than `edge_len_eps` (smaller-root-wins), iterated with the
+//!    ring rebuild until stable. Both cells incident to a collapsing face see
+//!    the same merged ids, so faces disappear symmetrically.
+//! 3. **Face resolution by canonical vertex pair.** Interior faces are paired
+//!    GEOMETRICALLY — two ring edges sharing the same unordered deduped-vertex
+//!    pair are one face — because tag reciprocity is not sound: the clip's
+//!    Cut-vs-Redundant verdict is per cell, so near-coincident seed pairs make
+//!    a shared neighbor swallow one twin's plane (a long real one-sided edge
 //!    tagged with the eps-indistinguishable twin). Unpaired edges fall back
 //!    to: endpoint-union for tiny (< 4·`edge_len_eps`) knife-edge stubs;
-//!    CHAINING for coarse edges subdivided by finer twin cells; and a
-//!    forced pairing with the tag's cell as the total fallback (structurally
-//!    valid, eps-approximate, adversarial inputs only). Emission then sweeps
-//!    cells in index order: faces materialize at first reference (owner =
-//!    smaller seed id, normal `normalize(p_b − p_a)` — the incumbent
-//!    convention, `voronoi.rs:139` — which recalculate_geometry's
-//!    sign-preservation keeps), so on tag-consistent inputs face ids and
-//!    bits are identical to the plain `j > i` emission scheme.
-//!    `Boundary`/`Box` edges emit boundary faces with outward normals and
-//!    `face_boundary` from `tag_boundary_type` (so nothing is ever left
-//!    untagged — `close_untagged_boundary_faces` is *not* needed and not
-//!    called).
-//! 4. **Cell arrays** — CCW `cell_vertices` rings, `cell_faces` in ring
-//!    order (first-use-by-owner, Morton-friendly since the seeds arrive
-//!    Morton-sorted), `v_fixed` on boundary-face vertices, `face_wrap_shift`
-//!    empty — and one defensive `recalculate_geometry()` so the stored
-//!    geometry is bit-consistent with any later refresh path.
+//!    CHAINING for coarse edges subdivided by finer twin cells; and a forced
+//!    pairing with the tag's cell as total fallback (adversarial inputs only).
+//!    Emission sweeps cells in index order: faces materialize at first
+//!    reference (owner = smaller seed id, normal `normalize(p_b − p_a)`, kept
+//!    by recalculate_geometry's sign-preservation). `Boundary`/`Box` edges
+//!    emit boundary faces with outward normals and `face_boundary` from
+//!    `tag_boundary_type`, so nothing is ever left untagged.
+//! 4. **Cell arrays** — CCW `cell_vertices` rings, `cell_faces` in ring order,
+//!    `v_fixed` on boundary-face vertices, and one defensive
+//!    `recalculate_geometry()`.
 //!
 //! Neither `fix_concave_cells` (cells are convex by construction) nor
-//! `Mesh::smooth` (vertex smoothing would move Voronoi vertices off the
-//! bisectors) is called: **cell `i` of the output is seed `i`**, always.
+//! `Mesh::smooth` (would move Voronoi vertices off the bisectors) is called:
+//! **cell `i` of the output is seed `i`**, always.
 //!
-//! Index-identity caveat (review F9): `Mesh::apply_env_cell_order`
-//! (`CFD2_MESH_ORDER`, `ordering.rs`) permutes cells *post-generation* and
-//! would silently void the seed-i == cell-i invariant. Harmless today (the
-//! default is a no-op and M0 consumers don't rely on the invariant yet), but
-//! the moving-mesh path (M2+) must assert that hook is inactive before
+//! Index-identity caveat: `Mesh::apply_env_cell_order` (`CFD2_MESH_ORDER`)
+//! permutes cells post-generation and would void the seed-i == cell-i
+//! invariant; the moving-mesh path must assert that hook is inactive before
 //! trusting seed indices.
 
 use ahash::AHashMap;
@@ -72,10 +56,8 @@ use super::{
 };
 use crate::solver::mesh::Mesh;
 
-/// Union-find over Voronoi vertices for the sub-tolerance face merge —
-/// verbatim policy transplant of the incumbent's `DisjointSet`
-/// (`voronoi.rs:24-51`): path-halving find, deterministic smaller-root-wins
-/// union.
+/// Union-find over Voronoi vertices for the sub-tolerance face merge:
+/// path-halving find, deterministic smaller-root-wins union.
 struct DisjointSet {
     parent: Vec<usize>,
 }
@@ -181,14 +163,11 @@ fn circumcenter(
 /// pair (plus `i` for bisectors, whose lines involve the owning seed), so
 /// every cell incident to the vertex *with the same tag pair* computes the
 /// exact same bits. Cells seeing one physical point through DIFFERENT tag
-/// pairs (e.g. a reflex polyline corner where guard g1 solves
-/// bisector ∩ prev-line while g2 solves bisector ∩ cur-line — review F-3)
-/// agree only to fp noise (~1e-16), a coincidence class the quantized
-/// dedup absorbs like the cocircular one. The `clipped` coordinate is the
-/// deterministic per-cell fallback for degenerate pairings (same plane
-/// twice, parallel lines) — those never arise from a valid convex clip,
-/// and if one ever does, quantized dedup still absorbs sub-`vertex_merge`
-/// disagreement.
+/// pairs (e.g. a reflex polyline corner) agree only to fp noise (~1e-16), a
+/// coincidence class the quantized dedup absorbs like the cocircular one. The
+/// `clipped` coordinate is the deterministic per-cell fallback for degenerate
+/// pairings (same plane twice, parallel lines), which never arise from a valid
+/// convex clip.
 fn canonical_vertex(
     input: &MeshlessInput,
     i: usize,
@@ -310,14 +289,10 @@ fn ring_of<'a>(
     }
 }
 
-/// Test instrument (stage-5 review): number of mutual-orphan endpoint
-/// unions the pass below performed since the last reset, and the largest
-/// endpoint gap it accepted (stored as f64 bits — monotone for finite
-/// non-negative values). Assembly is sequential, so `Relaxed` suffices;
-/// the counters exist to prove in CPU-only tests that the pass (a) fires
-/// and closes the mesh on standard seed sets and (b) accepts only gaps at
-/// the fp-coincidence scales it is justified by (f32 position ulps /
-/// sub-dedup-pitch bin straddles — see the pass comment).
+/// Test instrument: number of mutual-orphan endpoint unions the pass below
+/// performed since the last reset, and the largest endpoint gap it accepted
+/// (stored as f64 bits — monotone for finite non-negative values). Assembly
+/// is sequential, so `Relaxed` suffices.
 pub static MUTUAL_ORPHAN_UNIONS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 pub static MUTUAL_ORPHAN_MAX_GAP: std::sync::atomic::AtomicU64 =
@@ -383,17 +358,16 @@ pub fn assemble_mesh(input: &MeshlessInput, d: &MeshlessDiagram) -> Mesh {
         cell_vert_ids.push(ids);
     }
 
-    // Pass 2 + 3a, iterated: sub-tolerance edge merge (incumbent DSU
-    // policy) and ring rebuild, then face RESOLUTION by canonical vertex
-    // pair. Review F-1 exposed that tag reciprocity is not a sound pairing
-    // key: the Cut-vs-Redundant verdict is per cell (`sv > eps` against the
-    // cell's OWN ring), so near-coincident seed pairs make a neighbor
-    // swallow one twin's plane into the other's — the swallowed face is
-    // long and real, merely tagged with the wrong (indistinguishable-
-    // within-eps) twin. Faces are therefore paired GEOMETRICALLY: two ring
-    // edges sharing the same unordered deduped-vertex-id pair are the same
-    // face (canonical vertices make the ids bit-stable across cells).
-    // Leftover one-sided edges are handled by, in order:
+    // Pass 2 + 3a, iterated: sub-tolerance edge merge and ring rebuild, then
+    // face RESOLUTION by canonical vertex pair. Tag reciprocity is not a sound
+    // pairing key: the Cut-vs-Redundant verdict is per cell (`sv > eps` against
+    // the cell's OWN ring), so near-coincident seed pairs make a neighbor
+    // swallow one twin's plane into the other's — the swallowed face is long
+    // and real, merely tagged with the wrong (indistinguishable-within-eps)
+    // twin. Faces are therefore paired GEOMETRICALLY: two ring edges sharing
+    // the same unordered deduped-vertex-id pair are the same face (canonical
+    // vertices make the ids bit-stable across cells). Leftover one-sided edges
+    // are handled by, in order:
     //  - tiny orphans (< 4·edge_len_eps): the knife-edge class — union the
     //    endpoints and re-merge (the collapse both cells agree on);
     //  - long orphans, longest first: try to CHAIN them — a coarse edge
@@ -407,8 +381,8 @@ pub fn assemble_mesh(input: &MeshlessInput, d: &MeshlessDiagram) -> Mesh {
     let mut dsu = DisjointSet::new(vxy.len());
     let merge_sq = input.tol.edge_len_eps * input.tol.edge_len_eps;
     // Tiny-orphan threshold: one-sided knife-edge stubs whose canonical
-    // endpoints re-expanded past `edge_len_eps` (review F-1) still sit at
-    // that scale; 4x gives headroom while staying far below real edges.
+    // endpoints re-expanded past `edge_len_eps` still sit at that scale; 4x
+    // gives headroom while staying far below real edges.
     let tiny_sq = 16.0 * merge_sq;
 
     // Pre-merge on the raw rings so the loop below runs its single-rebuild
@@ -618,30 +592,22 @@ pub fn assemble_mesh(input: &MeshlessInput, d: &MeshlessDiagram) -> Mesh {
             }
         }
 
-        // Mutual-orphan endpoint reconciliation (review F-3 continuation,
-        // needed by the M1 GPU path): two cells that tag EACH OTHER, whose
-        // edges share exactly one deduped vertex id and disagree on the
-        // other by fp noise, are one face whose disagreeing endpoint was
-        // canonicalized through DIFFERENT tag pairs. Two measured
-        // coincidence classes (instrumented by MUTUAL_ORPHAN_* above,
-        // tests/meshless_orphan_cpu_test.rs):
+        // Mutual-orphan endpoint reconciliation: two cells that tag EACH
+        // OTHER, whose edges share exactly one deduped vertex id and disagree
+        // on the other by fp noise, are one face whose disagreeing endpoint was
+        // canonicalized through DIFFERENT tag pairs. Two coincidence classes:
         //  - reflex/curved-wall guard pairs on f32-QUANTIZED seeds, where
-        //    the F1 equidistance holds only to ~1 f32 position ulp
-        //    (~1e-7·|x|), so one cell solves bisector ∩ seg_k and the
-        //    other bisector ∩ seg_{k+1} to different bins;
-        //  - sub-dedup-pitch BIN STRADDLES on either precision (measured on
-        //    the f64 obstacle circle: gaps ~1.7e-8 < the 1e-6·h pitch —
-        //    within the dedup's own tolerance, but the two solves round to
-        //    adjacent quantize bins). NOTE the stage-3 claim that this pass
-        //    "never fires on f64" was WRONG (stage-5 instrumentation);
-        //    f64 firings are exclusively this sub-pitch class. Union the
-        // disagreeing endpoints when they sit BOTH within 1e-3 of the
-        // shorter edge's length AND within the f32 noise cap (64 ulps of
-        // domain scale — the disagreement is a few position ulps through
-        // the intersection solve; stage-5 review tightened this from the
-        // relative condition alone, whose 1e-3·edge window could weld a
-        // genuine micro-face of a third cell). Then restart the merge
-        // loop; both edges share both endpoint ids and pair geometrically.
+        //    equidistance holds only to ~1 f32 position ulp (~1e-7·|x|), so one
+        //    cell solves bisector ∩ seg_k and the other bisector ∩ seg_{k+1} to
+        //    different bins;
+        //  - sub-dedup-pitch BIN STRADDLES on either precision (gaps ~1.7e-8 <
+        //    the 1e-6·h pitch — within the dedup's own tolerance, but the two
+        //    solves round to adjacent quantize bins).
+        // Union the disagreeing endpoints when they sit BOTH within 1e-3 of the
+        // shorter edge's length AND within the f32 noise cap (64 ulps of domain
+        // scale) — the relative condition alone could weld a genuine micro-face
+        // of a third cell. Then restart the merge loop; both edges then share
+        // both endpoint ids and pair geometrically.
         let noise_sq = {
             let s = 64.0 * 2f64.powi(-24) * input.domain.x.max(input.domain.y);
             s * s
@@ -801,9 +767,7 @@ pub fn assemble_mesh(input: &MeshlessInput, d: &MeshlessDiagram) -> Mesh {
     // Pass 4: emit faces sweeping cells in index order, filling the cell
     // arrays in the same sweep. A face is created the first time any of its
     // references is visited (for tag-consistent meshes that is the smaller
-    // cell id's ring edge — the incumbent emission point), so face ids are
-    // deterministic and byte-identical to the pre-resolution scheme on
-    // clean inputs.
+    // cell id's ring edge), so face ids are deterministic.
     let mut mesh = Mesh::new();
     mesh.vx = vxy.iter().map(|p| p[0]).collect();
     mesh.vy = vxy.iter().map(|p| p[1]).collect();
@@ -824,8 +788,7 @@ pub fn assemble_mesh(input: &MeshlessInput, d: &MeshlessDiagram) -> Mesh {
         let vb = rv[(fd.src_pos as usize + 1) % m] as usize;
         let idx = mesh.face_v1.len();
         push_face_geometry(mesh, &vxy, va, vb);
-        // Incumbent normal convention: normalize(p_b − p_a), owner = the
-        // smaller seed id (voronoi.rs:139-147).
+        // Normal convention: normalize(p_b − p_a), owner = smaller seed id.
         let nrm = (input.seeds[fd.b as usize] - input.seeds[fd.a as usize]).normalize();
         mesh.face_nx.push(nrm.x);
         mesh.face_ny.push(nrm.y);
@@ -921,9 +884,9 @@ fn push_face_geometry(mesh: &mut Mesh, vxy: &[[f64; 2]], va: usize, vb: usize) {
 }
 
 /// Meshless drop-in counterpart of `generate_voronoi_mesh`: loop-derived
-/// boundary seeding (F1 protocol) + Poisson interior fill, per-cell clipped
-/// diagram, canonical assembly. No triangulation, no generator smoothing, no
-/// concave fixing — and cell `i` is seed `i`.
+/// boundary seeding + Poisson interior fill, per-cell clipped diagram,
+/// canonical assembly. No triangulation, no generator smoothing, no concave
+/// fixing — and cell `i` is seed `i`.
 pub fn generate_meshless_voronoi_mesh(
     geo: &(impl Geometry + Sync),
     min_cell_size: f64,

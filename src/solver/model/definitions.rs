@@ -17,9 +17,6 @@ pub struct ModelSpec {
     /// Model-defined numerical modules.
     ///
     /// Each module contributes kernel passes (schedule) and optional build-time WGSL generators.
-    ///
-    /// This is the primary mechanism for Gap 0 in `CODEGEN_PLAN.md`: adding a new numerical
-    /// module should not require edits to central kernel registries.
     pub modules: Vec<crate::solver::model::module::KernelBundleModule>,
 
     /// Optional model-owned linear solver configuration.
@@ -44,11 +41,9 @@ impl ModelSpec {
         let mut out: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
 
         for module in &self.modules {
-            // Include params from named_params (legacy)
             for key in &module.named_params {
                 out.insert(*key);
             }
-            // Include params from port_manifest (new)
             if let Some(ref port_manifest) = module.port_manifest {
                 for param in &port_manifest.params {
                     out.insert(param.key);
@@ -92,7 +87,7 @@ impl ModelSpec {
         let mut found: Option<crate::solver::model::module::RelaxationDefaults> = None;
         for module in &self.modules {
             if let Some(defaults) = module.relaxation_defaults {
-                // Last-one-wins (like EOS), but typically only one module declares these.
+                // Last-one-wins; typically only one module declares these.
                 found = Some(defaults);
             }
         }
@@ -170,8 +165,7 @@ impl ModelSpec {
             };
 
             if matches!(gradients, Some(FluxModuleGradientsSpec::FromStateLayout)) {
-                // Find the unique module providing flux_module to access its port manifest.
-                // This uses the same uniqueness assumptions as ModelSpec::flux_module().
+                // Relies on the same flux_module uniqueness assumption as ModelSpec::flux_module().
                 let flux_module_provider = self.modules.iter().find(|m| m.flux_module.is_some());
 
                 let has_gradient_targets = flux_module_provider
@@ -182,10 +176,6 @@ impl ModelSpec {
                 if !has_gradient_targets {
                     return Err("flux_module_gradients requested but no grad_<field> targets found in state layout".to_string());
                 }
-
-                // Gradient targets are pre-resolved at module creation time
-                // (in flux_module_module()) and stored in port_manifest.gradient_targets.
-                // No additional StateLayout scanning needed here.
             }
         }
 
@@ -203,21 +193,16 @@ impl ModelSpec {
         use crate::solver::model::module::{FieldKindReq, ModuleInvariant};
         use crate::solver::model::ports::{PortRegistry, PortValidationError};
 
-        // Build a PortRegistry and pre-register all StateLayout fields.
         let mut registry = PortRegistry::new(self.state_layout.clone());
-
-        // Pre-register all fields from state_layout to enable lookup by name.
         for field_ref in self.state_layout.fields() {
             let _ = registry.register_state_field(field_ref.name());
         }
 
-        // Validate port_manifest fields against the registry.
         for module in &self.modules {
             if let Some(ref port_manifest) = module.port_manifest {
                 for field_spec in &port_manifest.fields {
                     let name = field_spec.name;
 
-                    // Use registry for field lookup (resolves once, reused across checks).
                     let Some(entry) = registry.get_field_entry_by_name(name) else {
                         return Err(PortValidationError::MissingField {
                             module: module.name,
@@ -225,7 +210,6 @@ impl ModelSpec {
                         });
                     };
 
-                    // Validate component count (kind) matches.
                     let expected_components = field_spec.kind.component_count();
                     let actual_components = entry.component_count();
                     if expected_components != actual_components {
@@ -246,7 +230,7 @@ impl ModelSpec {
                         });
                     }
 
-                    // Validate unit dimension matches (skip for ANY_DIMENSION sentinel).
+                    // ANY_DIMENSION is a wildcard sentinel: skip the unit check.
                     if field_spec.unit != crate::solver::ir::ports::ANY_DIMENSION
                         && field_spec.unit != entry.runtime_dimension()
                     {
@@ -260,7 +244,6 @@ impl ModelSpec {
             }
         }
 
-        // Validate typed invariant requirements declared by modules.
         for module in &self.modules {
             for inv in &module.invariants {
                 match *inv {
@@ -303,7 +286,6 @@ impl ModelSpec {
                         require_vector2_momentum,
                         require_pressure_gradient,
                     } => {
-                        // Validate dp_field exists and is scalar.
                         let Some(dp_entry) = registry.get_field_entry_by_name(dp_field) else {
                             return Err(PortValidationError::MissingField {
                                 module: module.name,
@@ -323,8 +305,6 @@ impl ModelSpec {
                             });
                         }
 
-                        // Infer coupling via legacy method (this still uses StateLayout internally
-                        // for the coupling inference logic, but field lookups use registry).
                         let coupling = crate::solver::model::invariants::infer_unique_momentum_pressure_coupling_referencing_dp(
                             self,
                             dp_field,
@@ -376,11 +356,6 @@ impl ModelSpec {
                                     },
                                 });
                             }
-
-                            // Ensure the component offsets exist by checking component_count.
-                            // Vector2 should have 2 components; if we got here, it's valid.
-                            // The actual offset computation happens at codegen time using
-                            // the resolved gradient targets in PortManifest.
                         }
                     }
                 }
@@ -453,10 +428,8 @@ impl BoundarySpec {
                 };
 
                 let expected_unit = match entry.as_ref() {
-                    // Expression-refreshed entries hold boundary-face STATE
-                    // values regardless of kind (a ZeroGradient unknown's
-                    // refreshed value feeds flux/reconstruction consumers,
-                    // not the assembly gradient).
+                    // Expression-refreshed entries hold boundary-face STATE values
+                    // (in field.unit()) regardless of kind, so they skip the /L gradient unit.
                     Some(c) if c.expr_value().is_some() => field.unit(),
                     Some(c) if c.kind == GpuBcKind::Dirichlet => field.unit(),
                     _ => field.unit() / Length::UNIT,
@@ -475,7 +448,6 @@ impl BoundarySpec {
                     kind[table.offset(b_i, u_idx)] = cond.kind as u32;
                     value[table.offset(b_i, u_idx)] = cond.seed_value() as f32;
                 } else {
-                    // Default: ZeroGradient (Neumann=0), with expected unit field.unit()/L.
                     kind[table.offset(b_i, u_idx)] = GpuBcKind::ZeroGradient as u32;
                     value[table.offset(b_i, u_idx)] = 0.0;
                 }
@@ -703,11 +675,10 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
     Ok(vec![
         incompressible_momentum_model()?,
         incompressible_momentum_mms_model()?,
-        // ALE (moving-mesh) variant: same physics with mesh-relative
-        // convection; own id => own generated kernels, so static models stay
-        // byte-identical (docs/meshless-moving-mesh-roadmap.md §M3).
+        // ALE (moving-mesh) variant: same physics with mesh-relative convection;
+        // own id => own generated kernels, so static models stay byte-identical.
         incompressible_momentum_ale_model()?,
-        // ALE + manufactured source (prescribed-motion MMS, M3.3).
+        // ALE + manufactured source (prescribed-motion MMS).
         incompressible_momentum_ale_mms_model()?,
         allmach_pressure_model()?,
         allmach_pressure_mms_model()?,
@@ -717,9 +688,9 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
         buoyant_incompressible_mms_model()?,
         compressible_model()?,
         compressible_mms_model()?,
-        // Arc N4b: distinct id so its (larger, lap-extended) state stride gets its own
-        // committed kernel sources instead of reusing compressible_mms's smaller-stride
-        // kernels (which would misalign every cell and collapse the solve).
+        // Distinct id so its (larger, lap-extended) state stride gets its own committed
+        // kernel sources instead of reusing compressible_mms's smaller-stride kernels
+        // (which would misalign every cell and collapse the solve).
         compressible_mms_biharmonic_model()?,
         generic_diffusion_demo_model()?,
         generic_diffusion_demo_neumann_model()?,
@@ -780,10 +751,10 @@ mod tests {
         assert_eq!(pressure.terms()[1].op, TermOp::DivFlux);
     }
 
-    /// M3.1: the ALE variant flags exactly its two convection terms as
-    /// mesh-relative (`div(phi,U).bounded()` and `div_flux(phi,p)`), derives
-    /// `is_ale()`, and — critically — the static and MMS models stay non-ALE
-    /// (their generated kernels must remain byte-identical).
+    /// The ALE variant flags exactly its two convection terms as mesh-relative
+    /// (`div(phi,U).bounded()` and `div_flux(phi,p)`), derives `is_ale()`, and —
+    /// critically — the static and MMS models stay non-ALE (their generated
+    /// kernels must remain byte-identical).
     #[test]
     fn incompressible_momentum_ale_flags_convection_terms_only() {
         let ale = incompressible_momentum_ale_model().expect("ale model");
@@ -897,8 +868,8 @@ mod tests {
             ),
         };
 
-        // Now that gradient targets are resolved at module creation time,
-        // the error should be caught when building the flux module.
+        // Gradient targets resolve at module creation, so the error surfaces
+        // when building the flux module.
         let err = flux_module_module(
             with_gradients,
             &model.system,

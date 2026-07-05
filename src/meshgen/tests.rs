@@ -69,9 +69,7 @@ fn test_mesh_generation_circle_obstacle() {
         domain_max: Point2::new(1.0, 1.0),
     };
 
-    // Generate mesh
     let domain_size = Vector2::new(1.0, 1.0);
-    // Coarser mesh: 0.1 cell size. Radius is 0.2.
     let mut mesh = generate_cut_cell_mesh(&geo, 0.1, 0.1, 1.2, domain_size);
 
     println!("Generated mesh with {} cells", mesh.num_cells());
@@ -91,7 +89,6 @@ fn test_mesh_generation_circle_obstacle() {
     println!("Found {} fixed boundary vertices", boundary_indices.len());
     assert!(boundary_indices.len() > 0);
 
-    // Smooth
     mesh.smooth(&geo, 0.05, 50);
 
     // Verify positions are still on boundary
@@ -108,8 +105,6 @@ fn test_mesh_generation_circle_obstacle() {
     let final_skew = mesh.calculate_max_skewness();
     println!("Final max skewness: {}", final_skew);
 
-    // If smoothing made it worse, we should know.
-    // But for now, let's just check it's not terrible.
     assert!(final_skew < 0.25);
 }
 
@@ -153,7 +148,6 @@ fn test_delaunay_property() {
         domain_max: Point2::new(domain_size.x, domain_size.y),
     };
 
-    // Use generate_delaunay_mesh
     let mesh = generate_delaunay_mesh(&geo, 0.1, 0.2, 1.2, domain_size);
 
     println!("Generated Delaunay mesh with {} cells", mesh.num_cells());
@@ -183,8 +177,7 @@ fn test_delaunay_property() {
             let p = Point2::new(mesh.vx[v_idx], mesh.vy[v_idx]);
             let dist_sq = (p - center).norm_squared();
 
-            // Allow for small epsilon error
-            // If dist_sq < r_sq, the point is inside the circumcircle -> Violation
+            // dist_sq < r_sq => point inside circumcircle => Delaunay violation
             if dist_sq < r_sq - 1e-5 {
                 panic!(
                     "Delaunay property violated! Cell {} circumcircle contains vertex {}. \
@@ -193,11 +186,8 @@ fn test_delaunay_property() {
                 );
             }
 
-            // Log if point is on boundary (cocircular)
             if (dist_sq - r_sq).abs() < 1e-5 {
-                // This is expected for regular grids (cocircular points)
-                // Uncomment to see how many:
-                // println!("Point {} is on circumcircle of cell {}", v_idx, i);
+                // Cocircular point — expected for regular grids.
             }
         }
     }
@@ -316,7 +306,7 @@ fn test_voronoi_generation() {
     );
 }
 
-// --- Phase 3: Scale-invariance and quantization tests ---
+// Scale-invariance and quantization tests
 
 #[test]
 fn quantize_does_not_collapse_distinct_vertices_at_small_scale() {

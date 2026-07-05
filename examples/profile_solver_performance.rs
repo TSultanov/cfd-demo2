@@ -9,7 +9,6 @@ use cfd2::solver::model::helpers::SolverRuntimeParamsExt;
 use cfd2::solver::model::incompressible_momentum_model;
 use nalgebra::Vector2;
 
-/// Setup an incompressible solver for profiling
 fn setup_incompressible_solver(cell_size: f64) -> (GpuUnifiedSolver, usize) {
     let length = 2.0;
     let domain_size = Vector2::new(length, 1.0);
@@ -46,13 +45,11 @@ fn setup_incompressible_solver(cell_size: f64) -> (GpuUnifiedSolver, usize) {
     (solver, num_cells)
 }
 
-/// Profile solver performance with detailed breakdown
 fn profile_solver() {
     println!("\n========================================");
     println!("  SOLVER PERFORMANCE PROFILING REPORT");
     println!("========================================\n");
 
-    // Test with different mesh sizes
     let cell_sizes = [0.04, 0.02];
 
     for &cell_size in &cell_sizes {
@@ -61,11 +58,9 @@ fn profile_solver() {
         let (mut solver, num_cells) = setup_incompressible_solver(cell_size);
         let num_faces = num_cells * 2; // Approximation for structured grid
 
-        // Enable profiling
         solver.enable_detailed_profiling(true).unwrap();
         solver.start_profiling_session().unwrap();
 
-        // Run multiple steps for profiling
         let num_steps = 30;
         let start = std::time::Instant::now();
         for _ in 0..num_steps {
@@ -75,10 +70,8 @@ fn profile_solver() {
 
         solver.end_profiling_session().unwrap();
 
-        // Print profiling report
         let _ = solver.print_profiling_report();
 
-        // Summary statistics
         let cells_per_sec = (num_cells * num_steps) as f64 / total_time.as_secs_f64();
         let faces_per_sec = (num_faces * num_steps) as f64 / total_time.as_secs_f64();
         let time_per_step = total_time / num_steps as u32;
@@ -92,7 +85,6 @@ fn profile_solver() {
     }
 }
 
-/// Profile different preconditioners
 fn profile_preconditioners() {
     println!("\n========================================");
     println!("  PRECONDITIONER COMPARISON");
@@ -101,7 +93,6 @@ fn profile_preconditioners() {
     let cell_size = 0.02;
     let (mut solver_jacobi, num_cells) = setup_incompressible_solver(cell_size);
 
-    // Create AMG solver
     let (mut solver_amg, _) = setup_incompressible_solver(cell_size);
     solver_amg.set_preconditioner(PreconditionerType::Amg);
     // Warm up AMG
@@ -111,7 +102,6 @@ fn profile_preconditioners() {
 
     let num_steps = 20;
 
-    // Profile Jacobi
     println!("--- Jacobi Preconditioner ---");
     solver_jacobi.enable_detailed_profiling(true).unwrap();
     solver_jacobi.start_profiling_session().unwrap();
@@ -125,7 +115,6 @@ fn profile_preconditioners() {
     solver_jacobi.end_profiling_session().unwrap();
     let _ = solver_jacobi.print_profiling_report();
 
-    // Profile AMG
     println!("\n--- AMG Preconditioner ---");
     solver_amg.enable_detailed_profiling(true).unwrap();
     solver_amg.start_profiling_session().unwrap();
@@ -139,7 +128,6 @@ fn profile_preconditioners() {
     solver_amg.end_profiling_session().unwrap();
     let _ = solver_amg.print_profiling_report();
 
-    // Comparison
     println!("\n--- Preconditioner Comparison Summary ---");
     println!("  Mesh: {} cells", num_cells);
     println!("  Steps: {}", num_steps);

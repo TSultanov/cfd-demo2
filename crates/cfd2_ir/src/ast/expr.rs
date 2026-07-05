@@ -4,28 +4,22 @@ use std::sync::Arc;
 /// A self-contained expression node (no arena, no thread-local).
 ///
 /// Wraps `Arc<ExprNode>` for cheap cloning and structural sharing.
-/// Implements `Clone`, `Debug`, `PartialEq`, `Eq`, `Hash`, `Send`, `Sync`.
 #[derive(Debug, Clone)]
 pub struct Expr(Arc<ExprNode>);
 
 impl Expr {
-    /// Wrap an `ExprNode` in an `Arc`.
     fn alloc(node: ExprNode) -> Self {
         Expr(Arc::new(node))
     }
 
-    /// Public constructor from an `ExprNode`.
     pub fn alloc_node(node: ExprNode) -> Self {
         Self::alloc(node)
     }
 
-    /// Access the inner `ExprNode`.
     #[inline]
     pub fn node(&self) -> &ExprNode {
         &self.0
     }
-
-    // ── Constructors ────────────────────────────────────────────
 
     pub fn ident(name: impl Into<String>) -> Self {
         Expr::alloc(ExprNode::Ident(name.into()))
@@ -71,7 +65,6 @@ impl Expr {
         Expr::call(Expr::ident(name), args)
     }
 
-    /// Convenience: `sqrt(self)`.
     pub fn sqrt(self) -> Self {
         Expr::call_named("sqrt", vec![self])
     }
@@ -80,7 +73,6 @@ impl Expr {
         Expr::unary(UnaryOp::AddressOf, self)
     }
 
-    /// Pointer dereference: `*expr`.
     pub fn deref(self) -> Self {
         Expr::unary(UnaryOp::Deref, self)
     }
@@ -146,8 +138,6 @@ impl Expr {
         }
     }
 
-    // ── Internal helpers ────────────────────────────────────────
-
     fn unary(op: UnaryOp, expr: Expr) -> Self {
         Expr::alloc(ExprNode::Unary { op, expr })
     }
@@ -173,8 +163,6 @@ impl Expr {
     }
 }
 
-// ── PartialEq / Eq / Hash — structural comparison ──────────────────────
-
 impl PartialEq for Expr {
     fn eq(&self, other: &Self) -> bool {
         // Fast path: same Arc pointer means same expression.
@@ -190,15 +178,11 @@ impl std::hash::Hash for Expr {
     }
 }
 
-// ── Display — WGSL emission ────────────────────────────────────────────
-
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         render_expr(self, f, Precedence::Lowest)
     }
 }
-
-// ── From impls ─────────────────────────────────────────────────────────
 
 impl From<&str> for Expr {
     fn from(value: &str) -> Self {
@@ -248,8 +232,6 @@ impl From<f64> for Expr {
         Expr::lit_f32(value as f32)
     }
 }
-
-// ── Operator impls ─────────────────────────────────────────────────────
 
 impl std::ops::Add for Expr {
     type Output = Expr;
@@ -433,8 +415,6 @@ impl std::ops::BitOr<bool> for Expr {
     }
 }
 
-// ── ExprNode ───────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExprNode {
     Literal(Literal),
@@ -462,8 +442,6 @@ pub enum ExprNode {
     },
 }
 
-// ── Literal ────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Literal {
     Bool(bool),
@@ -483,14 +461,11 @@ impl fmt::Display for Literal {
     }
 }
 
-// ── UnaryOp ────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOp {
     Negate,
     Not,
     AddressOf,
-    /// Pointer dereference: `*expr`.
     Deref,
 }
 
@@ -504,8 +479,6 @@ impl fmt::Display for UnaryOp {
         }
     }
 }
-
-// ── BinaryOp ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinaryOp {
@@ -570,8 +543,6 @@ impl fmt::Display for BinaryOp {
     }
 }
 
-// ── Precedence ─────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Lowest,
@@ -603,8 +574,6 @@ pub fn next_precedence(prec: Precedence) -> Precedence {
         Precedence::Prefix | Precedence::Postfix => Precedence::Postfix,
     }
 }
-
-// ── WGSL rendering ─────────────────────────────────────────────────────
 
 fn render_expr(expr: &Expr, f: &mut fmt::Formatter<'_>, parent_prec: Precedence) -> fmt::Result {
     match expr.node() {

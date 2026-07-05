@@ -86,17 +86,14 @@ impl<'a> ResourceRegistry<'a> {
         }
 
         if let Some(mesh) = self.mesh {
-            // Resolve mesh buffers as SIZED ranges (M2 Tier B): topology-sized
-            // buffers (face_*, scalar_col_indices, cell_faces, mesh_fluxes) bind
+            // Resolve mesh buffers as SIZED ranges: topology-sized buffers
+            // (face_*, scalar_col_indices, cell_faces, mesh_fluxes) bind
             // `BufferBinding { offset: 0, size: logical }` so their WGSL
             // `arrayLength` guards see the logical face/nnz count even when the
             // allocation carries capacity headroom; cell-sized buffers fall back
             // to binding entire. With the default EXACT `CapacityPlan` the two
-            // shapes are byte-equivalent (size == full buffer) — the no-op
-            // topology-refresh byte gates prove that. Under headroom>1 this is
-            // the mechanism that keeps `arrayLength` from walking the zero-padded
-            // tail. (The block-CSR named buffers bound via `with_buffer` are NOT
-            // yet sized — `init_matrix` asserts EXACT until they are; M4.)
+            // shapes are byte-equivalent (size == full buffer); under headroom>1
+            // this keeps `arrayLength` from walking the zero-padded tail.
             if let Some(resource) = mesh.binding_resource_for(name) {
                 return Some(resource);
             }

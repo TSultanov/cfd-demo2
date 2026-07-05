@@ -16,7 +16,6 @@ pub(crate) async fn lower_program_model_driven(
 ) -> Result<GpuProgramPlan, String> {
     validate_model_owned_preconditioner_config(model, config.preconditioner)?;
 
-    // Derive the solver recipe from model + config
     let recipe = SolverRecipe::from_model(
         model,
         config.advection_scheme,
@@ -27,8 +26,7 @@ pub(crate) async fn lower_program_model_driven(
 
     let parts = lower_parts_for_model(mesh, model, recipe.clone(), device, queue).await?;
 
-    // Program spec is now always recipe-driven (with stable legacy templates
-    // emitted when the kernel set matches those families).
+    // Recipe-driven; stable legacy templates emitted when the kernel set matches those families.
     let program = recipe.build_program_spec();
     let spec = parts.spec.into_spec(program)?;
     let mut plan = GpuProgramPlan::new(
@@ -64,8 +62,8 @@ pub(crate) fn validate_model_owned_preconditioner_config(
     match solver.preconditioner {
         crate::solver::model::ModelPreconditionerSpec::Default => Ok(()),
         crate::solver::model::ModelPreconditionerSpec::Schur { .. } => {
-            // Model-owned Schur remains authoritative, but we still allow runtime configuration
-            // to select the pressure solve strategy (Chebyshev vs AMG).
+            // Model-owned Schur is authoritative, but runtime config still selects the
+            // pressure solve strategy (Chebyshev vs AMG).
             match config_preconditioner {
                 crate::solver::gpu::structs::PreconditionerType::Jacobi
                 | crate::solver::gpu::structs::PreconditionerType::Amg
@@ -82,7 +80,6 @@ async fn lower_parts_for_model(
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
 ) -> Result<LoweredProgramParts, String> {
-    // Otherwise, select the runtime backend based on the derived recipe structure.
     let built =
         crate::solver::gpu::program::generic_coupled_backend::build_generic_coupled_backend(
             mesh,

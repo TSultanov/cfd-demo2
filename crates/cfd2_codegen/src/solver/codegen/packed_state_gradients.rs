@@ -38,15 +38,11 @@ pub fn generate_packed_state_gradients_wgsl(
 }
 
 /// The `grad_state` buffer is keyed by STATE OFFSET (stride = state stride):
-/// the assembly's reconstruction reads the gradient of unknown `k` at
-/// `cell * stride + state_offset(k)`. The writer must use the same key — and
-/// must read the unknown's VALUES from the same state offset. Boundary
-/// tables, by contrast, are indexed by unknown RANK. For models whose solved
-/// unknowns are a prefix of the state layout the two keys coincide; the
-/// first model with an unknown placed after auxiliary fields (buoyant
-/// temperature at offset 8 behind d_p/grad_p) exposed the writer using rank
-/// where offset was required — its gradient slot was never written and the
-/// reconstruction silently degraded to first-order upwind.
+/// the assembly reads the gradient of unknown `k` at `cell * stride +
+/// state_offset(k)`. The writer must use the same key, and must read the
+/// unknown's VALUES from the same state offset. Boundary tables, by contrast,
+/// are indexed by unknown RANK; the two keys coincide only when the solved
+/// unknowns are a prefix of the state layout.
 fn validate_unknown_offsets(
     layout: &StateLayout,
     unknown_state_offsets: &[u32],
@@ -183,14 +179,10 @@ fn main_body(layout: &StateLayout, unknown_state_offsets: &[u32], knob_gated: bo
 
     if knob_gated {
         // Skip the full Green–Gauss pass for first-order upwind to keep overhead low.
-        //
-        // The skip is a *body-wrapping guard*, never an early `return`: this kernel is
-        // fused with the assembly kernel, and an early return would abort the fused
-        // kernel's remaining segments (observed as a frozen solver when the runtime
-        // scheme knob is switched to Upwind on a grad-state recipe).
-        //
-        // Models that *declare* a non-upwind scheme on a convection term are generated
-        // with `knob_gated = false`: their gradients are needed regardless of the knob.
+        // The skip must be a body-wrapping guard, never an early `return`: this kernel is
+        // fused with the assembly kernel, so an early return would abort the fused
+        // kernel's remaining segments. Models that declare a non-upwind scheme on a
+        // convection term are generated with `knob_gated = false` (gradients always needed).
         stmts.push(dsl::if_block_expr(
             Expr::ident("constants")
                 .field("scheme")
@@ -240,7 +232,6 @@ fn gradient_body_statements(layout: &StateLayout, unknown_state_offsets: &[u32])
         ));
     }
 
-    // Face loop.
     let face_loop_body = {
         let mut body = vec![
             dsl::let_expr(
@@ -443,9 +434,7 @@ fn gradient_body_statements(layout: &StateLayout, unknown_state_offsets: &[u32])
         face_loop_body,
     ));
 
-    // Write out gradients (divide by volume) into the packed `grad_state`
-    // buffer, keyed by the unknown's STATE OFFSET (the assembly reads the
-    // gradient for unknown k at `cell * stride + state_offset(k)`).
+    // Write out gradients (divide by volume), keyed by the unknown's STATE OFFSET.
     for (component, &state_offset) in unknown_state_offsets.iter().enumerate() {
         let acc_name = format!("grad_acc_{component}");
         let grad_vec = typed::VecExpr::<2>::from_expr(Expr::ident(acc_name))
@@ -474,17 +463,10 @@ fn gradient_body_statements(layout: &StateLayout, unknown_state_offsets: &[u32])
 
 const PACKED_STATE_GRADIENTS_WORKGROUP_SIZE: u32 = 64;
 
-/// Extract `LaunchSemantics` from the first statements of the packed_state_gradients body.
-///
-/// The body starts with:
-///   0: let idx = ...       (invocation index)
-///   1: if (idx >= ...) { return; }  (bounds check)
-///
-/// Everything after these is the kernel body proper (which, for knob-gated models,
-/// is a single `if (constants.scheme != 0u) { ... }` wrapping block — deliberately
-/// not an early return so that fusion with downstream segments stays correct).
-///
-/// Returns (launch, consumed_stmts).
+/// Extract `LaunchSemantics` from the first two statements of the body:
+///   0: `let idx = ...`  (invocation index)
+///   1: `if (idx >= ...) { return; }`  (bounds check)
+/// Everything after is the kernel body proper. Returns (launch, consumed_stmts).
 fn launch_from_gradient_statements(stmts: &[Stmt]) -> Result<(LaunchSemantics, usize), String> {
     // Statement 0: `let idx = ...`
     let idx_expr = match stmts.first() {

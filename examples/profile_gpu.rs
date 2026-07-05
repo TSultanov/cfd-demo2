@@ -38,7 +38,6 @@ fn main() {
         solver.set_density(1000.0).unwrap();
         solver.set_alpha_p(1.0).unwrap();
 
-        // Set initial BCs
         let mut u_init = vec![(0.0, 0.0); mesh.num_cells()];
         for i in 0..mesh.num_cells() {
             let cx = mesh.cell_cx[i];
@@ -49,7 +48,6 @@ fn main() {
         }
         solver.set_u(&u_init);
 
-        // Use the detailed ProfilingStats as the single source of truth
         solver
             .enable_detailed_profiling(true)
             .expect("profiling enable");
@@ -75,7 +73,6 @@ fn main() {
         println!("Total time for {} steps: {:?}", steps, total_duration);
         println!("Average time per step: {:?}", total_duration / steps);
 
-        // Print detailed profiling report from ProfilingStats
         let stats = solver.get_profiling_stats().expect("profiling stats");
         let session_total = stats.get_session_total();
         println!("\nProfiling Summary (ProfilingStats):");

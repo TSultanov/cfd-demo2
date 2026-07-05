@@ -17,8 +17,7 @@
 //!
 //! Driven at the REAL Air sound speed (psi = 1/c² ≈ 8.3e-6, c ≈ 347 m/s — zero
 //! exaggeration). The supersonic exit is kept well-posed by the pressure-flux Newton
-//! linearization ([[cfd2-hyperbolic-pressure-row]]); without it this real-c drive ran
-//! the exit density to vacuum.
+//! linearization; without it this real-c drive ran the exit density to vacuum.
 //!
 //! ENVELOPE NOTE: the achievable exit Mach is capped by the near-vacuum limit of the
 //! gauge-pressure EOS rho = rho_t_ref/T + psi*p: the outlet gauge pressure can only fall
@@ -71,7 +70,7 @@ fn build_nozzle(fluid: &Fluid, mesh: &Mesh, psi: f64, inlet_v: f64) -> UnifiedSo
     // Real sound-speed throughflow is O(100 m/s); a conservative acoustic CFL and a tiny
     // seed dt keep step 0 in-bounds before the adaptive dt settles to O(h/c) (the ALLMACH
     // obstacle preset's 0.02 seed / cfl 0.9 are for the near-incompressible obstacle, not
-    // this transonic nozzle). Matches the proven `nozzle_real_c_pseudolaminar_probe` recipe.
+    // this transonic nozzle).
     d.adaptive_dt = true;
     d.target_cfl = 0.4;
     d.timestep = 1e-5;
@@ -155,9 +154,8 @@ fn supersonic_cd_nozzle_backpressure_driven() {
     let air = air();
     // REAL Air compressibility psi = 1/c^2 ≈ 8.3e-6 (c ≈ 347 m/s) — zero exaggeration.
     // The back-pressure-driven supersonic transition is validated at the PHYSICAL sound
-    // speed (the pressure-flux Newton linearization keeps the supersonic exit well-posed;
-    // see [[cfd2-hyperbolic-pressure-row]]). Throughflow and back-pressures scale up to
-    // the physical ½ρc² ≈ 7e4 Pa accordingly.
+    // speed (the pressure-flux Newton linearization keeps the supersonic exit well-posed).
+    // Throughflow and back-pressures scale up to the physical ½ρc² ≈ 7e4 Pa accordingly.
     let psi: f64 = air.compressibility();
     let inlet_v = 130.0; // subsonic inlet (M≈0.37); chokes the area-ratio-2 throat (M≈1)
     let steps = 500;

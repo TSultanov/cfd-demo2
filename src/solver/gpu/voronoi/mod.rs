@@ -1,23 +1,8 @@
-//! GPU meshless Voronoi engine (roadmap M1): a WGSL port of the M0 CPU
-//! engine (`crate::meshgen::meshless`) — one thread per seed computes its
-//! Voronoi cell by half-plane clipping with a security-radius stop, per
-//! Ray/Sokolov/Lefebvre/Lévy, "Meshless Voronoi on the GPU" (ACM TOG 2018),
-//! adapted to 2D. Cloned structurally from the `srd.rs` hand-written-kernel
-//! seam: WGSL string literal, manual bind group layouts, own encoder +
-//! submit, outside the solver's step graph.
-//!
-//! Stage 3 scope (this module version): full boundary support on top of the
-//! stage-2 filter/fallback machinery — flattened boundary-segment table +
-//! per-seed `SeedKind` upload, `Boundary`-kind seeds clipping their own
-//! segment line(s) FIRST (the M0 `own_planes`/`clip_own` order),
-//! `Boundary`/`Box` tag equivalents in the output slots (see the encoding
-//! below), CPU-built `SeedGrid` uploaded as CSR `u32` buffers, conservative
-//! epsilon filter (`NEEDS_EXACT`, see `wgsl.rs` docs), CPU f64 fallback
-//! (`resolve_flagged`: recompute flagged cells via M0 `compute_cell` **on
-//! the f32-rounded seeds and segments** — review F4 — and patch via
-//! `write_buffer`), unconditional (release-mode) reciprocity enforcement
-//! over the merged diagram, and `read_diagram` — the ring readback bridge
-//! into the M0 `assemble_mesh` for an end-to-end GPU-diagram `Mesh`.
+//! GPU meshless Voronoi engine: a WGSL port of the CPU engine
+//! (`crate::meshgen::meshless`) — one thread per seed computes its Voronoi
+//! cell by half-plane clipping with a security-radius stop, adapted to 2D.
+//! Runs outside the solver's step graph: WGSL string literal, manual bind
+//! group layouts, own encoder + submit.
 //!
 //! ## Output tag encoding (`b_nbr_ids` / `b_face_bc`)
 //!
@@ -32,21 +17,16 @@
 //!   segment counts stay far below 2³¹ and `BC_NONE` is reserved);
 //! - unused slot: `NBR_NONE` / `BC_NONE`.
 //!
-//! ## Traversal decision: streaming ring clip (not kNN-then-clip)
+//! ## Traversal: streaming ring clip (not kNN-then-clip)
 //!
 //! The kernel clips candidates directly while walking Chebyshev grid rings
-//! (bins in the CPU `for_each_ring_bin` order, ids ascending within each bin
-//! — the CPU-built counting sort guarantees that for free), stopping when
-//! the next ring's distance lower bound exceeds `2R`. We deliberately do NOT
-//! reproduce M0's kNN ascending-(d², id) clip order: the final clipped
-//! polygon is order-independent up to f32 rounding, and the M1 parity gates
-//! compare *eps_face-filtered neighbor sets* and geometry tolerances — never
-//! bits — so matching the CPU order buys nothing for parity triage while
-//! costing a k-array, an in-register distance sort, and a "k too small"
-//! escalation/failure mode. Streaming clip leaves exactly two overflow
-//! classes (`MAX_VERTS`, `K_FACE_MAX`), and its traversal order is fully
-//! deterministic on a fixed device, which is the load-bearing property
-//! (byte-stable run-to-run). This choice is kept for all M1 stages.
+//! (bins in `for_each_ring_bin` order, ids ascending within each bin — the
+//! counting sort guarantees that for free), stopping when the next ring's
+//! distance lower bound exceeds `2R`. The final clipped polygon is
+//! order-independent up to f32 rounding, so we do not reproduce the CPU's
+//! kNN ascending-(d², id) order; streaming clip leaves exactly two overflow
+//! classes (`MAX_VERTS`, `K_FACE_MAX`) and its traversal order is fully
+//! deterministic on a fixed device (byte-stable run-to-run).
 //!
 //! ## Determinism
 //!
@@ -57,28 +37,16 @@
 //!
 //! ## Precision layout
 //!
-//! All clip arithmetic is seed-relative f32 (the M0 precision trick).
-//! Bisector planes are bitwise symmetric between threads i and j WITHOUT an
-//! explicit (min, max) ordering because IEEE-754 subtraction is
-//! sign-symmetric: `fl(p_j − p_i) == −fl(p_i − p_j)` bit-for-bit, and the
-//! offset `0.5·|q|²` and tolerance `|q|·eps` depend only on componentwise
-//! magnitudes, so the two threads evaluate the exactly-negated coefficients
-//! of the identical geometric line — the design §5.2 rule, obtained
-//! structurally. Cell centroids and face midpoints are stored SEED-RELATIVE
+//! All clip arithmetic is seed-relative f32. Bisector planes are bitwise
+//! symmetric between threads i and j WITHOUT an explicit (min, max) ordering
+//! because IEEE-754 subtraction is sign-symmetric:
+//! `fl(p_j − p_i) == −fl(p_i − p_j)` bit-for-bit, and the offset `0.5·|q|²`
+//! and tolerance `|q|·eps` depend only on componentwise magnitudes, so the
+//! two threads evaluate the exactly-negated coefficients of the identical
+//! geometric line. Cell centroids and face midpoints are stored SEED-RELATIVE
 //! (add the seed position to get absolute coordinates): at 30k+ seeds the
 //! absolute-f32 quantum (~1e-7 at x≈2) is larger than the 1e-5·h parity
 //! tolerance, while relative coordinates are O(h) with ~1e-10 ulps.
-
-//!
-//! ## Stage 4: GPU Lloyd/CVT relaxation (lloyd.rs)
-//!
-//! `lloyd_update` moves every non-fixed seed to the ρ = h⁻ᵉˣᵖ density-
-//! weighted centroid of its cell (the exact M0 `weighted_centroid` fan
-//! quadrature; sizing field = CPU-sampled bilerp grid), chained with full
-//! regens in one encoder and no readback; a two-pass max-displacement
-//! reduce feeds both the standalone convergence check (one tiny readback)
-//! and the grid-staleness slack that keeps the stale CPU `SeedGrid`'s
-//! security stop conservative across chained iterations (lloyd.rs docs).
 
 mod derive;
 mod engine;
@@ -100,13 +68,13 @@ pub const MAX_VERTS: usize = 24;
 /// Padded output faces per cell (final ring size). Overflow is a status.
 pub const K_FACE_MAX: usize = 16;
 
-/// Per-cell status codes written to `b_status` (mirrors design §5.3).
+/// Per-cell status codes written to `b_status`.
 pub mod status {
     /// Cell certified by the security radius, or clipped against every seed
     /// in the grid (exhaustive ⇒ exact).
     pub const SUCCESS: u32 = 0;
     /// Reserved: with a CPU-built full-coverage grid the ring sweep always
-    /// either certifies or goes exhaustive, so this cannot fire in v1.
+    /// either certifies or goes exhaustive, so this cannot fire.
     pub const SECURITY_RADIUS_NOT_REACHED: u32 = 1;
     /// Clip ring exceeded `MAX_VERTS`.
     pub const VERT_OVERFLOW: u32 = 2;
@@ -148,6 +116,6 @@ pub const BC_SEG_FLAG: u32 = 0x8000_0000;
 pub const SEG_NONE: u32 = u32::MAX;
 
 /// `b_seed_flags` bit: the seed is pinned — `lloyd_update` never moves it.
-/// `SeedKind::Boundary` seeds are ALWAYS fixed (keyed off the kind table,
-/// matching M0 `lloyd_relax`); this flag additionally pins interior seeds.
+/// `SeedKind::Boundary` seeds are ALWAYS fixed (keyed off the kind table);
+/// this flag additionally pins interior seeds.
 pub const SEED_FLAG_FIXED: u32 = 1;

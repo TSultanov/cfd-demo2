@@ -1,31 +1,23 @@
-//! ALE conservation audit (M3.3 of the meshless/moving-mesh roadmap):
-//! closed box, prescribed motion, `incompressible_momentum_ale`.
+//! ALE conservation audit: closed box, prescribed motion,
+//! `incompressible_momentum_ale`.
 //!
-//! Two independent conservation statements, asserted EVERY step:
+//! Two conservation statements, asserted every step:
 //!
-//! 1. **Mesh-side (physics-independent)**: `Σ_i V_i` must track the analytic
-//!    deformed-domain area to f64 geometry precision. The prescribed motion
-//!    slides boundary vertices TANGENTIALLY along their own wall (each wall
-//!    maps to itself, corners fixed), so the analytic area is exactly
-//!    `LX·LY` at every instant while the boundary faces still sweep
-//!    (degenerate, zero-area) quads and interior cells deform arbitrarily.
-//!    This pins the swept-quad/shoelace geometry chain end to end.
+//! 1. **Mesh-side**: `Σ_i V_i` must track the analytic deformed-domain area to
+//!    f64 geometry precision. The prescribed motion slides boundary vertices
+//!    TANGENTIALLY along their own wall (each wall maps to itself, corners
+//!    fixed), so the analytic area is exactly `LX·LY` at every instant while
+//!    boundary faces still sweep degenerate (zero-area) quads and interior
+//!    cells deform arbitrarily. Pins the swept-quad/shoelace geometry chain.
 //!
-//! 2. **Global mass audit**: `M = Σ_i rho·V_i` drift per step, printed and
-//!    pinned after first measurement (review-validation #8: do NOT
-//!    pre-commit 1e-12 — pin what is measured). HONESTY NOTE: for the
-//!    incompressible model `rho` is a solver constant, so `M = rho·Σ V` and
-//!    this audit is mesh-side too — its solver content for v1 is that the
-//!    run stays finite/bounded while the audit machinery (the struct future
-//!    compressible-ALE audits will reuse) is exercised. A solver-limited
-//!    mass statement for incompressible ALE would need the per-cell
-//!    continuity residual, which is not exposed; see the roadmap's M4
-//!    always-on defect diagnostic.
+//! 2. **Global mass audit**: `M = Σ_i rho·V_i` drift per step, pinned to what
+//!    is measured. For the incompressible model `rho` is a solver constant, so
+//!    `M = rho·Σ V` and this audit is mesh-side too — its solver content is
+//!    only that the run stays finite/bounded.
 //!
-//! The CPU tight variant sets the linear tolerance through the MODEL's
-//! recipe field (`model.linear_solver.solver.tolerance`) — `CFD2_LIN_TOL`
-//! is GPU-only (review-validation #7), so an env override would silently
-//! not tighten the CPU solve.
+//! The CPU tight variant sets the linear tolerance through the MODEL's recipe
+//! field (`model.linear_solver.solver.tolerance`); `CFD2_LIN_TOL` is GPU-only,
+//! so an env override would silently not tighten the CPU solve.
 #![cfg(feature = "cpu")]
 
 use cfd2::solver::mesh::{
@@ -91,8 +83,7 @@ fn run_audit(
 
     let mut model = incompressible_momentum_ale_model().expect("ale model");
     if let Some(tol) = tighten_cpu_tol {
-        // Review #7: the CPU linear tolerance is the RECIPE field, not
-        // CFD2_LIN_TOL (which only the GPU path reads).
+        // CPU linear tolerance is the RECIPE field, not CFD2_LIN_TOL (GPU-only).
         let ls = model
             .linear_solver
             .as_mut()
@@ -166,7 +157,6 @@ fn run_audit(
             .expect("begin_ale_step");
         solver.step();
 
-        // ── the audit, every step ──────────────────────────────────────────
         let m_n = mass(&mesh);
         out.max_step_drift = out.max_step_drift.max((m_n - m_prev).abs() / m0);
         out.max_total_drift = out.max_total_drift.max((m_n - m0).abs() / m0);
@@ -199,14 +189,10 @@ fn print_audit(label: &str, out: &AuditRun) {
     );
 }
 
-/// Caps pinned after first measurement (July 2026, 24×24, 120 steps, all
-/// three variants — CPU default-tol, CPU 1e-8 tight-tol, GPU):
-///   per-step mass drift = 5.773e-15, total = 6.106e-15, area err = 4.885e-15
-///   max|U| = 1.398e-8 (cpu) / 8.293e-9 (cpu tight) / 3.533e-8 (gpu)
-/// The area/mass identities are pure f64 shoelace-sum telescopes over a
-/// fixed-boundary domain (measured ~5e-15 relative; caps ~20× headroom
-/// against platform accumulation differences). max|U| is f32-noise-scale
-/// spurious motion; cap ~15× the worst backend.
+/// Caps pinned from measurement (24×24, 120 steps): the area/mass identities
+/// are pure f64 shoelace-sum telescopes over a fixed-boundary domain (~5e-15
+/// relative; caps carry ~20× headroom against platform accumulation). max|U|
+/// is f32-noise-scale spurious motion; cap ~15× the worst backend.
 fn assert_conservation_caps(out: &AuditRun) {
     assert!(
         out.max_area_err < 1e-13,
@@ -248,11 +234,10 @@ fn ale_mass_conservation_cpu() {
     assert_conservation_caps(&out);
 }
 
-/// CPU, tight linear tolerance (1e-8) via the model recipe field — the
-/// review-#7 knob. The mesh-side caps are tolerance-independent (they must
-/// hold identically); this variant pins that the recipe path actually
-/// accepts a tolerance override and the audit is not silently
-/// solver-tolerance-shaped.
+/// CPU, tight linear tolerance (1e-8) via the model recipe field. The
+/// mesh-side caps are tolerance-independent (they must hold identically); this
+/// variant pins that the recipe path accepts a tolerance override and the
+/// audit is not silently solver-tolerance-shaped.
 #[test]
 fn ale_mass_conservation_cpu_tight_tol() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());

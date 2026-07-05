@@ -1,26 +1,18 @@
-//! GMRES Logic kernel generator implementation.
-//!
-//! This module contains the implementation of generate_gmres_logic() which was
-//! ported from the handwritten src/solver/gpu/shaders/gmres_logic.wgsl file.
-//! It contains small-system operations: Givens rotations, triangular solve, and
-//! norm finalisation — all single-threaded (@workgroup_size(1)).
+//! GMRES Logic kernel generator: small-system operations (Givens rotations,
+//! triangular solve, norm finalisation) — all single-threaded (@workgroup_size(1)).
 
 use crate::solver::codegen::kernel_wgsl::KernelWgsl;
 use crate::solver::codegen::wgsl_ast::*;
 use crate::solver::codegen::wgsl_dsl::*;
 
-/// Generate the gmres_logic.wgsl kernel with 3 entry points:
-/// - update_hessenberg_givens: Apply Givens rotations to new Hessenberg column
-/// - solve_triangular: Backward substitution for upper triangular system
-/// - finish_norm: Finalize norm from reduction result (unused but included)
+/// Generate the gmres_logic.wgsl kernel (Givens rotation update, triangular
+/// solve, norm finalisation, restart guard, relative-scale clamp).
 pub fn generate_gmres_logic() -> KernelWgsl {
     let mut m = Module::new();
 
     m.push(Item::Comment(
         "GMRES Logic Shaders (Small system operations)".into(),
     ));
-
-    // ── Struct ──────────────────────────────────────────────────────────────
 
     m.push(Item::Struct(StructDef::new(
         "IterParams",
@@ -32,9 +24,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         ],
     )));
 
-    // ── Group 0: Hessenberg and Givens data ─────────────────────────────────
-
-    // @group(0) @binding(0) var<storage, read_write> hessenberg: array<f32>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "hessenberg",
         Type::array(Type::F32),
@@ -43,7 +32,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         vec![Attribute::Group(0), Attribute::Binding(0)],
     )));
 
-    // @group(0) @binding(1) var<storage, read_write> givens: array<vec2<f32>>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "givens",
         Type::array(Type::Vec2(Box::new(Type::F32))),
@@ -52,7 +40,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         vec![Attribute::Group(0), Attribute::Binding(1)],
     )));
 
-    // @group(0) @binding(2) var<storage, read_write> g_rhs: array<f32>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "g_rhs",
         Type::array(Type::F32),
@@ -61,7 +48,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         vec![Attribute::Group(0), Attribute::Binding(2)],
     )));
 
-    // @group(0) @binding(3) var<storage, read_write> y_sol: array<f32>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "y_sol",
         Type::array(Type::F32),
@@ -70,9 +56,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         vec![Attribute::Group(0), Attribute::Binding(3)],
     )));
 
-    // ── Group 1: Parameters ─────────────────────────────────────────────────
-
-    // @group(1) @binding(0) var<uniform> iter_params: IterParams;
     m.push(Item::GlobalVar(GlobalVar::new(
         "iter_params",
         Type::Custom("IterParams".into()),
@@ -81,7 +64,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         vec![Attribute::Group(1), Attribute::Binding(0)],
     )));
 
-    // @group(1) @binding(1) var<storage, read_write> scalars: array<f32>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "scalars",
         Type::array(Type::F32),
@@ -90,7 +72,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         vec![Attribute::Group(1), Attribute::Binding(1)],
     )));
 
-    // @group(1) @binding(2) var<storage, read_write> indirect_args: array<vec4<u32>>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "indirect_args",
         Type::array(Type::Vec4(Box::new(Type::U32))),
@@ -98,8 +79,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         Some(AccessMode::ReadWrite),
         vec![Attribute::Group(1), Attribute::Binding(2)],
     )));
-
-    // ── Constants ───────────────────────────────────────────────────────────
 
     m.push(Item::Const {
         name: "SCALAR_STOP".into(),
@@ -182,11 +161,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         expr: Expr::lit_u32(23),
     });
 
-    // ── Helper function: h_idx ──────────────────────────────────────────────
-
-    // fn h_idx(row: u32, col: u32) -> u32 {
-    //     return col * (iter_params.max_restart + 1u) + row;
-    // }
     m.push(Item::Function(Function::new(
         "h_idx",
         vec![
@@ -201,10 +175,8 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         )]),
     )));
 
-    // ── Entry point: update_hessenberg_givens ───────────────────────────────
     {
         let body = block(vec![
-            // if (scalars[SCALAR_STOP] > 0.5) { return; }
             if_block_expr(
                 Expr::ident("scalars")
                     .index(Expr::ident("SCALAR_STOP"))
@@ -212,17 +184,14 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                 block(vec![return_void()]),
                 None,
             ),
-            // Count actual Arnoldi iterations (past the STOP early-out, so
-            // frozen no-op dispatches don't count). Feeds the host-side
-            // adaptive iteration budget.
+            // Count Arnoldi iterations past the STOP early-out so frozen no-op
+            // dispatches don't count; feeds the host adaptive iteration budget.
             assign_expr(
                 Expr::ident("scalars").index(Expr::ident("SCALAR_TOTAL_ITERS")),
                 Expr::ident("scalars").index(Expr::ident("SCALAR_TOTAL_ITERS"))
                     + Expr::lit_f32(1.0),
             ),
-            // let j = iter_params.current_idx;
             let_expr("j", Expr::ident("iter_params").field("current_idx")),
-            // 1. Apply previous Givens rotations to the new column H[:, j]
             comment("Apply previous Givens rotations to the new column H[:, j]"),
             for_loop_expr(
                 ForInit::Var {
@@ -267,7 +236,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                     ),
                 ]),
             ),
-            // 2. Compute new Givens rotation for H[j, j] and H[j+1, j]
             comment("Compute new Givens rotation for H[j, j] and H[j+1, j]"),
             let_expr(
                 "idx_jj",
@@ -302,13 +270,11 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                 ]),
                 None,
             ),
-            // Store rotation
             comment("Store rotation"),
             assign_expr(
                 Expr::ident("givens").index(Expr::ident("j")),
                 vec2_f32(Expr::ident("c"), Expr::ident("s")),
             ),
-            // Apply rotation to H
             comment("Apply rotation to H"),
             assign_expr(
                 Expr::ident("hessenberg").index(Expr::ident("idx_jj")),
@@ -318,7 +284,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                 Expr::ident("hessenberg").index(Expr::ident("idx_j1j")),
                 Expr::lit_f32(0.0),
             ),
-            // 3. Apply rotation to RHS vector g
             comment("Apply rotation to RHS vector g"),
             let_expr("g_j", Expr::ident("g_rhs").index(Expr::ident("j"))),
             let_expr(
@@ -397,20 +362,14 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                         ),
                     ),
                 ]),
-                // ── Mid-cycle stall ──
-                // The Givens residual ESTIMATE is monotone within a cycle,
-                // so it cannot fake a stall (orthogonality loss only makes
-                // it optimistic, and the restart-boundary guard verifies the
-                // true residual). With an unreachable tolerance, solves hit
-                // their f32 floor mid-cycle (~iteration 70 of 200 on the
-                // reference cases) and grind out the rest: stop when the
-                // estimate improves <0.5% for 10 consecutive iterations AND
-                // is below SCALAR_STALL_REL * scalars[SCALAR_RHS_NORM]
-                // (0 disables). Reuses the
-                // convergence-break machinery (STOP + ITERS_USED = j+1 +
-                // zeroed indirect args); SKIP_UPDATE stays 0 so the cycle
-                // tail applies the partial solution update, and CONVERGED
-                // stays 0 for honest reporting.
+                // Mid-cycle stall: the Givens residual estimate is monotone
+                // within a cycle (orthogonality loss only makes it optimistic;
+                // the restart-boundary guard verifies the true residual). Stop
+                // when the estimate improves <0.5% for 10 consecutive iterations
+                // AND is below SCALAR_STALL_REL * scalars[SCALAR_RHS_NORM]
+                // (0 disables). Reuses the convergence-break machinery (STOP +
+                // ITERS_USED = j+1 + zeroed indirect args); SKIP_UPDATE stays 0
+                // so the cycle tail applies the partial update, CONVERGED stays 0.
                 Some(block(vec![
                     let_expr(
                         "stall_rel",
@@ -529,10 +488,8 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         )));
     }
 
-    // ── Entry point: solve_triangular ───────────────────────────────────────
     {
         let body = block(vec![
-            // if (scalars[SCALAR_SKIP_UPDATE] > 0.5) { return; }
             if_block_expr(
                 Expr::ident("scalars")
                     .index(Expr::ident("SCALAR_SKIP_UPDATE"))
@@ -540,7 +497,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                 block(vec![return_void()]),
                 None,
             ),
-            // let k = u32(clamp(round(scalars[SCALAR_ITERS_USED]), 1.0, f32(iter_params.max_restart)));
             let_expr(
                 "k",
                 u32_cast(clamp(
@@ -549,7 +505,6 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                     f32_cast(Expr::ident("iter_params").field("max_restart")),
                 )),
             ),
-            // Backward substitution
             comment("Backward substitution"),
             for_loop_expr(
                 ForInit::Var {
@@ -614,19 +569,14 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         )));
     }
 
-    // ── Entry point: finish_norm ────────────────────────────────────────────
     {
         let body = block(vec![
-            // let norm_sq = scalars[0];
             let_expr("norm_sq", Expr::ident("scalars").index(Expr::lit_u32(0))),
-            // let norm = sqrt(norm_sq);
             let_expr("norm", sqrt(Expr::ident("norm_sq"))),
-            // hessenberg[iter_params.current_idx] = norm;
             assign_expr(
                 Expr::ident("hessenberg").index(Expr::ident("iter_params").field("current_idx")),
                 Expr::ident("norm"),
             ),
-            // if (norm > 1e-20) { scalars[0] = 1.0 / norm; } else { scalars[0] = 0.0; }
             if_block_expr(
                 Expr::ident("norm").gt(Expr::lit_f32(1e-20)),
                 block(vec![assign_expr(
@@ -653,20 +603,15 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         )));
     }
 
-    // ── Entry point: restart_guard ──────────────────────────────────────────
-    //
     // Restart-boundary monotonicity guard. Runs after the encoded seed has
-    // written the TRUE residual norm ||b - A*x|| into hessenberg[0]. f32
-    // Arnoldi can lose orthogonality on hard preconditioned systems and a
-    // restart cycle may then APPLY an update that increases the true
-    // residual; unguarded this compounds across restarts (observed June
-    // 2026 on the coupled incompressible system: residual growth by orders
-    // of magnitude, ending in NaN). On improvement the guard requests a
-    // snapshot of x (GUARD_FLAG=1, executed by gmres_ops/guard_copy); on
-    // growth past BEST*1.25 (or a non-finite seed) it requests a restore
-    // (GUARD_FLAG=2), freezes the remaining work like the convergence
-    // break (STOP + SKIP_UPDATE + zeroed indirect args), and reports the
-    // best residual.
+    // written the TRUE residual norm ||b - A*x|| into hessenberg[0]. f32 Arnoldi
+    // can lose orthogonality on hard preconditioned systems and a restart cycle
+    // may then apply an update that increases the true residual; unguarded this
+    // compounds to NaN. On improvement the guard requests a snapshot of x
+    // (GUARD_FLAG=1, executed by gmres_ops/guard_copy); on growth past BEST*1.25
+    // (or a non-finite seed) it requests a restore (GUARD_FLAG=2), freezes the
+    // remaining work like the convergence break (STOP + SKIP_UPDATE + zeroed
+    // indirect args), and reports the best residual.
     {
         let r = Expr::ident("r");
         let best = Expr::ident("best");
@@ -763,17 +708,13 @@ pub fn generate_gmres_logic() -> KernelWgsl {
                             Expr::lit_f32(0.0),
                         )])),
                     ),
-                    // ── Stall-stop ──
-                    // With an unreachable tolerance every solve burns to the
-                    // iteration cap at its f32 floor. When the true residual
-                    // stops improving (<2% across a checkpoint) for two
-                    // consecutive checkpoints AND is already small relative
-                    // to the tolerance scale in SCALAR_RHS_NORM (clamped to
-                    // min(||b||, ||r0||) on the fully-encoded path; level
-                    // factor in SCALAR_STALL_REL; 0 disables),
-                    // freeze the remaining work like the convergence break,
-                    // keeping the best iterate. Mirrors the host loop in
-                    // solve_fgmres — keep the two in sync.
+                    // Stall-stop: when the true residual stops improving (<2%
+                    // across a checkpoint) for two consecutive checkpoints AND is
+                    // small relative to SCALAR_RHS_NORM (min(||b||, ||r0||) on the
+                    // fully-encoded path; level factor SCALAR_STALL_REL, 0 disables),
+                    // freeze the remaining work like the convergence break, keeping
+                    // the best iterate. Mirrors the host loop in solve_fgmres — keep
+                    // the two in sync.
                     let_expr(
                         "prev",
                         Expr::ident("scalars").index(Expr::ident("SCALAR_PREV_RESID")),
@@ -903,16 +844,12 @@ pub fn generate_gmres_logic() -> KernelWgsl {
         )));
     }
 
-    // ── Entry point: clamp_rel_scale ────────────────────────────────────────
-    //
-    // Align the fully-encoded path's relative-tolerance scale with the host
-    // loop (solve_fgmres): rel_scale = min(||b||, ||r0||). Runs on the first
-    // restart chunk only, after the GPU-side ||rhs|| computation wrote ||b||
-    // into scalars[SCALAR_RHS_NORM] and the encoded seed's beta = ||r0|| was
-    // restored into hessenberg[0]. Without the clamp, a near-converged warm
-    // start (||r0|| << ||b||) would declare convergence against ||b|| alone.
-    // NaN-safe: the comparison is false for non-finite beta, keeping ||b||
-    // (the seed/guard machinery handles non-finite residuals).
+    // Relative-tolerance scale = min(||b||, ||r0||), matching the host loop
+    // (solve_fgmres). Runs on the first restart chunk only, after ||b|| is in
+    // scalars[SCALAR_RHS_NORM] and beta = ||r0|| in hessenberg[0]. Without the
+    // clamp, a near-converged warm start (||r0|| << ||b||) would declare
+    // convergence against ||b|| alone. NaN-safe: the comparison is false for
+    // non-finite beta, keeping ||b||.
     {
         let body = block(vec![
             let_expr("beta", Expr::ident("hessenberg").index(Expr::lit_u32(0))),

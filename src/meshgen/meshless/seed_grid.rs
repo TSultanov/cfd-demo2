@@ -1,16 +1,15 @@
-//! Uniform CSR seed grid + exact k-nearest-neighbor ring search (meshless
-//! engine M0.1, design §2).
+//! Uniform CSR seed grid + exact k-nearest-neighbor ring search.
 //!
 //! Seeds are binned into a uniform grid (~`TARGET_OCCUPANCY` seeds/bin) laid
-//! out CSR-style by a counting sort — O(n), deterministic, and exactly the
-//! layout the M1 GPU stage-1 kernel consumes. Queries visit bins in
-//! concentric Chebyshev rings keeping the k best candidates in a bounded
-//! max-heap ordered by the `(d², id)` *total order* (id tie-break), and stop
-//! once the next ring is provably farther than the current k-th distance.
-//! The result is the exact k smallest neighbors under that total order —
-//! bit-deterministic even for cocircular/equidistant seed sets — which is
-//! load-bearing: the clip kernel's oracle-equality guarantee assumes the
-//! neighbor list is an exact distance-ordered prefix of all other seeds.
+//! out CSR-style by a counting sort — O(n), deterministic, and the layout the
+//! GPU stage-1 kernel consumes. Queries visit bins in concentric Chebyshev
+//! rings keeping the k best candidates in a bounded max-heap ordered by the
+//! `(d², id)` *total order* (id tie-break), and stop once the next ring is
+//! provably farther than the current k-th distance. The result is the exact k
+//! smallest neighbors under that total order — bit-deterministic even for
+//! cocircular/equidistant seed sets — which is load-bearing: the clip kernel's
+//! oracle-equality guarantee assumes the neighbor list is an exact
+//! distance-ordered prefix of all other seeds.
 
 use nalgebra::{Point2, Vector2};
 use std::collections::BinaryHeap;

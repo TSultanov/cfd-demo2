@@ -41,7 +41,6 @@ pub use {
         BufferI32, BufferPort, BufferType, BufferU32, BufferVec2F32, BufferVec3F32, ReadOnly,
         ReadWrite,
     },
-    // Re-export derive macros from cfd2_macros
     cfd2_macros::{ModulePorts, PortSet},
     dimensions::{
         Acceleration, AnyDimension, Area, Density, DimCompatible, Dimensionless, DivDim,
@@ -59,7 +58,6 @@ pub use {
         F32, F64, I32, U32,
     },
     registry::{PortRegistry, PortRegistryError},
-    // Re-export traits
     traits::{ModulePorts as ModulePortsTrait, PortSet as PortSetTrait, PortValidationError},
 };
 

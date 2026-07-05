@@ -1,28 +1,20 @@
-//! CPU-only regression coverage for the mutual-orphan endpoint
-//! reconciliation pass in `assemble_mesh` (stage-5 review: the pass changes
-//! the shared M0 assembler for EVERY consumer, but was previously exercised
-//! only by GPU-gated tests that silently skip without an adapter).
+//! CPU-only regression coverage for the mutual-orphan endpoint reconciliation pass
+//! in `assemble_mesh`: the pass changes the shared assembler for every consumer, but
+//! was otherwise exercised only by GPU-gated tests that silently skip without an adapter.
 //!
-//! The trigger is f32 QUANTIZATION of the seeds/boundary, not the GPU
-//! kernel: on f32-rounded seed sets a reflex-vertex guard pair's mutual
-//! bisector misses the polyline vertex by ~1 f32 position ulp, so the two
-//! cells canonicalize the shared face endpoint through DIFFERENT tag pairs
-//! into different dedup bins. This test needs NO GPU:
+//! The trigger is f32 QUANTIZATION of the seeds/boundary, not the GPU kernel: on
+//! f32-rounded seed sets a reflex-vertex guard pair's mutual bisector misses the
+//! polyline vertex by ~1 f32 position ulp, so the two cells canonicalize the shared
+//! face endpoint through DIFFERENT tag pairs into different dedup bins. No GPU needed:
 //!
-//! 1. f32-rounded seeds + spec → `build_diagram` → `assemble_mesh` must
-//!    produce a fully CLOSED mesh (the condition the pass repairs), with
-//!    the fire counter and max accepted endpoint gap reported; the pass
-//!    must actually fire on at least one standard case and accepted gaps
-//!    must stay at the f32 noise scale.
-//! 2. On unrounded f64 seeds, instrumentation REFUTED the stage-3 claim
-//!    that the pass "never fires": the obstacle circle fires 4× with gaps
-//!    ~1.7e-8 — BELOW the 1e-6·h quantized-dedup pitch (5e-8 here), i.e.
-//!    sub-pitch coincidences that straddle a quantize-bin boundary. The
-//!    honest gate is therefore: every f64-accepted gap ≤ the dedup pitch
-//!    (the pass only welds what the dedup itself was designed to absorb,
-//!    never real topology), and the mesh closes.
-//!
-//! Run with:
+//! 1. f32-rounded seeds + spec → `build_diagram` → `assemble_mesh` must produce a
+//!    fully CLOSED mesh (the condition the pass repairs); the pass must fire on at
+//!    least one standard case and accepted gaps must stay at the f32 noise scale.
+//! 2. On unrounded f64 seeds the pass still fires (obstacle circle 4× with gaps
+//!    ~1.7e-8) — but only BELOW the 1e-6·h quantized-dedup pitch (5e-8 here):
+//!    sub-pitch coincidences that straddle a quantize-bin boundary. The gate: every
+//!    f64-accepted gap ≤ the dedup pitch (the pass only welds what the dedup was
+//!    designed to absorb, never real topology), and the mesh closes.
 //!
 //! ```sh
 //! cargo test --features meshgen --test meshless_orphan_cpu_test -- --nocapture
@@ -174,12 +166,11 @@ fn mutual_orphan_pass_f64_firings_stay_sub_dedup_pitch() {
     let (f_obst, gap_obst, _) = assemble_case("obstacle", &obstacle, domain, hmin, false);
     let (f_nozz, gap_nozz, _) = assemble_case("nozzle", &nozzle, domain, hmin, false);
 
-    // Instrumented refutation record (stage-5): the pass DOES fire on the
-    // unrounded f64 obstacle (4 sites measured) — but only for endpoint
-    // gaps BELOW the quantized-dedup pitch (vertex_merge = 1e-6·h): the
-    // sub-pitch bin-straddle coincidence class the dedup was built to
-    // absorb. Anything above the pitch on f64 would mean the pass rewrites
-    // genuine topology on the pure-CPU M0 path — that is the gate.
+    // The pass DOES fire on the unrounded f64 obstacle (4 sites) — but only for
+    // endpoint gaps BELOW the quantized-dedup pitch (vertex_merge = 1e-6·h): the
+    // sub-pitch bin-straddle coincidence class the dedup was built to absorb. Anything
+    // above the pitch on f64 would mean the pass rewrites genuine topology on the
+    // pure-CPU path — that is the gate.
     let dedup_pitch = 1e-6 * hmin;
     let max_gap = gap_obst.max(gap_nozz);
     println!(

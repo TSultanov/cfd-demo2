@@ -12,7 +12,6 @@ pub struct BoundarySides {
 }
 
 impl BoundarySides {
-    /// Creates a new BoundarySides with all sides set to Wall.
     pub fn wall() -> Self {
         Self {
             left: BoundaryType::Wall,
@@ -40,7 +39,6 @@ pub fn generate_structured_rect_mesh(
 
     let mut mesh = Mesh::new();
 
-    // --- Vertices ---
     let num_vertices = (nx + 1) * (ny + 1);
     mesh.vx = vec![0.0; num_vertices];
     mesh.vy = vec![0.0; num_vertices];
@@ -55,8 +53,6 @@ pub fn generate_structured_rect_mesh(
         }
     }
 
-    // --- Faces (edges) ---
-    // We build a face list for all vertical and horizontal grid edges and a mapping to cell faces.
     let mut face_v1: Vec<usize> = Vec::new();
     let mut face_v2: Vec<usize> = Vec::new();
     let mut face_owner: Vec<usize> = Vec::new();
@@ -140,7 +136,6 @@ pub fn generate_structured_rect_mesh(
     mesh.face_cx = vec![0.0; mesh.face_v1.len()];
     mesh.face_cy = vec![0.0; mesh.face_v1.len()];
 
-    // --- Cells ---
     let num_cells = nx * ny;
     mesh.cell_cx = vec![0.0; num_cells];
     mesh.cell_cy = vec![0.0; num_cells];
@@ -279,11 +274,9 @@ pub fn generate_graded_rect_mesh(
 /// Fully periodic rectangular mesh: every face is INTERIOR (no boundary
 /// faces). Seam faces wrap to the opposite edge and record a
 /// `face_wrap_shift` = the vector to add to the neighbor-side cell center to
-/// bring it into the owner's frame across the seam. The boundary-free
-/// instrument that isolates the interior discretization from boundary
-/// effects (Arc N′ N3). Cells keep their own corner vertices; the wrap is
-/// carried purely by face connectivity + the shift, so cell geometry is
-/// identical to the uniform mesh.
+/// bring it into the owner's frame across the seam. Cells keep their own
+/// corner vertices; the wrap is carried purely by face connectivity + the
+/// shift, so cell geometry is identical to the uniform mesh.
 pub fn generate_structured_rect_mesh_periodic(
     nx: usize,
     ny: usize,

@@ -2,10 +2,7 @@
 
 use crate::solver::gpu::modules::krylov_precond::{PrecondContext, PreconditionerModule};
 
-/// Identity preconditioner (no preconditioning).
-///
-/// Simply copies the input vector to the output vector unchanged.
-/// Uses `encoder.copy_buffer_to_buffer()` — no compute pipeline needed.
+/// Identity preconditioner (no preconditioning): copies input to output.
 #[derive(Default)]
 pub struct IdentityPreconditioner;
 

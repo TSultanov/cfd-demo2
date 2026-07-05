@@ -86,8 +86,6 @@ impl fmt::Display for Type {
     }
 }
 
-// ── Render context for WGSL emission ───────────────────────────────────
-
 /// A simple indentation-aware WGSL line writer.
 ///
 /// This is the common rendering infrastructure used by both `Stmt::render()`

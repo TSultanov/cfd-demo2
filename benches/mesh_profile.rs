@@ -12,7 +12,6 @@ fn mesh_profile_benchmark(c: &mut Criterion) {
     };
     let domain_size = Vector2::new(2.0, 1.0);
 
-    // Requested cell size
     let min_cell_size = 0.00175;
     let max_cell_size = 0.00175;
 

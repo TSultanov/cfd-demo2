@@ -106,12 +106,11 @@ impl GeneratedKernelsModule {
         })
     }
 
-    /// Tier B topology refresh (M2): rebuild every kernel's ping-pong bind
-    /// groups against a fresh [`ResourceRegistry`] WITHOUT recompiling any
-    /// pipeline (the generated WGSL is unchanged — only the buffers the bind
-    /// groups point at were reallocated by the topology refresh). This is the
-    /// bind-group section of [`Self::new_from_recipe`] re-run over the cached
-    /// pipelines (`pipeline.get_bind_group_layout` reuses the compiled layout).
+    /// Rebuild every kernel's ping-pong bind groups against a fresh
+    /// [`ResourceRegistry`] WITHOUT recompiling any pipeline (the generated WGSL
+    /// is unchanged — only the buffers the bind groups point at were reallocated
+    /// by a topology refresh; `pipeline.get_bind_group_layout` reuses the
+    /// compiled layout).
     ///
     /// `registry` must already resolve the post-refresh buffers (mesh, fields,
     /// linear system, bc tables). The 3 ping-pong phases are rebuilt exactly as

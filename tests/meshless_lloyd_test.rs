@@ -1,30 +1,9 @@
-//! Lloyd/CVT gates for the meshless engine (M0.5, design §6 as amended by
-//! review F8):
-//!
-//! 1. **Uniform box CVT** — the relaxation converges (h-relative max
-//!    displacement < `tol_disp`; measured to need ~70 iterations, beyond the
-//!    default 30 — demonstrated on an extended budget) and the bulk of the
-//!    domain becomes near-regular hexagons: ring-size histogram mode 6 with
-//!    an absolute hexagon majority; cell-area CV < 7.5% (the design's 5% is
-//!    below the measured polycrystalline defect floor of ~5.3% — see the
-//!    in-test comment).
-//! 2. **Quality gate (review F8: interior faces only — the max is
-//!    boundary-dominated)** — interior-face skewness of `generate_cvt_mesh`
-//!    ≤ the incumbent `generate_voronoi_mesh` + `Mesh::smooth` GUI pipeline
-//!    on the same geometry/size, and CVT cuts the unrelaxed meshless mean
-//!    skew by ≥ 2×.
-//! 3. **Graded sizing** — cell area tracks h(x)² (Spearman rank correlation;
-//!    direction asserted, magnitude compared against the incumbent).
-//! 4. **Monotone-ish descent** — over the last 10 iterations no single Lloyd
-//!    step increases the mean interior skew by > 5%.
-//! 5. **Byte determinism** of `generate_cvt_mesh` across explicit rayon
-//!    thread pools (1/2/8).
-//!
-//! Run with:
-//!
-//! ```sh
-//! cargo test --features meshgen --test meshless_lloyd_test -- --nocapture
-//! ```
+//! Lloyd/CVT gates for the meshless engine: uniform-box convergence and
+//! near-hex regularity, interior-face skewness vs the incumbent Voronoi +
+//! `Mesh::smooth` pipeline, graded sizing (area tracks h(x)²), monotone-ish
+//! skew descent, and byte determinism across rayon thread pools. Skewness is
+//! measured on interior faces only — boundary-face skew reflects wall-face
+//! construction, not CVT quality.
 
 #![cfg(feature = "meshgen")]
 
@@ -55,10 +34,9 @@ fn obstacle() -> (ChannelWithObstacle, Vector2<f64>) {
     )
 }
 
-/// (max, mean) skewness over INTERIOR faces of an assembled mesh — the
-/// review-F8 metric (the `skew_stats` pattern from `meshgen_validation.rs`;
-/// boundary faces excluded because their skew reflects the wall-face
-/// construction, not CVT interior quality).
+/// (max, mean) skewness over INTERIOR faces of an assembled mesh. Boundary
+/// faces are excluded: their skew reflects wall-face construction, not CVT
+/// interior quality.
 fn interior_skew_stats(mesh: &Mesh) -> (f64, f64) {
     let mut max_s = 0.0f64;
     let mut sum = 0.0f64;
@@ -84,8 +62,7 @@ fn interior_skew_stats(mesh: &Mesh) -> (f64, f64) {
 
 /// Mean interior-face skew straight off a diagram (no assembly): every
 /// `Bisector(j)` edge with `j > i` is one interior face; the face normal is
-/// `normalize(seed_j − seed_i)` by construction. Overflow cells are skipped
-/// (none arise on these inputs).
+/// `normalize(seed_j − seed_i)` by construction. Overflow cells are skipped.
 fn diagram_mean_interior_skew(seeds: &[Point2<f64>], d: &MeshlessDiagram) -> f64 {
     let mut sum = 0.0f64;
     let mut n = 0usize;
@@ -161,10 +138,6 @@ fn boundary_free_cells(mesh: &Mesh) -> Vec<usize> {
         .collect()
 }
 
-// ---------------------------------------------------------------------------
-// 1. Uniform box: convergence + near-hex regularity
-// ---------------------------------------------------------------------------
-
 #[test]
 fn uniform_box_cvt_converges_to_near_hex() {
     let geo = RectangularChannel { length: 1.0, height: 1.0 };
@@ -186,19 +159,15 @@ fn uniform_box_cvt_converges_to_near_hex() {
         stats.escalated
     );
     assert!(stats.iters <= lcfg.max_iters);
-    // Snapshot the default-budget state: the near-hex quality gates below
-    // are asserted at <= 30 iterations, not on the extended run.
+    // The near-hex quality gates below are asserted at the default budget
+    // (<= 30 iters), not on the extended run.
     let seeds30 = seeds.clone();
 
-    // Convergence of the iteration itself (max_disp/h < tol_disp). Measured
-    // fact (probe, July 2026): the default 30-iteration budget is
-    // quality-saturated (the hex/CV gates below pass at 30) but NOT
-    // displacement-converged — max-disp decays non-monotonically because
-    // topology flips keep migrating through the lattice (grain-boundary
-    // rearrangement), and the first crossing below 0.01 lands at ~45-75
-    // iterations for n = 70-300 regardless of set size. So demonstrate
-    // convergence by CONTINUING the same relaxation (each iteration is a
-    // pure function of the seed set) with a larger budget.
+    // The default budget is quality-saturated but not displacement-converged:
+    // max_disp decays non-monotonically (topology flips migrating through the
+    // lattice) and first crosses tol_disp at ~45-75 iters. Demonstrate
+    // convergence by continuing the same relaxation (each iteration is a pure
+    // function of the seed set) with a larger budget.
     let extended = LloydConfig {
         max_iters: 150,
         ..lcfg
@@ -262,17 +231,10 @@ fn uniform_box_cvt_converges_to_near_hex() {
     );
     assert!(areas.len() > 50, "bulk set too small to be meaningful");
     assert_eq!(mode, 6, "ring-size histogram mode must be hexagonal");
-    // HONEST DEVIATION from the design's "CV < 5%": that number is not
-    // achievable by plain Lloyd from a Poisson-disk start on this box —
-    // measured (July 2026 probes): CV 6.94% @30 iters decaying to a 5.33%
-    // FLOOR @200; the floor is topological, not iterative: ~20-27% of bulk
-    // cells are 5/7-gon grain-boundary defects whose CVT areas sit at −9.5%
-    // / +9.0% of the mean (even the hexagon-only CV is ~5.1% from the
-    // polycrystalline strain), and Lloyd — a local descent — cannot anneal
-    // grain boundaries away (omega up to 1.9 improves 30-iter CV only to
-    // 6.24%). Gate pinned at the honestly achievable 7.5% for the default
-    // 30-iteration budget; hex-dominance (mode 6, and 6-gons an absolute
-    // majority) is the real regularity signal and is asserted strictly.
+    // CV gate is 7.5%, not the design's 5%: plain Lloyd cannot beat a
+    // topological ~5.3% floor set by 5/7-gon grain-boundary defects (a local
+    // descent can't anneal grain boundaries away). Hex-dominance below is the
+    // strict regularity signal.
     assert!(cv < 0.075, "cell-area CV {:.3}% >= 7.5%", cv * 100.0);
     assert!(
         hist[6] * 2 > areas.len(),
@@ -281,10 +243,6 @@ fn uniform_box_cvt_converges_to_near_hex() {
         areas.len()
     );
 }
-
-// ---------------------------------------------------------------------------
-// 2. Interior-face skewness vs the incumbent pipeline (review F8)
-// ---------------------------------------------------------------------------
 
 #[test]
 fn cvt_interior_skew_beats_incumbent_and_unrelaxed() {
@@ -323,10 +281,6 @@ fn cvt_interior_skew_beats_incumbent_and_unrelaxed() {
     let (geo, domain) = obstacle();
     run("obstacle", &geo, domain);
 }
-
-// ---------------------------------------------------------------------------
-// 3. Graded sizing: cell area tracks h(x)^2
-// ---------------------------------------------------------------------------
 
 #[test]
 fn graded_cvt_tracks_sizing_at_least_as_well_as_incumbent() {
@@ -367,10 +321,6 @@ fn graded_cvt_tracks_sizing_at_least_as_well_as_incumbent() {
         "CVT grading correlation {rho_cvt:.4} clearly worse than incumbent {rho_inc:.4}"
     );
 }
-
-// ---------------------------------------------------------------------------
-// 4. Monotone-ish descent of the mean interior skew
-// ---------------------------------------------------------------------------
 
 #[test]
 fn late_lloyd_iterations_do_not_regress_mean_skew() {
@@ -418,10 +368,6 @@ fn late_lloyd_iterations_do_not_regress_mean_skew() {
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// 5. Byte determinism across thread pools
-// ---------------------------------------------------------------------------
 
 fn assert_meshes_bit_identical(a: &Mesh, b: &Mesh, label: &str) {
     let bits = |v: &[f64]| -> Vec<u64> { v.iter().map(|x| x.to_bits()).collect() };

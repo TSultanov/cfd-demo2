@@ -7,29 +7,25 @@ use crate::solver::model::module::KernelBundleModule;
 ///
 /// This module does not contribute kernels.
 pub fn eos_module(eos: EosSpec) -> KernelBundleModule {
-    // For now, EOS tuning + low-mach knobs are only meaningful for compressible EOS variants.
-    // Keep the contract consistent with the previous EOS-implied behavior.
+    // EOS tuning + low-mach knobs are only meaningful for compressible EOS variants.
     let requires_low_mach_params = matches!(
         eos,
         EosSpec::IdealGas { .. } | EosSpec::LinearCompressibility { .. }
     );
 
     let (port_manifest, named_params) = if requires_low_mach_params {
-        // Set the port-based manifest for uniform params
-        // This is done via a helper function in a separate module to avoid
-        // proc-macro issues in build scripts
+        // Helper lives in a separate module to avoid proc-macro issues in build scripts.
         let port_manifest =
             Some(crate::solver::model::modules::eos_ports::eos_uniform_port_manifest());
 
-        // Keep named_params for non-uniform parameters and backward compatibility
-        // Note: low_mach.model is a u32 enum, not representable as ParamPort<F32, _>
-        // EOS uniform params are now declared via port_manifest, so we only list
-        // low_mach params here.
+        // low_mach.model is a u32 enum, not representable as ParamPort<F32, _>;
+        // EOS uniform params go through port_manifest, so only low_mach params
+        // are listed here.
         let named_params = vec![
             "low_mach.model",
             "low_mach.theta_floor",
             "low_mach.pressure_coupling_alpha",
-            // Arc N4b biharmonic dissipation coefficient (reuses the LowMachParams slot).
+            // biharmonic dissipation coefficient (reuses the LowMachParams slot).
             "low_mach.eps4",
         ];
 

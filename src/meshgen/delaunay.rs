@@ -45,7 +45,7 @@ impl Triangle {
         p2: Point2<f64>,
         p3: Point2<f64>,
     ) -> Self {
-        // Enforce CCW
+        // Enforce CCW winding
         let det = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
         let (v1, v2, v3, p1, p2, p3) = if det < 0.0 {
             (v1, v3, v2, p1, p3, p2)
@@ -71,7 +71,7 @@ impl Triangle {
     ) -> (Point2<f64>, f64) {
         let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
         if d.abs() < 1e-12 {
-            // Collinear or degenerate, return something safe but invalid
+            // Collinear/degenerate: return an invalid circle (never contains a point)
             return (Point2::origin(), f64::MAX);
         }
         let ux = ((a.x * a.x + a.y * a.y) * (b.y - c.y)
@@ -88,18 +88,16 @@ impl Triangle {
     }
 
     pub fn in_circumcircle(&self, p: Point2<f64>, points: &[Point2<f64>], eps: f64) -> bool {
-        // Robust check using determinant
         let a = points[self.v1];
         let b = points[self.v2];
         let c = points[self.v3];
 
-        // Check orientation of a, b, c
         let det_abc = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 
-        // If det_abc is negative, points are clockwise. Swap b and c to make them CCW for the check.
+        // Determinant test requires CCW winding: swap b,c if clockwise
         let (b, c) = if det_abc < 0.0 { (c, b) } else { (b, c) };
 
-        // Using relative coordinates to p improves precision
+        // Coordinates relative to p improve precision
         let adx = a.x - p.x;
         let ady = a.y - p.y;
         let bdx = b.x - p.x;
@@ -131,15 +129,12 @@ pub fn triangulate(
 ) -> (Vec<Point2<f64>>, Vec<Triangle>, Vec<bool>) {
     let tol = MeshgenTolerances::from_geometry(min_cell_size, domain_size);
 
-    // 1. Generate Points
-    // Step 1a: Boundary Points
     let boundary_points = geo.get_boundary_points(min_cell_size);
 
     let mut points = Vec::new();
     let mut fixed_nodes = Vec::new();
     let mut unique_map = HashMap::new();
 
-    // Add boundary points
     for p in boundary_points {
         let key = tol.quantize_point(p.x, p.y);
         if !unique_map.contains_key(&key) {
@@ -149,7 +144,6 @@ pub fn triangulate(
         }
     }
 
-    // Step 1b: Interior Points using Poisson Disk Sampling
     let interior_points = generate_poisson_points(
         &points,
         geo,
@@ -160,22 +154,18 @@ pub fn triangulate(
     );
 
     for p in interior_points {
-        // Interior points are not fixed
         points.push(p);
         fixed_nodes.push(false);
     }
 
-    // Sort points to improve triangulation performance (spatial locality)
+    // Sort by spatial locality to speed up triangulation
     sort_points_morton(&mut points, &mut fixed_nodes);
 
-    // 2. Initial Triangulation
     let mut triangles = compute_triangulation(&points, domain_size, &fixed_nodes, geo, &tol);
 
-    // 3. Smooth Generators (Laplacian Smoothing). The triangulation is only
-    // refreshed once the accumulated motion could plausibly change the
-    // topology (Laplacian smoothing tolerates a slightly stale neighborhood),
-    // and the loop exits early once the point set stops moving — a full
-    // Bowyer–Watson pass per iteration dominated generation time before.
+    // Laplacian smoothing. Re-triangulate only once accumulated motion could
+    // plausibly change topology (smoothing tolerates a slightly stale
+    // neighborhood); exit early once the point set stops moving.
     let smoothing_iters = 20;
     let converge_disp = 0.01 * min_cell_size;
     let retriangulate_disp = 0.2 * min_cell_size;
@@ -207,8 +197,7 @@ pub fn triangulate(
     (points, triangles, fixed_nodes)
 }
 
-// `pub(super)`: the meshless path (`meshgen::meshless::boundary`) reuses the
-// exact same sampler (and RNG seed) with loop-derived boundary seeds.
+// pub(super): the meshless path reuses this exact sampler (and RNG seed).
 pub(super) fn generate_poisson_points(
     boundary_points: &[Point2<f64>],
     geo: &(impl Geometry + Sync),
@@ -217,9 +206,7 @@ pub(super) fn generate_poisson_points(
     growth_rate: f64,
     domain_size: Vector2<f64>,
 ) -> Vec<Point2<f64>> {
-    // Fixed seed: mesh generation is deterministic — the same geometry and
-    // sizing always produce the same point set (and therefore the same mesh),
-    // which makes solver results reproducible across runs.
+    // Fixed seed: same geometry+sizing must yield the same mesh (reproducibility).
     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(0x5EED_CFD2);
     let r_min = min_cell_size;
     let cell_size = r_min / (2.0f64).sqrt();
@@ -228,12 +215,9 @@ pub(super) fn generate_poisson_points(
     let grid_h = (domain_size.y / cell_size).ceil() as usize;
 
     // Bucketed background grid: `grid_head[cell]` is the most recent point in
-    // the cell, `next_in_cell[point]` chains the rest. A single-slot grid is
-    // NOT sufficient here: boundary points arrive with arbitrary spacing (two
-    // wall polylines meeting at a corner, chords of the obstacle circle), so a
-    // cell can legitimately hold several points — a slot grid silently forgot
-    // all but the last one and let interior samples land arbitrarily close to
-    // a forgotten boundary point (sliver triangles / tiny Voronoi faces).
+    // the cell, `next_in_cell[point]` chains the rest. Chaining (not a single
+    // slot) is required because boundary points can crowd several into one cell
+    // (corners, obstacle chords); dropping all but the last spawns slivers.
     let mut grid_head: Vec<i32> = vec![-1; grid_w * grid_h];
     let mut next_in_cell: Vec<i32> = Vec::new();
 
@@ -245,8 +229,8 @@ pub(super) fn generate_poisson_points(
         gy * grid_w + gx
     };
 
-    let mut points = Vec::new(); // Local list of all points (boundary + new)
-    let mut active_list = Vec::new(); // Indices into `points`
+    let mut points = Vec::new(); // boundary + new
+    let mut active_list = Vec::new(); // indices into `points`
 
     let mut insert = |p: Point2<f64>,
                       points: &mut Vec<Point2<f64>>,
@@ -261,23 +245,20 @@ pub(super) fn generate_poisson_points(
         idx
     };
 
-    // Initialize with boundary points
     for &p in boundary_points {
         let idx = insert(p, &mut points, &mut grid_head, &mut next_in_cell);
         active_list.push(idx);
     }
 
-    // Sizing function
     let get_radius = |p: Point2<f64>| -> f64 {
         let dist = geo.sdf(&p).abs();
         let r = min_cell_size + (growth_rate - 1.0).max(0.0) * dist;
         r.min(max_cell_size)
     };
 
-    let k = 30; // Max candidates per point
+    let k = 30; // max candidates per point
 
     while !active_list.is_empty() {
-        // Pick a random point from active list
         let active_idx = rng.gen_range(0..active_list.len());
         let p_idx = active_list[active_idx];
         let p = points[p_idx];
@@ -290,21 +271,17 @@ pub(super) fn generate_poisson_points(
             let dist = rng.gen_range(r..2.0 * r);
             let new_p = Point2::new(p.x + dist * angle.cos(), p.y + dist * angle.sin());
 
-            // Check bounds
             if new_p.x < 0.0 || new_p.x > domain_size.x || new_p.y < 0.0 || new_p.y > domain_size.y
             {
                 continue;
             }
 
-            // Check geometry
             if !geo.is_inside(&new_p) {
                 continue;
             }
 
-            // Check neighbors. A conflict is a point within `r_new` of the
-            // candidate, so scanning a window of `r_new` (not `max_cell_size`)
-            // around the candidate's cell is sufficient — and much cheaper on
-            // graded meshes where max/min is large.
+            // A conflict is a point within `r_new`, so scan a window of `r_new`
+            // (not `max_cell_size`) — much cheaper on graded meshes.
             let r_new = get_radius(new_p);
 
             let gx = (new_p.x / cell_size).floor() as isize;
@@ -348,7 +325,7 @@ pub(super) fn generate_poisson_points(
         }
     }
 
-    // Return only the new points (exclude initial boundary points)
+    // Exclude the initial boundary points
     points.into_iter().skip(boundary_points.len()).collect()
 }
 
@@ -374,14 +351,12 @@ fn smooth_generators(
         adj[t.v3].push(t.v1);
         adj[t.v3].push(t.v2);
     }
-    // Every interior edge is shared by two triangles, so each neighbor is
-    // pushed twice — dedup halves the smoothing work without changing weights.
+    // Each shared edge pushes its neighbor twice; dedup to weight each once.
     for a in adj.iter_mut() {
         a.sort_unstable();
         a.dedup();
     }
 
-    // Sizing function (same as in generate_poisson_points)
     let get_radius = |p: Point2<f64>| -> f64 {
         let dist = geo.sdf(&p).abs();
         let r = min_cell_size + (growth_rate - 1.0).max(0.0) * dist;
@@ -543,8 +518,7 @@ fn compute_triangulation(
     let circumcircle_eps = tol.circumcircle_eps;
 
     // Per-insertion scratch, hoisted out of the loop. `visit_stamp`/`bad_stamp`
-    // are epoch-tagged marks replacing a per-insertion HashSet and O(k)
-    // `Vec::contains` cavity-membership tests.
+    // are epoch-tagged marks for O(1) cavity-membership tests.
     let mut bad_triangles: Vec<usize> = Vec::new();
     let mut queue: Vec<usize> = Vec::new();
     let mut boundary_edges: Vec<(usize, usize, Option<usize>)> = Vec::new();
@@ -679,7 +653,6 @@ fn compute_triangulation(
             let idx = dt.add_triangle(new_t);
             new_tri_indices.push(idx);
 
-            // Assign neighbor for the boundary edge
             let t = &mut dt.triangles[idx];
             if t.v1 == u && t.v2 == v {
                 t.neighbors[0] = neighbor;
@@ -687,9 +660,7 @@ fn compute_triangulation(
                 t.neighbors[1] = neighbor;
             } else if t.v3 == u && t.v1 == v {
                 t.neighbors[2] = neighbor;
-            }
-            // Handle swapped cases
-            else if t.v1 == v && t.v2 == u {
+            } else if t.v1 == v && t.v2 == u {
                 t.neighbors[0] = neighbor;
             } else if t.v2 == v && t.v3 == u {
                 t.neighbors[1] = neighbor;
@@ -760,10 +731,9 @@ fn compute_triangulation(
                 return None;
             }
 
-            // Keep only triangles whose centroid is in the fluid. This must
-            // apply to every triangle, not just all-boundary ones: a triangle
-            // with an interior vertex can still bridge a concave feature (a
-            // chord across the obstacle circle or the step notch).
+            // Keep only triangles whose centroid is in the fluid. Applies to
+            // every triangle, not just all-boundary ones: one with an interior
+            // vertex can still bridge a concave feature (obstacle chord, step notch).
             let p1 = points[t.v1];
             let p2 = points[t.v2];
             let p3 = points[t.v3];
@@ -789,21 +759,18 @@ pub fn generate_delaunay_mesh(
     let (points, triangles, fixed_nodes) =
         triangulate(geo, min_cell_size, max_cell_size, growth_rate, domain_size);
 
-    // Convert to Mesh via MeshBuilder
     let mut builder = MeshBuilder::with_capacity(
         points.len(),
         triangles.len(),
         triangles.len() * 2, // rough estimate
     );
 
-    // Add all vertices
     let vert_ids: Vec<VertexId> = points
         .iter()
         .zip(fixed_nodes.iter())
         .map(|(p, &fixed)| builder.add_vertex(p.x, p.y, fixed))
         .collect();
 
-    // Build faces and cells
     let mut edge_face_map: HashMap<Edge, FaceId> = HashMap::new();
 
     for t in triangles {
@@ -847,12 +814,10 @@ pub fn generate_delaunay_mesh(
     mesh
 }
 
-/// Tag every open (no-neighbor) face that `classify_boundary` left untyped as a
-/// no-slip wall. These are the embedded-geometry faces — the obstacle circle,
-/// the backwards-step walls, the nozzle's curved top — which do not lie on the
-/// rectangular domain edge. Without the tag the solver's BC table treats them
-/// as row 0 (zero-gradient ghost), i.e. an open hole in the middle of the
-/// domain. `generate_cut_cell_mesh` closes such faces the same way.
+/// Tag every open (no-neighbor) face left untyped by `classify_boundary` as a
+/// no-slip wall. These are embedded-geometry faces (obstacle circle, step walls,
+/// nozzle top) off the rectangular domain edge; untagged they become row 0
+/// (zero-gradient ghost), an open hole in the domain interior.
 pub(super) fn close_untagged_boundary_faces(mesh: &mut Mesh) {
     for f in 0..mesh.num_faces() {
         if mesh.face_neighbor[f].is_none() && mesh.face_boundary[f].is_none() {
@@ -861,14 +826,12 @@ pub(super) fn close_untagged_boundary_faces(mesh: &mut Mesh) {
     }
 }
 
-/// Morton (Z-order) permutation of `points`: `order[new] = old`. Extracted
-/// from `sort_points_morton` (byte-identical order — same codes, same stable
-/// sort) so the meshless path can co-permute its per-seed `SeedKind`s with
-/// the exact same order (review F4).
+/// Morton (Z-order) permutation of `points`: `order[new] = old`. Shared with
+/// the meshless path so it can co-permute its per-seed `SeedKind`s identically.
 pub(super) fn morton_order(points: &[Point2<f64>]) -> Vec<usize> {
     let mut indices: Vec<usize> = (0..points.len()).collect();
 
-    // Compute bounding box to normalize coordinates
+    // Bounding box to normalize coordinates
     let min_x = points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
     let max_x = points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max);
     let min_y = points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
@@ -896,7 +859,6 @@ pub(super) fn morton_order(points: &[Point2<f64>]) -> Vec<usize> {
 fn sort_points_morton(points: &mut Vec<Point2<f64>>, fixed_nodes: &mut Vec<bool>) {
     let indices = morton_order(points);
 
-    // Permute points and fixed_nodes
     let p_old = points.clone();
     let f_old = fixed_nodes.clone();
 

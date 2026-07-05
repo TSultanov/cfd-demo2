@@ -50,13 +50,11 @@ fn test_amg_preconditioner() {
         solver.set_state_fields(&rho_init, &u_init, &p_init);
         solver.initialize_history();
 
-        // Run with Jacobi
         solver.set_preconditioner(PreconditionerType::Jacobi);
         for _ in 0..3 {
             solver.step();
         }
 
-        // Reset solver (or create new one)
         let mut solver_amg = UnifiedSolver::new(
             &mesh,
             compressible_model().expect("model"),
@@ -78,20 +76,12 @@ fn test_amg_preconditioner() {
         solver_amg.set_state_fields(&rho_init, &u_init, &p_init);
         solver_amg.initialize_history();
 
-        // Run with AMG
         solver_amg.set_preconditioner(PreconditionerType::Amg);
         for _ in 0..3 {
             solver_amg.step();
         }
         let p_amg = solver_amg.get_p().await;
 
-        // Compare results
-        // They won't be identical because preconditioner affects convergence path,
-        // but they should be somewhat close or at least stable.
-        // Actually, if both converge, they should be close.
-        // But 5 steps might not be enough for full convergence.
-
-        // Just check that AMG runs without crashing and produces reasonable values.
         let max_p = p_amg.iter().fold(0.0f64, |a, &b| a.max(b.abs()));
         assert!(max_p.is_finite(), "pressure has non-finite values");
         assert!(max_p < 1e6, "pressure exploded with AMG");

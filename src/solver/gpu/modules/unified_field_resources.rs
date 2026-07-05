@@ -1,8 +1,6 @@
-//! Unified Field Resources Module
-//!
-//! This module provides a common abstraction for field storage across all solver families.
-//! It combines ping-pong state management, gradient buffers, and other auxiliary storage
-//! into a single cohesive module that can be parameterized by the SolverRecipe.
+//! Common field-storage abstraction across all solver families: ping-pong
+//! state, gradient buffers, and auxiliary storage parameterized by the
+//! SolverRecipe.
 
 use crate::solver::gpu::modules::constants::ConstantsModule;
 use crate::solver::gpu::modules::state::PingPongState;
@@ -13,13 +11,6 @@ use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
 /// Unified field resources for any solver family.
-///
-/// This module owns:
-/// - Ping-pong state buffers for time integration
-/// - Gradient buffers (if required by the recipe)
-/// - Constants buffer
-/// - Flux buffer (for face-based fluxes)
-/// - Additional auxiliary buffers as specified by the recipe
 pub struct UnifiedFieldResources {
     /// Ping-pong state for time stepping
     pub state: PingPongState,
@@ -43,7 +34,6 @@ pub struct UnifiedFieldResources {
     pub low_mach_params_buffer: Option<wgpu::Buffer>,
     pub low_mach_params: GpuLowMachParams,
 
-    /// Number of cells
     pub num_cells: u32,
 
     /// Number of faces (for flux buffer sizing)
@@ -107,8 +97,8 @@ impl UnifiedFieldResources {
             gradients.insert(field_name.clone(), buffer);
         }
 
-        // Retained for compatibility: time history beyond PingPongState is not
-        // used by current kernels, but the recipe can request it.
+        // Time history beyond PingPongState is unused by current kernels, but
+        // the recipe can request it.
         let mut history_buffers = Vec::new();
         let history_levels = recipe.time_integration.history_levels;
         if history_levels > 2 {
@@ -190,15 +180,15 @@ impl UnifiedFieldResources {
         }
     }
 
-    /// Tier B topology refresh (M2): the only face-indexed field buffer is the
-    /// per-face flux buffer; a topology refresh changes the face count, so it is
-    /// reallocated at the new size, zero-filled. Zero is safe: the flux module
-    /// recomputes `fluxes` from scratch every outer iteration, so the buffer is
-    /// write-before-read within a step (design §1.4 step 6). All other field
-    /// buffers (state ×3, gradients, snapshot, constants) are cell-indexed and
-    /// survive a topology refresh untouched (cell count invariant), so they are
-    /// deliberately NOT touched here. Callers holding bind groups over the flux
-    /// buffer must rebuild them.
+    /// Topology refresh: the only face-indexed field buffer is the per-face flux
+    /// buffer; a topology refresh changes the face count, so it is reallocated at
+    /// the new size, zero-filled. Zero is safe: the flux module recomputes
+    /// `fluxes` from scratch every outer iteration, so the buffer is
+    /// write-before-read within a step. All other field buffers (state ×3,
+    /// gradients, snapshot, constants) are cell-indexed and survive a topology
+    /// refresh untouched (cell count invariant), so they are deliberately NOT
+    /// touched here. Callers holding bind groups over the flux buffer must
+    /// rebuild them.
     pub fn refresh_face_count(&mut self, device: &wgpu::Device, num_faces: u32) {
         self.num_faces = num_faces;
         if self.flux_buffer.is_some() {

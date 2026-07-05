@@ -25,9 +25,8 @@ pub fn init_pipelines(
     matrix: &MatrixResources,
     state: &StateResources,
 ) -> Result<PipelineResources, String> {
-    // Pipelines (cached by KernelId so a topology refresh reuses the compiled
-    // shader instead of recompiling it). `linear_src`/`dot_src` are still fetched
-    // for their `.bindings` (used to build the bind groups below).
+    // Cached by KernelId so a topology refresh reuses the compiled shader.
+    // `linear_src`/`dot_src` are still fetched for their `.bindings`.
     let linear_src = kernel_registry::kernel_source_by_id("", KernelId::LINEAR_SOLVER_SPMV_P_V)
         .map_err(|e| format!("missing linear_solver/spmv_p_v kernel: {e}"))?;
     let pipeline_spmv_p_v = cache.pipeline(device, "", KernelId::LINEAR_SOLVER_SPMV_P_V)?;

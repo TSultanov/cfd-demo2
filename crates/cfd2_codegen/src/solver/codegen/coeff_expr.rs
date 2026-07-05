@@ -38,21 +38,16 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
             let expr = Expr::from(1.0) / dt_eff;
             Some(DynExpr::new(expr, DslType::f32(), InvTime::UNIT))
         }
-        // Dynamic viscosity (SI): Pa·s = kg/(m·s). Historically this was called `nu`,
-        // but `nu` is conventionally kinematic viscosity; accept both for now.
+        // Dynamic viscosity (SI Pa·s = kg/(m·s)). `nu` is accepted as an alias even
+        // though it conventionally denotes kinematic viscosity.
         "mu" | "nu" => Some(DynExpr::new(
             Expr::ident("constants").field("viscosity"),
             DslType::f32(),
             DynamicViscosity::UNIT,
         )),
 
-        // Thermal conductivity for ideal-gas (laminar) OpenFOAM reference alignment:
-        //   kappa = mu * Cp / Pr
-        // with Cp = gamma/(gamma-1) * R.
-        //
-        // Notes:
-        // - kappa has units of W/(m·K) (POWER/(LENGTH*TEMPERATURE)).
-        // - Pr is fixed at the OpenFOAM reference value (0.71) for now.
+        // Thermal conductivity (ideal-gas, laminar): kappa = mu * Cp / Pr, with
+        // Cp = gamma/(gamma-1) * R and Pr fixed at 0.71. Units W/(m·K).
         "kappa" => {
             let mu = Expr::ident("constants").field("viscosity");
             let gamma = Expr::ident("constants").field("eos_gamma");
@@ -64,7 +59,6 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
             let pr = Expr::from(0.71);
             let cp = gamma * r / gm1;
             let expr = mu * cp / pr;
-            // kappa = POWER / (LENGTH * TEMPERATURE)
             let kappa_unit = DivDim::<Power, MulDim<Length, Temperature>>::UNIT;
             Some(DynExpr::new(expr, DslType::f32(), kappa_unit))
         }
@@ -106,9 +100,7 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
             DslType::f32(),
             Temperature::UNIT,
         )),
-        // Buoyant Boussinesq runtime params (declared by the buoyant model's
-        // port manifest; constants-struct tail fields after the EOS block).
-        // beta*g: acceleration per kelvin.
+        // Buoyant Boussinesq runtime params. beta*g: acceleration per kelvin.
         "buoyant_beta_g" => Some(DynExpr::new(
             Expr::ident("constants").field("buoyant_beta_g"),
             DslType::f32(),
@@ -119,8 +111,8 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
             DslType::f32(),
             Temperature::UNIT,
         )),
-        // k/cp = rho * thermal diffusivity: kg/(m*s), declared in the model
-        // as Density*Volume/(Length*Time) to match the T-equation laplacian.
+        // k/cp = rho * thermal diffusivity: kg/(m*s), typed as
+        // Density*Volume/(Length*Time) to match the T-equation laplacian.
         "buoyant_k_over_cp" => Some(DynExpr::new(
             Expr::ident("constants").field("buoyant_k_over_cp"),
             DslType::f32(),
@@ -372,10 +364,6 @@ mod tests {
         assert_eq!(expr.to_string(), "state[idx * 1u + 0u]");
     }
 
-    // ============================================================================
-    // Unit tracking tests for the dyn APIs
-    // ============================================================================
-
     #[test]
     fn coeff_named_expr_dyn_inv_dt_has_inv_time_unit() {
         let inv_dt = coeff_named_expr_dyn("inv_dt").expect("inv_dt should exist");
@@ -435,7 +423,6 @@ mod tests {
         let layout = crate::solver::ir::StateLayout::new(vec![rho, d_p]);
         let slots = slots_from_layout(&layout);
 
-        // Create a product: rho * d_p
         let coeff = Coefficient::product(
             Coefficient::field(rho).unwrap(),
             Coefficient::field(d_p).unwrap(),
@@ -444,7 +431,6 @@ mod tests {
 
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
 
-        // Expected unit: DENSITY * D_P
         let expected_unit = MulDim::<Density, D_P>::UNIT;
         assert_eq!(dyn_expr.unit, expected_unit);
         assert_eq!(dyn_expr.ty, DslType::f32());
@@ -478,7 +464,6 @@ mod tests {
         let coeff = Coefficient::MagSqr(p);
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
 
-        // Expected unit: PRESSURE^2
         let expected_unit = MulDim::<Pressure, Pressure>::UNIT;
         assert_eq!(dyn_expr.unit, expected_unit);
         assert_eq!(dyn_expr.ty, DslType::f32());
@@ -494,7 +479,6 @@ mod tests {
         let coeff = Coefficient::MagSqr(u);
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
 
-        // Expected unit: VELOCITY^2
         let expected_unit = MulDim::<Velocity, Velocity>::UNIT;
         assert_eq!(dyn_expr.unit, expected_unit);
         assert_eq!(dyn_expr.ty, DslType::f32());
@@ -510,7 +494,6 @@ mod tests {
         let coeff = Coefficient::MagSqr(u);
         let dyn_expr = coeff_expr_dyn(&slots, &coeff, CoeffSample::Cell { idx: "i" });
 
-        // Expected unit: VELOCITY^2
         let expected_unit = MulDim::<Velocity, Velocity>::UNIT;
         assert_eq!(dyn_expr.unit, expected_unit);
         assert_eq!(dyn_expr.ty, DslType::f32());
@@ -541,10 +524,8 @@ mod tests {
         let dyn_expr =
             coeff_face_expr_dyn(&slots, Some(&coeff), "owner", "neigh", interp, fallback);
 
-        // Result should have DENSITY unit
         assert_eq!(dyn_expr.unit, Density::UNIT);
         assert_eq!(dyn_expr.ty, DslType::f32());
-        // WGSL should contain interpolation
         let wgsl = dyn_expr.expr.to_string();
         assert!(wgsl.contains("0.75"));
         assert!(wgsl.contains("owner"));

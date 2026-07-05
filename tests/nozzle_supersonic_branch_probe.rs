@@ -1,11 +1,7 @@
-//! PROBE (`#[ignore]`'d): with the pressure-based COMPRESSIBLE upgrades (Stage B real
-//! 1/RT compressibility + Stage C density upwinding), is a TRUE supersonic branch —
-//! the diverging section ACCELERATING, M_exit >= M_throat — now reachable by retuning
-//! the inlet pressure? (The shipped 0.07 was tuned for the old constant-psi model.)
-//!
-//! Sweeps inlet_pressure on the production driver path (ALLMACH_THERMAL_NOZZLE) and
-//! reports M_throat, M_exit, the gap, and T_min. Success = some inlet pressure gives
-//! M_exit >= M_throat (clean acceleration) while staying supersonic and vacuum-free.
+//! PROBE (`#[ignore]`'d): sweeps `inlet_pressure` on the production nozzle driver
+//! (ALLMACH_THERMAL_NOZZLE) and reports M_throat, M_exit, the gap, and T_min.
+//! Success = some inlet pressure gives M_exit >= M_throat (diverging section
+//! accelerates) while staying supersonic and vacuum-free.
 //!
 //! Run: cargo test --features "dev-tests ui" --test nozzle_supersonic_branch_probe -- --ignored --nocapture
 

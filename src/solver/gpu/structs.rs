@@ -57,7 +57,7 @@ pub struct GpuLowMachParams {
     pub model: u32,
     pub theta_floor: f32,
     pub pressure_coupling_alpha: f32,
-    /// Arc N4b biharmonic dissipation coefficient (epsilon_4); formerly `_pad0`.
+    /// Biharmonic dissipation coefficient (epsilon_4).
     pub eps4: f32,
 }
 

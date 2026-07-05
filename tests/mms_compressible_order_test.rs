@@ -1,39 +1,20 @@
 //! Compressible MMS: manufactured (rho, u, p) for the coupled compressible
 //! Navier–Stokes path (KT central-upwind flux with vanLeer reconstruction,
-//! implicit mu/kappa laplacians, EOS recovery rows) — the first MMS oracle
-//! for the conservative-flux operator family.
+//! implicit mu/kappa laplacians, EOS recovery rows).
 //!
-//! Setup: unit box, all four sides Inlet (subsonic inflow everywhere: the
-//! manufactured velocity points inward on every boundary, which the
-//! continuity source balances). Inlet BCs prescribe rho and u per face from
-//! the exact solution; the model's declared inlet expressions keep
-//! rho_u/rho_e/p/T consistent with the interior pressure. The manufactured
+//! Setup: unit box, all four sides Inlet (manufactured velocity points inward
+//! on every boundary; the continuity source balances it). Inlet BCs prescribe
+//! rho and u per face from the exact solution; the model's inlet expressions
+//! keep rho_u/rho_e/p/T consistent with interior pressure. The manufactured
 //! pressure has zero normal derivative on all boundaries, so the inlet
 //! "p follows interior" closure is second-order consistent.
 //!
-//! THE OPERATOR CONTRACT THIS TEST PINS: physical Navier-Stokes. The
-//! momentum viscous operator is `div(tau)` with
-//! `tau = mu (grad u + grad u^T - 2/3 I div u)`, split rhoCentralFoam-style
-//! between the implicit `laplacian(mu, u)` and the explicit transpose-only
-//! `tauMC` traction in the flux (`tau_mc_dot_n_components` in
-//! flux_schemes.rs); the energy viscous work flux is `tau . u`. The
-//! conduction coefficient lowers to `mu cp / 0.71` (hardcoded Prandtl).
-//! Sources are derived for that operator (`EXTRA_SHEAR = 0`).
-//!
-//! HISTORY (June 2026): tauMC was originally built as the FULL stress (its
-//! comment misread OpenFOAM's `dev2(T(grad U))`, which has only ONE
-//! gradient term), so combined with the assembled laplacian the effective
-//! operator was `div(tau) + mu lap(u)` - shear viscosity DOUBLED - with an
-//! extra `(mu/2) grad(|u|^2)` in the energy work flux. This oracle proved
-//! it in both directions at MU = 0.05, Re ~ 8: doubled-shear sources
-//! converged at design order (rho 1.94 / u 2.19 / p 1.86 / T 1.79) while
-//! physical-NS sources saturated h-independently at 30-70x (rho 4.6e-2,
-//! u 1.5e-2 at both n=16 and n=32). After the tauMC fix the roles swap:
-//! this test asserts order-2 convergence with physical-NS sources, and the
-//! `#[ignore]` probe (doubled-shear sources, `EXTRA_SHEAR = 1`) saturates -
-//! it guards against reintroducing the double-counted laplacian. See the FD
-//! cross-check test for source verification independent of the
-//! hand-derived partials.
+//! Operator contract: physical Navier-Stokes. The momentum viscous operator is
+//! `div(tau)` with `tau = mu (grad u + grad u^T - 2/3 I div u)`, split
+//! rhoCentralFoam-style between the implicit `laplacian(mu, u)` and the explicit
+//! transpose-only `tauMC` traction in the flux; the energy viscous work flux is
+//! `tau . u`. Conduction lowers to `mu cp / 0.71` (hardcoded Prandtl). Sources
+//! are derived for that operator (`EXTRA_SHEAR = 0`).
 
 #![cfg(feature = "dev-tests")]
 
@@ -66,19 +47,15 @@ const PRANDTL: f64 = 0.71;
 /// Viscosity of the Navier-Stokes study (Re ~ 8). Conduction k = mu cp / Pr
 /// tracks mu in the sources for both studies.
 const MU: f64 = 0.05;
-/// Euler-dominated study: smallest STABLE viscous floor (Re ~ 112; the
-/// convective error dominates the budget ~6x). Probed June 2026: mu = 0
-/// diverges at n=48/dt=0.01 and grows secularly at every dt; the growth
-/// rate rises with n and is bounded only by physical damping (see the
-/// inviscid-margin instability record in the test docs below).
+/// Euler-dominated study: smallest STABLE viscous floor (Re ~ 112). mu = 0 is
+/// unstable (secular growth, rate rising with n, bounded only by physical
+/// damping); see the inviscid-margin note on the Euler order test.
 const MU_EULER: f64 = 5.0e-3;
-/// CFL ~ 0.5 at n=32 for the Euler study (the n=48/dt=0.01 blow-up is the
-/// fast branch of the inviscid-margin instability).
+/// CFL ~ 0.5 at n=32 for the Euler study.
 const DT_EULER: f64 = 0.005;
 
-/// 0.0 = sources for physical NS (the operator since the tauMC fix).
-/// 1.0 = sources for the pre-fix doubled-shear operator (full-stress tauMC
-/// + assembly laplacian) - used by the regression probe.
+/// 0.0 = sources for physical NS. 1.0 = sources for the doubled-shear operator
+/// (full-stress tauMC + assembly laplacian), used by the regression probe.
 const EXTRA_SHEAR: f64 = 0.0;
 
 const U0: f64 = 0.4;
@@ -93,14 +70,11 @@ const P0: f64 = 1.0;
 const PA: f64 = 0.2;
 
 // Steady-marching policy: BDF2 pseudo-marching. The vanLeer-limited flux
-// sustains a small steady-state limit cycle (the classic TVD-limiter
-// convergence stall): the per-step delta decays to a floor whose RATE is
-// dt-independent (~3.6e-3 per time unit measured at dt = 0.005 and 0.02,
-// unchanged by outer_iters 1 vs 2, persisting to t = 16 ~ 10 physical time
-// constants). The runner therefore stops on a delta PLATEAU (no improvement
-// over a window) rather than an absolute tolerance; the cycle's state
-// amplitude is far below discretization error (validated by the error-drift
-// check inside the order study).
+// sustains a small steady-state limit cycle (TVD-limiter convergence stall):
+// the per-step delta decays to a dt-independent floor rather than to zero, so
+// the runner stops on a delta PLATEAU (no improvement over a window) rather
+// than an absolute tolerance. The cycle amplitude is far below discretization
+// error (checked by the error-drift guard in the order study).
 const DT: f64 = 0.01;
 const OUTER_ITERS: usize = 1;
 const STEADY_TOL: f64 = 1e-5;
@@ -108,18 +82,15 @@ const STEADY_MAX_STEPS: usize = 1600;
 /// Plateau detection: stop when the best (smallest) max-delta seen has not
 /// improved by >2% within this many steps.
 const PLATEAU_WINDOW: usize = 80;
-/// No stop criterion may fire before this many steps: starting from the
-/// exact solution the state still has to travel to the discrete fixed point,
-/// and the slowest (thermal, tau ~ 1.4 time units) mode needs ~4 tau to
-/// settle. Measured: at n=48 the absolute tol alone fired at t=0.73 with the
-/// rho error still drifting 22% per +1 time unit.
+/// No stop criterion may fire before this many steps: from the exact-solution
+/// start the state must still travel to the discrete fixed point, and the
+/// slowest (thermal, tau ~ 1.4 time units) mode needs ~4 tau to settle.
 const MIN_STEPS: usize = 600;
 /// Accept the state unconditionally after this many steps (t = 12, ~8x the
-/// slowest physical mode). Needed by the mismatched-sources probe: at an
+/// slowest physical mode). The mismatched-sources probe needs it: at an
 /// O(1)-displaced solution the limiter wander occasionally sets a new best
-/// delta and starves the plateau detector forever; the wander amplitude
-/// (~2e-5/step) is irrelevant against the saturated error level it
-/// measures.
+/// delta and starves the plateau detector, though its amplitude is irrelevant
+/// against the saturated error it measures.
 const LONG_MARCH_ACCEPT_STEPS: usize = 1200;
 
 // ---------------------------------------------------------------------------
@@ -130,15 +101,9 @@ fn exact_rho(x: f64, y: f64) -> f64 {
     RHO0 * (1.0 + amp_scale() * RHOA * (PI * x + PHX).sin() * (PI * y + PHY).sin())
 }
 
-/// ARC N: strain-free manufactured-field family toggle (uniform velocity
-/// (U0, V0); rho/p waves advect through it). The default (strained) family's
-/// base flow is inviscidly UNSTABLE as physics — O(1) strain with
-/// inflection-point shear; measured growth is linear in the velocity
-/// amplitude (116/76/56.6 %/tu at amp 1/0.5/0.25 on the converged-Picard
-/// rows, h-independent) and matches the strain-rate scale. The uniform
-/// family has zero velocity gradients (no production mechanism), so a
-/// faithful discretization must march it stably at mu = 0: the diagnosis's
-/// falsifiable counterpart, exercised by `probe_arcn_uniform_mu0`.
+/// Strain-free manufactured-field family toggle: uniform velocity (U0, V0)
+/// with rho/p waves advecting through it (zero velocity gradients). Isolates
+/// the interior instability from base-flow strain.
 /// NOTE: uniform flow exits through the right/top faces — runs must use
 /// left/bottom Inlet + right/top Outlet sides, not the all-Inlet box.
 static UNIFORM_FLOW_FAMILY: std::sync::atomic::AtomicBool =
@@ -148,13 +113,11 @@ fn uniform_family() -> bool {
     UNIFORM_FLOW_FAMILY.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// ARC N: global amplitude scale on the manufactured PERTURBATIONS — the
-/// velocity scales (U0/V0/UA/UB) and the rho/p wave amplitudes (RHOA/PA);
-/// the RHO0/P0 backgrounds are NOT scaled. Shrinking the whole solution
-/// deviation isolates the amplitude-INDEPENDENT boundary mode from the
-/// amplitude-LINEAR interior KH physics, repeatably, without editing
-/// consts. Default 1.0 (bits 0 = unset = 1.0). The sources derive from the
-/// same `amp_scale()`, so the scaled family is a consistent MMS.
+/// Global amplitude scale on the manufactured PERTURBATIONS — the velocity
+/// scales (U0/V0/UA/UB) and the rho/p wave amplitudes (RHOA/PA); the RHO0/P0
+/// backgrounds are NOT scaled. Default 1.0 (bits 0 = unset = 1.0). The sources
+/// derive from the same `amp_scale()`, so the scaled family stays a consistent
+/// MMS.
 static AMP_SCALE_BITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn amp_scale() -> f64 {
@@ -170,17 +133,13 @@ fn set_amp_scale(s: f64) {
     AMP_SCALE_BITS.store(s.to_bits(), std::sync::atomic::Ordering::Relaxed);
 }
 
-/// ARC N′ N2 mechanism toggles. RECON_UPWIND forces first-order Upwind (no
-/// gradient reconstruction) to test whether the 2nd-order vanLeer
-/// reconstruction is the source of the grid-scale boundary instability;
-/// MASS_COMPAT_OFF skips the source mass-compatibility projection to rule it
-/// out as the boundary-mode seed. Both default OFF.
+/// Mechanism toggles. RECON_UPWIND forces first-order Upwind (no gradient
+/// reconstruction); MASS_COMPAT_OFF skips the source mass-compatibility
+/// projection. Both default OFF.
 static RECON_UPWIND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static MASS_COMPAT_OFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// ARC N N4: select the KNP central-upwind MINMOD reconstruction (sharper
-/// limiter) instead of vanLeer. Minmod caps psi at 1 (no compressive overshoot
-/// for r>1) — the candidate fix for the interior grid-scale under-dissipation.
-/// Default OFF (vanLeer). Ignored if RECON_UPWIND is set.
+/// Select the KNP central-upwind MINMOD reconstruction (psi capped at 1)
+/// instead of vanLeer. Default OFF (vanLeer). Ignored if RECON_UPWIND is set.
 static RECON_MINMOD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn recon_upwind() -> bool {
@@ -195,29 +154,25 @@ fn mass_compat_off() -> bool {
     MASS_COMPAT_OFF.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// ARC N′ N3 toggle: run on a fully-periodic box (zero boundary faces) instead
-/// of the Dirichlet rectangle, so the interior operator is isolated from the
-/// boundary stencil. Default OFF. The boundary seeding in `build_run_box`
-/// no-ops (no Inlet/Outlet faces) and the mass-compatibility `bflux` term is
-/// zero, so `eps` becomes the mean source — exactly the closed-system
-/// constraint a periodic domain requires.
+/// Run on a fully-periodic box (zero boundary faces) instead of the Dirichlet
+/// rectangle, isolating the interior operator from the boundary stencil.
+/// Default OFF. The boundary seeding in `build_run_box` no-ops and the
+/// mass-compatibility `bflux` term is zero, so `eps` becomes the mean source —
+/// the closed-system constraint a periodic domain requires.
 static PERIODIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn periodic() -> bool {
     PERIODIC.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// ARC N N4c toggle + coefficient: select the IMPLICIT biharmonic-dissipation
-/// compressible MMS model and set the eps4 coefficient. When `BIHARMONIC` is set,
-/// `build_run_box` builds `compressible_mms_biharmonic_model()` (stride-12: the
-/// `lap_X = laplacian(X)` constraint unknowns + `laplacian(-bih_eps4, lap_X)` on
-/// each conserved row) and fills the per-cell `bih_eps4` field with `eps4_knob()`;
-/// otherwise the plain MMS model. eps4 is a runtime field (no recompile to sweep).
-/// The cure for the interior grid-scale under-dissipation; the implicit form
-/// removes the explicit `dt <~ C*h^2` limit, and Arc N4d cured the eps4>0 grad^4
-/// conditioning with `PreconditionerType::BlockJacobi` (the per-cell 12x12 block
-/// inverse, selected in `build_run_box`; the default point-Jacobi stalls at fine
-/// mesh). See the model doc / `probe_arcn_biharmonic_order`.
+/// Toggle + coefficient for the IMPLICIT biharmonic-dissipation compressible
+/// MMS model. When set, `build_run_box` builds
+/// `compressible_mms_biharmonic_model()` (stride-12: the `lap_X = laplacian(X)`
+/// constraint unknowns + `laplacian(-bih_eps4, lap_X)` on each conserved row)
+/// and fills the per-cell `bih_eps4` field with `eps4_knob()`; otherwise the
+/// plain MMS model. eps4 is a runtime field (no recompile to sweep). The
+/// implicit form uses `PreconditionerType::BlockJacobi` (per-cell 12x12 inverse)
+/// because point-Jacobi stalls on the grad^4 conditioning at fine mesh.
 static BIHARMONIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static EPS4_BITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -601,11 +556,11 @@ fn build_run(
     )
 }
 
-/// Arc N generalization of `build_run`: arbitrary rectangular box and
-/// per-side boundary types. The manufactured fields/sources/BC closures
-/// are all evaluated at mesh coordinates, so any (lx, ly) works; when a
-/// side is Outlet, the model's outlet closure needs its per-face Dirichlet
-/// p, seeded from the exact solution like the inlet entries.
+/// Generalization of `build_run`: arbitrary rectangular box and per-side
+/// boundary types. The manufactured fields/sources/BC closures are evaluated
+/// at mesh coordinates, so any (lx, ly) works; when a side is Outlet, the
+/// model's outlet closure needs its per-face Dirichlet p, seeded from the
+/// exact solution like the inlet entries.
 #[allow(clippy::too_many_arguments)]
 fn build_run_box(
     nx: usize,
@@ -649,15 +604,12 @@ fn build_run_box(
                 Scheme::SecondOrderUpwindVanLeer
             },
             time_scheme,
-            // Arc N4d: the implicit biharmonic couples a 4th-order (condition
-            // ~h^-4) block whose stiffness is dominated by the INTRA-CELL
-            // coupling (inv_dt-scaled recovery rows + the -I/+4 auxiliary-
-            // Laplacian block, diagonal entries spanning ~2000x). Point-Jacobi
-            // stalls at fine mesh (eps4=0.25 n=48 hits the 4000-iter cap as the
-            // march nears steady state); the per-cell 12x12 block inverse
-            // resolves that coupling exactly and converges in ~80 iters/step
-            // (O(n) scaling). Non-biharmonic runs keep point-Jacobi (byte-for-
-            // byte the prior behaviour).
+            // The implicit biharmonic couples a 4th-order (condition ~h^-4)
+            // block whose stiffness is dominated by intra-cell coupling
+            // (inv_dt-scaled recovery rows + the -I/+4 auxiliary-Laplacian
+            // block, diagonal entries spanning ~2000x); point-Jacobi stalls at
+            // fine mesh, the per-cell 12x12 block inverse resolves it in ~80
+            // iters/step. Non-biharmonic runs keep point-Jacobi.
             preconditioner: if biharmonic() {
                 PreconditionerType::BlockJacobi
             } else {
@@ -675,13 +627,10 @@ fn build_run_box(
     solver.set_dtau(0.0).expect("dtau");
     solver.set_viscosity(mu as f32).expect("viscosity");
     solver.set_density(RHO0 as f32).expect("density");
-    // Thread the REQUESTED outer count (a previous version set the
-    // OUTER_ITERS=1 const here, silently running the o2/o4 probe rows at
-    // one iteration — the parameter-threading no-op bug class), and pin
-    // the adaptive outer-convergence break OPEN so requested iterations
-    // actually run: the break's relative tolerance fires after iteration
-    // 1 on these smooth marches, collapsing the step to a single Picard
-    // iteration (= forward-Euler-in-flux).
+    // Thread the requested outer count and pin the adaptive outer-convergence
+    // break OPEN (tol 0) so requested iterations actually run: the break's
+    // relative tolerance otherwise fires after iteration 1 on these smooth
+    // marches, collapsing the step to a single Picard iteration.
     solver.set_outer_iters(outer_iters).expect("outer_iters");
     solver.set_outer_tolerance(0.0).expect("outer_tol");
     solver.set_outer_tolerance_abs(0.0).expect("outer_tol_abs");
@@ -755,8 +704,8 @@ fn build_run_box(
             .set_boundary_values_per_face(GpuBoundaryType::Inlet, "rho_u", c as u32, &rho_u_face)
             .expect("rho_u bc");
     }
-    // Outlet sides (Arc N BC-flip rows): the model's outlet closure takes a
-    // per-face Dirichlet p; everything else extrapolates via bc_expr.
+    // Outlet sides: the model's outlet closure takes a per-face Dirichlet p;
+    // everything else extrapolates via bc_expr.
     if has_outlet {
         solver
             .set_boundary_values_per_face(
@@ -779,9 +728,8 @@ fn build_run_box(
     // to the interior. Total mass then obeys
     //   dM/dt = sum(S_rho V) - sum_boundary(rho* u* . n A) = const,
     // an O(h^2) quadrature mismatch with no restoring mode: without this
-    // projection the solution drifts secularly (~2e-4/time-unit at n=48,
-    // error growing linearly long past every physical relaxation time) and
-    // no discrete steady state exists. Subtracting the uniform constant
+    // projection the solution drifts secularly and no discrete steady state
+    // exists. Subtracting the uniform constant
     // eps = imbalance / V_total enforces dM/dt = 0 exactly (flux divergence
     // telescopes); eps is O(h^2) and vanishes under refinement, so it does
     // not affect the convergence order. Momentum/energy need no projection:
@@ -853,10 +801,9 @@ fn build_run_box(
     solver.set_field_scalar("T", &t0).expect("init T");
     solver.set_field_vec2("u", &u0).expect("init u");
     if biharmonic() {
-        // Arc N4c: the implicit biharmonic coefficient `bih_eps4` (= eps4 *
-        // acoustic-speed scale) is a uniform-valued storage field (like mu); one
-        // registered model serves any eps4 with no shader recompile. Default 0
-        // keeps the dissipation inert.
+        // `bih_eps4` (= eps4 * acoustic-speed scale) is a uniform-valued storage
+        // field (like mu); one registered model serves any eps4 with no shader
+        // recompile. Default 0 keeps the dissipation inert.
         solver
             .set_field_scalar("bih_eps4", &vec![eps4_knob() as f64; cells])
             .expect("init bih_eps4");
@@ -971,50 +918,27 @@ fn order_study(extra: f64, mu: f64, dt: f64, levels: &[usize], label: &str) -> (
 fn steady_compressible_vanleer_order() {
     let (hs, [rho_errs, u_errs, p_errs, t_errs]) =
         order_study(EXTRA_SHEAR, MU, DT, &[16, 24, 32, 48], "compressible");
-    // Measured at the ratchet (June 2026, post-tauMC-fix, physical-NS
-    // sources): rho 1.956 / u 2.153 / p 1.831 / T 1.858, finest errors
-    // 5.6e-4 / 2.7e-4 / 5.2e-4 / 5.8e-4. (Pre-fix, with doubled-shear
-    // sources matching the pre-fix operator: 1.937 / 2.186 / 1.859 / 1.791.)
     assert_convergence_order("compressible_rho", &hs, &rho_errs, 2.0, 0.35, 1.5e-3);
     assert_convergence_order("compressible_u", &hs, &u_errs, 2.0, 0.35, 7.0e-4);
     assert_convergence_order("compressible_p", &hs, &p_errs, 2.0, 0.35, 1.2e-3);
     assert_convergence_order("compressible_T", &hs, &t_errs, 2.0, 0.40, 1.2e-3);
 }
 
-/// Euler-dominated variant of the oracle: the same manufactured solution
-/// and harness with mu = 0 — no viscous stress, no conduction (k tracks mu),
-/// pure KT/vanLeer convection + EOS recovery + pressure work. This orders
-/// the convective operator in isolation: the NS study at Re ~ 8 is
-/// viscosity-dominated, so a convective-flux defect could hide under the
-/// laplacians there.
+/// Euler-dominated variant of the oracle: the same manufactured solution and
+/// harness with mu = 0 — no viscous stress, no conduction (k tracks mu), pure
+/// KT/vanLeer convection + EOS recovery + pressure work. Orders the convective
+/// operator in isolation (the Re ~ 8 NS study is viscosity-dominated, so a
+/// convective defect could hide under the laplacians).
 ///
-/// INVISCID-MARGIN INSTABILITY (June 2026, probed during this test's
-/// derivation — the reason mu is 5e-3 and not 0): the coupled-implicit
-/// compressible path develops a slow secular instability as mu -> 0,
-/// strongest at fine grids (rate rises with n, bounded only by physical
-/// damping mu k^2):
-/// - mu = 0,    dt = 0.01:  n=48 diverges outright (state -> inf).
-/// - mu = 0,    dt = 0.005: no blow-up, but secular growth at every level
-///   (u error +52% per 100 steps at n=48) — not CFL, a genuine
-///   marginal-mode instability.
-/// - mu = 1e-3, dt = 0.01:  n=48 still diverges (fast branch at CFL ~ 1).
-/// - mu = 1e-3, dt = 0.005: n=32 clean; n=48 drifts +49%/100 steps.
-/// - mu = 5e-3, dt = 0.005: n=16/24/32 clean (this test); n=48 still
-///   marginal (errors grow ~80% per 3 time units under extended march).
-/// Recorded as an engine-robustness backlog item (rhoCentralFoam runs
-/// inviscid fine, so the coupled-implicit path's inviscid stability is a
-/// real gap). Within the stable envelope the conservative viscous-era
-/// march policy holds (plateaus at steps 215-839, drift guard <10%).
+/// mu is 5e-3 not 0 because the coupled-implicit path has a marginal-mode
+/// instability as mu -> 0, strongest at fine grids (damped only by physical
+/// mu k^2): at mu = 0 it grows secularly at every dt and n=48/dt=0.01 diverges
+/// outright. mu = 5e-3, dt = 5e-3 is clean through n = 32; n = 48 is still
+/// marginal.
 #[test]
 fn steady_euler_dominated_vanleer_order() {
     let (hs, [rho_errs, u_errs, p_errs, t_errs]) =
         order_study(EXTRA_SHEAR, MU_EULER, DT_EULER, &[16, 24, 32], "euler");
-    // Measured June 2026 (first run, mu = 5e-3, dt = 5e-3, n = 16/24/32):
-    // orders rho 2.430 / u ~2.05 / p ~3.2 / T ~2.45; finest errors
-    // 3.28e-3 / 6.36e-3 / 6.17e-4 / 3.21e-3 (larger than the NS study's:
-    // no conduction smoothing). n=32 drift guard measured +8.4% (rho) —
-    // close to the 10% bound; if it ever flakes, the march is the lever,
-    // not the band. Caps at ~1.3x measured; ratchet-only thereafter.
     assert_convergence_order("euler_rho", &hs, &rho_errs, 2.0, 0.35, 4.5e-3);
     assert_convergence_order("euler_u", &hs, &u_errs, 2.0, 0.35, 8.5e-3);
     assert_convergence_order("euler_p", &hs, &p_errs, 2.0, 0.35, 9.0e-4);
@@ -1022,7 +946,7 @@ fn steady_euler_dominated_vanleer_order() {
 }
 
 // ---------------------------------------------------------------------------
-// Inviscid-margin instability probes (Arc I, June 2026).
+// Inviscid-margin instability probes.
 // ---------------------------------------------------------------------------
 
 /// March `steps`, sampling the u-vs-exact L2 error every `sample_every`
@@ -1061,8 +985,8 @@ fn measure_growth(
 
     // Grid-Nyquist (checkerboard) fraction of the de-meaned field:
     // |sum f' * (-1)^(i+j)| / (N * rms(f')).
-    // Domain extents derived from the mesh (Arc N: probes run on boxes
-    // other than the unit square); assumes uniform square cells.
+    // Domain extents derived from the mesh (probes run on boxes other than the
+    // unit square); assumes uniform square cells.
     let lx = run.mesh.vx.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let ly = run.mesh.vy.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let h = (lx * ly / run.mesh.num_cells() as f64).sqrt();
@@ -1108,75 +1032,14 @@ fn measure_growth(
     (rate, nyq(&p), bfrac, u_final, rho_final)
 }
 
-/// Probe matrix for the inviscid-margin instability (Arc I). All runs at
-/// mu = 0, dt = 5e-3 (the slow-growth regime; the fast CFL~1 branch at
-/// dt = 0.01/n=48 is probed separately by the last row).
-///
-/// MEASURED (June 12, 2026) — growth %/tu, p-nyquist, boundary fraction,
-/// FINAL u/rho error levels (the levels matter: a rate fitted on the
-/// second half is blind to a fast blow-up that saturates early, and a
-/// u-only metric is blind to thermo-field blow-up hidden by the bounded
-/// u = rho_u/rho recovery — both blindnesses produced a wrong
-/// "preconditioning stabilizes" reading on the first pass):
-///   BDF2  o1 n32                 103.5  nyq 1e-3  bf 0.08  u 4.6e-2  rho 1.5e-2
-///   BDF2  o1 n48                  60.6  nyq 1e-4  bf 0.07  u 3.5e-2  rho 1.8e-2
-///   Euler o1 n32/n48          104/116  (same character)
-///   BDF2  o2/o4 n48            116.1/116.5  (genuine iterations; see below)
-///   BDF2  o1 n48 dtau=dt lm=Off   77.2  bf 0.51   u 5.1e-3  rho 3.0e-3
-///   BDF2  o1 n48 dtau=dt lm=WS    "0"   u 0.18    rho 9.0e10  (BLOWN)
-///   BDF2  o1 n48 dtau lm=WS a=0   "0"   u 1.7e7   (BLOWN)
-///   BDF2  o1 n48 dtau lm=Legacy   "0"   rho 9.0e10  (BLOWN)
-///   BDF2  o1 n48 dt=1e-2 (fast)   "0"   u 1.5e12  (BLOWN)
-///
-/// CORRECTION (Arc R, June 12 2026): the original o2/o4 rows read
-/// "bit-identical to o1" and were taken as proof the flux is frozen per
-/// step. BOTH were instrument artifacts: (1) build_run overrode the
-/// outer_iters parameter with the OUTER_ITERS=1 const (the
-/// parameter-threading no-op bug class), and (2) the adaptive
-/// outer-convergence break fires after one iteration on these smooth
-/// marches anyway. With the threading fixed and the break pinned open
-/// (outer_tol = 0), genuine o2/o4 Picard iterations CONVERGE (o2 = o4 to
-/// 0.4%) and the converged implicit-in-flux step grows at ~116 %/tu —
-/// matching Euler-o1 and WORSE than the unconverged o1-BDF2 map (60.6,
-/// which partially damps the mode by accident). Time integration is
-/// thereby exonerated BY MEASUREMENT: the spatial semi-discretization
-/// itself has an eigenvalue with positive real part at this
-/// configuration.
-///
-/// VERDICT — every knob-level hypothesis REFUTED; the instability is
-/// intrinsic to the SPATIAL discretization at mu = 0, moderate Mach:
-/// - NOT time integration (Euler ~ BDF2 ~ converged Picard, all ~116).
-/// - NOT outer-iteration lag (converged o2/o4 grow at the spatial rate).
-/// - NOT the implicit EOS-recovery coupling (Arc R P3a/P3b: with the
-///   recovery rows decoupled to trivial holds and primitives recovered
-///   explicitly from conserved state — rhoCentralFoam semantics — the
-///   instability persists at comparable magnitude: n32 66, n48 diverges).
-/// - NOT a checkerboard (nyquist ~1e-4 on the growing runs) and NOT
-///   boundary-fed (boundary band holds LESS error mass than uniform);
-///   the Inlet closure is characteristic-correct by design (rho/u
-///   prescribed, p follows the interior via bc_expr).
-/// - Pseudo-time damping (dtau = dt, preconditioning Off) DAMPS the mode
-///   ~7x in final error but does not stabilize it.
-/// - Low-Mach preconditioning (either model, with or without the
-///   pressure-coupling term) makes it catastrophically WORSE: at M ~ 0.5
-///   it rescales the dissipation wave speed c -> ~|u|, halving the
-///   acoustic dissipation — a low-Mach tool misapplied at moderate Mach.
-/// - Flux-dissipation redesign cannot fix it (Arc K): jump-proportional
-///   dissipation is O(h^3) on the smooth mode; non-vanishing raw-jump
-///   dissipation damps it linearly in dose but collapses orders first.
-/// The growing object is a smooth INTERIOR eigenmode of the spatial
-/// KT-flux discretization (EOS coupling exonerated), damped only by
-/// physical viscosity (mu k^2 must beat the mode's growth; mu = 5e-3
-/// holds through n = 32 at this problem's scales — the Euler study's
-/// operating point). Remaining suspects for a future arc: the discrete
-/// interplay of the bc_expr boundary refresh with the face flux
-/// (Kreiss-type discrete well-posedness — needs periodic-domain support
-/// to discriminate), and the vanLeer-reconstructed acoustic-speed field
-/// feeding the wave bounds.
-/// STABILITY ENVELOPE (model contract, see the compressible model docs):
-/// time-accurate compressible marching requires nonzero physical
-/// viscosity; the inviscid limit is out of envelope on this
-/// discretization at moderate Mach.
+/// Probe matrix for the inviscid-margin instability. All runs at mu = 0,
+/// dt = 5e-3 (the slow-growth regime; the fast CFL~1 branch at dt = 0.01/n=48
+/// is the last row). Reports growth %/tu, p-nyquist, boundary fraction, and
+/// final u/rho error levels for each time-scheme / outer-iter / preconditioning
+/// configuration; the levels catch fast blow-ups that a second-half rate fit
+/// misses. Stability-envelope contract: time-accurate compressible marching
+/// requires nonzero physical viscosity — the inviscid limit is out of envelope
+/// on this discretization at moderate Mach.
 ///
 /// Run:
 /// `cargo test --features dev-tests --test mms_compressible_order_test -- --ignored probe_inviscid --nocapture`
@@ -1205,8 +1068,7 @@ fn probe_inviscid_margin_matrix() {
     report("Euler o1 n32", build_run(32, EXTRA_SHEAR, 0.0, dt, TimeScheme::Euler, 1), dt, steps);
     report("Euler o1 n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::Euler, 1), dt, steps);
 
-    // H2: outer iterations (genuine since the Arc R threading fix +
-    // break pinning in build_run; converged Picard = implicit-in-flux).
+    // H2: outer iterations (converged Picard = implicit-in-flux).
     report("BDF2 o2 n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2), dt, steps);
     report("BDF2 o4 n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 4), dt, steps);
 
@@ -1262,23 +1124,10 @@ fn probe_inviscid_margin_matrix() {
     report("BDF2 o1 n48 dt=1e-2 (fast)", build_run(48, EXTRA_SHEAR, 0.0, 1.0e-2, TimeScheme::BDF2, 1), 1.0e-2, steps);
 }
 
-/// ARC N verification: the strain-free (uniform-velocity) family at mu = 0.
-/// The physical-instability diagnosis predicts: with zero base-flow
-/// velocity gradients there is no production mechanism, so the same
-/// discretization that grows at ~116 %/tu on the strained family must
-/// march this family STABLY at mu = 0 — and converge at design order.
-///
-/// MEASURED (June 13, 2026): CONFOUNDED by the outlet closure, not a
-/// clean interior test — uniform flow must exit somewhere, the run needs
-/// right/top Outlets, and the Outlet-bearing MMS configuration has its
-/// own boundary-band instability/inconsistency (bfrac 0.93-1.00, n48
-/// blown, plateau errors 0.1-0.2 with orders ~0.35 — the SAME boundary
-/// problem the small-amplitude all-Inlet rows unmask at bfrac 0.90; see
-/// the domain-matrix verdict). The interior half of the diagnosis is
-/// instead confirmed by the amplitude-scaling law; THIS probe becomes the
-/// acceptance test for the boundary-closure fix family: it must turn
-/// stable (growth <= 0, orders ~2) when the closure is fixed — or when
-/// run on a periodic domain.
+/// Strain-free (uniform-velocity) family at mu = 0: with zero base-flow
+/// velocity gradients there is no production mechanism, so a faithful
+/// discretization should march it stably and converge at design order. Uniform
+/// flow needs right/top Outlets, so this also exercises the Outlet closure.
 #[test]
 #[ignore]
 fn probe_arcn_uniform_mu0() {
@@ -1333,41 +1182,13 @@ fn probe_arcn_uniform_mu0() {
     UNIFORM_FLOW_FAMILY.store(false, Ordering::Relaxed);
 }
 
-/// ARC N S2+S3: boundary-vs-interior discriminators at MATCHED h.
-/// - [0,3]² all-Inlet (odd L keeps the unit box's all-inflow boundary
-///   structure: cos(3π) = −1, sin(3π) = 0): an interior-driven mode must
-///   reproduce the unit-box rate; boundary-driven growth scales down with
-///   the perimeter/area ratio (×1/3) or changes character.
-/// - [0,2]² left/bottom Inlet + right/top Outlet (genuine outflow there:
-///   u_x(2,y) = +U0): changes the boundary reflection structure entirely;
-///   a strongly different rate convicts the boundary closure.
-///
-/// MEASURED (June 13, 2026): L3 reproduces the unit-box rate at matched h
-/// (61.6 vs 60.6 at h=1/48; 83.8 vs 103.5 at h=1/32) — interior-driven at
-/// FULL amplitude. The in/out rows grow in the same band but with large
-/// boundary-band error levels (bfrac 0.58-0.66, levels 0.2-0.3): the
-/// Outlet-bearing MMS configuration has its own boundary problem (never
-/// previously validated — the MMS suite is all-Inlet).
-///
-/// AMPLITUDE-SCALING VERDICT (the arc's decisive measurement, run by
-/// scaling the manufactured-field consts in the working tree): on the
-/// converged-Picard rows, growth vs amplitude is
-///   velocity amps x1.0/0.5/0.25 (rho,p fixed):  116 / 76 / 56.6 %/tu
-///   (two-point linear fit 80*amp + 36 predicted 56 at 0.25 — confirmed)
-///   ALL amps x0.25:                              63.7 %/tu, bfrac 0.90
-/// Two superposed mechanisms:
-/// 1. INTERIOR, amplitude-LINEAR (dominates at full amplitude, bfrac
-///    0.09): the manufactured base flow itself — O(1) strain with
-///    inflection-point shear — is linearly UNSTABLE as inviscid PHYSICS
-///    (strain scale 0.8-1.3/tu matches the measured 1.04-1.16/tu;
-///    h-independent on the converged rows; immune to every numerics
-///    change probed across Arcs I/K/R/N; quenched by physical mu*k^2).
-///    NOT a discretization defect; do not try to "fix" it.
-/// 2. BOUNDARY-BAND, amplitude-independent ~60 %/tu at n48 (unmasked at
-///    small amplitude: bfrac flips 0.09 -> 0.90): a genuine DISCRETE
-///    boundary-closure instability — the remaining numerics target
-///    (characteristic/LODI inlet closure family; the periodic-domain
-///    instrument separates it cleanly if needed).
+/// Boundary-vs-interior discriminators at MATCHED h.
+/// - [0,3]² all-Inlet (odd L keeps the all-inflow boundary structure:
+///   cos(3π) = −1, sin(3π) = 0): an interior-driven mode must reproduce the
+///   unit-box rate; a boundary-driven one scales with perimeter/area (×1/3).
+/// - [0,2]² left/bottom Inlet + right/top Outlet (genuine outflow, u_x(2,y) =
+///   +U0): changes the boundary reflection structure; a strongly different rate
+///   convicts the boundary closure.
 #[test]
 #[ignore]
 fn probe_arcn_domain_matrix() {
@@ -1419,25 +1240,12 @@ fn probe_arcn_domain_matrix() {
     );
 }
 
-/// ARC N′ N1 — IS THE BOUNDARY-BAND μ=0 INSTABILITY GENUINE? Converged-Picard
-/// (outer=2), small amplitude (perturbations ×AMP so the amplitude-INDEPENDENT
-/// boundary mode dominates the amplitude-LINEAR interior KH physics), all-Inlet
-/// box, n = 32/48/64/96. The growth-rate trend under refinement is the verdict:
-///   rate → 0 with h  ⇒ BENIGN O(h) boundary inconsistency (the inviscid limit
-///                      is reachable at resolution — close the arc);
-///   rate constant/↑  ⇒ GENUINE discrete instability (continue to N2/N3).
-/// Bit-reproduces the committed full-amplitude probe at AMP=1 (the amp_scale
-/// refactor is transparent there).
-///
-/// MEASURED (June 13, 2026; amp=0.25, o2, μ=0, 600 steps): n=32 → 61.2,
-/// n=48 → 63.7 (rate CONSTANT, not falling), n=64 → DIVERGES (u_l2 9.96e8),
-/// n=96 → DIVERGES (u_l2 2.03e13). **VERDICT: GENUINE and
-/// REFINEMENT-AMPLIFIED** — finer grids blow up harder (the "0.00" rate at
-/// n≥64 is the saturated-blowup metric trap; the levels show divergence).
-/// This is a grid-scale numerical instability (consistent with the
-/// high-k eigenmode card), NOT a benign O(h) inconsistency. NOTE for
-/// re-measuring the n≥64 *rate*: shorten `steps` so the fit window precedes
-/// saturation.
+/// Is the boundary-band μ=0 instability genuine? Converged-Picard (outer=2),
+/// small amplitude (perturbations ×AMP so the amplitude-independent boundary
+/// mode dominates the amplitude-linear interior KH physics), all-Inlet box,
+/// n = 32/48/64/96. The growth-rate trend under refinement is the verdict:
+/// rate → 0 with h ⇒ benign O(h) boundary inconsistency; rate constant/↑ ⇒
+/// genuine discrete instability.
 #[test]
 #[ignore]
 fn probe_arcn_refinement_trend() {
@@ -1458,27 +1266,12 @@ fn probe_arcn_refinement_trend() {
     set_amp_scale(1.0);
 }
 
-/// ARC N′ N2 — mechanism isolation for the grid-scale boundary instability
-/// (small amplitude, converged Picard, all-Inlet). Two cheap discriminators:
-/// - Upwind vs vanLeer: first-order Upwind disables the whole gradient/
-///   reconstruction path. If the boundary mode VANISHES under Upwind, the
-///   2nd-order vanLeer reconstruction (the owner-side reconstruct-to-face vs
-///   the 0th-order face ghost asymmetry) is the source.
-/// - mass-compat on/off: rules out the source projection (expected null —
-///   O(h²)).
-///
-/// MEASURED (June 13, 2026; amp=0.25, o2): vanLeer n32/n48 = 61.2/63.7;
-/// **Upwind n32/n48 = 0.28/2.74 — a 20–200× reduction, NEARLY STABLE**;
-/// no-masscompat n48 = 63.1 (≈ baseline ⇒ mass-compat RULED OUT). Verdict:
-/// the 2nd-order vanLeer reconstruction is the DOMINANT driver — its
-/// near-central limiter (ψ≈1 on the smooth background) is under-dissipative
-/// at grid scale (the KNP jump dissipation is O(h³) on smooth reconstructed
-/// states), exactly matching the high-k eigenmode card; Upwind's numerical
-/// dissipation suppresses it. CAVEAT: Upwind n64 still DIVERGES (u_l2 6e8) —
-/// its O(h) dissipation VANISHES under refinement, so Upwind only DELAYS the
-/// refinement-amplified mode. The instability is fundamentally
-/// under-dissipation at high k. N3 (periodic) separates whether this is the
-/// INTERIOR reconstruction or specifically the BOUNDARY.
+/// Mechanism isolation for the grid-scale boundary instability (small
+/// amplitude, converged Picard, all-Inlet). Two discriminators:
+/// - Upwind vs vanLeer: first-order Upwind disables the whole reconstruction
+///   path; if the mode vanishes under Upwind, the 2nd-order vanLeer
+///   reconstruction is the source.
+/// - mass-compat on/off: rules out the source projection (expected null, O(h²)).
 #[test]
 #[ignore]
 fn probe_arcn_mechanism() {
@@ -1494,7 +1287,7 @@ fn probe_arcn_mechanism() {
         let (rate, nyq_p, bfrac, u_l2, rho_l2) = measure_growth(&mut run, dt, steps, 25);
         println!("[arcn-mech] {label:20} {rate:12.2} {nyq_p:8.4} {bfrac:8.4} {u_l2:9.2e} {rho_l2:9.2e}");
     };
-    // Baseline vanLeer (boundary mode present: ~61/64 at n32/48).
+    // Baseline vanLeer.
     report("vanLeer n32", build_run(32, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2));
     report("vanLeer n48", build_run(48, EXTRA_SHEAR, 0.0, dt, TimeScheme::BDF2, 2));
     // First-order Upwind (no gradient reconstruction).
@@ -1510,28 +1303,11 @@ fn probe_arcn_mechanism() {
     set_amp_scale(1.0);
 }
 
-/// ARC N′ N3 — the periodic-domain instrument: the decisive interior-vs-boundary
-/// separator. A fully-periodic box has ZERO boundary faces, so any growth is the
-/// INTERIOR operator alone — the all-Inlet box's boundary band is structurally
-/// absent. The manufactured fields are 2-periodic, so the box is [0,2]^2 at 2n
-/// cells/side (h = 1/n), matched to the N1/N2 unit-box rows. Small amplitude
-/// (0.25), mu = 0, converged Picard (outer=2, break pinned open) — identical to
-/// `probe_arcn_refinement_trend` except for the periodic mesh.
-///
-/// MEASURED (June 13, 2026) — VERDICT: ENTIRELY INTERIOR.
-///   h=1/32 (64 cells):  +43.94 %/tu, u_l2 1.26e-2  (all-Inlet N1: 61.2)
-///   h=1/48 (96 cells):  +41.06 %/tu, u_l2 9.72e-3  (all-Inlet N1: 63.7)
-///   h=1/64 (128 cells): DIVERGES, u_l2 5.77e5      (all-Inlet N1: 9.96e8)
-///   h=1/96 (192 cells): DIVERGES, u_l2 2.86e8      (all-Inlet N1: 2.03e13)
-/// The boundary-free box reproduces the WHOLE N1 signature — finite growth at
-/// coarse h AND the refinement-amplified blow-up at fine h (the "0.00" rate at
-/// n>=64 is the saturated-blowup metric trap; the LEVELS show divergence). So
-/// the instability needs NO boundary faces: it is the interior vanLeer
-/// reconstruction's high-k under-dissipation (N2), full stop. The all-Inlet
-/// box's bfrac~0.90 "boundary band" was a metric artifact (the interior high-k
-/// mode's amplitude concentrating near edges); the boundary geometry AMPLIFIES
-/// the mode (~3 orders harder at n=64) but does not cause it. => N4 targets a
-/// k-selective INTERIOR dissipation (must hold the mu>0 MMS orders).
+/// Periodic-domain instrument: the interior-vs-boundary separator. A
+/// fully-periodic box has ZERO boundary faces, so any growth is the interior
+/// operator alone. The manufactured fields are 2-periodic, so the box is
+/// [0,2]^2 at 2n cells/side (h = 1/n), matched to the unit-box rows. Small
+/// amplitude (0.25), mu = 0, converged Picard (outer=2, break pinned open).
 #[test]
 #[ignore]
 fn probe_arcn_periodic() {
@@ -1552,8 +1328,7 @@ fn probe_arcn_periodic() {
         "[arcn-periodic] amp={amp} mu=0 [0,2]^2  {:12} {:>12} {:>9} {:>9}",
         "config", "growth %/tu", "u_l2", "rho_l2"
     );
-    // 2n cells over [0,2] => h = 1/n, matched to the N1 unit-box n rows
-    // (where all-Inlet diverged at n=64/96 — does the boundary-free box too?).
+    // 2n cells over [0,2] => h = 1/n, matched to the unit-box rows.
     for &n in &[32usize, 48, 64, 96] {
         let cells = 2 * n;
         // outer=2 = converged Picard (build_run_box pins the outer break open).
@@ -1567,13 +1342,11 @@ fn probe_arcn_periodic() {
     set_amp_scale(1.0);
 }
 
-/// ARC N N4: does the sharper MINMOD limiter (KNP central-upwind) suppress the
-/// interior grid-scale instability that vanLeer under-dissipates? A/B on the
-/// boundary-free [0,2]^2 periodic box (the N3 instrument), small amplitude,
-/// mu=0, converged Picard. vanLeer is the baseline (the N3 divergence at fine
-/// h); minmod is the candidate fix — psi capped at 1, no compressive overshoot.
+/// Does the sharper MINMOD limiter (KNP central-upwind) suppress the interior
+/// grid-scale instability that vanLeer under-dissipates? A/B on the
+/// boundary-free [0,2]^2 periodic box, small amplitude, mu=0, converged Picard.
 /// SUCCESS = minmod growth bounded / <= 0 where vanLeer diverges, at fine h.
-/// (The mu>0 MMS-order gate — minmod must still reach order ~2 — is separate.)
+/// (The mu>0 MMS-order gate is separate.)
 #[test]
 #[ignore]
 fn probe_arcn_minmod() {
@@ -1608,15 +1381,12 @@ fn probe_arcn_minmod() {
     set_amp_scale(1.0);
 }
 
-/// ARC N N4b: k-selective BIHARMONIC dissipation — the actual cure. Sweeps eps4
-/// on the boundary-free [0,2]^2 periodic box (the N3 instrument), small amplitude,
-/// mu=0, converged Picard, at the meshes where vanLeer AND minmod diverge.
-/// eps4=0 is the control (the lap machinery is on but the term is x0, so it must
-/// reproduce the vanLeer divergence). SUCCESS = an eps4>0 that drives the n>=64
-/// growth to bounded (rate <= 0 / u_l2 at the coarse-h scale, not 1e5..1e12)
-/// WITHOUT blowing up coarse h. A WRONG dissipation sign makes eps4>0 diverge
-/// HARDER than eps4=0 — the instrument catches that on the first row. The mu>0
-/// order gate (term must stay O(h^3) => order ~2) is `probe_arcn_biharmonic_order`.
+/// k-selective BIHARMONIC dissipation. Sweeps eps4 on the boundary-free
+/// [0,2]^2 periodic box, small amplitude, mu=0, converged Picard, at the meshes
+/// where vanLeer and minmod diverge. eps4=0 is the control (term x0, must
+/// reproduce the vanLeer divergence). SUCCESS = an eps4>0 that bounds the n>=64
+/// growth without blowing up coarse h; a wrong dissipation sign diverges HARDER
+/// than eps4=0. The mu>0 order gate is `probe_arcn_biharmonic_order`.
 #[test]
 #[ignore]
 fn probe_arcn_biharmonic() {
@@ -1656,10 +1426,9 @@ fn probe_arcn_biharmonic() {
     set_amp_scale(1.0);
 }
 
-/// ARC N N4: minmod's mu>0 convergence order — the accuracy gate. Minmod can
-/// clip to first order at smooth extrema, so this measures whether KNP+minmod
-/// still reaches order ~2 (the bar vanLeer clears at 1.96/2.15/1.83/1.86).
-/// Reports observed orders without asserting (characterization probe).
+/// Minmod's mu>0 convergence order — the accuracy gate. Minmod can clip to
+/// first order at smooth extrema, so this measures whether KNP+minmod still
+/// reaches order ~2. Reports observed orders without asserting.
 #[test]
 #[ignore]
 fn probe_arcn_minmod_order() {
@@ -1687,19 +1456,12 @@ fn probe_arcn_minmod_order() {
     }
 }
 
-/// ARC N N4c/N4d: IMPLICIT biharmonic mu>0 convergence order. eps4=0 (control)
-/// reproduces plain `compressible_mms` to order ~2 (rho 2.02 / u 2.12 / p 2.03 /
-/// T 1.95, finest err ~5e-4) — proving the stride-12 mixed formulation is correct
-/// and the explicit `dt` limit is gone. Arc N4d CURED the eps4>0 conditioning: the
-/// implicit grad^4 stiffness is intra-cell-dominated (inv_dt-scaled recovery rows +
-/// the -I/+4 auxiliary-Laplacian block, diagonal span ~2000x), so
-/// `PreconditionerType::BlockJacobi` (the per-cell 12x12 inverse, selected in
-/// `build_run_box`) converges in ~80 FGMRES iters/step at n=48 to an EXACT discrete
-/// fixed point, where the default point-Jacobi stalled at the iteration cap. Orders
-/// are now positive (eps4=0.1: 1.68/1.57/1.42/1.98; eps4=0.25: 1.48/1.94/2.39/1.76,
-/// was -2.8/-1.96) — the sub-2 values are the biharmonic hyperviscosity consistency
-/// error (the -eps4*grad^4 term assembles as ~eps4*h^2*grad^4 U, an O(h^2)
-/// inconsistency with the non-biharmonic MMS sources), trending to 2 under refinement.
+/// IMPLICIT biharmonic mu>0 convergence order. eps4=0 (control) reproduces
+/// plain `compressible_mms` to order ~2, proving the stride-12 mixed formulation
+/// is correct. For eps4>0 the sub-2 orders are the biharmonic hyperviscosity
+/// consistency error (the -eps4*grad^4 term assembles as ~eps4*h^2*grad^4 U, an
+/// O(h^2) inconsistency with the non-biharmonic MMS sources), trending to 2
+/// under refinement.
 #[test]
 #[ignore]
 fn probe_arcn_biharmonic_order() {
@@ -1731,12 +1493,11 @@ fn probe_arcn_biharmonic_order() {
     set_eps4(0.0);
 }
 
-/// ARC N N4b: DISCRIMINATOR — biharmonic mu>0 order on the boundary-free PERIODIC
-/// box. The Dirichlet mu>0 order gate blows up for eps4>0; this isolates whether
-/// the cause is the boundary closure (then periodic should be order ~2 and a
-/// smooth boundary treatment is the fix) or a mu>0+biharmonic interaction (then
-/// periodic also blows up and a boundary fix won't help). Full amplitude, MU,
-/// march-to-plateau, same as the Dirichlet order study but on [0,2]^2 periodic.
+/// Discriminator: biharmonic mu>0 order on the boundary-free PERIODIC box. The
+/// Dirichlet mu>0 order gate blows up for eps4>0; this isolates whether the
+/// cause is the boundary closure (periodic then order ~2) or a mu>0+biharmonic
+/// interaction (periodic also blows up). Full amplitude, MU, march-to-plateau,
+/// on [0,2]^2 periodic.
 #[test]
 #[ignore]
 fn probe_arcn_biharmonic_periodic_order() {
@@ -1782,13 +1543,11 @@ fn probe_arcn_biharmonic_periodic_order() {
     PERIODIC.store(false, Ordering::Relaxed);
 }
 
-/// ARC N N4b: is the Dirichlet mu>0 biharmonic blow-up an EXPLICIT-stiffness
-/// problem? The term reads a frozen (lagged) `lap`, so it acts like an explicit
-/// 4th-difference (stability limit dt ~ h^4) — which OUTER_ITERS=1 + dt=0.01
-/// violates, worsening under refinement (the observed negative order). This
-/// varies outer-iterations and dt at eps4=0.1 on the Dirichlet box; if order
-/// recovers to ~2 with more outer / smaller dt, the fix is iteration/relaxation,
-/// not a boundary treatment.
+/// Is the Dirichlet mu>0 biharmonic blow-up an EXPLICIT-stiffness problem? The
+/// term reads a frozen (lagged) `lap`, so it acts like an explicit 4th-difference
+/// (stability limit dt ~ h^4), which OUTER_ITERS=1 + dt=0.01 violates. Varies
+/// outer-iterations and dt at eps4=0.1 on the Dirichlet box; if order recovers to
+/// ~2, the fix is iteration/relaxation, not a boundary treatment.
 #[test]
 #[ignore]
 fn probe_arcn_biharmonic_stab() {
@@ -1820,11 +1579,11 @@ fn probe_arcn_biharmonic_stab() {
     set_eps4(0.0);
 }
 
-/// ARC N4d DIAGNOSTIC (throwaway): per-step FGMRES telemetry for the implicit
-/// biharmonic solve, to classify the linear-solve failure mode and compare
-/// preconditioners. Prints, for each (eps4, n), per-step (iterations, residual,
-/// converged/diverged) plus a SUMMARY with total iterations, wall time, and the
-/// plateau-free short-march errors. Env knobs (ONE compile, many runs):
+/// Per-step FGMRES telemetry for the implicit biharmonic solve: classifies the
+/// linear-solve failure mode and compares preconditioners. Prints, for each
+/// (eps4, n), per-step (iterations, residual, converged/diverged) plus a SUMMARY
+/// with total iterations, wall time, and the short-march errors. Env knobs (one
+/// compile, many runs):
 ///   BIH_DIAG_PRECOND  = jacobi|block|amg     (default jacobi)
 ///   BIH_DIAG_RESTART  = <usize>              (<= build-time capacity 60; default model)
 ///   BIH_DIAG_MAXITERS = <u32>                (default model 4000)
@@ -1913,38 +1672,13 @@ fn probe_arcn_biharmonic_diag() {
     set_eps4(0.0);
 }
 
-/// ARC N S1: eigenmode dump — capture the growing inviscid mode's spatial
-/// structure. Marches n=48 / mu=0 / BDF2 / o1, snapshots per-cell deltas
-/// vs the exact solution at steps 400 and 500, and writes CSV to
-/// target/arcn_probes/eigenmode_n48.csv with columns
-/// x,y,d1_<f>,d2_<f>,g_<f> for f in rho,ux,uy,p,T — where d1/d2 are the
-/// two snapshots' deltas and g = d2 - d1 is the GROWING-MODE component
-/// (the snapshot difference cancels the steady O(h^2) discretization
-/// error).
-///
-/// MODE CARD (measured June 12, 2026; n=48, mu=0, BDF2 o1, steps 400-500):
-/// - growth-component rms: rho 1.98e-2, ux 1.65e-2, uy 1.48e-2,
-///   p 2.43e-2, T 1.10e-2 — ALL fields participate; p is largest.
-/// - spectral content: 86-93% of energy at |freq| > 8 (NEAR GRID SCALE;
-///   peaks at (3,15), (21,-19) etc.) — the mode is HIGH-FREQUENCY, not
-///   the smooth k~11 object inferred earlier. THIRD METRIC TRAP: the
-///   nyquist-checkerboard fraction (strict alternating-sign measure) is
-///   blind to broadband high-k content; it read ~1e-4 while 90% of the
-///   mode energy sat above kh ~ 1.
-/// - corr(p, rho) = +0.978, rms p/rho = 1.23 (between isothermal 1.0 and
-///   acoustic c^2 = 1.4): an acoustic-LIKE correlated pattern, not an
-///   entropy mode. corr(p, T) = +0.64.
-/// - envelope: interior rms slightly ABOVE edge rms — interior-
-///   distributed, consistent with the bfrac findings.
-/// Mechanism candidate consistent with all of this: small-amplitude
-/// high-k perturbations riding a smooth background see near-central
-/// (psi ~ 1) limited reconstruction, whose linearized face jumps nearly
-/// cancel — the KNP jump dissipation has a near-null direction there,
-/// leaving non-dissipative central transport that the coupled system
-/// tips unstable. The k-content REOPENS k-selective (JST-style compact
-/// 4th-difference) dissipation as the fix family: O(h^3) on smooth
-/// fields (order-preserving) but O(amplitude) at grid scale — Arc K
-/// had excluded it under the (wrong) smooth-mode belief.
+/// Eigenmode dump: capture the growing inviscid mode's spatial structure.
+/// Marches n=48 / mu=0 / BDF2 / o1, snapshots per-cell deltas vs the exact
+/// solution at steps 400 and 500, and writes CSV to
+/// target/arcn_probes/eigenmode_n48.csv with columns x,y,d1_<f>,d2_<f>,g_<f>
+/// for f in rho,ux,uy,p,T — d1/d2 are the two snapshots' deltas and g = d2 - d1
+/// is the growing-mode component (the difference cancels the steady O(h^2)
+/// discretization error).
 #[test]
 #[ignore]
 fn probe_arcn_eigenmode_dump() {
@@ -2018,24 +1752,10 @@ fn probe_arcn_eigenmode_dump() {
     );
 }
 
-/// ARC R diagnostic: does the outer Picard loop actually refresh the KT
-/// flux/assembly inputs, or is the step effectively explicit-in-flux?
-/// Run with CFD2_DEBUG_FGMRES=1 CFD2_LIN_TOL=1e-7 and read the per-solve
-/// trace within each step.
-///
-/// FINDINGS (June 12, 2026):
-/// - The batched one-submission outer loop emits NO per-solve trace
-///   (encoded up front, no readback) — disable it first, as below.
-/// - Even un-batched, only ONE solve fired per step at outer_iters=4:
-///   the adaptive outer-convergence break (outer_tol relative) fires
-///   after iteration 1 on smooth marches. Production compressible
-///   stepping is therefore one-Picard-iteration (explicit-in-flux) by
-///   default — ironically MORE stable here than the converged implicit
-///   step (60.6 vs 116 %/tu at n48; see the matrix verdict), so this is
-///   recorded as a characterization, not a defect to fix.
-/// - With the break pinned open (outer_tol = 0) the assembly does
-///   re-read the updated state each iteration and Picard converges
-///   (o2 = o4 to 0.4%): the per-outer refresh architecture works.
+/// Diagnostic: does the outer Picard loop actually refresh the KT flux/assembly
+/// inputs, or is the step effectively explicit-in-flux? Run with
+/// CFD2_DEBUG_FGMRES=1 CFD2_LIN_TOL=1e-7 and read the per-solve trace within
+/// each step.
 #[test]
 #[ignore]
 fn probe_arcr_outer_refresh() {
@@ -2053,37 +1773,10 @@ fn probe_arcr_outer_refresh() {
     }
 }
 
-/// ARC K probe: order study of the UNPRECONDITIONED operator at mu = 0,
-/// for measuring candidate flux-dissipation designs against the success
-/// criterion (stable at mu = 0 AND orders ~2). Run with a candidate
-/// dissipation active in flux_schemes.rs.
-///
-/// ARC K VERDICT (June 12, 2026) — two candidate families probed and
-/// REFUTED; the timebox closed the arc:
-/// - Family 1, Rusanov symmetric wave-speed split (ap = a_max = -am,
-///   dissipation (|u|+c)/2 instead of the signed KT ~(1-M^2)c/2, ~2x at
-///   M=0.5): growth moved only 103.5->98.3 / 115.9->109.9 %/tu. Jump-
-///   proportional dissipation vanishes at O(h^3) on smooth reconstructed
-///   fields and cannot reach the smooth thermo-mode AT ANY coefficient
-///   scale. (Side finding: it does rescue the PRECONDITIONED rows from
-///   catastrophic blow-up, rho 9e10 -> bounded, and stabilizes the
-///   dt=1e-2 row — relevant if preconditioning is ever revisited.)
-/// - Family 2, raw-cell-jump dissipation on the rho/rhoE rows
-///   (mu_art ~ k2*c*h, non-vanishing on smooth fields): clean monotone
-///   dose-response — n32 growth 103.5 (k2=0) -> 72.7 (0.05) -> 34.4 (0.2)
-///   -> 5.6 (0.4) %/tu — the mode IS reachable by smooth-field
-///   dissipation. But the joint criterion fails: at k2=0.4 this probe
-///   measured orders rho 0.458 / u 0.235 / p 0.709 / T 0.673 (the O(h)
-///   dissipation error dominates), errors RISE with k2 at fixed n, and a
-///   pressure checkerboard emerges (nyq(p) 0.136 on the Euler n48 row).
-///   There is no sweet spot: full stabilization needs k2 >~ 0.5 and
-///   order 2 dies well before k2 = 0.4.
-/// Conclusion: face-local dissipation design cannot deliver "stable at
-/// mu=0 with orders ~2"; the gap between the O(h^3) jump dissipation and
-/// the O(h) damping the mode needs is structural. A real fix must change
-/// the structure of the inv_dt-scaled EOS-recovery coupling (e.g.
-/// entropy-consistent coupling rows) — backlog, own plan. The stability
-/// envelope contract in compressible.rs stands.
+/// Order study of the UNPRECONDITIONED operator at mu = 0, for measuring
+/// candidate flux-dissipation designs against the success criterion (stable at
+/// mu = 0 AND orders ~2). Run with a candidate dissipation active in
+/// flux_schemes.rs.
 #[test]
 #[ignore]
 fn probe_arck_mu0_order() {
@@ -2115,14 +1808,11 @@ fn probe_arck_mu0_order() {
     }
 }
 
-/// Order study of the PRECONDITIONED inviscid operator: mu = 0 with
-/// dual-time WeissSmith preconditioning. MEASURED June 12, 2026: BLOWS UP
-/// (rho/p -> 1e10..1e12 by n=24; u stays bounded through the rho_u/rho
-/// recovery, which is how the first probe pass mislabeled this
-/// configuration "stable"). Kept as the falsification record for the
-/// "just use preconditioning for inviscid" idea — at moderate Mach the
-/// preconditioned wave-speed rescale REMOVES dissipation and worsens the
-/// instability. See the probe matrix verdict above.
+/// Order study of the PRECONDITIONED inviscid operator: mu = 0 with dual-time
+/// WeissSmith preconditioning. Kept as a falsification record for "just use
+/// preconditioning for inviscid": at moderate Mach the preconditioned
+/// wave-speed rescale removes dissipation and the run blows up (rho/p ->
+/// 1e10..1e12 by n=24, while u stays bounded through the rho_u/rho recovery).
 #[test]
 #[ignore]
 fn probe_euler_preconditioned_order() {
@@ -2157,20 +1847,12 @@ fn probe_euler_preconditioned_order() {
     }
 }
 
-/// Probe: the same study with sources for the PRE-FIX doubled-shear
-/// operator (`extra = 1`). After the tauMC fix these must SATURATE
-/// h-independently instead of converging — if this probe ever shows order-2
-/// convergence again, the double-counted laplacian has been reintroduced.
+/// Sources for the doubled-shear operator (`extra = 1`). With physical-NS in
+/// the solver these must SATURATE h-independently instead of converging — if
+/// this probe ever shows order-2 convergence again, the double-counted
+/// laplacian has been reintroduced.
 /// Run manually:
 /// `cargo test --features dev-tests --test mms_compressible_order_test -- --ignored probe_ --nocapture`
-///
-/// Measured post-fix (June 2026): rho 5.60e-2 -> 5.28e-2, u 2.49e-2 ->
-/// 2.31e-2, T 1.39e-2 -> 1.20e-2 from n=16 to n=32 — saturated, ~100x the
-/// converging study's n=32 errors. Pre-fix the roles were reversed
-/// (doubled-shear operator in the solver, physical-NS sources saturating at
-/// rho 4.6e-2 / u 1.5e-2), completing the two-direction operator
-/// identification. (The drift guard passes on a saturated run too: it is a
-/// genuine steady state — of the wrong continuous problem.)
 #[test]
 #[ignore]
 fn probe_doubled_shear_sources_saturate() {

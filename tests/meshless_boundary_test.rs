@@ -1,12 +1,12 @@
-//! Meshless engine boundary gates (M0.3, review-corrected F1/F3/F6):
+//! Meshless engine boundary gates:
 //! 1. loop integrity per geometry — closed, fluid-on-left orientation,
-//!    tag census by TOTAL LENGTH per `BoundaryType` (review F3: face
-//!    counts differ legitimately between seeding protocols);
+//!    tag census by TOTAL LENGTH per `BoundaryType` (face counts differ
+//!    legitimately between seeding protocols);
 //! 2. full-domain diagrams on all four GUI geometries — clean statuses,
 //!    partition of unity against the *discrete* loop area (shoelace of the
-//!    boundary loops, 1e-9) and against the analytic fluid area (the
-//!    incumbent's 2% Monte-Carlo tolerance); plus engine == exhaustive
-//!    oracle bitwise with boundary kinds, and thread-count determinism;
+//!    boundary loops, 1e-9) and against the analytic fluid area (2%
+//!    Monte-Carlo tolerance); plus engine == exhaustive oracle bitwise
+//!    with boundary kinds, and thread-count determinism;
 //! 3. watertight walls — the circle obstacle's Wall edges reconstruct the
 //!    chord polygon (length within 1e-9), every polyline vertex is
 //!    reproduced in some ring, the step's reflex corner exists, no
@@ -78,9 +78,8 @@ fn nozzle() -> (Nozzle, Vector2<f64>) {
     )
 }
 
-/// Estimate the fluid area by sampling `is_inside` on a fine grid — the same
-/// Monte-Carlo reference (and 2% tolerance) the incumbent validation matrix
-/// uses.
+/// Estimate the fluid area by sampling `is_inside` on a fine grid (2%
+/// Monte-Carlo tolerance).
 fn fluid_area_estimate(geo: &(impl Geometry + Sync), domain: Vector2<f64>, n: usize) -> f64 {
     let mut hits = 0usize;
     for j in 0..n {
@@ -145,15 +144,10 @@ fn assert_fluid_on_left(name: &str, geo: &impl Geometry, loops: &[BoundaryLoop],
     }
 }
 
-// ---------------------------------------------------------------------------
-// 1. Loop integrity per geometry
-// ---------------------------------------------------------------------------
-
 #[test]
 fn loops_are_closed_oriented_and_census_matches_analytic() {
     let spacing = 0.05;
 
-    // Shared structural checks + census per geometry.
     fn structural(name: &str, geo: &(impl Geometry + Sync), domain: Vector2<f64>, spacing: f64) -> Vec<BoundaryLoop> {
         let tol = MeshgenTolerances::from_geometry(spacing, domain);
         let loops = geo.get_boundary_loops(spacing, domain, &tol);
@@ -167,7 +161,6 @@ fn loops_are_closed_oriented_and_census_matches_analytic() {
             } else {
                 assert!(area < 0.0, "{name} loop {l}: holes must be CW (area {area})");
             }
-            // Consecutive points distinct, segments no longer than ~spacing.
             let n = lp.pts.len();
             for s in 0..n {
                 let len = (lp.pts[(s + 1) % n] - lp.pts[s]).norm();
@@ -192,7 +185,6 @@ fn loops_are_closed_oriented_and_census_matches_analytic() {
         let (geo, domain) = obstacle();
         let loops = structural("obstacle", &geo, domain, spacing);
         assert_eq!(loops.len(), 2, "obstacle: box + circle");
-        // The circle loop is all Wall and its length is the chord perimeter.
         let circle = &loops[1];
         assert!(circle.tags.iter().all(|t| *t == BoundaryType::Wall));
         let chord_perim: f64 = (0..circle.pts.len())
@@ -237,10 +229,6 @@ fn loops_are_closed_oriented_and_census_matches_analytic() {
         println!("[loops/nozzle] inlet={inlet:.6} outlet={outlet:.6} wall={wall:.6}");
     }
 }
-
-// ---------------------------------------------------------------------------
-// Shared full-domain build
-// ---------------------------------------------------------------------------
 
 struct Built {
     seeds: Vec<Point2<f64>>,
@@ -302,10 +290,6 @@ fn assert_clean_statuses(name: &str, b: &Built) {
     assert_eq!(failed, 0, "{name}: SecurityRadiusFailed cells");
 }
 
-// ---------------------------------------------------------------------------
-// 2. Full-domain diagrams: statuses + partition + oracle + determinism
-// ---------------------------------------------------------------------------
-
 #[test]
 fn full_domain_diagrams_partition_the_fluid_area() {
     fn run(name: &str, geo: &(impl Geometry + Sync), domain: Vector2<f64>, tight_rel: f64) {
@@ -319,7 +303,7 @@ fn full_domain_diagrams_partition_the_fluid_area() {
         let discrete = loops_area(&b.spec);
         let rel = ((total - discrete) / discrete).abs();
         // Loose gate: the discrete region matches the analytic fluid area
-        // within the incumbent's 2% Monte-Carlo tolerance.
+        // within the 2% Monte-Carlo tolerance.
         let analytic = fluid_area_estimate(geo, domain, 2000);
         let rel_analytic = ((total - analytic) / analytic).abs();
         println!(
@@ -407,10 +391,6 @@ fn boundary_diagram_is_byte_identical_across_thread_counts() {
     println!("[determinism/obstacle-boundary] n={} pools 1/2/8 byte-identical", seeds.len());
 }
 
-// ---------------------------------------------------------------------------
-// 3. Watertight walls + no phantoms + shielding
-// ---------------------------------------------------------------------------
-
 #[test]
 fn obstacle_wall_edges_reconstruct_the_chord_polygon() {
     let (geo, domain) = obstacle();
@@ -443,7 +423,7 @@ fn obstacle_wall_edges_reconstruct_the_chord_polygon() {
     assert!(rel < 1e-9, "circle wall length rel error {rel:.3e}");
 
     // Every chord-polygon vertex is reproduced in some ring (the flanking
-    // midpoint seeds' mutual bisector passes through it — review F1).
+    // midpoint seeds' mutual bisector passes through it).
     for (v, p) in circle.pts.iter().enumerate() {
         let mut best = f64::INFINITY;
         for i in 0..b.diagram.n {
@@ -483,9 +463,8 @@ fn no_phantom_walls_and_shielding_holds_everywhere() {
         let input = b.input();
 
         // Phantom-wall check: every boundary-tagged ring edge (longer than
-        // the eps-sliver scale) must lie ON the boundary polyline — F1's
-        // failure mode was wall edges on chord-line EXTENSIONS strictly
-        // inside the fluid.
+        // the eps-sliver scale) must lie ON the boundary polyline, not on
+        // chord-line extensions strictly inside the fluid.
         let mut checked = 0usize;
         for i in 0..b.diagram.n {
             let (xy, tags) = b.ring(i);
@@ -507,14 +486,14 @@ fn no_phantom_walls_and_shielding_holds_everywhere() {
                     "{name} cell {i} edge {e} ({:?}): phantom wall — midpoint {mid:?} is {dist:.3e} off the polyline",
                     tags[e]
                 );
-                // Tag must resolve to a BoundaryType (parity plumbing).
+                // Tag must resolve to a BoundaryType.
                 assert!(tag_boundary_type(tags[e], &b.spec).is_some());
                 checked += 1;
             }
         }
 
-        // Shielding (review F6): no Interior-cell ring vertex on the solid
-        // side of the loops.
+        // Shielding: no Interior-cell ring vertex on the solid side of the
+        // loops.
         let violations = shielding_violations(&input, &b.diagram);
         assert!(
             violations.is_empty(),
@@ -534,10 +513,6 @@ fn no_phantom_walls_and_shielding_holds_everywhere() {
     let (geo, domain) = nozzle();
     run("nozzle", &geo, domain);
 }
-
-// ---------------------------------------------------------------------------
-// 4. Convexity + seed containment
-// ---------------------------------------------------------------------------
 
 #[test]
 fn cells_are_convex_and_contain_their_seeds() {
@@ -599,11 +574,7 @@ fn cells_are_convex_and_contain_their_seeds() {
     run("nozzle", &geo, domain);
 }
 
-// ---------------------------------------------------------------------------
-// Sanity: statuses (referenced here so CellStatus stays imported even if
-// gates evolve) — every built case must keep index identity seed i == cell i.
-// ---------------------------------------------------------------------------
-
+// Keeps CellStatus imported; asserts index identity seed i == cell i.
 #[test]
 fn seed_index_identity_holds() {
     let (geo, domain) = obstacle();

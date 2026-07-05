@@ -1,11 +1,9 @@
 //! `GpuVoronoiEngine`: buffers, pipeline, CPU grid build/upload, boundary
 //! segment/seed-kind upload, regen encoding, validation readback, the CPU
-//! f64 fallback path (`resolve_flagged`: flag-list over-read → M0
+//! f64 fallback path (`resolve_flagged`: flag-list over-read →
 //! `compute_cell` on the f32-rounded seeds/segments → `write_buffer`
 //! patches → RELEASE reciprocity enforcement), and the `read_diagram`
-//! bridge back to a CPU `MeshlessDiagram` for `assemble_mesh`. Design
-//! §3.3/§5.4, cloned from the srd.rs seam: manual layouts, own encoder +
-//! submit.
+//! bridge back to a CPU `MeshlessDiagram` for `assemble_mesh`.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -27,10 +25,10 @@ use super::{status, wgsl, BC_NONE, BC_SEG_FLAG, K_FACE_MAX, MAX_VERTS, NBR_NONE,
 
 /// Round every boundary-loop point through f32 (widened back to f64 —
 /// exact), keeping tags and segment ids. The GPU kernel sees f32 segment
-/// endpoints; review F4 requires the CPU fallback AND any CPU oracle to run
-/// on the SAME rounded values, so every consumer comparing against the GPU
-/// engine must build its `MeshlessInput` from this spec (the engine itself
-/// applies it in `upload_case`).
+/// endpoints, so the CPU fallback AND any CPU oracle must run on these SAME
+/// rounded values: every consumer comparing against the GPU engine must
+/// build its `MeshlessInput` from this spec (the engine itself applies it
+/// in `upload_case`).
 pub fn boundary_spec_f32(spec: &BoundarySpec) -> BoundarySpec {
     let loops = spec
         .loops
@@ -50,21 +48,20 @@ pub fn boundary_spec_f32(spec: &BoundarySpec) -> BoundarySpec {
 const WORKGROUP_SIZE: u32 = 64;
 
 /// Absolute derate of the kernel's ring-sweep distance lower bound, in
-/// domain units (stage-5 review fix): the WGSL `ring_lower_bound` carries
-/// the f32 rounding of `cell_size` times the bin index plus one product
-/// rounding — up to ~2·2⁻²⁴·domain ABSOLUTE overestimate regardless of how
-/// small the bound itself is, which no relative margin can cover.
-/// `upload_case` writes this as the `b_slack` baseline (2× headroom); the
-/// Lloyd grid-staleness accumulation adds on top of it.
+/// domain units: the WGSL `ring_lower_bound` carries the f32 rounding of
+/// `cell_size` times the bin index plus one product rounding — up to
+/// ~2·2⁻²⁴·domain ABSOLUTE overestimate regardless of how small the bound
+/// itself is, which no relative margin can cover. `upload_case` writes this
+/// as the `b_slack` baseline (2× headroom); the Lloyd grid-staleness
+/// accumulation adds on top of it.
 fn lb_abs_slack(domain: &Vector2<f64>) -> f32 {
     (4.0 * domain.x.max(domain.y) * 2f64.powi(-24)) as f32
 }
 
 /// A one-sided face is a reciprocity VIOLATION iff its length exceeds
 /// `REAL_FACE_REL * |p_j - p_i|`; shorter one-sided faces are eps-scale
-/// slivers the M0 f64 engine itself can produce (its assembler pairs faces
-/// geometrically for exactly this reason) — they are tolerated and counted,
-/// and M5's derive pass must drop faces below this threshold.
+/// slivers the f64 engine itself can produce (its assembler pairs faces
+/// geometrically for exactly this reason) — they are tolerated and counted.
 const REAL_FACE_REL: f64 = 1e-6;
 
 /// Uniform parameter block — must match the WGSL `Params` struct.
@@ -81,8 +78,8 @@ struct Params {
     domain_y: f32,
 }
 
-/// Per-cell padded outputs (design §3.2), allocated at seed capacity.
-/// `centroid`, `face mid` and `ring_vert` are SEED-RELATIVE (module docs).
+/// Per-cell padded outputs, allocated at seed capacity. `centroid`,
+/// `face mid` and `ring_vert` are SEED-RELATIVE.
 pub struct VoronoiCellOutputs {
     pub b_nbr_ids: wgpu::Buffer,
     pub b_face_bc: wgpu::Buffer,
@@ -99,8 +96,8 @@ pub struct VoronoiCellOutputs {
     /// `[0]` = atomic count, `[1..=capacity]` = flagged cell ids.
     pub b_flagged: wgpu::Buffer,
     /// Diagnostics (deterministic): low 24 bits = grid bins processed by
-    /// the cell's ring traversal (review F3 graded-set instrument), high 8
-    /// bits = the epsilon-filter condition mask of NEEDS_EXACT cells.
+    /// the cell's ring traversal, high 8 bits = the epsilon-filter
+    /// condition mask of NEEDS_EXACT cells.
     pub b_visited_bins: wgpu::Buffer,
 }
 
@@ -144,7 +141,7 @@ pub struct VoronoiResolveReport {
     /// Cells flagged by the reciprocity check rather than the kernel.
     pub reciprocity_flagged: Vec<u32>,
     /// Tolerated one-sided faces below the `REAL_FACE_REL` sliver threshold
-    /// in the final merged diagram (see the constant's doc).
+    /// in the final merged diagram.
     pub sub_eps_asymmetries: usize,
     /// Cells whose f64 result does not fit the padded GPU layout (ring
     /// longer than `K_FACE_MAX`). Empty on all supported seed sets.
@@ -195,11 +192,11 @@ pub struct GpuVoronoiEngine {
     pub(super) n_seeds: u32,
     pub(super) domain: Vector2<f64>,
     tol: MeshgenTolerances,
-    /// The uploaded seeds, f32-rounded and widened back to f64 (exact) —
-    /// review F4: the f64 fallback MUST run on the values the kernel saw,
-    /// never the caller's original f64 seeds.
+    /// The uploaded seeds, f32-rounded and widened back to f64 (exact): the
+    /// f64 fallback MUST run on the values the kernel saw, never the
+    /// caller's original f64 seeds.
     pts: Vec<Point2<f64>>,
-    /// M0 accelerator grid over `pts` (also the source of the uploaded CSR
+    /// Accelerator grid over `pts` (also the source of the uploaded CSR
     /// buffers); kept for `resolve_flagged`'s `compute_cell` calls.
     grid: Option<SeedGrid>,
     /// Coalescing table (canon[i] = lowest seed index of i's quantize bin).
@@ -210,9 +207,9 @@ pub struct GpuVoronoiEngine {
     /// Per-seed flag words as uploaded (`SEED_FLAG_FIXED` bit); kept so
     /// `refresh_after_lloyd` can re-run `upload_case` unchanged.
     pub(super) flags: Vec<u32>,
-    /// The uploaded boundary spec, f32-ROUNDED (`boundary_spec_f32`) —
-    /// review F4: the kernel clips f32 segment endpoints, so the fallback
-    /// and every oracle must consume these exact values.
+    /// The uploaded boundary spec, f32-ROUNDED (`boundary_spec_f32`): the
+    /// kernel clips f32 segment endpoints, so the fallback and every oracle
+    /// must consume these exact values.
     pub(super) boundary: BoundarySpec,
 
     pipeline: wgpu::ComputePipeline,
@@ -233,14 +230,14 @@ pub struct GpuVoronoiEngine {
     /// `lb_abs_slack` f32 baseline plus the accumulated max seed
     /// displacement since the CPU `SeedGrid` was built. Reset to the
     /// baseline by `upload_case`, grown by the Lloyd reduce, subtracted
-    /// from the ring sweep's lower bound (see lloyd.rs module docs).
+    /// from the ring sweep's lower bound.
     pub(super) b_slack: wgpu::Buffer,
     b_grid_offsets: Option<wgpu::Buffer>,
     b_grid_ids: Option<wgpu::Buffer>,
     /// Flattened segment table ([ax, ay, bx, by] f32 per global SegId).
     b_segments: Option<wgpu::Buffer>,
-    /// Per-segment `bc_table_index` u32 — uploaded for the M5 derive pass
-    /// (which needs on-GPU BC indices); the M1 cell kernel does not bind it
+    /// Per-segment `bc_table_index` u32 — uploaded for the GPU derive pass
+    /// (which needs on-GPU BC indices); the cell kernel does not bind it
     /// (segment ids in `b_face_bc` are resolved through the CPU spec).
     #[allow(dead_code)]
     b_seg_tags: Option<wgpu::Buffer>,
@@ -250,12 +247,11 @@ pub struct GpuVoronoiEngine {
 
     /// A regen has been encoded since the last `upload_case` — Lloyd
     /// updates consume cell outputs, so this must be true before
-    /// `encode_lloyd_update` (stage-5 review: was a doc-only contract).
+    /// `encode_lloyd_update`.
     pub(super) outputs_ready: std::cell::Cell<bool>,
     /// A chained-Lloyd episode moved seeds on the GPU: the CPU mirrors
     /// (`pts`/`grid`/`canon`) are STALE, so `resolve_flagged`/`read_diagram`
-    /// must not run until `refresh_after_lloyd` + a fresh regen (stage-5
-    /// review: was a doc-only contract).
+    /// must not run until `refresh_after_lloyd` + a fresh regen.
     pub(super) lloyd_dirty: std::cell::Cell<bool>,
 
     pub outputs: VoronoiCellOutputs,
@@ -264,7 +260,7 @@ pub struct GpuVoronoiEngine {
 impl GpuVoronoiEngine {
     /// Create pipelines + capacity-sized buffers. `domain` is the clip bbox
     /// `[0, x] × [0, y]`; `tol` supplies the coalescing quantization and the
-    /// clip epsilon (`edge_len_eps`), exactly as the M0 engine uses them.
+    /// clip epsilon (`edge_len_eps`), exactly as the CPU engine uses them.
     pub fn new(
         device: &wgpu::Device,
         capacity_seeds: u32,
@@ -430,7 +426,7 @@ impl GpuVoronoiEngine {
     }
 
     /// The f32-rounded boundary spec the engine (and its fallback) uses —
-    /// the values every CPU oracle must consume for parity (review F4).
+    /// the values every CPU oracle must consume for parity.
     pub fn boundary(&self) -> &BoundarySpec {
         &self.boundary
     }
@@ -443,8 +439,8 @@ impl GpuVoronoiEngine {
         self.n_seeds
     }
 
-    /// Interior-only convenience wrapper over `upload_case` (the stage-1/2
-    /// configuration: no boundary loops, every seed `Interior`).
+    /// Interior-only convenience wrapper over `upload_case` (no boundary
+    /// loops, every seed `Interior`).
     pub fn upload_seeds(
         &mut self,
         device: &wgpu::Device,
@@ -464,7 +460,7 @@ impl GpuVoronoiEngine {
     /// f32 values the kernel sees (widened to f64 — `boundary` is rounded
     /// through `boundary_spec_f32` here), so grid membership, coalescing
     /// verdicts, own-plane lines and kernel arithmetic agree between the
-    /// GPU kernel and the CPU f64 fallback (review F4).
+    /// GPU kernel and the CPU f64 fallback.
     pub fn upload_case(
         &mut self,
         device: &wgpu::Device,
@@ -491,9 +487,9 @@ impl GpuVoronoiEngine {
             .map(|i| Point2::new(seeds_xy[2 * i] as f64, seeds_xy[2 * i + 1] as f64))
             .collect();
         // Out-of-domain seeds void SeedGrid's ring-lower-bound contract
-        // (they clamp into an edge bin) — the documented failure mode of a
-        // Lloyd `omega > 1` overshoot re-entering through
-        // `refresh_after_lloyd`. Fail loudly here (stage-5 review).
+        // (they clamp into an edge bin) — the failure mode of a Lloyd
+        // `omega > 1` overshoot re-entering through `refresh_after_lloyd`.
+        // Fail loudly here.
         for (i, p) in pts.iter().enumerate() {
             assert!(
                 (0.0..=self.domain.x).contains(&p.x) && (0.0..=self.domain.y).contains(&p.y),
@@ -508,7 +504,7 @@ impl GpuVoronoiEngine {
         let grid = SeedGrid::build(&pts, self.domain);
 
         // Coalescing table: canon[i] = lowest seed index in i's quantize
-        // bin (the M0 EmptyCell rule; same-bin planes are skipped by the
+        // bin (the EmptyCell rule; same-bin planes are skipped by the
         // kernel via canon[j] == canon[i]).
         let mut first: HashMap<(i64, i64), u32> = HashMap::with_capacity(n);
         let mut canon = vec![0u32; n];
@@ -530,8 +526,8 @@ impl GpuVoronoiEngine {
 
         // Flattened segment table from the ROUNDED spec ([ax,ay,bx,by] is
         // exactly the f32 value the f64 fallback widens back) + per-segment
-        // bc_table_index tags for the M5 derive pass. Storage buffers must
-        // be non-empty: pad the no-boundary case with one degenerate entry
+        // bc_table_index tags for the derive pass. Storage buffers must be
+        // non-empty: pad the no-boundary case with one degenerate entry
         // (never referenced — no seed carries a segment id then).
         let nseg = spec.num_segments();
         let mut segs: Vec<[f32; 4]> = Vec::with_capacity(nseg.max(1));
@@ -541,8 +537,7 @@ impl GpuVoronoiEngine {
             // Re-assert the BoundaryLoop::from_points degeneracy invariant
             // AFTER f32 rounding: `boundary_spec_f32` builds loops as
             // struct literals, so a segment collapsing within an f32 ulp
-            // would otherwise reach the kernel and emit NaN normals
-            // (stage-5 review).
+            // would otherwise reach the kernel and emit NaN normals.
             let len = (b - a).norm();
             assert!(
                 len > self.tol.edge_len_eps,
@@ -689,8 +684,8 @@ impl GpuVoronoiEngine {
         pass.dispatch_workgroups(dx, dy, 1);
     }
 
-    /// Own encoder + submit (srd.rs style). Returns the submission index so
-    /// callers can `device.poll` on it.
+    /// Own encoder + submit. Returns the submission index so callers can
+    /// `device.poll` on it.
     pub fn run_regen(
         &self,
         device: &wgpu::Device,
@@ -705,7 +700,7 @@ impl GpuVoronoiEngine {
 
     /// Validation-path readback of every output for the first `n` cells.
     /// The flag list is read in ONE bounded over-read (count word + full
-    /// capacity id region — never two dependent round-trips) and sorted.
+    /// capacity id region) and sorted.
     pub fn read_cells(&self, ctx: &GpuContext, cache: &StagingBufferCache) -> GpuVoronoiCells {
         let n = self.n_seeds as usize;
         let k = K_FACE_MAX;
@@ -743,7 +738,7 @@ impl GpuVoronoiEngine {
             (n * 4) as u64,
             "voronoi:rb_nfaces",
         ));
-        // Bounded over-read of the flag list (review F10).
+        // Bounded over-read of the flag list.
         let flag_raw = cast_vec::<u32>(read(
             &self.outputs.b_flagged,
             ((1 + n) * 4) as u64,
@@ -769,9 +764,9 @@ impl GpuVoronoiEngine {
     }
 
     /// Read the per-cell traversal diagnostics: low 24 bits = grid bins
-    /// processed (review F3 graded-set instrument), high 8 bits = the
-    /// epsilon-filter condition mask of NEEDS_EXACT cells. Deterministic
-    /// but excluded from patches (a patched cell keeps its kernel value).
+    /// processed, high 8 bits = the epsilon-filter condition mask of
+    /// NEEDS_EXACT cells. Deterministic but excluded from patches (a patched
+    /// cell keeps its kernel value).
     pub fn read_visited_bins(&self, ctx: &GpuContext, cache: &StagingBufferCache) -> Vec<u32> {
         let n = self.n_seeds as usize;
         let prof = ProfilingStats::new();
@@ -786,10 +781,10 @@ impl GpuVoronoiEngine {
         bytemuck::cast_slice(&bytes).to_vec()
     }
 
-    /// Read the compacted flag list with ONE bounded over-read (review F10:
-    /// never two dependent round-trips): the window covers ~4× the 2e-3
-    /// design flag budget; only degenerate inputs (count > window) pay a
-    /// second, full-list read. Returns sorted ids.
+    /// Read the compacted flag list with ONE bounded over-read (never two
+    /// dependent round-trips): the window covers ~4× the 2e-3 flag budget;
+    /// only degenerate inputs (count > window) pay a second, full-list read.
+    /// Returns sorted ids.
     fn read_flag_ids(&self, ctx: &GpuContext, cache: &StagingBufferCache) -> Vec<u32> {
         let n = self.n_seeds as usize;
         let prof = ProfilingStats::new();
@@ -824,7 +819,7 @@ impl GpuVoronoiEngine {
         ids
     }
 
-    /// Convert an M0 f64 `CellOut` into the padded GPU slot layout.
+    /// Convert an f64 `CellOut` into the padded GPU slot layout.
     /// `None` = the ring does not fit `K_FACE_MAX` (reported unresolved).
     fn cell_patch(&self, i: u32, out: &CellOut) -> Option<CellPatch> {
         match out.status {
@@ -870,7 +865,7 @@ impl GpuVoronoiEngine {
                     p.nbr[e] = nbr;
                     p.bc[e] = bc;
                     p.geom[e] = [nrm[0], nrm[1], len as f32, 0.0];
-                    // Seed-relative, like the kernel outputs (module docs).
+                    // Seed-relative, like the kernel outputs.
                     p.mid[e] = [
                         (0.5 * (v0[0] + v1[0]) - seed.x) as f32,
                         (0.5 * (v0[1] + v1[1]) - seed.y) as f32,
@@ -909,23 +904,17 @@ impl GpuVoronoiEngine {
         queue.write_buffer(&out.b_status, i * 4, bytemuck::bytes_of(&p.status));
     }
 
-    /// The CPU f64 fallback + RELEASE reciprocity enforcement (review F4).
+    /// The CPU f64 fallback + RELEASE reciprocity enforcement.
     ///
     /// 1. Read the flag list (one bounded over-read), sort ids.
-    /// 2. Recompute each flagged cell via M0 `compute_cell` on the
-    ///    f32-rounded seeds and patch the padded outputs with
-    ///    `write_buffer`.
+    /// 2. Recompute each flagged cell via `compute_cell` on the f32-rounded
+    ///    seeds and patch the padded outputs with `write_buffer`.
     /// 3. Read the merged (nbr, face-length, nfaces) topology back and
     ///    verify every real face is reciprocated — unconditionally, in
     ///    release builds. One-sided real faces flag BOTH endpoints for f64
     ///    recompute; the loop repeats on the CPU mirror until reciprocal
     ///    (bounded; convergence asserted). Sub-`REAL_FACE_REL` sliver
-    ///    asymmetries are tolerated and counted (see the constant's doc).
-    ///
-    /// M5 cost note: the check needs only `b_nbr_ids` + face lengths +
-    /// `b_cell_nfaces`, all in the padded outputs — the resident loop can
-    /// run it as a small GPU kernel appending violations to `b_flagged`
-    /// instead of this full readback.
+    ///    asymmetries are tolerated and counted.
     pub fn resolve_flagged(
         &self,
         ctx: &GpuContext,
@@ -1069,8 +1058,7 @@ impl GpuVoronoiEngine {
             // strictly grows and the loop is bounded by n. A fresh f64
             // patch CAN legitimately expose a new one-sided face against a
             // yet-unpatched neighbor (chains advance one adjacency hop per
-            // round — stage-5 review: a fixed small bound was a latent
-            // release panic on long chains).
+            // round, so the bound must be n, not a fixed small constant).
             assert!(
                 rounds <= self.n_seeds,
                 "meshless reciprocity enforcement did not terminate in n rounds — \
@@ -1224,5 +1212,5 @@ fn cast_vec<T: bytemuck::Pod>(bytes: Vec<u8>) -> Vec<T> {
 }
 
 // Compile-time guarantee that the WGSL constants (injected from mod.rs) and
-// the private-array budget stay in sync with the design.
+// the private-array budget stay in sync.
 const _: () = assert!(MAX_VERTS == 24 && K_FACE_MAX == 16);

@@ -2,9 +2,7 @@ use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{vol_scalar_dim, EquationSystem};
 use crate::solver::model::backend::typed_ast::{typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef};
 use crate::solver::model::ports::PortRegistry;
-// si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_ir::dimensions::{Area, Dimensionless, DivDim, InvTime, Length, Time, Volume};
-// Type alias for dimensionless gradient (used for boundary conditions)
 type DimensionlessGradient = DivDim<Dimensionless, Length>;
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
@@ -62,22 +60,16 @@ fn build_diffusion_model(
     variant: DiffusionBcVariant,
     with_mms_source: bool,
 ) -> Result<ModelSpec, String> {
-    // Build typed field reference for phi (dimensionless scalar)
     let phi_typed = TypedFieldRef::<Dimensionless, Scalar>::new("phi");
-
-    // Build coefficient kappa with unit Area/Time
     let kappa_typed: TypedCoeff<DivDim<Area, Time>> = TypedCoeff::constant(1.0);
 
-    // Build equation terms using typed FVM constructors
     // ddt(phi): integrated unit is Volume/Time (Dimensionless * Volume / Time)
     let ddt_term = typed_fvm::ddt(phi_typed);
 
-    // laplacian(kappa, phi): integrated unit is (Area/Time) * Dimensionless * Area / Length
-    // = Area^2 / (Time * Length) = Volume / Time (since Area = Length^2, Volume = Length^3)
+    // laplacian(kappa, phi): (Area/Time) * Dimensionless * Area / Length = Volume / Time
     let laplacian_term = typed_fvm::laplacian(kappa_typed, phi_typed);
 
-    // Need to cast terms to a common dimension type for addition
-    // The actual integrated unit for both is Volume/Time
+    // Cast both terms to a common dimension type (Volume/Time) for addition.
     let ddt_cast = ddt_term.cast_to::<DiffusionIntegratedUnit>();
     let laplacian_cast = laplacian_term.cast_to::<DiffusionIntegratedUnit>();
 
@@ -97,7 +89,6 @@ fn build_diffusion_model(
     let mut system = EquationSystem::new();
     system.add_equation(eqn);
 
-    // Validate units to ensure the system is consistent
     system
         .validate_units()
         .map_err(|e| format!("{id} system failed unit validation: {e:?}"))?;

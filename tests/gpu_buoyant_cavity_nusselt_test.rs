@@ -9,10 +9,10 @@
 //! - Hot/cold walls are MovingWall-typed (the buoyant model's thermally-held
 //!   wall: Dirichlet T with per-face values, no-slip U); adiabatic walls are
 //!   Wall-typed (zero-gradient T). No Outlet => pure-Neumann pressure
-//!   (gauge-free; supported since the all-wall stall test).
+//!   (gauge-free).
 //! - Ra = beta_g * dT * L^3 / (nu * alpha) is dialed in entirely through the
-//!   runtime params landed in the Arc-4 migration (buoyant.beta_g,
-//!   buoyant.k_over_cp) plus set_viscosity — no recompiles.
+//!   runtime params (buoyant.beta_g, buoyant.k_over_cp) plus set_viscosity —
+//!   no recompiles.
 //! - Nu on each held wall from a second-order one-sided gradient using the
 //!   two interior cell layers: dT/dx|_w ≈ (9*T1 - T2 - 8*T_w) / (3h).
 //!   Steady-state energy balance requires Nu_hot ≈ Nu_cold; both are
@@ -195,7 +195,7 @@ fn run_cavity_on_mesh(mesh: &Mesh, ra: f64, dt: f64, max_steps: usize) -> Cavity
     }
 }
 
-/// High-Ra extension on a wall-refined graded mesh (Arc M consumer): the
+/// High-Ra extension on a wall-refined graded mesh: the
 /// thermal boundary layers at the held walls thin as Ra^(-1/4) (~0.056 at
 /// Ra = 1e5), so the x axis gets two-sided geometric refinement while y
 /// stays uniform. de Vahl Davis (1983): Nu_avg = 4.519 at Ra = 1e5.
@@ -206,9 +206,7 @@ fn heated_cavity_high_ra_nusselt_graded() {
 
     // (Ra, reference Nu, n, x-grading ratio, dt, step cap). Wall-cell CFL
     // sizing: u_max ~ alpha * v_max(Ra) (de Vahl Davis v_max ≈ 68.6 at 1e5
-    // in alpha/L units), dt ≈ 0.5 * h_wall / u_max. A Ra = 1e6 case
-    // (Nu = 8.800; ~80² at ratio 8, dt ≈ 2e-4) is the natural next rung but
-    // was not measured — add it only with a fresh measured run.
+    // in alpha/L units), dt ≈ 0.5 * h_wall / u_max.
     for &(ra, nu_ref, n, ratio, dt, cap) in &[(1e5, 4.519, 64, 4.0, 1e-3, 20000)] {
         let mesh = generate_graded_rect_mesh(
             n,
@@ -235,9 +233,7 @@ fn heated_cavity_high_ra_nusselt_graded() {
             r.final_delta,
             r.steps
         );
-        // Measured June 2026 (first run, 64² ratio 4, steady at 2900 steps):
-        // Nu_hot 4.5277 / Nu_cold 4.5276 vs 4.519 — rel_err 0.0019,
-        // balance 3e-5. Bands ~2.5x measured; ratchet-only thereafter.
+        // Bands ~2.5x measured; ratchet-only thereafter.
         assert!(
             balance < 0.005,
             "Ra={ra:.0e}: hot/cold wall Nusselt imbalance {balance:.4}"
@@ -272,14 +268,11 @@ fn heated_cavity_nusselt_matches_de_vahl_davis() {
             r.steps
         );
         // Steady-state energy balance: heat in = heat out.
-        // Measured June 2026 (40x40, SOU, BDF2): 1e-4 (Ra 1e3), 3e-4 (Ra 1e4).
         assert!(
             balance < 0.005,
             "Ra={ra:.0e}: hot/cold wall Nusselt imbalance {balance:.4}"
         );
-        // Published-value band. Measured June 2026 (first run of this test):
-        // Ra 1e3: Nu_avg 1.1188 vs 1.118 (rel_err 0.0007);
-        // Ra 1e4: Nu_avg 2.2597 vs 2.243 (rel_err 0.0075).
+        // Published-value band.
         assert!(
             rel_err < 0.02,
             "Ra={ra:.0e}: Nu_avg {nu_avg:.4} deviates {rel_err:.4} from de Vahl Davis {nu_ref}"

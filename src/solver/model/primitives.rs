@@ -57,28 +57,22 @@ impl PrimitiveDerivations {
 
         let safe_rho = Self::safe_rho_expr();
 
-        // u_x = rho_u_x / max(rho, rho_floor)
         derivations.insert(
             "u_x".into(),
             Expr::ident("rho_u_x") / safe_rho.clone(),
         );
 
-        // u_y = rho_u_y / max(rho, rho_floor)
         derivations.insert(
             "u_y".into(),
             Expr::ident("rho_u_y") / safe_rho.clone(),
         );
 
-        // kinetic_energy = 0.5 * (rho_u_x^2 + rho_u_y^2) / max(rho, rho_floor)
-        //
-        // Important: avoid referencing derived primitives (u_x/u_y) when defining `p`.
-        // Primitive recovery kernels may compute outputs in any order unless an
-        // explicit dependency graph is enforced.
+        // Avoid referencing derived primitives (u_x/u_y) when defining `p`: recovery
+        // kernels may compute outputs in any order unless a dependency graph is enforced.
         let rho_u_sq = Expr::ident("rho_u_x") * Expr::ident("rho_u_x")
             + Expr::ident("rho_u_y") * Expr::ident("rho_u_y");
         let ke = Expr::lit_f32(0.5) * (rho_u_sq / safe_rho.clone());
 
-        // p = (gamma - 1) * (rho_e - ke)
         derivations.insert(
             "p".into(),
             Expr::lit_f32(gamma - 1.0) * (Expr::ident("rho_e") - ke),
@@ -103,18 +97,15 @@ impl PrimitiveDerivations {
         // rho is conserved (identity mapping)
         derivations.insert("rho".into(), Expr::ident("rho"));
 
-        // kinetic_energy = 0.5 * (rho_u_x^2 + rho_u_y^2) / max(rho, rho_floor)
         let rho_u_sq = Expr::ident("rho_u_x") * Expr::ident("rho_u_x")
             + Expr::ident("rho_u_y") * Expr::ident("rho_u_y");
         let ke = Expr::lit_f32(0.5) * (rho_u_sq / safe_rho.clone());
 
-        // p = (gamma - 1) * (rho_e - ke)
         derivations.insert(
             "p".into(),
             Expr::lit_f32(gamma - 1.0) * (Expr::ident("rho_e") - ke),
         );
 
-        // T = p / max(rho, rho_floor)
         derivations.insert(
             "T".into(),
             Expr::ident("p") / safe_rho,
@@ -290,13 +281,11 @@ mod tests {
         assert!(prims.contains("u_y"));
         assert!(prims.contains("p"));
 
-        // rho should be identity (just a field reference)
         match prims.get("rho").unwrap().node() {
             ExprNode::Ident(name) => assert_eq!(name, "rho"),
             other => panic!("expected Ident, got {:?}", other),
         }
 
-        // u_x should be division
         match prims.get("u_x").unwrap().node() {
             ExprNode::Binary { op, .. } => assert_eq!(*op, cfd2_ir::ast::BinaryOp::Div),
             other => panic!("expected Binary Div, got {:?}", other),
@@ -313,7 +302,6 @@ mod tests {
             other => panic!("expected Binary Div, got {:?}", other),
         }
 
-        // p should be multiplication (gamma-1) * (...)
         match prims.get("p").unwrap().node() {
             ExprNode::Binary { op, .. } => assert_eq!(*op, cfd2_ir::ast::BinaryOp::Mul),
             other => panic!("expected Binary Mul, got {:?}", other),

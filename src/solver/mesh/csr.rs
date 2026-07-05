@@ -1,10 +1,7 @@
-//! Scalar-CSR topology builders, factored out of the backend init paths
-//! (M2 Tier B stage 1: a `Topology`-level mesh refresh must rebuild exactly
-//! what init built, so the builders live here as reusable pure functions and
-//! the init paths call them).
+//! Scalar-CSR topology builders shared by the backend init paths and the
+//! `Topology`-level mesh refresh (which must rebuild exactly what init built).
 //!
-//! The two backends use **different** row layouts and cannot share a builder
-//! (verified inventory, design-solver-ale §1.4):
+//! The two backends use **different** row layouts and cannot share a builder:
 //!
 //! - **GPU** ([`build_sorted_scalar_csr`]): rows hold the diagonal plus all
 //!   interior-face neighbors in **sorted column order** (adjacency lists are
@@ -17,8 +14,8 @@
 //!   diagonal).
 //!
 //! Both builders are deterministic pure functions of the mesh topology
-//! (sort/order-based — no hash-map iteration), which is what makes a no-op
-//! topology refresh byte-identical by construction.
+//! (sort/order-based — no hash-map iteration), which makes a no-op topology
+//! refresh byte-identical by construction.
 
 use super::structs::Mesh;
 
@@ -46,9 +43,7 @@ impl ScalarCsr {
 }
 
 /// Build the GPU scalar-CSR layout: sorted-adjacency rows (diagonal at its
-/// sorted column position). Exactly the logic previously inlined in
-/// `gpu::init::mesh::init_mesh` — byte-for-byte identical output (gated by
-/// `tests/csr_builder_equivalence_test.rs` against a re-inlined reference).
+/// sorted column position).
 ///
 /// `Err` only if a cell's diagonal is missing from its row — impossible by
 /// construction, kept as a hard fail-fast.
@@ -67,7 +62,7 @@ pub fn build_sorted_scalar_csr(mesh: &Mesh) -> Result<ScalarCsr, String> {
     }
 
     for (i, list) in adj.iter_mut().enumerate() {
-        list.push(i); // Add diagonal
+        list.push(i);
         list.sort();
         list.dedup();
     }
@@ -82,7 +77,6 @@ pub fn build_sorted_scalar_csr(mesh: &Mesh) -> Result<ScalarCsr, String> {
     }
     scalar_row_offsets[num_cells as usize] = current_offset;
 
-    // --- Cell Face Matrix Indices ---
     let mut cell_face_matrix_indices = Vec::new();
     for i in 0..num_cells {
         let start = mesh.cell_face_offsets[i as usize];
@@ -99,11 +93,9 @@ pub fn build_sorted_scalar_csr(mesh: &Mesh) -> Result<ScalarCsr, String> {
                 Some(owner)
             };
 
-            // For boundary faces, map to the diagonal entry.
-            //
-            // Assembly kernels rely on `cell_face_matrix_indices` to produce a valid CSR rank for
-            // every (cell, face) pair. Using the diagonal for boundary faces keeps neighbor-rank
-            // indexing well-defined and matches the intended "ghost equals owner" convention.
+            // Boundary faces map to the diagonal so every (cell, face) pair has a
+            // valid CSR rank ("ghost equals owner" convention); kernels guard with
+            // is_boundary before use.
             let target_col = match neighbor {
                 Some(n) => n as u32,
                 None => i,
@@ -144,10 +136,7 @@ pub fn build_sorted_scalar_csr(mesh: &Mesh) -> Result<ScalarCsr, String> {
 }
 
 /// Build the CPU scalar-CSR layout: each row holds the diagonal (rank 0)
-/// followed by one entry per interior face in cell-face order. Exactly the
-/// logic previously inlined as `cpu::solver::build_csr_topology` —
-/// byte-for-byte identical output (gated by
-/// `tests/csr_builder_equivalence_test.rs` against a re-inlined reference).
+/// followed by one entry per interior face in cell-face order.
 pub fn build_diag_first_scalar_csr(mesh: &Mesh) -> ScalarCsr {
     let n = mesh.num_cells();
     let mut row_offsets = vec![0u32; n + 1];

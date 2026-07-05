@@ -232,8 +232,6 @@ impl BlockCsrSoaEntry {
     }
 }
 
-// ── Named (phantom-typed) block CSR SOA wrappers ──────────────────────
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct NamedBlockCsrSoaMatrix<Ax: CoupledAxis> {
     inner: BlockCsrSoaMatrix,
@@ -364,8 +362,6 @@ mod tests {
         let expr = entry.entry(2, 3).expr.to_string();
         assert_eq!(expr, "matrix_values[base_2 + 3u]");
     }
-
-    // ── NamedBlockCsrSoaMatrix tests ──────────────────────────────────
 
     use crate::solver::codegen::dsl::tensor::{
         block_col, block_row, BlockCol, BlockRow, IncompressibleAxis2D, ScalarAxis,

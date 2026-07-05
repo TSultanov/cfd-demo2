@@ -1,25 +1,17 @@
-//! Solver-level gates for the meshless/CVT mesh path (roadmap M0, design
-//! §9 M0.4): the GUI now offers `VoronoiCvt` meshes to the solver, so the
-//! solver must be shown to produce correct physics on them — not just valid
-//! geometry.
-//!
-//! Two tiers, both on the Re = 100 lid-driven cavity (the benchmark with an
-//! external truth, Ghia et al. 1982):
+//! Solver-level gates that the solver produces correct physics (not just
+//! valid geometry) on meshless/CVT meshes, both on the Re = 100 lid-driven
+//! cavity (Ghia et al. 1982):
 //!
 //! - `meshless_cvt_lid_smoke` (always-run): coarse CVT mesh vs the
 //!   incumbent Voronoi+smooth mesh, both marched to steady; the two steady
-//!   centerline profiles must agree to a few % of lid speed and both stay
-//!   finite. Catches "solver diverges / produces garbage on meshless
-//!   topology" at test-tier cost.
-//! - `ghia_cvt_vs_incumbent_voronoi` (#[ignore], explicit-run like the rest
-//!   of the Ghia family): the roadmap gate proper — Ghia centerline error
-//!   on the CVT mesh ≤ incumbent-Voronoi error × 1.05, plus reported
-//!   absolute errors.
+//!   centerline profiles must agree to a few % of lid speed and stay finite.
+//! - `ghia_cvt_vs_incumbent_voronoi` (#[ignore]): Ghia centerline error on
+//!   the CVT mesh ≤ incumbent-Voronoi error × 1.05.
 //!
 //! Both meshes are unstructured, so profiles use an UNSTRUCTURED centerline
-//! sampler (`tensor_grid` breaks on Voronoi vertices — roadmap note):
-//! inverse-distance-squared weighting over the k nearest cell centroids,
-//! identical for both meshes so sampling bias cancels in the comparison.
+//! sampler (`tensor_grid` breaks on Voronoi vertices): inverse-distance-
+//! squared weighting over the k nearest cell centroids, identical for both
+//! meshes so sampling bias cancels in the comparison.
 //!
 //! ```sh
 //! cargo test --release --features "dev-tests meshgen" \
@@ -43,8 +35,7 @@ use nalgebra::Vector2;
 
 const RE: f64 = 100.0;
 
-/// Ghia, Ghia & Shin (1982), Re = 100: u_x through the vertical centerline
-/// (same table as tests/ghia_lid_cavity_test.rs).
+/// Ghia, Ghia & Shin (1982), Re = 100: u_x through the vertical centerline.
 const GHIA_UX: &[(f64, f64)] = &[
     (0.0547, -0.03717),
     (0.0625, -0.04192),
@@ -124,15 +115,14 @@ fn incumbent_lid_mesh(h: f64) -> Mesh {
         height: 1.0,
     };
     let mut mesh = generate_voronoi_mesh(&geo, h, h, 1.0, Vector2::new(1.0, 1.0));
-    // GUI parity: unstructured meshes get smooth(0.3, 50) (src/ui/app.rs).
+    // GUI parity: unstructured meshes get smooth(0.3, 50).
     mesh.smooth(&geo, 0.3, 50);
     retag_lid(&mut mesh);
     mesh
 }
 
 /// March a lid cavity to steady on the given mesh; returns the steady cell
-/// velocities. Mirrors tests/ghia_lid_cavity_test.rs `run_cavity_on_mesh`
-/// (SOU + BDF2 + coupled — the production configuration).
+/// velocities. SOU + BDF2 + coupled — the production configuration.
 fn run_lid_to_steady(mesh: &Mesh, label: &str, max_steps: usize) -> Vec<(f64, f64)> {
     let mut solver = pollster::block_on(UnifiedSolver::new(
         mesh,
@@ -258,9 +248,8 @@ fn ghia_errors(label: &str, prof_ux: &[f64], prof_uy: &[f64]) -> (f64, f64) {
     (max_ux, max_uy)
 }
 
-/// Always-run smoke (design M0.4): the CPU/GPU solver must run the lid case
-/// on a meshless CVT mesh and land on the same steady flow as the
-/// incumbent-Voronoi mesh. Coarse meshes keep this at test-tier cost.
+/// Always-run smoke: the solver must run the lid case on a meshless CVT mesh
+/// and land on the same steady flow as the incumbent-Voronoi mesh.
 #[test]
 fn meshless_cvt_lid_smoke() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -282,19 +271,15 @@ fn meshless_cvt_lid_smoke() {
         .map(|(a, b)| (a - b).abs())
         .fold(0.0f64, f64::max);
     println!("[meshless-solver][smoke] CVT-vs-incumbent centerline: max|du_x|={dx:.5} max|du_y|={dy:.5}");
-    // Two different unstructured discretizations of the same flow at a
-    // coarse h = 1/24 (420-ish cells); measured July 2026: du_x 0.0425 /
-    // du_y 0.0224 (both runs steady at 975 steps). Bands ~1.8x measured —
-    // this smoke exists to catch divergence/garbage on meshless topology;
-    // the accuracy gate proper is `ghia_cvt_vs_incumbent_voronoi`.
+    // Loose bands: this smoke catches divergence/garbage on meshless
+    // topology, not accuracy (that gate is `ghia_cvt_vs_incumbent_voronoi`).
     assert!(dx < 0.08, "CVT steady u_x deviates {dx:.4} from incumbent-mesh run");
     assert!(dy < 0.045, "CVT steady u_y deviates {dy:.4} from incumbent-mesh run");
 }
 
-/// The roadmap M0 solver gate: Ghia centerline error on the CVT mesh must
-/// not exceed the incumbent-Voronoi mesh's error by more than 5%.
-/// Explicit-run like the whole Ghia family (external-physics benchmark,
-/// minutes).
+/// Solver gate: Ghia centerline error on the CVT mesh must not exceed the
+/// incumbent-Voronoi mesh's error by more than 5%. Explicit-run like the
+/// whole Ghia family (external-physics benchmark, minutes).
 #[test]
 #[ignore = "external-physics benchmark (~minutes); run explicitly like the Ghia suite"]
 fn ghia_cvt_vs_incumbent_voronoi() {
@@ -311,13 +296,8 @@ fn ghia_cvt_vs_incumbent_voronoi() {
     println!(
         "[meshless-solver][gate] CVT err ({ex_cvt:.5}, {ey_cvt:.5}) vs incumbent ({ex_inc:.5}, {ey_inc:.5})"
     );
-    // Roadmap gate: Ghia error on CVT ≤ incumbent × 1.05, on the combined
-    // metric max(u_x err, u_y err) — the single "Ghia error" number the
-    // roadmap names. Per-component values are printed above for the record
-    // but not gated separately: the smaller component sits at the IDW
-    // sampler's O(h) noise floor (measured July 2026, h = 1/64: CVT
-    // (0.0180, 0.0100) vs incumbent (0.0301, 0.0089) — CVT 40% better on
-    // the dominant u_x error, u_y within sampler noise of each other).
+    // Gate on the combined metric max(u_x err, u_y err), not per-component:
+    // the smaller component sits at the IDW sampler's O(h) noise floor.
     let err_cvt = ex_cvt.max(ey_cvt);
     let err_inc = ex_inc.max(ey_inc);
     assert!(

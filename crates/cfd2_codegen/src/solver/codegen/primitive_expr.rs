@@ -16,12 +16,11 @@ fn resolve_field_slot_component<'a>(
     slots: &'a ResolvedStateSlotsSpec,
     name: &str,
 ) -> Option<(&'a ResolvedStateSlotSpec, u32)> {
-    // First, try direct field lookup
     if let Some(slot) = slots.slots.iter().find(|s| s.name == name) {
         return Some((slot, 0));
     }
 
-    // Try to parse component suffix (_x, _y, _z)
+    // Parse a component suffix (_x, _y, _z).
     let (base, suffix) = name.rsplit_once('_')?;
     let component = match suffix {
         "x" => 0,
@@ -32,7 +31,6 @@ fn resolve_field_slot_component<'a>(
 
     let slot = slots.slots.iter().find(|s| s.name == base)?;
 
-    // Validate component is within range for this slot's kind
     if component >= slot.kind.component_count() {
         return None;
     }
@@ -71,14 +69,13 @@ pub fn resolve_field_refs_dyn(
         }
 
         ExprNode::Ident(name) => {
-            // Try to resolve as a field reference
             if let Some((slot, component)) = resolve_field_slot_component(slots, name) {
                 let offset = slot.base_offset + component;
                 let stride = slots.stride;
                 let resolved = Expr::ident(state_array).index(cell_idx * stride + offset);
                 DynExpr::new(resolved, DslType::f32(), slot.unit)
             } else {
-                // Not a field - pass through as-is (e.g. local variable name)
+                // Not a field: pass through as-is (e.g. a local variable name).
                 DynExpr::new(expr.clone(), DslType::f32(), UnitDim::dimensionless())
             }
         }
@@ -114,7 +111,6 @@ pub fn resolve_field_refs_dyn(
         }
 
         ExprNode::Call { callee, args } => {
-            // Check for sqrt
             if let ExprNode::Ident(name) = callee.node() {
                 if name == "sqrt" && args.len() == 1 {
                     let inner_dyn =
@@ -222,7 +218,6 @@ mod tests {
             ("rho_u", PortFieldKind::Vector2, MomentumDensity::UNIT),
         ]);
 
-        // (rho_u_x / rho) - a dimensionally consistent expression
         let expr = Expr::ident("rho_u_x") / Expr::ident("rho");
 
         let cell_idx = Expr::ident("i");
@@ -245,11 +240,10 @@ mod tests {
         let cell_idx = Expr::ident("i");
         let dyn_expr = resolve_field_refs_dyn(&expr, &slots, cell_idx, "state");
 
-        // Verify the expression produces the expected WGSL
         assert!(dyn_expr.expr.to_string().contains("state[i * 3u + 1u]"));
         assert!(dyn_expr.expr.to_string().contains("state[i * 3u + 0u]"));
 
-        // Verify the resulting unit is velocity (momentum_density / density = velocity)
+        // momentum_density / density = velocity
         assert_eq!(dyn_expr.unit, Velocity::UNIT);
         assert_eq!(dyn_expr.ty, DslType::f32());
     }
@@ -258,7 +252,6 @@ mod tests {
     fn expr_dyn_tracks_component_units() {
         let slots = test_slots_from_fields(vec![("U", PortFieldKind::Vector2, Velocity::UNIT)]);
 
-        // Access U_x component - should have velocity units
         let expr = Expr::ident("U_x");
 
         let cell_idx = Expr::ident("i");
@@ -345,7 +338,6 @@ mod tests {
         let expr = Expr::ident("rho") + Expr::ident("U");
 
         let cell_idx = Expr::ident("i");
-        // This should panic due to unit mismatch
         let _ = resolve_field_refs_dyn(&expr, &slots, cell_idx, "state");
     }
 
@@ -361,7 +353,6 @@ mod tests {
         let expr = Expr::ident("p") - Expr::ident("rho");
 
         let cell_idx = Expr::ident("i");
-        // This should panic due to unit mismatch
         let _ = resolve_field_refs_dyn(&expr, &slots, cell_idx, "state");
     }
 }

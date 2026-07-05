@@ -1,26 +1,13 @@
-//! M1 stage-3 full-geometry gates for the GPU meshless Voronoi engine:
-//! boundary segments + seed kinds + graded sets + end-to-end mesh.
+//! Full-geometry parity gates for the GPU meshless Voronoi engine against the
+//! CPU f64 `build_diagram` oracle, across the four GUI geometries (rect channel
+//! / obstacle / backstep / nozzle) plus a graded nozzle set.
 //!
-//! For each of the four GUI geometries (rect channel / obstacle / backstep /
-//! nozzle, loop-derived boundary seeding via `meshless_seed_points`) plus a
-//! graded nozzle set (review F3):
-//!
-//! 1. Stage-1/2 parity protocol against the CPU f64 `build_diagram` oracle
-//!    on the SAME f32-rounded seeds AND f32-rounded boundary spec (review
-//!    F4): ZERO unflagged topology disagreements post `eps_face` (bisector
-//!    ids AND boundary/box tags), flag-rate budget 2e-3 on the BULK
-//!    interior + a defensive cap on the wall strip (see the in-code note:
-//!    M0's same-segment guard pairs are knife-edge twins by construction),
-//!    zero overflow statuses, run-to-run byte stability.
-//! 2. `resolve_flagged` → full post-fallback parity + independent
-//!    reciprocity check.
-//! 3. End-to-end mesh: GPU outputs → `read_diagram` → `assemble_mesh` →
-//!    `validate_mesh` battery green; mesh equivalent to the pure-CPU-engine
-//!    mesh (interior neighbor-pair sets post `eps_face`, per-BoundaryType
-//!    wall length sums rel < 1e-6, cell volumes/centroids within f32
-//!    tolerances).
-//! 4. Graded nozzle (h ratio 4×): visited-bin distribution measured (F3
-//!    instrument) and reported; gates identical.
+//! Each case: (1) zero unflagged topology disagreements post `eps_face` on the
+//! same f32-rounded seeds and boundary spec, flag-rate budget 2e-3 on the bulk
+//! interior + a defensive cap on the wall strip, zero overflow, run-to-run byte
+//! stability; (2) `resolve_flagged` full post-fallback parity + reciprocity;
+//! (3) end-to-end mesh (GPU outputs → `assemble_mesh` → `validate_mesh`),
+//! equivalent to the pure-CPU-engine mesh.
 //!
 //! Run with:
 //!
@@ -146,8 +133,7 @@ fn gpu_sets(gpu: &GpuVoronoiCells, i: usize, eps_face: f64) -> (BTreeSet<u32>, B
 }
 
 // ---------------------------------------------------------------------------
-// validate_mesh battery (trimmed transplant of tests/meshgen_validation.rs —
-// test crates cannot share modules; the checks are identical).
+// validate_mesh battery (duplicated: test crates cannot share modules).
 // ---------------------------------------------------------------------------
 
 fn fluid_area_estimate(geo: &(impl Geometry + Sync), domain: Vector2<f64>, n: usize) -> f64 {
@@ -406,7 +392,7 @@ fn assert_mesh_equivalent(
 }
 
 // ---------------------------------------------------------------------------
-// The full stage-3 protocol for one geometry
+// The full parity protocol for one geometry
 // ---------------------------------------------------------------------------
 
 fn run_geometry_case(
@@ -428,7 +414,7 @@ fn run_geometry_case(
     let tol = MeshgenTolerances::from_geometry(hmin, domain);
 
     // f32-rounded seeds AND boundary spec — the identical inputs both
-    // engines consume (review F4).
+    // engines consume.
     let seeds_f32: Vec<f32> = seeds
         .iter()
         .flat_map(|p| [p.x as f32, p.y as f32])
@@ -533,22 +519,16 @@ fn run_geometry_case(
         "[{name}] VERT/FACE_OVERFLOW must not fire on standard geometry sets"
     );
 
-    // Flag-rate budget. The strict 2e-3 design budget applies to the BULK
-    // interior (cells with no boundary-seed neighbor — the Poisson-like
-    // class it was calibrated on; stage-2's interior suites keep asserting
-    // it globally). The WALL STRIP (boundary-kind seeds + interior cells
-    // adjacent to one) legitimately exceeds it on geometries with curved /
-    // kinked walls: M0's `boundary_seeds` emits the two guards of adjacent
-    // reflex vertices onto their shared segment at DIFFERENT `t` whenever
-    // the flanking segment lengths differ, so they miss the midpoint
-    // collapse and land 1e-3·h..1e-2·h apart — knife-edge twin seeds whose
-    // surrounding vertices carry true f32 errors up to ~1e-4·h (measured:
-    // every nozzle vert-err flag is such a same-segment guard pair).
-    // Flag + f64 fallback is exactly the designed mechanism for them; a
-    // defensive 35% strip cap catches regressions (measured strip rates:
-    // rect 1.8%, obstacle 1.9%, backstep 2.5%, nozzle 27.7%, graded 28.7%).
-    // (Root-cause lever, deferred to an M0 arc: collapse/equalize
-    // same-segment guard pairs.)
+    // Flag-rate budget. The strict 2e-3 budget applies to the BULK interior
+    // (cells with no boundary-seed neighbor). The WALL STRIP (boundary-kind
+    // seeds + interior cells adjacent to one) legitimately exceeds it on
+    // curved/kinked walls: `boundary_seeds` emits the two guards of adjacent
+    // reflex vertices onto their shared segment at DIFFERENT `t` whenever the
+    // flanking segment lengths differ, so they miss the midpoint collapse and
+    // land 1e-3·h..1e-2·h apart — knife-edge twin seeds whose surrounding
+    // vertices carry true f32 errors up to ~1e-4·h. Flag + f64 fallback is the
+    // designed mechanism for them; a defensive 35% strip cap catches
+    // regressions.
     let mut wall_strip = vec![false; n];
     for i in 0..n {
         if matches!(kinds[i], SeedKind::Boundary { .. }) {
@@ -609,7 +589,7 @@ fn run_geometry_case(
         "[{name}] wall-strip flag count {flagged_strip} exceeds the defensive 35% cap {strip_cap}"
     );
 
-    // Visited-bin distribution (review F3 instrument for graded sets).
+    // Visited-bin distribution (instrument for graded sets).
     if report_bins {
         let mut bins: Vec<u32> = visited.iter().map(|v| v & 0x00ff_ffff).collect();
         bins.sort_unstable();
@@ -820,12 +800,8 @@ fn gpu_voronoi_geometry_nozzle() {
     );
 }
 
-/// Design-scale boundary gate (stage-5 review: design §8.3 gate 1 names
-/// obstacle 100k/300k, but every boundary case above runs at ~600-1100
-/// seeds — the flag-window over-read, wall-strip fallback volume and graded
-/// ring sweep were untested at scale). The FULL stage-3 protocol (oracle
-/// parity, zero-tolerance, budgets, byte stability, fallback, reciprocity,
-/// end-to-end mesh + equivalence) at ~100k seeds. dev-tests-gated: run in
+/// Design-scale boundary gate: the full parity protocol at ~100k seeds (the
+/// other boundary cases run at ~600-1100 seeds). dev-tests-gated: run in
 /// release (`cargo test --release --features "meshgen dev-tests"`).
 #[cfg(feature = "dev-tests")]
 #[test]
@@ -847,11 +823,11 @@ fn gpu_voronoi_geometry_obstacle_100k() {
     );
 }
 
-/// Graded nozzle seed set (review F3): min/max cell size 0.02/0.08 (h ratio
-/// 4×, density ratio 16×). The CPU-built `SeedGrid` sizes bins by mean
-/// occupancy, so coarse-region cells must sweep more rings before the
-/// security-radius stop — the visited-bin distribution below is the
-/// instrument; gates are identical to the uniform cases.
+/// Graded nozzle seed set: min/max cell size 0.02/0.08 (h ratio 4×, density
+/// ratio 16×). The CPU-built `SeedGrid` sizes bins by mean occupancy, so
+/// coarse-region cells must sweep more rings before the security-radius stop —
+/// the visited-bin distribution below is the instrument; gates are identical to
+/// the uniform cases.
 #[test]
 fn gpu_voronoi_geometry_nozzle_graded() {
     run_geometry_case(

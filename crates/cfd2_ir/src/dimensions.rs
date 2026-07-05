@@ -277,14 +277,12 @@ const fn normalize_rational(num: i32, den: i32) -> (i32, i32) {
         d = -d;
     }
 
-    // Compute GCD and reduce
     let g = gcd_i32(n.abs(), d.abs());
     (n / g, d / g)
 }
 
 /// Greatest common divisor (Euclidean algorithm)
 const fn gcd_i32(mut a: i32, mut b: i32) -> i32 {
-    // Ensure non-negative
     a = if a < 0 { -a } else { a };
     b = if b < 0 { -b } else { b };
 
@@ -473,7 +471,6 @@ mod tests {
     fn derived_dimensions_match_si_constants() {
         use crate::units::si;
 
-        // Verify that type-level dimensions match runtime SI constants
         assert_eq!(Dimensionless::UNIT, si::DIMENSIONLESS);
         assert_eq!(Mass::UNIT, si::MASS);
         assert_eq!(Length::UNIT, si::LENGTH);

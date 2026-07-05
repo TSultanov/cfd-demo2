@@ -1,28 +1,19 @@
 //! Scalar algebraic multigrid (plain aggregation) for the CPU backend's Schur
-//! pressure block.
-//!
-//! The Schur preconditioner needs an approximate solve of the pressure block
-//! `A_pp p = g` every FGMRES iteration. A Jacobi-preconditioned BiCGSTAB works
-//! at coarse resolution but its iteration count grows like the Poisson
-//! condition number (~h^-2): on fine meshes it burns its whole budget without
-//! converging and the outer FGMRES pays for it in extra iterations. This module
-//! provides the mesh-scalable alternative the GPU reaches for with its AMG
-//! branch: a plain-aggregation V-cycle used as the preconditioner inside the
-//! inner BiCGSTAB.
+//! pressure block: a mesh-scalable V-cycle preconditioner for the inner
+//! BiCGSTAB that solves `A_pp p = g` each FGMRES iteration (Jacobi-BiCGSTAB's
+//! iteration count grows like the Poisson condition number ~h^-2).
 //!
 //! Split in two so the expensive part is done once:
 //!  * [`AmgHierarchy`] — TOPOLOGY ONLY (aggregation, coarse CSR patterns, the
 //!    fine-nnz → coarse-nnz scatter map for the Galerkin product, restriction
-//!    member lists). Built once per solver from the block topology; the matrix
-//!    VALUES never affect it.
+//!    member lists). Values-independent; built once per solver.
 //!  * [`AmgSolver`] — per-solve values: Galerkin-coarsened `A_l` on every
 //!    level (a single O(nnz) scatter-add per level), inverse diagonals, and a
 //!    dense inverse of the coarsest level.
 //!
 //! Determinism: aggregation is a fixed-order greedy pass; the Galerkin
 //! scatter-add and all reductions run in fixed serial order or over disjoint
-//! per-node chunks, so results are bit-identical across thread counts (the
-//! same contract as the rest of `cpu::linalg`).
+//! per-node chunks, so results are bit-identical across thread counts.
 
 use crate::solver::cpu::linalg::Real;
 use crate::solver::cpu::parallel::{par_map_into, parallel_cell_chunks_mut};
@@ -35,7 +26,6 @@ const JACOBI_OMEGA: f64 = 2.0 / 3.0;
 /// One level's topology: the CSR pattern of `A_l`, plus the maps tying it to
 /// the next-coarser level.
 struct LevelTopo {
-    /// CSR pattern of this level's matrix.
     row_offsets: Vec<u32>,
     col_indices: Vec<u32>,
     /// Aggregate id of each node on THIS level (length = this level's n).
@@ -61,11 +51,11 @@ pub struct AmgHierarchy {
 }
 
 /// Greedy plain aggregation over an undirected adjacency (CSR), restricted to
-/// STRONG connections: |a_ij| >= theta * sqrt(|a_ii| * |a_jj|). On heterogeneous
-/// operators (cut-cell pressure blocks: face-area/volume ratios vary by orders
-/// of magnitude) aggregating across weak couplings destroys the coarse-grid
-/// correction; strength filtering is the standard fix. Returns (aggregate id
-/// per node, number of aggregates). Fixed visiting order = deterministic.
+/// STRONG connections: |a_ij| >= theta * sqrt(|a_ii| * |a_jj|). Strength
+/// filtering is required on heterogeneous operators (cut-cell pressure blocks,
+/// face-area/volume ratios spanning orders of magnitude): aggregating across
+/// weak couplings destroys the coarse-grid correction. Returns (aggregate id
+/// per node, number of aggregates); fixed visiting order is deterministic.
 fn aggregate(
     n: usize,
     row_offsets: &[u32],
@@ -135,12 +125,11 @@ fn aggregate(
 }
 
 impl AmgHierarchy {
-    /// Build the hierarchy from the finest CSR pattern plus REPRESENTATIVE
-    /// matrix values (used only for strength-of-connection aggregation — the
-    /// coefficient PATTERN is dominated by static mesh geometry, so a
-    /// hierarchy aggregated from the first assembled matrix stays good for
-    /// the whole run; the per-solve values are re-Galerkin'd every
-    /// [`AmgSolver::assemble`]).
+    /// Build from the finest CSR pattern plus REPRESENTATIVE values (used only
+    /// for strength-of-connection aggregation). The coefficient pattern is
+    /// dominated by static mesh geometry, so a hierarchy aggregated from the
+    /// first assembled matrix stays good for the whole run; per-solve values
+    /// are re-Galerkin'd every [`AmgSolver::assemble`].
     pub fn build(row_offsets: &[u32], col_indices: &[u32], values: &[f32]) -> Self {
         let theta = std::env::var("CFD2_CPU_AMG_THETA")
             .ok()
@@ -254,19 +243,17 @@ pub struct AmgSolver<'h> {
     inv_diag: Vec<Vec<f64>>,
     /// Dense row-major inverse of the coarsest matrix.
     coarsest_inv: Vec<f64>,
-    /// Gauge-singular pressure hierarchy (pure-Neumann/all-wall block,
-    /// detected by ~zero row sums at the coarsest level): the V-cycle then
-    /// PROJECTS OUT the constant null mode from every apply — without this
-    /// the smoothers/coarse solve amplify the unconstrained constant by the
-    /// Tikhonov bound per apply and the iterate wanders to ~1e9 along the
-    /// null (invisible to residuals, poisonous to reduced-precision Krylov).
+    /// Gauge-singular pressure hierarchy (pure-Neumann/all-wall block, detected
+    /// by ~zero row sums at the coarsest level): the V-cycle then PROJECTS OUT
+    /// the constant null mode from every apply, else the unconstrained constant
+    /// is amplified per apply and the iterate wanders along the null (invisible
+    /// to residuals, poisonous to reduced-precision Krylov).
     gauge_singular: bool,
-    /// f32 copies of the level matrices (the SIMD/mixed-precision option):
-    /// V-cycle smoothing and residual spmvs are BANDWIDTH-bound and the value
-    /// stream dominates their traffic (~5 entries/row vs ~3 vector touches),
-    /// so f32 storage nearly halves the bytes; accumulation stays f64. The
-    /// coarsest dense inverse and the vectors remain f64. `None` on the
-    /// default path (bit-identical to the pre-SIMD behaviour).
+    /// f32 copies of the level matrices for the mixed-precision V-cycle:
+    /// smoothing and residual spmvs are BANDWIDTH-bound and the value stream
+    /// dominates their traffic (~5 entries/row vs ~3 vector touches), so f32
+    /// storage nearly halves the bytes; accumulation stays f64. The coarsest
+    /// dense inverse and the vectors remain f64. `None` on the default path.
     values32: Option<Vec<Vec<f32>>>,
     threads: usize,
     /// Damped-Jacobi sweeps before/after the coarse correction
@@ -299,13 +286,12 @@ fn spmv_f64<T: Real>(
 }
 
 /// `y = A x` for an f32-value CSR level, accumulated in f64 — the
-/// mixed-precision V-cycle spmv. Rows are processed FOUR at a time in
-/// lockstep over the shortest of the four (independent accumulators expose
-/// instruction-level parallelism on the cache-resident coarse levels, where
-/// dependency chains — not bandwidth — are the limit), with per-row scalar
-/// tails. Each row's terms accumulate in ascending-k order, exactly like the
-/// scalar loop, so the batching itself does not change results; only the
-/// f32-rounded VALUES differ from the f64 path.
+/// mixed-precision V-cycle spmv. Rows are processed FOUR at a time in lockstep
+/// over the shortest of the four (independent accumulators expose ILP on the
+/// cache-resident coarse levels, where dependency chains — not bandwidth — are
+/// the limit), with per-row scalar tails. Each row accumulates in ascending-k
+/// order exactly like the scalar loop, so batching does not change results;
+/// only the f32-rounded VALUES differ from the f64 path.
 fn spmv_vals32<T: Real>(
     row_offsets: &[u32],
     col_indices: &[u32],
@@ -417,17 +403,12 @@ impl<'h> AmgSolver<'h> {
                 dense[i * nc + cci[k] as usize] = cvals[k];
             }
         }
-        // GAUGE-SINGULAR blocks (all-wall pressure: pure Neumann, defined up
-        // to a constant — the lid cavity) have ~zero row sums all the way to
-        // the coarsest level; the raw dense inverse of that singular matrix
-        // is unbounded garbage that injects enormous constant-mode
-        // corrections into every V-cycle (measured: 1.6e9-scale entries in
-        // the FGMRES z-basis, poisoning the f32 solve; latent-but-dormant at
-        // f64, which never took the AMG flip on such a case). Detect the
-        // Neumann block by its row sums and Tikhonov-shift the diagonal so
-        // the null mode's inverse is bounded instead of infinite; every
-        // pinned-pressure case (outlets) keeps the exact inverse, bit-
-        // identical to before.
+        // GAUGE-SINGULAR blocks (all-wall pressure: pure Neumann, defined up to
+        // a constant) have ~zero row sums to the coarsest level; the raw dense
+        // inverse of that singular matrix injects enormous constant-mode
+        // corrections into every V-cycle. Detect via row sums and Tikhonov-shift
+        // the diagonal so the null mode's inverse is bounded; pinned-pressure
+        // cases (outlets) keep the exact inverse.
         let diag_max = (0..nc).fold(0.0f64, |m, i| m.max(dense[i * nc + i].abs()));
         let rowsum_max = (0..nc).fold(0.0f64, |m, i| {
             m.max((0..nc).map(|j| dense[i * nc + j]).sum::<f64>().abs())

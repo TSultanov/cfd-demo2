@@ -1,26 +1,16 @@
-//! GPU Lloyd/CVT relaxation (design §7): `lloyd_update` kernel + a two-pass
+//! GPU Lloyd/CVT relaxation: `lloyd_update` kernel + a two-pass
 //! max-displacement reduce, chained with full regens in ONE encoder with no
 //! readback (`encode_lloyd_iterations`).
 //!
-//! ## Semantics (mirrors M0 `lloyd_relax` exactly)
-//!
-//! Each iteration moves every non-fixed seed toward the DENSITY-WEIGHTED
+//! Each iteration moves every non-fixed seed toward the density-weighted
 //! centroid of its current cell: the ring is fanned from the seed and each
 //! triangle `(seed, v_e, v_{e+1})` contributes `w = area · ρ(centroid)` with
-//! the graded-CVT weight `ρ(x) = h(x)^-exponent` evaluated at the triangle
-//! centroid (centroid-point quadrature) — the exact M0 `weighted_centroid`
-//! quadrature. The sizing field `h(x)` is an arbitrary CPU closure in M0; on
-//! the GPU it is a CPU-sampled node grid evaluated by bilinear interpolation
-//! (`set_lloyd_density`), whose approximation error is far below the O(h)
-//! quadrature error Lloyd already tolerates (M0 lloyd.rs module docs).
-//! Fixed seeds: `SeedKind::Boundary` seeds never move (the M0 v1 contract,
-//! keyed off the kind table so it CANNOT be forgotten), and the
-//! `SEED_FLAG_FIXED` bit in `b_seed_flags` pins additional seeds. Cells with
-//! no usable geometry this iteration (coalesced `EMPTY_CELL`, overflow —
-//! `nfaces < 3`) leave their seed unmoved, matching M0's `cell_ring_xy =
-//! None` rule. `NEEDS_EXACT` cells move on their best-known f32 ring (the
-//! chained loop never patches mid-flight; the CPU oracle uses its exact ring
-//! — covered by the relaxation-drift tolerance).
+//! the graded-CVT weight `ρ(x) = h(x)^-exponent` at the triangle centroid.
+//! `h(x)` is a CPU-sampled node grid, bilinearly interpolated on the GPU
+//! (`set_lloyd_density`). `SeedKind::Boundary` seeds never move (keyed off the
+//! kind table) and the `SEED_FLAG_FIXED` bit pins additional seeds. Cells with
+//! no usable geometry (`nfaces < 3`: coalesced `EMPTY_CELL`, overflow) leave
+//! their seed unmoved.
 //!
 //! ## The stale-grid problem and the displacement-slack derate
 //!
@@ -35,22 +25,19 @@
 //! displacement into `b_slack[0]`, and `voronoi_cell` derates its stop to
 //! `(lb − slack)² · SECURITY_SCALE > 4R²` — no readback, provably
 //! conservative (per-seed total displacement ≤ sum of per-iteration maxima).
-//! `upload_case` resets the slack to the `lb_abs_slack` baseline (fresh
-//! grid; the baseline covers the kernel `ring_lower_bound`'s absolute f32
-//! rounding — see engine.rs, stage-5 review). The coalescing
-//! table is also held fixed across chained iterations: a coalesced duplicate
-//! outputs `EMPTY_CELL` (centroid 0 ⇒ parked seed) and its planes stay
-//! skipped; `refresh_after_lloyd` re-derives grid + coalescing from the
+//! `upload_case` resets the slack to the `lb_abs_slack` baseline (fresh grid;
+//! the baseline covers `ring_lower_bound`'s absolute f32 rounding). The
+//! coalescing table is also held fixed across chained iterations: a coalesced
+//! duplicate outputs `EMPTY_CELL` (centroid 0 ⇒ parked seed) and its planes
+//! stay skipped; `refresh_after_lloyd` re-derives grid + coalescing from the
 //! relaxed positions before any diagram is consumed.
 //!
 //! ## Convergence (standalone path)
 //!
 //! `lloyd_update` writes per-seed `(|Δx|, |Δx|/h(x))` displacements; the
-//! two-pass reduce (`max_disp_pass1/2`, the dot_product.wgsl workgroup-
-//! scratch pattern — the existing reductions are sum-typed and bindgen-bound,
-//! not reusable) leaves the componentwise max in `b_dmax`, read back as one
-//! tiny transfer by `read_max_disp`. f32 `max` is exact (no rounding), so the
-//! whole relaxation stays byte-stable run-to-run for a fixed device.
+//! two-pass reduce leaves the componentwise max in `b_dmax`, read back by
+//! `read_max_disp`. f32 `max` is exact (no rounding), so the whole relaxation
+//! stays byte-stable run-to-run for a fixed device.
 
 use nalgebra::Point2;
 
@@ -78,9 +65,9 @@ pub(super) struct LloydParams {
     /// Reciprocal sizing-grid pitches (node i sits at `i / inv_dx`).
     pub inv_dx: f32,
     pub inv_dy: f32,
-    /// ρ(x) = h(x)^-exponent (M0 `density_exponent`; 0 ⇒ uniform density).
+    /// ρ(x) = h(x)^-exponent; 0 ⇒ uniform density.
     pub exponent: f32,
-    /// Under-/over-relaxation on the centroid move (M0 `omega`).
+    /// Under-/over-relaxation on the centroid move.
     pub omega: f32,
 }
 
@@ -292,9 +279,9 @@ impl LloydResources {
 impl GpuVoronoiEngine {
     /// Upload a density/sizing configuration for the Lloyd stage: `h(x)` is
     /// sampled at the `(nx+1)×(ny+1)` nodes of a uniform grid over the
-    /// domain bbox (bilinearly interpolated by the kernel), `exponent` is
-    /// the M0 `density_exponent` (ρ = h^-exponent; 4 = 2D energy-CVT
-    /// grading, 0 = uniform density) and `omega` the M0 relaxation factor.
+    /// domain bbox (bilinearly interpolated by the kernel), `exponent` grades
+    /// the density (ρ = h^-exponent; 4 = 2D energy-CVT grading, 0 = uniform)
+    /// and `omega` is the relaxation factor.
     /// The default (never called) is uniform density, ω = 1.
     pub fn set_lloyd_density(
         &mut self,
@@ -362,7 +349,7 @@ impl GpuVoronoiEngine {
         );
         // CPU mirrors (pts/grid/canon) go stale the moment seeds move on
         // the GPU; resolve_flagged/read_diagram assert on this flag until
-        // refresh_after_lloyd re-uploads (stage-5 review).
+        // refresh_after_lloyd re-uploads.
         self.lloyd_dirty.set(true);
         let n_groups = self.n_seeds.div_ceil(WORKGROUP_SIZE).max(1);
         debug_assert_eq!(n_groups, self.lloyd.params.num_groups);
@@ -381,7 +368,7 @@ impl GpuVoronoiEngine {
     }
 
     /// Chain `iters` full Lloyd iterations (`lloyd_update` + regen each)
-    /// into one encoder — no readback (design §7). The first update consumes
+    /// into one encoder — no readback. The first update consumes
     /// the cell outputs already resident (run a regen after `upload_case`
     /// before the first call).
     pub fn encode_lloyd_iterations(
@@ -415,8 +402,8 @@ impl GpuVoronoiEngine {
     }
 
     /// One tiny readback of the LAST `lloyd_update`'s max displacement:
-    /// `(h_relative, absolute)` — the standalone convergence check (the M0
-    /// measure is the h-relative one, `LloydConfig::tol_disp`).
+    /// `(h_relative, absolute)` — the standalone convergence check (the
+    /// h-relative measure is `LloydConfig::tol_disp`).
     pub fn read_max_disp(&self, ctx: &GpuContext, cache: &StagingBufferCache) -> (f32, f32) {
         let prof = ProfilingStats::new();
         let bytes = pollster::block_on(read_buffer_cached(

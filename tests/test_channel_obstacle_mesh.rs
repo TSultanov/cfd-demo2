@@ -21,7 +21,6 @@ mod tests {
 
         println!("Mesh generated with {} vertices", mesh.vx.len());
 
-        // Check before smoothing
         let mut max_error_before = 0.0;
         for i in 0..mesh.vx.len() {
             if mesh.v_fixed[i] {
@@ -34,10 +33,8 @@ mod tests {
         }
         println!("Max boundary error before smoothing: {}", max_error_before);
 
-        // Smooth
         mesh.smooth(&geo, 0.3, 50);
 
-        // Identify boundary vertices from mesh topology
         let mut boundary_vertices = std::collections::HashSet::new();
         for f_idx in 0..mesh.face_cx.len() {
             if mesh.face_neighbor[f_idx].is_none() {
@@ -62,10 +59,6 @@ mod tests {
             }
 
             if sdf.abs() > 1e-3 {
-                // println!(
-                //     "Bad boundary vertex at {:?}, sdf: {}, fixed: {}",
-                //     p, sdf, mesh.v_fixed[v_idx]
-                // );
                 bad_vertices += 1;
             }
         }

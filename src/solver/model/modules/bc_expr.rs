@@ -4,8 +4,7 @@
 // `BoundarySpec` (see `BcValue::Expr` and `backend::boundary::BoundaryExpr`)
 // into ONE Preparation-phase Faces kernel that rewrites the corresponding
 // `bc_value` table entries from interior state, prescribed boundary values,
-// and uniform params -- every outer iteration. This replaces hand-written
-// runtime-BC kernels (e.g. the old compressible_runtime_bc module).
+// and uniform params -- every outer iteration.
 //
 // Semantics implemented here (the contract `BoundaryExpr` documents):
 // - all `bc(..)` reads are hoisted into `let` snapshots before any write,

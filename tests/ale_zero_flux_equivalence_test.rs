@@ -1,27 +1,15 @@
-//! M3.1 zero-flux equivalence gate (meshless/moving-mesh roadmap,
-//! docs/meshless-moving-mesh-roadmap.md §M3).
-//!
-//! The load-bearing property: `incompressible_momentum_ale` with all-zero
+//! Zero-flux equivalence gate: `incompressible_momentum_ale` with all-zero
 //! `mesh_fluxes` and equal volume history over a STATIC mesh must reproduce
-//! `incompressible_momentum` **byte-identically**. The ALE kernels differ from
-//! the static ones by exactly `phi_rel = phi - rho * mesh_fluxes[face]` at
-//! every convective consumption point (verified by diffing the generated
-//! WGSL), and with `mesh_fluxes[face] == 0.0` the subtraction is
+//! `incompressible_momentum` byte-identically. The ALE kernels differ by
+//! exactly `phi_rel = phi - rho * mesh_fluxes[face]` at every convective
+//! consumption point, and with `mesh_fluxes[face] == 0.0` the subtraction is
 //! `x - rho*0.0 = x - 0.0`, an IEEE-754 bitwise identity for every finite x
-//! (including -0.0: `-0.0 - 0.0 == -0.0` under round-to-nearest). The volume
-//! history buffers exist but are not yet consumed by any kernel (moving-volume
-//! ddt is M3.2), so equal-vols is trivially satisfied; this gate still pins it
-//! by construction (both backends seed `cell_vols_old(_old) = cell_vols`).
+//! (including -0.0: `-0.0 - 0.0 == -0.0` under round-to-nearest). Both backends
+//! seed `cell_vols_old(_old) = cell_vols` so equal-volume history holds too.
 //!
 //! Comparison is on the CPU backend, where `read_state_f32` is a lossless view
-//! of the f32-bit interpreter state (see tests/mesh_refresh_identity_test.rs
-//! header, review-validation #9). Both CPU engines are covered: the
-//! interpreter (executes the KernelProgram IR) and the transpiler (compiled
-//! Rust) — the two independent consumers of the ALE codegen.
-//!
-//! Feature gate: `meshgen` (the `sim::SolverDriver` seam) + `cpu` — Tier-1
-//! always-on under `--features meshgen,cpu` per the roadmap's validation
-//! program.
+//! of the f32-bit interpreter state. Both CPU engines are covered: the
+//! interpreter (KernelProgram IR) and the transpiler (compiled Rust).
 #![cfg(all(feature = "meshgen", feature = "cpu"))]
 
 use cfd2::sim::{DriverBuild, RuntimeParams, SolverDriver};
@@ -118,10 +106,10 @@ fn state_bits(driver: &SolverDriver) -> Vec<u32> {
 }
 
 /// Run the static and ALE models side by side on the given CPU engine and
-/// time scheme, asserting bit-equality of the full state every step. Both
-/// schemes are load-bearing legs: Euler exercises the BDF1 moving-volume ddt
-/// branch directly; BDF2 exercises the volume-ratio-weighted history chain
-/// (plus the step-0 Euler startup fallback on the from-rest state).
+/// time scheme, asserting bit-equality of the full state every step. Euler
+/// exercises the BDF1 moving-volume ddt branch directly; BDF2 exercises the
+/// volume-ratio-weighted history chain (plus the step-0 Euler startup fallback
+/// on the from-rest state).
 fn assert_zero_flux_equivalence(engine: &str, time_scheme: TimeScheme) {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     std::env::set_var("CFD2_BACKEND", "cpu");
@@ -198,8 +186,8 @@ fn ale_zero_flux_byte_identical_cpu_transpiled() {
 }
 
 /// Interpreter engine, Euler: the BDF1 moving-volume branch as the DECLARED
-/// scheme (the BDF2 legs only reach it through the step-0 startup fallback
-/// on a from-rest state — adversarial review, July 2026).
+/// scheme (the BDF2 legs only reach it through the step-0 startup fallback on a
+/// from-rest state).
 #[test]
 fn ale_zero_flux_byte_identical_cpu_interpreter_euler() {
     assert_zero_flux_equivalence("interpreter", TimeScheme::Euler);
@@ -211,11 +199,10 @@ fn ale_zero_flux_byte_identical_cpu_transpiled_euler() {
     assert_zero_flux_equivalence("transpiled", TimeScheme::Euler);
 }
 
-/// ALE sequencing/handshake guards (adversarial review, July 2026), pinned on
-/// the cheap CPU backend:
+/// ALE sequencing/handshake guards, pinned on the cheap CPU backend:
 ///   * `SolverDriver::begin_ale_step` under `adaptive_dt` must ERROR — the
 ///     fluxes are SCL-closed against one dt, and an adaptive recompute after
-///     the closure silently injects mass (review F2);
+///     the closure silently injects mass;
 ///   * double-arming `begin_ale_step` without an intervening `step()` must
 ///     ERROR — it would rotate the volume history twice;
 ///   * `refresh_mesh` on an ALE model must ERROR — it updates volumes without
@@ -341,17 +328,15 @@ fn run_gpu_pair(time_scheme: TimeScheme) -> Option<(usize, f32)> {
     Some((ndiff, maxd))
 }
 
-/// GPU leg, Euler: BITWISE. Also the *binding-resolution* gate — the ALE
-/// kernels bind `mesh_fluxes`/`cell_vols_old{,_old}` (group 0 / bindings
-/// 8, 9, 15) through `MeshResources::buffer_for_binding_name`, and a
-/// resolution gap would fail pipeline/bind-group creation right here, long
-/// before real fluxes are uploaded. Under Euler every ALE delta is an IEEE
-/// identity at zero fluxes / equal volume history (`x - rho*0`, `x/x` via
-/// the select guard, `(v - v)/dt`), and fp contraction cannot break any of
-/// them, so the exact-bit comparison holds on the GPU too.
-/// `CFD2_ALLOW_GPU_BYTE_WAIVE=1` downgrades to <1e-6 (driver-update escape
-/// hatch, mirroring tests/mesh_refresh_identity_test.rs). Skips without a
-/// GPU adapter.
+/// GPU leg, Euler: BITWISE. Also the binding-resolution gate — the ALE kernels
+/// bind `mesh_fluxes`/`cell_vols_old{,_old}` (group 0 / bindings 8, 9, 15)
+/// through `MeshResources::buffer_for_binding_name`, and a resolution gap would
+/// fail pipeline/bind-group creation here, before real fluxes are uploaded.
+/// Under Euler every ALE delta is an IEEE identity at zero fluxes / equal
+/// volume history (`x - rho*0`, `x/x` via the select guard, `(v - v)/dt`), and
+/// fp contraction cannot break any of them, so the exact-bit comparison holds
+/// on the GPU too. `CFD2_ALLOW_GPU_BYTE_WAIVE=1` downgrades to <1e-6
+/// (driver-update escape hatch). Skips without a GPU adapter.
 #[test]
 fn ale_zero_flux_byte_identical_gpu_euler() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -374,17 +359,14 @@ fn ale_zero_flux_byte_identical_gpu_euler() {
     println!("[ale-zero-flux] gpu/euler: ALE == static bitwise over {STEPS} steps");
 }
 
-/// GPU leg, BDF2: TOLERANCE-GATED, deliberately NOT bitwise. The
-/// moving-volume BDF2 ddt multiplies the history states by volume ratios
-/// that are an exact 1.0 here, but Metal fast math reassociates the
-/// (textually different) static and ALE rhs chains differently, giving
-/// ~1-ulp per-assembly differences even at ratio == 1.0 — isolated and
-/// pinned by tests/ale_metal_fastmath_evidence.rs, exactly the
-/// "reassociation genuinely prevents byte-identity" fallback of the M3.2
-/// contract (CPU stays bitwise under BDF2 — see the CPU legs, which is the
-/// discretization-correctness statement; this leg only bounds the compiler
-/// noise). Measured July 2026: max|diff| = 6.15e-5 after 20 steps (the ulp
-/// noise amplified through the nonlinear solve feedback); cap ~2.5x.
+/// GPU leg, BDF2: TOLERANCE-GATED, deliberately NOT bitwise. The moving-volume
+/// BDF2 ddt multiplies the history states by volume ratios that are an exact
+/// 1.0 here, but Metal fast math reassociates the (textually different) static
+/// and ALE rhs chains differently, giving ~1-ulp per-assembly differences even
+/// at ratio == 1.0. The CPU legs stay bitwise under BDF2 (the
+/// discretization-correctness statement); this leg only bounds the compiler
+/// noise, which amplifies through the nonlinear solve to max|diff| ~6.15e-5
+/// after 20 steps; cap ~2.5x.
 #[test]
 fn ale_zero_flux_equivalent_gpu_bdf2() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());

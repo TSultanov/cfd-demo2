@@ -15,7 +15,7 @@ fn test_mesh_comparison() {
 
     let min_cell_size = 0.05;
     let max_cell_size = 0.1;
-    let growth_rate = 1.2; // Added growth_rate parameter
+    let growth_rate = 1.2;
 
     println!("Generating CutCell Mesh...");
     let cut_cell_mesh = generate_cut_cell_mesh(
@@ -47,11 +47,9 @@ fn test_mesh_comparison() {
         delaunay_mesh.num_vertices()
     );
 
-    // Basic checks
     assert!(cut_cell_mesh.num_cells() > 0);
     assert!(delaunay_mesh.num_cells() > 0);
 
-    // Volume check
     let total_vol_cut = cut_cell_mesh.cell_vol.iter().sum::<f64>();
     let total_vol_del = delaunay_mesh.cell_vol.iter().sum::<f64>();
 
@@ -69,15 +67,12 @@ fn test_mesh_comparison() {
         "Delaunay volume mismatch"
     );
 
-    // Skewness check
     let skew_cut = cut_cell_mesh.calculate_max_skewness();
     let skew_del = delaunay_mesh.calculate_max_skewness();
 
     println!("CutCell Max Skewness: {:.6}", skew_cut);
     println!("Delaunay Max Skewness: {:.6}", skew_del);
 
-    // Delaunay meshes can have slivers, but hopefully not too bad with good point distribution
-    // We don't strictly assert skewness yet as we haven't implemented optimization/smoothing for Delaunay
-    // But it shouldn't be 1.0 (degenerate)
+    // Delaunay slivers aren't smoothed, so only assert non-degeneracy (< 1.0).
     assert!(skew_del < 0.99, "Delaunay mesh has degenerate cells");
 }

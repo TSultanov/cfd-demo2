@@ -10,14 +10,6 @@ use crate::solver::gpu::enums::GpuBcKind;
 /// Layout: `bc_kind[face_idx * stride + unknown_offset]` (u32)
 ///         `bc_value[face_idx * stride + unknown_offset]` (f32)
 ///
-/// # Motivation
-///
-/// Every BC lookup site manually computes
-/// `face_expr * stride + offset`, then passes the result to
-/// `dsl::array_access("bc_kind", …)` and `dsl::array_access("bc_value", …)`.
-/// This struct centralises that arithmetic and provides typed accessors
-/// that make the intent explicit.
-///
 /// # Example
 ///
 /// ```ignore
@@ -49,17 +41,11 @@ impl BcTable {
     }
 
     /// Returns `bc_kind[face * stride + offset]` as a typed `GpuBcKind` enum expression.
-    ///
-    /// Use this in assembly kernels where BC kind is compared via
-    /// `kind.eq(GpuBcKind::Dirichlet)`.
     pub fn kind(&self, unknown_offset: impl Into<Expr>) -> EnumExpr<GpuBcKind> {
         EnumExpr::<GpuBcKind>::from_expr(dsl::array_access("bc_kind", self.index(unknown_offset)))
     }
 
     /// Returns `bc_kind[face * stride + offset]` as a raw `Expr`.
-    ///
-    /// Use this in gradient/flux kernels where BC kind is compared via
-    /// `kind.eq(Expr::from(1u32))` inside `dsl::select` chains.
     pub fn kind_raw(&self, unknown_offset: impl Into<Expr>) -> Expr {
         dsl::array_access("bc_kind", self.index(unknown_offset))
     }
@@ -87,10 +73,6 @@ impl BcTable {
     ///   kind == 2u,
     /// )
     /// ```
-    ///
-    /// This deduplicates the identical nested `select` pattern used in
-    /// `packed_state_gradients.rs`, `flux_module_gradients_wgsl.rs`,
-    /// and `rhie_chow.rs`.
     pub fn ghost_value(
         &self,
         unknown_offset: impl Into<Expr>,
@@ -167,9 +149,7 @@ mod tests {
     fn bc_table_kind_produces_typed_enum_expr() {
         let bc = BcTable::new(Expr::ident("face_idx"), Expr::from(3u32));
         let kind = bc.kind(Expr::from(1u32));
-        // Should produce bc_kind[face_idx * 3u + 1u] wrapped in EnumExpr
         let eq_dirichlet = kind.eq(GpuBcKind::Dirichlet);
-        // The expression should compile without panicking
         let _ = format!("{:?}", eq_dirichlet);
     }
 
@@ -177,7 +157,6 @@ mod tests {
     fn bc_table_kind_raw_produces_raw_expr() {
         let bc = BcTable::new(Expr::ident("face_idx"), Expr::from(3u32));
         let kind = bc.kind_raw(Expr::from(0u32));
-        // Raw expr can be compared with Expr::from(1u32) for select-style usage
         let eq_1 = kind.eq(Expr::from(1u32));
         let _ = format!("{:?}", eq_1);
     }
@@ -193,7 +172,6 @@ mod tests {
     fn bc_table_lookup_returns_kind_and_value() {
         let bc = BcTable::new(Expr::ident("face_idx"), Expr::from(3u32));
         let (kind, value) = bc.lookup(Expr::from(1u32));
-        // Both should be usable
         let _ = kind.eq(GpuBcKind::Dirichlet);
         let _ = format!("{:?}", value);
     }
@@ -207,7 +185,6 @@ mod tests {
             Expr::ident("d_own"),
         );
         let rendered = ghost.to_string();
-        // Should contain "select" calls
         assert!(
             rendered.contains("select"),
             "ghost_value should produce select expressions, got: {rendered}"
@@ -216,7 +193,6 @@ mod tests {
 
     #[test]
     fn bc_table_ghost_value_matches_manual_pattern() {
-        // Reproduce the manual pattern from packed_state_gradients.rs
         let face = Expr::ident("face_idx");
         let stride = Expr::from(3u32);
         let component = Expr::from(1u32);
@@ -241,7 +217,6 @@ mod tests {
         let bc = BcTable::new(Expr::ident("face_idx"), Expr::from(3u32));
         let typed_ghost = bc.ghost_value(Expr::from(1u32), cell_val, d_own);
 
-        // Compare rendered WGSL output (structural equality)
         assert_eq!(
             manual_ghost.to_string(),
             typed_ghost.to_string(),

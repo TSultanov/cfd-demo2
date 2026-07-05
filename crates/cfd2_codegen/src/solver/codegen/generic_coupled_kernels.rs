@@ -894,8 +894,7 @@ mod tests {
     fn dev2_term_keys_grad_state_by_state_offset_not_rank() {
         // Non-prefix layout (buoyant-T-style): an aux scalar sits BEFORE the
         // unknown, so U's state offset (1) differs from its coupled rank (0).
-        // grad_state is STATE-OFFSET keyed — the known rank-vs-offset latent
-        // bug class (two prior engine bugs).
+        // grad_state is STATE-OFFSET keyed, not rank-keyed.
         let aux = vol_scalar_dim::<cfd2_ir::dimensions::Pressure>("aux");
         let u = crate::solver::ir::vol_vector_dim::<cfd2_ir::dimensions::Velocity>("U");
         let p = vol_scalar_dim::<cfd2_ir::dimensions::Pressure>("p");

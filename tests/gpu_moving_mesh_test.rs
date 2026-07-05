@@ -1,45 +1,21 @@
-//! M5 stage 2 gates (meshless/moving-mesh roadmap §M5): the GPU moving-mesh
-//! loop end-to-end.
-//!
-//! M4's `moving_mesh_gcl_test` proved the FULL moving-mesh cycle (dt handshake →
-//! advect seeds → M0 regen → swept-flux → topology refresh → step) on the CPU
-//! backend. These gates prove the SAME `MovingMeshDriver` runs correctly on the
-//! GPU backend now that stage-1 made the GPU topology refresh surgical (cached
-//! LA pipelines + warm-start-x carry) instead of recompile-cold-restart.
-//!
-//! The moving loop needs NO GPU snapshot/history readback: the GPU topology
-//! refresh preserves every cross-step buffer surgically IN PLACE —
-//!   * `state`, `state_old`, `state_old_old` are cell-indexed field buffers the
-//!     refresh never reallocates (only the face-flux buffer is resized), so the
-//!     BDF2 history survives a topology change untouched;
-//!   * the ALE volume history `cell_vols_old{,_old}` is rotated then carried over
-//!     by swap (`MeshResources::refresh_topology`);
-//!   * the warm-start `x` is blitted across the reallocation (stage 1).
-//! The `bdf2` GCL gate is the proof: if `state_old_old` were lost across the
-//! per-step refresh, BDF2 would silently cold-start (Euler fallback) every step
-//! and the drift/compounding would blow the caps. Snapshot-based history
-//! readback (`has_history==true` on GPU) is a SEPARATE concern the moving loop
-//! does not exercise, and is deferred (documented in `snapshot.rs`).
+//! GPU moving-mesh loop gates (`MovingMeshDriver` end-to-end).
 //!
 //! Gates:
-//!   * `gpu_moving_mesh_gcl_{euler,bdf2}` — prescribed flip-free swirl through
-//!     the GPU moving loop keeps a uniform free stream uniform at the stage-1
-//!     scale, non-compounding, over the run. BDF2 additionally proves the
-//!     surgical history preservation.
-//!   * `gpu_vs_cpu_moving_mesh_freestream_gcl` — the SAME prescribed-motion case
-//!     on both backends must agree on the CONSERVATION observables of the moving
-//!     mesh: both preserve the uniform free stream (GCL) and their final fields
-//!     match to an f32 cross-backend RMS. The free stream is an exact discrete
-//!     fixed point, so this proves cross-backend GCL/free-stream preservation of
-//!     the swept-flux + moving-volume machinery — NOT a developed-field physics
-//!     match (a cross-backend comparison on a nontrivial wake is a documented gap,
-//!     deferred; the GPU FlowCoupled path is smoke-tested single-backend in
-//!     `moving_mesh_gui_worker_gpu_backend`).
+//!   * `gpu_moving_mesh_gcl_{euler,bdf2}` — prescribed flip-free swirl keeps a
+//!     uniform free stream uniform, non-compounding, over the run. BDF2 also
+//!     proves surgical history preservation: `state_old_old` must survive the
+//!     per-step topology refresh in place, or BDF2 cold-starts to Euler each step
+//!     and the drift compounds.
+//!   * `gpu_vs_cpu_moving_mesh_freestream_gcl` — the same prescribed-motion case
+//!     on both backends must agree on the conservation observables (both preserve
+//!     the free stream; final fields match to an f32 cross-backend RMS). The free
+//!     stream is an exact discrete fixed point, so this proves cross-backend GCL
+//!     preservation only, NOT a developed-field physics match.
 //!   * `gpu_moving_perf` — per-step overhead split (plan/regen/swept/refresh vs
-//!     total) at ~20k cells: with stage 1 the refresh no longer dominates.
+//!     total) at ~20k cells.
 //!
-//! Skips cleanly when no GPU adapter is present. `feature = "meshgen"` (the M0
-//! engine + `sim` drivers); the cross-backend gate additionally needs `cpu`.
+//! Skips cleanly when no GPU adapter is present. Needs `feature = "meshgen"`; the
+//! cross-backend gate additionally needs `cpu`.
 #![cfg(feature = "meshgen")]
 
 use cfd2::meshgen::meshless::generate_cvt_mesh_with_seeds;
@@ -68,9 +44,9 @@ const PERIOD: f64 = 80.0 * DT as f64;
 /// artifact, never BC physics.
 const U0: (f32, f32) = (1.0, 0.0);
 
-/// Flip-free interior swirl (mirrors `moving_mesh_gcl_test::swirl`): rotate each
-/// seed about the domain centre by a boundary-vanishing bump, small enough to
-/// never flip the Voronoi adjacency. Evaluated from the t=0 label (no drift).
+/// Flip-free interior swirl: rotate each seed about the domain centre by a
+/// boundary-vanishing bump, small enough to never flip the Voronoi adjacency.
+/// Evaluated from the t=0 label (no drift).
 fn swirl(p: [f64; 2], t: f64) -> [f64; 2] {
     let (cx, cy) = (0.5 * LX, 0.5 * LY);
     let bump = (std::f64::consts::PI * p[0] / LX).sin().powi(2)
@@ -284,30 +260,21 @@ fn print_gcl(label: &str, out: &RunOut) {
     );
 }
 
-/// GCL caps for the GPU moving loop (f32 solve). Pinned after first measurement
-/// (July 2026, 125-cell CVT square, 120 steps, swirl θ_peak=0.03):
-///   euler: max|U-U0| = 1.32e-5, max|p| = 1.05e-5 (late 8.3e-7 / 7.7e-6)
-///   bdf2:  max|U-U0| = 2.14e-5, max|p| = 8.12e-5 (late 1.4e-6 / 1.1e-5)
-/// The whole-run caps are ~4× the measured max (the GPU f32 scale, ~10× the CPU
-/// f64 GCL gate). The NON-COMPOUNDING statement is the LATE-window absolute cap,
-/// matching the sibling `ale_gcl_test`: a conservation-law (GCL) violation or a
-/// lost-history BDF2 cold-restart COMPOUNDS step-over-step, so the final quarter
-/// would rise toward the whole-run cap instead of settling an order below it
-/// (the sibling measured ~1.5e-3 when the warm-start carry was lost — 100× these
-/// late caps). The late caps are tight ABSOLUTE bounds at the measured late scale
-/// (not the whole-run floor, which made the old ratio-only check vacuous).
+/// GCL caps for the GPU moving loop (f32 solve). The whole-run caps are ~4× the
+/// measured max (GPU f32 scale). A GCL violation or a lost-history BDF2
+/// cold-restart COMPOUNDS step-over-step, so the non-compounding check is a
+/// late-window (final quarter) absolute cap: a compounding drift rises toward the
+/// whole-run cap instead of settling an order below it.
 fn assert_gpu_gcl_caps(out: &RunOut) {
     assert!(out.max_identity_err < 1e-11, "f64 identity {:.3e}", out.max_identity_err);
     assert!(out.max_scl_defect < 1e-8, "SCL defect {:.3e}", out.max_scl_defect);
     assert!(out.max_du < 1e-4, "U drift {:.3e} above cap", out.max_du);
     assert!(out.max_dp < 3e-4, "p drift {:.3e} above cap", out.max_dp);
     // Late-window (final quarter) absolute caps — the live no-compounding floor.
-    // Measured late: euler 8.3e-7 / 7.7e-6, bdf2 1.4e-6 / 1.1e-5; these caps give
-    // ~2-7× headroom yet a compounding drift blows them well before the run end.
     assert!(out.late_du < 1e-5, "late U drift {:.3e}: GCL error compounds", out.late_du);
     assert!(out.late_dp < 3e-5, "late p drift {:.3e}: GCL error compounds", out.late_dp);
-    // ...and the late window must not exceed the settled early window (floors at
-    // the measured late scale keep this ratio bound live, not vacuous).
+    // ...and the late window must not exceed the settled early window (floors keep
+    // this ratio bound live, not vacuous).
     assert!(
         out.late_du <= (out.early_du * 2.5).max(1e-5),
         "late U drift {:.3e} vs early {:.3e}: GCL error compounds",
@@ -342,9 +309,9 @@ fn gpu_moving_mesh_gcl_euler() {
     assert_gpu_gcl_caps(&out);
 }
 
-/// BDF2 is the surgical-history-preservation proof: `state_old_old` must survive
-/// the per-step topology refresh in place, or BDF2 cold-starts to Euler each step
-/// and the drift compounds.
+/// BDF2 proves surgical history preservation: `state_old_old` must survive the
+/// per-step topology refresh in place, or BDF2 cold-starts to Euler each step and
+/// the drift compounds.
 #[test]
 fn gpu_moving_mesh_gcl_bdf2() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -357,17 +324,14 @@ fn gpu_moving_mesh_gcl_bdf2() {
 
 // ─── Gate 2: CPU vs GPU free-stream / GCL preservation (same moving case) ─────
 
-/// Cross-backend conservation gate: the SAME prescribed-motion case on CPU (f64
-/// linear solve) and GPU (f32) must agree on the CONSERVATION observables of the
-/// moving mesh. The flow is a uniform (1,0) free stream — an exact discrete fixed
-/// point on both backends — so this proves the swept-flux + moving-volume GCL
-/// machinery preserves it identically across backends (final-field RMS + both
-/// legs' free-stream drift), within an f32 cross-backend tolerance. Bits differ
-/// (expected, never asserted). This is deliberately NOT a developed-field physics
-/// match: any bug that vanishes on uniform flow is invisible here; a genuine
-/// cross-backend nontrivial-wake comparison is a documented deferred gap (the
-/// f32-GPU/f64-CPU spread on a chaotic wake is itself a known open question — see
-/// the compressible marched-MMS notes).
+/// Cross-backend conservation gate: the same prescribed-motion case on CPU (f64
+/// solve) and GPU (f32) must agree on the conservation observables. The flow is a
+/// uniform (1,0) free stream — an exact discrete fixed point on both backends —
+/// so this proves the swept-flux + moving-volume GCL machinery preserves it
+/// identically across backends (final-field RMS + both legs' free-stream drift),
+/// within an f32 cross-backend tolerance (bits differ, never asserted). NOT a
+/// developed-field physics match: any bug that vanishes on uniform flow is
+/// invisible here.
 #[test]
 #[cfg(feature = "cpu")]
 fn gpu_vs_cpu_moving_mesh_freestream_gcl() {
@@ -410,10 +374,9 @@ fn gpu_vs_cpu_moving_mesh_freestream_gcl() {
 
     // Both backends must preserve the free stream (physics observable, not bits).
     assert!(cpu.max_du < 5e-3 && gpu.max_du < 5e-3, "a backend lost the free stream");
-    // The two free-stream fields agree to f32 cross-backend scale (measured RMS
-    // 3.0e-6, max 1.3e-5; caps ~two decades above — meaningful, not knife-edge).
-    // This is a free-stream/GCL agreement, not a developed-field match (see the
-    // fn doc): the fixed point is trivial, only conservation-breaking bugs show.
+    // The two free-stream fields agree to f32 cross-backend scale (caps ~two
+    // decades above the measured RMS). A free-stream/GCL agreement only: the fixed
+    // point is trivial, so only conservation-breaking bugs show.
     assert!(l2 < 5e-4, "cross-backend free-stream RMS {l2:.3e} too large — GCL disagrees");
     assert!(max_abs < 5e-3, "cross-backend field max|diff| {max_abs:.3e} too large");
 }
@@ -421,8 +384,7 @@ fn gpu_vs_cpu_moving_mesh_freestream_gcl() {
 // ─── Gate 3: per-step overhead split at ~20k cells ───────────────────────────
 
 /// Per-step overhead: at ~20k cells, report the moving-mesh overhead
-/// (plan+regen+swept+refresh) against the total step time. With stage 1 the
-/// surgical refresh should no longer dominate the per-step cost.
+/// (plan+regen+swept+refresh) against the total step time.
 #[test]
 fn gpu_moving_perf() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -482,17 +444,12 @@ fn gpu_moving_perf() {
         100.0 * refresh / total_ms.max(1e-6),
         100.0 * refresh / overhead.max(1e-6),
     );
-    // Do-no-harm regression gate. The OLD check (`refresh <= total_ms`) only
-    // caught a refresh exceeding the ENTIRE step — a 2× refresh regression that
-    // stayed under the step wall passed silently. Pin refresh below the larger of
-    // the two genuine size-scaling mesh passes (regen / swept-flux) instead: the
-    // pre-M5 recompile of the whole LA stack was a size-INDEPENDENT ~10.6 ms that
-    // dominated; a reintroduced recompile adds that back to `refresh` while
-    // regen/swept are unchanged, pushing refresh above them. All three are GPU
-    // passes on the same adapter, so the bound scales with the machine (portable,
-    // not an absolute wall-clock cap). Measured: refresh 7.6 vs regen 12.7 /
-    // swept 12.3 ms (22% of overhead); the 1.25× cushion absorbs run-to-run noise
-    // while a ~10 ms recompile still blows it.
+    // Do-no-harm regression gate. Pin refresh below the larger of the two
+    // size-scaling mesh passes (regen / swept-flux): a reintroduced LA-stack
+    // recompile is a size-independent ~10 ms added to `refresh` while regen/swept
+    // are unchanged, pushing refresh above them. All three are GPU passes on the
+    // same adapter, so the bound scales with the machine (portable, not an
+    // absolute wall-clock cap); the 1.25× cushion absorbs run-to-run noise.
     let mesh_pass = regen.max(swept);
     assert!(
         refresh < mesh_pass * 1.25,

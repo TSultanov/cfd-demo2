@@ -319,8 +319,8 @@ mod tests {
             }],
         };
 
-        // Force the kernel to read neighbor-side gradients (which previously used the owner
-        // gradient on boundary faces), so we can assert boundary-specific zeroing exists.
+        // Force the kernel to read neighbor-side gradients so we can assert boundary-specific
+        // zeroing exists.
         let phi_expr = FaceScalarExpr::Dot(
             Box::new(FaceVec2Expr::state_vec2(FaceSide::Neighbor, "grad_phi")),
             Box::new(FaceVec2Expr::cell_to_face(FaceSide::Neighbor)),
@@ -359,7 +359,6 @@ mod tests {
             ],
         };
 
-        // Use expressions that access vector components by name
         let primitives = vec![
             (
                 "mom_x".to_string(),
@@ -371,7 +370,6 @@ mod tests {
             ),
         ];
 
-        // Simple flux that just passes through the primitive values
         let spec = FluxModuleKernelSpec::ScalarPerComponent {
             components: vec!["rho_u_x".to_string(), "rho_u_y".to_string()],
             flux: vec![
@@ -389,7 +387,6 @@ mod tests {
         let wgsl = generate_flux_module_wgsl(&resolved, &flux_layout, 2, &primitives, &spec, &[])
             .to_wgsl();
 
-        // Should contain state accesses for both components
         // rho_u_x is at offset 0, rho_u_y is at offset 1
         assert!(
             wgsl.contains("state[owner * 2u + 0u]") || wgsl.contains("state[owner * 2u]"),
@@ -1147,7 +1144,6 @@ fn face_stmts_runtime_scheme(
     let ctx = LowerCtx::new(resolver, primitives, flux_layout, state_vars);
     let mut cse = CseBuilder::new("_cse_");
 
-    // --- Runtime scheme selection ---
     if variants.is_empty() {
         panic!("runtime scheme flux module requires at least one variant spec");
     }
@@ -1259,7 +1255,6 @@ fn face_stmts_runtime_scheme(
             ));
         }
 
-        // Write the selected component fluxes into the packed flux table.
         for (name, comp_name) in var_names.iter().zip(upwind.components.iter()) {
             let off = flux_layout
                 .offset_for(comp_name)
@@ -1332,7 +1327,6 @@ fn face_stmts_runtime_scheme(
     let is_interior = !Expr::ident("is_boundary");
     let cond_for = |scheme: Scheme| scheme_lit.clone().eq(scheme) & is_interior.clone();
 
-    // Wave speed selection.
     let a_plus_upwind = lower_scalar(upwind.a_plus, &ctx);
     let a_minus_upwind = lower_scalar(upwind.a_minus, &ctx);
     let (cse_stmts, exprs) = cse.eliminate(&[a_plus_upwind, a_minus_upwind]);
@@ -2194,7 +2188,6 @@ fn lower_primitive_expr_at_side<'a>(
     use cfd2_ir::ast::ExprNode;
     match expr.node() {
         ExprNode::Literal(_lit) => {
-            // Reconstruct the literal as an Expr
             expr.clone()
         }
 
@@ -2221,7 +2214,6 @@ fn lower_primitive_expr_at_side<'a>(
         }
 
         ExprNode::Call { callee, args } => {
-            // Resolve args recursively
             let resolved_args: Vec<Expr> = args
                 .iter()
                 .map(|a| lower_primitive_expr_at_side(a, ctx, side))
@@ -2247,9 +2239,7 @@ fn resolve_state_field_component_resolver<'a>(
     resolver: &dyn OffsetResolver,
     name: &'a str,
 ) -> (&'a str, u32) {
-    // Check if it's a scalar field (component 0)
     if resolver.component_offset(name, 0).is_some() {
-        // Verify it's actually a scalar by checking field kind
         if let Some(FieldKind::Scalar) = resolver.field_kind(name) {
             return (name, 0);
         }

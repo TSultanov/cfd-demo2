@@ -1,11 +1,8 @@
-//! Mesh-refresh seam (M2, Tier A): shared geometry casts + topology snapshot.
+//! Mesh-refresh seam: shared geometry casts + topology snapshot.
 //!
-//! The solver backends consume mesh geometry as f32 arrays (GPU storage
-//! buffers, CPU `Buffers` entries). Both backends historically built those
-//! casts inline in their init paths (`init_mesh`, `upload_mesh`); a
-//! geometry-only mesh refresh must upload the *exact same* arrays, so the
-//! cast lives here, in one place, used by init **and** refresh on **both**
-//! backends — they can never drift apart.
+//! The f64→f32 mesh-geometry cast lives here in one place, used by init
+//! (`init_mesh` GPU, `upload_mesh` CPU) and refresh on both backends, so they
+//! upload bit-identical f32 arrays by construction.
 //!
 //! A `Geometry`-level refresh is only valid when the mesh topology (face set,
 //! adjacency, boundary classification, cell→face connectivity) is unchanged;
@@ -20,8 +17,7 @@ use super::structs::Mesh;
 /// re-derives the boundary-condition tables from the model spec and the new
 /// `face_boundary` classification, so any per-face runtime overrides the caller
 /// applied via `set_boundary_values_per_face` (keyed by the OLD face indices)
-/// are gone. The caller owns re-applying them against the new face indexing
-/// (design §1.4.4 / review R8).
+/// are gone. The caller owns re-applying them against the new face indexing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MeshRefreshReport {
     /// `true` when the BC tables were rebuilt from the model spec and any
@@ -38,7 +34,7 @@ pub enum MeshRefreshLevel {
     Geometry,
     /// Face set / adjacency / boundary classification changed (cell count must
     /// still be unchanged — seed↔cell identity). Rebuilds CSR + face-indexed
-    /// buffers. **Tier B — not yet implemented.**
+    /// buffers. Not yet implemented.
     Topology,
 }
 
@@ -150,9 +146,8 @@ impl MeshTopology {
 
     /// Validate that `mesh` has exactly this topology, `Err` otherwise.
     ///
-    /// Cost: a full O(num_cells + num_faces) array comparison (a few MB of
-    /// u32 traffic even at 300k cells) — negligible next to a solver step, and
-    /// it only runs on explicit `refresh_mesh` calls, never in the step loop.
+    /// Full O(num_cells + num_faces) array comparison; acceptable because it
+    /// only runs on explicit `refresh_mesh` calls, never in the step loop.
     pub fn validate_matches(&self, mesh: &Mesh) -> Result<(), String> {
         if mesh.num_cells() != self.num_cells {
             return Err(format!(

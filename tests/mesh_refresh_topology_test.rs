@@ -1,21 +1,14 @@
-//! M2 Tier B mesh-refresh TOPOLOGY gates (meshless/moving-mesh roadmap §M2).
+//! Mesh-refresh TOPOLOGY gates: the FACE SET / adjacency / nnz may change while
+//! the cell count stays invariant (seed↔cell identity). These gates prove the
+//! topology refresh corrupts nothing on a no-op, steps identically to a fresh
+//! build on the new mesh loaded with the same cell-state, is stable + bounded
+//! under alternating A↔B cycles, and rebuilds the byte-identical scalar CSR a
+//! fresh build produces.
 //!
-//! Tier A proved a `Geometry` refresh is byte-invisible (same faces, positions
-//! moved). Tier B lets the FACE SET / adjacency / nnz change while the cell
-//! count stays invariant (seed↔cell identity). These gates prove the topology
-//! refresh:
-//!   1. corrupts nothing on a no-op (byte-identical stepping, both backends);
-//!   2. leaves the solver in a state that steps IDENTICALLY to a fresh build on
-//!      the new mesh loaded with the same cell-state (catches any stale
-//!      mesh-derived cache by construction);
-//!   3. is stable + bounded under many alternating A↔B refresh cycles;
-//!   4. rebuilds the byte-identical scalar CSR a fresh build produces.
-//!
-//! Precision note (identical to the Tier A gate): CPU kernel state is f32 bits
-//! in `AtomicU32`; `read_state_f32` marshals them 1:1, so a bit-pattern compare
-//! is the exact/lossless CPU comparison. The GPU state buffer is f32; the
-//! staging readback is exact. GPU byte gates carry the `CFD2_ALLOW_GPU_BYTE_WAIVE`
-//! driver-update escape hatch (max|diff| < 1e-6), mirroring Tier A.
+//! Precision: CPU kernel state is f32 bits in `AtomicU32`, marshalled 1:1 by
+//! `read_state_f32`, so a bit-pattern compare is exact; the GPU f32 staging
+//! readback is exact too. GPU byte gates carry the `CFD2_ALLOW_GPU_BYTE_WAIVE`
+//! driver-update escape hatch (max|diff| < 1e-6).
 #![cfg(feature = "meshgen")]
 
 use cfd2::meshgen::meshless::{
@@ -304,8 +297,8 @@ fn noop_topology_refresh_byte_identical_gpu() {
 
 // ─── 2. refresh-to-B matches a fresh build on B ──────────────────────────────
 
-/// The load-bearing Tier B equivalence (design §1.4 acceptance): refreshing a
-/// solver from mesh A onto a genuinely-different-topology mesh B leaves it in a
+/// The load-bearing equivalence: refreshing a solver from mesh A onto a
+/// genuinely-different-topology mesh B leaves it in a
 /// state that steps IDENTICALLY to a solver freshly built on B and loaded with
 /// the same cell-state. Both legs are seeded from ONE snapshot (identical input
 /// state — full history on CPU, IC-history on GPU), so the ONLY difference is
@@ -315,17 +308,13 @@ fn noop_topology_refresh_byte_identical_gpu() {
 #[cfg(feature = "cpu")]
 fn topology_refresh_matches_fresh_build_cpu() {
     with_cpu_backend(|| {
-        // Pin the CPU Schur inner solve to Jacobi (`CFD2_CPU_SCHUR_AMG=0`) for
-        // this equivalence check. On the 243-cell meshless CUT-CELL mesh the
-        // adaptive Jacobi→AMG flip fires within the first few steps, so the
-        // snapshot carries `schur_amg_active=true`. The refresh correctly RESETS
-        // that flag (F8 stale-aggregation: a topology change invalidates the AMG
-        // aggregation), so a refreshed leg and a fresh-build+restore leg would
-        // take DIFFERENT inner-solve modes (Jacobi vs a freshly-rebuilt AMG) —
-        // an adaptive-solver-mode difference, ORTHOGONAL to the mesh-rebuild
-        // correctness this gate targets. Pinning the mode removes the confound;
-        // the flag then stays false on every leg. (Verified: without the pin the
-        // legs diverge at exactly `schur_amg_active`, 5e-4; with it, byte-equal.)
+        // Pin the CPU Schur inner solve to Jacobi for this equivalence check. On
+        // the 243-cell meshless cut-cell mesh the adaptive Jacobi→AMG flip fires
+        // within a few steps, so the snapshot carries `schur_amg_active=true`.
+        // The refresh correctly RESETS that flag (a topology change invalidates
+        // the AMG aggregation), so a refreshed leg and a fresh-build+restore leg
+        // would take DIFFERENT inner-solve modes — a difference orthogonal to the
+        // mesh-rebuild correctness this gate targets. Pinning removes the confound.
         std::env::set_var("CFD2_CPU_SCHUR_AMG", "0");
 
         let Some((mesh_a, mesh_b)) = meshless_ab() else {
@@ -426,12 +415,9 @@ fn topology_refresh_matches_fresh_build_gpu() {
 /// old allocations dropped). Also proves the rebuild is deterministic: A's
 /// rebuilt CSR is byte-identical on every A-cycle.
 ///
-/// DEVIATION (honest, roadmap-aligned): with the default EXACT `CapacityPlan`
-/// (headroom 1.0) each refresh reallocates at the new exact size, so "no
-/// reallocation after first growth" (headroom capacity-reuse) is NOT asserted
-/// here — that surgical in-place / reserve-to-max path is the M4 per-step-loop
-/// optimization (see stage 2/3 deviation notes). Bounded logical sizes +
-/// determinism are the properties deliverable at EXACT capacity.
+/// With the default EXACT `CapacityPlan` (headroom 1.0) each refresh reallocates
+/// at the new exact size, so capacity-reuse ("no reallocation after first
+/// growth") is NOT asserted here — only bounded logical sizes + determinism.
 #[test]
 #[cfg(feature = "cpu")]
 fn alternating_topology_refresh_stable() {
@@ -572,10 +558,10 @@ fn structured_square(nx: usize, ny: usize) -> Mesh {
 
 /// The meshless A/B pair (`meshless_ab`) flips ADJACENCY at an EQUAL face count
 /// (fa==fb for a single-seed shift), so it never resizes a buffer — it leaves
-/// the buffer-REALLOCATION-at-a-different-length path (the core Tier B
-/// capability: `refresh_face_count(new != old)`, `matrix_values`/`mesh_fluxes`/
-/// block-CSR realloc at a new nnz, `init_matrix` capacity sizing on a size
-/// delta) unexercised. Two structured meshes with the SAME cell count but a
+/// the buffer-REALLOCATION-at-a-different-length path
+/// (`refresh_face_count(new != old)`, `matrix_values`/`mesh_fluxes`/block-CSR
+/// realloc at a new nnz, `init_matrix` capacity sizing on a size delta)
+/// unexercised. Two structured meshes with the SAME cell count but a
 /// different factorization (8×12 vs 4×24 = 96 square cells) have DIFFERENT face
 /// and nnz counts, so refreshing between them resizes every topology-sized
 /// buffer. Same equivalence contract as the meshless gate: refresh(A→B) must
@@ -638,10 +624,10 @@ fn topology_refresh_face_count_change_matches_fresh_build_cpu() {
 }
 
 /// GPU leg of the face-count-change equivalence. This is the path that resizes
-/// the block-expanded CSR (`matrix_values`/`col_indices`, ~S²× the scalar nnz —
-/// review-F7) and the FGMRES/AMG/Schur bind groups over the reallocated buffers
-/// (review-F10). Same current-state-snapshot contract as the equal-size GPU
-/// gate; f32-exact per device (waiver hatch).
+/// the block-expanded CSR (`matrix_values`/`col_indices`, ~S²× the scalar nnz)
+/// and the FGMRES/AMG/Schur bind groups over the reallocated buffers. Same
+/// current-state-snapshot contract as the equal-size GPU gate; f32-exact per
+/// device (waiver hatch).
 #[test]
 fn topology_refresh_face_count_change_matches_fresh_build_gpu() {
     let _guard = lock_env();
@@ -686,7 +672,7 @@ fn topology_refresh_face_count_change_matches_fresh_build_gpu() {
     );
 }
 
-// ─── refresh-cost benchmark (deliverable 4; `#[ignore]`d — run explicitly) ────
+// ─── refresh-cost benchmark (`#[ignore]`d — run explicitly) ──────────────────
 
 /// A structured grid sized to ~`target` cells (returns the actual mesh).
 fn structured_n(target: usize) -> Mesh {
@@ -708,7 +694,7 @@ fn structured_n(target: usize) -> Mesh {
 }
 
 /// Time a no-op `Topology` refresh (refresh to the SAME structured mesh) at ~20k
-/// and ~300k cells, both backends. A no-op topology refresh does the FULL Tier B
+/// and ~300k cells, both backends. A no-op topology refresh does the FULL
 /// rebuild work (both CSR layouts, reallocate every face/nnz buffer, block-CSR
 /// re-expansion on GPU, re-scatter bc, rebuild bind groups / LA stack) — the
 /// topology is unchanged, so the cost is faithful. Reports median-of-5 ms.
@@ -733,9 +719,8 @@ fn bench_topology_refresh_cost() {
         let mesh = structured_n(target);
         let n = mesh.num_cells();
 
-        // GPU — measure BOTH legs so the roadmap's "−68%" figure is
-        // self-verifying: cache ON (default, surgical) vs OFF
-        // (`CFD2_GPU_PIPELINE_CACHE=0`, the pre-M5 recompile-per-refresh cost).
+        // GPU — measure BOTH legs: cache ON (default, surgical) vs OFF
+        // (`CFD2_GPU_PIPELINE_CACHE=0`, the recompile-per-refresh cost).
         if let Ok(ctx) = pollster::block_on(GpuContext::new(None, None)) {
             let _g = lock_env();
             std::env::remove_var("CFD2_BACKEND");

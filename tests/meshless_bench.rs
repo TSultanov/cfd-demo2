@@ -1,18 +1,14 @@
-//! Meshless-engine performance report (M0.6, design §8 budget table).
+//! Meshless-engine performance report.
 //!
-//! Times every engine phase on the ChannelWithObstacle geometry (the class
-//! the roadmap budgets were written for) at ~75k and ~300k cells, plus the
-//! incumbent `generate_voronoi_mesh` baseline the CVT total is budgeted
-//! against. Reports the full table for the roadmap's acceptance review
-//! (diagram ≤ 100 ms @300k, Lloyd iter ≤ 120 ms, assembly ≤ 250 ms, CVT
-//! total ≤ incumbent wall time, all at 16T), and ASSERTS only at 2× budget
-//! (the roadmap's "red flag" threshold) on the ≥250k-seed case — generous
-//! enough not to flake on machine noise (measured headroom ≥ 3×), loud
-//! enough that a real regression fails instead of hiding in a report.
+//! Times every engine phase on the ChannelWithObstacle geometry at ~75k and
+//! ~300k cells, plus the incumbent `generate_voronoi_mesh` baseline the CVT
+//! total is compared against (budgets: diagram ≤ 100 ms @300k, Lloyd iter ≤
+//! 120 ms, assembly ≤ 250 ms, CVT total ≤ incumbent wall time, all at 16T).
+//! Asserts only at 2× budget on the ≥250k-seed case — generous enough not to
+//! flake on machine noise, loud enough that a real regression fails.
 //!
-//! Poisson seeding is timed separately on purpose: it is inherently
-//! sequential, common to BOTH pipelines, and must not be booked as engine
-//! speedup (design §8).
+//! Poisson seeding is timed separately: it is inherently sequential, common to
+//! both pipelines, and must not be booked as engine speedup.
 //!
 //! Run (release is what the budget table means):
 //!
@@ -74,7 +70,7 @@ fn bench_case(size: f64, reps: usize) {
     let (geo, domain) = obstacle();
     let growth = 1.2;
 
-    // --- Seeding (common to both pipelines; NOT engine time) --------------
+    // Seeding: common to both pipelines, NOT engine time.
     let t = Instant::now();
     let (seeds, kinds, spec) = meshless_seed_points(&geo, size, size, growth, domain);
     let t_seed = t.elapsed().as_secs_f64();
@@ -82,10 +78,8 @@ fn bench_case(size: f64, reps: usize) {
     let tol = MeshgenTolerances::from_geometry(size, domain);
     let cfg = EngineConfig::default();
 
-    // --- SeedGrid build ----------------------------------------------------
     let (grid_min, grid_mean) = time_reps(reps, || SeedGrid::build(&seeds, domain));
 
-    // --- build_diagram -----------------------------------------------------
     let input = MeshlessInput {
         seeds: &seeds,
         kinds: &kinds,
@@ -98,10 +92,9 @@ fn bench_case(size: f64, reps: usize) {
     let diagram = build_diagram(&input);
     let (ok, esc, ovf, empty, failed) = diagram.status_counts();
 
-    // --- assemble_mesh -----------------------------------------------------
     let (asm_min, asm_mean) = time_reps(reps, || assemble_mesh(&input, &diagram));
 
-    // --- one Lloyd iteration (grid + diagram + move, NO assembly) ----------
+    // One Lloyd iteration: grid + diagram + move, no assembly.
     let sizing = |p: Point2<f64>| -> f64 {
         let dist = geo.sdf(&p).abs();
         (size + (growth - 1.0f64).max(0.0) * dist).min(size)
@@ -116,12 +109,12 @@ fn bench_case(size: f64, reps: usize) {
         lloyd_relax(&mut s, &kinds, &spec, &sizing, domain, &tol, &cfg, &one)
     });
 
-    // --- generate_cvt_mesh total (seeding + default-budget Lloyd + assembly)
+    // generate_cvt_mesh total: seeding + default-budget Lloyd + assembly.
     let t = Instant::now();
     let cvt = cfd2::meshgen::generate_cvt_mesh(&geo, size, size, growth, domain, &LloydConfig::default());
     let t_cvt = t.elapsed().as_secs_f64();
 
-    // --- incumbent baseline: generate_voronoi_mesh, plus the GUI's smooth --
+    // Incumbent baseline: generate_voronoi_mesh, plus the GUI's smooth.
     let t = Instant::now();
     let mut incumbent = generate_voronoi_mesh(&geo, size, size, growth, domain);
     let t_inc = t.elapsed().as_secs_f64();
@@ -139,8 +132,8 @@ fn bench_case(size: f64, reps: usize) {
     println!("  generate_cvt_mesh total           {:9.1} ms   [budget: <= incumbent voronoi]", ms(t_cvt));
     println!("  incumbent generate_voronoi_mesh   {:9.1} ms   (+ GUI smooth(0.3,50): {:.1} ms)", ms(t_inc), ms(t_inc_smooth));
 
-    // Regression gates at 2x budget (roadmap red-flag line), on the ~300k
-    // case only. `min` over reps is the noise-robust statistic.
+    // Regression gates at 2x budget, on the ~300k case only. `min` over reps
+    // is the noise-robust statistic.
     if n >= 250_000 {
         assert!(diag_min <= 0.200, "build_diagram {:.1} ms > 2x budget (200 ms) @ {n} seeds", ms(diag_min));
         assert!(asm_min <= 0.500, "assemble_mesh {:.1} ms > 2x budget (500 ms) @ {n} seeds", ms(asm_min));

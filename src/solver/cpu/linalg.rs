@@ -1,31 +1,26 @@
 //! CPU sparse linear algebra for the CPU backend.
 //!
-//! The GPU backend implements the linear solve as a stack of WGSL kernels
-//! (FGMRES/CG/AMG/Schur over a CSR matrix). The CPU backend instead reads the
-//! *same assembled CSR system* — `row_offsets` / `col_indices` / `matrix_values`
-//! / `rhs`, produced by the generic-coupled assembly kernel — and solves it with
-//! a plain Rust iterative solver. The matrix is generally nonsymmetric (the
-//! convection operator), so we use **BiCGSTAB** with a **Jacobi (diagonal)**
-//! preconditioner. We solve in `f64` for robustness even though the assembled
-//! values are `f32`; results are compared to references at tolerance, not
-//! bit-exactly against the GPU.
+//! Reads the *same assembled CSR system* the GPU backend solves
+//! (`row_offsets`/`col_indices`/`matrix_values`/`rhs` from the generic-coupled
+//! assembly kernel) and solves it with a Rust iterative solver. The matrix is
+//! generally nonsymmetric (convection), so BiCGSTAB with a Jacobi (diagonal)
+//! preconditioner. Solved in `f64` for robustness even though the assembled
+//! values are `f32`.
 
 use crate::solver::cpu::parallel::{
     par_dot, par_map_into, par_update, parallel_cell_chunks_mut, parallel_cell_chunks_mut2,
 };
 
-/// Scalar type of the CPU coupled linear solve — the runtime PRECISION option
+/// Scalar type of the CPU coupled linear solve — the runtime precision option
 /// (`CpuBackendConfig::precision` / `CFD2_CPU_PRECISION`).
 ///
-/// `f64` is the reference (and the default): the generic code instantiated at
-/// f64 compiles to exactly the pre-generics arithmetic (every `from_*`/`to_*`
-/// is a no-op there), so the default path stays bit-identical. `f32` mirrors
-/// the GPU's arithmetic — f32 storage and accumulation through the matvec,
-/// preconditioner and Krylov updates — halving vector bandwidth on the
-/// memory-bound phases. BOTH precisions keep their reductions deterministic:
-/// dot products always accumulate in f64 through the fixed-chunk
-/// [`par_dot`]/[`par_dot_f32`], so results remain bit-exact across thread
-/// counts; the Hessenberg/Givens bookkeeping is f64 for both.
+/// `f64` (default) is the reference: generic code at f64 compiles to the
+/// pre-generics arithmetic (every `from_*`/`to_*` is a no-op), so the default
+/// path is bit-identical. `f32` mirrors the GPU's arithmetic, halving vector
+/// bandwidth on the memory-bound phases. Both keep reductions deterministic:
+/// dot products accumulate in f64 through the fixed-chunk
+/// [`par_dot`]/[`par_dot_f32`], bit-exact across thread counts; the
+/// Hessenberg/Givens bookkeeping is f64 for both.
 pub trait Real:
     Copy
     + Send
@@ -42,15 +37,12 @@ pub trait Real:
 {
     const ZERO: Self;
     const ONE: Self;
-    /// True for the f32 instantiation (runtime dispatch where a dedicated
-    /// mixed-precision kernel exists, e.g. the f64-mode SIMD heavy-ball).
+    /// True for the f32 instantiation.
     const IS_F32: bool;
     /// Division-guard threshold in the precision's own scale: a pivot below
-    /// this is treated as zero. The f64 guards used 1e-300, which an
-    /// f32-DENORMAL pivot sails past — the division then overflows f32 to
-    /// inf and poisons the iterate with NaN (measured: every hard lid solve
-    /// died at a NaN restart head until the guard restored the warm start
-    /// and the march froze).
+    /// this is treated as zero. 1e-300 (the f64 guard) lets an f32-DENORMAL
+    /// pivot through — the division then overflows f32 to inf and poisons the
+    /// iterate with NaN.
     const TINY: f64;
     fn from_f64(v: f64) -> Self;
     fn to_f64(self) -> f64;
@@ -132,12 +124,10 @@ impl Real for f32 {
     }
 }
 
-/// Fine-grained linear-solve profiling (enabled by `CFD2_CPU_PROFILE` via
-/// `CpuSolver::step`). Global atomic accumulators: the linear solve runs once
-/// per outer iteration on the solver thread, so plain relaxed adds are enough.
-/// The coarse step profile attributes the whole solve to one bucket; these
-/// split it into marshal / preconditioner build+apply / spmv / dots / axpys so
-/// the serial-vs-parallel and bandwidth-vs-latency structure is visible.
+/// Fine-grained linear-solve profiling (enabled by `CFD2_CPU_PROFILE`). Global
+/// atomic accumulators: the linear solve runs once per outer iteration on the
+/// solver thread, so relaxed adds suffice. Splits the solve into marshal /
+/// preconditioner build+apply / spmv / dots / axpys.
 pub mod prof {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 
@@ -287,17 +277,13 @@ impl CsrView<'_> {
 
 /// Upper bound on the block size S (unknowns per cell) for stack-allocated
 /// per-cell scratch. The biharmonic-compressible model carries S = 12
-/// (4 conserved + 8 `lap_*` unknowns) — 8 was too small and made the release
-/// build panic on the `acc[..s]` slice (the debug_assert only fires in debug).
-/// 16 keeps the fixed array at 128 bytes: still registers/L1-friendly.
+/// (4 conserved + 8 `lap_*` unknowns). 16 keeps the fixed array at 128 bytes:
+/// still registers/L1-friendly.
 const MAX_BLOCK_S: usize = 16;
 
 // Dot products / norms in the solvers below go through `par_dot`
 // (parallel.rs): a FIXED-CHUNK deterministic reduction — bit-identical across
-// thread counts, 4-wide SIMD within chunks, multi-core across chunks. The
-// historical `simd` knob on `fgmres`/`bicgstab` is accepted but no longer
-// changes the reduction (the chunked kernel is strictly better and equally
-// deterministic).
+// thread counts, 4-wide SIMD within chunks, multi-core across chunks.
 
 // ── Block-CSR (coupled systems, unknowns_per_cell = S) ──────────────────────
 //
@@ -313,9 +299,6 @@ const MAX_BLOCK_S: usize = 16;
 // (connecting cell i to cell `col_indices[scalar_offset + rank]`) lives at
 //   matrix_values[start_row_r + rank*S + c].
 // The right-hand side / solution are packed `rhs[i*S + r]`.
-//
-// This is the CPU mirror of what the WGSL FGMRES/AMG kernel stack reads; the CPU
-// reads the *same assembled buffers* and solves with its own Krylov method.
 
 /// A borrowed block-CSR matrix in the assembly kernel's SoA layout.
 #[derive(Clone, Copy)]
@@ -334,12 +317,10 @@ pub struct BlockCsr<'a> {
     pub threads: usize,
     /// Explicit-SIMD matvec (the GUI "CPU Transpiled (SIMD linear)" option):
     /// `block_spmv` uses monomorphized fixed-S kernels with `wide::f64x4`
-    /// vector accumulators for S = 3/4 instead of the runtime-`s` scalar
-    /// loop (which LLVM cannot fully vectorize at a variable trip count).
-    /// Changes the per-row summation ORDER (per-lane partials + one
-    /// horizontal add instead of a sequential scalar sum), i.e. a
-    /// rounding-level result change — validated by the tolerance suites,
-    /// still bit-exact across thread counts (chunking untouched).
+    /// accumulators for S = 3/4 instead of the runtime-`s` scalar loop (which
+    /// LLVM cannot fully vectorize at a variable trip count). Changes the
+    /// per-row summation ORDER (rounding-level result change), still bit-exact
+    /// across thread counts (chunking untouched).
     pub simd: bool,
 }
 
@@ -429,11 +410,9 @@ impl BlockCsr<'_> {
     /// Explicit-SIMD `block_spmv_range` for compile-time block size `S`
     /// (3 or 4; see the `simd` field docs). Layout facts it exploits: the S
     /// columns of a block row are contiguous in `values`, and `x[j*S..]` is
-    /// contiguous per neighbour — so each neighbour contributes one f64x4
-    /// FMA per block row (S = 3 pads lane 3 with zeros, which contribute
-    /// exactly 0.0 to the horizontal sum). The x vector is loaded ONCE per
-    /// neighbour and reused across all S block rows (the scalar loop reloads
-    /// it per row).
+    /// contiguous per neighbour — so each neighbour contributes one f64x4 FMA
+    /// per block row (S = 3 pads lane 3 with zeros). The x vector is loaded once
+    /// per neighbour and reused across all S block rows.
     fn block_spmv_range_simd<T: Real, const S: usize>(
         &self,
         x: &[T],
@@ -675,12 +654,11 @@ impl<T: Real> Preconditioner<T> for BlockJacobi<T> {
 }
 
 /// Point (scalar-diagonal) Jacobi: `z_i = r_i / A_ii`. Weaker than block-Jacobi
-/// but mirrors the GPU's generic-coupled `Jacobi` preconditioner
-/// (`jacobi_diag_*_inv`). For the marginally-stable compressible Picard system
-/// this weaker preconditioner is essential: block-Jacobi over-converges each
-/// linear solve into a full Newton/Picard correction that excites the
+/// but mirrors the GPU's generic-coupled `Jacobi`. Essential for the
+/// marginally-stable compressible Picard system: block-Jacobi over-converges
+/// each linear solve into a full Newton/Picard correction that excites the
 /// inviscid-margin instability, whereas point-Jacobi + the inexact-Picard stop
-/// (1e-4) yields the damped correction the GPU relies on.
+/// yields the damped correction the GPU relies on.
 pub struct PointJacobi<T: Real> {
     inv_diag: Vec<T>,
 }
@@ -717,12 +695,11 @@ enum SchurInner {
     /// GPU `relax_pressure` ping-pong. One parallel pass per sweep, no
     /// reductions in the sweep loop; residual checked at geometrically spaced
     /// sweeps (4, 8, 16, …) for early exit on easy blocks. Default: the inner
-    /// solve is launch-overhead-bound at bench sizes (BiCGSTAB pays ~13
-    /// parallel ops/iteration and anti-scales beyond 4 threads), so fewer,
-    /// fatter parallel passes win even at a worse per-pass contraction rate.
+    /// solve is launch-overhead-bound at bench sizes, so fewer, fatter parallel
+    /// passes win even at a worse per-pass contraction rate.
     HeavyBall,
-    /// Jacobi-preconditioned BiCGSTAB (the pre-heavy-ball default; also the
-    /// inner solve whenever an AMG hierarchy is active).
+    /// Jacobi-preconditioned BiCGSTAB (also the inner solve whenever an AMG
+    /// hierarchy is active).
     BiCgStab,
     /// Raw AMG V-cycle(s) as the pressure solve (requires the AMG hierarchy) —
     /// fixed work per apply, no reductions.
@@ -761,11 +738,8 @@ pub struct SchurPrecond<'a, T: Real> {
     inner_iters: usize,
     inner_tol: f64,
     /// Compact `A[p_row, u_col]` values, `u_len` per scalar-CSR entry
-    /// (layout `[(scalar_offset + rank) * u_len + i]`). The Schur pre pass
-    /// previously strided the FULL block values array to pick `u_len` floats
-    /// out of every `s*s`-value block (~2 cache lines touched per block to
-    /// use a handful of bytes, per apply, per FGMRES iteration); the compact
-    /// array streams linearly. Same values, same arithmetic — bit-exact.
+    /// (layout `[(scalar_offset + rank) * u_len + i]`) so the Schur pre pass
+    /// streams linearly instead of striding the full `s*s`-value blocks.
     pu_values: Vec<f32>,
     /// Compact `A[u_row, p_col]` values, same layout (the post/velocity-
     /// correction pass's column).
@@ -780,28 +754,22 @@ pub struct SchurPrecond<'a, T: Real> {
     /// (applies, applies that failed to converge — cap-out or stagnation).
     applies: std::cell::Cell<u32>,
     inner_failures: std::cell::Cell<u32>,
-    /// Reusable apply-path scratch (see [`SchurWork`]): every apply
-    /// previously allocated + zero-filled fresh vectors (gp/psol + f32
-    /// mirrors + the heavy-ball ping-pong quad = ~24 MB per apply on the
-    /// 750k nozzle, ~50 applies/step of pure alloc/page-fault churn).
+    /// Reusable apply-path scratch (see [`SchurWork`]) — avoids reallocating +
+    /// zero-filling the gp/psol/f32-mirror/heavy-ball vectors every apply.
     work: std::cell::RefCell<SchurWork<T>>,
-    /// AMG-path Krylov selection. PCG was REFUTED as the default by
-    /// measurement (July 2026, 118k cut-cell obstacle): the "near-SPD"
+    /// AMG-path Krylov selection. Default false (BiCGSTAB): CG's "near-SPD"
     /// premise fails on the real block — cut-cell/BC/deferred-correction
-    /// nonsymmetry makes CG stall at rel 0.4-1.0 within ~4 iterations
-    /// (sometimes diverging past 1.0), every apply becomes a nearly-useless
-    /// preconditioner application, and the warm step regressed 0.25 -> 0.82s
-    /// (3.2x) while BiCGSTAB's extra spmv/V-cycle per iteration buys real
-    /// reduction. Default false (BiCGSTAB);
-    /// `CFD2_CPU_SCHUR_AMG_KRYLOV=cg` opts into the experiment (curvature
-    /// breakdown still one-way-flips back).
+    /// nonsymmetry makes CG stall (or diverge) within a few iterations, while
+    /// BiCGSTAB's extra spmv/V-cycle per iteration buys real reduction.
+    /// `CFD2_CPU_SCHUR_AMG_KRYLOV=cg` opts into it (curvature breakdown
+    /// one-way-flips back).
     amg_use_cg: std::cell::Cell<bool>,
 }
 
-/// Per-apply scratch reused across [`SchurPrecond::apply`] calls. All
-/// buffers are fully overwritten before use (the zero fills that carried
-/// semantics — heavy-ball's from-zero start, the inner solves' x0 = 0 —
-/// are now explicit `fill(0.0)` at the use sites), so reuse is bit-exact.
+/// Per-apply scratch reused across [`SchurPrecond::apply`] calls. All buffers
+/// are fully overwritten before use — from-zero starts (heavy-ball, the inner
+/// solves' x0 = 0) are explicit `fill(0.0)` at the use sites — so reuse is
+/// bit-exact.
 struct SchurWork<T: Real> {
     gp: Vec<T>,
     psol: Vec<T>,
@@ -934,10 +902,9 @@ impl<'a, T: Real> SchurPrecond<'a, T> {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(40);
-        // 1e-1 measured best on BOTH benchmark cases (obstacle 2.19→1.59s,
-        // nozzle 2.49→2.17s warm step): the apply is a preconditioner, so a
-        // loose pressure solve suffices; the outer FGMRES count barely moves
-        // while inner iterations halve. (1e-2 was the pre-AMG default.)
+        // The apply is a preconditioner, so a loose (1e-1) pressure solve
+        // suffices: the outer FGMRES count barely moves while inner iterations
+        // halve.
         let inner_tol = std::env::var("CFD2_CPU_SCHUR_INNER_TOL")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -1068,13 +1035,11 @@ impl<T: Real> Preconditioner<T> for SchurPrecond<'_, T> {
         let (aa, u_idx, diag_u_inv) = (&self.a, &self.u_idx, &self.diag_u_inv);
         let (pu_values, up_values) = (&self.pu_values, &self.up_values);
         let simd = aa.simd && u_len <= 4;
-        // NOTE: a lane-per-component SIMD variant of the PRE pass was
-        // implemented and MEASURED SLOWER (nozzle 49 -> 78 ms/step): the
-        // r-vector lanes need per-component scalar gathers (u_idx is not
-        // contiguous for the thermal models), so assembling the vectors costs
-        // more than the u_len-long scalar FMA chain it replaces. The POST
-        // pass below vectorizes cleanly (contiguous A_up run x broadcast
-        // psol) and keeps its SIMD variant.
+        // The PRE pass is not SIMD-vectorized: the r-vector lanes need
+        // per-component scalar gathers (u_idx is not contiguous for the thermal
+        // models), so assembling the vectors costs more than the u_len-long
+        // scalar FMA chain. The POST pass below vectorizes cleanly (contiguous
+        // A_up run x broadcast psol) and keeps its SIMD variant.
         prof::time(&prof::SCHUR_PRE, || {
             {
                 parallel_cell_chunks_mut2(cells, s, 1, aa.threads, z, gp, |cell0, zc, gpc| {
@@ -1227,9 +1192,8 @@ impl<T: Real> Preconditioner<T> for SchurPrecond<'_, T> {
         self.applies.set(self.applies.get() + 1);
         // Failure accounting drives the one-way AMG switch. Heavy-ball is a
         // fixed-sweep smoother (GPU semantics): missing `inner_tol` at the cap
-        // is NORMAL on hard Poisson blocks (rate ~ sqrt(omega-1) per sweep ⇒
-        // ~0.2 residual reduction at 63 sweeps) and FGMRES converges fine with
-        // it — only a near-total stall (barely any reduction) means the block
+        // is NORMAL on hard Poisson blocks and FGMRES converges fine with it —
+        // only a near-total stall (barely any reduction) means the block
         // genuinely needs the AMG hierarchy.
         let failed = if heavy_ball {
             !stats.converged && stats.rel_residual > 0.7
@@ -1305,17 +1269,14 @@ impl<T: Real> Preconditioner<T> for SchurPrecond<'_, T> {
 
 /// Restarted, flexible GMRES — FGMRES(`restart`) — over a block-CSR matrix with
 /// a pluggable (possibly nonlinear/iterative) preconditioner. Mirrors the GPU's
-/// FGMRES(60) so a variable preconditioner (the Schur complement smoother in
-/// Phase 2) can be slotted in without breaking the Krylov recurrence. `x` is the
-/// initial guess and receives the solution. Convergence is relative to
+/// FGMRES(60) so a variable preconditioner (the Schur complement smoother) can
+/// be slotted in without breaking the Krylov recurrence. `x` is the initial
+/// guess and receives the solution. Convergence is relative to
 /// `rel_scale = min(||b||, ||r0||)` — the GPU `clamp_rel_scale` semantics.
 /// The min matters for warm-started coupled solves whose RHS is dominated by
 /// large ddt/BDF2 terms: there `||r0|| << ||b||`, and a plain `||b||` scale
-/// declares convergence at zero iterations without computing any correction
-/// (measured: the allmach_thermal obstacle case froze bit-exact at its
-/// initial condition on the CPU backend — rel-to-b residual 6.5e-4 was
-/// already under the EW first-outer 1e-2 — while the GPU, with the clamp,
-/// evolved normally).
+/// would declare convergence at zero iterations without computing any
+/// correction.
 #[allow(clippy::too_many_arguments)]
 pub fn fgmres<T: Real>(
     a: &BlockCsr,
@@ -1345,9 +1306,9 @@ pub fn fgmres<T: Real>(
     // Krylov / flexible bases: grown LAZILY. The restart cap `m` is 60, but with a
     // warm start + inexact tolerance only a handful of iterations typically run, so
     // eagerly allocating and zeroing `m+1` full length-`n` vectors wastes GBs of
-    // memset per solve (2*61*n*8 bytes at n=3M). Each basis vector persists across
-    // restart cycles (reused/overwritten), so the bases grow at most to the largest
-    // iteration count actually reached. `h` is tiny (m*(m+1)); keep it dense.
+    // memset per solve. Each basis vector persists across restart cycles
+    // (reused/overwritten), so the bases grow at most to the largest iteration
+    // count actually reached. `h` is tiny (m*(m+1)); keep it dense.
     let mut vbasis: Vec<Vec<T>> = Vec::with_capacity(m + 1);
     let mut zbasis: Vec<Vec<T>> = Vec::with_capacity(m);
     // Hessenberg/Givens bookkeeping in the solve precision (GPU parity: the
@@ -1360,33 +1321,24 @@ pub fn fgmres<T: Real>(
     // Restart-boundary monotonicity guard (the CPU port of the GPU host
     // loop's snapshot/restore): an Arnoldi cycle whose reduced-precision
     // basis lost orthogonality can APPLY an update that GROWS the true
-    // residual; unguarded this compounds across restarts (measured at f32:
-    // the Ghia lid march diverged to ~1e19 while every short run passed).
-    // Track the best-so-far x at the restart-head true-residual checkpoints
-    // and restore it when a cycle made things worse.
+    // residual; unguarded this compounds across restarts. Track the best-so-far
+    // x at the restart-head true-residual checkpoints and restore it when a
+    // cycle made things worse.
     let mut best_x: Vec<T> = Vec::new();
     let mut best_beta = f64::INFINITY;
     const RESTART_GROWTH_TOL: f64 = 1.25;
-    // f32 projection trust: the Givens projection may break a cycle early,
-    // but the claim is VERIFIED at the next restart head (which recomputes
-    // the true residual and makes the actual convergence decision). A cycle
-    // that broke early and fails the head check flips trust off for the rest
-    // of the solve: the gauge-mode solves where the f32 projection lies
-    // (all-wall lid: claimed 1.25e-6 while the applied update grew the true
-    // residual 47x) then run full-length cycles exactly as before, at the
-    // cost of one short wasted cycle plus two head evaluations (the failing
-    // confirmation and the post-restore recompute). Without the early break every EASY
-    // warm-started solve (the common case: EW first-outer 1e-2, inexact
-    // 1e-4 later outers) burns the entire restart length per cycle —
-    // measured on the GUI obstacle default: 60 iterations where f64 takes
-    // 1-4, a 29x step-time regression.
+    // f32 projection trust: the Givens projection may break a cycle early, but
+    // the claim is VERIFIED at the next restart head (which recomputes the true
+    // residual and makes the actual convergence decision). A cycle that broke
+    // early and fails the head check flips trust off for the rest of the solve:
+    // gauge-mode solves where the f32 projection lies then run full-length
+    // cycles. Without the early break every easy warm-started solve burns the
+    // entire restart length per cycle.
     let mut trust_projection = true;
     let mut proj_broke_early = false;
 
     let mut ax = vec![T::ZERO; n];
-    // Reused Arnoldi work vector (was `ax.clone()` per iteration).
     let mut w = vec![T::ZERO; n];
-    // Reused residual buffer (was reallocated each restart).
     let mut r = vec![T::ZERO; n];
     let mut total_iters = 0usize;
     let mut res;
@@ -1397,9 +1349,7 @@ pub fn fgmres<T: Real>(
     loop {
         // r0 = b - A x. This head residual doubles as the restart-cycle
         // convergence/budget guard, so each cycle costs exactly ONE true
-        // residual evaluation (the historical shape recomputed it up to three
-        // times per cycle: before the loop, at the head, and after the
-        // restarted update).
+        // residual evaluation.
         spmv(&xf, &mut ax);
         prof::time(&prof::AXPY, || par_map_into(threads, &mut r, |i| bf[i] - ax[i]));
         let beta = vnorm(&r);
@@ -1491,10 +1441,9 @@ pub fn fgmres<T: Real>(
             }
             if T::IS_F32 {
                 // Re-orthogonalization pass ("twice is enough"): one MGS pass
-                // at f32 loses orthogonality on hard solves — the SAME
-                // failure cluster that made the GPU arm CGS2 on the lid
-                // (Arc C) — and the corrupted updates GREW the true residual
-                // every cycle until the restart guard froze the march.
+                // at f32 loses orthogonality on hard solves, and the corrupted
+                // updates GREW the true residual every cycle until the restart
+                // guard froze the march.
                 for i in 0..=j {
                     let d = vdot(&w, &vbasis[i]);
                     h[j][i] += T::from_f64(d);
@@ -1533,12 +1482,10 @@ pub fn fgmres<T: Real>(
             total_iters += 1;
             jfin = j + 1;
             res = g[j + 1].abs().to_f64();
-            // At f32 the Givens PROJECTION residual is not trustworthy on
-            // hard solves (measured on the lid: projection 1.25e-6 while the
-            // applied update GREW the true residual 47x). Convergence is
-            // therefore DECIDED only at restart heads (true residual); the
-            // projection may merely propose an early cycle break while it is
-            // still trusted — see `trust_projection` above.
+            // At f32 the Givens PROJECTION residual is not trustworthy on hard
+            // solves. Convergence is therefore DECIDED only at restart heads
+            // (true residual); the projection may merely propose an early cycle
+            // break while it is still trusted — see `trust_projection` above.
             let proj_converged = (!T::IS_F32 || trust_projection) && res / rs <= tol;
             if proj_converged || hnext < T::TINY || total_iters >= max_iter {
                 proj_broke_early = T::IS_F32 && proj_converged;
@@ -1564,11 +1511,10 @@ pub fn fgmres<T: Real>(
         // all-wall lid: pressure defined up to a constant) H is near-singular
         // and the tiny pivots pump enormous y components along near-null
         // directions. At f64 their residual contribution still cancels
-        // (eps64 headroom); at f32 it does NOT — measured: the projection
-        // claimed 1e-6 while the applied update grew the true residual 47x.
-        // Dropping pivots below 1e-5 of the largest (truncated least squares)
-        // bounds y at a negligible cost in attainable residual. The f64 path
-        // keeps the absolute TINY guard only.
+        // (eps64 headroom); at f32 it does NOT. Dropping pivots below 1e-5 of
+        // the largest (truncated least squares) bounds y at a negligible cost
+        // in attainable residual. The f64 path keeps the absolute TINY guard
+        // only.
         let pivot_floor = if T::IS_F32 {
             let hmax = (0..jfin).fold(0.0f64, |m, i| m.max(h[i][i].abs().to_f64()));
             (1e-5 * hmax).max(T::TINY)
@@ -1674,12 +1620,11 @@ pub fn bicgstab<T: Real>(
 ///
 /// Each sweep is ONE parallel pass (residual, diagonal scale and momentum
 /// update fused per row) with no reductions — the whole point: the inner solve
-/// at bench sizes is scoped-thread launch-overhead-bound, and BiCGSTAB pays
-/// ~13 launches per iteration. The residual is measured only at geometrically
-/// spaced sweeps (4, 8, 16, …, max_sweeps) so easy blocks (the all-Mach
-/// diagonal-boosted pressure row) exit after a few sweeps while hard Poisson
-/// blocks run the full budget as a FIXED linear operator — which is exactly
-/// what FGMRES wants from a preconditioner.
+/// at bench sizes is scoped-thread launch-overhead-bound. The residual is
+/// measured only at geometrically spaced sweeps (4, 8, 16, …, max_sweeps) so
+/// easy blocks (the all-Mach diagonal-boosted pressure row) exit after a few
+/// sweeps while hard Poisson blocks run the full budget as a FIXED linear
+/// operator — which is exactly what FGMRES wants from a preconditioner.
 ///
 /// Deterministic: sweeps write each row once from read-only inputs (ping-pong
 /// buffers), and the exit decision comes from `par_dot` — bit-identical across
@@ -1706,10 +1651,8 @@ fn heavy_ball_solve<T: Real>(
     // overwritten — element-local, so the chunked write stays race-free;
     // neighbour reads touch only `cur`).
     //
-    // The four sweep buffers live in the caller's reusable workspace
-    // (allocating ~4n per apply measured as ~24 MB/apply x ~50 applies/step
-    // of alloc + page-fault churn on the 750k nozzle); the explicit zero
-    // fills reproduce the fresh-alloc from-zero start bit-exactly.
+    // The four sweep buffers live in the caller's reusable workspace; the
+    // explicit zero fills reproduce the fresh-alloc from-zero start bit-exactly.
     work.resize(4 * n, T::ZERO);
     work.fill(T::ZERO);
     let (mut cur, rest) = work.split_at_mut(n);
@@ -1722,8 +1665,7 @@ fn heavy_ball_solve<T: Real>(
     // axis as omega -> 2; pressure blocks with an upwinded `div_flux(phi, p)`
     // (slightly complex spectrum) or near-null gauge modes can be AMPLIFIED at
     // omega 1.95 even though plain Jacobi converges — and once one apply
-    // amplifies, FGMRES feeds the unstable modes right back (measured: apply 1
-    // rel 0.56, applies 2+ rel ~22 on the cut-cell obstacle). On growth vs the
+    // amplifies, FGMRES feeds the unstable modes right back. On growth vs the
     // best iterate: halve the momentum and restart from the best; after
     // repeated decays bail with the best iterate (feeds the AMG switch).
     let mut best_rel = 1.0f64; // x = 0 has relative residual exactly 1
@@ -1784,15 +1726,12 @@ fn heavy_ball_solve<T: Real>(
                 best.copy_from_slice(cur);
                 strikes = 0;
             } else if T::IS_F32 {
-                // f32 runs the sweeps GPU-BLIND: on near-critical blocks
-                // (lid: lam_max(DinvA) ~ 1.975 at omega 1.95) the f32-measured
-                // residual hovers ~1.0 through the transient and the f64
-                // strike/decay safeguard below misreads that as divergence —
-                // bailing with the ZERO iterate and starving FGMRES of its
-                // pressure preconditioning (measured: the Ghia march froze at
-                // an undeveloped state). The GPU, which passes Ghia at f32,
-                // runs these sweeps blind; the final iterate's low-frequency
-                // content is what flexible FGMRES actually needs. Only a
+                // f32 runs the sweeps GPU-BLIND: on near-critical blocks the
+                // f32-measured residual hovers ~1.0 through the transient and
+                // the f64 strike/decay safeguard below would misread that as
+                // divergence — bailing with the ZERO iterate and starving
+                // FGMRES of its pressure preconditioning. The final iterate's
+                // low-frequency content is what flexible FGMRES needs; only a
                 // genuine blow-up restores `best`, after the loop.
             } else {
                 // Non-improving check. Heavy-ball residuals overshoot
@@ -1839,10 +1778,9 @@ fn heavy_ball_solve<T: Real>(
         // Accept the final iterate only when it is NOT net-amplified: an
         // iterate with rel >~ 1.5 carries momentum-amplified modes whose
         // magnitude poisons the downstream f32 Arnoldi (eps32 * ||z|| errors
-        // in H become comparable to the outer residual itself — measured on
-        // the lid: the projection claimed 1e-6 while the applied update GREW
-        // the true residual 47x). Otherwise fall back to the best iterate
-        // (typically near-zero: a weak but benign preconditioner apply).
+        // in H become comparable to the outer residual itself). Otherwise fall
+        // back to the best iterate (typically near-zero: a weak but benign
+        // preconditioner apply).
         if final_rel.is_finite() && final_rel <= 1.5f64.max(1.05 * best_rel) {
             x.copy_from_slice(cur);
             return SolveStats {
@@ -1918,12 +1856,10 @@ fn pad4_f32(v: &[f32]) -> wide::f64x4 {
 /// Mixed-precision heavy-ball inner solve (the SIMD/mixed-precision option):
 /// identical iteration to [`heavy_ball_solve`] but with the sweep state
 /// (`cur`/`prev`/`scratch`/`best`) and RHS in f32 storage — the sweep is
-/// memory-BANDWIDTH-bound (measured ~54 MB/sweep at ~74 GB/s on the 750k
-/// nozzle), so halving the vector bytes is the lever f64 SIMD arithmetic
-/// could not be. The inner tolerance is 1e-1 (a preconditioner apply under
-/// flexible FGMRES), leaving orders of magnitude of accuracy budget; the
-/// residual-check norms accumulate in f64 via the deterministic
-/// [`par_dot_f32`], and the safeguard logic is unchanged.
+/// memory-BANDWIDTH-bound, so halving the vector bytes is the lever f64 SIMD
+/// arithmetic could not be. The inner tolerance is 1e-1 (a preconditioner apply
+/// under flexible FGMRES); the residual-check norms accumulate in f64 via the
+/// deterministic [`par_dot_f32`], and the safeguard logic is unchanged.
 #[allow(clippy::too_many_arguments)]
 fn heavy_ball_solve_mixed<T: Real>(
     pa: &CsrView,
@@ -2106,7 +2042,6 @@ pub fn bicgstab_pc_opts<T: Real>(
     let mut v = vec![T::ZERO; n];
     let mut p = vec![T::ZERO; n];
     let (mut phat, mut shat, mut t) = (vec![T::ZERO; n], vec![T::ZERO; n], vec![T::ZERO; n]);
-    // Hoisted s-vector (was a fresh allocation every iteration).
     let mut sv = vec![T::ZERO; n];
     // Stagnation tracking (see `stagnation_exit`).
     let mut best_res = res;
@@ -2641,12 +2576,9 @@ mod block_tests {
     #[test]
     fn fgmres_f32_easy_solve_breaks_cycle_early() {
         // Regression for the f32 over-solve: while the f32 projection is
-        // TRUSTED it may propose an early cycle break (verified at the
-        // restart head). Before the fix f32 never broke a cycle on the
-        // projection, so this easy diagonally-dominant solve burned the
-        // full restart length (60) per cycle — measured as a 29x step-time
-        // regression on the GUI obstacle default, where f64 took 1-4
-        // iterations per warm-started solve.
+        // TRUSTED it may propose an early cycle break (verified at the restart
+        // head), so this easy diagonally-dominant solve must not burn the full
+        // restart length (60) per cycle.
         let n = 50usize;
         let mut sro = vec![0u32];
         let mut ci = Vec::new();
@@ -2725,7 +2657,6 @@ mod block_tests {
         let m = BlockJacobi::<f64>::new(&a);
         let stats = fgmres(&a, &b, &mut x, &m, 40, 400, 1e-10, true);
         assert!(stats.converged, "did not converge: {stats:?}");
-        // residual
         let mut max_r = 0.0f64;
         for i in 0..n {
             let start = sro[i] as usize;

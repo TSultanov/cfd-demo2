@@ -12,11 +12,10 @@ fn mesh_smoothing_benchmark(c: &mut Criterion) {
     };
     let domain_size = Vector2::new(2.0, 1.0);
 
-    // Requested cell size
     let min_cell_size = 0.00175;
     let max_cell_size = 0.00175;
 
-    // Generate mesh once
+    // Generate once; each bench iteration clones this.
     let mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, 1.2, domain_size);
 
     let mut group = c.benchmark_group("mesh_smoothing");

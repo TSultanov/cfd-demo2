@@ -1,30 +1,16 @@
-//! M1 stage-2 parity gates for the GPU meshless Voronoi engine
+//! Parity gates for the GPU meshless Voronoi engine
 //! (`src/solver/gpu/voronoi/`), interior-only bbox configuration:
 //!
-//! 1. ZERO-TOLERANCE topology gate: NO cell may claim `SUCCESS` while its
-//!    eps_face-filtered neighbor set (bisector ids, canonicalized through
-//!    the coalescing table, AND bbox sides) disagrees with the CPU f64
-//!    `build_diagram` oracle on the SAME f32-rounded seed values (review
-//!    F4). Any such cell is a kernel/filter bug, not a tolerance.
-//! 2. Every disagreement must be *flagged* (epsilon filter / hard status),
-//!    `resolve_flagged` must patch it to the exact f64 result, and the
-//!    merged diagram must be full-parity and reciprocal.
-//! 3. Flag-rate budget ≤ 2e-3 on Poisson-like sets (reported per class);
-//!    zero VERT/FACE overflow statuses everywhere.
-//! 4. Geometry parity (`SUCCESS` + patched cells): cell area rel < 1e-5,
-//!    centroid (seed-relative) < 1e-5 · local h.
-//! 5. Run-to-run byte stability of all deterministic outputs; a kernel
-//!    timing datapoint at ~30k seeds.
-//!
-//! Adversarial classes (mirroring the M0 fuzz battery): near/exact
-//! cocircular lattices (jitter sweep down to exactly cocircular) and
-//! knife-edge twins + exact duplicates planted in a Poisson-like set.
-//!
-//! Run with:
-//!
-//! ```sh
-//! cargo test --features meshgen --test gpu_voronoi_parity_test -- --nocapture
-//! ```
+//! 1. ZERO-TOLERANCE topology: no `SUCCESS` cell may have its eps_face-filtered
+//!    neighbor set (bisector ids canonicalized through the coalescing table, plus
+//!    bbox sides) disagree with the CPU f64 `build_diagram` oracle on the same
+//!    f32-rounded seeds. Any such cell is a kernel/filter bug, not a tolerance.
+//! 2. Every disagreement must be flagged; `resolve_flagged` patches it to the
+//!    exact f64 result; the merged diagram must be full-parity and reciprocal.
+//! 3. Flag-rate budget ≤ 2e-3 on Poisson-like sets; zero VERT/FACE overflows.
+//! 4. Geometry parity (`SUCCESS` + patched): area rel < 1e-5, centroid
+//!    (seed-relative) < 1e-5 · local h.
+//! 5. Run-to-run byte stability of all deterministic outputs.
 
 #![cfg(feature = "meshgen")]
 
@@ -76,7 +62,7 @@ fn gpu_context() -> Option<GpuContext> {
 }
 
 /// Coalescing table over the f32-rounded seeds — the same rule the engine
-/// and the M0 oracle apply (`canon[i]` = lowest index of i's quantize bin).
+/// and the CPU oracle apply (`canon[i]` = lowest index of i's quantize bin).
 fn canon_map(pts: &[Point2<f64>], tol: &MeshgenTolerances) -> Vec<u32> {
     let mut first: HashMap<(i64, i64), u32> = HashMap::with_capacity(pts.len());
     let mut canon = vec![0u32; pts.len()];
@@ -159,7 +145,7 @@ struct CaseStats {
     patched: usize,
 }
 
-/// Full stage-2 gate run for one seed set. `spacing` scales the meshgen
+/// Full gate run for one seed set. `spacing` scales the meshgen
 /// tolerances (as `min_cell_size = spacing / 2`); `poisson_budget` applies
 /// the 2e-3 flag-rate budget (Poisson-like classes only).
 fn run_case(
@@ -174,7 +160,7 @@ fn run_case(
     let tol = MeshgenTolerances::from_geometry(0.5 * spacing, DOMAIN);
 
     // f32-rounded seeds: what the kernel sees AND what the CPU oracle gets
-    // (widened back to f64 — exact). Review F4.
+    // (widened back to f64 — exact).
     let seeds_f32: Vec<f32> = seeds
         .iter()
         .flat_map(|p| [p.x as f32, p.y as f32])
@@ -450,9 +436,7 @@ fn gpu_voronoi_interior_parity_30k() {
     run_case("30k", seeds, DOMAIN.y / 123.0, true, true);
 }
 
-/// Design-scale interior gate (stage-5 review: design §8.3 gate 1 commits
-/// to parity at bench scale, previously only run to 30k). Full stage-2
-/// protocol at ~300k seeds. dev-tests-gated: run in release.
+/// Full protocol at ~300k seeds. dev-tests-gated: run in release.
 #[cfg(feature = "dev-tests")]
 #[test]
 fn gpu_voronoi_interior_parity_300k() {
@@ -460,8 +444,8 @@ fn gpu_voronoi_interior_parity_300k() {
     run_case("300k", seeds, DOMAIN.y / 388.0, true, true);
 }
 
-/// Near-cocircular lattices (M0 fuzz class (c) analog): a 64×32 lattice on
-/// an exactly f32-representable pitch (2/64 = 2⁻⁵), jitter swept from
+/// Near-cocircular lattices: a 64×32 lattice on an exactly f32-representable
+/// pitch (2/64 = 2⁻⁵), jitter swept from
 /// Poisson-like down to EXACTLY cocircular (every interior Voronoi vertex
 /// is a 4-seed tie; amp 1e-6 of the pitch is sub-f32-ulp, i.e. seeds land
 /// 0-1 ulp off the exact lattice). Flag rates are expected to be large
@@ -483,9 +467,9 @@ fn gpu_voronoi_adversarial_near_cocircular() {
     }
 }
 
-/// Knife-edge twins + exact duplicates in a Poisson-like set (M0 fuzz
-/// classes (d)/(e)/(f) analog): twin gaps swept from 1e-2 down to 1e-5 of
-/// the pitch (the smallest is a handful of f32 ulps — some twins collapse
+/// Knife-edge twins + exact duplicates in a Poisson-like set: twin gaps
+/// swept from 1e-2 down to 1e-5 of the pitch (the smallest is a handful of
+/// f32 ulps — some twins collapse
 /// to identical f32 values and must coalesce), plus exact duplicates that
 /// must coalesce to `EMPTY_CELL` on both engines.
 #[test]

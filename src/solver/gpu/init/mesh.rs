@@ -21,11 +21,9 @@ pub struct MeshResources {
     pub b_scalar_row_offsets: wgpu::Buffer,
     pub b_scalar_col_indices: wgpu::Buffer,
     /// ALE mesh face fluxes: per-face volumetric swept rate `V̇_f` (f32,
-    /// Volume/Time, owner-signed like `fluxes`). Allocated zero-filled ALWAYS
-    /// — non-ALE models never bind it, and ALE models over a static mesh bind
-    /// zeros so the mesh-relative subtraction vanishes bitwise (mirrors the
-    /// `face_wrap_shift` empty-means-zero convention). Written per step by
-    /// the moving-mesh loop (M4) from swept-face geometry.
+    /// Volume/Time, owner-signed like `fluxes`). Always zero-filled at alloc —
+    /// non-ALE models never bind it, and ALE over a static mesh binds zeros so
+    /// the mesh-relative subtraction vanishes bitwise.
     pub b_mesh_fluxes: wgpu::Buffer,
     /// ALE volume history `V^n` (f32, cells). Seeded equal to `cell_vols` at
     /// creation and by `seed_volume_history`; rotated by the refresh/ALE-step
@@ -131,11 +129,11 @@ impl MeshResources {
         Ok(())
     }
 
-    /// Tier B topology refresh (M2): the incoming mesh keeps the SAME cell
+    /// Tier B topology refresh: the incoming mesh keeps the SAME cell
     /// count (invariant) but may have a different face set, adjacency and
     /// boundary classification. Every topology-derived buffer is rebuilt from
-    /// `mesh` at its new exact size (per design §1.4: reallocate rather than
-    /// pad — bind groups and `arrayLength` guards are size-load-bearing) by
+    /// `mesh` at its new exact size (reallocate rather than pad — bind groups
+    /// and `arrayLength` guards are size-load-bearing) by
     /// delegating to [`init_mesh`], which is the single source of truth for the
     /// CSR builders and buffer layout. Only the two ALE volume-history buffers
     /// (`cell_vols_old{,_old}`) are carried over untouched — they are
@@ -167,10 +165,10 @@ impl MeshResources {
         Ok(())
     }
 
-    /// ALE step entry (M3.2): rotate the volume history, upload the new
-    /// geometry, upload the (f32-closed) mesh face fluxes — in that order.
+    /// ALE step entry: rotate the volume history, upload the new geometry,
+    /// upload the (f32-closed) mesh face fluxes — in that order.
     ///
-    /// Ordering is the whole point (review F3): the rotation must capture the
+    /// Ordering is the whole point: the rotation must capture the
     /// CURRENT `cell_vols` as `V^n` **before** `refresh_geometry` overwrites
     /// them with `V^{n+1}`. That is why the rotation lives here, in the
     /// refresh/ALE-step seam, and NOT in `host_prepare_step`
@@ -248,7 +246,6 @@ impl MeshResources {
         queue.submit(std::iter::once(encoder.finish()));
     }
 
-    /// Return the list of all binding names this resource can resolve.
     pub fn binding_names(&self) -> &'static [&'static str] {
         &[
             "cell_centers",
@@ -283,9 +280,7 @@ pub fn init_mesh(
     // truth so init, refresh, and both backends see bit-identical geometry.
     let geo = mesh_geometry_f32(mesh);
 
-    // --- CSR Matrix Structure (factored builder — Tier B refresh reuses it;
-    // byte-equivalence to the historical inlined logic is gated by
-    // tests/csr_builder_equivalence_test.rs) ---
+    // Factored CSR matrix-structure builder (also reused by Tier B refresh).
     let csr = build_sorted_scalar_csr(mesh)?;
     let scalar_row_offsets = csr.row_offsets;
     let scalar_col_indices = csr.col_indices;
@@ -313,7 +308,6 @@ pub fn init_mesh(
         wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
     );
 
-    // --- Mesh Buffers ---
     let face_owner: Vec<u32> = mesh.face_owner.iter().map(|&x| x as u32).collect();
     let b_face_owner = create_buffer_with_capacity(
         device,
@@ -422,8 +416,8 @@ pub fn init_mesh(
         wgpu::BufferUsages::STORAGE,
     );
 
-    // COPY_DST: rewritten in place by a Tier-B topology refresh (and by the
-    // M5 GPU-resident regeneration path).
+    // COPY_DST: rewritten in place by a Tier-B topology refresh (and the
+    // GPU-resident regeneration path).
     let b_cell_face_matrix_indices = create_buffer_with_capacity(
         device,
         "Cell Face Matrix Indices Buffer",

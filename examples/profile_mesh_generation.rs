@@ -17,15 +17,11 @@ fn main() {
     println!("Generated mesh with {} cells", mesh.num_cells());
     assert!(mesh.num_cells() > 0);
 
-    // Check for negative volumes
     for (i, &vol) in mesh.cell_vol.iter().enumerate() {
         assert!(vol > 0.0, "Cell {} has non-positive volume: {}", i, vol);
     }
 
-    // Check skewness
     let max_skew = mesh.calculate_max_skewness();
     println!("Max skewness: {}", max_skew);
-    // Assuming we want reasonable quality, though cut cells can be skewed.
-    // Just ensuring it doesn't crash and produces something valid.
     assert!(max_skew < 1.0, "Skewness too high: {}", max_skew);
 }

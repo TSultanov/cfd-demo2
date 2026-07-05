@@ -6,7 +6,6 @@ use crate::solver::model::backend::typed_ast::{
     typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
 use crate::solver::model::ports::PortRegistry;
-// si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_codegen::solver::codegen::dsl::XY;
 use cfd2_ir::dimensions::{
     Density, DivDim, DynamicViscosity, Force, InvTime, Length, MassFlux, Pressure, Velocity,
@@ -60,24 +59,13 @@ pub enum ViscousStressForm {
     LaplacianOnly,
     /// Plus the explicit transpose/deviatoric correction
     /// `div(mu * dev2((grad U)^T))` — the OpenFOAM simpleFoam laminar UEqn
-    /// form. Completes the full viscous stress divergence; the correction
-    /// is analytically zero for div-free fields but discretely nonzero
-    /// (measured 2-6% of local viscous at the lid corners, 662ff9f).
+    /// form. Analytically zero for div-free fields but discretely nonzero.
     FullDev2,
 }
 
-/// DECISION RECORD (June 12, 2026, Arc D): `FullDev2` is the shipped
-/// default. Measured on the OpenFOAM references vs `LaplacianOnly`:
-///   lid      u 0.1486 → 0.0933 (−37%),  p 0.2377 → 0.1105 (−54%)
-///   backstep u 0.0820 → 0.0801 (−2.3%), p 0.1495 → 0.1126 (−25%)
-///   channel  u 0.0788 → 0.0800 (+1.6%), p 0.1285 → 0.1154 (−10%)
-/// The corner-singular lid/backstep mismatch was largely the missing
-/// transpose stress. The channel-u +1.6% is the one tracked-error growth,
-/// explicitly accepted: the term is the reference solver's own UEqn
-/// formulation, and every other metric improves 10–54%. MMS orders hold
-/// (SOU u 1.87, p 1.69; the term is analytically zero for div-free fields
-/// and its discrete residual vanishes at O(h²) — finest Taylor-Green u
-/// error improved 21%). Bands ratcheted in the same changeset.
+/// `FullDev2` is the shipped default: adding the reference solver's transpose
+/// stress cuts the corner-singular lid/backstep pressure error. MMS orders
+/// hold (the term is analytically zero for div-free fields, residual O(h²)).
 const VISCOUS_STRESS_FORM: ViscousStressForm = ViscousStressForm::FullDev2;
 
 fn build_incompressible_momentum_system(
@@ -85,12 +73,9 @@ fn build_incompressible_momentum_system(
     with_mms_source: bool,
     ale: bool,
 ) -> EquationSystem {
-    // NOTE: This model uses typed builder APIs with explicit cast_to() calls to align
-    // terms to canonical dimension types. The type-level dimension expressions are not
-    // normalized, so semantically equivalent dimensions (e.g., MassFlux * Velocity vs
-    // MomentumDensity * Volume / Time) are different types; cast_to::<Force>() unifies them.
-
-    // Build typed field and flux references
+    // Type-level dimension expressions are not normalized, so semantically
+    // equivalent dimensions (e.g. MassFlux*Velocity vs MomentumDensity*Volume/Time)
+    // are distinct types; the explicit cast_to::<Force>() calls unify them.
     let u_typed = TypedFieldRef::<Velocity, Vector2>::new("U");
     let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
     let phi_typed = TypedFluxRef::<MassFlux, Scalar>::new("phi");
@@ -98,35 +83,31 @@ fn build_incompressible_momentum_system(
     let mu_typed = TypedFieldRef::<DynamicViscosity, Scalar>::new("mu");
     let d_p_typed = TypedFieldRef::<cfd2_ir::dimensions::D_P, Scalar>::new("d_p");
 
-    // Build coefficients
     let rho_coeff = TypedCoeff::from_field(rho_typed);
     let mu_coeff = TypedCoeff::from_field(mu_typed);
     let rho_dp_coeff =
         TypedCoeff::from_field(rho_typed).multiply(TypedCoeff::from_field(d_p_typed));
 
-    // Build momentum equation terms
-    // ddt(rho, U): integrated unit is MomentumDensity * Volume / Time = Force
+    // ddt(rho, U): integrated unit MomentumDensity*Volume/Time = Force
     let ddt_term = typed_fvm::ddt_coeff(rho_coeff, u_typed);
 
-    // div(phi, U): integrated unit is MassFlux * Velocity = Force.
+    // div(phi, U): integrated unit MassFlux*Velocity = Force.
     // Declared bounded (OpenFOAM `bounded Gauss`): assembly subtracts the
-    // continuity defect (div phi) * U_P from the diagonal, matching the
-    // reference solver's convection form while the flux is not exactly
-    // divergence-free.
+    // continuity defect (div phi)*U_P from the diagonal, matching the
+    // reference convection form while the flux is not exactly div-free.
     let mut div_term = typed_fvm::div(phi_typed, u_typed).bounded();
     if ale {
-        // ALE variant: convection consumes the mesh-relative flux
-        // `phi - rho * mesh_fluxes[face]` (see `Term::relative_to_mesh`).
+        // Convection consumes the mesh-relative flux `phi - rho*mesh_fluxes[face]`
+        // (see `Term::relative_to_mesh`).
         div_term = div_term.with_mesh_relative();
     }
 
-    // laplacian(mu, U): integrated unit is DynamicViscosity * Velocity * Area / Length = Force
+    // laplacian(mu, U): integrated unit DynamicViscosity*Velocity*Area/Length = Force
     let laplacian_term = typed_fvm::laplacian(mu_coeff, u_typed);
 
-    // grad(p): integrated unit is Pressure * Area = Force
+    // grad(p): integrated unit Pressure*Area = Force
     let grad_term = typed_fvc::grad(p_typed);
 
-    // Cast all terms to Force and add
     let mut momentum_sum = ddt_term.cast_to::<Force>()
         + div_term.cast_to::<Force>()
         + laplacian_term.cast_to::<Force>()
@@ -139,8 +120,7 @@ fn build_incompressible_momentum_system(
             + typed_fvc::div_dev2_grad_transpose(mu_coeff2, u_typed).cast_to::<Force>();
     }
     if with_mms_source {
-        // Manufactured per-component momentum source (MMS): one more
-        // declared equation term, exactly like the scalar MMS variants.
+        // Manufactured per-component momentum source (MMS).
         let mms_src_typed = TypedFieldRef::<DivDim<Force, cfd2_ir::dimensions::Volume>, Vector2>::new(
             INCOMPRESSIBLE_MMS_SOURCE_FIELD,
         );
@@ -149,7 +129,6 @@ fn build_incompressible_momentum_system(
     }
     let momentum_eqn = momentum_sum.eqn(u_typed);
 
-    // Build pressure equation terms
     // laplacian(rho*d_p, p): integrated unit is (rho*d_p) * Pressure * Area / Length = MassFlux
     // where rho*d_p has units: Density * (Volume*Time/Mass) = Time (since Volume/Mass = 1/Density)
     // So the unit is: Time * Pressure * Area / Length = Time * (Mass/(Length*Time^2)) * Length
@@ -159,13 +138,12 @@ fn build_incompressible_momentum_system(
     // div_flux(phi, p): integrated unit is MassFlux
     let mut p_div_flux_term = typed_fvm::div_flux(phi_typed, p_typed);
     if ale {
-        // Continuity on the moving mesh is also mesh-relative. The
-        // compensating volume-change source (`+rho*(V^{n+1}-V^n)/dt`, exact
-        // by SCL construction) lands with the moving-volume ddt (M3.2).
+        // Continuity on the moving mesh is also mesh-relative. The compensating
+        // volume-change source (`+rho*(V^{n+1}-V^n)/dt`, exact by SCL
+        // construction) lands with the moving-volume ddt.
         p_div_flux_term = p_div_flux_term.with_mesh_relative();
     }
 
-    // Cast all terms to MassFlux and add
     let pressure_eqn = (p_laplacian_term.cast_to::<MassFlux>()
         + p_div_flux_term.cast_to::<MassFlux>())
     .eqn(p_typed);
@@ -174,7 +152,6 @@ fn build_incompressible_momentum_system(
     system.add_equation(momentum_eqn);
     system.add_equation(pressure_eqn);
 
-    // Validate units to ensure the system is consistent (debug builds only)
     system
         .validate_units()
         .expect("incompressible momentum system failed unit validation");
@@ -198,26 +175,19 @@ pub fn incompressible_momentum_mms_model() -> Result<ModelSpec, String> {
 }
 
 /// ALE (moving-mesh) variant of `incompressible_momentum`: identical physics
-/// declaration except the convection terms — `div(phi, U).bounded()` and
-/// `div_flux(phi, p)` — are declared `.with_mesh_relative()`, so assembly
-/// consumes `phi_rel = phi - rho * mesh_fluxes[face]` (M3 of the
-/// meshless/moving-mesh roadmap). Registered exactly like the `_mms`
-/// variants: its own model id gets its own generated kernels, and static
-/// models stay byte-identical. With the (always-allocated) `mesh_fluxes`
-/// buffer zero-filled and equal volume history this reproduces the static
-/// model's results bitwise (`x - rho*0.0` is an IEEE identity; gated by
-/// tests/ale_zero_flux_equivalence_test.rs).
+/// except the convection terms — `div(phi, U).bounded()` and `div_flux(phi, p)`
+/// — are declared `.with_mesh_relative()`, so assembly consumes
+/// `phi_rel = phi - rho * mesh_fluxes[face]`. Its own model id gets its own
+/// generated kernels. With `mesh_fluxes` zero-filled and equal volume history
+/// this reproduces the static model bitwise (`x - rho*0.0` is an IEEE identity).
 pub fn incompressible_momentum_ale_model() -> Result<ModelSpec, String> {
     incompressible_momentum_model_impl(false, true)
 }
 
-/// ALE + MMS combined variant (prescribed-motion MMS, M3.3): the
-/// mesh-relative convection of `_ale` plus the manufactured momentum source
-/// of `_mms`, under its own model id (own generated kernels; the pairwise
-/// variants stay byte-identical). Used by tests/mms_ale_order_test.rs to
-/// measure convergence orders on a prescribed smoothly-deforming mesh — the
-/// manufactured source is re-evaluated at the moved cell centroids every
-/// step (`set_field_vec2_current`, history-preserving).
+/// ALE + MMS combined variant (prescribed-motion MMS): the mesh-relative
+/// convection of `_ale` plus the manufactured momentum source of `_mms`, under
+/// its own model id. The manufactured source is re-evaluated at the moved cell
+/// centroids every step (`set_field_vec2_current`, history-preserving).
 pub fn incompressible_momentum_ale_mms_model() -> Result<ModelSpec, String> {
     incompressible_momentum_model_impl(true, true)
 }
@@ -238,46 +208,26 @@ fn incompressible_momentum_model_impl(with_mms_source: bool, ale: bool) -> Resul
         ));
     }
     let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
-    // d_p stays the closed form. Two assembled-matrix alternatives exist
-    // (June 2026, both probed via tests/dp_diag_probe.rs):
+    // d_p stays the closed form. Two assembled-matrix alternatives exist:
     //
-    // - DpFormulation::FromAssembledDiagonal (OpenFOAM rAU, d_p = V/a_P):
-    //   kernel VERIFIED correct, but the coupled outer loop's gain at the
-    //   Schur-consistent d_p scale is >1 even with f32-floor linear solves
-    //   (|u| x3.5/step in an unforced box; alpha pairings and theta-damping
-    //   all amplify). Pressure-row equilibration CANNOT fix this: it is a
-    //   pure row scaling, and the amplification survives near-exact solves,
-    //   so the exact-solve outer map itself is unstable at that scale.
-    //
-    // - DpFormulation::FromAssembledRowSum (SIMPLEC, d_p = V/Σ_row a):
-    //   STABLE by construction (interior row sum = ddt coefficient, so the
-    //   interior d_p stays at the proven closed-form scale; Dirichlet
-    //   boundaries shrink it locally). All 5 MMS suites green; u/p errors
-    //   strictly better per level on the momentum MMS. OpenFOAM measured
-    //   TWICE, in both viscous-stress eras, same verdict:
-    //   - pre-dev2 (June 11): channel u 0.079→0.047 / p 0.129→0.067,
-    //     backstep +3%, lid u 0.149→0.165 (+11%).
-    //   - under dev2 (June 12, Arc S re-measurement): channel
-    //     u 0.080→0.031 / p 0.115→0.052 (−62%/−55%), backstep +4%,
-    //     lid u 0.093→0.118 / p 0.110→0.139 (+27%, band fail).
-    //   The lid penalty is INTRINSIC to the boundary-shrunk d_p on
-    //   wall-bounded recirculating flows — it persists (relatively worse)
-    //   after the transpose-stress fix removed most of the corner error,
-    //   so it is not a corner-singularity interaction. PERMANENTLY
-    //   default-off under the no-growth policy. Flip this call to
-    //   derive_rhie_chow_with_dp(.., FromAssembledRowSum { theta: 0.5 })
-    //   for inlet-dominated flows where the channel-like gains matter.
+    // - FromAssembledDiagonal (OpenFOAM rAU, d_p = V/a_P): the coupled outer
+    //   loop's gain at this d_p scale is >1 even with near-exact linear solves,
+    //   so the outer map is unstable — row equilibration (a pure row scaling)
+    //   cannot fix it.
+    // - FromAssembledRowSum (SIMPLEC, d_p = V/Σ_row a): stable by construction
+    //   and better on inlet-dominated flows, but the boundary-shrunk d_p
+    //   intrinsically penalizes wall-bounded recirculating flows (lid), so it
+    //   is default-off. Flip this call to
+    //   derive_rhie_chow_with_dp(.., FromAssembledRowSum { theta: 0.5 }) to use it.
     let derived_rhie_chow =
         crate::solver::model::flux_derivation::derive_rhie_chow(&system, &layout)
             .map_err(|e| format!("failed to derive Rhie–Chow flux: {e}"))?;
 
-    // Port-based validation and offset resolution (replaces ad-hoc StateLayout lookups)
     let (u0, u1, p) = {
         use crate::solver::model::ports::{PortRegistry, Pressure, Velocity};
 
         let mut registry = PortRegistry::new(layout.clone());
 
-        // Validate required fields with clear errors
         registry
             .validate_vector2_field::<Velocity>("incompressible_momentum_model", "U")
             .map_err(|e| format!("state layout validation failed: {e}"))?;
@@ -285,7 +235,6 @@ fn incompressible_momentum_model_impl(with_mms_source: bool, ale: bool) -> Resul
             .validate_scalar_field::<Pressure>("incompressible_momentum_model", "p")
             .map_err(|e| format!("state layout validation failed: {e}"))?;
 
-        // Resolve offsets via ports (no StateLayout probing in this function)
         let u_port = registry
             .register_vector2_field::<Velocity>("U")
             .map_err(|e| format!("U field registration failed: {e}"))?;
@@ -309,8 +258,8 @@ fn incompressible_momentum_model_impl(with_mms_source: bool, ale: bool) -> Resul
     boundaries.set_field(
         "U",
         FieldBoundarySpec::new()
-            // Inlet velocity is Dirichlet; the value can be updated at runtime via the solver's
-            // boundary table API (e.g. `set_boundary_vec2(GpuBoundaryType::Inlet, "U", ...)`).
+            // Inlet velocity is Dirichlet; value updatable at runtime via
+            // `set_boundary_vec2(GpuBoundaryType::Inlet, "U", ...)`.
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 2,
@@ -389,7 +338,6 @@ fn incompressible_momentum_model_impl(with_mms_source: bool, ale: bool) -> Resul
     };
     let primitives = crate::solver::model::primitives::PrimitiveDerivations::identity();
 
-    // Clone layout for flux_module_module since we need to move it into ModelSpec
     let layout_for_flux = layout.clone();
     let flux_module_module = crate::solver::model::modules::flux_module::flux_module_module(
         flux_module,

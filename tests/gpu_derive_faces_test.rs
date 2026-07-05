@@ -1,17 +1,12 @@
-//! GPU `derive_faces` count→scan parity (design-gpu §6.2 first half) — M5 stage 3.
+//! GPU `derive_faces` count→scan parity.
 //!
-//! The M1 engine emits cell-major, padded per-cell face slots. The GPU-resident
-//! regen turns those into face-major arrays via **count → scan → emit → gather**.
-//! This gate pins the landed half — the `count_owned_faces` kernel + the new GPU
-//! `scan` primitive producing per-cell face offsets + the total `num_faces`,
-//! entirely on the GPU — bit-exact against a CPU reference computed from the
-//! *same* cell-major outputs. Two seed sizes cover the single-block and the
-//! multi-block (>1024 cells) scan paths.
-//!
-//! The `emit`/`gather` passes (face-major geometry + `cell_faces` CSR) and the
-//! §6.3 CSR bridge are documented-deferred (see `voronoi/derive.rs`): the CPU
-//! face-major geometry is a post-vertex-merge product of `assemble_mesh`, not a
-//! direct projection of these cell-major slots.
+//! The engine emits cell-major, padded per-cell face slots; GPU-resident regen
+//! turns those into face-major arrays via count → scan → emit → gather. This
+//! gate pins the count + scan half — the `count_owned_faces` kernel and the GPU
+//! `scan` primitive (per-cell face offsets + total `num_faces`), entirely on the
+//! GPU — bit-exact against a CPU reference computed from the *same* cell-major
+//! outputs. Two seed sizes cover the single-block and the multi-block
+//! (>1024 cells) scan paths.
 //!
 //! Skips cleanly when no GPU adapter is present.
 #![cfg(feature = "meshgen")]

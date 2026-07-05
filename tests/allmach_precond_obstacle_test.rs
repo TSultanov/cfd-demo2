@@ -1,15 +1,11 @@
 //! Low-Mach preconditioning gate: the all-Mach pressure model must be STABLE at the
 //! REAL EOS compressibility (psi = 1/c^2, Air ≈ 8.3e-6), not just the artificial psi≈50.
 //!
-//! Before preconditioning the obstacle diverged at STEP 0 (max|u|≈36, p≈−235): the
-//! pressure-row `ddt(psi,p)` couples the acoustic mode explicitly, and at real (tiny)
+//! The pressure-row `ddt(psi,p)` couples the acoustic mode explicitly, and at real (tiny)
 //! psi the sound speed c=1/√psi≈347 gives an acoustic CFL ≈ 667 with the convective dt.
-//! The driver now seeds a preconditioned `psi_precond = max(psi, 1/(k·U_inlet)²)` into a
-//! decoupled field that ONLY the time term reads (density recovery keeps real psi), so
-//! the pseudo sound speed tracks the velocity and a convective dt is acoustically stable.
-//!
-//! This is the fast single-driver proof of the mechanism (the full two-regime gate lives
-//! in `gui_default_convergence_test::gui_default_allmach_obstacle_eos_derived_and_exaggeratable`).
+//! The driver seeds `psi_precond = max(psi, 1/(k·U_inlet)²)` into a decoupled field that
+//! ONLY the time term reads (density recovery keeps real psi), so the pseudo sound speed
+//! tracks the velocity and a convective dt is acoustically stable.
 
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
@@ -92,8 +88,8 @@ fn allmach_real_psi_obstacle_is_bounded_with_preconditioning() {
         max_seen = max_seen.max(mv);
     }
 
-    // Step 0 must NOT be the recorded blow-up (max|u|≈36, |p|≈235): the preconditioner
-    // holds it at the convective scale O(inlet), with a gauge pressure O(rho·U²) « 1.
+    // Step 0 must not blow up: the preconditioner holds it at the convective scale
+    // O(inlet), with a gauge pressure O(rho·U²) « 1.
     eprintln!(
         "[precond/obstacle] step0 max|u|={first_step_max:.3e} (inlet {u_in:.3e}), |p|≈{first_step_pmag:.3e}; \
          run max|u|={max_seen:.3e}"

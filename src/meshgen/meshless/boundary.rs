@@ -1,5 +1,4 @@
-//! Boundary loops + boundary seeding for the meshless engine (M0.3, design
-//! §1/§4 as amended by review F1/F3/F5/F6).
+//! Boundary loops + boundary seeding for the meshless engine.
 //!
 //! The discrete boundary is a set of closed polyline loops walked with the
 //! **fluid on the left** (outer loops CCW, embedded holes CW). Each segment
@@ -10,30 +9,26 @@
 //! boundary cells cut the same global chord line and the walls assemble
 //! watertight.
 //!
-//! Seeding protocol (review F1 — the vertex-seeded blocker fix): boundary
-//! seeds are generated FROM the loops, not from `get_boundary_points`:
+//! Seeding protocol — boundary seeds are generated FROM the loops:
 //!
-//! - a polyline vertex whose fluid angle is ≤ π (straight-wall vertices, box
-//!   corners, the step's outer corners) carries a **vertex seed** — its cell,
-//!   clipped by the two own-segment lines through the seed, is exactly the
-//!   true (convex) Voronoi cell, independent of neighbor spacing;
-//! - a vertex whose fluid angle is > π (every obstacle-circle vertex, the
-//!   step's reflex corner, concave nozzle-wall kinks) gets **no vertex
-//!   seed** — its true cell would be non-convex (phantom walls + orphaned
-//!   slivers, review F1). Instead two **guard seeds** go onto the two
-//!   adjacent segments at the *same* distance `t = ½·min(len_prev,
-//!   len_next)` from the vertex. Equidistance is load-bearing: the guards'
-//!   mutual bisector then passes through the vertex, which both cells
-//!   reproduce exactly as bisector ∩ own-line — watertight, both convex.
-//!   On uniformly subdivided curved loops the guards emitted onto a shared
-//!   segment coincide at its midpoint (review F1's "midpoint seeding");
-//!   quantized dedup collapses them to one seed.
+//! - a polyline vertex whose fluid angle is ≤ π carries a **vertex seed** —
+//!   its cell, clipped by the two own-segment lines through the seed, is
+//!   exactly the true (convex) Voronoi cell, independent of neighbor spacing;
+//! - a vertex whose fluid angle is > π gets **no vertex seed** — its true
+//!   cell would be non-convex (phantom walls + orphaned slivers). Instead two
+//!   **guard seeds** go onto the two adjacent segments at the *same* distance
+//!   `t = ½·min(len_prev, len_next)` from the vertex. Equidistance is
+//!   load-bearing: the guards' mutual bisector then passes through the vertex,
+//!   which both cells reproduce exactly as bisector ∩ own-line — watertight,
+//!   both convex. On uniformly subdivided curved loops the guards emitted onto
+//!   a shared segment coincide at its midpoint; quantized dedup collapses them
+//!   to one seed.
 //!
-//! Shielding (review F6): interior cells never need boundary planes because
-//! the boundary-seed layer is closer to every wall-strip point than any
-//! interior seed. `shielding_violations` checks that claim on a finished
-//! diagram against the *loops* (distance to the chord polyline, not the
-//! smooth SDF — the discrete boundary is the polyline).
+//! Shielding: interior cells never need boundary planes because the
+//! boundary-seed layer is closer to every wall-strip point than any interior
+//! seed. `shielding_violations` checks that claim on a finished diagram
+//! against the *loops* (distance to the chord polyline, not the smooth SDF —
+//! the discrete boundary is the polyline).
 
 use std::collections::HashMap;
 
@@ -70,8 +65,7 @@ impl BoundaryLoop {
         assert!(pts.len() >= 3, "a boundary loop needs at least 3 points");
         let n = pts.len();
         // Degenerate segments would produce NaN guard seeds downstream
-        // (`t / l` with `l = 0` in `boundary_seeds`) — reject them here,
-        // where the invariant belongs, instead of in a test (review F-2).
+        // (`t / l` with `l = 0` in `boundary_seeds`); reject them here.
         for s in 0..n {
             let len = (pts[(s + 1) % n] - pts[s]).norm();
             assert!(
@@ -225,8 +219,8 @@ pub fn polyline_loop(
 
 /// Closed chord polygon of a circle, walked **clockwise** so the fluid
 /// (outside the obstacle) is on the left. Uniform angles make every chord the
-/// same length, which is what collapses the reflex-vertex guard seeds into
-/// exact chord midpoints (see the module docs).
+/// same length, which collapses the reflex-vertex guard seeds into exact
+/// chord midpoints.
 pub fn circle_loop(
     center: Point2<f64>,
     radius: f64,
@@ -248,7 +242,7 @@ pub fn circle_loop(
 }
 
 // ---------------------------------------------------------------------------
-// Boundary seeding (review F1)
+// Boundary seeding
 // ---------------------------------------------------------------------------
 
 /// Convexity threshold on the *normalized* cross product of consecutive
@@ -263,7 +257,7 @@ const TURN_SIN_EPS: f64 = 1e-12;
 /// (first occurrence wins; the map is lookup-only, so output order is the
 /// deterministic loop-walk order).
 ///
-/// Guard collapse (review): the two guards emitted onto a SEGMENT shared by
+/// Guard collapse: the two guards emitted onto a SEGMENT shared by
 /// consecutive reflex vertices (the uniform-chord case: both land at the
 /// chord midpoint) are computed from opposite ends and agree only to last
 /// ulps — relying on the quantization bin to dedup them risks a bin-edge
@@ -366,11 +360,10 @@ pub fn boundary_seeds(
 }
 
 /// Loop-derived seeding entry for the meshless generators: boundary seeds
-/// from the loops (fixed, review F1) + interior Poisson fill respecting the
-/// min-separation from them (the same sampler and RNG seed `0x5EED_CFD2` as
-/// the incumbent generators), Morton-sorted with `kinds` co-permuted
-/// (review F4). Returns the `BoundarySpec` too — the `SegId`s inside `kinds`
-/// index into it, so the pair must stay together.
+/// from the loops + interior Poisson fill respecting the min-separation from
+/// them (RNG seed `0x5EED_CFD2`), Morton-sorted with `kinds` co-permuted.
+/// Returns the `BoundarySpec` too — the `SegId`s inside `kinds` index into
+/// it, so the pair must stay together.
 pub fn meshless_seed_points(
     geo: &(impl Geometry + Sync),
     min_cell_size: f64,
@@ -401,11 +394,11 @@ pub fn meshless_seed_points(
 }
 
 // ---------------------------------------------------------------------------
-// Shielding / watertightness instruments (review F6)
+// Shielding / watertightness instruments
 // ---------------------------------------------------------------------------
 
 /// Unsigned distance from `p` to the nearest boundary-loop *segment* (the
-/// chord polyline — NOT the smooth SDF; review F6).
+/// chord polyline — NOT the smooth SDF).
 pub fn distance_to_loops(p: Point2<f64>, spec: &BoundarySpec) -> f64 {
     let mut best = f64::INFINITY;
     for lp in &spec.loops {
@@ -448,7 +441,7 @@ pub fn point_in_fluid(p: Point2<f64>, spec: &BoundarySpec) -> bool {
     inside
 }
 
-/// Shielding safety check (review F6): ring vertices of *Interior* cells
+/// Shielding safety check: ring vertices of *Interior* cells
 /// must never sit on the solid side of the boundary loops by more than
 /// `tol.boundary_eps` — if one does, an interior cell reached a wall past
 /// the boundary-seed layer and the shielding assumption is broken. Returns

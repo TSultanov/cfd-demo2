@@ -1,9 +1,8 @@
-/// Generic coupled module port definitions - separate from the main module to avoid build script issues.
+// Separate from the main module to avoid build-script include issues.
 use cfd2_ir::dimensions::{Dimensionless, Density, DynamicViscosity, Time, UnitDimension};
 use crate::solver::ir::ports::ParamSpec;
 use crate::solver::model::module::PortManifest as ModulePortManifest;
 
-/// Get the port manifest for generic_coupled uniform params.
 pub fn generic_coupled_uniform_port_manifest(
     apply_relaxation_in_update: bool,
 ) -> ModulePortManifest {

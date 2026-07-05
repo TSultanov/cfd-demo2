@@ -1,9 +1,8 @@
 //! GUI ↔ CPU feature parity: exercise the *exact* path the GUI uses when the user
 //! ticks "CPU backend" — `UnifiedSolver` selected via `CFD2_BACKEND=cpu`, with the
 //! per-model `SolverConfig.stepping` the GUI sets (Coupled for the saddle-point
-//! models, Implicit for compressible). This guards two parity fixes:
-//!   1. The CPU path must honor `config.stepping` (it used to hardcode Coupled via
-//!      `CpuSolver::new`, mis-stepping compressible in the GUI).
+//! models, Implicit for compressible). Guards two parity requirements:
+//!   1. The CPU path must honor `config.stepping` (not hardcode Coupled).
 //!   2. EOS runtime tuning (`eos.*`) must route to the CPU backend.
 //! The four non-compressible families + Ghia already certify the GPU-equivalent
 //! solution path; this focuses on the GUI's UnifiedSolver wiring for ALL models.
@@ -94,7 +93,7 @@ fn run_incompressible_coupled() {
 /// `stepping = Implicit { outer_iters: 1 }` (what the GUI sets for compressible).
 /// A uniform stagnant gas with matching inlets + zero sources is an exact steady
 /// state; it must stay uniform and finite — proving the CPU path honors the
-/// requested Implicit stepping (it used to hardcode Coupled).
+/// requested Implicit stepping.
 fn run_compressible_implicit() {
     let n = 8;
     let mesh = generate_structured_rect_mesh(
@@ -188,8 +187,8 @@ fn cpu_gui_unified_backend_runs_coupled_and_compressible() {
 /// `copy_state_to_buffer` into a GPU viz buffer (then the GUI renders it), the
 /// uploaded data must (a) reflect an EVOLVED field (not the frozen IC — otherwise
 /// the user sees nothing) and (b) equal the solver's current state. This guards
-/// the path behind "Run does nothing visible on CPU" (the upload now flushes via
-/// an explicit submit, matching the GPU copy). Needs a GPU adapter for the
+/// the path behind "Run does nothing visible on CPU"; the upload flushes via an
+/// explicit submit, matching the GPU copy. Needs a GPU adapter for the
 /// render-mirror device (the GUI supplies eframe's); skips if none is available.
 #[test]
 fn cpu_render_bridge_uploads_evolved_state() {

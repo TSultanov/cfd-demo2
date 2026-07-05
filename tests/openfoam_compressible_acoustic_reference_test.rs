@@ -13,12 +13,10 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 
 /// Test compressible acoustic wave against OpenFOAM reference.
 ///
-/// # Reference provenance (audited June 2026): MATCHED-TIME TRANSIENT
-/// This is a transient-by-design comparison, NOT a steady-state anchor:
-/// both codes are time-accurate and compared at the identical instant
-/// (cfd2: 100 steps at the reference dt = endTime 1.7e-4 s; the acoustic
-/// wave IS the phenomenon under test). Unlike the incompressible cases
-/// (steady references since June 2026), extending this case's endTime
+/// # Reference provenance: MATCHED-TIME TRANSIENT
+/// A transient-by-design comparison, NOT a steady-state anchor: both codes
+/// are time-accurate and compared at the identical instant (cfd2: 100 steps
+/// at the reference dt = endTime 1.7e-4 s). Extending this case's endTime
 /// would change the reference field -- the matched-time contract is what
 /// makes the comparison valid.
 ///

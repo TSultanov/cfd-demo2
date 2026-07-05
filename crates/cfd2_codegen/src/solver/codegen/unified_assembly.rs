@@ -35,35 +35,26 @@ fn validate_unified_assembly_inputs(needs_fluxes: bool, flux_stride: u32) {
     }
 }
 
-/// ALE marker, derived from the discrete system: any convection op consuming
-/// its face flux relative to the mesh (`Term::relative_to_mesh`). Gates the
-/// ALE storage-binding emission — static (non-ALE) models emit no new item
-/// and stay byte-identical.
+/// ALE marker: true when any convection op consumes its face flux relative to
+/// the mesh. Gates the ALE storage-binding emission.
 fn unified_assembly_needs_mesh_fluxes(system: &DiscreteSystem) -> bool {
     system.is_ale()
 }
 
-/// Fail-fast validation of the ALE v1 scope, called whenever a system is ALE
-/// (mirrors the ALE+`dt_local` assert in time_integration.rs). Two silent
-/// mishandlings are rejected at codegen time instead of compiling into
-/// GCL-violating kernels:
+/// Fail-fast validation of the ALE scope. Two silent mishandlings are rejected
+/// at codegen time instead of compiling into GCL-violating kernels:
 ///
 /// * **Explicit flagged terms**: every mesh-relative subtraction site gates on
 ///   `Discretization::Implicit`, so an explicit `Div` term flagged
 ///   `relative_to_mesh` would get the bindings / moving-volume ddt /
 ///   continuity source emitted but NO flux subtraction — an inconsistent ALE
-///   discretization. (`Term::with_mesh_relative` also rejects this at model
-///   construction; this is the authoritative consumer-side backstop for
-///   directly-constructed IR.)
+///   discretization.
 ///
 /// * **Variable density**: `ale_relative_flux_expr` hardcodes the flux's
-///   density factor as the uniform `constants.density`. The flux derivation
-///   (src/solver/model/flux_derivation.rs `density_face_expr`) uses that same
-///   uniform exactly when the state layout has NO `rho` field; a state-layout
-///   `rho` means the flux carries an upwinded face density and the subtraction
-///   would be wrong-by-ρ. v1 ALE scope is constant-density (incompressible)
-///   only — variable-density fluxes need a persisted face density (flagged
-///   follow-up, see `Term::relative_to_mesh` docs).
+///   density factor as the uniform `constants.density`, valid only when the
+///   state layout has NO `rho` field. A state-layout `rho` means the flux
+///   carries an upwinded face density and the subtraction would be wrong-by-ρ.
+///   ALE scope is constant-density (incompressible) only.
 fn validate_ale_unified_assembly(system: &DiscreteSystem, slots: &ResolvedStateSlotsSpec) {
     for eq in &system.equations {
         for op in &eq.ops {
@@ -88,25 +79,22 @@ fn validate_ale_unified_assembly(system: &DiscreteSystem, slots: &ResolvedStateS
     );
 }
 
-/// `mesh_fluxes` storage binding (group 0 / binding 8, the first free mesh
-/// slot): per-face volumetric swept rate `V̇_f = A_swept(f)/dt` (Volume/Time),
-/// signed along the stored face normal (owner convention, exactly like the
-/// `fluxes` mass flux). Computed host-side from swept-face geometry (SCL by
-/// construction), NEVER from a velocity dotted with a normal. Allocated
-/// zero-filled always at runtime, so an ALE model over a static mesh binds
-/// zeros and the mesh-relative subtraction vanishes bitwise.
+/// `mesh_fluxes` storage binding (group 0 / binding 8): per-face volumetric
+/// swept rate `V̇_f = A_swept(f)/dt` (Volume/Time), signed along the stored
+/// face normal (owner convention, like the `fluxes` mass flux). Computed
+/// host-side from swept-face geometry (SCL by construction), NEVER from a
+/// velocity dotted with a normal. Zero-filled when static, so the subtraction
+/// vanishes bitwise.
 fn mesh_fluxes_item() -> Item {
     storage_var("mesh_fluxes", Type::array(Type::F32), 0, 8, AccessMode::Read)
 }
 
-/// ALE volume-history bindings (group 0 / bindings 9 and 15 — the remaining
-/// free mesh slots; 14 is `face_wrap_shift` in the flux modules and is left
-/// untouched so fused kernels can never collide). `cell_vols_old` = V^n,
-/// `cell_vols_old_old` = V^{n-1}; both rotated by the ALE step seam
-/// (`begin_ale_step`: old_old ← old ← current, BEFORE the new volumes are
-/// uploaded) and seeded equal to `cell_vols` by `initialize_history`.
-/// Consumed by the moving-volume ddt and the ALE volume rates
-/// (`ale_volume_locals_setup`, time_integration.rs).
+/// ALE volume-history bindings (group 0 / bindings 9 and 15; binding 14 is
+/// `face_wrap_shift` in the flux modules and is left untouched so fused kernels
+/// can never collide). `cell_vols_old` = V^n, `cell_vols_old_old` = V^{n-1};
+/// both rotated by the ALE step seam (`begin_ale_step`: old_old ← old ←
+/// current, BEFORE the new volumes are uploaded) and seeded equal to
+/// `cell_vols` by `initialize_history`.
 fn ale_vols_history_items() -> Vec<Item> {
     vec![
         storage_var(
@@ -131,18 +119,12 @@ fn ale_vols_history_items() -> Vec<Item> {
 /// `phi_rel = phi - rho_f * mesh_fluxes[face_idx]` for `relative_to_mesh`
 /// terms. The subtraction sits BEFORE the non-owner sign flip so `phi_rel`
 /// inherits the flip exactly like `phi` — both cells of a shared face see one
-/// consistent relative flux. Every downstream consumer (upwind matrix
-/// coefficients, deferred correction, the `bounded` diagonal correction, the
-/// `DivFlux` RHS and its pressure linearization) reads the accumulator, so
-/// this is the single subtraction point for the whole assembly (and the
-/// rhs_only / fused kernel variants are synthesized from this same
-/// `KernelProgram`, inheriting it).
+/// consistent relative flux. This is the single subtraction point for the
+/// whole assembly; every downstream consumer reads the accumulator.
 ///
-/// `rho_f` is the constant density coefficient (`constants.density`): v1 ALE
-/// scope is constant-density (incompressible) mass fluxes, where
-/// `phi = rho * (U·n) A` uses the same constant. Variable-density fluxes
-/// (compressible/allmach upwinded `rho_f`) would need the flux kernel to
-/// persist its face density — flagged follow-up, not supported here.
+/// `rho_f` is the constant density coefficient (`constants.density`): ALE scope
+/// is constant-density mass fluxes where `phi = rho * (U·n) A` uses the same
+/// constant. Variable-density fluxes are not supported here.
 fn ale_relative_flux_expr(
     conv_op: &crate::solver::codegen::ir::DiscreteOp,
     flux_val_expr: Expr,
@@ -722,8 +704,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
         // Matches the derived Rhie-Chow flux kernel's Lerp convention —
         // the assembly's face coefficients MUST interpolate identically to
         // the flux module's face d_p or the pressure system loses
-        // consistency. On uniform meshes lambda = 0.5 (the previous
-        // arithmetic mean); on graded meshes the mean is only first-order.
+        // consistency. On uniform meshes lambda = 0.5.
         // (Vector2 is the custom STRUCT; convert member-wise for distance().)
         body.push(dsl::let_expr(
             "lam_f_center_v",
@@ -828,10 +809,9 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     !Expr::ident("is_boundary"),
                 );
 
-                // Keep the historical single-op name `diff_coeff_<target>`
-                // (preserves byte-identical WGSL for every existing model);
-                // disambiguate by field only when an equation carries more than
-                // one implicit diffusion op (e.g. viscous + biharmonic).
+                // Single-op name `diff_coeff_<target>`; disambiguate by field
+                // only when an equation carries more than one implicit
+                // diffusion op (e.g. viscous + biharmonic).
                 let diff_coeff_name = if multiple_implicit_diffusion {
                     format!("diff_coeff_{}_{}", equation.target.name(), field_name)
                 } else {
@@ -1127,8 +1107,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             // already folded in by packed_state_gradients — no bc branch.
             //
             // grad_state is STATE-OFFSET keyed (slots base_offset), NOT the
-            // coupled-rank `offsets` map — the known rank-vs-offset latent
-            // bug class (two prior engine bugs).
+            // coupled-rank `offsets` map (rank-vs-offset latent bug class).
             for dev2_op in equation.ops.iter().filter(|op| {
                 op.kind == DiscreteOpKind::Diffusion
                     && op.discretization == Discretization::Explicit
@@ -1476,7 +1455,6 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         // a simple two-point gradient estimate based on neighbor differences.
                         // This keeps the scheme knob meaningful without requiring a dedicated
                         // gradients kernel for every model.
-                        // Helper to find slot offset by field name.
                         let field_offset = slots
                             .slots
                             .iter()
@@ -1664,8 +1642,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
     // `U_P × (discrete mass residual)`, and on a moving mesh that residual is
     // `ρ·dV/dt + Σ_f φ_rel` (mass in the cell changes because the volume
     // does), with the volume rate taken at the SAME time-scheme weights as
-    // the momentum ddt (`ale_dvdt_ddt`, see time_integration.rs). Augment the
-    // face-accumulated `Σ_f φ_rel` accordingly. This is what makes a uniform
+    // the momentum ddt (`ale_dvdt_ddt`). Augment the face-accumulated
+    // `Σ_f φ_rel` accordingly. This is what makes a uniform
     // flow an exact fixed point of the moving-mesh momentum equation under
     // both Euler and BDF2: ddt contributes `ρU·dV/dt|_scheme`, upwind
     // convection of a uniform U contributes `U·Σφ_rel`, and the bounded
@@ -1685,16 +1663,15 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
         stmts.push(acc.sub_diag(u_idx, Expr::ident(format!("bounded_sum_phi_{u_idx}"))));
     }
 
-    // ALE continuity volume source (design S2.3 option b): an equation whose
-    // `DivFlux` mass-flux divergence is mesh-relative gains the compensating
-    // per-cell volume-change source. Mass balance on a moving cell (constant
-    // density): ρ·(V^{n+1}−V^n)/dt + Σ_f φ_rel = 0, so the RHS (which already
-    // accumulated `−Σ_f φ_rel` in the face loop) gains `−ρ·ale_dvdt_scl`.
-    // The rate is the SCL/BDF1 rate — exactly what the mesh-flux closure
-    // guarantees `Σ_f mesh_fluxes` sums to (src/solver/mesh/ale.rs), so at a
-    // divergence-free absolute flux the two cancel to f32 roundoff under any
-    // time scheme. Static mesh: `ale_dvdt_scl == 0.0` bitwise and
-    // `rhs -= ρ·0.0` is the IEEE identity `x - 0.0`.
+    // ALE continuity volume source: an equation whose `DivFlux` mass-flux
+    // divergence is mesh-relative gains the compensating per-cell volume-change
+    // source. Mass balance on a moving cell (constant density):
+    // ρ·(V^{n+1}−V^n)/dt + Σ_f φ_rel = 0, so the RHS (which already accumulated
+    // `−Σ_f φ_rel` in the face loop) gains `−ρ·ale_dvdt_scl`. The rate is the
+    // SCL/BDF1 rate — exactly what the mesh-flux closure guarantees
+    // `Σ_f mesh_fluxes` sums to, so at a divergence-free absolute flux the two
+    // cancel to f32 roundoff under any time scheme. Static mesh:
+    // `ale_dvdt_scl == 0.0` bitwise and `rhs -= ρ·0.0` is the IEEE identity.
     for equation in &system.equations {
         let has_ale_div_flux = equation.ops.iter().any(|op| {
             op.kind == DiscreteOpKind::Convection

@@ -199,8 +199,7 @@ fn run_with_policy_kernel_graph_dispatches(
     fixed_outer_iterations_mode: bool,
     outer_batched_mode: bool,
 ) -> u64 {
-    // Survive poisoning: another test panicking while holding the lock must
-    // not cascade into failures here (same pattern as the other lock sites).
+    // Survive poisoning: a test panicking while holding the lock must not cascade here.
     let _lock = solver_test_lock()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -501,10 +500,6 @@ fn assert_snapshots_match(
     );
 }
 
-// ---------------------------------------------------------------------------
-// Convergence diagnostics helpers and tests (FUSION.md §5C)
-// ---------------------------------------------------------------------------
-
 /// Convergence diagnostics collected after a solver run.
 struct ConvergenceDiagnostics {
     /// Absolute outer-field residuals (e.g. [("u", 0.01), ("p", 0.005)]).
@@ -604,8 +599,7 @@ fn run_with_convergence_diagnostics(
 
 /// Verify that the one-submission path populates outer-field residuals and
 /// per-field convergence diagnostics when `collect_convergence_stats` is
-/// enabled.  Prior to the §5C fix this path bailed entirely when convergence
-/// stats were requested.
+/// enabled.
 #[test]
 fn one_submission_convergence_stats_populated() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -690,9 +684,7 @@ fn one_submission_convergence_stats_populated() {
 }
 
 /// Verify that the one-submission path returns a finite residual in
-/// `last_linear_stats` (not `f32::INFINITY`).  Prior to the §5C fix the
-/// encoded path always returned INFINITY because `capture_solver_scalars`
-/// was false.
+/// `last_linear_stats` (not `f32::INFINITY`).
 #[test]
 fn one_submission_last_linear_stats_has_finite_residual() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -869,8 +861,7 @@ fn rhie_chow_fused_safe_matches_unfused_off_within_tolerance() {
 
     let off = run_with_policy(&mesh, KernelFusionPolicy::Off);
     let safe = run_with_policy(&mesh, KernelFusionPolicy::Safe);
-    // Fusion schedule reordering preserves bitwise-identical results on this
-    // mesh; use exact parity (see 1e investigation in FUSION.md §1e).
+    // Fusion schedule reordering preserves bitwise-identical results; use exact parity.
     let rel_tol = 0.0f64;
     assert_snapshots_match("off", &off, "safe", &safe, rel_tol);
 }
@@ -1168,7 +1159,7 @@ fn coupled_outer_batched_mode_matches_non_batched_fixed_snapshot_within_toleranc
     );
 }
 
-/// Parity gate for the one-submission encoded FGMRES path (FUSION.md §5A).
+/// Parity gate for the one-submission encoded FGMRES path.
 ///
 /// Compares the host-driven linear solve (non-batched, fixed outer iterations)
 /// against the one-submission GPU-encoded path (batched).  All env-var tuning
@@ -1278,15 +1269,9 @@ fn host_driven_encoded_seed_basis0_default_on_matches_opt_out() {
         false,
     );
 
-    // The two seed paths produce slightly different (both valid) iterates;
-    // u/p agree to ~0.3% and the derived grad_p amplifies. Measured grad_p
-    // max_rel history: just under 1e-2 originally; 1.156e-2 when bounded
-    // convection landed; 1.795e-2 when the FGMRES restart-boundary
-    // monotonicity guard landed (June 2026 — at the unreachable-tolerance
-    // f32 floor the guard can freeze a restart on one seed path and not
-    // the other, so trajectories diverge a little more; u/p agreement is
-    // unchanged at ~0.2% and d_p parity is exact). Band at 2.2e-2 for
-    // headroom while still catching real divergence.
+    // The two seed paths produce slightly different (both valid) iterates:
+    // u/p agree to ~0.2%, d_p parity is exact, and the derived grad_p amplifies
+    // to just under 2.2e-2. Band at 2.2e-2 for headroom while catching real divergence.
     let rel_tol = 2.2e-2f64;
     assert_snapshots_match(
         "encoded_opt_out",
@@ -1301,9 +1286,7 @@ fn host_driven_encoded_seed_basis0_default_on_matches_opt_out() {
 /// a substantial reduction in queue-submission count relative to the non-batched baseline.
 ///
 /// With per-FGMRES-restart-chunk submission the count scales with the number of restart chunks
-/// rather than the number of host-side convergence round-trips.  On the 16×8 test mesh with
-/// default FGMRES parameters (max_iters=200, max_restart=60), the chunked path produces ~42
-/// submissions per 2 steps vs 178 for the non-batched baseline — a ~76% reduction.
+/// rather than the number of host-side convergence round-trips.
 #[test]
 fn one_submission_mode_submission_count_at_expected_floor() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -1372,12 +1355,6 @@ fn one_submission_mode_submission_count_at_expected_floor() {
         non_batched, one_submission
     );
 }
-
-
-
-// ---------------------------------------------------------------------------
-// Stepping-mode coverage (FUSION.md §1c)
-// ---------------------------------------------------------------------------
 
 /// Helper: run incompressible_momentum under `Implicit` stepping with a given
 /// fusion policy and return a field snapshot.

@@ -7,8 +7,6 @@ use crate::solver::gpu::program::plan_instance::{
 };
 use crate::solver::gpu::recipe::{SolverRecipe, SteppingMode};
 
-// --- Universal op registration ---
-
 /// Single universal lowering path: register the unified op kinds emitted by `SolverRecipe::build_program_spec()`.
 ///
 /// The actual host/graph handlers access the strongly-typed `PlanResources` fields directly.
@@ -44,7 +42,6 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
         },
         SteppingMode::Coupled => {
             UnifiedOpRegistryConfig {
-                // These map onto the unified coupled program.
                 prepare: Some(host_coupled_begin_step),
                 finalize: Some(host_coupled_finalize_step),
                 solve: Some(host_coupled_solve),
@@ -64,8 +61,6 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
         crate::solver::gpu::lowering::unified_registry::build_unified_registry(recipe, config)?;
     registry.merge(built)
 }
-
-// --- Universal program spec callbacks ---
 
 pub(in crate::solver::gpu::lowering) fn spec_num_cells(plan: &GpuProgramPlan) -> u32 {
     generic_coupled_program::spec_num_cells(plan)
@@ -173,8 +168,6 @@ pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
     Some(&mut plan.resources.backend as &mut dyn PlanLinearSystemDebug)
 }
 
-// --- Generic-coupled handlers (explicit/implicit) ---
-
 fn host_explicit_prepare(plan: &mut GpuProgramPlan) {
     generic_coupled_program::host_prepare_step(plan);
 }
@@ -255,8 +248,6 @@ fn host_implicit_finalize(plan: &mut GpuProgramPlan) {
     generic_coupled_program::host_finalize_step(plan);
 }
 
-// --- Coupled handlers ---
-
 fn coupled_graph_init_prepare_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
@@ -274,8 +265,7 @@ fn coupled_graph_iter_prepare_run(
 }
 
 fn coupled_outer_iters(plan: &GpuProgramPlan) -> usize {
-    // Use the same `OuterIters` knob as the implicit path so tests/UI can control the number of
-    // nonlinear corrector iterations per step for coupled methods (e.g. incompressible SIMPLE).
+    // Reuse the implicit path's `OuterIters` knob to control nonlinear corrector iterations per step.
     generic_coupled_program::count_outer_iters(plan)
 }
 

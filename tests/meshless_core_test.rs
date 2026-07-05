@@ -1,4 +1,4 @@
-//! Meshless engine core gates (M0.1 kNN + M0.2 clip kernel):
+//! Meshless engine core gates:
 //! 1. `SeedGrid::knn` vs a brute-force O(n²) reference — exact id-set
 //!    equality under the (d², id) total order, including tie cases;
 //! 2. engine vs the clip-everything oracle — bit-identical rings (the
@@ -26,8 +26,8 @@ use rand::{Rng, SeedableRng};
 const DOMAIN: Vector2<f64> = Vector2::new(2.0, 1.0);
 
 // ---------------------------------------------------------------------------
-// Deterministic seed-set generators (the crate's Poisson sampler is private;
-// per review F4 a small seeded sampler is the minimal-exposure choice).
+// Deterministic seed-set generators (the crate's Poisson sampler is private, so
+// use a small seeded sampler).
 // ---------------------------------------------------------------------------
 
 /// Poisson-like: uniform rejection sampling with a minimum separation.

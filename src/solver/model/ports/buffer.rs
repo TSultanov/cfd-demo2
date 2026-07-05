@@ -1,14 +1,9 @@
-// Buffer ports for WGSL storage buffer bindings.
-//
-// Buffer ports provide type-safe abstractions for GPU buffer bindings,
-// tracking access modes (read-only, read-write) and data types.
+// Type-safe WGSL storage-buffer bindings, tracking access mode and element type.
 
 use super::{Port, PortId, WgslPort};
 use std::marker::PhantomData;
 
-/// Trait for buffer data types.
-///
-/// This trait is implemented by marker types representing valid buffer element types.
+/// Trait for buffer data types (implemented by marker types).
 pub trait BufferType: 'static + Copy + Send + Sync + Eq + PartialEq + std::fmt::Debug {
     /// The WGSL type name for elements in this buffer.
     fn wgsl_element_type() -> &'static str;
@@ -109,9 +104,7 @@ impl BufferType for BufferVec3F32 {
     }
 }
 
-/// Trait for buffer access modes.
-///
-/// This trait is implemented by marker types representing read-only or read-write access.
+/// Trait for buffer access modes (implemented by marker types).
 pub trait AccessMode: 'static + Copy + Send + Sync + Eq + PartialEq + std::fmt::Debug {
     /// The WGSL access mode keyword.
     fn wgsl_access_mode() -> &'static str;
@@ -205,22 +198,18 @@ impl<T: BufferType, A: AccessMode> BufferPort<T, A> {
         }
     }
 
-    /// Get the binding group index.
     pub fn group(&self) -> u32 {
         self.group
     }
 
-    /// Get the binding index within the group.
     pub fn binding(&self) -> u32 {
         self.binding
     }
 
-    /// Check if this buffer allows write access.
     pub fn allows_write(&self) -> bool {
         A::allows_write()
     }
 
-    /// Check if this buffer allows read access.
     pub fn allows_read(&self) -> bool {
         A::allows_read()
     }
@@ -285,12 +274,10 @@ pub struct BufferBindingGroup {
 }
 
 impl BufferBindingGroup {
-    /// Get the binding group index.
     pub fn group_index(&self) -> u32 {
         self.group_index
     }
 
-    /// Get the bindings in this group.
     pub fn bindings(&self) -> &[BufferBindingEntry] {
         &self.bindings
     }

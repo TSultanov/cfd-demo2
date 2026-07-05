@@ -1,9 +1,7 @@
-//! Passive scalar transport: the Phase-1 "vertical slice" of the math-driven solver.
-//!
-//! The entire model is a declaration: equation terms (with an optionally declared
-//! per-term scheme), a declarative flux definition (advecting velocity), boundary
-//! conditions, and an MMS source field. There are no model-specific modules, no
-//! hand-built face expressions, and no hand-written WGSL.
+//! Passive scalar transport, defined entirely as a declaration: equation terms
+//! (with an optionally declared per-term scheme), a declarative flux definition
+//! (advecting velocity), boundary conditions, and an MMS source field. No
+//! model-specific modules, hand-built face expressions, or hand-written WGSL.
 
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{vol_scalar_dim, vol_vector_dim, EquationSystem};

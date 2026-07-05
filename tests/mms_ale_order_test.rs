@@ -1,43 +1,31 @@
-//! Prescribed-motion MMS (M3.3 of the meshless/moving-mesh roadmap):
-//! convergence orders of the ALE incompressible solver on a smoothly
-//! deforming structured mesh.
+//! Prescribed-motion MMS: convergence orders of the ALE incompressible solver
+//! on a smoothly deforming structured mesh.
 //!
 //! **Spatial study** — the forced steady Taylor–Green of
-//! tests/mms_incompressible_order_test.rs (same manufactured solution, same
-//! source, same all-wall per-face Dirichlet BCs), except the mesh vertices
-//! oscillate through a smooth interior bump (amplitude ∝ h, zero on the
-//! boundary — boundary face centers never move, so the per-face Dirichlet
-//! values stay exact). The manufactured solution is defined in FIXED space;
-//! the discrete solution sees moving cell centroids, mesh-relative fluxes
+//! tests/mms_incompressible_order_test.rs (same manufactured solution, source
+//! and all-wall per-face Dirichlet BCs), except the mesh vertices oscillate
+//! through a smooth interior bump (amplitude ∝ h, zero on the boundary — so
+//! boundary face centers never move and the per-face Dirichlet values stay
+//! exact). The manufactured solution is defined in FIXED space; the discrete
+//! solution sees moving cell centroids, mesh-relative fluxes
 //! (`phi − rho·mesh_flux`), the moving-volume ddt and the continuity volume
-//! source. If the SCL closure and the ALE terms are consistent, the observed
-//! error matches a STATIC solve on the same (deformed) geometry — verified
-//! to 3 significant digits per level, see the probe notes at the spatial
-//! gate; an inconsistent ALE term shows up as an order collapse here long
-//! before it corrupts a real moving-mesh run.
+//! source. If the SCL closure and the ALE terms are consistent, the error
+//! matches a STATIC solve on the same deformed geometry.
 //!
-//! Per step (the M4 loop in miniature, fixed dt):
-//!   move vertices analytically → `recalculate_geometry` → swept-quad fluxes
-//!   + f32 SCL closure → `begin_ale_step` (rotates volume history, uploads
-//!   geometry + fluxes) → re-upload the manufactured source at the MOVED
-//!   centroids (`set_field_vec2_current`, history-preserving) → `step()`.
+//! Per step (fixed dt): move vertices analytically → `recalculate_geometry`
+//! → swept-quad fluxes + f32 SCL closure → `begin_ale_step` (rotates volume
+//! history, uploads geometry + fluxes) → re-upload the manufactured source at
+//! the MOVED centroids (`set_field_vec2_current`, history-preserving) →
+//! `step()`.
 //!
-//! The run marches a fixed 35 steps at dt=0.05 (static suite settles in ~12
-//! steps; the motion period is 1.0, so the state has orbited the periodic
-//! regime for ≥1 cycle) and samples at t=1.75 — the phase where the mesh is
-//! at MAXIMUM deformation and momentarily at rest (sin(2π·1.75)=−1,
-//! cos(2π·1.75)=0), i.e. the error is measured on the deformed geometry.
+//! Marches 35 steps at dt=0.05 and samples at t=1.75 — the phase of MAXIMUM
+//! deformation and momentarily zero mesh velocity (sin(2π·1.75)=−1), so the
+//! error is measured on the deformed geometry.
 //!
 //! **Temporal study** — BDF2 on moving volumes: spatially uniform
-//! U*(t) = U₀·e^{−t} (spatial operators are exact for uniform fields — the
-//! GCL gate pins that), manufactured source S = ρ·dU*/dt uniform, on a mesh
-//! oscillating at FIXED amplitude while dt refines. The measured error is
-//! purely the temporal truncation of the moving-volume BDF2.
-//! Validation-review note: a naive swept-volume BDF2 can degrade to first
-//! order — the gate asserts the honest measured floor and ratchets per the
-//! repo convention (values recorded at the asserts).
-//!
-//! Tolerances follow the repo's pin-after-first-measurement convention.
+//! U*(t) = U₀·e^{−t} (spatial operators are exact for uniform fields), source
+//! S = ρ·dU*/dt uniform, on a mesh oscillating at FIXED amplitude while dt
+//! refines, so the measured error is purely the temporal truncation.
 #![cfg(feature = "dev-tests")]
 
 mod mms_support;
@@ -60,13 +48,11 @@ use mms_support::{assert_convergence_order, field_errors, field_errors_vec2};
 const MU: f64 = 1.0;
 const RHO: f64 = 1.0;
 const DT: f64 = 0.05;
-/// 1.75 motion periods: transient decayed (static settles ~12 steps), mesh
-/// sampled at max deformation / zero mesh velocity (see header).
+/// 1.75 motion periods, sampled at max deformation / zero mesh velocity.
 const STEPS: usize = 35;
 const MOTION_PERIOD: f64 = 1.0;
-/// Interior bump amplitude as a fraction of h — mesh distortion is uniform
-/// across refinement levels (same relative cell-size perturbation), so the
-/// ALE terms stay proportionally as large on every level.
+/// Bump amplitude as a fraction of h: keeps mesh distortion (and the ALE
+/// terms) proportionally constant across refinement levels.
 const AMP_FRAC: f64 = 0.2;
 
 // ── manufactured solution (identical to the static incompressible suite) ──
@@ -91,14 +77,12 @@ fn env_f64(name: &str, default: f64) -> f64 {
         .unwrap_or(default)
 }
 
-/// Prescribed vertex position at time `t` from the UNDEFORMED coordinates
-/// (no incremental drift): smooth interior bump, zero on the boundary. The
-/// env knobs are the diagnostic probes documented at the spatial gate.
+/// Prescribed vertex position at time `t` from the UNDEFORMED coordinates (no
+/// incremental drift): smooth interior bump, zero on the boundary.
 ///
-/// `static_deform` (also forceable via `CFD2_ALE_SPATIAL_STATIC_DEFORM=1`):
-/// deform to max ONCE and hold (zero motion after step 1) — the static solve
-/// on the deformed mesh, isolating spatial-on-skewed-cells accuracy from the
-/// ALE terms. The spatial gate asserts moving ≡ static-deformed in-test.
+/// `static_deform`: deform to max ONCE and hold (zero motion after step 1) —
+/// the static solve on the deformed mesh, isolating spatial-on-skewed-cells
+/// accuracy from the ALE terms.
 fn vertex_position(x0: f64, y0: f64, t: f64, h: f64, static_deform: bool) -> (f64, f64) {
     let amp_frac = env_f64("CFD2_ALE_SPATIAL_AMP", AMP_FRAC);
     let period = env_f64("CFD2_ALE_SPATIAL_PERIOD", MOTION_PERIOD);
@@ -191,9 +175,8 @@ fn solve_taylor_green_moving(n: usize, static_deform: bool) -> (Mesh, Vec<(f64, 
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();
 
-    // Probe scaffolding: a longer motion period keeps the same max
-    // deformation but slower motion; steps scale so the run still covers
-    // 1.75 periods and samples at the max-deformation/zero-velocity phase.
+    // Steps scale with the (env-overridable) period so the run always covers
+    // 1.75 periods to the max-deformation/zero-velocity phase.
     let period = env_f64("CFD2_ALE_SPATIAL_PERIOD", MOTION_PERIOD);
     let steps = ((STEPS as f64) * period / MOTION_PERIOD).round() as usize;
 
@@ -241,43 +224,19 @@ fn solve_taylor_green_moving(n: usize, static_deform: bool) -> (Mesh, Vec<(f64, 
     (mesh, u, p)
 }
 
-/// SPATIAL order on the moving mesh (the M3.3 gate).
+/// SPATIAL order on the moving mesh.
 ///
-/// Measured July 2026 (n = 8/16/32/64, GPU f32, amp 0.2h, dt 0.05):
-///   u_l2 = [9.945e-3, 3.460e-3, 1.284e-3, 5.610e-4], order 1.387
-///   p_l2 = [9.202e-2, 4.668e-2, 2.331e-2, 1.161e-2], order ~1.0
+/// The gate is pinned near the measured order (≥1.35), below the nominal 2:
+/// the sub-2 u order is the spatial operator on persistently-skewed cells
+/// (amplitude ∝ h keeps the non-orthogonality constant across levels, so the
+/// skew error never refines away), NOT the ALE machinery. The graded static
+/// suite keeps orthogonal cells and never sees this band.
 ///
-/// **Honest deviation record (adversarial review, July 2026)**: the design
-/// spec asked order ≥ ~1.7 with slope_tol 0.3 (design-solver-ale M3.3 /
-/// design-validation); the measured 1.387 sits BELOW that band, and no
-/// roadmap allowance covers the gap. The order gate is therefore pinned at
-/// the measured value per the repo's pin-after-first-measurement convention
-/// (2.0 − 0.65 ⇒ ≥ 1.35), and the load-bearing correctness statement is
-/// asserted separately, in-test, below: the moving-mesh solve must match a
-/// STATIC solve on the same (max-deformed) geometry — i.e. the ALE machinery
-/// adds NO error on top of the pre-existing skewed-cell spatial band.
-///
-/// The sub-2 u order is NOT the ALE machinery — three probes localize it to
-/// the spatial operator on persistently-skewed cells (amplitude ∝ h keeps
-/// the non-orthogonality constant across levels, so the skew-related error
-/// component never refines away):
-///   * ω-independence: 4× slower motion (CFD2_ALE_SPATIAL_PERIOD=4, same
-///     deformation) leaves the error unchanged (n=32: 1.292e-3 vs 1.284e-3)
-///     — not a fixed-dt temporal artifact;
-///   * amplitude scaling: 10× smaller bump (CFD2_ALE_SPATIAL_AMP=0.02)
-///     recovers the static-protocol error (n=32: 7.33e-4);
-///   * STATIC pre-deformed solve (deform to max once at step 1, hold, zero
-///     mesh fluxes afterwards) reproduces the moving-mesh sweep to 3
-///     significant digits at EVERY level and the identical order 1.387 —
-///     ASSERTED below at n=32 (moving/static u-error ratio within 5%; the
-///     probe remains sweepable via CFD2_ALE_SPATIAL_STATIC_DEFORM=1).
-///
-/// The non-orthogonal (skewed-quad) spatial band is a pre-existing solver
-/// property outside ALE scope (the graded static suite keeps orthogonal
-/// cells, so it never sees it; static-suite band: u order 2.0 − 0.35,
-/// measured 1.87 uniform / 1.98 graded). An order collapse below 1.35, a
-/// blown finest cap (~2× measured) or a moving/static divergence >5% catches
-/// ALE-term regressions.
+/// The decisive ALE-correctness check is asserted in-test below: the
+/// moving-mesh solve must match a STATIC solve on the same max-deformed
+/// geometry, i.e. the ALE terms add no error on top of the skewed-cell band.
+/// An order collapse below 1.35, a blown finest cap, or a moving/static
+/// divergence >5% catches ALE-term regressions.
 #[test]
 fn ale_taylor_green_sou_velocity_second_order() {
     let mut hs = Vec::new();
@@ -289,8 +248,8 @@ fn ale_taylor_green_sou_velocity_second_order() {
         .unwrap_or_else(|| vec![8, 16, 32, 64]);
     let env_static_deform =
         std::env::var("CFD2_ALE_SPATIAL_STATIC_DEFORM").as_deref() == Ok("1");
-    // The moving ≡ static-on-deformed-geometry equivalence assert (below)
-    // needs the n=32 moving error; only available on the default level list.
+    // The moving ≡ static-on-deformed-geometry assert (below) needs the n=32
+    // moving error; only available on the default level list.
     let default_levels = levels == [8, 16, 32, 64];
     for n in levels {
         let (mesh, u, p) = solve_taylor_green_moving(n, env_static_deform);
@@ -317,14 +276,11 @@ fn ale_taylor_green_sou_velocity_second_order() {
         "pressure order regressed: {p_order:.3} (errors {p_errs:?})"
     );
 
-    // The decisive ALE-correctness statement (see the header's deviation
-    // record): the moving-mesh error must equal the static solve on the same
-    // max-deformed geometry — the ALE terms (mesh-relative fluxes,
-    // moving-volume ddt, continuity volume source) add nothing on top of the
-    // pre-existing skewed-cell spatial error. Measured equal to 3 significant
-    // digits (n=32: moving 1.284e-3 vs static-deformed 1.284e-3, July 2026);
-    // asserted at ±5% for GPU run-to-run headroom. Skipped when the level
-    // list or the static-deform probe is overridden via env (diagnostics).
+    // Decisive ALE-correctness check: the moving-mesh error must equal the
+    // static solve on the same max-deformed geometry — the ALE terms add
+    // nothing on top of the skewed-cell spatial error. Asserted at ±5% for
+    // GPU run-to-run headroom; skipped when the level list or static-deform
+    // probe is overridden via env.
     if default_levels && !env_static_deform {
         let (mesh_s, u_s, _p_s) = solve_taylor_green_moving(32, true);
         let u_err_static = field_errors_vec2(&mesh_s, &u_s, exact_u).l2;
@@ -381,10 +337,8 @@ fn bdf2_moving_volume_error(steps: usize) -> f64 {
     let y0 = mesh.vy.clone();
     let h = TLX / TNX as f64;
 
-    // The mms variant: the (spatially uniform) manufactured source
-    // S = rho·dU*/dt needs the declared source term. The linear tolerance is
-    // tightened through the MODEL recipe field (works on both backends;
-    // CFD2_LIN_TOL is GPU-only — review-validation #7).
+    // Tighten the linear tolerance through the MODEL recipe field: works on
+    // both backends (the CFD2_LIN_TOL env override is GPU-only).
     let mut model = incompressible_momentum_ale_mms_model().expect("ale+mms model");
     if let Some(ls) = model.linear_solver.as_mut() {
         ls.solver.tolerance = 1e-7;
@@ -397,12 +351,9 @@ fn bdf2_moving_volume_error(steps: usize) -> f64 {
     solver.set_viscosity(1e-2_f32).expect("viscosity");
     solver.set_alpha_u(0.7).expect("alpha_u");
     solver.set_alpha_p(0.3).expect("alpha_p");
-    // 50 outers: a temporal-order instrument must drive each implicit step
-    // to convergence well below the finest truncation error. Measured floors
-    // (July 2026, motion on AND off — i.e. a PROTOCOL artifact, not ALE):
-    // 8 outers floors the sweep at u_l2 ≈ 2.3e-3 (order 0.48), 25 outers at
-    // ≈ 1.45e-4 (order 1.1) — per-step Picard/relaxation lag, insensitive to
-    // linear tolerance. 50 outers clears the floor through dt = 0.0125.
+    // 50 outers: a temporal-order instrument must drive each implicit step to
+    // convergence well below the finest truncation error, or per-step
+    // Picard/relaxation lag floors the sweep and collapses the order.
     solver.set_outer_iters(50).expect("outer_iters");
 
     // t=0 state: exactly U0 everywhere, p = 0.
@@ -461,15 +412,9 @@ fn bdf2_moving_volume_error(steps: usize) -> f64 {
 
 /// TEMPORAL order of BDF2 on moving volumes (dt sweep at fixed mesh + fixed
 /// motion amplitude; spatially uniform manufactured solution so the error is
-/// purely temporal). The roadmap's honest floor was ≥1.0 (naive
-/// swept-volume BDF2 can be first order — measure, do not force 2.0).
-///
-/// Measured July 2026 (steps = 10/20/40/80, GPU f32, amp 0.2h, 50 outers):
-///   u_l2 = [1.462e-3, 3.472e-4, 7.913e-5, 1.652e-5], order 2.154
-/// — the moving-volume BDF2 (variable-dt Newton weights on V·φ + the
-/// scheme-matched bounded rate `ale_dvdt_ddt`) holds SECOND order; gate
-/// ratcheted to 2.0 − 0.3 per the repo convention. Finest cap ~3× measured
-/// (GPU run-to-run jitter headroom).
+/// purely temporal). The moving-volume BDF2 (variable-dt Newton weights on
+/// V·φ + the scheme-matched bounded rate `ale_dvdt_ddt`) holds SECOND order;
+/// a naive swept-volume BDF2 can degrade to first order.
 #[test]
 fn ale_bdf2_moving_volume_temporal_order() {
     let mut dts = Vec::new();

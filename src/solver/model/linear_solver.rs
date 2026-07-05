@@ -92,9 +92,6 @@ impl SchurBlockLayout {
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ModelPreconditionerSpec {
     /// Leave preconditioner selection to the runtime config.
-    ///
-    /// This is the default for most models while solver plumbing is being
-    /// migrated to be fully model-owned.
     #[default]
     Default,
 
@@ -156,19 +153,14 @@ impl Default for ModelLinearSolverSettings {
         Self {
             solver_type: ModelLinearSolverType::Fgmres { max_restart: 60 },
             max_iters: 200,
-            // Inexact-Picard relative tolerance (June 2026). The outer loop
-            // re-linearizes every iteration, so solving each linearization
-            // past ~1e-4 of its initial residual is pure waste — measured on
-            // the OpenFOAM reference suite, walls roughly halve with metrics
-            // unchanged to the 5th decimal, because solves CONVERGE early
-            // and the adaptive encoding budget stops encoding dead work.
-            // 1e-3 was swept and REJECTED: it breaks the compressible MMS
-            // pressure order (1.36 vs >= 1.65; dual-time fine-grid
-            // corrections need the extra decade). 1e-4 reproduces all five
-            // MMS suites at baseline orders. The scale is
-            // min(||b||, ||r0||) on every path (host + encoded, aligned by
-            // gmres_logic/clamp_rel_scale). tolerance_abs stays 1e-12:
-            // the criterion is deliberately purely relative.
+            // Inexact-Picard relative tolerance. The outer loop re-linearizes
+            // every iteration, so solving each linearization past ~1e-4 of its
+            // initial residual is pure waste. 1e-3 was rejected: it breaks the
+            // compressible MMS pressure order (1.36 vs >= 1.65; dual-time
+            // fine-grid corrections need the extra decade). 1e-4 reproduces all
+            // five MMS suites at baseline orders. The scale is min(||b||, ||r0||)
+            // on every path (host + encoded). tolerance_abs stays 1e-12: the
+            // criterion is deliberately purely relative.
             tolerance: 1e-4,
             tolerance_abs: 1e-12,
             update_strategy: FgmresSolutionUpdateStrategy::FusedContiguous,

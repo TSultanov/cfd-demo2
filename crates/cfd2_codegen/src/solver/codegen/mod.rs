@@ -29,5 +29,4 @@ pub use ir::{
 pub use kernel_wgsl::{BindingDesc, KernelWgsl};
 pub use packed_state_gradients::generate_packed_state_gradients_kernel_program;
 pub use packed_state_gradients::generate_packed_state_gradients_wgsl;
-// Slot-based state access helpers are publicly available via state_access module
 pub use wgsl::{generate_wgsl, generate_wgsl_library};

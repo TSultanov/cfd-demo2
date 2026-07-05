@@ -1,27 +1,22 @@
-// Buoyant incompressible flow (Boussinesq): the math-driven capstone model.
+// Buoyant incompressible flow (Boussinesq): incompressible momentum + pressure
+// as `incompressible_momentum`, plus a temperature transport equation advected
+// by the solved Rhie-Chow mass flux and Boussinesq buoyancy fed back into
+// momentum as a directional explicit source.
 //
-// Everything here is declaration: incompressible momentum + pressure exactly
-// as `incompressible_momentum`, plus a temperature transport equation
-// advected by the SOLVED Rhie-Chow mass flux, plus Boussinesq buoyancy
-// feedback into momentum as a directional explicit source. The flux module,
-// its auxiliary kernels, and all WGSL derive from these declarations - this
-// file adds zero hand-written kernels.
-//
-// Equations (all terms sum to zero; see the assembly sign conventions):
+// Equations (all terms sum to zero):
 //
 //   momentum:  ddt(rho U) + div(phi, U)|bounded - lap(mu, U) + grad(p)
 //                = -rho beta (T - T0) g_vec        (buoyancy, explicit)
 //   pressure:  -lap(rho d_p, p) + divFlux(phi, p) = 0
 //   energy/cp: ddt(rho T) + div(phi, T) - lap(k/cp, T) = 0
 //
-// The buoyancy force is declared as two directional sources with scalar
-// coefficient trees (direction [0, -1], i.e. gravity along -y):
+// Buoyancy is two directional sources (gravity along -y, dir [0, -1]):
 //   (-beta*g * rho * T) * dir   +   (+beta*g*T0 * rho) * dir
-// which sums to f_y = rho*beta*g*(T - T0): hot fluid rises.
+// summing to f_y = rho*beta*g*(T - T0): hot fluid rises.
 //
-// The temperature equation is declared divided by the (constant) specific
-// heat so every term shares the unit Density*Temperature*Volume/Time; the
-// conduction coefficient is therefore k/cp.
+// The temperature equation is declared divided by the (constant) specific heat
+// so every term shares unit Density*Temperature*Volume/Time; the conduction
+// coefficient is therefore k/cp.
 
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{vol_scalar_dim, vol_vector_dim, EquationSystem};
@@ -37,11 +32,8 @@ use cfd2_ir::dimensions::{
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
 /// beta * |g|: thermal expansion coefficient times gravity magnitude.
-/// Modest value so buoyancy is a well-behaved coupling for validation.
-///
-/// DEFAULT of the runtime param `buoyant.beta_g` (see
-/// `modules::buoyant_ports`); the equations read `constants.buoyant_beta_g`
-/// at runtime. The MMS manufactured solutions are derived from these
+/// Default of the runtime param `buoyant.beta_g`; equations read
+/// `constants.buoyant_beta_g` at runtime. MMS solutions are derived from these
 /// canonical values, so tests must leave the params at their defaults.
 pub const BUOYANT_BETA_G: f64 = 0.1;
 /// Reference temperature of the Boussinesq linearization.
@@ -85,9 +77,9 @@ fn build_buoyant_system(with_mms_sources: bool) -> EquationSystem {
 
     // Boussinesq buoyancy, direction [0, -1] (gravity along -y):
     //   (-beta_g * rho * T) * dir_c  +  (beta_g * T0 * rho) * dir_c
-    // beta_g and T0 are runtime uniform params (constants.buoyant_*): the
-    // field names below are not state slots, so coefficient lowering falls
-    // through to the named-constants table (coeff_named_expr_dyn).
+    // beta_g and T0 are runtime uniform params: the field names below are not
+    // state slots, so coefficient lowering falls through to the
+    // named-constants table (coeff_named_expr_dyn).
     let beta_g_param =
         TypedCoeff::from_field(TypedFieldRef::<BetaG, Scalar>::new("buoyant_beta_g"));
     let t0_param =
@@ -111,12 +103,10 @@ fn build_buoyant_system(with_mms_sources: bool) -> EquationSystem {
         + grad_term.cast_to::<Force>()
         + buoy_t_term.cast_to::<Force>()
         + buoy_const_term.cast_to::<Force>();
-    // Explicit dev2 transpose viscous correction — same full-stress form as
-    // the incompressible sibling (Arc D, shipped default there June 2026);
-    // the manufactured MMS velocity is divergence-free, so the MMS sources
-    // are unchanged. Declaring the term forces the gradients pipeline on
-    // and excludes the gradients+assembly fusion (neighbor grad_state
-    // reads), exactly as for incompressible.
+    // Explicit dev2 transpose viscous correction (full-stress form). The MMS
+    // velocity is divergence-free, so the MMS sources are unchanged. Declaring
+    // the term forces the gradients pipeline on and excludes the
+    // gradients+assembly fusion (neighbor grad_state reads).
     {
         let mu_coeff2 = TypedCoeff::from_field(mu_typed);
         momentum_sum = momentum_sum
@@ -333,27 +323,15 @@ fn buoyant_incompressible_model_impl(with_mms_sources: bool) -> Result<ModelSpec
             crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
             derived_rhie_chow.aux_module,
         ],
-        // Schur preconditioning with T in the u-block. The capstone-era
-        // corruption ("p -> 2.7e5 on step 0, NaN cascade") no longer
-        // reproduces (June 2026, tests/gpu_buoyant_schur_probe_test.rs:
-        // rel_l2 vs the default preconditioner ~1e-7..1e-6, equal residual
-        // floors): it predated the validator's state-offset->FluxLayout-rank
-        // fix and the FGMRES restart monotonicity guard, either of which
-        // explains the observed signature. The Schur kernels are N-generic
-        // (u_index tables, u_len-sized buffers); A_pT/A_Tp blocks are
+        // Schur preconditioning with T in the u-block. The Schur kernels are
+        // N-generic (u_index tables, u_len-sized buffers); A_pT/A_Tp blocks are
         // structurally present but zero, so T degenerates to exact Jacobi
-        // inside the preconditioner — mathematically benign.
+        // inside the preconditioner — mathematically benign. Kept for
+        // saddle-point robustness, not speed.
         //
-        // NOTE: layout indices are coupled FluxLayout RANKS (equation
-        // order: U_x=0, U_y=1, p=2, T=3), NOT state-layout offsets (T sits
-        // at state offset 8) — the known rank-vs-offset latent-bug class.
-        //
-        // Wall cost (June 2026, reachable-tolerance era): Schur needs
-        // 1.8x fewer iterations than block-Jacobi at identical floors
-        // (probe: 206 vs 374 total) but its per-application pressure
-        // solve still costs ~+16% wall on the buoyant MMS suite (110s vs
-        // 94s; was +40% when cap-bound). Kept for saddle-point
-        // robustness, not speed.
+        // NOTE: layout indices are coupled FluxLayout RANKS (equation order:
+        // U_x=0, U_y=1, p=2, T=3), NOT state-layout offsets (T sits at state
+        // offset 8) — the known rank-vs-offset latent-bug class.
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
             preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
                 omega: 1.0,

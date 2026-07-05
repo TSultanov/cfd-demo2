@@ -247,7 +247,7 @@ pub fn generate_cut_cell_mesh(
     // 5. Fill SoA arrays
     let mut sorted_xs = vec![0.0; vx.len()];
     let mut sorted_ys = vec![0.0; vy.len()];
-    let mut sorted_indices = vec![0; vx.len()]; // Store original indices
+    let mut sorted_indices = vec![0; vx.len()];
 
     let mut current_starts = grid_starts.clone();
     for (i, idx) in grid_indices.iter().enumerate() {
@@ -288,7 +288,6 @@ pub fn generate_cut_cell_mesh(
 
             let mut on_segment = Vec::new();
 
-            // SIMD Setup
             let p_curr_x = f64x4::splat(p_curr.x);
             let p_curr_y = f64x4::splat(p_curr.y);
             let p_next_x = f64x4::splat(p_next.x);
@@ -419,7 +418,6 @@ pub fn generate_cut_cell_mesh(
         cells.len() * 4, // rough estimate
     );
 
-    // Add all vertices
     let vert_ids: Vec<super::mesh_builder::VertexId> = vx
         .iter()
         .zip(vy.iter())

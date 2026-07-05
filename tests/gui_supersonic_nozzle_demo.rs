@@ -1,27 +1,21 @@
-//! GUI supersonic-nozzle demo: end-to-end validation of the *GUI build path*.
+//! GUI supersonic-nozzle demo: end-to-end validation of the GUI build path.
 //!
-//! The GUI's "Supersonic Nozzle" case is the composition
-//!   model   = allmach_thermal           (the dropdown)
-//!   mesh    = generate_structured_nozzle_mesh  (the geometry radio)
-//!   params  = ALLMACH_THERMAL_NOZZLE     (the per-case defaults)
-//! driven through the shared `SolverDriver` exactly as the GUI worker drives it.
+//! The GUI's "Supersonic Nozzle" case composes model = allmach_thermal, mesh =
+//! generate_structured_nozzle_mesh, params = ALLMACH_THERMAL_NOZZLE, driven through
+//! the shared `SolverDriver` exactly as the GUI worker drives it.
 //!
-//! The shipping nozzle is driven by a PRESSURE INLET + SUPERSONIC (extrapolated)
-//! OUTLET (`ALLMACH_THERMAL_NOZZLE.pressure_inlet = true`): the driver flips the
-//! Inlet/Outlet boundary kinds, pins the inlet gauge pressure (the gauge anchor), and
-//! lets the outlet float (no back-pressure). At the REAL Air sound speed (c≈347 m/s,
-//! zero exaggeration) the flow reaches a supersonic exit with expansion cooling. The
-//! extrapolated supersonic-outlet pressure row is kept well-posed by the pressure-flux
-//! Newton linearization ([[cfd2-hyperbolic-pressure-row]]) — without it the real-c
-//! drive ran the exit density to vacuum. The profile is now a CLASSIC CD nozzle:
-//! subsonic throat (M≈0.95) accelerating to a supersonic exit (M≈1.7), i.e.
-//! M_exit > M_throat (the earlier over-expansion inversion is gone).
+//! Driven by a pressure inlet + supersonic (extrapolated) outlet
+//! (`ALLMACH_THERMAL_NOZZLE.pressure_inlet = true`): the driver flips the Inlet/Outlet
+//! boundary kinds, pins the inlet gauge pressure (the gauge anchor), and lets the outlet
+//! float (no back-pressure). At the real Air sound speed (c≈347 m/s) the flow reaches a
+//! supersonic exit with expansion cooling — a classic CD nozzle, subsonic throat (M≈0.95)
+//! accelerating to a supersonic exit (M≈1.7). The extrapolated outlet pressure row is
+//! kept well-posed by the pressure-flux Newton linearization (else the exit runs to
+//! vacuum).
 //!
-//! The whole point of this test is that it does NO manual field seeding: unlike the
-//! lower-level `allmach_thermal_supersonic_test`, it relies ENTIRELY on the driver to
-//! seed the thermal EOS fields (`psi`, `rho`, `rho_t_ref`, `T`), flip the BCs, seed the
-//! pressure ramp, and pin the inlet pressure — the seam the GUI uses. If this passes,
-//! selecting "Supersonic Nozzle" in the GUI produces supersonic flow.
+//! The point of this test: it does NO manual field seeding — it relies ENTIRELY on the
+//! driver to seed the thermal EOS fields (`psi`, `rho`, `rho_t_ref`, `T`), flip the BCs,
+//! seed the pressure ramp, and pin the inlet pressure (the seam the GUI uses).
 
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
@@ -90,9 +84,8 @@ fn gui_supersonic_nozzle_demo_reaches_mach_1() {
     let mesh = nozzle_mesh();
     let n = mesh.num_cells();
 
-    // FROM REST, as the GUI's `build_initial_velocity_with` now produces for the nozzle:
-    // zero velocity + flat gauge p=0 (the driver seeds no ramp). The flow develops from
-    // scratch, driven purely by the 1 MPa inlet pressure drop. NO field seeding here —
+    // FROM REST, as the GUI's `build_initial_velocity_with` produces for the nozzle:
+    // zero velocity + flat gauge p=0 (the driver seeds no ramp). NO field seeding here —
     // the driver must do the EOS fields + BC flip + inlet-pressure pin.
     let initial_u = vec![(0.0, 0.0); n];
     let initial_p = vec![0.0; n];
@@ -107,13 +100,12 @@ fn gui_supersonic_nozzle_demo_reaches_mach_1() {
         None,
     ))
     .expect("driver build");
-    // Phase-2: pins the inlet pressure (and keeps psi live) — the GUI seam.
+    // apply_params pins the inlet pressure (and keeps psi live) — the GUI seam.
     driver.apply_params(&params);
 
     let mut solver = driver.into_solver();
-    // From rest the flow needs longer to develop than the old freestream-seeded start:
-    // it accelerates from zero, chokes the throat, overshoots, then settles toward the
-    // supersonic CD profile (M_throat≈1.1, M_exit≈1.9). 1200 steps clears the transient.
+    // From rest the flow accelerates from zero, chokes the throat, overshoots, then
+    // settles toward the supersonic CD profile; 1200 steps clears the transient.
     for _ in 0..1200 {
         solver
             .step_with_stats()
@@ -140,13 +132,10 @@ fn gui_supersonic_nozzle_demo_reaches_mach_1() {
         params.inlet_pressure
     );
 
-    // The driver flipped the BCs, seeded the EOS fields, and pinned the 1 MPa inlet
-    // pressure purely from the params: developing FROM REST, the rocket-scale drop chokes
-    // the throat and the flow reaches a SUPERSONIC exit with expansion cooling. With the
-    // pressure-flux Newton linearization ([[cfd2-hyperbolic-pressure-row]]) making the
-    // exit well-posed, the profile is a CLASSIC converging–diverging nozzle — choked
-    // throat (M≈1.1) accelerating to a supersonic exit (M≈1.9), i.e. M_exit > M_throat.
-    // The throat bound stays loose (the choke point drifts slightly with the transient).
+    // Developing from rest, the inlet pressure drop chokes the throat and the flow
+    // reaches a supersonic exit with expansion cooling — a classic CD nozzle,
+    // M_exit > M_throat. The throat bound stays loose: the choke point drifts slightly
+    // with the transient.
     assert!(
         (0.85..=1.50).contains(&m_throat),
         "throat Mach out of band: M_throat={m_throat:.3} (driver seeding may be wrong)"

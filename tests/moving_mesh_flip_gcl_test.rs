@@ -1,33 +1,19 @@
-//! M4.3 gate (meshless/moving-mesh roadmap §M4, the case M3 explicitly
-//! DEFERRED): the topology-flip GCL test.
+//! Topology-flip GCL test: a swirl large enough to force real Voronoi adjacency
+//! FLIPS (faces born/die between steps as the mesh re-tessellates). Claim under
+//! test: uniform flow stays uniform to the CPU GCL scale THROUGH the flips,
+//! because the born/dead-face conservative remap keeps `Σ_f σ·mesh_flux_f =
+//! ΔV_i/dt` EXACT per cell (born faces carry zero swept contribution; the
+//! per-cell defect is distributed onto slack faces by the spanning-forest
+//! closure). GCL senses only that per-cell sum, so it survives the flip; the
+//! per-FACE flux near a flip is only locally first-order (`flip_defect`
+//! diagnostic). The test also ASSERTS flips actually occur.
 //!
-//! Where `moving_mesh_gcl_test` moves the seeds with a deliberately flip-FREE
-//! swirl (persistent Voronoi adjacency, every step closes through the M3
-//! telescoping identity), THIS gate drives a swirl large enough to force real
-//! adjacency FLIPS — faces are BORN and DIE between steps as the Voronoi
-//! re-tessellates. The claim under test is the whole moving-mesh premise:
+//! CPU-only: a GPU `refresh_mesh` cold-restarts the linear-algebra stack, so it
+//! cannot hold the warm-started GCL through a flip.
 //!
-//!   uniform flow stays uniform to the CPU GCL scale THROUGH the flips,
-//!
-//! because the born/dead-face conservative remap
-//! (`swept_mesh_fluxes_closed_flip`) keeps `Σ_f σ·mesh_flux_f = ΔV_i/dt` EXACT
-//! per cell — born faces carry zero swept contribution and the per-cell defect
-//! is distributed onto the slack faces by the spanning-forest closure. GCL
-//! (free-stream preservation) senses only that per-cell sum, so it survives the
-//! flip; the per-FACE flux near a flip is only locally first-order (the roadmap
-//! accepted cost), reported here as the `flip_defect` diagnostic.
-//!
-//! The test ASSERTS flips actually occur (a nonzero flip count — otherwise it
-//! would silently degrade into the M4.2 flip-free gate) and pins the flip rate.
-//!
-//! CPU-primary (the M4 loop is CPU-first; GPU per-step regen is M5 — a GPU
-//! `refresh_mesh` cold-restarts the linear-algebra stack, so it cannot hold the
-//! warm-started GCL through a flip and is out of scope here).
-//!
-//! Boundary/flow setup mirrors `moving_mesh_gcl_test` exactly: slip channel
-//! (Inlet left / Outlet right / SlipWall top+bottom), horizontal free stream
-//! `(U,0)` — an exact discrete fixed point, so any drift is a GCL/solve
-//! artifact, never BC physics.
+//! Slip channel (Inlet left / Outlet right / SlipWall top+bottom), horizontal
+//! free stream `(U,0)` — an exact discrete fixed point, so any drift is a
+//! GCL/solve artifact, never BC physics.
 #![cfg(all(feature = "meshgen", feature = "cpu"))]
 
 use cfd2::meshgen::meshless::generate_cvt_mesh_with_seeds;
@@ -51,23 +37,21 @@ const STEPS: usize = 140;
 /// Motion period (~2 swirl cycles over the run — several excursions through the
 /// flip-inducing extremes).
 const PERIOD: f64 = 70.0 * DT as f64;
-/// Horizontal free stream (see the module note): an exact discrete fixed point.
+/// Horizontal free stream: an exact discrete fixed point.
 const U0: (f32, f32) = (1.0, 0.0);
 
-/// Peak translation amplitude as a fraction of `H` (the flip probe in
-/// `moving_mesh_gcl_test` measured the first adjacency flip at ~0.2·h of rigid
-/// interior translation; this over-drives it to guarantee flips at the extremes
-/// while the mesh-CFL cap keeps the per-step motion small).
+/// Peak translation amplitude as a fraction of `H`; over-drives past the ~0.2·h
+/// adjacency-flip threshold to guarantee flips while the mesh-CFL cap keeps the
+/// per-step motion small.
 const FLIP_AMP_FRAC: f64 = 0.45;
 
-/// Flip-FORCING motion: an OSCILLATING rigid translation of the interior seed
-/// block (the driver holds the boundary seeds fixed), so the interior shears
-/// against the static boundary ring — the mechanism the M4.2 flip probe showed
-/// flips the Voronoi adjacency past ~0.2·h. Oscillating (not the probe's
-/// monotone drift) so the seeds return and the mesh stays valid over the run.
-/// The near-boundary faces are BORN/DIE as the shear crosses the threshold each
-/// half-cycle; interior-block faces translate rigidly (adjacency preserved).
-/// Evaluated from the t=0 label — no incremental round-off drift.
+/// Flip-forcing motion: an oscillating rigid translation of the interior seed
+/// block (boundary seeds held fixed), so the interior shears against the static
+/// boundary ring and flips the Voronoi adjacency past ~0.2·h. Oscillating so the
+/// seeds return and the mesh stays valid over the run; near-boundary faces
+/// born/die as the shear crosses the threshold each half-cycle, interior-block
+/// faces translate rigidly (adjacency preserved). Evaluated from the t=0 label —
+/// no incremental round-off drift.
 fn shear_flip(p: [f64; 2], t: f64) -> [f64; 2] {
     let a = FLIP_AMP_FRAC * H * (2.0 * std::f64::consts::PI * t / PERIOD).sin();
     [p[0] + a, p[1] + 0.6 * a]
@@ -283,9 +267,8 @@ fn run_flip_gcl_cpu(scheme: TimeScheme, label: &str) -> FlipGclOut {
     out
 }
 
-/// Assert the decisive properties. Caps pinned after first measurement (see the
-/// printed line); tightened to ~2-3× measured. The load-bearing asserts:
-///   1. flips ACTUALLY occurred (nonzero flip count) — else this is the M4.2
+/// Assert the decisive properties (caps tightened to ~2-3× measured):
+///   1. flips ACTUALLY occurred (nonzero flip count) — else this is the
 ///      flip-free gate in disguise;
 ///   2. uniform flow stays uniform to the CPU GCL scale THROUGH the flips;
 ///   3. no compounding (the late window ≈ the early window — a broken flip
@@ -307,11 +290,9 @@ fn assert_flip_gcl(out: &FlipGclOut) {
         "flip defect {:.3e} unexpectedly tiny — flips not really exercised",
         out.max_flip_defect
     );
-    // Uniform flow preserved through the flips, at the CPU GCL scale — pinned to
-    // the SAME ~1e-6 band as the flip-FREE M4.2 gate (measured max|U-U0| ≈
-    // 1.9e-6, max|p| ≈ 2.3e-5 across 88 born/died faces; caps ~3× measured).
-    // This is the decisive correctness statement of the whole moving-mesh
-    // premise: the born/dead-face remap holds the free stream through flips.
+    // Uniform flow preserved through the flips, at the CPU GCL scale — the same
+    // ~1e-6 band as the flip-free gate (caps ~3× measured). The decisive
+    // statement: the born/dead-face remap holds the free stream through flips.
     assert!(out.max_du < 6e-6, "U drift {:.3e} above cap through flips", out.max_du);
     assert!(out.max_dp < 8e-5, "p drift {:.3e} above cap through flips", out.max_dp);
     // Non-compounding: a broken flip remap injects a fresh O(dt) GCL error at

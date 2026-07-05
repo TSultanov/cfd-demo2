@@ -10,8 +10,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 const ORD: Ordering = Ordering::Relaxed;
 
-// ── Vector types (mirror WGSL vecN<f32>) ────────────────────────────────────
-
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vec2 {
     pub x: f32,
@@ -110,8 +108,6 @@ vec_ops!(Vec2 { x, y });
 vec_ops!(Vec3 { x, y, z });
 vec_ops!(Vec4 { x, y, z, w });
 
-// ── Vector intrinsics ───────────────────────────────────────────────────────
-
 pub trait Dot {
     fn dot(self, o: Self) -> f32;
 }
@@ -156,8 +152,6 @@ pub fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-// ── Typed atomic load/store over the buffer backing slices ──────────────────
-
 #[inline(always)]
 pub fn ldf(b: &[AtomicU32], i: usize) -> f32 {
     f32::from_bits(b[i].load(ORD))
@@ -197,11 +191,9 @@ pub fn st2c(b: &[AtomicU32], i: usize, comp: usize, v: f32) {
     stf(b, 2 * i + comp, v);
 }
 
-/// Boundary ghost value for face reconstruction (model kernel helper; mirrors
-/// the WGSL `bc_neighbor_scalar` and the interpreter intrinsic). Dirichlet
-/// (kind 1) returns the prescribed value, Neumann (kind 2) extrapolates by the
-/// outward gradient, otherwise zero-gradient (owner); interior faces pass
-/// `interior` through.
+/// Boundary ghost value for face reconstruction. Dirichlet (kind 1) returns the
+/// prescribed value, Neumann (kind 2) extrapolates by the outward gradient,
+/// otherwise zero-gradient (owner); interior faces pass `interior` through.
 #[inline(always)]
 pub fn bc_neighbor_scalar(
     interior: f32,

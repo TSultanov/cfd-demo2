@@ -32,7 +32,7 @@ impl FluxLayout {
                     offset += 1;
                 }
                 FieldKind::Vector2 => {
-                    // Match the existing coupled ordering: x then y.
+                    // x then y, matching coupled ordering.
                     components.push(FluxComponent {
                         name: format!("{}_x", field.name()),
                         offset,

@@ -1,9 +1,8 @@
 //! Runtime solver knobs the driver applies to a live solver.
 //!
-//! Moved out of `src/ui/app.rs` so both the GUI worker and the headless tests
-//! build the identical parameter bag. The canonical
-//! `ModelGuiDefaults` → `RuntimeParams` mapping lives on
-//! `ModelGuiDefaults::to_runtime_params` (`src/ui/model_defaults.rs`).
+//! Shared by the GUI worker and the headless tests so both build the identical
+//! parameter bag. The canonical `ModelGuiDefaults` → `RuntimeParams` mapping lives
+//! on `ModelGuiDefaults::to_runtime_params` (`src/ui/model_defaults.rs`).
 
 use crate::solver::model::eos::EosSpec;
 use crate::solver::scheme::Scheme;
@@ -37,8 +36,8 @@ pub struct RuntimeParams {
     pub viscosity: f32,
     pub eos: EosSpec,
     /// All-Mach compressibility `psi = d(rho)/d(p) = 1/c^2` (units Density/Pressure),
-    /// seeded into the `allmach_*` models' per-cell `psi` field. This is now
-    /// **EOS-derived**: the GUI fills it as `(1/c^2) * exaggeration`, where `1/c^2`
+    /// seeded into the `allmach_*` models' per-cell `psi` field. EOS-derived: the
+    /// GUI fills it as `(1/c^2) * exaggeration`, where `1/c^2`
     /// comes from the fluid's real sound speed (`Fluid::compressibility`) and
     /// `exaggeration` is the dimensionless GUI factor (×1 = real physics). `0.0` is the
     /// incompressible limit (an incompressible `Constant` EOS gives `1/c^2 = 0`). Other

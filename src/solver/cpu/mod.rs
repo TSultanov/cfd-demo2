@@ -51,9 +51,8 @@ pub enum CpuPrecision {
     F32,
 }
 
-/// Runtime-selectable execution configuration for the CPU backend. All knobs are
-/// runtime values (not cargo features), per the user's requirement that engine,
-/// threading and SIMD all be switchable at runtime.
+/// Runtime-selectable execution configuration for the CPU backend. Engine,
+/// threading and SIMD are runtime knobs (not cargo features).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CpuBackendConfig {
     /// Kernel engine: interpreter (default) or transpiled compiled-Rust.

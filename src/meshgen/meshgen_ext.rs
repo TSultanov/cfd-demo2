@@ -22,7 +22,6 @@ impl Mesh {
         max_iterations: usize,
         tolerances: Option<&MeshgenTolerances>,
     ) {
-        // Compute tolerances from mesh bounding box if not provided
         let default_tol;
         let tol = match tolerances {
             Some(t) => t,
@@ -66,7 +65,6 @@ impl Mesh {
         let n_verts = self.vx.len();
         let mut adj = vec![Vec::new(); n_verts];
 
-        // Build adjacency
         for i in 0..self.face_cx.len() {
             let v0 = self.face_v1[i];
             let v1 = self.face_v2[i];
@@ -115,7 +113,6 @@ impl Mesh {
             })
             .collect();
 
-        // Identify domain boundaries (Box)
         let mut min_bound = Point2::new(f64::MAX, f64::MAX);
         let mut max_bound = Point2::new(f64::MIN, f64::MIN);
 
@@ -147,7 +144,6 @@ impl Mesh {
         let normal_degenerate_sq = tol.normal_degenerate_sq;
 
         for iter in 0..max_iterations {
-            // Check skewness
             self.recalculate_geometry();
             let current_skew = self.calculate_max_skewness_with_eps(normal_degenerate_sq);
             if current_skew < target_skew {
@@ -167,12 +163,10 @@ impl Mesh {
                     let x_old = self.vx[i];
                     let y_old = self.vy[i];
 
-                    // If on domain box, fix it
                     if is_on_box(x_old, y_old) {
                         return (x_old, y_old);
                     }
 
-                    // Feature (corner) vertices never move.
                     if pinned[i] {
                         return (x_old, y_old);
                     }
@@ -204,7 +198,6 @@ impl Mesh {
                     let avg_x = sum_x / count as f64;
                     let avg_y = sum_y / count as f64;
 
-                    // Relaxation factor
                     let alpha = 0.5;
                     let mut x_new = x_old + (avg_x - x_old) * alpha;
                     let mut y_new = y_old + (avg_y - y_old) * alpha;
@@ -214,7 +207,6 @@ impl Mesh {
                         let p_curr = Point2::new(x_new, y_new);
                         let d = geo.sdf(&p_curr);
 
-                        // Numerical Gradient
                         let d_x = geo.sdf(&Point2::new(x_new + sdf_grad_eps, y_new))
                             - geo.sdf(&Point2::new(x_new - sdf_grad_eps, y_new));
                         let d_y = geo.sdf(&Point2::new(x_new, y_new + sdf_grad_eps))
@@ -226,7 +218,6 @@ impl Mesh {
                         y_new = p_proj.y;
                     }
 
-                    // Check for bad cells (edge collapse)
                     let mut bad_move = false;
                     for &neigh in &adj[i] {
                         let nx = self.vx[neigh];
@@ -271,7 +262,6 @@ impl Mesh {
                     let c2 = Vector2::new(self.cell_cx[neigh], self.cell_cy[neigh]);
                     c2 - c1
                 } else {
-                    // Boundary face
                     let c1 = Vector2::new(self.cell_cx[owner], self.cell_cy[owner]);
                     let f_c = Vector2::new(self.face_cx[i], self.face_cy[i]);
                     f_c - c1

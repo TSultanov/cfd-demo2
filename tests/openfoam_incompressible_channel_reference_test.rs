@@ -52,11 +52,8 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     .expect("solver init");
 
     // Match the OpenFOAM case setup in `reference/openfoam/incompressible_channel`.
-    // Canonical configuration dt = 0.02 / alpha_u = 0.7: d_p ∝ alpha_u*dt
-    // is part of cfd2's spatial discretization, so dt changes the discrete
-    // steady state (this case measured u 0.0800 at dt=0.02 vs 0.1317 at
-    // dt=0.05) — dt=0.02 matches the reference's own dt and the historical
-    // d_p. See the lid test header for the full d_p-sensitivity record.
+    // d_p ∝ alpha_u*dt is part of cfd2's spatial discretization, so dt changes
+    // the discrete steady state; dt=0.02 matches the reference's own dt.
     solver.set_dt(0.02);
     solver.set_dtau(0.0).unwrap();
     solver.set_density(1.0).unwrap();
@@ -69,12 +66,9 @@ fn openfoam_incompressible_channel_matches_reference_profile() {
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();
 
-    // Pseudo-time stepping towards the SIMPLE steady solution.
-
-    // March to steady state: the reference is the machine-converged steady
-    // end state (final pimpleFoam initial residuals at the noise floor), so
-    // the transient path -- dt, time scheme, outer iterations -- drops out
-    // of the comparison; both codes compare converged states.
+    // March to steady state: the reference is machine-converged, so the
+    // transient path (dt, time scheme, outer iterations) drops out of the
+    // comparison; both codes compare converged states.
     const CHECK_EVERY: usize = 25;
     const STEADY_TOL: f64 = 1e-7;
     const MAX_STEPS: usize = 3000;

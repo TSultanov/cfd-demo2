@@ -1,11 +1,10 @@
 //! DSL generators for infrastructure compute kernels.
 //!
 //! These are solver-infrastructure kernels (dot product, CG linear solver, AMG,
-//! scalars reduction, GMRES helpers, Schur setup, etc.) that were previously
-//! handwritten `.wgsl` files.  Each generator builds a [`Module`] via the
-//! structured DSL and returns a [`KernelWgsl`] so the build system can write
-//! the result to `shaders/generated/` and let `wgsl_bindgen` + the kernel
-//! registry handle the rest.
+//! scalars reduction, GMRES helpers, Schur setup, etc.).  Each generator builds
+//! a [`Module`] via the structured DSL and returns a [`KernelWgsl`] so the build
+//! system can write the result to `shaders/generated/` and let `wgsl_bindgen` +
+//! the kernel registry handle the rest.
 
 use super::kernel_wgsl::KernelWgsl;
 use super::wgsl_ast::*;
@@ -33,7 +32,6 @@ pub use block_precond_impl::generate_block_precond;
 pub fn generate_dot_product() -> KernelWgsl {
     let mut m = Module::new();
 
-    // struct SolverParams { n: u32, num_groups: u32, padding: vec2<u32> }
     m.push(Item::Struct(StructDef::new(
         "SolverParams",
         vec![
@@ -43,7 +41,6 @@ pub fn generate_dot_product() -> KernelWgsl {
         ],
     )));
 
-    // @group(0) @binding(0) var<uniform> params: SolverParams;
     m.push(Item::GlobalVar(GlobalVar::new(
         "params",
         Type::Custom("SolverParams".into()),
@@ -52,7 +49,6 @@ pub fn generate_dot_product() -> KernelWgsl {
         vec![Attribute::Group(0), Attribute::Binding(0)],
     )));
 
-    // @group(1) @binding(0) var<storage, read_write> dot_result: array<f32>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "dot_result",
         Type::array(Type::F32),
@@ -60,7 +56,6 @@ pub fn generate_dot_product() -> KernelWgsl {
         Some(AccessMode::ReadWrite),
         vec![Attribute::Group(1), Attribute::Binding(0)],
     )));
-    // @group(1) @binding(1) var<storage, read> dot_a: array<f32>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "dot_a",
         Type::array(Type::F32),
@@ -68,7 +63,6 @@ pub fn generate_dot_product() -> KernelWgsl {
         Some(AccessMode::Read),
         vec![Attribute::Group(1), Attribute::Binding(1)],
     )));
-    // @group(1) @binding(2) var<storage, read> dot_b: array<f32>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "dot_b",
         Type::array(Type::F32),
@@ -77,7 +71,6 @@ pub fn generate_dot_product() -> KernelWgsl {
         vec![Attribute::Group(1), Attribute::Binding(2)],
     )));
 
-    // var<workgroup> scratch: array<f32, 64>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "scratch",
         Type::sized_array(Type::F32, 64),
@@ -86,7 +79,6 @@ pub fn generate_dot_product() -> KernelWgsl {
         vec![],
     )));
 
-    // Build the main() body
     let global_id = Expr::ident("global_id");
     let local_id = Expr::ident("local_id");
     let group_id = Expr::ident("group_id");
@@ -216,7 +208,6 @@ pub fn generate_dot_product_pair() -> KernelWgsl {
         vec![Attribute::Group(0), Attribute::Binding(0)],
     )));
 
-    // group 1 bindings
     for (i, name) in [
         "dot_result_a",
         "dot_result_b",
@@ -242,7 +233,6 @@ pub fn generate_dot_product_pair() -> KernelWgsl {
         )));
     }
 
-    // workgroup scratch
     m.push(Item::GlobalVar(GlobalVar::new(
         "scratch_a",
         Type::sized_array(Type::F32, 64),
@@ -297,7 +287,6 @@ pub fn generate_dot_product_pair() -> KernelWgsl {
             Expr::ident("val1"),
         ),
         workgroup_barrier(),
-        // Reduction via loop { ... break; } pattern (matches original)
         var_expr("offset", Expr::lit_u32(32)),
         loop_block(block(vec![
             if_block_expr(
@@ -327,7 +316,6 @@ pub fn generate_dot_product_pair() -> KernelWgsl {
                 Expr::ident("offset").shr(Expr::lit_u32(1)),
             ),
         ])),
-        // Write results
         if_block_expr(
             Expr::ident("lid").eq(0u32),
             block(vec![
@@ -412,7 +400,6 @@ pub fn generate_outer_convergence() -> KernelWgsl {
         ],
     )));
 
-    // Bindings
     m.push(Item::GlobalVar(GlobalVar::new(
         "input",
         Type::array(Type::F32),
@@ -905,7 +892,6 @@ pub fn generate_linear_solver() -> KernelWgsl {
         vec![Attribute::Group(1), Attribute::Binding(4)],
     )));
 
-    // Helper function: global_index
     m.push(Item::Function(Function::new(
         "global_index",
         vec![
@@ -1216,7 +1202,6 @@ pub fn generate_amg() -> KernelWgsl {
         vec![Attribute::Group(3), Attribute::Binding(1)],
     )));
 
-    // amg_should_stop helper
     m.push(Item::Function(Function::new(
         "amg_should_stop",
         vec![],
@@ -1504,7 +1489,6 @@ pub fn generate_gmres_update_fused() -> KernelWgsl {
         ],
     )));
 
-    // Helper function
     m.push(Item::Function(Function::new(
         "global_index",
         vec![
@@ -1614,7 +1598,6 @@ pub fn generate_gmres_update_fused() -> KernelWgsl {
         vec![Attribute::Group(3), Attribute::Binding(4)],
     )));
 
-    // accumulate_solution
     let body = block(vec![
         let_expr(
             "idx",
@@ -1702,7 +1685,6 @@ pub fn generate_gmres_update_fused() -> KernelWgsl {
 pub fn generate_generic_coupled_schur_setup() -> KernelWgsl {
     let mut m = Module::new();
 
-    // Bindings (all group 0)
     m.push(Item::GlobalVar(GlobalVar::new(
         "scalar_row_offsets",
         Type::array(Type::U32),
@@ -1765,7 +1747,6 @@ pub fn generate_generic_coupled_schur_setup() -> KernelWgsl {
         vec![Attribute::Group(0), Attribute::Binding(6)],
     )));
 
-    // u_index helper
     m.push(Item::Function(Function::new(
         "u_index",
         vec![Param::new("i", Type::U32, vec![])],
@@ -1787,7 +1768,6 @@ pub fn generate_generic_coupled_schur_setup() -> KernelWgsl {
         ]),
     )));
 
-    // safe_inverse helper
     m.push(Item::Function(Function::new(
         "safe_inverse",
         vec![Param::new("val", Type::F32, vec![])],
@@ -2295,7 +2275,7 @@ pub fn generate_outer_convergence_break() -> KernelWgsl {
         ]),
     );
 
-    // Plateau-mode field loop (see the doc comment; host semantics EXACT).
+    // Plateau-mode field loop; host semantics replicated exactly.
     let plateau_loop = for_loop_expr(
         for_init_var_typed_expr("i", Type::U32, Expr::lit_u32(0)),
         i.clone().lt(params.clone().field("count")),
@@ -2351,8 +2331,8 @@ pub fn generate_outer_convergence_break() -> KernelWgsl {
             block(vec![return_void()]),
             None,
         ),
-        // Sweeps completed INCLUDING this one (host `iters_done`); the host
-        // clears `eval_count` before each step's first outer.
+        // Sweeps completed including this one; host clears `eval_count` before
+        // each step's first outer.
         let_expr("it", eval_count.clone().index(Expr::lit_u32(0)) + Expr::lit_u32(1)),
         assign_expr(eval_count.clone().index(Expr::lit_u32(0)), it.clone()),
         if_block_expr(
@@ -2388,8 +2368,8 @@ pub fn generate_outer_convergence_break() -> KernelWgsl {
                 assign_expr(status.clone().index(Expr::lit_u32(0)), st.clone()),
             ])),
         ),
-        // Roll the current deltas into `delta_prev` for the next sweep's
-        // ratio (after all reads; both modes — mode 0 never reads it).
+        // Roll current deltas into `delta_prev` for the next sweep's ratio
+        // (after all reads).
         for_loop_expr(
             for_init_var_typed_expr("i", Type::U32, Expr::lit_u32(0)),
             i.clone().lt(params.clone().field("count")),
@@ -2789,7 +2769,7 @@ mod tests {
         assert!(wgsl.contains("&inv"));
     }
 
-    /// Phase 2a cross-check: every infrastructure kernel must have non-empty
+    /// Cross-check: every infrastructure kernel must have non-empty
     /// structured bindings when generated through `KernelWgsl::new(Module)`.
     ///
     /// This ensures that `Module::bindings()` extracts the same metadata that

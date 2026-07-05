@@ -142,11 +142,10 @@ fn source_u(x: f64, y: f64) -> (f64, f64) {
 }
 
 /// Continuity source S_p = +div(rho* U*) = +div(mass flux). NON-ZERO for variable
-/// density (= U*.grad(rho)); this is what forces the pressure to p* (without it,
-/// div_flux ~ 0 and the Rhie-Chow pressure equation drives p -> const). The sign
-/// matches the assembled div_flux convention (empirically: the -div sign drove
-/// the solve to -p*, error = 2||p*||; this +div sign recovers +p*). It is
-/// sign-invisible in the incompressible limit (div(rho U*) = 0).
+/// density (= U*.grad(rho)); this forces the pressure to p* (without it the
+/// Rhie-Chow pressure equation drives p -> const). The +div sign matches the
+/// assembled div_flux convention and recovers +p*; sign-invisible in the
+/// incompressible limit (div(rho U*) = 0).
 fn source_p(x: f64, y: f64) -> f64 {
     let mx = |x: f64, y: f64| mass_flux(x, y).0;
     let my = |x: f64, y: f64| mass_flux(x, y).1;
@@ -210,10 +209,9 @@ fn solve(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, Vec<f64>) {
     let n_cells = mesh.num_cells();
     // EOS aux fields (see the on-device recovery rho = rho_t_ref/T + psi*p).
     solver.set_field_scalar("psi", &vec![PSI; n_cells]).expect("psi");
-    // The pressure-row ddt now reads the decoupled `psi_precond`; seed it equal to PSI
-    // (=0 here) so the manufactured-solution residual is byte-identical to the physical
-    // psi (the term vanishes at steady state regardless, this just removes buffer-init
-    // dependence). Preconditioning is a driver-only transient device, inert under MMS.
+    // The pressure-row ddt reads the decoupled `psi_precond`; seed it equal to PSI
+    // (=0 here) so the residual is byte-identical to the physical psi. The term
+    // vanishes at steady state; this just removes buffer-init dependence.
     solver
         .set_field_scalar("psi_precond", &vec![PSI; n_cells])
         .expect("psi_precond");
@@ -321,25 +319,20 @@ fn allmach_thermal_coupled_second_order() {
         t_errs.push(t_err);
         p_errs.push(p_err);
     }
-    // VELOCITY and TEMPERATURE carry the new thermal physics — the energy
-    // equation, the variable-density momentum/flux, the on-device EOS coupling
-    // (rho recovered from T) — and both converge at ~2nd order (asymptotic
-    // n=32->48 orders ~1.86), so the discretization of the coupled
-    // variable-density system is second-order consistent.
+    // Velocity and temperature carry the thermal physics (energy equation,
+    // variable-density momentum/flux, on-device EOS rho-from-T coupling) and both
+    // converge at ~2nd order.
     assert_convergence_order("allmach_thermal_u", &hs, &u_errs, 2.0, 0.35, 3.0e-3);
     // T amplitude (~1.5) is ~15x the velocity amplitude, so its absolute L2 error
     // floor scales up accordingly.
     assert_convergence_order("allmach_thermal_T", &hs, &t_errs, 2.0, 0.35, 2.0e-2);
 
     // PRESSURE FIELD: only a bounded sanity check, NOT an order. grad(p) IS
-    // validated — the velocity converges at 2nd order and is driven by grad(p),
-    // so the pressure-velocity coupling is second-order accurate. The pressure
-    // FIELD's L2, however, carries a bounded null-space/checkerboard mode: the
+    // validated — the velocity converges at 2nd order driven by grad(p). The
+    // pressure FIELD's L2 carries a bounded null-space/checkerboard mode: the
     // steady pressure equation is singular (pure-Neumann gauge, psi=0) and this
-    // MMS sources grad(p*) directly to keep the manufactured (U*,p*) free, which
-    // excites a zero-grad pressure mode the velocity never sees. (The
-    // incompressible MMS dodges this by never sourcing grad(p*) and only reaches
-    // ~1st order on p.) The mode is bounded (0.43->0.47->0.49, decelerating).
+    // MMS sources grad(p*) directly, exciting a zero-grad pressure mode the
+    // velocity never sees. The mode is bounded and decelerating.
     let p_order = fit_order(&hs, &p_errs);
     let p_finest = *p_errs.last().unwrap();
     println!("[mms][allmach_thermal] pressure field L2 order {p_order:.3} (errs {p_errs:?}) — bounded, not asserted");

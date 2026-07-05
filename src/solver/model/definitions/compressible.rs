@@ -1,16 +1,10 @@
-// STABILITY ENVELOPE (model contract, measured June 2026 — probe matrix in
-// tests/mms_compressible_order_test.rs::probe_inviscid_margin_matrix):
-// this discretization (explicit KT/vanLeer flux + implicit inv_dt-scaled
-// EOS-recovery rows) develops a slow secular instability in the inviscid
-// limit at moderate Mach: a smooth interior thermo-field mode whose growth
-// rate rises with mesh resolution and is damped ONLY by physical viscosity
-// (mu k^2 must beat it; mu = 5e-3 holds through n = 32 at the MMS box's
-// scales, mu = 0.05 is robust everywhere measured). Time scheme, outer
-// iterations, pseudo-time damping, and low-Mach preconditioning were all
-// probed and refuted as cures — preconditioning makes it WORSE at moderate
-// Mach (it removes acoustic-scale dissipation). Time-accurate compressible
-// marching therefore REQUIRES nonzero physical viscosity; do not run this
-// model inviscid.
+// Model contract: this discretization (explicit KT/vanLeer flux + implicit
+// inv_dt-scaled EOS-recovery rows) develops a slow secular thermo-field
+// instability in the inviscid limit at moderate Mach, whose growth rate rises
+// with mesh resolution and is damped ONLY by physical viscosity (mu k^2 must
+// beat it; mu = 5e-3 holds through n = 32, mu = 0.05 is robust). Low-Mach
+// preconditioning makes it WORSE (it removes acoustic-scale dissipation). Do
+// not run this model inviscid.
 
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::algebraic::{
@@ -24,22 +18,19 @@ use crate::solver::model::backend::typed_ast::{
     typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
 use crate::solver::model::ports::PortRegistry;
-// si module no longer needed for boundary conditions - using type-level dimensions
 use cfd2_ir::dimensions::{
     Density, Dimensionless, DivDim, DynamicViscosity, EnergyDensity, Force, InvTime, Length,
     MassFlux, MomentumDensity, MulDim, Power, Pressure, Temperature, Velocity, Volume,
 };
-// Type-level dimensions for boundary conditions (re-exported for convenience)
 type DensityGradient = DivDim<Density, Length>;
 type MomentumDensityGradient = DivDim<MomentumDensity, Length>;
 type EnergyDensityGradient = DivDim<EnergyDensity, Length>;
 type PressureGradient = DivDim<Pressure, Length>;
 type TemperatureGradient = DivDim<Temperature, Length>;
 
-// Arc N4c implicit biharmonic. The auxiliary undivided-Laplacian unknowns
+// Implicit biharmonic. The auxiliary undivided-Laplacian unknowns
 // `lap_X = laplacian(X)` carry unit [X * Length]: the surface-integral
-// Laplacian `sum_faces(area/dist)*(X_neigh - X_own)` (the `laplacian(1, X)`
-// op's integrated unit is `X * Area/Length = X * Length`), so the static
+// Laplacian's integrated unit is `X * Area/Length = X * Length`, so the static
 // identity row `sp(-1, lap_X) + laplacian(1, X) = 0` is unit-consistent and
 // `laplacian(bih_eps4, lap_X)` (bih_eps4 a velocity) lands on the conserved
 // equation's own unit.
@@ -166,35 +157,30 @@ fn build_compressible_system_impl(
     with_mms_sources: bool,
     biharmonic: bool,
 ) -> EquationSystem {
-    // NOTE: This model uses typed builder APIs with explicit cast_to() calls to align
-    // terms to canonical dimension types. Type-level dimension expressions are not normalized,
-    // so semantically equivalent dimensions are different types; cast_to() unifies them.
-
-    // Define typed field references for conservative variables
+    // cast_to() aligns terms to canonical dimension types: type-level dimension
+    // expressions are not normalized, so semantically equivalent dimensions are
+    // distinct types that cast_to() unifies.
     let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
     let rho_u_typed = TypedFieldRef::<MomentumDensity, Vector2>::new("rho_u");
     let rho_e_typed = TypedFieldRef::<EnergyDensity, Scalar>::new("rho_e");
 
-    // Define typed field references for primitive variables
     let u_typed = TypedFieldRef::<Velocity, Vector2>::new("u");
     let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
     let t_typed = TypedFieldRef::<Temperature, Scalar>::new("T");
     let mu_typed = TypedFieldRef::<DynamicViscosity, Scalar>::new("mu");
 
-    // Define typed flux references
     let phi_rho_typed = TypedFluxRef::<MassFlux, Scalar>::new("phi_rho");
     let phi_rho_u_typed = TypedFluxRef::<Force, Vector2>::new("phi_rho_u");
     let phi_rho_e_typed = TypedFluxRef::<Power, Scalar>::new("phi_rho_e");
 
-    // Build coefficients
     let mu_coeff = TypedCoeff::from_field(mu_typed);
 
-    // Arc N4c implicit biharmonic. Auxiliary undivided-Laplacian unknowns
-    // `lap_X` (one per conserved field) and the velocity-scaled coefficient
-    // field `bih_eps4` (= eps4 * acoustic speed), set uniformly at runtime like
-    // `mu`. `laplacian(-bih_eps4, lap_X)` on a conserved row assembles
-    // `+bih_eps4 * lap2_undiv(lap_X)` (the implicit diffusion operator is
-    // `-coeff * lap2`), i.e. the dissipative `-bih_eps4 * grad^4 X`.
+    // Auxiliary undivided-Laplacian unknowns `lap_X` (one per conserved field)
+    // and the velocity-scaled coefficient field `bih_eps4` (= eps4 * acoustic
+    // speed), set uniformly at runtime like `mu`. `laplacian(-bih_eps4, lap_X)`
+    // on a conserved row assembles `+bih_eps4 * lap2_undiv(lap_X)` (the implicit
+    // diffusion operator is `-coeff * lap2`), i.e. the dissipative
+    // `-bih_eps4 * grad^4 X`.
     let lap_rho_typed = TypedFieldRef::<LapDensity, Scalar>::new("lap_rho");
     let lap_rho_u_typed = TypedFieldRef::<LapMomentumDensity, Vector2>::new("lap_rho_u");
     let lap_rho_e_typed = TypedFieldRef::<LapEnergyDensity, Scalar>::new("lap_rho_e");
@@ -202,9 +188,7 @@ fn build_compressible_system_impl(
         TypedCoeff::from_field(TypedFieldRef::<Velocity, Scalar>::new("bih_eps4")),
     );
 
-    // ========================================
-    // Continuity equation: ddt(rho) + div(phi_rho, rho) = 0
-    // ========================================
+    // Continuity: ddt(rho) + div(phi_rho, rho) = 0
     let rho_ddt = typed_fvm::ddt(rho_typed);
     let rho_div = typed_fvm::div_flux(phi_rho_typed, rho_typed);
 
@@ -221,9 +205,7 @@ fn build_compressible_system_impl(
     }
     let rho_eqn = rho_sum.eqn(rho_typed);
 
-    // ========================================
-    // Momentum equation: ddt(rho_u) + div(phi_rho_u, rho_u) - laplacian(mu, u) = 0
-    // ========================================
+    // Momentum: ddt(rho_u) + div(phi_rho_u, rho_u) - laplacian(mu, u) = 0
     let rho_u_ddt = typed_fvm::ddt(rho_u_typed);
     let rho_u_div = typed_fvm::div_flux(phi_rho_u_typed, rho_u_typed);
     let viscous_term = typed_fvm::laplacian(mu_coeff, u_typed);
@@ -244,10 +226,8 @@ fn build_compressible_system_impl(
     }
     let rho_u_eqn = rho_u_sum.eqn(rho_u_typed);
 
-    // ========================================
-    // Energy equation: ddt(rho_e) + div(phi_rho_e, rho_e) - laplacian(kappa, T) = 0
-    // ========================================
-    // Thermal conductivity field coefficient: kappa has unit Power/(Length*Temperature)
+    // Energy: ddt(rho_e) + div(phi_rho_e, rho_e) - laplacian(kappa, T) = 0
+    // kappa has unit Power/(Length*Temperature).
     let kappa_typed = TypedCoeff::from_field(TypedFieldRef::<
         cfd2_ir::dimensions::DivDim<Power, MulDim<Length, Temperature>>,
         Scalar,
@@ -273,14 +253,10 @@ fn build_compressible_system_impl(
     }
     let rho_e_eqn = rho_e_sum.eqn(rho_e_typed);
 
-    // ========================================
-    // Primitive recovery, declared as algebraic relations.
-    //
-    // These lower mechanically to the inv_dt-scaled coupled source rows
-    // (see cfd2_ir::equation::algebraic). Fields multiplying the linear
-    // unknown of each product (e.g. rho in `rho * u`) are frozen at the
-    // current state (Picard linearization).
-    // ========================================
+    // Primitive recovery, declared as algebraic relations. These lower to
+    // inv_dt-scaled coupled source rows; fields multiplying the linear unknown
+    // of each product (e.g. rho in `rho * u`) are frozen at the current state
+    // (Picard linearization).
 
     // Velocity recovery: rho * u = rho_u.
     let u_recovery = typed_alg::equation(
@@ -314,9 +290,6 @@ fn build_compressible_system_impl(
         typed_alg::field(p_typed),
     );
 
-    // ========================================
-    // Assemble equation system
-    // ========================================
     let mut system = EquationSystem::new();
     system.add_equation(rho_eqn);
     system.add_equation(rho_u_eqn);
@@ -329,13 +302,12 @@ fn build_compressible_system_impl(
         .expect("compressible temperature recovery failed algebraic lowering");
 
     if biharmonic {
-        // Arc N4c: auxiliary undivided-Laplacian constraint rows, appended last
-        // so the lap unknowns occupy coupled slots 8..12 (matching
+        // Auxiliary undivided-Laplacian constraint rows, appended last so the
+        // lap unknowns occupy coupled slots 8..12 (matching
         // `CompressibleBiharmonicAxis2D`). Each is the static identity
-        // `sp(-1, lap_X) + laplacian(1, X) = 0` ⟹ `lap_X = laplacian(X)`
-        // (the un-volumed `sp` diagonal balances the surface-flux Laplacian of X
-        // on the same row; RHS is zero, so the steady state is unchanged by the
-        // auxiliary block). rho_u is a Vector2, so `lap_rho_u` is per-component.
+        // `sp(-1, lap_X) + laplacian(1, X) = 0` ⟹ `lap_X = laplacian(X)`; RHS is
+        // zero, so the steady state is unchanged by the auxiliary block. rho_u
+        // is a Vector2, so `lap_rho_u` is per-component.
         let one = TypedCoeff::<Dimensionless>::constant(1.0);
         let minus_one = TypedCoeff::<Dimensionless>::constant(-1.0);
         let lap_rho_eqn = (typed_fvm::sp(minus_one.clone(), lap_rho_typed)
@@ -355,7 +327,6 @@ fn build_compressible_system_impl(
         system.add_equation(lap_rho_e_eqn);
     }
 
-    // Validate units to ensure the system is consistent
     system
         .validate_units()
         .expect("compressible system failed unit validation");
@@ -397,23 +368,17 @@ pub fn compressible_mms_model() -> Result<ModelSpec, String> {
     )
 }
 
-/// Arc N4c: `compressible_mms` plus the IMPLICIT k-selective biharmonic
-/// dissipation. Promotes the auxiliary undivided-Laplacian unknowns `lap_X`
-/// to the coupled block (stride 8 -> 12) with the constraint rows
-/// `lap_X = laplacian(X)` and adds `laplacian(-bih_eps4, lap_X)` to each
-/// conserved equation, so the whole `-eps4*grad^4 X` dissipation lives in the
-/// matrix (no explicit flux term, no `dt <~ C*h^2` limit). The coefficient is
-/// the per-cell `bih_eps4` field (= eps4 * acoustic speed), set uniformly at
-/// runtime like `mu`, so one registered model serves any eps4. Used by the
-/// inviscid-mode probes; NOT a shipped default (production keeps biharmonic OFF).
-///
-/// STATUS (Arc N4c): the formulation is validated — at eps4=0 the model
-/// reproduces plain `compressible_mms` to order ~2, and on the periodic box
-/// eps4>0 cures the inviscid refinement-amplified divergence. The eps4>0
-/// bounded-domain MMS order is conditioning-limited: the implicit `grad^4`
-/// operator (condition ~h^-4) outruns the default Jacobi+FGMRES at fine mesh
-/// (a stronger preconditioner is the deferred follow-up). The large
-/// `max_iters` override below is what the eps4=0 limit needs; eps4>0 needs more.
+/// `compressible_mms` plus IMPLICIT k-selective biharmonic dissipation.
+/// Promotes the auxiliary undivided-Laplacian unknowns `lap_X` to the coupled
+/// block (stride 8 -> 12) with the constraint rows `lap_X = laplacian(X)` and
+/// adds `laplacian(-bih_eps4, lap_X)` to each conserved equation, so the whole
+/// `-eps4*grad^4 X` dissipation lives in the matrix (no explicit flux term, no
+/// `dt <~ C*h^2` limit). The coefficient is the per-cell `bih_eps4` field
+/// (= eps4 * acoustic speed), set uniformly at runtime like `mu`, so one
+/// registered model serves any eps4. Used by the inviscid-mode probes; NOT a
+/// shipped default. At eps4>0 the bounded-domain MMS order is conditioning-
+/// limited (the implicit `grad^4` operator, condition ~h^-4, outruns
+/// Jacobi+FGMRES at fine mesh).
 pub fn compressible_mms_biharmonic_model() -> Result<ModelSpec, String> {
     compressible_model_impl(
         crate::solver::model::eos::EosSpec::IdealGas {
@@ -458,19 +423,19 @@ fn compressible_model_impl(
         grad_u_y,
     ];
     if biharmonic {
-        // Arc N4c: the auxiliary undivided-Laplacian unknowns `lap_X` (solved by
-        // the coupled matrix via the `lap_X = laplacian(X)` constraint rows) plus
-        // the runtime coefficient field `bih_eps4`. `lap_rho_u` is a single Vector2
-        // (matching the Vector2 `rho_u` it diffuses, so the cross-field biharmonic
-        // diffusion is component-wise). Present ONLY in this variant; the distinct
-        // model id keeps default models on their committed (stride-22/26) kernels.
+        // Auxiliary undivided-Laplacian unknowns `lap_X` (solved via the
+        // `lap_X = laplacian(X)` constraint rows) plus the runtime coefficient
+        // field `bih_eps4`. `lap_rho_u` is a single Vector2 (matching `rho_u`,
+        // so the biharmonic diffusion is component-wise). Present ONLY in this
+        // variant; the distinct model id keeps default models on their committed
+        // (stride-22/26) kernels.
         layout_fields.push(vol_scalar_dim::<LapDensity>("lap_rho"));
         layout_fields.push(vol_vector_dim::<LapMomentumDensity>("lap_rho_u"));
         layout_fields.push(vol_scalar_dim::<LapEnergyDensity>("lap_rho_e"));
         // `bih_eps4` = eps4 * acoustic speed (velocity units), the coefficient of
-        // `laplacian(-bih_eps4, lap_X)`. A uniform-valued storage field (like `mu`),
-        // set at runtime via `set_field_scalar`, so one registered model serves any
-        // eps4 without recompiling the shader.
+        // `laplacian(-bih_eps4, lap_X)`. A uniform-valued storage field (like
+        // `mu`) set at runtime, so one registered model serves any eps4 without
+        // recompiling the shader.
         layout_fields.push(vol_scalar_dim::<Velocity>("bih_eps4"));
     }
     if with_mms_sources {
@@ -486,18 +451,12 @@ fn compressible_model_impl(
     }
     let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
 
-    // ========================================
-    // Boundary conditions.
-    //
-    // Inlet: rho and u are prescribed (placeholder Dirichlet values; set via
-    // the solver's boundary table API). The dependent inlet entries
-    // (p/T/rho_e/rho_u) are declared expressions that keep the prescribed
-    // state thermodynamically consistent with the interior pressure every
-    // outer iteration. Outlet: p is prescribed; everything else
-    // extrapolates from the interior. The expressions reproduce the retired
-    // hand-written compressible_runtime_bc kernel (including its safety
-    // floors); the generic bc_expr module lowers them to one Faces kernel.
-    // ========================================
+    // Boundary conditions. Inlet: rho and u are prescribed (placeholder
+    // Dirichlet values; set via the solver's boundary table API). The dependent
+    // inlet entries (p/T/rho_e/rho_u) are declared expressions that keep the
+    // prescribed state thermodynamically consistent with the interior pressure
+    // every outer iteration. Outlet: p is prescribed; everything else
+    // extrapolates from the interior. bc_expr lowers them to one Faces kernel.
     use crate::solver::gpu::enums::GpuBcKind;
     use crate::solver::model::backend::boundary::BoundaryExpr as B;
 
@@ -764,14 +723,13 @@ fn compressible_model_impl(
             ),
     );
     if biharmonic {
-        // Arc N4c: the auxiliary lap unknowns get zero-gradient on every boundary.
-        // Two reasons: (1) every coupled unknown must appear in the boundary table
-        // or the boundary closure of the WHOLE coupled system is left ill-posed
-        // (an undeclared unknown corrupts the bounded-domain solve even at eps4=0);
-        // (2) zero-gradient makes the biharmonic flux through domain-boundary faces
-        // zero, keeping the dissipation interior (the implicit successor to the
-        // retired explicit `bih_mask`). The lap values at boundary cells are still
-        // pinned by the constraint `lap_X = laplacian(X)` via X's own BC.
+        // The auxiliary lap unknowns get zero-gradient on every boundary. Two
+        // reasons: (1) every coupled unknown must appear in the boundary table or
+        // the WHOLE coupled system's boundary closure is ill-posed (an undeclared
+        // unknown corrupts the bounded-domain solve even at eps4=0); (2)
+        // zero-gradient makes the biharmonic flux through domain-boundary faces
+        // zero, keeping the dissipation interior. The lap values at boundary cells
+        // are still pinned by the constraint `lap_X = laplacian(X)` via X's own BC.
         let all_types = [
             GpuBoundaryType::Inlet,
             GpuBoundaryType::Outlet,
@@ -821,7 +779,6 @@ fn compressible_model_impl(
     };
     let primitives = crate::solver::model::primitives::PrimitiveDerivations::identity();
 
-    // Clone system and layout for flux_module_module since we need to move them into ModelSpec
     let system_for_flux = system.clone();
     let layout_for_flux = layout.clone();
     let flux_module_module = crate::solver::model::modules::flux_module::flux_module_module(
@@ -843,7 +800,6 @@ fn compressible_model_impl(
             (false, true) => "compressible_biharmonic",
             (false, false) => "compressible",
         },
-        // Route compressible through the generic coupled pipeline.
         system,
         state_layout: layout,
         boundaries,
@@ -867,17 +823,14 @@ fn compressible_model_impl(
             },
         ],
         // The implicit biharmonic couples a 4th-order (condition ~ h^-4)
-        // operator into the block. Arc N4d found the stiffness is dominated by
-        // the INTRA-CELL coupling (inv_dt-scaled recovery rows + the -I/+4
-        // auxiliary-Laplacian block); the per-cell block-Jacobi preconditioner
-        // (`PreconditionerType::BlockJacobi`, selected via SolverConfig — the
-        // 12-unknown stride fits MAX_BLOCK_JACOBI=16) resolves it and converges
-        // in ~80 FGMRES iters/step at n=48 with O(n) scaling. The default
-        // point-Jacobi stalls and needs thousands of iters, so a modest budget
-        // bump over the inexact-Picard default of 200 covers the transient and
-        // finer research meshes with headroom. Non-biharmonic models keep the
-        // global default. NOTE: callers MUST select BlockJacobi for this model;
-        // point-Jacobi is conditioning-limited at fine mesh.
+        // operator into the block. The stiffness is dominated by the INTRA-CELL
+        // coupling (inv_dt-scaled recovery rows + the -I/+4 auxiliary-Laplacian
+        // block); the per-cell block-Jacobi preconditioner (the 12-unknown stride
+        // fits MAX_BLOCK_JACOBI=16) resolves it and converges in ~80 FGMRES
+        // iters/step at n=48. Point-Jacobi stalls and needs thousands of iters,
+        // so bump the budget over the inexact-Picard default of 200. Callers MUST
+        // select BlockJacobi for this model; point-Jacobi is conditioning-limited
+        // at fine mesh.
         linear_solver: if biharmonic {
             Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
                 solver: crate::solver::model::linear_solver::ModelLinearSolverSettings {
@@ -901,11 +854,9 @@ mod tests {
     use crate::solver::model::backend::typed_ast::typed_fvc;
     use cfd2_ir::dimensions::UnitDimension;
 
-    /// The hand-written pseudo-source recovery rows exactly as they were
-    /// declared before algebraic-equation lowering replaced them. This is the
-    /// golden reference: the lowering must reproduce these terms bit-for-bit
-    /// (same ops, same fields, same coefficient trees, same order), which is
-    /// what guarantees byte-identical generated WGSL.
+    /// Golden reference: the hand-written pseudo-source recovery rows that the
+    /// algebraic-equation lowering must reproduce bit-for-bit (same ops, fields,
+    /// coefficient trees, order), which guarantees byte-identical generated WGSL.
     fn handwritten_recovery_equations() -> Vec<Equation> {
         let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
         let rho_u_typed = TypedFieldRef::<MomentumDensity, Vector2>::new("rho_u");

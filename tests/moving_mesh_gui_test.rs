@@ -1,55 +1,9 @@
-//! Headless GUI ↔ moving-mesh (ALE) worker seam test — the Stage-1 gate.
+//! Headless GUI ↔ moving-mesh (ALE) worker seam test.
 //!
-//! There is no display in CI, so this exercises the *verifiable* half of the GUI
-//! moving-mesh hookup, in the spirit of `cpu_gui_parity.rs` (which drives the
-//! wrapped solver, not a window):
-//!
-//!  1. **Driver payload** — build a `MovingMeshDriver` exactly as the GUI init
-//!     path does (`generate_cvt_mesh_with_seeds` → `MovingMeshDriver::build` on
-//!     the incompressible ALE model, CPU backend) and step it N times, asserting
-//!     it steps without error, the cell count stays fixed (fixed-seed v1), and
-//!     the per-step `MovingMeshStats` are finite — the exact `(StepOutcome,
-//!     MovingMeshStats)` the worker's `SolverMode::MovingMesh` arm consumes.
-//!
-//!  2. **Worker message path** — hand a fresh `MovingMeshDriver` to the *real*
-//!     private solver worker via `moving_mesh_worker_smoke` (which sends
-//!     `SetSolver { MovingMesh }` + `SetRunning(true)` and collects the
-//!     `MeshRefreshed` events over the mpsc channel), asserting the worker steps,
-//!     emits `MeshRefreshed` events with non-empty re-tessellation cells + finite
-//!     stats, and the cell count never changes.
-//!
-//! No window is created; nothing here claims visual / interactive verification.
-//!
-//! # Manual visual smoke test (needs a display — NOT covered here)
-//!
-//! Headless CI cannot open the window, so the actual mesh-advecting animation
-//! must be confirmed by a human. To do so, run the GUI and:
-//!
-//!  1. `cargo run --release --features "cpu ui"`.
-//!  2. In the left panel, under **Compute backend**, pick GPU or any CPU option
-//!     (moving mesh runs on both backends as of M5 — the GPU path uses the
-//!     surgical topology refresh).
-//!  3. In the **Moving Mesh (ALE)** group, tick **Enable Moving Mesh (ALE)**.
-//!     This auto-steers Mesh Type → *Voronoi (CVT)*, model →
-//!     *incompressible_momentum_ale*, and forces a fixed timestep.
-//!  4. Leave **Seed motion** on *Flow-coupled* (the "follows the flow" default);
-//!     optionally drag **Regularization χ** (0 = pure flow advection, higher =
-//!     more centroid steering to hold cell quality).
-//!  5. Click **Initialize / Reset**, then **Run**.
-//!
-//! For the **oscillating-obstacle** demo instead: pick Geometry → *Channel with
-//! obstacle*, then in the Moving Mesh group tick **Oscillating obstacle** and set
-//! Amplitude / Frequency (Seed motion can stay *Frozen*). See the roadmap M6
-//! "Manual GUI smoke — oscillating obstacle" for the full steps.
-//!
-//! Expected: the Voronoi cells visibly advect / distort with the flow and the
-//! wireframe re-tessellates every step (no flicker, no crash, no buffer-overflow
-//! validation error even as per-cell vertex counts drift). The stats panel shows
-//! a live **ALE mesh / ALE / ALE time** block (cells, faces, flip counts, dt,
-//! skew, SCL defect, flip defect, and the plan/regen/swept/refresh millisecond
-//! split) next to the usual step-time/residual labels. **Pause** (Run toggles
-//! off) freezes it; **Initialize / Reset** rebuilds from scratch. The moving-mesh
-//! toggle is available on both the GPU and CPU backends (M5).
+//! No display in CI, so this exercises the verifiable half of the GUI moving-mesh
+//! hookup: build a `MovingMeshDriver` as the GUI init path does and step it, then
+//! drive the real private solver worker through the `SolverMode::MovingMesh`
+//! message path and observe the `MeshRefreshed` events. No window is created.
 #![cfg(feature = "ui")]
 
 use cfd2::meshgen::ChannelWithObstacle;
@@ -104,11 +58,10 @@ fn ale_params() -> RuntimeParams {
     }
 }
 
-/// Build a moving-mesh driver on a coarse CVT backstep mesh (fast), the same way
-/// the GUI's `build_moving_init` does. `u0` is the uniform initial cell velocity
-/// — `(0,0)` is the from-rest IC; a nonzero freestream makes the FlowCoupled
-/// seeds actually advect from step one (so the moving-mesh path is exercised with
-/// genuine motion, not a near-frozen mesh that never develops flow in 30 steps).
+/// Build a moving-mesh driver on a coarse CVT backstep mesh, as the GUI's
+/// `build_moving_init` does. `u0` is the uniform initial cell velocity: `(0,0)`
+/// is the from-rest IC; a nonzero freestream makes the FlowCoupled seeds advect
+/// from step one.
 fn build_driver(motion: MeshMotionSpec, u0: (f64, f64)) -> (MovingMeshDriver, usize) {
     let domain = Vector2::new(3.5, 1.0);
     let geo = BackwardsStep {
@@ -140,16 +93,14 @@ fn build_driver(motion: MeshMotionSpec, u0: (f64, f64)) -> (MovingMeshDriver, us
         None,
     ))
     .expect("MovingMeshDriver::build (CPU ALE) must succeed");
-    // Phase-2 knobs (outer_iters / relaxation), exactly as the worker's SetSolver.
+    // Apply outer_iters / relaxation knobs, as the worker's SetSolver does.
     driver.driver_mut().apply_params(&params);
     (driver, n_cells)
 }
 
 /// Build a moving-mesh driver on a ChannelWithObstacle CVT with a cross-stream
-/// OSCILLATING obstacle + the MovingWall BC — exactly as the GUI's
-/// `build_moving_init` does when "Oscillating obstacle" is ticked (obstacle =
-/// loop 1). Frozen interior seeds; only the obstacle loop moves. Returns the
-/// driver + its (fixed) cell count.
+/// oscillating obstacle + the MovingWall BC (the "Oscillating obstacle" GUI
+/// toggle). Frozen interior seeds; only the obstacle loop (loop 1) moves.
 fn build_oscillating_obstacle_driver() -> (MovingMeshDriver, usize) {
     let domain = Vector2::new(3.0, 1.0);
     let geo = ChannelWithObstacle {
@@ -180,7 +131,6 @@ fn build_oscillating_obstacle_driver() -> (MovingMeshDriver, usize) {
     ))
     .expect("MovingMeshDriver::build (oscillating obstacle) must succeed");
     driver.driver_mut().apply_params(&params);
-    // The obstacle is loop 1 of ChannelWithObstacle; cross-stream oscillation.
     driver.set_boundary_motion(BoundaryMotionSpec::Oscillation {
         loop_index: 1,
         amplitude: 0.03,
@@ -230,13 +180,13 @@ fn moving_mesh_gui_worker_and_driver_smoke() {
     std::env::set_var("CFD2_BACKEND", "cpu");
     std::env::set_var("CFD2_CPU_ENGINE", "interpreter");
 
-    // Part 1: the do-no-harm Frozen anchor + the flow-coupled path both step
-    // cleanly and report finite, fixed-cell telemetry.
+    // The Frozen anchor + flow-coupled path both step cleanly and report finite,
+    // fixed-cell telemetry.
     driver_steps_produce_finite_stats(MeshMotionSpec::Frozen, 6);
     driver_steps_produce_finite_stats(MeshMotionSpec::FlowCoupled { regularization: 0.5 }, 6);
 
-    // Part 2: drive the actual private solver worker through the moving-mesh
-    // message path and observe the MeshRefreshed events it emits.
+    // Drive the private solver worker through the moving-mesh message path and
+    // observe the MeshRefreshed events it emits.
     let (driver, n_cells) = build_driver(MeshMotionSpec::Frozen, (0.0, 0.0));
     let smoke = moving_mesh_worker_smoke(driver, 2000, 3, false);
     println!(
@@ -262,15 +212,11 @@ fn moving_mesh_gui_worker_and_driver_smoke() {
         "worker mesh cell count must stay fixed at {n_cells}"
     );
 
-    // Part 3: the FULL flow-coupled render loop, headless. Drive the real worker
-    // in FlowCoupled moving mode for ~30 regens through the message API,
-    // collecting each emitted `cached_cells`, then replay the UI's per-frame
-    // re-tessellation + renderer capacity path (`build_mesh_vertices` ->
-    // `update_mesh`) on the REAL emitted ALE meshes — the closest headless proxy
-    // for the live GPU render loop (which needs a display we do not have).
-    // Uniform freestream IC so the flow-coupled seeds advect from step one — the
-    // mesh genuinely moves (nonzero swept fluxes, real per-step topology drift),
-    // rather than sitting near-frozen while a from-rest flow slowly develops.
+    // The full flow-coupled render loop, headless: drive the worker in FlowCoupled
+    // moving mode for ~30 regens, collect each emitted mesh, then replay the UI's
+    // per-frame re-tessellation + renderer capacity path on the real ALE meshes.
+    // Uniform freestream IC so the seeds advect from step one (nonzero swept
+    // fluxes, real per-step topology drift) rather than sitting near-frozen.
     let (fc_driver, fc_cells) =
         build_driver(MeshMotionSpec::FlowCoupled { regularization: 0.5 }, (1.0, 0.0));
     let fc = moving_mesh_worker_smoke(fc_driver, 120_000, 30, true);
@@ -298,9 +244,8 @@ fn moving_mesh_gui_worker_and_driver_smoke() {
         (Some(fc_cells), Some(fc_cells)),
         "flow-coupled cell count must stay fixed at {fc_cells} (no implied add/remove)"
     );
-    // Physical: the post-closure per-cell SCL defect stays at f32-roundoff scale
-    // over the whole run — a genuinely conservative moving mesh (no negative area
-    // implied). ~1e-6 in practice; 1e-3 is a generous non-flaky ceiling.
+    // Post-closure per-cell SCL defect stays at f32-roundoff scale (a conservative
+    // moving mesh): ~1e-6 in practice; 1e-3 is a generous non-flaky ceiling.
     assert!(
         fc.max_scl_defect < 1e-3,
         "flow-coupled max SCL defect too large (non-conservative mesh): {:.3e}",
@@ -312,15 +257,12 @@ fn moving_mesh_gui_worker_and_driver_smoke() {
         fc.mesh_refresh_events,
         "collect_meshes must retain every emitted refresh"
     );
-    // Replay the real emitted meshes through the renderer's re-tessellation +
-    // capacity-growth path.
     replay_through_renderer(&fc.meshes, fc_cells);
 
-    // Part 4 (M6): the MOVING-BOUNDARY worker path. Drive an oscillating-obstacle
-    // ChannelObstacle driver (the "Oscillating obstacle" GUI toggle) through the
-    // real worker, collect the emitted meshes, and assert the obstacle actually
-    // MOVED (the near-obstacle geometry changes across refreshes) while the cell
-    // count stays fixed and the mesh stays conservative + renderable.
+    // The moving-boundary worker path: drive an oscillating-obstacle driver
+    // through the worker, collect the emitted meshes, and assert the obstacle
+    // actually moved (near-obstacle geometry changes across refreshes) while the
+    // cell count stays fixed and the mesh stays conservative + renderable.
     let (osc_driver, osc_cells) = build_oscillating_obstacle_driver();
     let osc = moving_mesh_worker_smoke(osc_driver, 120_000, 30, true);
     println!(
@@ -348,10 +290,8 @@ fn moving_mesh_gui_worker_and_driver_smoke() {
         "oscillating-obstacle cell count must stay fixed at {osc_cells}"
     );
     assert!(osc.max_scl_defect < 1e-3, "oscillating-obstacle SCL defect too large: {:.3e}", osc.max_scl_defect);
-    // The obstacle demonstrably MOVED: some cell's polygon differs between the
-    // first refresh and a later one (a rigid boundary displacement re-tessellates
-    // the near-wall cells). This is the moving-boundary analogue of the flow-
-    // coupled "mesh advects" observation, through the message path.
+    // The obstacle moved: some cell's polygon differs between the first refresh
+    // and a later one (a rigid boundary displacement re-tessellates near-wall cells).
     let mesh_moved = osc.meshes.len() >= 2
         && osc.meshes.iter().skip(1).any(|m| moved_relative_to(&osc.meshes[0], m));
     assert!(mesh_moved, "oscillating-obstacle mesh never changed across refreshes (obstacle did not move)");
@@ -387,8 +327,8 @@ fn moved_relative_to(a: &[Vec<[f64; 2]>], b: &[Vec<[f64; 2]>]) -> bool {
 /// `update_mesh`, asserting no overflow, that the buffers grow to fit, and that
 /// `num_vertices` tracks the data exactly (no truncation). A real headless wgpu
 /// device services every `write_buffer` (`poll(Wait)`), so an overrun would
-/// validation-error — this exercises the ea2c421 fatal-crash class on the ACTUAL
-/// per-step ALE topology, not synthetic polygons.
+/// validation-error — this exercises the buffer-overflow crash class on the
+/// actual per-step ALE topology, not synthetic polygons.
 fn replay_through_renderer(meshes: &[Vec<Vec<[f64; 2]>>], n_cells: usize) {
     assert!(!meshes.is_empty(), "no meshes to replay through the renderer");
     let instance = wgpu::Instance::default();
@@ -451,16 +391,13 @@ fn replay_through_renderer(meshes: &[Vec<Vec<[f64; 2]>>], n_cells: usize) {
     );
 }
 
-/// M5 Stage 3 gate — the moving-mesh worker on the **GPU backend**.
-///
-/// Stage 1/2 made the GPU moving loop viable (surgical topology refresh + carried
-/// BDF2 history); this proves the GUI's moving-mesh worker message path runs that
-/// loop end-to-end on the GPU backend now that the M5 UI gate is lifted. It drives
-/// the real private solver worker (`SetSolver { MovingMesh } + SetRunning`) with a
-/// flow-coupled CVT backstep built on the GPU backend (`CFD2_BACKEND` unset ⇒ GPU
-/// device), collects the `MeshRefreshed` events, and replays the emitted meshes
-/// through the renderer capacity path — the same assertions as the CPU worker
-/// smoke, but on the GPU. Skips cleanly when no GPU adapter is present.
+/// The moving-mesh worker on the **GPU backend** (surgical topology refresh +
+/// carried BDF2 history). Drives the private solver worker
+/// (`SetSolver { MovingMesh } + SetRunning`) with a flow-coupled CVT backstep on
+/// the GPU backend (`CFD2_BACKEND` unset ⇒ GPU device), collects the
+/// `MeshRefreshed` events, and replays the emitted meshes through the renderer
+/// capacity path — the same assertions as the CPU worker smoke, but on the GPU.
+/// Skips cleanly when no GPU adapter is present.
 #[test]
 fn moving_mesh_gui_worker_gpu_backend() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());

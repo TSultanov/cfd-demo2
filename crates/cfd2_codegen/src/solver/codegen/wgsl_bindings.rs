@@ -48,8 +48,8 @@ pub fn low_mach_params_struct() -> StructDef {
             StructField::new("model", Type::U32),
             StructField::new("theta_floor", Type::F32),
             StructField::new("pressure_coupling_alpha", Type::F32),
-            // Arc N4b: formerly `_pad0`; now the biharmonic dissipation coefficient
-            // (epsilon_4). Default 0 keeps the slot inert for non-biharmonic models.
+            // Biharmonic dissipation coefficient (epsilon_4); default 0 keeps the
+            // slot inert for non-biharmonic models.
             StructField::new("eps4", Type::F32),
         ],
     )

@@ -81,19 +81,15 @@ struct PositivityFieldOffsets {
 /// to avoid repeated StateLayout lookups during GPU operations.
 #[derive(Debug, Clone)]
 pub struct ResolvedUnknownMapping {
-    /// Maps (equation_index, component_index) -> state_offset
-    /// Stored as a flat Vec where index = equation_index * max_components + component_index
+    /// Flat, indexed by `equation_index * max_components + component_index`.
     pub offsets: Vec<u32>,
-    /// Number of equations
     pub num_equations: usize,
-    /// Maximum components per equation (for indexing)
     pub max_components: usize,
 }
 
 impl ResolvedUnknownMapping {
     const UNMAPPED_OFFSET: u32 = u32::MAX;
 
-    /// Get the state offset for a given equation and component.
     pub fn get_offset(&self, equation: usize, component: usize) -> Option<u32> {
         if equation >= self.num_equations || component >= self.max_components {
             return None;
@@ -104,10 +100,8 @@ impl ResolvedUnknownMapping {
     }
 }
 
-/// Resolve the unknown-to-state mapping from equation targets using PortRegistry.
-///
-/// This is the runtime path (used during actual GPU execution) that registers
-/// field ports and extracts their offsets.
+/// Resolve the unknown-to-state mapping from equation targets, extracting
+/// offsets from the field ports registered in the `PortRegistry`.
 pub fn resolve_unknown_mapping_runtime(
     model: &ModelSpec,
     port_registry: &PortRegistry,
@@ -128,7 +122,6 @@ pub fn resolve_unknown_mapping_runtime(
         let kind = target.kind();
         let comps = kind.component_count();
 
-        // Get offsets from PortRegistry
         match kind {
             FieldKind::Scalar => {
                 let port = port_registry
@@ -138,12 +131,9 @@ pub fn resolve_unknown_mapping_runtime(
             }
             _ => {
                 for comp in 0..comps {
-                    // For vector fields, we need to get the component offset
-                    // The PortRegistry stores these as separate entries or we compute from base
                     let port = port_registry
                         .get_field_entry_by_name(name)
                         .ok_or_else(|| format!("Field '{}' not found in port registry", name))?;
-                    // Component offset = base offset + component index
                     offsets[eq_idx * max_components + comp] = port.offset() + comp as u32;
                 }
             }
@@ -178,32 +168,22 @@ pub(crate) struct GenericCoupledProgramResources {
     /// Assembly graph for outer iterations AFTER the first, when the model's
     /// Update phase runs `rhie_chow/grad_p_update`: that kernel already wrote
     /// the identical Green-Gauss pressure gradient the Gradients-phase
-    /// `flux_module_gradients` would recompute (same stencil, same boundary
-    /// closure — verified byte-equivalent modulo a no-op `* 1.0`), and nothing
-    /// between them modifies `p`. `None` when the model lacks the refresher or
+    /// `flux_module_gradients` would recompute, and nothing between them
+    /// modifies `p`. `None` when the model lacks the refresher or
     /// `CFD2_NO_GRADP_SKIP=1`.
     assembly_graph_tail: Option<ModuleGraph<GeneratedKernelsModule>>,
-    /// RHS-only assembly variant (v2: the AssemblyRhsOnly kernels ONLY):
-    /// re-assembles the RHS against a FROZEN matrix AND frozen
-    /// fluxes/gradients. Used on outer iterations where
-    /// `matrix_freeze_period` skips re-linearization; None when the recipe
-    /// has no RHS-only kernels or the model is freeze-ineligible.
+    /// RHS-only assembly variant: re-assembles the RHS against a FROZEN matrix
+    /// AND frozen fluxes/gradients (freezing them together keeps the
+    /// deferred-correction implicit/explicit pairing consistent). Used on outer
+    /// iterations where `matrix_freeze_period` skips re-linearization; None when
+    /// the recipe has no RHS-only kernels or the model is freeze-ineligible.
     assembly_graph_frozen: Option<ModuleGraph<GeneratedKernelsModule>>,
     /// Matrix-freeze period (default 0 = off; env `CFD2_MATRIX_FREEZE=k`
     /// re-linearizes on outers 0, 1 and every k-th after). Applied on the
     /// non-batched path and the direct batched path; the adaptive-indirect
-    /// batched sub-path keeps full re-assembly.
-    ///
-    /// HISTORY: v1 (refuted 2026-07-02) re-ran Gradients/FluxComputation in
-    /// the frozen graph, recomputing the deferred-correction RHS from FRESH
-    /// fluxes against a matrix built from OLD ones — the broken pairing cost
-    /// nozzle 2.2 -> 614 s/step and OOMed the obstacle (frozen step-0
-    /// zero-d_p matrix poisoning the AMG hierarchy). v2 freezes the
-    /// fluxes/gradients WITH the matrix (frozen graph = RHS-only kernels
-    /// alone), keeping every implicit/explicit pair consistent by
-    /// construction, always re-linearizes outer 1 (d_p is seeded by the
-    /// first Update), and excludes `linearize_pressure_flux` models (their
-    /// RHS piece re-reads live state — an a_lin cache is the future fix).
+    /// batched sub-path keeps full re-assembly. `linearize_pressure_flux`
+    /// models are ineligible: their RHS piece re-reads live state and would
+    /// decouple from the frozen matrix's Jacobian.
     matrix_freeze_period: u32,
     apply_graph: ModuleGraph<GeneratedKernelsModule>,
     update_graph: ModuleGraph<GeneratedKernelsModule>,
@@ -227,11 +207,11 @@ pub(crate) struct GenericCoupledProgramResources {
     _b_bc_kind: wgpu::Buffer,
     _b_bc_value: wgpu::Buffer,
     boundary_faces: Vec<Vec<u32>>,
-    /// Model + recipe clones kept so a Tier B topology refresh can reconstruct
-    /// the mesh-topology-derived resources (bc scatter needs `model.boundaries`
-    /// + `model.system`; the generated-kernel bind-group rebuild needs
-    /// `model.id` + `recipe.kernels`; the Schur/krylov + convergence-monitor
-    /// rebuild needs both). Cheap relative to the GPU buffers they gate.
+    /// Model + recipe clones kept so a topology refresh can reconstruct the
+    /// mesh-topology-derived resources (bc scatter needs `model.boundaries` +
+    /// `model.system`; the generated-kernel bind-group rebuild needs `model.id`
+    /// + `recipe.kernels`; the Schur/krylov + convergence-monitor rebuild needs
+    /// both). Cheap relative to the GPU buffers they gate.
     model: ModelSpec,
     recipe: SolverRecipe,
 }
@@ -275,8 +255,6 @@ impl GenericCoupledProgramResources {
             b_bc_value,
             boundary_faces,
         } = bc_data;
-        // Build graphs from recipe using unified graph builder.
-        //
         // Some models (e.g., compressible KT flux) require a gradient stage before flux.
         // Keep gradients optional so diffusion-only models don't fail graph construction.
         let init_prepare_graph = build_optional_graph_for_phase(
@@ -323,12 +301,6 @@ impl GenericCoupledProgramResources {
 
         // RHS-only assembly graph for matrix-frozen outer iterations (see the
         // field docs; kernels exist only for the generic coupled models).
-        // v2: the frozen graph runs ONLY the RHS-only assembly — freezing the
-        // fluxes/gradients together with the matrix keeps the deferred-
-        // correction pairing consistent (see the field docs). Models with
-        // `linearize_pressure_flux` stay ineligible: that term's RHS piece is
-        // recomputed from live state inside the RHS-only kernel and would
-        // decouple from the frozen matrix's Jacobian.
         let freeze_eligible = !model.system.equations().iter().any(|eq| {
             eq.terms().iter().any(|t| t.linearize_pressure_flux.is_some())
         });
@@ -403,7 +375,6 @@ impl GenericCoupledProgramResources {
             build_generic_krylov(recipe, &runtime)?
         };
 
-        // Resolve unknown-to-state mapping using PortRegistry (runtime path)
         let unknown_mapping = resolve_unknown_mapping_runtime(model, &recipe.port_registry)?;
 
         let outer_convergence = OuterConvergenceMonitor::new(
@@ -489,7 +460,7 @@ impl GenericCoupledProgramResources {
         }
     }
 
-    /// Tier A geometry-only mesh refresh: rewrite the six geometry buffers in
+    /// Geometry-only mesh refresh: rewrite the six geometry buffers in
     /// place (see [`MeshResources::refresh_geometry`]). Topology-identical
     /// meshes only (validated); bind groups, CSR structures, bc tables, AMG
     /// and FGMRES/Schur workspaces are untouched — they are all
@@ -503,7 +474,7 @@ impl GenericCoupledProgramResources {
         common.mesh.refresh_geometry(&common.context.queue, mesh)
     }
 
-    /// Tier B topology refresh (M2): rebuild every mesh-topology-derived GPU
+    /// Topology refresh: rebuild every mesh-topology-derived GPU
     /// resource for a new mesh with the SAME cell count but a possibly changed
     /// face set / adjacency / boundary classification / nnz. Cell-indexed
     /// solver state (`state` ×3, gradients, iteration snapshot, warm-start is
@@ -517,25 +488,19 @@ impl GenericCoupledProgramResources {
     /// 3. Re-scatter the bc tables from the model spec + new `face_boundary`
     ///    and rebuild `boundary_faces`. **Runtime per-face BC overrides are
     ///    lost** (they were keyed by the old face indices) — reported via
-    ///    `bc_overrides_reset` so the caller re-applies them (design §1.4.4).
+    ///    `bc_overrides_reset` so the caller re-applies them.
     /// 4. Rebuild the Schur / krylov preconditioner + FGMRES workspace and the
     ///    outer-convergence monitor/gate against the refreshed linear system.
     /// 5. Rebuild every generated-kernel bind group in place, WITHOUT
     ///    recompiling any generated pipeline (the WGSL is unchanged — only the
     ///    buffers moved).
     ///
-    /// DEVIATION (honestly noted): stages 1 and 4 currently RECONSTRUCT the
-    /// linear-algebra modules (scalar CG, FGMRES, Schur/krylov, AMG, monitors),
-    /// which recompiles their *static, hand-written* WGSL pipelines. The
-    /// generated model kernels (the codegen output the "no recompile" rule
-    /// primarily protects, and the thing byte-identity guards) are NOT
-    /// recompiled — they take the in-place bind-group rebuild (stage 5). This
-    /// reconstruction also makes an in-place `GenericCoupledSchurPreconditioner::reset()`
-    /// unnecessary here: the rebuilt Schur has a fresh AMG hierarchy
-    /// (`prepares_seen = 0`), so coarse operators cannot go stale (review F8c is
-    /// satisfied by construction). Surgical in-place refresh of the LA pipelines
-    /// (via a threaded pipeline cache) is the follow-up perf optimization for
-    /// the per-step M4 loop; it does not change this stage's correctness gates.
+    /// Stages 1 and 4 reconstruct the static, hand-written linear-algebra
+    /// modules (scalar CG, FGMRES, Schur/krylov, AMG, monitors), recompiling
+    /// their pipelines; only the generated model kernels take the in-place
+    /// bind-group rebuild (stage 5). Reconstruction also makes an in-place
+    /// Schur `reset()` unnecessary: the rebuilt Schur has a fresh AMG hierarchy
+    /// (`prepares_seen = 0`), so coarse operators cannot go stale.
     pub(crate) fn refresh_mesh_topology(
         &mut self,
         mesh: &crate::solver::mesh::Mesh,
@@ -546,17 +511,15 @@ impl GenericCoupledProgramResources {
         macro_rules! tick { ($t:expr, $label:literal) => { if _prof { eprintln!("[refresh-prof] {}: {:.2} ms", $label, $t.elapsed().as_secs_f64()*1e3); $t = std::time::Instant::now(); } }; }
         let mut _t = std::time::Instant::now();
 
-        // Warm-start carry-forward (M5 stage 1): the coupled FGMRES uses the `x`
-        // buffer as its initial guess (absolute unknown values, not a
-        // correction — see `solve_fgmres`). A cell keeps its identity across a
-        // topology refresh (cell count invariant, so `num_dofs` is invariant),
-        // so the previous step's converged iterate is still a good seed. Capture
-        // the OLD `x` (an Arc-backed handle that outlives the reallocation) and
-        // its logical length here, BEFORE step 1 reallocates the linear system,
-        // then copy it into the fresh `x` below. Re-zeroing instead forces a
-        // cold restart every refresh — the GPU topology-seam GCL cost this stage
-        // targets. At step 0 (the byte-gate path) the old `x` is still zero, so
-        // this is byte-identical to a fresh build; the benefit is mid-run only.
+        // Warm-start carry-forward: the coupled FGMRES uses the `x` buffer as
+        // its initial guess (absolute unknown values, not a correction — see
+        // `solve_fgmres`). A cell keeps its identity across a topology refresh
+        // (cell count invariant, so `num_dofs` is invariant), so the previous
+        // step's converged iterate is still a good seed. Capture the OLD `x` (an
+        // Arc-backed handle that outlives the reallocation) here, BEFORE step 1
+        // reallocates the linear system, then copy it into the fresh `x` below.
+        // At step 0 the old `x` is still zero, so this is byte-identical to a
+        // fresh build; the benefit is mid-run only.
         let old_x = self
             .runtime
             .linear_port_space
@@ -699,9 +662,9 @@ impl GenericCoupledProgramResources {
     /// ALE step entry: rotate the volume history, THEN upload the new
     /// geometry, THEN upload the closed mesh fluxes (single owner of that
     /// ordering — see [`MeshResources::begin_ale_step`] for why
-    /// `host_prepare_step` cannot do the rotation). Note the v1 scope guard:
-    /// the dual-time step retry/rollback machinery is compressible-only
-    /// (`plan.model.id == "compressible"` gates in this file), and v1 ALE is
+    /// `host_prepare_step` cannot do the rotation). Scope guard: the dual-time
+    /// step retry/rollback machinery is compressible-only
+    /// (`plan.model.id == "compressible"` gates in this file) while ALE is
     /// incompressible-only, so a rejected-step re-run against an
     /// already-advanced mesh cannot occur; compressible ALE will need mesh
     /// rollback (seed snapshot + regen) before those paths may fire.
@@ -719,7 +682,7 @@ impl GenericCoupledProgramResources {
         )
     }
 
-    /// ALE step entry for a **topology-changing** move (M2 Tier B): the mesh's
+    /// ALE step entry for a **topology-changing** move: the mesh's
     /// face set / adjacency / nnz may differ (same cell count), so the whole
     /// mesh-topology-derived GPU stack must be rebuilt AND the volume history
     /// rotated — in this order (each step depends on the previous):
@@ -804,17 +767,14 @@ fn validate_schur_model(
     // Validate the layout against the equation targets used to assemble the system.
     //
     // The Schur bridge is N-generic: the u-block may contain any number of
-    // non-pressure unknowns (up to SCHUR_MAX_U), with a single
-    // pressure-like scalar; the layout must cover exactly the model's
-    // equation targets. Validated in production by the buoyant model
-    // (u = [U_x, U_y, T], p) — see tests/gpu_buoyant_schur_probe_test.rs.
+    // non-pressure unknowns (up to SCHUR_MAX_U), with a single pressure-like
+    // scalar; the layout must cover exactly the model's equation targets
+    // (e.g. buoyant: u = [U_x, U_y, T], p).
     //
     // The layout indexes the packed coupled x-vector (0..unknowns_per_cell),
     // so targets must be resolved through the coupled FluxLayout — NOT the
-    // state layout. The two coincide for models whose solved unknowns form a
-    // prefix of the state layout (e.g. incompressible_momentum), which
-    // masked this distinction until a model interleaved auxiliary state
-    // fields before a solved unknown.
+    // state layout. The two coincide only when the solved unknowns form a
+    // prefix of the state layout (e.g. incompressible_momentum).
     let _ = unknown_mapping;
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
     let mut target_indices = std::collections::BTreeSet::new();
@@ -1308,8 +1268,6 @@ fn res_mut(plan: &mut GpuProgramPlan) -> &mut GenericCoupledProgramResources {
     &mut plan.resources.backend
 }
 
-/// Register ops using the unified registry builder.
-/// The recipe's stepping mode determines which ops are registered.
 pub(crate) fn named_params_for_recipe(
     model: &crate::solver::model::ModelSpec,
     _recipe: &SolverRecipe,
@@ -1382,7 +1340,7 @@ pub(crate) fn spec_set_bc_values_per_face(
 
     let table = HostBcTable::new(coupled_stride as usize);
 
-    // Per-face BC storage: apply the boundary value to all boundary faces of this type.
+    // Apply the boundary value to all boundary faces of this type.
     // (Boundary index 0 is reserved for "None" and should have no boundary faces.)
     let faces = res(plan)
         .boundary_faces
@@ -1423,12 +1381,9 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     }
     r.fields.advance_step();
 
-    // OpenFOAM-style `backward` startup: the first step falls back to Euler because the
-    // `n-1` history is not yet meaningful. Once we have advanced at least one step, switch
-    // back to the requested scheme (BDF2).
-    //
-    // This keeps the scheme selection stable for steady runs and only affects `BDF2` at the
-    // very beginning of a simulation.
+    // OpenFOAM-style `backward` startup: the first step falls back to Euler
+    // because the `n-1` history is not yet meaningful; once at least one step
+    // has advanced, switch back to the requested scheme (BDF2).
     let requested = r.requested_time_scheme;
     let effective = if requested == crate::solver::gpu::enums::TimeScheme::BDF2
         && r.time_integration.step_count == 0
@@ -1444,10 +1399,8 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
 
     // Seed the writable `state` buffer with the previous state so kernels that
     // read from `state` (e.g. gradient/flux stages during implicit outer
-    // iterations) start from a consistent iterate.
-    //
-    // This mirrors the EI solver's pre-step copy and avoids reading stale data
-    // from the rotated ping-pong buffer.
+    // iterations) start from a consistent iterate, not stale data from the
+    // rotated ping-pong buffer.
     let size = r.fields.state_size_bytes();
     let src = r.fields.previous_state();
     let dst = r.fields.current_state();
@@ -1699,15 +1652,12 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
 /// Route multi-outer host-driven solves through the chunked one-submission
 /// machinery (GPU-side seed + rel-scale clamp + restart guard + stall +
 /// convergence flag, ONE submission and ONE blocking scalar readback per
-/// chunk) instead of the host restart loop, which pays per restart cycle: a
-/// host residual recompute (2 submits + a blocking norm readback), a
-/// snapshot/restore submission, the restart-body submission and a second
-/// blocking scalar readback. Semantics are preserved GPU-side:
-/// `clamp_rel_scale` implements the same `rel_scale = min(||b||, ||r0||)`,
-/// the encoded stall matches the host checkpoint stall, and the restart
-/// guard replicates the snapshot/restore monotonicity logic (this is the
-/// batched path's production configuration). `CFD2_NO_HOST_CHUNKED=1`
-/// restores the host loop.
+/// chunk) instead of the host restart loop, which pays a host residual
+/// recompute + blocking readback per restart cycle. Semantics are preserved
+/// GPU-side: `clamp_rel_scale` implements the same
+/// `rel_scale = min(||b||, ||r0||)`, the encoded stall matches the host
+/// checkpoint stall, and the restart guard replicates the snapshot/restore
+/// monotonicity logic. `CFD2_NO_HOST_CHUNKED=1` restores the host loop.
 fn host_chunked_solve_enabled() -> bool {
     !std::env::var("CFD2_NO_HOST_CHUNKED").is_ok_and(|v| v == "1")
 }
@@ -1716,9 +1666,9 @@ fn host_chunked_solve_enabled() -> bool {
 /// a multi-outer step: the step re-linearizes immediately after it, so its
 /// linearization error is O(1) and solving past ~1e-2 relative is pure
 /// over-solving (the later outers still run at the model tolerance, so the
-/// converged step is unchanged — validated by the MMS order suites). Biggest
-/// effect on from-rest first solves that otherwise burn the whole FGMRES
-/// budget at the tight tolerance. `CFD2_NO_EW_FIRST=1` disables.
+/// converged step is unchanged). Biggest effect on from-rest first solves that
+/// otherwise burn the whole FGMRES budget at the tight tolerance.
+/// `CFD2_NO_EW_FIRST=1` disables.
 fn first_outer_tolerance(base_tol: f32, is_first_outer: bool, multi_outer: bool) -> f32 {
     if !is_first_outer
         || !multi_outer
@@ -1783,13 +1733,11 @@ fn outer_plateau_active(plan: &GpuProgramPlan) -> bool {
 }
 
 /// Minimum outer sweeps before the plateau detector may take the STALL exit —
-/// the empirically validated floor (`model_defaults`: "Ghia validates 5").
-/// Below this the correction phase is not yet complete, so a stall-exit could
-/// change the physics. The TOLERANCE exit (every field's scaled correction
-/// under `outer_tol`) is a genuine convergence criterion and is allowed below
-/// the floor (from 2 sweeps): the obstacle bench measured the floor as ALWAYS
-/// binding (exactly 5.00 outers/step) even in steady phases where corrections
-/// were under tolerance by sweep 2-3.
+/// an empirically validated floor (Ghia validates at 5). Below this the
+/// correction phase is not yet complete, so a stall-exit could change the
+/// physics. The TOLERANCE exit (every field's scaled correction under
+/// `outer_tol`) is a genuine convergence criterion and is allowed below the
+/// floor (from 2 sweeps).
 const OUTER_PLATEAU_MIN_ITERS: usize = 5;
 /// Minimum outer sweeps before the TOLERANCE exit: at least one re-linearized
 /// second sweep must confirm the first's correction, so a single lucky
@@ -1890,7 +1838,7 @@ pub(crate) fn host_after_solve(plan: &mut GpuProgramPlan) {
         };
 
         // Adaptive outer-loop plateau detector (incompressible_momentum default).
-        // Handles convergence entirely here — the legacy GPU break below is
+        // Handles convergence entirely here — the GPU break below is
         // converged-gated and therefore unreachable for the plateauing SIMPLE
         // corrections. `prev` is refreshed every iter so ratios stay adjacent.
         if outer_plateau_active(plan) {
@@ -2218,7 +2166,6 @@ fn compute_outer_residuals(plan: &mut GpuProgramPlan) -> Option<(Vec<f32>, Optio
     // Always compute scaled residuals (state scale is populated by ensure_state_scale above).
     let scale: Option<Vec<f32>> = monitor.state_scale().map(|s| s.to_vec());
 
-    // Store absolute residuals
     plan.outer_field_residuals.clear();
     plan.outer_field_residuals.extend(
         monitor
@@ -2228,7 +2175,6 @@ fn compute_outer_residuals(plan: &mut GpuProgramPlan) -> Option<(Vec<f32>, Optio
             .zip(delta.iter().copied()),
     );
 
-    // Store scaled residuals (normalized by state scale)
     plan.outer_field_residuals_scaled.clear();
     if let Some(ref s) = scale {
         if s.len() == delta.len() {
@@ -2328,7 +2274,6 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
         let tol = r.linear_solver.tolerance;
         let tol_abs = r.linear_solver.tolerance_abs;
 
-        // Determine if adaptive outer break is available
         let supports_adaptive = r.outer_break_enabled
             && r.outer_gate.is_some()
             && r.outer_convergence.is_some()
@@ -2336,14 +2281,12 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
 
         let use_adaptive = supports_adaptive;
 
-        // Prepare adaptive resources (indirect graphs, bind groups, etc.)
         let adaptive_resources = if use_adaptive {
             let gate = r.outer_gate.as_ref()
                 .expect("outer_gate must be Some when use_adaptive is true (checked above)");
             let monitor = r.outer_convergence.as_ref()
                 .expect("outer_convergence must be Some when use_adaptive is true (checked above)");
 
-            // Create indirect-dispatch variants of assembly and update graphs.
             // The indirect assembly graph is only ever encoded for iter_idx > 0
             // (the direct graph covers the first iteration), so it derives from
             // the TAIL variant.
@@ -2360,7 +2303,6 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                     _ => (indirect_cells.clone(), 0),
                 });
 
-            // Create state bind group for convergence check
             let state = r.fields.current_state();
             let bg_state = monitor.create_state_bind_group(&device, state);
 
@@ -2380,11 +2322,9 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                 monitor.upload_break_params(&queue, r.outer_tol, r.outer_tol_abs);
             }
 
-            // Clear iteration counter
             let zero: u32 = 0;
             queue.write_buffer(&gate.b_iter_counter, 0, bytemuck::bytes_of(&zero));
 
-            // Create STOP-inject bind group from the solver's scalars buffer
             let stop_inject_bg = if solver_is_cg {
                 let b_scalars = r.runtime.scalar_cg.scalars();
                 gate.create_stop_inject_bind_group_cg(&device, &monitor.b_break_status, b_scalars)
@@ -2498,10 +2438,9 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                         tol_abs,
                         precond_label: "generic_coupled:schur(batch_tail)",
                         use_encoded_seed_basis0: true,
-                        // Plateau-routed models keep the tight policy they had
-                        // on the per-outer chunked route; the long-batched
-                        // models (pseudo-transient nozzle etc.) keep the
-                        // validated legacy floor.
+                        // Plateau-routed models keep the tight budget policy;
+                        // the long-batched models (pseudo-transient nozzle etc.)
+                        // keep the validated floor.
                         tight_budget: plateau_mode_active,
                     },
                     &mut pre,
@@ -2772,11 +2711,10 @@ pub(crate) fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
         let r = res(plan);
         (r.outer_batched_mode, r.outer_iters.max(1))
     };
-    // Plateau-driven models run batched too since the detector was ported
-    // into the break kernel's plateau mode (`CFD2_GPU_PLATEAU=0` restores the
-    // host detector on the non-batched per-iteration loop, which computes
-    // per-iter residuals host-side and skips the remaining UNENCODED sweeps).
-    // `CFD2_NO_BATCH` forces non-batched for diagnostics.
+    // Plateau-driven models can run batched via the break kernel's plateau
+    // mode (`CFD2_GPU_PLATEAU=0` restores the host detector on the non-batched
+    // per-iteration loop, which computes per-iter residuals host-side and skips
+    // the remaining UNENCODED sweeps). `CFD2_NO_BATCH` forces non-batched.
     let outer_batched_mode = outer_batched_mode
         && (!outer_plateau_active(plan) || gpu_plateau_enabled())
         && std::env::var("CFD2_NO_BATCH").is_err();
@@ -2801,17 +2739,13 @@ fn encoded_seed_basis0_enabled(default_enabled: bool) -> bool {
 
 /// On-device plateau detection (the break kernel's plateau mode), letting
 /// plateau-driven models use the batched one-submission outer path.
-/// `CFD2_GPU_PLATEAU=1` opts in; DEFAULT OFF by measurement (July 2026):
-/// after the per-outer host route switched to chunked one-submission solves
-/// with the tight AIMD budget, it beats the batched tail at BOTH scales —
-/// GUI obstacle 72.7 vs 104.7 ms/step, 118k obstacle 0.428 vs 0.510 s/step —
-/// because the batched tail must encode ALL `outer_iters` outers
-/// (assembly+solve+update) up front while the plateau typically exits at ~5
-/// of 8, and STOP-frozen iterations still cost their encoding and no-op
+/// `CFD2_GPU_PLATEAU=1` opts in; DEFAULT OFF because the per-outer host route
+/// (chunked one-submission solves with the tight budget) beats it: the batched
+/// tail must encode ALL `outer_iters` up front while the plateau typically
+/// exits early, and STOP-frozen iterations still cost their encoding and no-op
 /// dispatches. The host detector also keeps per-iteration residuals for the
-/// GUI. Machinery stays maintained: the break kernel's plateau mode
-/// replicates the host detector exactly (tolerance + stall exits, same
-/// band/floors) and is exercised opt-in.
+/// GUI. The break kernel's plateau mode replicates the host detector exactly
+/// (tolerance + stall exits, same band/floors).
 fn gpu_plateau_enabled() -> bool {
     std::env::var("CFD2_GPU_PLATEAU").is_ok_and(|v| v == "1")
 }

@@ -1,14 +1,9 @@
-//! GPU exclusive-scan primitive parity (design-gpu §4.1) — M5 stage 3.
+//! GPU exclusive-scan primitive parity.
 //!
-//! The scan is the prerequisite the GPU-resident regen (`derive_faces`, §6.2)
-//! needs to turn per-cell face counts into offsets on the GPU. This gate pins
-//! the two-level exclusive scan against a CPU reference across the boundary
+//! Pins the two-level exclusive scan against a CPU reference across boundary
 //! cases that exercise every level: sub-block, exactly one block, block+1
-//! (forces the block-sums level), a large multi-block count at the ~face-count
-//! scale, and a randomized count. Deterministic (`u32` adds are exact) so the
-//! match is bit-exact, not a tolerance.
-//!
-//! Skips cleanly when no GPU adapter is present.
+//! (forces the block-sums level), a large multi-block count, and a randomized
+//! count. Deterministic (`u32` adds are exact) so the match is bit-exact.
 #![cfg(feature = "meshgen")]
 
 use cfd2::solver::gpu::context::GpuContext;
@@ -53,7 +48,7 @@ fn gpu_scan_matches_cpu_exclusive_scan() {
         ("block_plus_one".into(), vec![2u32; epb + 1]),
         ("two_blocks".into(), (0..2 * epb as u32).map(|i| i % 7).collect()),
         (
-            // ~face-count scale: many blocks, forces the block-sums level.
+            // Many blocks: forces the block-sums level.
             "large_300k".into(),
             (0..300_000u32).map(|i| (i % 13) + 1).collect(),
         ),
@@ -74,7 +69,6 @@ fn gpu_scan_matches_cpu_exclusive_scan() {
             want.len()
         );
         assert_eq!(got_total, want_total, "case {name}: total sum mismatch");
-        // Find the first divergence for a useful message (bit-exact expected).
         if got != want {
             let idx = got.iter().zip(&want).position(|(a, b)| a != b).unwrap();
             panic!(

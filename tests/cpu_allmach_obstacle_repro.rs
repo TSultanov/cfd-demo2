@@ -1,22 +1,15 @@
 //! Regression test for the CPU-backend freeze on the all-Mach thermal
-//! obstacle case (reported: obstacle channel + 0.01 cut-cell mesh +
-//! `allmach_thermal` works on GPU, produces no sensible solution on CPU).
+//! obstacle case (works on GPU, produced no sensible CPU solution). Root
+//! cause: CPU FGMRES measured convergence against `||b||` alone while the GPU
+//! clamps the relative scale to `min(||b||, ||r0||)`; with an RHS dominated by
+//! BDF2/ddt terms every CPU solve "converged" at zero iterations under the
+//! Eisenstat-Walker tolerance, so the state never moved.
 //!
-//! ROOT CAUSE: the CPU FGMRES measured convergence against `||b||` alone,
-//! while the GPU clamps the relative scale to `min(||b||, ||r0||)`
-//! (`gmres_logic/clamp_rel_scale`). On this near-equilibrium configuration
-//! the RHS is dominated by large BDF2/ddt terms (`||r0||/||b|| ~ 6.5e-4` at
-//! the very first solve), so under the Eisenstat-Walker first-outer
-//! tolerance (1e-2) every CPU solve "converged" at ZERO iterations, no
-//! correction was ever computed, and the state stayed bit-exact at its
-//! initial condition forever. The GPU, with the clamp, evolved normally.
-//!
-//! The test drives the exact GUI configuration (ALLMACH defaults through
-//! `SolverDriver`, incl. the Turkel `psi_precond` seeding) on the CPU
-//! backend and asserts the flow actually DEVELOPS: the obstacle must carve a
-//! stagnation/wake region (min |U| well below the freestream) and build a
-//! pressure field. Run manually with `CFD2_BACKEND=gpu` to compare backends;
-//! `CFD2_REPRO_SIZE`/`CFD2_REPRO_STEPS` override the mesh size / step count.
+//! Drives the GUI ALLMACH defaults through `SolverDriver` (incl. Turkel
+//! `psi_precond` seeding) on CPU and asserts the flow develops: the obstacle
+//! carves a stagnation/wake region and builds a pressure field. Set
+//! `CFD2_BACKEND=gpu` to compare; `CFD2_REPRO_SIZE`/`CFD2_REPRO_STEPS` override
+//! the mesh size / step count.
 
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
@@ -122,8 +115,7 @@ fn allmach_thermal_obstacle_develops_on_cpu() {
     }
 
     // The flow must DEVELOP: the no-slip obstacle carves a stagnation/wake
-    // region (frozen-state bug: min |U| stayed exactly at the freestream
-    // 1.1e-2 and p stayed exactly 0 for every step).
+    // region (the frozen-state bug left min |U| at freestream and p at 0).
     let inlet = d.inlet_velocity as f64;
     assert!(
         min_umag < 0.5 * inlet,

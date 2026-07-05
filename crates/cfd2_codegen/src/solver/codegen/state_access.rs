@@ -23,10 +23,6 @@ fn compute_offset_for_slot(slot: &ResolvedStateSlotSpec, component: u32) -> u32 
     slot.base_offset + component
 }
 
-// ============================================================================
-// Slot-Based State Access Helpers (no name lookup)
-// ============================================================================
-
 /// Access a single component of a state field by slot (no name lookup).
 pub fn state_component_slot(
     stride: u32,
@@ -282,10 +278,6 @@ mod tests {
         }
     }
 
-    // ============================================================================
-    // Slot-Based State Access Tests
-    // ============================================================================
-
     #[test]
     fn slot_based_state_access_builds_scalar_and_vector_exprs() {
         let slots = test_slots_from_fields(vec![
@@ -296,15 +288,12 @@ mod tests {
         let p_slot = find_slot(&slots, "p").unwrap();
         let u_slot = find_slot(&slots, "U").unwrap();
 
-        // Test scalar access
         let scalar = state_scalar_slot(slots.stride, "state", "idx", p_slot);
         assert_eq!(scalar.to_string(), "state[idx * 3u + 2u]");
 
-        // Test component access
         let component = state_component_slot(slots.stride, "state", "idx", u_slot, 1);
         assert_eq!(component.to_string(), "state[idx * 3u + 1u]");
 
-        // Test vec2 access
         let vec2 = state_vec2_slot(slots.stride, "state", "idx", u_slot);
         assert_eq!(
             vec2.to_string(),
@@ -322,13 +311,11 @@ mod tests {
         let p_slot = find_slot(&slots, "p").unwrap();
         let u_slot = find_slot(&slots, "U").unwrap();
 
-        // Test typed scalar access
         let p = state_scalar_slot_typed(slots.stride, "state", "idx", p_slot);
         assert_eq!(p.ty, DslType::f32());
         assert_eq!(p.unit, Pressure::UNIT);
         assert_eq!(p.expr.to_string(), "state[idx * 3u + 2u]");
 
-        // Test typed vec2 access
         let u = state_vec2_slot_typed(slots.stride, "state", "idx", u_slot);
         assert_eq!(u.ty, DslType::vec2_f32());
         assert_eq!(u.unit, Velocity::UNIT);
@@ -344,13 +331,10 @@ mod tests {
 
         let p_slot = find_slot(&slots, "p").unwrap();
 
-        // Access "p" with Pressure dimension type
         let p: TypedExpr<Pressure> = state_scalar_slot_dim(slots.stride, "state", "idx", p_slot);
 
-        // Verify the expression string matches
         assert_eq!(p.expr.to_string(), "state[idx * 1u + 0u]");
 
-        // Verify into_dyn().unit matches the slot unit
         let dyn_p = p.into_dyn();
         assert_eq!(dyn_p.unit, Pressure::UNIT);
         assert_eq!(dyn_p.ty, DslType::f32());
@@ -362,16 +346,13 @@ mod tests {
 
         let u_slot = find_slot(&slots, "U").unwrap();
 
-        // Access "U" with Velocity dimension type
         let u: TypedExpr<Velocity> = state_vec2_slot_dim(slots.stride, "state", "idx", u_slot);
 
-        // Verify the expression string matches
         assert_eq!(
             u.expr.to_string(),
             "vec2<f32>(state[idx * 2u + 0u], state[idx * 2u + 1u])"
         );
 
-        // Verify into_dyn().unit matches the slot unit
         let dyn_u = u.into_dyn();
         assert_eq!(dyn_u.unit, Velocity::UNIT);
         assert_eq!(dyn_u.ty, DslType::vec2_f32());
@@ -383,14 +364,11 @@ mod tests {
 
         let u_slot = find_slot(&slots, "U").unwrap();
 
-        // Access component 0 of "U" with Velocity dimension type
         let u_x: TypedExpr<Velocity> =
             state_component_slot_dim(slots.stride, "state", "idx", u_slot, 0);
 
-        // Verify the expression string matches
         assert_eq!(u_x.expr.to_string(), "state[idx * 2u + 0u]");
 
-        // Verify into_dyn().unit matches the slot unit
         let dyn_u_x = u_x.into_dyn();
         assert_eq!(dyn_u_x.unit, Velocity::UNIT);
         assert_eq!(dyn_u_x.ty, DslType::f32());
@@ -403,7 +381,6 @@ mod tests {
 
         let p_slot = find_slot(&slots, "p").unwrap();
 
-        // Try to access "p" with Velocity dimension type (should panic)
         let _: TypedExpr<Velocity> = state_scalar_slot_dim(slots.stride, "state", "idx", p_slot);
     }
 
@@ -414,7 +391,6 @@ mod tests {
 
         let u_slot = find_slot(&slots, "U").unwrap();
 
-        // Try to access "U" with Pressure dimension type (should panic)
         let _: TypedExpr<Pressure> = state_vec2_slot_dim(slots.stride, "state", "idx", u_slot);
     }
 
@@ -425,7 +401,6 @@ mod tests {
 
         let p_slot = find_slot(&slots, "p").unwrap();
 
-        // Try to access scalar "p" as vec2 (should panic)
         let _: TypedExpr<Pressure> = state_vec2_slot_dim(slots.stride, "state", "idx", p_slot);
     }
 
@@ -436,7 +411,6 @@ mod tests {
 
         let u_slot = find_slot(&slots, "U").unwrap();
 
-        // Try to access vec2 "U" as scalar (should panic)
         let _: TypedExpr<Velocity> = state_scalar_slot_dim(slots.stride, "state", "idx", u_slot);
     }
 
@@ -446,7 +420,6 @@ mod tests {
 
         let p_slot = find_slot(&slots, "p").unwrap();
 
-        // Try to access scalar "p" as vec2 (should panic)
         let result = std::panic::catch_unwind(|| {
             let _ = state_vec2_slot_typed(slots.stride, "state", "idx", p_slot);
         });
@@ -460,13 +433,11 @@ mod tests {
             ("rho_u", PortFieldKind::Vector2, MomentumDensity::UNIT),
         ]);
 
-        // Direct field access
         assert!(find_slot(&slots, "rho").is_some());
         assert!(find_slot(&slots, "rho_u").is_some());
         assert_eq!(find_slot(&slots, "rho").unwrap().base_offset, 0);
         assert_eq!(find_slot(&slots, "rho_u").unwrap().base_offset, 1);
 
-        // Invalid access
         assert!(find_slot(&slots, "nonexistent").is_none());
     }
 }

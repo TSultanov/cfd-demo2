@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use wgsl_bindgen::{WgslBindgenOptionBuilder, WgslTypeSerializeStrategy};
 
 #[allow(dead_code)]
-// Top-level aliases for cfd2_ir paths used by include!()'d files
-// (typed_ast.rs is compiled in both cfd2_ir and build.rs contexts)
+// Aliases for cfd2_ir paths used by include!()'d files (dual-context: typed_ast.rs
+// compiles in both cfd2_ir and build.rs).
 mod dimensions {
     pub use cfd2_ir::dimensions::*;
 }
@@ -41,7 +41,7 @@ mod solver {
     }
 
     pub mod shared {
-        // Kept for backwards compatibility; previously re-exported PrimitiveExpr.
+        // Kept for backwards compatibility.
         #[allow(unused_imports)]
         pub use cfd2_ir::ast::Expr;
     }
@@ -136,17 +136,15 @@ mod solver {
                     "/crates/cfd2_ir/src/equation/typed_ast.rs"
                 ));
             }
-            // Algebraic equations are dual-context like typed_ast (they take
-            // the include!'d TypedFieldRef types as arguments, so a crate
-            // re-export would not typecheck against include!'d model files).
+            // Dual-context like typed_ast: takes the include!'d TypedFieldRef types
+            // as arguments, so a crate re-export would not typecheck here.
             pub mod algebraic {
                 include!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
                     "/crates/cfd2_ir/src/equation/algebraic.rs"
                 ));
             }
-            // Boundary expressions are dual-context for the same reason
-            // (they carry algebraic::ParamRef).
+            // Dual-context for the same reason (carries algebraic::ParamRef).
             pub mod boundary {
                 include!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
@@ -164,7 +162,6 @@ mod solver {
             pub use scheme_expansion::{expand_schemes, SchemeExpansion};
             #[allow(unused_imports)]
             pub use state_layout::{StateField, StateLayout};
-            // Re-export typed_ast items
             #[allow(unused_imports)]
             pub use typed_ast::{
                 typed_fvc, typed_fvm, Kind, Scalar, TypedCoeff, TypedEquation, TypedEquationSystem,
@@ -321,12 +318,11 @@ fn main() {
         write_u64_hex(&model_codegen_fingerprint_path, model_codegen_fingerprint);
     }
 
-    // Transpiled CPU kernels (compiled-Rust path) — only when `cpu` is enabled.
+    // Transpiled (compiled-Rust) CPU kernels.
     if std::env::var("CARGO_FEATURE_CPU").is_ok() {
         emit_transpiled_cpu_kernels(&out_dir, &models, &schemes);
     }
 
-    // Generate infrastructure kernels (dot_product, amg, scalars, etc.) from DSL
     emit_infrastructure_kernels(&manifest_dir);
 
     generate_kernel_registry_map(&manifest_dir, &models);
@@ -346,7 +342,6 @@ fn main() {
 
     builder.build().unwrap().generate().unwrap();
 
-    // Post-process: add clippy::too_many_arguments to the allow list in the generated file
     postprocess_bindings_for_clippy("src/solver/gpu/bindings.rs");
 }
 
@@ -356,12 +351,10 @@ fn postprocess_bindings_for_clippy(bindings_path: &str) {
         panic!("Failed to read {bindings_path}: {err}");
     });
 
-    // Check if already contains too_many_arguments
     if content.contains("clippy::too_many_arguments") {
         return;
     }
 
-    // Find the existing #![allow(...)] line and add clippy::too_many_arguments to it
     // The line looks like: #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
     let updated = if let Some(start_pos) = content.find("#![allow(") {
         // Insert inside the allow-list parentheses: before the closing `)]`.
@@ -386,12 +379,8 @@ fn postprocess_bindings_for_clippy(bindings_path: &str) {
     });
 }
 
-/// Stopgap boundary enforcement: scans `cfd2_codegen/` source files for
+/// Textual boundary enforcement: scans `cfd2_codegen/` source files for
 /// accidental imports of `crate::solver::model`.
-///
-/// This is a textual firewall, not a structural one.  It will become
-/// unnecessary once `cfd2_codegen` is extracted into a workspace crate
-/// with its own `pub` visibility boundary (see ARCHITECTURE_REVIEW.md §2).
 fn enforce_codegen_ir_boundary(manifest_dir: &str) {
     let codegen_dir = PathBuf::from(manifest_dir)
         .join("crates")
@@ -403,10 +392,7 @@ fn enforce_codegen_ir_boundary(manifest_dir: &str) {
     let pattern = codegen_dir.join("**/*.rs").to_string_lossy().to_string();
     let mut violations = Vec::new();
 
-    // Make it difficult to accidentally punch through the IR boundary via path imports.
-    //
-    // If codegen needs additional inputs, expand `crate::solver::ir` (the facade) or move
-    // model-dependent orchestration into build-time code (e.g. `build.rs`).
+    // Catch attempts to punch through the IR boundary via path imports.
     let needles = [
         "crate::solver::model",
         "crate::solver::{model",
@@ -638,7 +624,7 @@ fn generate_kernel_registry_map(manifest_dir: &str, models: &[solver::model::Mod
         let rel_stem = wgsl_relative_stem(&shader_dir, &path);
         let module_path = wgsl_bindings_module_path(&rel_stem);
         if entrypoints.len() == 1 && entrypoints[0] == "main" {
-            // Skip if this kernel is now generated as infrastructure
+            // Skip if this kernel is generated as infrastructure.
             if infrastructure_kernel_ids.contains(&rel_stem) {
                 continue;
             }

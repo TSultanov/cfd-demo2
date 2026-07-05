@@ -13,9 +13,7 @@ use crate::solver::model::KernelId;
 /// Configuration for a unified compute graph.
 #[derive(Debug, Clone)]
 pub struct UnifiedGraphConfig {
-    /// Label prefix for nodes
     pub label_prefix: &'static str,
-    /// Whether to dispatch per cell or per face
     pub dispatch_kind: DispatchKind,
 }
 
@@ -144,8 +142,7 @@ pub fn build_optional_graph_for_phase<M: UnifiedGraphModule>(
 
 /// Generate a static label for a kernel.
 fn kernel_label(prefix: &'static str, id: KernelId) -> &'static str {
-    // Use leaked strings for static labels
-    // In practice, these are a fixed set so leaking is acceptable
+    // Leaked: the kernel set is fixed, so a static-lifetime label per id is bounded.
     let label = format!("{}:{}", prefix, id.as_str());
     Box::leak(label.into_boxed_str())
 }
@@ -153,13 +150,9 @@ fn kernel_label(prefix: &'static str, id: KernelId) -> &'static str {
 /// A set of graphs for a complete solver step.
 #[derive(Default)]
 pub struct UnifiedGraphSet<M: UnifiedGraphModule> {
-    /// Preparation phase graph (if any)
     pub preparation: Option<ModuleGraph<M>>,
-    /// Gradient computation graph (if any)
     pub gradients: Option<ModuleGraph<M>>,
-    /// Assembly phase graph
     pub assembly: Option<ModuleGraph<M>>,
-    /// State update graph
     pub update: Option<ModuleGraph<M>>,
 }
 
@@ -192,8 +185,7 @@ impl<M: UnifiedGraphModule> UnifiedGraphSet<M> {
 mod tests {
     use super::*;
 
-    // Note: These tests require a concrete module implementation to test.
-    // The module is tested through integration tests with actual solver modules.
+    // Concrete-module coverage lives in the integration tests.
 
     #[test]
     fn test_kernel_label_format() {

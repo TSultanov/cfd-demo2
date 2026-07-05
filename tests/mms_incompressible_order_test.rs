@@ -12,15 +12,10 @@
 //!
 //!   S = -mu lap(U*) = 2 mu pi^2 U*
 //!
-//! (The solver itself flagged an earlier sign error here: its converged
-//! pressure disagreed with a wrongly-signed manufactured p* by exactly 2x
-//! the field amplitude.)
-//!
 //! The source enters as one more declared equation term on the `_mms` model
-//! variant (a Vector2 source field read per component — the first consumer
-//! of per-component explicit sources). Continuity needs no source: U* is
-//! divergence-free, so the pressure-row residual is pure discretization
-//! error.
+//! variant (a Vector2 source field read per component). Continuity needs no
+//! source: U* is divergence-free, so the pressure-row residual is pure
+//! discretization error.
 //!
 //! Pressure is gauge-free on the all-wall mesh (zero-gradient everywhere),
 //! so p is compared after demeaning both fields.
@@ -47,8 +42,8 @@ use mms_support::{
 const MU: f64 = 1.0;
 const RHO: f64 = 1.0;
 const STEADY_TOL: f64 = 5e-6;
-// The viscous-dominated transient settles in ~12 steps at every level
-// (verified on the first run); the cap is headroom, not budget.
+// The viscous-dominated transient settles in ~12 steps at every level; the
+// cap is headroom, not budget.
 const STEADY_MAX_STEPS: usize = 60;
 
 fn exact_u(x: f64, y: f64) -> (f64, f64) {
@@ -175,9 +170,9 @@ fn convergence_table(levels: &[usize], scheme: Scheme) -> (Vec<f64>, Vec<f64>, V
 
 /// Second-order-upwind convection: both the viscous and convective truncation
 /// are O(h^2), so U converges at second order through the full coupled
-/// saddle-point path (derived Rhie–Chow flux + Schur). First MMS coverage of
-/// momentum+pressure. Pressure order is pinned at what the saddle point
-/// currently delivers (>= ~1) so numerics changes are refereed.
+/// saddle-point path (derived Rhie–Chow flux + Schur). Pressure order is pinned
+/// at what the saddle point currently delivers (>= ~1) so numerics changes are
+/// refereed.
 #[test]
 fn steady_taylor_green_sou_velocity_second_order() {
     let (hs, u_errs, p_errs) = convergence_table(&[8, 16, 32, 64], Scheme::SecondOrderUpwind);
@@ -191,9 +186,8 @@ fn steady_taylor_green_sou_velocity_second_order() {
 }
 
 /// The SOU Taylor-Green study repeated on a two-sided geometrically graded
-/// mesh (Arc M generality gate): smallest cells at every wall, center/wall
-/// ratio 4 on both axes, orders fitted against the MAX cell extent (see
-/// `max_cell_extent`). This drives the full coupled saddle-point path —
+/// mesh: smallest cells at every wall, center/wall ratio 4 on both axes, orders
+/// fitted against the MAX cell extent. This drives the full coupled saddle-point path —
 /// distance-weighted assembly coefficients, derived Rhie-Chow flux, and
 /// gradient reconstruction — on non-uniform spacing; velocity must hold
 /// second order and pressure must not regress below the uniform-mesh floor.
@@ -222,9 +216,7 @@ fn steady_taylor_green_sou_graded_second_order() {
         u_errs.push(u_err);
         p_errs.push(p_err);
     }
-    // Measured June 2026 (first run): u order 1.978 (uniform study: 1.87),
-    // finest u_l2 3.28e-4 at h_eff 0.0287; p order 1.678 (uniform: 1.69).
-    // Graded errors sit BELOW the uniform line at matched h_eff. Cap ~2x.
+    // Graded errors sit BELOW the uniform line at matched h_eff. Cap ~2x measured.
     assert_convergence_order("taylor_green_sou_graded_u", &hs, &u_errs, 2.0, 0.35, 7.0e-4);
     let p_order = mms_support::fit_order(&hs, &p_errs);
     println!("[mms][taylor_green_sou_graded] pressure order {p_order:.3}");
@@ -236,8 +228,8 @@ fn steady_taylor_green_sou_graded_second_order() {
 
 /// Upwind convection: the convective truncation is O(h) and overtakes the
 /// O(h^2) viscous error under refinement, so the fitted order is a mix
-/// trending toward 1 (observed ~1.3 over 8..32 on the first run). Assert
-/// monotone convergence at first order or better with an absolute cap.
+/// trending toward 1. Assert monotone convergence at first order or better
+/// with an absolute cap.
 #[test]
 fn steady_taylor_green_upwind_converges() {
     let (hs, u_errs, _p_errs) = convergence_table(&[8, 16, 32], Scheme::Upwind);

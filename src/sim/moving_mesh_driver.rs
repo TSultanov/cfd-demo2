@@ -1,60 +1,39 @@
-//! The moving-mesh loop orchestrator (roadmap M4, CPU-first).
+//! The moving-mesh loop orchestrator.
 //!
 //! [`MovingMeshDriver`] wraps a [`SolverDriver`] and drives the per-step
-//! moving-mesh cycle around it — WITHOUT touching `SolverDriver::step`, so
-//! static-mesh users are provably unaffected (the wrapper is purely additive).
-//! One `step` is:
+//! moving-mesh cycle around it WITHOUT touching `SolverDriver::step`, so
+//! static-mesh users are unaffected. One `step` is:
 //!
-//! 1. **dt handshake** (review-solver-ale F2): pin a fixed dt — the driver's
-//!    configured `requested_dt`, additionally capped by the mesh-motion CFL
-//!    `dt ≤ cfl_mesh · min_h / max|w|` — via [`SolverDriver::set_requested_dt`]
-//!    BEFORE the swept fluxes are closed, so the fluxes and the step march with
-//!    exactly one dt (an adaptive re-scale after the closure would silently
-//!    break the GCL; `begin_ale_step_topology` also hard-rejects `adaptive_dt`).
+//! 1. **dt handshake**: pin a fixed dt — the configured `requested_dt`, capped
+//!    by the mesh-motion CFL `dt ≤ cfl_mesh · min_h / max|w|` — BEFORE the swept
+//!    fluxes are closed, so the fluxes and the step march with exactly one dt
+//!    (an adaptive re-scale after the closure would silently break the GCL;
+//!    `adaptive_dt` is rejected).
 //! 2. **advect seeds** per [`MeshMotionSpec`] (f64). `Frozen` is a no-op.
-//! 3. **regen** the mesh from the advected seeds via the M0 engine
-//!    ([`assemble_meshless_from_seeds`]) — deterministic; from an UNCHANGED
-//!    seed set it reproduces the current mesh byte-for-byte.
-//! 4. **swept-quad mesh fluxes** old→new with the pinned dt
-//!    ([`swept_mesh_fluxes_closed`]): f64 telescoping geometry + the f32 SCL
-//!    closure. A frozen (byte-identical) regen ⇒ all-zero fluxes, zero defect.
+//! 3. **regen** the mesh from the advected seeds
+//!    ([`assemble_meshless_from_seeds`]) — deterministic; an UNCHANGED seed set
+//!    reproduces the current mesh byte-for-byte.
+//! 4. **swept-quad mesh fluxes** old→new with the pinned dt: f64 telescoping
+//!    geometry + the f32 SCL closure. A byte-identical regen ⇒ all-zero fluxes.
 //! 5. **refresh + rotate**: [`SolverDriver::begin_ale_step_topology`] rotates
-//!    the volume history, rebuilds the topology-derived solver stack for the
-//!    new mesh, and uploads the closed fluxes.
+//!    the volume history, rebuilds the topology-derived solver stack, uploads
+//!    the closed fluxes.
 //! 6. **step**: `SolverDriver::step` (fixed dt, divergence detection).
 //!
-//! **Fixed seed count (v1)**: seed `i` is cell `i` for the whole run; no
-//! insertion/deletion (that needs a conservative remap, deferred to M6). This
-//! is what lets every cell-indexed solver buffer (state, BDF2 history, the
-//! warm-start `x`) survive the refresh untouched.
+//! **Fixed seed count**: seed `i` is cell `i` for the whole run; no
+//! insertion/deletion. This lets every cell-indexed solver buffer (state, BDF2
+//! history, warm-start `x`) survive the refresh untouched.
 //!
-//! **Model scope (v1)**: `incompressible_momentum_ale` only. The constructor
-//! builds that model; no other model is accepted.
+//! **Model scope**: `incompressible_momentum_ale` only.
 //!
-//! **Moving boundaries (roadmap M6, stage 1)**: [`BoundaryMotionSpec`] is
-//! orthogonal to [`MeshMotionSpec`] — the interior seeds follow the mesh-motion
-//! law, and additionally a declared moving boundary
+//! **Moving boundaries**: [`BoundaryMotionSpec`] is orthogonal to
+//! [`MeshMotionSpec`] (which governs interior seeds). A declared moving boundary
 //! ([`BoundaryMotionSpec::RigidLoop`]) moves its boundary-bound seeds RIGIDLY
-//! each step (they keep their parametric position on the moving wall) while the
+//! each step (keeping their parametric position on the moving wall) while the
 //! regen clips against the moved loops. `moved_spec`/`apply_boundary_motion`
-//! evaluate the rigid transform from the t=0 labels (no drift); the SAME
-//! `align_old_vertices_by_seed_set` + `swept_mesh_fluxes_closed` path closes the
-//! now-real boundary-face swept areas; and `w_wall` records the per-seed
-//! material velocity for stage 2's `MovingWall` Dirichlet BC. `Static` (the
-//! default) is byte-identical to the M4 static-boundary path.
-//!
-//! Scope so far: [`MeshMotionSpec::Frozen`] (stage 1 — the static-limit
-//! plumbing) and [`MeshMotionSpec::Prescribed`] (stage 2 — analytic seed motion
-//! through the full Voronoi-regen + swept-flux path; stage 3 — Voronoi
-//! topology FLIPS via the born/dead-face conservative remap: born faces carry
-//! zero swept contribution and the per-cell defect is closed onto the slack
-//! faces by the spanning forest, so `Σ_f σ·flux = ΔV_i/dt` stays exact per cell
-//! and free-stream flow survives the flip). Stage 4 adds `FlowCoupled`: the
-//! seeds move with the readback cell velocity plus an AREPO-style
-//! distortion-ramped centroid steering (`χ·(centroid − seed)`), clamped per
-//! step to a fraction of the local cell radius, with a Lloyd regularization
-//! escalation when the regenerated mesh's skew rises — a genuinely
-//! flow-following moving mesh.
+//! evaluate the rigid transform from the t=0 labels (no drift); `w_wall` records
+//! the per-seed material velocity for the `MovingWall` Dirichlet BC. `Static`
+//! (the default) is byte-identical to the static-boundary path.
 
 use std::time::Instant;
 
@@ -74,101 +53,88 @@ use crate::solver::mesh::{
 use crate::solver::model::incompressible_momentum_ale_model;
 
 /// Default per-step seed-displacement cap, as a fraction of the local cell
-/// radius `R_i = √(V_i/π)`. Under `FlowCoupled`, a seed cannot move more than
-/// `FLOW_DISP_CAP · R_i` in one step regardless of the flow speed — a hard
+/// radius `R_i = √(V_i/π)`. Under `FlowCoupled` a seed cannot move more than
+/// `FLOW_DISP_CAP · R_i` in one step regardless of flow speed — a hard
 /// anti-tangling clamp that keeps the swept-quad linear-motion assumption and
 /// the born/dead-face flip remap in their valid regime.
 pub const DEFAULT_FLOW_DISP_CAP: f64 = 0.25;
 
-/// Default AREPO distortion trigger `η` (Springel 2010, Eq. 63 style): the
-/// centroid steering ramps in once a cell's seed-to-centroid offset exceeds
-/// `η · R_i` and saturates at `1.1 η`. Below `0.9 η` the steering is OFF, so
-/// well-shaped cells advect PURELY with the flow (the milestone premise — a
-/// moving mesh must reduce advective dissipation, not regularize it away).
+/// Default AREPO distortion trigger `η`: the centroid steering ramps in once a
+/// cell's seed-to-centroid offset exceeds `η · R_i` and saturates at `1.1 η`.
+/// Below `0.9 η` the steering is OFF, so well-shaped cells advect PURELY with
+/// the flow.
 pub const DEFAULT_AREPO_ETA: f64 = 0.25;
 
 /// Default max-skewness above which a `FlowCoupled` step runs a Lloyd
-/// regularization escalation on the advected seeds before committing. Chosen
-/// below the solver's comfortable skew band so quality is caught rising, not
-/// after it has hurt the solve.
+/// regularization escalation on the advected seeds before committing. Below the
+/// solver's comfortable skew band so quality is caught rising.
 pub const DEFAULT_QUALITY_SKEW_TARGET: f64 = 0.5;
 
 /// Default mesh-motion CFL cap factor (`dt ≤ cfl_mesh · min_h / max|w|`).
 /// Conservative (0.2) so a fast seed cannot sweep more than ~a fifth of a cell
-/// per step — the regime where the swept-quad linear-motion assumption and the
-/// warm-start-validity argument hold. Inert under `Frozen` (max|w| = 0).
+/// per step — the regime where the swept-quad linear-motion assumption holds.
+/// Inert under `Frozen` (max|w| = 0).
 pub const DEFAULT_MESH_CFL: f64 = 0.2;
 
 /// How the seeds move each step.
-///
-/// `Frozen` and `Prescribed` are implemented; `FlowCoupled` is declared for the
-/// milestone shape and rejected by [`MovingMeshDriver::step`] until its stage.
 #[derive(Clone, Copy)]
 pub enum MeshMotionSpec {
-    /// Seeds never move (regen reproduces the same mesh byte-for-byte). The
-    /// static-limit / do-no-harm case.
+    /// Seeds never move (regen reproduces the same mesh byte-for-byte).
     Frozen,
     /// Prescribed analytic motion `new_pos = f(seed0, t)` from the t=0 seed
-    /// label and absolute time (interior seeds only; boundary seeds fixed in
-    /// v1). Voronoi topology flips are handled by the born/dead-face
-    /// conservative remap (stage 3).
+    /// label and absolute time (interior seeds only; boundary seeds fixed).
+    /// Voronoi topology flips are handled by the born/dead-face conservative
+    /// remap.
     Prescribed(fn([f64; 2], f64) -> [f64; 2]),
     /// Flow-coupled motion (cell velocity + AREPO centroid steering); the
-    /// `regularization` is the steering strength χ (stage 4).
+    /// `regularization` is the steering strength χ.
     FlowCoupled { regularization: f64 },
 }
 
-/// How the *boundary* moves (roadmap M6). Orthogonal to [`MeshMotionSpec`],
-/// which governs the INTERIOR seeds: the interior seeds always follow the
-/// `MeshMotionSpec` law, and additionally, when a boundary is declared moving
-/// here, its boundary-bound seeds move RIGIDLY with it each step (staying
-/// exactly on the moving boundary) while the mesh regenerates against the moved
-/// loops.
+/// How the *boundary* moves. Orthogonal to [`MeshMotionSpec`], which governs
+/// the INTERIOR seeds: when a boundary is declared moving here, its
+/// boundary-bound seeds move RIGIDLY with it each step (staying exactly on the
+/// moving boundary) while the mesh regenerates against the moved loops.
 ///
-/// `Static` is the M0–M4 behaviour (all boundary seeds held); the moving-mesh
-/// path is byte-identical to a static-boundary run under it. `RigidLoop`
-/// prescribes an analytic rigid transform for ONE boundary loop (the obstacle):
-/// an oscillating cylinder is `transform(t, p) = [p.x + A·sin(ω t), p.y]`.
+/// `Static` holds all boundary seeds; the moving-mesh path is byte-identical to
+/// a static-boundary run under it. `RigidLoop` prescribes an analytic rigid
+/// transform for ONE boundary loop (the obstacle): an oscillating cylinder is
+/// `transform(t, p) = [p.x + A·sin(ω t), p.y]`.
 #[derive(Clone, Copy)]
 pub enum BoundaryMotionSpec {
-    /// All boundaries fixed (v1 default). The moving-mesh loop under this is
-    /// byte-identical to the M4 static-boundary path (the do-no-harm anchor).
+    /// All boundaries fixed (default). Byte-identical to the static-boundary
+    /// path.
     Static,
     /// A rigidly-moving boundary loop. `loop_index` selects the loop in the
     /// [`BoundarySpec`] that moves (e.g. the obstacle circle is loop 1 of a
     /// [`crate::meshgen::ChannelWithObstacle`]); `transform(t, p)` maps a t=0
-    /// point to its position at absolute time `t`. It is applied to BOTH the
-    /// loop's polyline points (so the regen clips against the moved wall) and the
+    /// point to its position at absolute time `t`. Applied to BOTH the loop's
+    /// polyline points (so the regen clips against the moved wall) and the
     /// loop's boundary seeds (so seed `i` stays on the moving wall). **Contract:**
     /// `transform(0, p) == p` — the driver is built on the t=0 mesh, so the
     /// motion law must be the identity at t=0 (an oscillation `A·sin(ω t)`
     /// satisfies this).
     ///
-    /// **v1 scope: pure TRANSLATION.** A rigid translation preserves chord lengths
-    /// ⇒ the loop's seed count / segment structure are invariant (fixed-seed +
-    /// watertightness carry over), and — critically for the `MovingWall` BC — the
-    /// per-seed material velocity `w_wall` recorded from the seed's `(new−old)/dt`
-    /// is UNIFORM across the seed's wall face, exactly matching the per-vertex
-    /// swept `mesh_flux` (all chords sweep the same displacement). A ROTATION would
-    /// break that match: the face's vertices sit at different radii/angles than the
-    /// seed, so the uniform seed-velocity Dirichlet no longer cancels the per-face
-    /// swept flux (a spurious wall mass flux O(ω·Δr)). Rotation is left to a future
-    /// stage that evaluates `w_wall` per wall-face rather than per seed; do not
-    /// pass a rotating `transform` in v1.
+    /// **Scope: pure TRANSLATION.** A rigid translation preserves chord lengths
+    /// ⇒ the loop's seed count / segment structure are invariant, and —
+    /// critically for the `MovingWall` BC — the per-seed material velocity
+    /// `w_wall` from `(new−old)/dt` is UNIFORM across the seed's wall face,
+    /// exactly matching the per-vertex swept `mesh_flux`. A ROTATION would break
+    /// that match: the face's vertices sit at different radii/angles than the
+    /// seed, so the uniform seed-velocity Dirichlet no longer cancels the
+    /// per-face swept flux (a spurious wall mass flux O(ω·Δr)). Do not pass a
+    /// rotating `transform`.
     RigidLoop {
         loop_index: usize,
         transform: fn(f64, [f64; 2]) -> [f64; 2],
     },
-    /// A sinusoidally-oscillating boundary loop (the headline M6 demo — an
-    /// oscillating cylinder). A first-class variant that carries its own
+    /// A sinusoidally-oscillating boundary loop. Carries its own
     /// `amplitude`/`omega`/`axis` so the analytic rigid map is `p ↦ p +
     /// amplitude·sin(ω t)·ê_axis` — identity at t=0 (`sin 0 = 0`), so the
     /// build-mesh contract holds — WITHOUT a captured closure (the `RigidLoop`
-    /// `fn` pointer cannot carry runtime-tuned parameters, e.g. from the GUI
-    /// sliders). It is a pure rigid translation, so the chord-length /
-    /// fixed-seed / watertightness invariants carry over exactly as for
-    /// `RigidLoop`. `axis` selects in-line (`InLine`, cross-stream-free) vs
-    /// cross-stream (`CrossStream`) forcing.
+    /// `fn` pointer cannot carry runtime-tuned parameters). Pure rigid
+    /// translation, so the same chord-length / fixed-seed invariants carry over
+    /// as for `RigidLoop`. `axis` selects in-line vs cross-stream forcing.
     Oscillation {
         loop_index: usize,
         amplitude: f64,
@@ -223,16 +189,15 @@ impl BoundaryMotionSpec {
     }
 }
 
-/// Per-step moving-mesh telemetry (the always-on diagnostics the M4 gates and
-/// the UI observe).
+/// Per-step moving-mesh telemetry (always-on diagnostics the gates and the UI
+/// observe).
 #[derive(Clone, Copy, Debug)]
 pub struct MovingMeshStats {
     /// Wall time of the pre-regen seed-motion planning (ms): the dt handshake,
-    /// seed advection, the FlowCoupled velocity readback, AND the quality-escalation
-    /// PROBE regen (which runs a full `assemble_meshless_from_seeds` before the
-    /// authoritative regen). Counted separately so the moving-mesh overhead split
-    /// is HONEST — this work would otherwise fall into the `solve` residual (review
-    /// July 2026). 0 on the skip-regen passthrough.
+    /// seed advection, the FlowCoupled velocity readback, AND the
+    /// quality-escalation PROBE regen (a full `assemble_meshless_from_seeds`
+    /// before the authoritative regen). Counted separately so the overhead split
+    /// stays honest. 0 on the skip-regen passthrough.
     pub plan_ms: f32,
     /// Wall time to regenerate the mesh from the advected seeds (ms).
     pub regen_ms: f32,
@@ -252,11 +217,10 @@ pub struct MovingMeshStats {
     pub n_faces: usize,
     /// The regenerated mesh's face ARRAYS (order and/or adjacency) differ from
     /// the previous step's, so the step drove the TOPOLOGY seam (a full CSR
-    /// rebuild) rather than the surgical geometry seam. Note: any real seed
-    /// motion reorders the deterministic face emission, so this is `true` every
-    /// motion step — it is NOT a flip flag (see `flipped` for the genuine
-    /// adjacency-change flag). Always `false` under `Frozen` (byte-identical
-    /// regen ⇒ geometry seam).
+    /// rebuild) rather than the surgical geometry seam. Any real seed motion
+    /// reorders the deterministic face emission, so this is `true` every motion
+    /// step — it is NOT a flip flag (see `flipped`). Always `false` under
+    /// `Frozen` (byte-identical regen ⇒ geometry seam).
     pub topo_changed: bool,
     /// A genuine Voronoi topology FLIP happened this step (born/dead faces —
     /// an ADJACENCY change, not merely a face-array reorder). A flip always
@@ -273,18 +237,17 @@ pub struct MovingMeshStats {
     pub flipped_cells: usize,
     /// Pre-closure per-cell **flip defect** (relative) — the residual the
     /// born/dead faces leave that the forest closure repairs onto the slack
-    /// faces. O(motion·h/V) on a flip step, 0 otherwise. The always-on flip
-    /// diagnostic (roadmap: "defect magnitude is the diagnostic"). NOT a GCL
-    /// error — `scl_defect` (the post-closure per-cell sum) stays at roundoff.
+    /// faces. O(motion·h/V) on a flip step, 0 otherwise. NOT a GCL error —
+    /// `scl_defect` (the post-closure per-cell sum) stays at roundoff.
     pub flip_defect: f64,
     /// The pinned dt the swept fluxes were closed against AND the solver
-    /// stepped with (they are equal by the F2 handshake). f64-widened f32 —
+    /// stepped with (they are equal by the dt handshake). f64-widened f32 —
     /// exactly `params.requested_dt as f64`.
     pub dt: f64,
 }
 
-/// The moving-mesh loop driver (roadmap M4). Owns the authoritative seed set,
-/// the current realized mesh, and the wrapped [`SolverDriver`].
+/// The moving-mesh loop driver. Owns the authoritative seed set, the current
+/// realized mesh, and the wrapped [`SolverDriver`].
 pub struct MovingMeshDriver {
     driver: SolverDriver,
     /// Authoritative seed positions (f64), seed `i` == cell `i` — the CURRENT
@@ -308,10 +271,10 @@ pub struct MovingMeshDriver {
     min_cell_size: f64,
     /// The dt the driver was CONFIGURED with at build (`params.requested_dt`,
     /// f64-widened) — the immutable base the mesh-motion CFL cap is applied to
-    /// each step. Caching it (rather than reading back the already-capped
-    /// `params.requested_dt`) keeps the pinned dt from ratcheting monotonically
+    /// each step. Cached (rather than reading back the already-capped
+    /// `params.requested_dt`) so the pinned dt cannot ratchet monotonically
     /// downward: a transient fast step must not permanently lower the timestep
-    /// after the flow slows (review July 2026).
+    /// after the flow slows.
     configured_dt: f64,
     /// The current realized mesh (owned; the driver holds it across steps).
     mesh: Mesh,
@@ -320,45 +283,45 @@ pub struct MovingMeshDriver {
     prev_vy: Vec<f64>,
     /// Seed motion law (INTERIOR seeds).
     motion: MeshMotionSpec,
-    /// Boundary motion law (roadmap M6). `Static` ⇒ the M4 path (byte-identical).
+    /// Boundary motion law. `Static` ⇒ byte-identical to a static-boundary run.
     boundary_motion: BoundaryMotionSpec,
     /// Per-seed material velocity `w_wall = (new_pos − old_pos)/dt` of the last
     /// committed step, seed `i` == cell `i`. Zero for interior + static-boundary
-    /// seeds; the rigid boundary velocity for moving-wall seeds. Stored here for
-    /// stage 2's `MovingWall` Dirichlet BC (the Dirichlet U at the wall must be
-    /// the wall's material velocity). All-zero until the first moving step.
+    /// seeds; the rigid boundary velocity for moving-wall seeds. Feeds the
+    /// `MovingWall` Dirichlet BC (the Dirichlet U at the wall must be the wall's
+    /// material velocity). All-zero until the first moving step.
     w_wall: Vec<[f64; 2]>,
-    /// M6 stage 2: feed the moving wall's material velocity into the fluid.
-    /// When `true` (opt-in via [`set_moving_wall_bc`]) AND a `RigidLoop`
-    /// boundary motion is declared, each regenerated mesh's moving-loop open
-    /// faces are re-tagged [`BoundaryType::MovingWall`] (from the engine's
-    /// default `Wall`) and, after the ALE refresh, their per-face Dirichlet
-    /// velocity `bc_value` is set to `w_wall[owner]` — so the no-slip ghost at
-    /// the wall carries the wall's material velocity (no-penetration +
-    /// no-slip). Static + fixed walls stay `Wall`/`Slip`. Default `false`
-    /// (stage-1 behaviour: the obstacle stays a static-velocity `Wall`).
+    /// Feed the moving wall's material velocity into the fluid. When `true`
+    /// (opt-in via [`set_moving_wall_bc`]) AND a `RigidLoop` boundary motion is
+    /// declared, each regenerated mesh's moving-loop open faces are re-tagged
+    /// [`BoundaryType::MovingWall`] (from the engine's default `Wall`) and, after
+    /// the ALE refresh, their per-face Dirichlet velocity `bc_value` is set to
+    /// `w_wall[owner]` — so the no-slip ghost at the wall carries the wall's
+    /// material velocity (no-penetration + no-slip). Static + fixed walls stay
+    /// `Wall`/`Slip`. Default `false` (the obstacle stays a static-velocity
+    /// `Wall`).
     moving_wall_bc: bool,
     /// Mesh-motion CFL cap factor.
     mesh_cfl: f64,
     /// Whether `step` regenerates + refreshes each step. `false` = the
-    /// do-no-harm skip-regen variant (a pure `SolverDriver::step` passthrough,
+    /// skip-regen variant (a pure `SolverDriver::step` passthrough,
     /// byte-identical to a static run).
     regen_each_step: bool,
     /// Optional per-regen boundary-tag rewrite, applied to each freshly
-    /// regenerated mesh before the ALE seam. The M0 engine tags the domain box
+    /// regenerated mesh before the ALE seam. The engine tags the domain box
     /// sides by a FIXED rule (left Inlet / right Outlet / bottom+top Wall), so a
-    /// run that wants a different arrangement (e.g. slip channel walls, or
-    /// inlet/outlet on the bottom) must re-stamp `face_boundary` every step —
-    /// the topology seam rebuilds the bc tables from the regenerated mesh's
-    /// tags, so a one-time retag of the initial mesh would be lost. Touches only
-    /// `face_boundary` (never geometry/adjacency), so it does not affect the
-    /// swept fluxes or the topology-diff. `None` = keep the engine's tags.
+    /// run that wants a different arrangement must re-stamp `face_boundary` every
+    /// step — the topology seam rebuilds the bc tables from the regenerated
+    /// mesh's tags, so a one-time retag of the initial mesh would be lost.
+    /// Touches only `face_boundary` (never geometry/adjacency), so it does not
+    /// affect the swept fluxes or the topology-diff. `None` = keep the engine's
+    /// tags.
     boundary_retag: Option<fn(&mut Mesh)>,
     /// Route every step through the topology seam even when the topology is
     /// unchanged (default `false` — use the geometry seam when it suffices).
     /// The topology seam clears the AMG hierarchy + re-scatters bc tables, so
     /// this deliberately perturbs the solve away from a static run; it exists to
-    /// MEASURE that perturbation (the do-no-harm finding).
+    /// MEASURE that perturbation.
     force_topology_seam: bool,
     /// Per-step seed-displacement cap (fraction of local cell radius), FlowCoupled.
     flow_disp_cap: f64,
@@ -507,11 +470,11 @@ impl MovingMeshDriver {
         self.motion = motion;
     }
 
-    /// Declare a moving boundary (roadmap M6). `Static` (the default) is the
-    /// M4 path; [`BoundaryMotionSpec::RigidLoop`] moves one loop's boundary
-    /// seeds rigidly each step. Orthogonal to [`set_motion`]: the interior
-    /// seeds still follow the [`MeshMotionSpec`]. Panics if a `RigidLoop`
-    /// `loop_index` is out of range for the current boundary spec.
+    /// Declare a moving boundary. `Static` (the default) holds all boundaries;
+    /// [`BoundaryMotionSpec::RigidLoop`] moves one loop's boundary seeds rigidly
+    /// each step. Orthogonal to [`set_motion`]: the interior seeds still follow
+    /// the [`MeshMotionSpec`]. Panics if a `RigidLoop` `loop_index` is out of
+    /// range for the current boundary spec.
     pub fn set_boundary_motion(&mut self, boundary_motion: BoundaryMotionSpec) {
         if let Some(loop_index) = boundary_motion.loop_index() {
             assert!(
@@ -526,31 +489,30 @@ impl MovingMeshDriver {
 
     /// Per-seed material velocity `w_wall` (seed `i` == cell `i`) of the last
     /// committed step — zero for interior + static-boundary seeds, the rigid
-    /// wall velocity for moving-wall seeds. The stage-2 `MovingWall` BC reads
-    /// this to set the Dirichlet wall velocity per boundary face.
+    /// wall velocity for moving-wall seeds. The `MovingWall` BC reads this to set
+    /// the Dirichlet wall velocity per boundary face.
     pub fn w_wall(&self) -> &[[f64; 2]] {
         &self.w_wall
     }
 
-    /// M6 stage 2: enable feeding the moving wall's material velocity into the
-    /// fluid (opt-in; default off). With this on AND a
+    /// Enable feeding the moving wall's material velocity into the fluid
+    /// (opt-in; default off). With this on AND a
     /// [`BoundaryMotionSpec::RigidLoop`] declared, each regenerated mesh's
     /// moving-loop open faces are re-tagged [`BoundaryType::MovingWall`] and
     /// their per-face Dirichlet velocity `bc_value` is set to `w_wall[owner]`
     /// after the ALE refresh, so the fluid satisfies no-slip AND no-penetration
     /// at the wall's material velocity (`U_wall = w_wall`; the convective part
-    /// already sees the relative velocity `phi − ρ·mesh_flux` from the M3 ALE
-    /// path — this is the other half, the Dirichlet wall value). Inert under
-    /// `Static` (no moving seeds ⇒ no faces tagged) and byte-neutral for a run
-    /// that never enables it (stage-1 keeps the obstacle a static `Wall`).
+    /// already sees the relative velocity `phi − ρ·mesh_flux` from the ALE path
+    /// — this is the other half, the Dirichlet wall value). Inert under `Static`
+    /// (no moving seeds ⇒ no faces tagged) and byte-neutral for a run that never
+    /// enables it.
     pub fn set_moving_wall_bc(&mut self, enable: bool) {
         self.moving_wall_bc = enable;
     }
 
     /// Disable per-step regeneration: `step` becomes a pure `SolverDriver::step`
-    /// passthrough (no seed advection, no regen, no ALE refresh). The
-    /// do-no-harm anchor — byte-identical to a static ALE run — used by the
-    /// skip-regen gate. Only meaningful with `Frozen` motion.
+    /// passthrough (no seed advection, no regen, no ALE refresh) — byte-identical
+    /// to a static ALE run. Only meaningful with `Frozen` motion.
     pub fn set_regen_each_step(&mut self, regen: bool) {
         self.regen_each_step = regen;
     }
@@ -558,10 +520,9 @@ impl MovingMeshDriver {
     /// Advance one moving-mesh step; returns the solver outcome + the per-step
     /// moving-mesh telemetry.
     pub fn step(&mut self, readback: bool) -> Result<(StepOutcome, MovingMeshStats), String> {
-        // Re-assert the dt handshake invariant on EVERY path (review July 2026):
-        // `adaptive_dt` is rejected at build and at both ALE seams, but the
-        // skip-regen passthrough never reaches an ALE seam, so a caller that
-        // flipped it on via `driver_mut().apply_params(..)` after build could
+        // Re-assert the dt handshake invariant on EVERY path: the skip-regen
+        // passthrough never reaches an ALE seam, so a caller that enabled
+        // `adaptive_dt` via `driver_mut().apply_params(..)` after build could
         // otherwise silently step on an adaptive dt (ignoring the pinned value)
         // with no seam to catch it. Guard here, up front, for both paths.
         if self.driver.params().adaptive_dt {
@@ -573,9 +534,9 @@ impl MovingMeshDriver {
             );
         }
 
-        // Skip-regen (do-no-harm) variant: pin the fixed dt and step. No seed
-        // motion, no regen, no ALE refresh — a pure passthrough, byte-identical
-        // to a static ALE run driven by `SolverDriver::step`.
+        // Skip-regen variant: pin the fixed dt and step. No seed motion, no
+        // regen, no ALE refresh — a pure passthrough, byte-identical to a static
+        // ALE run driven by `SolverDriver::step`.
         if !self.regen_each_step {
             let dt = self.pin_dt(0.0);
             let outcome = self.driver.step(readback);
@@ -603,19 +564,13 @@ impl MovingMeshDriver {
 
         // 1-2. Motion: pin the fixed dt (mesh-motion CFL capped) BEFORE the
         //      swept fluxes are closed — so the flux dt == the step dt exactly —
-        //      and advect the interior seeds (boundary seeds fixed in v1).
-        //      * Frozen/Prescribed: the analytic label path (`f(seed0, t)`).
-        //      * FlowCoupled: read back the current cell velocities, cap dt off
-        //        the flow speed, then displace each seed by `U_i·dt` plus an
-        //        AREPO distortion-ramped centroid steering, clamped to a
-        //        fraction of the local cell radius.
+        //      and advect the interior seeds (boundary seeds fixed).
         let plan_start = Instant::now();
         let (dt, mut new_seeds) = self.plan_seed_motion()?;
         let new_time = self.time + dt;
-        // M6: move the boundary-bound seeds RIGIDLY with the moving boundary at
-        // t^{n+1} — overwrites the moving loop's boundary seeds (they keep their
-        // parametric position on the moving wall); interior + static-boundary
-        // seeds are untouched. A no-op under `BoundaryMotionSpec::Static`.
+        // Move the boundary-bound seeds RIGIDLY with the moving boundary at
+        // t^{n+1} (they keep their parametric position on the moving wall);
+        // interior + static-boundary seeds untouched. No-op under `Static`.
         self.apply_boundary_motion(new_time, &mut new_seeds);
         // The boundary spec at t^{n+1}: the moved loops the regen clips against
         // (an identity clone of `self.spec` under Static ⇒ byte-identical regen).
@@ -623,20 +578,17 @@ impl MovingMeshDriver {
 
         // 2b. FlowCoupled quality escalation: if the advected seed set would
         //     regenerate a too-skewed mesh, run a gentle Lloyd regularization
-        //     pass (reusing the meshgen Lloyd machinery) to pull it back toward
-        //     CVT before the authoritative regen — "more steering if quality
-        //     rises". A no-op for Frozen/Prescribed and for well-shaped sets.
+        //     pass to pull it back toward CVT before the authoritative regen.
+        //     A no-op for Frozen/Prescribed and for well-shaped sets.
         let (new_seeds, escalated) = self.maybe_quality_escalate(&step_spec, new_seeds);
-        // The pre-regen planning cost (readback + escalation probe regen): timed
-        // into its own bucket so the overhead split stays honest.
         let plan_ms = ms_since(plan_start);
 
-        // M6: record the per-seed material velocity w_wall = (new − old)/dt for
-        // THIS step's wall motion, while `self.seeds` still holds the t^n set. It
-        // is computed here (before the solve, not after) so the stage-2
-        // `MovingWall` Dirichlet BC applied below feeds this step's solve the
-        // wall velocity consistent with the mesh motion swept during [t^n,t^{n+1}].
-        // Zero for interior + static-boundary seeds (a no-op under `Static`).
+        // Record the per-seed material velocity w_wall = (new − old)/dt for THIS
+        // step's wall motion, while `self.seeds` still holds the t^n set.
+        // Computed before the solve so the `MovingWall` Dirichlet BC applied
+        // below feeds this step's solve the wall velocity consistent with the
+        // mesh motion swept during [t^n,t^{n+1}]. Zero for interior +
+        // static-boundary seeds (no-op under `Static`).
         self.record_wall_velocity(&new_seeds, dt);
 
         // 3. Regenerate the mesh from the advected seeds (deterministic; a
@@ -655,10 +607,10 @@ impl MovingMeshDriver {
         if let Some(retag) = self.boundary_retag {
             retag(&mut new_mesh);
         }
-        // M6 stage 2: re-tag the moving loop's open faces MovingWall (from the
-        // engine's default Wall) so the ALE seam builds a MovingWall face list to
-        // receive the wall velocity below. face_boundary only — no effect on the
-        // swept fluxes or the topology-diff. No-op unless moving_wall_bc is on.
+        // Re-tag the moving loop's open faces MovingWall (from the engine's
+        // default Wall) so the ALE seam builds a MovingWall face list to receive
+        // the wall velocity below. face_boundary only. No-op unless
+        // moving_wall_bc is on.
         self.retag_moving_wall_faces(&mut new_mesh);
         let regen_ms = ms_since(regen_start);
         if new_mesh.num_cells() != self.mesh.num_cells() {
@@ -670,25 +622,24 @@ impl MovingMeshDriver {
             ));
         }
         // Whether the regenerated face ARRAYS (order and/or adjacency) differ
-        // from the previous mesh. Stage-2 finding: seed motion can REORDER the
-        // deterministic face emission without changing the adjacency, so this is
-        // NOT a flip flag — it just decides geometry-vs-topology seam below. (In
-        // practice a swirl toggles it on ~1/5 of steps; a rigid translation
-        // trips it almost immediately.) The genuine-flip discriminator is the
-        // VERTEX correspondence: a born vertex — an incident-seed set with no
-        // t^n counterpart — is precisely what the swept-quad path cannot close.
+        // from the previous mesh. Seed motion can REORDER the deterministic face
+        // emission without changing the adjacency, so this is NOT a flip flag —
+        // it just decides geometry-vs-topology seam below. The genuine-flip
+        // discriminator is the VERTEX correspondence: a born vertex — an
+        // incident-seed set with no t^n counterpart — is precisely what the
+        // swept-quad path cannot close.
         let face_arrays_differ = topology_differs(&self.mesh, &new_mesh);
 
         // 4. Swept-quad mesh fluxes old→new with the pinned dt. Across the
         //    Voronoi regen the new mesh's vertex ids are unrelated to the old
         //    mesh's, so we first map each NEW vertex to its t^n position via the
-        //    seed-set correspondence (roadmap R2: vertex ≡ seed-triple).
+        //    seed-set correspondence (vertex ≡ seed-triple).
         //
         //    Then we detect ADJACENCY flips (born/dead faces). Two regimes:
-        //    * NO flip (`is_flip()` false — persistent adjacency, at worst a
-        //      face-array reorder): the aligned old ring reproduces each cell's
-        //      t^n polygon, so the M3 f64-telescoping + f32-forest-closure path
-        //      applies directly and its telescoping identity is HARD-asserted.
+        //    * NO flip (persistent adjacency, at worst a face-array reorder): the
+        //      aligned old ring reproduces each cell's t^n polygon, so the
+        //      f64-telescoping + f32-forest-closure path applies directly and its
+        //      telescoping identity is HARD-asserted.
         //    * FLIP (born/dead faces): the born faces have no swept quad, so we
         //      take the flip-aware path — born faces carry zero swept
         //      contribution and the per-cell defect they (and the born-vertex
@@ -724,8 +675,8 @@ impl MovingMeshDriver {
         let swept = if is_flip {
             // Degeneracy-ONLY step (no genuine adjacency change): keep the >1e-9
             // telescoping-identity assert LIVE on every cell not incident to a
-            // forced-degenerate face — a lone sliver must not disable the whole-step
-            // guard (review July 2026 F1). On a genuine flip, pass None (relaxed).
+            // forced-degenerate face — a lone sliver must not disable the
+            // whole-step guard. On a genuine flip, pass None (relaxed).
             let hard_assert_exclude = if genuine_flip {
                 None
             } else {
@@ -754,15 +705,14 @@ impl MovingMeshDriver {
         //    * Face arrays BYTE-IDENTICAL (a frozen regen): the surgical
         //      GEOMETRY seam re-uploads geometry while keeping the AMG hierarchy
         //      + per-face BC overrides — a zero-motion step is byte-identical to
-        //      a static run (the stage-1 do-no-harm anchor).
+        //      a static run.
         //    * Face arrays differ (ANY real motion reorders the face emission):
         //      the geometry seam would upload against a stale face order, so we
         //      take the CPU-surgical TOPOLOGY seam (rebuilds the face-indexed
         //      CSR stack for the new order; cell-indexed state incl. the
-        //      warm-start `x` and BDF2 history is preserved — M3 proved this
-        //      holds the GCL at ~1e-6). The rebuild re-scatters bc tables from
-        //      the model per-type defaults, dropping per-face overrides, so we
-        //      re-apply them (`bc_overrides_reset`).
+        //      warm-start `x` and BDF2 history is preserved). The rebuild
+        //      re-scatters bc tables from the model per-type defaults, dropping
+        //      per-face overrides, so we re-apply them (`bc_overrides_reset`).
         //    A genuine flip changes adjacency ⇒ `face_arrays_differ` is already
         //    true; the explicit `is_flip` guard makes the coupling defensive.
         let refresh_start = Instant::now();
@@ -776,11 +726,11 @@ impl MovingMeshDriver {
         } else {
             self.driver.begin_ale_step(&new_mesh, &swept.fluxes)?;
         }
-        // M6 stage 2: feed the moving wall's material velocity into the fluid.
-        // AFTER the refresh (the seam just rebuilt the MovingWall face list + BC
-        // tables) and BEFORE the solve, set each MovingWall face's Dirichlet
-        // velocity to w_wall[owner] — no-slip + no-penetration at the wall's
-        // material velocity. No-op unless moving_wall_bc is on.
+        // Feed the moving wall's material velocity into the fluid. AFTER the
+        // refresh (the seam just rebuilt the MovingWall face list + BC tables)
+        // and BEFORE the solve, set each MovingWall face's Dirichlet velocity to
+        // w_wall[owner] — no-slip + no-penetration at the wall's material
+        // velocity. No-op unless moving_wall_bc is on.
         self.apply_moving_wall_velocity(&new_mesh)?;
         let refresh_ms = ms_since(refresh_start);
         let topo_changed = face_arrays_differ || is_flip;
@@ -831,7 +781,7 @@ impl MovingMeshDriver {
     }
 
     /// The seed positions at absolute time `t`, evaluated from the t=0 labels
-    /// `f(seed0_i, t)` for interior seeds; boundary seeds are held fixed (v1).
+    /// `f(seed0_i, t)` for interior seeds; boundary seeds are held fixed.
     /// Frozen returns the labels unchanged (t is irrelevant).
     fn advect_to(&self, t: f64) -> Vec<Point2<f64>> {
         match self.motion {
@@ -845,8 +795,8 @@ impl MovingMeshDriver {
                         let p = f([s0.x, s0.y], t);
                         Point2::new(p[0], p[1])
                     } else {
-                        // Boundary seeds are fixed in v1 (moving boundaries are
-                        // M6); this keeps boundary faces static ⇒ zero mesh flux.
+                        // Boundary seeds fixed here (moving boundaries handled by
+                        // BoundaryMotionSpec) ⇒ boundary faces static, zero flux.
                         *s0
                     }
                 })
@@ -879,9 +829,7 @@ impl MovingMeshDriver {
         w_max
     }
 
-    // -----------------------------------------------------------------------
-    // M6 — moving boundary (rigidly-moving boundary seeds + moved loop spec).
-    // -----------------------------------------------------------------------
+    // Moving boundary: rigidly-moving boundary seeds + moved loop spec.
 
     /// The `[lo, hi)` global-segment range of the moving loop, or `None` under
     /// `Static`. A boundary seed whose adjacent segment falls in this range is a
@@ -909,7 +857,7 @@ impl MovingMeshDriver {
     /// The boundary spec at absolute time `t`: the t=0 label spec with the
     /// moving loop's polyline points rigidly transformed. Under `Static` this is
     /// a byte-identical clone of `self.spec`, so the regen reproduces the mesh
-    /// byte-for-byte (the do-no-harm anchor). A rigid transform preserves chord
+    /// byte-for-byte. A rigid transform preserves chord
     /// lengths, so segment tags/structure are unchanged — only the points move.
     fn moved_spec(&self, t: f64) -> BoundarySpec {
         let mut spec = self.spec.clone();
@@ -981,16 +929,16 @@ impl MovingMeshDriver {
         }
     }
 
-    /// M6 stage 2: re-tag the moving loop's open (boundary) faces as
+    /// Re-tag the moving loop's open (boundary) faces as
     /// [`BoundaryType::MovingWall`] on a freshly regenerated mesh. An open face
     /// whose OWNER cell is a moving-boundary seed lies on the moving obstacle
     /// contour (the boundary seeds sit ON the wall; their cells' only open face
     /// is the clipped obstacle edge), so this catches exactly the moving wall
     /// while leaving the fixed channel walls / inlet / outlet untouched. Only
     /// `face_boundary` is rewritten (geometry/adjacency untouched ⇒ swept fluxes
-    /// and the topology-diff are unaffected). A no-op unless `moving_wall_bc` is
-    /// on and a `RigidLoop` is declared. Must run BEFORE the ALE seam so the
-    /// solver builds a `MovingWall` boundary-face list to receive the velocity.
+    /// and the topology-diff unaffected). A no-op unless `moving_wall_bc` is on
+    /// and a `RigidLoop` is declared. Must run BEFORE the ALE seam so the solver
+    /// builds a `MovingWall` boundary-face list to receive the velocity.
     fn retag_moving_wall_faces(&self, mesh: &mut Mesh) {
         if !self.moving_wall_bc || self.moving_loop_range().is_none() {
             return;
@@ -1002,16 +950,16 @@ impl MovingMeshDriver {
         }
     }
 
-    /// M6 stage 2: push the per-face Dirichlet wall velocity into the solver for
-    /// the current step. Each `MovingWall` open face gets `bc_value = w_wall`
-    /// of its owner cell (the rigid wall material velocity — uniform across the
-    /// face under the v1 pure-translation scope; a rotating wall would need a
-    /// per-face `w_wall`, out of v1). Re-applied EVERY step: the topology
-    /// seam re-scatters the bc tables from the model's per-type defaults
-    /// (MovingWall Dirichlet 0) dropping the per-face override, and `w_wall`
-    /// itself changes each step. A no-op unless `moving_wall_bc` is on. Called
-    /// AFTER the refresh (so the `MovingWall` face list + tables are rebuilt)
-    /// and BEFORE the solve (so this step feels this step's wall velocity).
+    /// Push the per-face Dirichlet wall velocity into the solver for the current
+    /// step. Each `MovingWall` open face gets `bc_value = w_wall` of its owner
+    /// cell (the rigid wall material velocity — uniform across the face under the
+    /// pure-translation scope; a rotating wall would need a per-face `w_wall`).
+    /// Re-applied EVERY step: the topology seam re-scatters the bc tables from
+    /// the model's per-type defaults (MovingWall Dirichlet 0) dropping the
+    /// per-face override, and `w_wall` itself changes each step. A no-op unless
+    /// `moving_wall_bc` is on. Called AFTER the refresh (so the `MovingWall` face
+    /// list + tables are rebuilt) and BEFORE the solve (so this step feels this
+    /// step's wall velocity).
     fn apply_moving_wall_velocity(&mut self, mesh: &Mesh) -> Result<(), String> {
         if !self.moving_wall_bc || self.moving_loop_range().is_none() {
             return Ok(());
@@ -1045,8 +993,8 @@ impl MovingMeshDriver {
     fn plan_seed_motion(&mut self) -> Result<(f64, Vec<Point2<f64>>), String> {
         match self.motion {
             // Frozen: no INTERIOR motion. `advect_to` returns the labels; the dt
-            // is capped only by the moving BOUNDARY speed (M6), zero otherwise —
-            // so a fully static step pins exactly `requested_dt`.
+            // is capped only by the moving BOUNDARY speed, zero otherwise — so a
+            // fully static step pins exactly `requested_dt`.
             MeshMotionSpec::Frozen => {
                 let w_max = self.max_boundary_speed(self.configured_dt);
                 let dt = self.pin_dt(w_max);
@@ -1054,7 +1002,7 @@ impl MovingMeshDriver {
             }
             // Prescribed: FD-estimate max seed speed over the base step, cap dt,
             // then sample the analytic law at the pinned t^{n+1}. The moving
-            // boundary speed (M6) also enters the cap.
+            // boundary speed also enters the cap.
             MeshMotionSpec::Prescribed(_) => {
                 let dt_base = self.configured_dt;
                 let w_max = self
@@ -1069,16 +1017,16 @@ impl MovingMeshDriver {
         }
     }
 
-    /// FlowCoupled seed motion (deliverable 1): read the current cell velocities,
-    /// pin dt off the flow speed (mesh-motion CFL), then displace each interior
-    /// seed by `U_i·dt` plus an AREPO-style distortion-ramped steering toward its
-    /// cell centroid, clamped to a fraction of the local cell radius.
+    /// FlowCoupled seed motion: read the current cell velocities, pin dt off the
+    /// flow speed (mesh-motion CFL), then displace each interior seed by `U_i·dt`
+    /// plus an AREPO-style distortion-ramped steering toward its cell centroid,
+    /// clamped to a fraction of the local cell radius.
     ///
     /// * The steering `χ_i·(c_i − s_i)` is a partial (under-relaxed) Lloyd move.
     ///   `χ_i` ramps from 0 (well-shaped cell — pure flow advection, so the mesh
     ///   follows the flow and cuts advective dissipation) up to `regularization`
-    ///   once the seed-to-centroid offset exceeds `η·R_i` (Springel 2010 Eq. 63
-    ///   style). This is what holds quality WITHOUT overwhelming advection.
+    ///   once the seed-to-centroid offset exceeds `η·R_i`. This holds quality
+    ///   WITHOUT overwhelming advection.
     /// * The per-step displacement clamp `|Δ| ≤ flow_disp_cap·R_i` is the hard
     ///   anti-tangling guard (keeps the swept-quad + flip-remap regime valid).
     /// * The mesh-motion CFL cap on dt is sized from the flow speed; the steering
@@ -1095,7 +1043,7 @@ impl MovingMeshDriver {
             }
             w_flow_max = w_flow_max.max((ux * ux + uy * uy).sqrt());
         }
-        // The moving boundary speed (M6) also enters the dt cap.
+        // The moving boundary speed also enters the dt cap.
         let w_max = w_flow_max.max(self.max_boundary_speed(self.configured_dt));
         let dt = self.pin_dt(w_max);
 
@@ -1104,7 +1052,7 @@ impl MovingMeshDriver {
         let mut new_seeds = self.seeds.clone();
         for i in 0..self.seeds.len() {
             if self.kinds[i] != SeedKind::Interior {
-                continue; // boundary seeds fixed (v1)
+                continue; // boundary seeds fixed
             }
             let s = self.seeds[i];
             let (ux, uy) = u[i];
@@ -1167,8 +1115,8 @@ impl MovingMeshDriver {
             .collect())
     }
 
-    /// FlowCoupled quality escalation (deliverable 2): if the advected seed set
-    /// would regenerate a mesh whose max skew exceeds `quality_skew_target`, run
+    /// FlowCoupled quality escalation: if the advected seed set would regenerate
+    /// a mesh whose max skew exceeds `quality_skew_target`, run
     /// `lloyd_escalation_iters` blended Lloyd regularization sweeps (reusing the
     /// meshgen [`lloyd_relax`]) to pull the interior seeds back toward CVT, then
     /// return the regularized seeds. Returns `(seeds, escalated?)`. A no-op for
@@ -1304,11 +1252,11 @@ fn set_moving_wall_component(
 /// faces (whose real swept volume is negligible) are caught. Returns how many
 /// faces were newly forced born.
 ///
-/// Keeps the flip telemetry honest (review July 2026): a forced-degenerate face
-/// marks its incident cells in `flip.cell_flipped` and re-derives
-/// `flip.flipped_cells`, so a degeneracy-only step reports `flipped_cells > 0`
-/// (not a `flipped=true, flipped_cells=0` phantom). That per-cell flag is ALSO
-/// the hard-assert exclude set the caller passes to the flip closure.
+/// Keeps the flip telemetry honest: a forced-degenerate face marks its incident
+/// cells in `flip.cell_flipped` and re-derives `flip.flipped_cells`, so a
+/// degeneracy-only step reports `flipped_cells > 0` (not a `flipped=true,
+/// flipped_cells=0` phantom). That per-cell flag is ALSO the hard-assert exclude
+/// set the caller passes to the flip closure.
 fn force_degenerate_faces_born(
     mesh: &Mesh,
     old_vx: &[f64],
@@ -1347,15 +1295,15 @@ fn force_degenerate_faces_born(
 /// per-face owner/neighbor and per-cell face lists — the connectivity the
 /// topology refresh rebuilds — AND `face_boundary` (by `bc_table_index`).
 ///
-/// The `face_boundary` comparison is load-bearing for the M6 `Wall → MovingWall`
-/// retag (review July 2026, HIGH): the geometry seam ([`Mesh::refresh_mesh_geometry`])
-/// asserts identical `face_boundary` and hard-errors on a tag flip, but a step
-/// whose motion is too small to change connectivity (e.g. the GUI slider minima)
-/// would otherwise take that seam and die on step 0. Including the tags here
-/// routes any tag change through `begin_ale_step_topology`, which rebuilds the BC
-/// tables + `face_boundary` snapshot; `apply_moving_wall_velocity` then repopulates
-/// the values. Byte-neutral under `Static`/no-retag (tags identical ⇒ `false`),
-/// and it hardens every `boundary_retag` path too. Cheap (O(faces)).
+/// The `face_boundary` comparison is load-bearing for the `Wall → MovingWall`
+/// retag: the geometry seam ([`Mesh::refresh_mesh_geometry`]) asserts identical
+/// `face_boundary` and hard-errors on a tag flip, but a step whose motion is too
+/// small to change connectivity would otherwise take that seam and die.
+/// Including the tags here routes any tag change through
+/// `begin_ale_step_topology`, which rebuilds the BC tables + `face_boundary`
+/// snapshot; `apply_moving_wall_velocity` then repopulates the values.
+/// Byte-neutral under `Static`/no-retag (tags identical ⇒ `false`). Cheap
+/// (O(faces)).
 fn topology_differs(a: &Mesh, b: &Mesh) -> bool {
     a.num_faces() != b.num_faces()
         || a.face_owner != b.face_owner

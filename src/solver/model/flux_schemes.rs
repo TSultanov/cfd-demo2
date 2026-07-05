@@ -199,12 +199,9 @@ fn derive_central_upwind(
 
     // Minmod limiter in the same OpenFOAM NVDTVD ratio convention (r = 2*gradcf/gradf - 1):
     //   psi(r) = max(0, min(1, r))
-    // Sharper than vanLeer: it CAPS psi at 1 (no anti-diffusion for r>1, where vanLeer rises
-    // toward 2 and adds the compressive/destabilizing correction) and is more dissipative for
-    // r<1. Arc N N4: the inviscid mu=0 instability is the vanLeer reconstruction's grid-scale
-    // under-dissipation (proved interior by the periodic probe); minmod removes the compressive
-    // overshoot that feeds it. min(1,..)/max(0,..) already bound the output to [0,1], so the
-    // vanLeer 1000x guard clamp is unnecessary here.
+    // Caps psi at 1 (no anti-diffusion for r>1, where vanLeer rises toward 2 and adds a
+    // compressive/destabilizing correction) and is more dissipative for r<1. min/max already
+    // bound the output to [0,1], so the vanLeer 1000x guard clamp is unnecessary here.
     let minmod_limiter = |gradf: S, gradcf: S| {
         let gradf2 = S::Mul(Box::new(gradf.clone()), Box::new(gradf.clone()));
         let ratio = S::Div(
@@ -662,15 +659,6 @@ fn derive_central_upwind(
     //   tauMC . n = mu * ((J^T - 2/3 I div u) . n),   J_ij = du_i/dx_j
     // i.e. traction_x = mu*((dux_dx - 2/3 div)*n_x + duy_dx*n_y).
     //
-    // HISTORY: this closure previously built the FULL stress tau (factor 2
-    // on the diagonal, symmetric dux_dy + duy_dx off-diagonal), so combined
-    // with the assembled laplacian the effective momentum viscous operator
-    // was div(tau) + mu lap(u) - shear viscosity DOUBLED vs physical NS -
-    // and the energy work flux carried an extra (mu/2) grad(|u|^2). Proved
-    // by the compressible MMS in both directions (as-coded sources converged
-    // at order 2, physical-NS sources saturated 30-70x higher); see
-    // tests/mms_compressible_order_test.rs.
-    //
     // The Gauss div scheme forms the face traction via `Sf & tauMC` (units: force).
     // Here we build the equivalent traction per unit area (tauMC · n) from face gradients,
     // then multiply by area when assembling integrated fluxes.
@@ -1058,12 +1046,9 @@ fn derive_central_upwind(
         )
     };
 
-    // Arc N4c: the biharmonic dissipation is now treated IMPLICITLY in the
-    // matrix (the auxiliary `lap_<conserved>` unknowns + the `laplacian(bih_eps4,
-    // lap_X)` term on each conserved equation), so it no longer rides on the
-    // explicit flux. The explicit `+ eps4*c*(lap_neigh-lap_own)*area` term (Arc
-    // N4b) was retired with its `dt <~ C*h^2` stability limit; see
-    // `compressible::build_compressible_system_impl`.
+    // Biharmonic dissipation is handled implicitly in the matrix (auxiliary
+    // `lap_<conserved>` unknowns + `laplacian(bih_eps4, lap_X)` per conserved
+    // equation), not on the explicit flux here.
 
     let mut flux = Vec::new();
     for name in &components {

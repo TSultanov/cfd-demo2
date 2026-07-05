@@ -23,13 +23,11 @@ use super::{PortRegistry, PortRegistryError};
 /// }
 /// ```
 pub trait ModulePorts {
-    /// The type representing this module's port set.
     type PortSet;
 
     /// The module name (used for identification and logging).
     const MODULE_NAME: &'static str;
 
-    /// Get the module name.
     fn module_name(&self) -> &'static str {
         Self::MODULE_NAME
     }
@@ -52,9 +50,7 @@ pub trait ModulePorts {
         Ok(())
     }
 
-    /// Get the port set for this module.
-    ///
-    /// Returns the typed port handles that can be used for WGSL generation.
+    /// Returns the typed port handles used for WGSL generation.
     fn port_set(&self) -> &Self::PortSet;
 }
 
@@ -203,10 +199,7 @@ pub trait KernelProvider: ModulePorts {
     fn kernel_generators(&self) -> &[crate::solver::model::kernel::ModelKernelGeneratorSpec];
 }
 
-/// Trait for type-safe module initialization.
-///
-/// This trait bridges the gap between the old `KernelBundleModule` construction
-/// and the new port-based system during migration.
+/// Trait for type-safe, port-based module initialization.
 pub trait IntoModule {
     /// The module type produced.
     type Module: ModulePorts;

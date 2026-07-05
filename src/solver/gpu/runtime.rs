@@ -9,11 +9,9 @@ use crate::solver::mesh::Mesh;
 
 /// Generic CSR runtime sized by an arbitrary DOF count.
 ///
-/// This keeps mesh resources at the cell level (`common.num_cells`) but allocates
-/// the linear system for an expanded CSR over `num_dofs = num_cells * unknowns_per_cell`.
-///
-/// This is the bridge needed to make `unknowns_per_cell` fully model-driven for the
-/// generic coupled path without relying on specialized kernels.
+/// Keeps mesh resources at the cell level (`common.num_cells`) but allocates the
+/// linear system for an expanded CSR over `num_dofs = num_cells * unknowns_per_cell`,
+/// making `unknowns_per_cell` fully model-driven without specialized kernels.
 pub(crate) struct GpuCsrRuntime {
     pub common: GpuRuntimeCommon,
     pub num_dofs: u32,
@@ -65,18 +63,17 @@ impl GpuCsrRuntime {
         })
     }
 
-    /// Tier B topology refresh (M2): rebuild every mesh-topology-derived
-    /// resource in place for a new mesh with the SAME cell count (the invariant)
-    /// but a possibly different face set / adjacency / nnz.
+    /// Rebuild every mesh-topology-derived resource in place for a new mesh with
+    /// the SAME cell count (the invariant) but a possibly different face set /
+    /// adjacency / nnz.
     ///
-    /// Steps: (1) refresh the mesh buffers + host CSR ([`MeshResources::refresh_topology`]);
-    /// (2) update `num_faces`; (3) rebuild the block-expanded CSR (F7: ~S²× the
-    /// scalar nnz — the dominant upload) and re-init the scalar-CG linear system
-    /// over it. `num_dofs` is invariant (cells × unknowns). The scalar-CG
-    /// module + its bind groups + the linear port space are replaced with fresh
-    /// ones (the block CSR buffers changed size); callers that hold bind groups
-    /// over the linear system (FGMRES, Schur, generated kernels) MUST rebuild
-    /// them afterward.
+    /// Refreshes the mesh buffers + host CSR ([`MeshResources::refresh_topology`]),
+    /// updates `num_faces`, and rebuilds the block-expanded CSR + scalar-CG linear
+    /// system over it. `num_dofs` is invariant (cells × unknowns). The scalar-CG
+    /// module, its bind groups, and the linear port space are replaced with fresh
+    /// ones (the block CSR buffers changed size), so callers holding bind groups
+    /// over the linear system (FGMRES, Schur, generated kernels) MUST rebuild them
+    /// afterward.
     pub fn refresh_topology(
         &mut self,
         mesh: &Mesh,

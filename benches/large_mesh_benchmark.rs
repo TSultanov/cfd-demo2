@@ -12,16 +12,8 @@ fn large_mesh_benchmark(c: &mut Criterion) {
     };
     let domain_size = Vector2::new(2.0, 1.0);
 
-    // Target: ~2-3 million cells.
-    // Area = 2.0.
-    // 2,000,000 cells => Area/cell = 1e-6 => size = 0.001.
-    // Let's try a slightly larger size first to ensure it runs in reasonable time for a test run,
-    // then we can decrease it.
-    // 0.01 => 20,000 cells.
-    // 0.005 => 80,000 cells.
-    // 0.002 => 500,000 cells.
-    // 0.001 => 2,000,000 cells.
-
+    // Area = 2.0; cell count ~ Area / size^2.
+    //   0.01 => 20k, 0.005 => 80k, 0.002 => 500k, 0.001 => 2M cells.
     let min_cell_size = 0.001; // 2 million cells
     let max_cell_size = 0.001;
 

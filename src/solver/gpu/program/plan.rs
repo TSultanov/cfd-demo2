@@ -155,26 +155,22 @@ impl ProgramOpRegistry {
         Ok(())
     }
 
-    /// Check if a host op is registered.
     #[cfg(test)]
     pub fn has_host(&self, kind: &HostOpKind) -> bool {
         self.host.contains_key(kind)
     }
 
-    /// Check if a graph op is registered.
     #[cfg(test)]
     pub fn has_graph(&self, kind: &GraphOpKind) -> bool {
         self.graph.contains_key(kind)
     }
 
-    /// Check if a count op is registered.
     #[cfg(test)]
     pub fn has_count(&self, kind: &CountOpKind) -> bool {
         self.count.contains_key(kind)
     }
 
-    /// Merge another registry into this one.
-    /// Returns an error if there are duplicate registrations.
+    /// Merge another registry in; errors on duplicate registrations.
     pub fn merge(&mut self, other: Self) -> Result<(), String> {
         for (kind, handler) in other.graph {
             self.register_graph(kind, handler)?;
@@ -314,9 +310,6 @@ impl ProgramSpecBuilder {
 }
 
 /// Strongly-typed container for program-level resources.
-///
-/// Replaces the former type-erased `HashMap<TypeId, Box<dyn Any>>` bag.
-/// All fields are known at compile time — no runtime downcasts needed.
 pub(crate) struct PlanResources {
     /// The solver backend (currently always GenericCoupled).
     pub backend: crate::solver::gpu::lowering::programs::generic_coupled::GenericCoupledProgramResources,
@@ -475,18 +468,17 @@ impl GpuProgramPlan {
         (self.spec.write_state_bytes)(self, bytes)
     }
 
-    /// Tier A geometry-only mesh refresh (see `MeshResources::refresh_geometry`):
-    /// overwrite the geometry buffers in place; topology must be unchanged.
+    /// Geometry-only mesh refresh: overwrite the geometry buffers in place;
+    /// topology must be unchanged.
     pub fn refresh_mesh_geometry(&self, mesh: &crate::solver::mesh::Mesh) -> Result<(), String> {
         self.resources.backend.refresh_mesh_geometry(mesh)
     }
 
-    /// Tier B topology refresh (M2): rebuild the mesh-topology-derived GPU
-    /// resources for a new mesh with the same cell count but changed
-    /// faces/adjacency (see
-    /// [`GenericCoupledProgramResources::refresh_mesh_topology`]). Returns a
-    /// report whose `bc_overrides_reset` flag tells the caller the bc tables
-    /// were rebuilt from the model spec (per-face runtime overrides dropped).
+    /// Topology refresh: rebuild the mesh-topology-derived GPU resources for a
+    /// new mesh with the same cell count but changed faces/adjacency. The
+    /// returned report's `bc_overrides_reset` flag tells the caller the bc
+    /// tables were rebuilt from the model spec (per-face runtime overrides
+    /// dropped).
     pub fn refresh_mesh_topology(
         &mut self,
         mesh: &crate::solver::mesh::Mesh,
@@ -494,11 +486,9 @@ impl GpuProgramPlan {
         self.resources.backend.refresh_mesh_topology(mesh)
     }
 
-    /// ALE step entry (M3.2): rotate the volume history (old_old ← old ←
-    /// current), then upload the new geometry, then upload the f32-closed
-    /// mesh face fluxes. Call once per step, BEFORE `step()`, after moving
-    /// the mesh. See `MeshResources::begin_ale_step` for the ordering
-    /// contract (review F3: `host_prepare_step` cannot own the rotation).
+    /// ALE step entry: rotate the volume history (old_old ← old ← current),
+    /// then upload the new geometry, then upload the f32-closed mesh face
+    /// fluxes. Call once per step, BEFORE `step()`, after moving the mesh.
     pub fn begin_ale_step(
         &self,
         mesh: &crate::solver::mesh::Mesh,
@@ -507,11 +497,9 @@ impl GpuProgramPlan {
         self.resources.backend.begin_ale_step(mesh, mesh_fluxes)
     }
 
-    /// ALE step entry for a topology-changing move (M2 Tier B): rotate the
-    /// volume history, rebuild the whole topology-derived stack, then upload
-    /// the closed mesh fluxes (see
-    /// [`GenericCoupledProgramResources::begin_ale_step_topology`]). Returns the
-    /// topology-refresh report (`bc_overrides_reset`).
+    /// ALE step entry for a topology-changing move: rotate the volume history,
+    /// rebuild the whole topology-derived stack, then upload the closed mesh
+    /// fluxes. Returns the topology-refresh report (`bc_overrides_reset`).
     pub fn begin_ale_step_topology(
         &mut self,
         mesh: &crate::solver::mesh::Mesh,

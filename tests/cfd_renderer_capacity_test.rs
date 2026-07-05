@@ -1,12 +1,11 @@
 #![cfg(all(feature = "ui", feature = "dev-tests"))]
 
-//! Regression test for the GUI Voronoi crash: the renderer's vertex buffers
-//! were sized with a `num_cells * 10` heuristic, but a polygonal (Voronoi)
-//! cell needs `3*(n-2)` fan-triangulation vertices and `2*n` wireframe
-//! vertices — ~12+ for the typical hexagon — so `Queue::write_buffer`
-//! overran the buffer (fatal wgpu validation error) on every Voronoi mesh.
-//! The buffers are now sized from the actual triangulated data; this test
-//! performs the same upload the GUI worker does.
+//! Regression test for the GUI Voronoi crash: a polygonal (Voronoi) cell needs
+//! `3*(n-2)` fan-triangulation vertices and `2*n` wireframe vertices (~12+ for
+//! the typical hexagon), which overran the old `num_cells * 10` vertex-buffer
+//! heuristic (fatal wgpu validation error). Buffers must be sized from the
+//! actual triangulated data; this test performs the same upload the GUI worker
+//! does.
 
 use cfd2::solver::mesh::{generate_voronoi_mesh, ChannelWithObstacle, Mesh};
 use cfd2::ui::cfd_renderer;
@@ -44,8 +43,7 @@ fn voronoi_mesh_upload_fits_render_buffers() {
     let vertices = cfd_renderer::build_mesh_vertices(&cells);
     let line_vertices = cfd_renderer::build_line_vertices(&cells);
 
-    // The old heuristic really is insufficient for polygonal meshes — keep
-    // this assertion so the sizing can never quietly go back to it.
+    // Guard: the num_cells*10 heuristic is insufficient for polygonal meshes.
     assert!(
         vertices.len() > mesh.num_cells() * 10 || line_vertices.len() > mesh.num_cells() * 10,
         "expected a Voronoi mesh to exceed the old num_cells*10 vertex heuristic \
@@ -66,7 +64,7 @@ fn voronoi_mesh_upload_fits_render_buffers() {
     .expect("device");
 
     let max_vertices = vertices.len().max(line_vertices.len()).max(1);
-    // Static upload path — allocate exactly, as the GUI static path now does.
+    // Static upload path: allocate exactly, as the GUI static path does.
     let mut renderer = cfd_renderer::CfdRenderResources::new(
         &device,
         wgpu::TextureFormat::Rgba8Unorm,

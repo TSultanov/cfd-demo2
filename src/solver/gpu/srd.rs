@@ -1,40 +1,28 @@
 //! State Redistribution (SRD) for cut-cell small cells (Berger & Giuliani, JCP 2021).
 //!
 //! A non-merging, conservative, geometry-preserving treatment for the cut-cell
-//! *small-cell instability*: tiny "sliver" control volumes — produced where an
-//! immersed boundary cuts a background Cartesian cell — destabilize the implicit
-//! coupled solve (a single ~6%-volume sliver on the default channel-with-obstacle
-//! mesh runs away in the base operator, independent of dt, viscosity, or the
-//! transpose-stress term). SRD applies a fixed linear map `u <- S u` after each
-//! step, where `S` is a partition-of-unity averaging operator that is *exactly
-//! identity* for every cell outside a sliver neighborhood, so the simulation keeps
-//! the true geometry and every degree of freedom (no merging, no mesh edit, no
-//! viscosity floor).
+//! small-cell instability: tiny "sliver" control volumes where an immersed
+//! boundary cuts a background Cartesian cell destabilize the implicit coupled
+//! solve. SRD applies a fixed linear map `u <- S u` after each step, where `S`
+//! is a partition-of-unity averaging operator that is exactly identity for every
+//! cell outside a sliver neighborhood (no merging, no mesh edit, no viscosity
+//! floor).
 //!
-//! **Status: opt-in, OFF by default.** The cut-cell small-cell instability is
-//! properly cured by the immersed no-slip wall BC on the embedded geometry (see
-//! `generate_cut_cell_mesh`), which both stabilizes the tiny cut cells — a
-//! no-slip face adds a `mu/dist` wall-shear damping that grows as cells shrink —
-//! and produces the physical boundary layer SRD's averaging would smear. SRD is
-//! retained as an opt-in stabilizer (`GpuUnifiedSolver::set_srd_enabled`); it is
-//! built when slivers exist but not applied unless enabled.
+//! Opt-in, OFF by default: the instability is properly cured instead by the
+//! immersed no-slip wall BC (`mu/dist` wall-shear damping that grows as cells
+//! shrink, plus the physical boundary layer SRD's averaging would smear). Built
+//! when slivers exist but only applied via `GpuUnifiedSolver::set_srd_enabled`.
 //!
-//! `S` is conservative by construction: `sum_j V_j (S u)_j == sum_j V_j u_j`
-//! (proven in `conservation_error` / the unit tests).
+//! `S` is conservative by construction: `sum_j V_j (S u)_j == sum_j V_j u_j`.
 //!
-//! **No-op safety.** [`build_srd_operator`] only returns `Some` for meshes that
-//! carry the cut-cell *signature* — a dominant plateau of equal-volume "full"
-//! background cells plus a small minority of sub-half-nominal slivers. Structured
-//! and graded meshes lack that signature, so the operator is not even built there
-//! (`None`), and SRD is a guaranteed no-op: Ghia, the compressible-lid reference,
-//! and the graded MMS order tests are byte-for-byte untouched.
+//! No-op safety: [`build_srd_operator`] returns `Some` only for meshes with the
+//! cut-cell signature — a plateau of equal-volume "full" cells plus a minority of
+//! sub-half-nominal slivers. Structured and graded meshes lack it, so the operator
+//! is not built (`None`) and SRD is a guaranteed no-op.
 //!
-//! The CPU neighborhood construction + operator mirror the validated prototype in
-//! `tests/gui_default_convergence_test.rs` (`srd_neighborhoods` / `srd_apply`,
-//! which hold the true-geometry obstacle bounded over 200 steps at the physical
-//! velocity scale). The GPU path applies the same operator in two compute passes
-//! (gather into a temp buffer, then copy back) to avoid the read-after-write race
-//! a cell would otherwise hit reading neighbors' already-overwritten velocity.
+//! The GPU path applies `S` in two compute passes (gather into a temp buffer,
+//! then copy back) to avoid the read-after-write race a cell would hit reading
+//! neighbors' already-overwritten velocity.
 
 use crate::solver::gpu::buffers::{create_buffer, create_buffer_init};
 use crate::solver::mesh::Mesh;
@@ -59,8 +47,7 @@ pub struct SrdCsr {
 }
 
 impl SrdCsr {
-    /// Apply `S` on the CPU: `u <- S u`. Reference for the GPU cross-check and
-    /// for callers without a device. Accumulates in f64 over the f32 weights.
+    /// Apply `S` on the CPU: `u <- S u`. Accumulates in f64 over the f32 weights.
     pub fn apply_cpu(&self, u: &mut [(f64, f64)]) {
         debug_assert_eq!(u.len(), self.n_cells);
         let mut out = vec![(0.0f64, 0.0f64); self.n_cells];
@@ -107,13 +94,10 @@ impl SrdCsr {
 /// neighborhoods containing `j` (overlap count, `>= 1`).
 ///
 /// A cell is a sliver when it is abruptly smaller than its largest face-neighbor
-/// (`cell_vol[i] < relative_frac * max_neighbor_vol[i]`) — the cut-cell
-/// signature. This relative test is what makes SRD safe on graded meshes:
-/// smoothly graded cells differ from their neighbors only by the (near-1) grading
-/// ratio, so they are never flagged, whereas a cut sliver is a sudden drop. On
-/// the validated obstacle mesh each sliver has a near-full neighbor, so this
-/// reproduces the prototype's global `0.5 * nominal` flagging
-/// (`tests/gui_default_convergence_test.rs::srd_neighborhoods`).
+/// (`cell_vol[i] < relative_frac * max_neighbor_vol[i]`). This relative test is
+/// what makes SRD safe on graded meshes: smoothly graded cells differ from their
+/// neighbors only by the (near-1) grading ratio, so they are never flagged,
+/// whereas a cut sliver is a sudden drop.
 fn srd_neighborhoods(
     mesh: &Mesh,
     relative_frac: f64,
@@ -178,15 +162,11 @@ fn srd_neighborhoods(
 }
 
 /// Build the SRD operator `S` for `mesh`, or `None` if the mesh is not a
-/// sliver-bearing cut-cell mesh (structured / graded → no-op, references
-/// untouched).
+/// sliver-bearing cut-cell mesh (structured / graded → no-op).
 ///
-/// The detection + neighborhood thresholds match the validated prototype: a cell
-/// is a sliver if its volume is below `0.5 * nominal`, and neighborhoods grow to
-/// `nominal`, where `nominal = max(cell_vol)` is the uniform background-cell
-/// volume of the cut mesh. The extra cut-cell *signature* guard (a full-cell
-/// plateau plus a small sliver minority) keeps SRD from ever firing on graded
-/// meshes, whose legitimately small fine-region cells are not slivers.
+/// A cell is a sliver if its volume is below `0.5 * nominal`, and neighborhoods
+/// grow to `nominal`, where `nominal = max(cell_vol)` is the uniform
+/// background-cell volume of the cut mesh.
 pub fn build_srd_operator(mesh: &Mesh) -> Option<SrdCsr> {
     let n = mesh.num_cells();
     if n == 0 {
@@ -197,11 +177,6 @@ pub fn build_srd_operator(mesh: &Mesh) -> Option<SrdCsr> {
         return None;
     }
 
-    // A sliver is a cell abruptly smaller than its largest face-neighbor (below
-    // half its volume); neighborhoods grow to the background volume `nominal`.
-    // The relative sliver test (inside `srd_neighborhoods`) is what keeps
-    // structured AND graded meshes sliver-free — they then yield only identity
-    // rows and we return `None` below, so references stay byte-identical.
     let (neigh, theta) = srd_neighborhoods(mesh, 0.5, nominal);
     let num_small_cells = neigh.iter().filter(|ni| ni.len() > 1).count();
     if num_small_cells == 0 {
@@ -311,8 +286,7 @@ const WORKGROUP_SIZE: u32 = 64;
 
 /// GPU resources to apply the precomputed SRD operator to the solver's live
 /// velocity field after each step. Velocity-only (the pressure solve
-/// re-establishes continuity the following step, matching the validated
-/// prototype).
+/// re-establishes continuity the following step).
 pub struct SrdGpu {
     n_cells: u32,
     bind_group_layout: wgpu::BindGroupLayout,
@@ -543,8 +517,7 @@ mod tests {
         use crate::solver::mesh::{generate_cut_cell_mesh, ChannelWithObstacle, Mesh};
         use nalgebra::{Point2, Vector2};
 
-        /// The default GUI channel-with-obstacle mesh (mirrors the gate test's
-        /// `channel_obstacle_mesh`).
+        /// The default GUI channel-with-obstacle mesh.
         fn obstacle_mesh() -> Mesh {
             let length = 3.0;
             let geo = ChannelWithObstacle {

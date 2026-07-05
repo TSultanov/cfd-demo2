@@ -1,11 +1,8 @@
-//! Meshless Voronoi engine (roadmap M0): the mesh *is* the seed set; each
-//! Voronoi cell is computed independently — kNN candidate search
-//! (`seed_grid`) + half-plane clipping with a security-radius stop (`clip`)
-//! — per Ray/Sokolov/Lefebvre/Lévy, "Meshless Voronoi on the GPU" (ACM TOG
-//! 2018), adapted to 2D. Purely additive alongside the incumbent generators;
-//! nothing in the static pipeline changes.
+//! Meshless Voronoi engine: the mesh *is* the seed set; each Voronoi cell is
+//! computed independently — kNN candidate search (`seed_grid`) + half-plane
+//! clipping with a security-radius stop (`clip`).
 //!
-//! Invariants (stronger than the incumbent Voronoi path):
+//! Invariants:
 //! - **Seed i == cell i.** Diagram slot `i` is a pure function of the input;
 //!   no compaction, no cell splitting, statuses instead of failures.
 //! - **Exactness.** The kNN + security-radius engine is an accelerator, not
@@ -14,14 +11,6 @@
 //! - **Determinism.** Per-cell writes go to disjoint padded slots, neighbor
 //!   ties break on id, and there is no shared mutable state — output is
 //!   byte-identical for any rayon thread count by construction.
-//!
-//! Stage coverage: this file + `seed_grid` + `clip` implement M0.1/M0.2;
-//! `boundary` adds M0.3 — boundary loops, the review-F1 seeding protocol
-//! (vertex seeds at convex fluid corners, equidistant guard seeds around
-//! reflex ones) and own-segment-line clipping for `SeedKind::Boundary`
-//! seeds; `assemble` adds M0.4 — tag-canonical `Mesh` assembly and the
-//! `generate_meshless_voronoi_mesh` entry point; `lloyd` adds M0.5 —
-//! Lloyd/CVT relaxation and the `generate_cvt_mesh` entry point.
 
 mod assemble;
 mod boundary;
@@ -58,8 +47,8 @@ use nalgebra::{Point2, Vector2};
 pub struct EngineConfig {
     pub k: usize,
     pub k_max: usize,
-    /// Ring stride of the padded diagram; reserved knob — the v1 fast path
-    /// is compiled at `MAX_CLIP_VERTS` and this must equal it.
+    /// Ring stride of the padded diagram; the fast path is compiled at
+    /// `MAX_CLIP_VERTS` and this must equal it.
     pub max_ring: usize,
 }
 
@@ -80,7 +69,7 @@ impl Default for EngineConfig {
 pub enum CellStatus {
     Ok,
     /// Certified after `n` k-doublings (the exhaustive fallback counts as
-    /// one more doubling). Telemetry that feeds the M1 GPU k choice.
+    /// one more doubling).
     OkEscalated(u8),
     /// Even the exhaustive pass failed to certify — impossible on the CPU
     /// path (an exhaustive clip is exact by construction); reserved for
@@ -166,9 +155,9 @@ impl<'a> MeshlessInput<'a> {
 }
 
 /// The whole diagram as a padded SoA (stride `MAX_CLIP_VERTS`): fixed-size
-/// disjoint slots per cell make parallel writes deterministic and are the
-/// exact shape the M1 GPU port produces. Ring vertices are CCW in absolute
-/// (not seed-relative) f64 coordinates; edge `e` of cell `i` runs
+/// disjoint slots per cell make parallel writes deterministic. Ring vertices
+/// are CCW in absolute (not seed-relative) f64 coordinates; edge `e` of cell
+/// `i` runs
 /// `ring_xy[i*M + e] -> ring_xy[i*M + (e+1) % ring_len[i]]` and was created
 /// by `ring_plane[i*M + e]`.
 #[derive(Clone, Debug)]
@@ -189,8 +178,7 @@ pub struct MeshlessDiagram {
 }
 
 impl MeshlessDiagram {
-    /// Status census `(ok, escalated, overflow, empty, failed)` — the
-    /// escalation-rate telemetry the M0 gates report.
+    /// Status census `(ok, escalated, overflow, empty, failed)`.
     pub fn status_counts(&self) -> (usize, usize, usize, usize, usize) {
         let mut counts = (0, 0, 0, 0, 0);
         for s in &self.status {
@@ -207,8 +195,7 @@ impl MeshlessDiagram {
 }
 
 /// One computed cell — the pure per-cell result `build_diagram` scatters
-/// into the diagram, and the entry point the M1 GPU fallback recomputes
-/// flagged cells through. Ring coordinates are absolute; `len == 0` with
+/// into the diagram. Ring coordinates are absolute; `len == 0` with
 /// `spill = Some(..)` for rings beyond `MAX_CLIP_VERTS`.
 pub struct CellOut {
     pub status: CellStatus,
@@ -411,8 +398,7 @@ pub fn compute_cell(input: &MeshlessInput, grid: &SeedGrid, i: usize) -> CellOut
 /// and then **every** other seed's bisector in ascending `(d², id)` order —
 /// no kNN, no security radius, same clip arithmetic. The engine must
 /// reproduce this bit-for-bit (the accelerator is exactness-preserving, not
-/// approximate); kept public for the test gates and the M1 GPU-parity
-/// harness.
+/// approximate); kept public for the test gates and GPU-parity harness.
 pub fn compute_cell_exhaustive(input: &MeshlessInput, i: usize) -> CellOut {
     let seeds = input.seeds;
     let p = seeds[i];
@@ -461,8 +447,8 @@ pub fn build_diagram(input: &MeshlessInput) -> MeshlessDiagram {
         input.kinds.is_empty() || input.kinds.len() == n,
         "kinds must be empty or one per seed"
     );
-    // The v1 fast path is compiled at MAX_CLIP_VERTS; a silently-ignored
-    // knob would be worse than a hard error (review finding).
+    // The fast path is compiled at MAX_CLIP_VERTS; a silently-ignored knob
+    // would be worse than a hard error.
     assert_eq!(
         input.cfg.max_ring, MAX_CLIP_VERTS,
         "EngineConfig::max_ring must equal MAX_CLIP_VERTS in v1"

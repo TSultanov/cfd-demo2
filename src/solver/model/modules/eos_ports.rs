@@ -3,7 +3,6 @@ use cfd2_ir::dimensions::{Dimensionless, DivDim, MulDim, Pressure, Density, Temp
 use crate::solver::ir::ports::ParamSpec;
 use crate::solver::model::module::PortManifest as ModulePortManifest;
 
-/// Get the port manifest for EOS uniform params.
 pub fn eos_uniform_port_manifest() -> ModulePortManifest {
     // R = P/(rho*T) has units of (ML⁻¹T⁻²)/(ML⁻³·K) = L²T⁻²K⁻¹
     let gas_constant_unit = DivDim::<Pressure, MulDim<Density, Temperature>>::UNIT;

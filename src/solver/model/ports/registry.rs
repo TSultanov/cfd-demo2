@@ -1,7 +1,4 @@
-// Port registry for runtime management of ports.
-//
-// The port registry manages the creation and storage of field, parameter,
-// and buffer ports, mapping them to their underlying resources.
+// Port registry: creates and stores field, parameter, and buffer ports.
 
 use super::{BufferPort, FieldKind, FieldPort, ParamPort, ParamType, PortId, PortValidationError};
 
@@ -332,7 +329,6 @@ impl PortRegistry {
     ///
     /// Returns an error if the field is not found in the state layout.
     pub fn register_state_field(&mut self, name: &str) -> Result<(), PortRegistryError> {
-        // Check if already registered
         if self.field_name_to_id.contains_key(name) {
             return Ok(());
         }
@@ -384,17 +380,14 @@ impl PortRegistry {
         &mut self,
         name: &str,
     ) -> Result<FieldPort<D, K>, PortRegistryError> {
-        // Intern the name to get a 'static str
         let name = super::intern(name);
 
-        // Check if already registered
         if let Some(&existing_id) = self.field_name_to_id.get(name) {
             let entry = self.field_ports.get(&existing_id).ok_or_else(|| {
                 PortRegistryError::InternalInconsistency {
                     detail: format!("field port entry for '{name}' (id={existing_id:?}) not found after index lookup"),
                 }
             })?;
-            // Verify kind matches
             let expected_components = K::COMPONENT_COUNT;
             if entry.component_count != expected_components {
                 return Err(PortRegistryError::FieldSpecConflict {
@@ -403,7 +396,6 @@ impl PortRegistry {
                     registered_kind: entry.component_count,
                 });
             }
-            // Return existing port
             return Ok(FieldPort::new(
                 existing_id,
                 name,
@@ -420,7 +412,6 @@ impl PortRegistry {
                     name: name.to_string(),
                 })?;
 
-        // Verify field kind matches
         let expected_components = K::COMPONENT_COUNT;
         let actual_components = field.component_count();
         if expected_components != actual_components {
@@ -481,7 +472,6 @@ impl PortRegistry {
         key: &'static str,
         wgsl_field_name: &'static str,
     ) -> Result<ParamPort<T, D>, PortRegistryError> {
-        // Check if already registered
         if let Some(&existing_id) = self.param_key_to_id.get(key) {
             let entry = self
                 .param_ports
@@ -489,7 +479,6 @@ impl PortRegistry {
                 .ok_or_else(|| PortRegistryError::InternalInconsistency {
                     detail: format!("param port entry for key '{key}' (id={existing_id:?}) not found after index lookup"),
                 })?;
-            // Verify wgsl_field matches
             if entry.wgsl_field != wgsl_field_name {
                 return Err(PortRegistryError::ParamSpecConflict {
                     key: key.to_string(),
@@ -497,7 +486,6 @@ impl PortRegistry {
                     registered_wgsl: entry.wgsl_field.clone(),
                 });
             }
-            // Verify type matches
             let expected_type = ParamTypeKind::from_type::<T>();
             if entry.param_type != expected_type {
                 return Err(PortRegistryError::ParamTypeConflict {
@@ -507,9 +495,8 @@ impl PortRegistry {
                 });
             }
 
-            // Verify unit matches (unless using AnyDimension escape hatch). If the existing
-            // registration is also `AnyDimension`, allow a later call to "resolve" it to a
-            // concrete dimension.
+            // Skipped for AnyDimension; if the stored dim is AnyDimension, a later
+            // concrete call resolves it.
             if !is_any_dimension::<D>() {
                 let expected_dim = D::to_runtime();
                 if entry.runtime_dim != expected_dim {
@@ -524,7 +511,6 @@ impl PortRegistry {
                     }
                 }
             }
-            // Return existing port
             return Ok(ParamPort::new(
                 existing_id,
                 key,
@@ -571,14 +557,12 @@ impl PortRegistry {
             binding,
         };
 
-        // Check if already registered
         if let Some(&existing_id) = self.buffer_key_to_id.get(&buffer_key) {
             let entry = self.buffer_ports.get(&existing_id).ok_or_else(|| {
                 PortRegistryError::InternalInconsistency {
                     detail: format!("buffer port entry for '{name}' (id={existing_id:?}) not found after index lookup"),
                 }
             })?;
-            // Verify type matches
             let expected_type = T::into_kind();
             if entry.buffer_type != expected_type {
                 return Err(PortRegistryError::BufferTypeConflict {
@@ -589,7 +573,6 @@ impl PortRegistry {
                     registered_type: entry.buffer_type,
                 });
             }
-            // Verify access mode matches
             let expected_mode = A::into_kind();
             if entry.access_mode != expected_mode {
                 return Err(PortRegistryError::BufferAccessConflict {
@@ -600,7 +583,6 @@ impl PortRegistry {
                     registered_mode: entry.access_mode,
                 });
             }
-            // Return existing port
             return Ok(BufferPort::new(existing_id, name, group, binding));
         }
 
@@ -751,7 +733,6 @@ impl PortRegistry {
         })
     }
 
-    /// Get a parameter port entry by ID.
     /// Register all ports from a manifest.
     ///
     /// This method iterates through all params, fields, and buffers in the manifest
@@ -803,7 +784,6 @@ impl PortRegistry {
             }
         })?;
 
-        // Check if already registered
         if let Some(&existing_id) = self.param_key_to_id.get(param.key) {
             let entry = self
                 .param_ports
@@ -811,7 +791,6 @@ impl PortRegistry {
                 .ok_or_else(|| PortRegistryError::InternalInconsistency {
                     detail: format!("param port entry for key '{}' (id={existing_id:?}) not found after index lookup", param.key),
                 })?;
-            // Verify wgsl_field matches
             if entry.wgsl_field != param.wgsl_field {
                 return Err(PortRegistryError::ParamSpecConflict {
                     key: format!("{} (from module '{}')", param.key, module_name),
@@ -819,7 +798,6 @@ impl PortRegistry {
                     registered_wgsl: entry.wgsl_field.clone(),
                 });
             }
-            // Verify type matches
             if entry.param_type != param_type {
                 return Err(PortRegistryError::ParamTypeConflict {
                     key: format!("{} (from module '{}')", param.key, module_name),
@@ -827,7 +805,6 @@ impl PortRegistry {
                     registered_type: entry.param_type,
                 });
             }
-            // Verify unit matches
             if entry.runtime_dim != param.unit {
                 if entry.runtime_dim == AnyDimension::to_runtime() {
                     entry.runtime_dim = param.unit;
@@ -863,14 +840,12 @@ impl PortRegistry {
         module_name: &str,
         field: &crate::solver::ir::ports::FieldSpec,
     ) -> Result<(), PortRegistryError> {
-        // Check if already registered
         if let Some(&existing_id) = self.field_name_to_id.get(field.name) {
             let entry = self.field_ports.get(&existing_id).ok_or_else(|| {
                 PortRegistryError::InternalInconsistency {
                     detail: format!("field port entry for '{}' (id={existing_id:?}) not found after index lookup", field.name),
                 }
             })?;
-            // Verify kind matches
             let expected_components = field.kind.component_count();
             if entry.component_count != expected_components {
                 return Err(PortRegistryError::FieldSpecConflict {
@@ -892,7 +867,6 @@ impl PortRegistry {
             return Ok(());
         }
 
-        // Validate field exists in state layout
         let (offset, stride, actual_components, runtime_dim) = {
             let layout_field = self.state_layout.field(field.name).ok_or_else(|| {
                 PortRegistryError::FieldNotFound {
@@ -900,7 +874,6 @@ impl PortRegistry {
                 }
             })?;
 
-            // Validate field kind matches
             let expected_components = field.kind.component_count();
             let actual_components = layout_field.component_count();
             if expected_components != actual_components {
@@ -974,14 +947,12 @@ impl PortRegistry {
             binding: buffer.binding,
         };
 
-        // Check if already registered
         if let Some(&existing_id) = self.buffer_key_to_id.get(&buffer_key) {
             let entry = self.buffer_ports.get(&existing_id).ok_or_else(|| {
                 PortRegistryError::InternalInconsistency {
                     detail: format!("buffer port entry for '{}' (id={existing_id:?}) not found after index lookup", buffer.name),
                 }
             })?;
-            // Verify type matches
             if entry.buffer_type != buffer_type {
                 return Err(PortRegistryError::BufferTypeConflict {
                     name: format!("{} (from module '{}')", buffer.name, module_name),
@@ -991,7 +962,6 @@ impl PortRegistry {
                     registered_type: entry.buffer_type,
                 });
             }
-            // Verify access mode matches
             if entry.access_mode != access_mode {
                 return Err(PortRegistryError::BufferAccessConflict {
                     name: format!("{} (from module '{}')", buffer.name, module_name),
@@ -1474,12 +1444,10 @@ mod tests {
         let layout = create_test_layout();
         let mut registry = PortRegistry::new(layout);
 
-        // First registration
         let p1 = registry
             .register_scalar_field::<Pressure>("p")
             .expect("should register p");
 
-        // Second registration with same spec returns same port
         let p2 = registry
             .register_scalar_field::<Pressure>("p")
             .expect("should return existing p");
@@ -1493,12 +1461,10 @@ mod tests {
         let layout = create_test_layout();
         let mut registry = PortRegistry::new(layout);
 
-        // Register as scalar
         registry
             .register_scalar_field::<Pressure>("p")
             .expect("should register p as scalar");
 
-        // Try to register same field as vector - should fail
         let err = registry
             .register_vector2_field::<Pressure>("p")
             .expect_err("should fail with conflict");
@@ -1522,12 +1488,10 @@ mod tests {
         let layout = create_test_layout();
         let mut registry = PortRegistry::new(layout);
 
-        // First registration
         let dt1 = registry
             .register_param::<F32, Time>("dt", "dt")
             .expect("should register dt");
 
-        // Second registration with same spec returns same port
         let dt2 = registry
             .register_param::<F32, Time>("dt", "dt")
             .expect("should return existing dt");
@@ -1541,12 +1505,10 @@ mod tests {
         let layout = create_test_layout();
         let mut registry = PortRegistry::new(layout);
 
-        // Register with wgsl field "dt"
         registry
             .register_param::<F32, Time>("dt", "dt")
             .expect("should register dt");
 
-        // Try to register same key with different wgsl field - should fail
         let err = registry
             .register_param::<F32, Time>("dt", "delta_t")
             .expect_err("should fail with conflict");
@@ -1570,12 +1532,10 @@ mod tests {
         let layout = create_test_layout();
         let mut registry = PortRegistry::new(layout);
 
-        // First registration
         let state1 = registry
             .register_buffer::<BufferF32, ReadWrite>("state", 1, 0)
             .expect("should register state");
 
-        // Second registration with same spec returns same port
         let state2 = registry
             .register_buffer::<BufferF32, ReadWrite>("state", 1, 0)
             .expect("should return existing state");
@@ -1589,12 +1549,10 @@ mod tests {
         let layout = create_test_layout();
         let mut registry = PortRegistry::new(layout);
 
-        // Register as f32
         registry
             .register_buffer::<BufferF32, ReadWrite>("state", 1, 0)
             .expect("should register state as f32");
 
-        // Try to register same buffer as u32 - should fail
         let err = registry
             .register_buffer::<BufferU32, ReadWrite>("state", 1, 0)
             .expect_err("should fail with conflict");
@@ -1620,12 +1578,10 @@ mod tests {
         let layout = create_test_layout();
         let mut registry = PortRegistry::new(layout);
 
-        // Register as read-write
         registry
             .register_buffer::<BufferF32, ReadWrite>("state", 1, 0)
             .expect("should register state as read-write");
 
-        // Try to register same buffer as read-only - should fail
         let err = registry
             .register_buffer::<BufferF32, ReadOnly>("state", 1, 0)
             .expect_err("should fail with conflict");
@@ -1661,12 +1617,10 @@ mod tests {
             .register_buffer::<BufferF32, ReadWrite>("state", 1, 0)
             .expect("should register state");
 
-        // Lookup by name/key
         assert_eq!(registry.lookup_field("p"), Some(p.id()));
         assert_eq!(registry.lookup_param("dt"), Some(dt.id()));
         assert_eq!(registry.lookup_buffer("state", 1, 0), Some(state.id()));
 
-        // Lookup non-existent
         assert_eq!(registry.lookup_field("nonexistent"), None);
         assert_eq!(registry.lookup_param("nonexistent"), None);
         assert_eq!(registry.lookup_buffer("nonexistent", 1, 0), None);
@@ -1724,19 +1678,16 @@ mod tests {
         assert_eq!(registry.field_port_count(), 1);
         assert_eq!(registry.buffer_port_count(), 1);
 
-        // Verify params
         assert!(
             registry.lookup_param("test.dt").is_some(),
             "should find dt param"
         );
 
-        // Verify fields
         let p_id = registry.lookup_field("p").expect("should find p field");
         let p_entry = registry.get_field_entry(p_id).unwrap();
         assert_eq!(p_entry.name(), "p");
         assert_eq!(p_entry.component_count(), 1);
 
-        // Verify buffers
         assert!(
             registry.lookup_buffer("test_buffer", 1, 0).is_some(),
             "should find buffer"
@@ -1763,13 +1714,11 @@ mod tests {
             resolved_state_slots: None,
         };
 
-        // First registration
         registry
             .register_manifest("module1", &manifest)
             .expect("should register first time");
         assert_eq!(registry.param_port_count(), 1);
 
-        // Second registration with same spec should succeed (idempotent)
         registry
             .register_manifest("module2", &manifest)
             .expect("should be idempotent");
@@ -1855,7 +1804,6 @@ mod tests {
 
         assert_eq!(manifest.params.len(), 6);
 
-        // Find each param and verify its unit and wgsl_field name
         let gamma = manifest
             .params
             .iter()
@@ -1904,11 +1852,10 @@ mod tests {
 
     #[test]
     fn register_field_with_owned_string_name() {
-        // Test that we can register a field using an owned String name
         let layout = create_test_layout();
         let mut registry = PortRegistry::new(layout);
 
-        // Create an owned String (simulating derived name like format!("grad_{}", p))
+        // Owned String simulates a derived name like format!("grad_{}", p)
         let owned_name = String::from("p");
         let p = registry
             .register_scalar_field::<Pressure>(&owned_name)
@@ -1920,24 +1867,19 @@ mod tests {
 
     #[test]
     fn register_field_idempotent_with_different_allocations() {
-        // Test that registering the same field with different String allocations
-        // returns the same PortId (idempotent behavior)
         let layout = create_test_layout();
         let mut registry = PortRegistry::new(layout);
 
-        // First registration with one String allocation
         let name1 = String::from("p");
         let p1 = registry
             .register_scalar_field::<Pressure>(&name1)
             .expect("first registration");
 
-        // Second registration with a different String allocation
         let name2 = String::from("p");
         let p2 = registry
             .register_scalar_field::<Pressure>(&name2)
             .expect("second registration");
 
-        // Should get the same PortId
         assert_eq!(p1.id(), p2.id(), "same field should have same PortId");
         assert_eq!(p1.name(), p2.name());
     }
@@ -1951,24 +1893,20 @@ mod tests {
         ]);
         let mut registry = PortRegistry::new(layout);
 
-        // Simulate deriving a field name
         let pressure_name = "p";
         let grad_name = format!("grad_{}", pressure_name);
 
-        // Register using the derived name
         let grad_p = registry
             .register_vector2_field::<super::super::dimensions::PressureGradient>(&grad_name)
             .expect("should register grad_p with derived name");
 
         assert_eq!(grad_p.name(), "grad_p");
 
-        // Register again with a fresh derived name to test idempotency
         let grad_name2 = format!("grad_{}", pressure_name);
         let grad_p2 = registry
             .register_vector2_field::<super::super::dimensions::PressureGradient>(&grad_name2)
             .expect("second registration with derived name");
 
-        // Should be idempotent
         assert_eq!(grad_p.id(), grad_p2.id());
     }
 
@@ -2039,13 +1977,10 @@ mod tests {
         let u = vol_vector("U", si::VELOCITY);
         let p = vol_scalar("p", si::PRESSURE);
 
-        // Construct via from_fields (new path)
         let registry_new = PortRegistry::from_fields(vec![u, p]);
-        // Construct via StateLayout (old path)
         let layout = StateLayout::new(vec![u, p]);
         let registry_old = PortRegistry::new(layout);
 
-        // Both should produce the same resolved state slots
         let resolved_new = registry_new.to_resolved_state_slots();
         let resolved_old = registry_old.to_resolved_state_slots();
         assert_eq!(resolved_new, resolved_old);

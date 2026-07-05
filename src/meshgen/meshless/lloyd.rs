@@ -1,31 +1,23 @@
-//! Lloyd/CVT relaxation for the meshless engine (M0.5, design §6).
+//! Lloyd/CVT relaxation for the meshless engine.
 //!
 //! Each iteration rebuilds the diagram from the current seed set (grid +
-//! per-cell clipping only — **no assembly**; that is the whole point of
-//! keeping `MeshlessDiagram` as the primary product) and moves every
-//! `Interior` seed to the density-weighted centroid of its cell; boundary
-//! seeds stay fixed (v1, matching the incumbent `fixed_nodes` contract).
-//! The density is the standard graded-CVT weight ρ(x) = h(x)⁻⁴ in 2D
-//! (energy-optimal cell capacity ∝ h²·ρ = const), where `h` is the same
-//! sizing function the Poisson sampler uses; the weighted centroid is
-//! evaluated by fanning the ring from the seed with centroid-point
-//! quadrature of ρ per triangle — exact for constant ρ, O(h) otherwise,
-//! which Lloyd tolerates.
+//! per-cell clipping only — no assembly) and moves every `Interior` seed to
+//! the density-weighted centroid of its cell; boundary seeds stay fixed. The
+//! density is the graded-CVT weight ρ(x) = h(x)⁻⁴ in 2D (energy-optimal cell
+//! capacity ∝ h²·ρ = const), where `h` is the same sizing function the
+//! Poisson sampler uses; the weighted centroid is evaluated by fanning the
+//! ring from the seed with centroid-point quadrature of ρ per triangle —
+//! exact for constant ρ, O(h) otherwise.
 //!
-//! CVT replaces generator smoothing *entirely*: `generate_cvt_mesh` runs
-//! neither `triangulate`/`smooth_generators` (Lloyd is their strictly better
-//! replacement — actual CVT energy descent) nor `Mesh::smooth` afterwards
-//! (vertex smoothing would move Voronoi vertices off the bisectors and
-//! destroy the engine's defining property). Quality argument: interior
-//! Voronoi faces are ⊥ to the seed–seed segment by construction and CVT
-//! drives centroid → seed, so the solver's skewness metric `1 − |d̂·n̂|`
-//! (d = centroid–centroid) goes to zero on interior faces as CVT converges.
+//! CVT replaces generator smoothing entirely: `generate_cvt_mesh` runs no
+//! `triangulate`/`smooth_generators` and no `Mesh::smooth` afterwards —
+//! vertex smoothing would move Voronoi vertices off the bisectors and destroy
+//! the engine's defining property.
 //!
-//! Determinism: per-seed moves are computed in parallel into an
-//! index-ordered `Vec` (disjoint outputs, no reductions), and the
-//! convergence measure is an f64 `max` — order-insensitive — so the whole
-//! relaxation is byte-identical for any rayon thread count, like the rest
-//! of the engine.
+//! Determinism: per-seed moves are computed in parallel into an index-ordered
+//! `Vec` (disjoint outputs, no reductions), and the convergence measure is an
+//! f64 `max` — order-insensitive — so the relaxation is byte-identical for any
+//! rayon thread count.
 
 use nalgebra::{Point2, Vector2};
 use rayon::prelude::*;
@@ -45,8 +37,8 @@ pub struct LloydConfig {
     /// Iteration cap; Lloyd converges linearly, so the cap binds on large
     /// uniform sets long before quality stops improving.
     pub max_iters: usize,
-    /// Convergence threshold on `max_i |Δx_i| / h(x_i)` (the same
-    /// h-relative displacement measure as the incumbent's `converge_disp`).
+    /// Convergence threshold on `max_i |Δx_i| / h(x_i)` (h-relative
+    /// displacement).
     pub tol_disp: f64,
     /// Under-/over-relaxation factor on the centroid move. Plain Lloyd
     /// (ω = 1) is unconditionally stable.
@@ -68,7 +60,7 @@ impl Default for LloydConfig {
 
 /// Relaxation telemetry: iterations actually run, the final h-relative max
 /// displacement (`< tol_disp` ⇔ converged), and the escalated-cell count of
-/// the last diagram build (feeds the M1 GPU k choice).
+/// the last diagram build.
 #[derive(Clone, Copy, Debug)]
 pub struct LloydStats {
     pub iters: usize,
@@ -138,12 +130,12 @@ fn weighted_centroid(
 
 /// Lloyd/CVT relaxation: per iteration, rebuild the seed grid + diagram (no
 /// assembly) and move every `Interior` seed toward its density-weighted cell
-/// centroid; `Boundary` seeds are fixed (v1). Converged when
+/// centroid; `Boundary` seeds are fixed. Converged when
 /// `max_i |Δx_i| / h(x_i) < lcfg.tol_disp`. The centroid of a convex cell is
 /// strictly inside it, so seeds stay inside the domain (and, by shielding,
 /// inside the fluid) and pairwise distinct — every intermediate seed set is
 /// a valid engine input.
-#[allow(clippy::too_many_arguments)] // the design-pinned signature
+#[allow(clippy::too_many_arguments)]
 pub fn lloyd_relax(
     seeds: &mut Vec<Point2<f64>>,
     kinds: &[SeedKind],
@@ -214,9 +206,9 @@ pub fn lloyd_relax(
 }
 
 /// A CVT mesh together with the authoritative seed set that produced it —
-/// the input the moving-mesh driver (roadmap M4) owns so it can advect the
-/// seeds and regenerate the mesh deterministically. `seeds`/`kinds` are the
-/// POST-Lloyd relaxed set (seed `i` == cell `i`), `spec` the boundary loops,
+/// the input the moving-mesh driver owns so it can advect the seeds and
+/// regenerate the mesh deterministically. `seeds`/`kinds` are the POST-Lloyd
+/// relaxed set (seed `i` == cell `i`), `spec` the boundary loops,
 /// and `domain`/`min_cell_size` the two scalars `MeshgenTolerances` and the
 /// engine config are derived from — everything [`assemble_meshless_from_seeds`]
 /// needs to reproduce `mesh` byte-for-byte.
@@ -235,8 +227,8 @@ pub struct CvtMeshSeeds {
 /// `EngineConfig`, `build_diagram` and `assemble_mesh` are all deterministic
 /// pure functions of `(seeds, kinds, spec, domain, min_cell_size)`, calling
 /// this with the [`CvtMeshSeeds`] the mesh was generated from reproduces that
-/// mesh BYTE-FOR-BYTE. That byte-reproducibility is the M4 "frozen-seed
-/// do-no-harm" foundation: a moving-mesh step that has not moved the seeds
+/// mesh BYTE-FOR-BYTE. That byte-reproducibility is the frozen-seed
+/// do-no-harm foundation: a moving-mesh step that has not moved the seeds
 /// regenerates the identical mesh, so the swept-quad fluxes are exactly zero.
 pub fn assemble_meshless_from_seeds(
     seeds: &[Point2<f64>],

@@ -1,11 +1,6 @@
-//! GPU exclusive prefix-sum (scan) primitive — design-gpu §4.1 ("the missing
-//! scan primitive").
-//!
-//! Before M5 there was **no** prefix-sum kernel anywhere in `src/solver/gpu/**`
-//! (only workgroup-scratch tree *reductions* for dot products); the design flags
-//! this as the prerequisite the GPU-resident regen (`derive_faces`, §6.2) needs
-//! to turn per-cell face **counts** into per-cell face **offsets** (and thus the
-//! total `num_faces`) without a CPU round-trip. This module owns that primitive.
+//! GPU exclusive prefix-sum (scan) primitive: turns per-cell face **counts**
+//! into per-cell face **offsets** (and the total `num_faces`) for GPU-resident
+//! regen (`derive_faces`) without a CPU round-trip.
 //!
 //! ## Algorithm — standard two-level exclusive scan
 //!

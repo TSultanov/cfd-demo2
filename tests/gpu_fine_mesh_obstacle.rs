@@ -20,7 +20,6 @@ fn test_gpu_fine_mesh_obstacle() {
         obstacle_radius: 0.2,
     };
 
-    // Requested fine mesh size
     let min_cell_size = 0.001;
     let max_cell_size = 0.001;
 
@@ -54,7 +53,6 @@ fn test_gpu_fine_mesh_obstacle() {
         solver.set_density(density).unwrap();
         solver.set_viscosity(viscosity).unwrap();
 
-        // Init BC
         println!("Initializing BCs...");
         let mut u_init = vec![(0.0, 0.0); mesh.num_cells()];
         for i in 0..mesh.num_cells() {

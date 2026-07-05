@@ -1,7 +1,6 @@
-//! CPU-backend buoyant (Boussinesq) MMS smoke + order: S=4 coupled saddle-point
-//! (U, p, T) with buoyancy coupling and the CPU Schur preconditioner
-//! (velocity-block = {U_x, U_y, T}, pressure = p). Mirrors mms_buoyant_order_test
-//! but runs entirely on the CPU.
+//! CPU-backend buoyant (Boussinesq) MMS smoke + order: 4-unknown coupled
+//! saddle-point (U, p, T) with buoyancy coupling and the CPU Schur preconditioner
+//! (velocity-block = {U_x, U_y, T}, pressure = p).
 #![cfg(feature = "cpu")]
 
 use cfd2::solver::cpu::{CpuBackendConfig, CpuSolver};

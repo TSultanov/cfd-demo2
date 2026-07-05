@@ -1,27 +1,10 @@
-//! Probe: does the generic Schur preconditioner work for the buoyant model
-//! (extra scalar unknown T in the u-block), or does the corruption recorded
-//! during the capstone ("p -> 2.7e5 on step 0, NaN cascade") still
-//! reproduce?
-//!
-//! Background (plan Arc 1, June 2026): the capstone experiment predates two
-//! fixes that each explain that exact symptom — (a) the Schur validator
-//! originally compared STATE offsets (T = offset 8) instead of coupled
-//! FluxLayout ranks (T = rank 3) and was fixed within the same commit, and
-//! (b) the FGMRES restart-corruption guard (commit 1d3dde9), whose
-//! motivating failure has the identical signature. The Schur kernels
-//! themselves are N-generic (u_index tables, u_len-sized buffers,
-//! rank-correct col decoding), so the "Schur bridge assumes the velocity
-//! pair" conclusion was never re-established after either fix.
-//!
-//! OUTCOME (June 2026): the corruption did NOT reproduce (rel_l2 vs the
-//! default preconditioner ~1e-7..1e-6, equal residual floors), so the
-//! buoyant model now declares Schur{u=[U_x,U_y,T], p} by default and this
-//! probe is promoted to a smoke test: it twin-runs the buoyant MMS setup
-//! (8x8, 5 steps) with the model's declared Schur preconditioner vs a
-//! block-Jacobi override (linear_solver: None) and asserts agreement.
-//! Only the preconditioner differs, so the outer fixed point is identical
-//! and the fields must agree closely. It also asserts the model's default
-//! spec IS Schur (guards against silent fallback regressions).
+//! Smoke test: the generic Schur preconditioner works for the buoyant model
+//! (extra scalar unknown T in the u-block, so Schur{u=[U_x,U_y,T], p}). Twin-
+//! runs the buoyant MMS setup (8x8, 5 steps) with the model's declared Schur
+//! preconditioner vs a block-Jacobi override (linear_solver: None) and asserts
+//! agreement: only the preconditioner differs, so the outer fixed point is
+//! identical and the fields must agree closely. Also asserts the model's
+//! default spec IS Schur (guards against silent fallback regressions).
 #![cfg(feature = "dev-tests")]
 
 use std::f64::consts::PI;

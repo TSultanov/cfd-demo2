@@ -1,25 +1,10 @@
 //! Ghia lid-driven cavity benchmark: external literature validation of the
-//! incompressible model (the counterpart of the de Vahl Davis Nusselt
-//! benchmark for the buoyant model).
+//! incompressible model.
 //!
-//! Steady lid-driven cavity at Re = 100 (64x64), Re = 400 and Re = 1000
-//! (128x128), SOU convection (the production scheme), marched to steady;
-//! centerline velocity profiles compared against Ghia, Ghia & Shin (1982),
-//! Table I/II — u_x through the vertical centerline (x = 0.5) and u_y
-//! through the horizontal centerline (y = 0.5). Measured June 2026:
-//! Re=100 max diff 0.0041/0.0087, Re=400 0.0021/0.0045, Re=1000
-//! 0.0054/0.0105 (of lid speed) — all stations within ~1% of the
-//! published values. Table provenance: cross-checked against the
-//! canonical reproduction (ivan-pi gists of the 1982 tables), whose
-//! Re=100 column matches this file's original values exactly; the known
-//! Re=400 misprint at x=0.9063 is excluded.
-//!
-//! Why this exists (June 2026): the OpenFOAM lid reference is a
-//! matched-discretization code-to-code regression case (20x20, first-order
-//! upwind, shared mesh/scheme); its steady end state still sits ~4.5% (of
-//! lid speed) from Ghia from discretization diffusion alone. This test is
-//! the accuracy anchor against published values, decoupled from any other
-//! solver's discretization choices.
+//! Steady lid-driven cavity at Re = 100 (64x64), Re = 400/1000 (128x128),
+//! SOU convection, marched to steady; centerline velocity profiles compared
+//! against Ghia, Ghia & Shin (1982), Table I/II — u_x through the vertical
+//! centerline (x = 0.5) and u_y through the horizontal centerline (y = 0.5).
 
 #![cfg(feature = "dev-tests")]
 
@@ -79,10 +64,7 @@ const GHIA_UY: &[(f64, f64)] = &[
     (0.9688, -0.05906),
 ];
 
-/// Ghia, Ghia & Shin (1982), Re = 400 — u_x through the vertical
-/// centerline. Values cross-checked June 2026 against the canonical
-/// reproduction (gist.github.com/ivan-pi/3e9326d18a366ffe6a8e5bfda6353219),
-/// whose Re=100 column matches GHIA_UX above exactly.
+/// Ghia, Ghia & Shin (1982), Re = 400 — u_x through the vertical centerline.
 const GHIA_UX_400: &[(f64, f64)] = &[
     (0.0547, -0.08186),
     (0.0625, -0.09266),
@@ -102,9 +84,8 @@ const GHIA_UX_400: &[(f64, f64)] = &[
 ];
 
 /// Ghia (1982), Re = 400 — u_y through the horizontal centerline.
-/// The published x = 0.9063 entry (−0.23827) is a KNOWN MISPRINT (it
-/// breaks monotonicity between the neighboring stations; flagged in the
-/// reproduction source) and is excluded.
+/// The published x = 0.9063 entry (−0.23827) is a known misprint (breaks
+/// monotonicity between neighboring stations) and is excluded.
 const GHIA_UY_400: &[(f64, f64)] = &[
     (0.0625, 0.18360),
     (0.0703, 0.19713),
@@ -161,10 +142,8 @@ const GHIA_UY_1000: &[(f64, f64)] = &[
 ];
 
 /// Ghia, Ghia & Shin (1982), Re = 3200: u_x through the vertical centerline.
-/// Verified against the ivan-pi gist reproduction of Table I. The published
-/// value at y = 0.4531 (-0.86636) is a known misprint (a physically
-/// impossible jump between -0.04 neighbors, same class as the Re=400
-/// x=0.9063 misprint) and is excluded.
+/// The published value at y = 0.4531 (-0.86636) is a known misprint
+/// (physically impossible jump between -0.04 neighbors) and is excluded.
 const GHIA_UX_3200: &[(f64, f64)] = &[
     (0.0547, -0.32407),
     (0.0625, -0.35344),
@@ -182,8 +161,7 @@ const GHIA_UX_3200: &[(f64, f64)] = &[
     (0.9766, 0.53236),
 ];
 
-/// Ghia, Ghia & Shin (1982), Re = 3200: u_y through the horizontal
-/// centerline (Table II, verified against the ivan-pi gist).
+/// Ghia, Ghia & Shin (1982), Re = 3200: u_y through the horizontal centerline.
 const GHIA_UY_3200: &[(f64, f64)] = &[
     (0.0625, 0.39560),
     (0.0703, 0.40917),
@@ -260,9 +238,8 @@ fn run_cavity_on_mesh(
     ))
     .expect("solver init");
 
-    // Echo the configuration so a parameter-threading no-op can never
-    // silently masquerade as a result (a refactor once ran "Re=400" with
-    // the Re=100 viscosity; the field data exposed it).
+    // Echo the configuration so a parameter-threading no-op can't silently
+    // masquerade as a result.
     println!(
         "[ghia] config: Re={re} cells={} dt={dt} nu={}",
         mesh.num_cells(),
@@ -390,10 +367,6 @@ fn ghia_re100_centerline_profiles() {
     std::env::set_var("CFD2_QUIET", "1");
     let (ux_prof, uy_prof) = run_cavity(RE, N, 0.02, 4000);
     let (max_ux, max_uy) = compare_to_ghia("Re100", &ux_prof, &uy_prof, GHIA_UX, GHIA_UY);
-    // Measured June 2026 (first run, machine-steady at delta 3.6e-14 after
-    // 975 steps): max|u_x diff| = 0.0041, max|u_y diff| = 0.0087 — every
-    // station within 0.9% of lid speed, most under 0.4%. Bands at ~1.8x
-    // measured; ratchet-only thereafter.
     assert!(
         max_ux < 0.008,
         "u_x centerline deviates {max_ux:.4} from Ghia Re=100"
@@ -409,26 +382,18 @@ fn ghia_re400_centerline_profiles() {
     std::env::set_var("CFD2_QUIET", "1");
     let (ux_prof, uy_prof) = run_cavity(400.0, 128, 0.02, 8000);
     let (max_ux, max_uy) = compare_to_ghia("Re400", &ux_prof, &uy_prof, GHIA_UX_400, GHIA_UY_400);
-    // Measured June 2026 (first true-Re run, steady at 2100 steps/t=42,
-    // ~22 min wall): max|u_x diff| = 0.0021, max|u_y diff| = 0.0045 —
-    // vortex minimum within 0.06% of Ghia. Bands at ~2x measured;
-    // ratchet-only thereafter.
     assert!(max_ux < 0.005, "u_x deviates {max_ux:.4} from Ghia Re=400");
     assert!(max_uy < 0.009, "u_y deviates {max_uy:.4} from Ghia Re=400");
 }
 
-/// Re = 3200 on a wall-refined graded mesh (Arc M consumer): at this Re the
-/// boundary layers (~Re^(-1/2) ≈ 0.018) are under-resolved by a uniform
-/// 128^2 mesh, so both axes get two-sided geometric refinement (wall cells
-/// ~0.0036 at ratio 4, ~5 cells per layer).
+/// Re = 3200 on a wall-refined graded mesh: at this Re the boundary layers
+/// (~Re^(-1/2) ≈ 0.018) are under-resolved by a uniform 128^2 mesh, so both
+/// axes get two-sided geometric refinement (wall cells ~0.0036 at ratio 4,
+/// ~5 cells per layer).
 ///
-/// PROVISIONAL — NEVER COMPLETED A RUN. The June 2026 probe was killed
-/// (user timebox) after ~90 min wall at t ≈ 170 with the field still
-/// settling (Re=1000 settled at t = 83.5 on the uniform mesh; Re=3200's
-/// secondary vortices are slower, and dt is fixed at the canonical 0.02
-/// because d_p ∝ dt is part of the spatial discretization). The bands
-/// below are ESTIMATES, not measurements — before trusting this test,
-/// complete a run and reset the bands from it.
+/// PROVISIONAL — the assert bands below are estimates, not measurements: no
+/// run has ever completed (multi-hour settling). Complete a run and reset
+/// the bands from it before trusting this test.
 #[test]
 #[ignore = "PROVISIONAL: never completed (multi-hour settling); bands unmeasured; run explicitly and re-band"]
 fn ghia_re3200_centerline_profiles_graded() {
@@ -449,10 +414,6 @@ fn ghia_re1000_centerline_profiles() {
     let (ux_prof, uy_prof) = run_cavity(1000.0, 128, 0.02, 12000);
     let (max_ux, max_uy) =
         compare_to_ghia("Re1000", &ux_prof, &uy_prof, GHIA_UX_1000, GHIA_UY_1000);
-    // Measured June 2026 (first true-Re run, steady at 4175 steps/t=83.5,
-    // ~40 min wall): max|u_x diff| = 0.0054, max|u_y diff| = 0.0105 —
-    // within ~1% of lid speed at every station including the
-    // secondary-vortex region. Bands at ~2x measured; ratchet-only.
     assert!(max_ux < 0.011, "u_x deviates {max_ux:.4} from Ghia Re=1000");
     assert!(max_uy < 0.020, "u_y deviates {max_uy:.4} from Ghia Re=1000");
 }

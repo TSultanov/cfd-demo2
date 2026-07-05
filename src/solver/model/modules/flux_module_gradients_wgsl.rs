@@ -17,8 +17,8 @@ use cfd2_ir::kernel::{DispatchDomain, KernelProgram, LaunchSemantics};
 
 /// Generate flux module gradients WGSL kernel from pre-resolved gradient targets.
 ///
-/// This function no longer scans StateLayout; all offsets and metadata must be
-/// pre-resolved into `targets` via `resolve_flux_module_gradients_targets()`.
+/// All offsets and metadata must be pre-resolved into `targets` via
+/// `resolve_flux_module_gradients_targets()`.
 #[cfg(test)]
 pub fn generate_flux_module_gradients_wgsl(
     stride: u32,
@@ -64,7 +64,6 @@ pub fn generate_flux_module_gradients_kernel_program(
         }
     };
 
-    // Extract bounds check from the if-guard statement
     let bounds_check = match main.body.stmts.get(1) {
         Some(Stmt::If {
             cond,
@@ -109,7 +108,6 @@ fn base_items() -> Vec<Item> {
 }
 
 fn base_constants_struct() -> cfd2_codegen::solver::codegen::wgsl_ast::StructDef {
-    // Use shared helper for base Constants struct (no extra params)
     constants_struct(&[])
 }
 
@@ -234,7 +232,6 @@ fn main_body(stride: u32, flux_layout: &FluxLayout, targets: &[ResolvedGradientT
         ));
     }
 
-    // Face loop.
     let face_loop_body = {
         let mut body = vec![
             dsl::let_expr(
@@ -544,7 +541,6 @@ mod tests {
             ],
         };
 
-        // Use resolver -> generator pattern
         let targets = resolve_flux_module_gradients_targets(&layout, &flux_layout)
             .expect("should resolve gradient targets");
         let wgsl =

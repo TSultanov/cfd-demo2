@@ -24,8 +24,8 @@ pub(crate) struct GenericCoupledBuilt {
 
 /// The per-face BC tables + boundary-face groups a coupled solver binds,
 /// scattered from the model's boundary-type tables onto the mesh's boundary
-/// faces. Produced at build AND rebuilt on a Tier B topology refresh (the face
-/// set / boundary classification changed), so the logic lives in one function.
+/// faces. Produced at build and rebuilt on a topology refresh, so the logic
+/// lives in one function.
 pub(crate) struct ScatteredBcTables {
     /// Per-face × unknown-component BC kind codes, length `num_faces * stride`.
     pub bc_kind: Vec<u32>,
@@ -37,7 +37,7 @@ pub(crate) struct ScatteredBcTables {
 
 /// Expand the model-defined boundary-type tables onto the mesh's boundary faces
 /// (interior faces get zeros — kernels ignore them). Deterministic: iterates
-/// faces in index order. Shared by init and the Tier B topology-refresh path.
+/// faces in index order. Shared by init and the topology-refresh path.
 pub(crate) fn scatter_bc_tables(
     mesh: &Mesh,
     model: &ModelSpec,
@@ -112,9 +112,8 @@ pub(crate) async fn build_generic_coupled_backend(
         .unknowns_per_cell
         .try_into()
         .map_err(|_| "recipe.unknowns_per_cell overflows u32".to_string())?;
-    // Stage-1 groundwork: build paths reserve EXACT capacity (byte-neutral —
-    // sized bindings at full size == whole-buffer bindings). A refresh/churn
-    // context can later request headroom here without touching this seam.
+    // Build paths reserve EXACT capacity: sized bindings at full size are
+    // byte-equivalent to whole-buffer bindings.
     let runtime = GpuCsrRuntime::new(
         mesh,
         unknowns_per_cell,
@@ -129,7 +128,6 @@ pub(crate) async fn build_generic_coupled_backend(
     let stride = model.state_layout.stride();
     let num_cells = runtime.common.num_cells;
 
-    // Create unified field resources from recipe.
     let fields = UnifiedFieldResources::from_recipe(
         device,
         &recipe,

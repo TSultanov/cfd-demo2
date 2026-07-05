@@ -353,11 +353,10 @@ fn voronoi_all_geometries_valid() {
     assert_eq!(failures, 0, "{failures} voronoi case(s) failed validation");
 }
 
-/// Meshless-engine counterpart of `voronoi_all_geometries_valid` (M0.4):
-/// the same invariant battery over the same geometry/size matrix. NOTE the
-/// meshless path must never run `Mesh::smooth` afterwards (vertex smoothing
-/// would move Voronoi vertices off the bisectors), so it is deliberately
-/// absent from `smoothed_meshes_stay_valid`.
+/// Same invariant battery as `voronoi_all_geometries_valid` over the same
+/// geometry/size matrix. The meshless path must never run `Mesh::smooth`
+/// afterwards (vertex smoothing would move Voronoi vertices off the
+/// bisectors), so it is deliberately absent from `smoothed_meshes_stay_valid`.
 #[test]
 fn meshless_all_geometries_valid() {
     let failures = run_matrix("meshless", false);

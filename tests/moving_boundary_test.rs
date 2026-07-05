@@ -1,26 +1,20 @@
-//! M6 stage 1 gates (meshless/moving-mesh roadmap §M6): a PRESCRIBED-motion
-//! boundary (an oscillating cylinder in a channel) whose boundary-bound seeds
-//! move RIGIDLY with it each step, staying exactly on the moving wall, driven
-//! through the M4 moving-mesh loop on CPU.
-//!
-//! Stage 1 delivers the mesh/seed-motion machinery only — the `MovingWall`
-//! Dirichlet BC (fluid feels the wall's material velocity) is stage 2, so the
-//! obstacle contour is still tagged `Wall` here and these gates validate mesh
-//! integrity + seed tracking + the static-boundary do-no-harm anchor, NOT the
-//! flow response.
+//! Prescribed-motion moving-boundary gates: an oscillating cylinder in a channel
+//! whose boundary-bound seeds move RIGIDLY with it each step, staying exactly on
+//! the moving wall, driven through the moving-mesh loop on CPU. Here the obstacle
+//! contour is tagged `Wall` (not `MovingWall`); these gates validate mesh integrity
+//! + seed tracking + the static do-no-harm anchor, not the flow response.
 //!
 //! Gates:
-//!   * `moving_obstacle_mesh_stays_valid` — oscillating cylinder, N steps; every
-//!     step the obstacle-contour faces exist + are tagged `Wall`, zero untagged
-//!     boundary faces, watertight (Wall length ≈ moving circumference), positive
-//!     cell areas, closure, fixed cell count. The obstacle demonstrably moves.
+//!   * `moving_obstacle_mesh_stays_valid` — every step the obstacle-contour faces
+//!     exist + are tagged `Wall`, zero untagged boundary faces, watertight (Wall
+//!     length ≈ moving circumference), positive cell areas, closure, fixed cell
+//!     count.
 //!   * `boundary_seeds_track_the_wall` — every moving boundary seed stays on the
-//!     analytic moving obstacle (its distance to the moved centre equals the
+//!     analytic moving obstacle (distance to the moved centre equals the
 //!     chord-midpoint radius to f64 roundoff) every step.
 //!   * `static_boundary_is_byte_identical_do_no_harm` — a static obstacle (both
-//!     `BoundaryMotionSpec::Static` AND a zero-amplitude `RigidLoop`) reproduces
-//!     the M4 frozen behaviour: the regen is BYTE-IDENTICAL to the initial mesh
-//!     every step and `w_wall` is all-zero.
+//!     `BoundaryMotionSpec::Static` AND a zero-amplitude `RigidLoop`): the regen is
+//!     BYTE-IDENTICAL to the initial mesh every step and `w_wall` is all-zero.
 #![cfg(all(feature = "meshgen", feature = "cpu"))]
 
 use cfd2::meshgen::meshless::generate_cvt_mesh_with_seeds;
@@ -36,7 +30,6 @@ use std::sync::Mutex;
 /// `CFD2_BACKEND` is process-global; serialize the CPU tests.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-// --- shared scenario constants ------------------------------------------------
 const LX: f64 = 2.0;
 const LY: f64 = 1.0;
 const OBS_CX: f64 = 0.6;
@@ -101,9 +94,8 @@ fn obstacle_geo() -> ChannelWithObstacle {
     }
 }
 
-/// Faces on the obstacle contour (reused verbatim from
-/// `tests/voronoi_obstacle_wall_test.rs:30`): open faces whose centre is near
-/// the (moved) circle.
+/// Faces on the obstacle contour: open faces whose centre is near the (moved)
+/// circle.
 fn obstacle_faces(mesh: &Mesh, center: Point2<f64>, radius: f64) -> Vec<usize> {
     (0..mesh.num_faces())
         .filter(|&f| {
@@ -115,7 +107,7 @@ fn obstacle_faces(mesh: &Mesh, center: Point2<f64>, radius: f64) -> Vec<usize> {
         .collect()
 }
 
-/// Untagged boundary faces (validate_mesh #6): open faces with no BoundaryType.
+/// Untagged boundary faces: open faces with no BoundaryType.
 fn untagged_boundary_faces(mesh: &Mesh) -> usize {
     (0..mesh.num_faces())
         .filter(|&f| mesh.face_neighbor[f].is_none() && mesh.face_boundary[f].is_none())
@@ -181,7 +173,7 @@ fn moving_obstacle_mesh_stays_valid() {
         let (_outcome, stats) = moving.step(false).expect("moving step");
         sim_t += stats.dt;
 
-        // Cell count fixed (fixed-seed v1).
+        // Cell count fixed (fixed-seed).
         assert_eq!(
             stats.n_cells, n_cells,
             "step {step}: cell count changed {} -> {}",
@@ -194,8 +186,7 @@ fn moving_obstacle_mesh_stays_valid() {
         max_disp = max_disp.max((cx - OBS_CX).abs());
         let center = Point2::new(cx, OBS_CY);
 
-        // Obstacle-contour faces exist and are tagged Wall (stage 1 keeps Wall;
-        // MovingWall arrives in stage 2).
+        // Obstacle-contour faces exist and are tagged Wall.
         let contour = obstacle_faces(mesh, center, OBS_R);
         assert!(
             contour.len() >= n_chords - 2,
@@ -419,18 +410,12 @@ fn static_boundary_is_byte_identical_do_no_harm() {
     }
 }
 
-// =============================================================================
-// M6 stage 2 — MovingWall ALE BC: the fluid feels the wall's material velocity.
-//
-// The BC path (documented in the report): `MovingWall` (bc index 5) is ALREADY
-// a per-face Dirichlet velocity in the incompressible_momentum(_ale) model,
-// consumed by the assembly identically to the Inlet Dirichlet (kind 1 →
-// `bc_neighbor_scalar` returns the prescribed value). Stage 2 reuses it: each
-// regen re-tags the moving obstacle's open faces `MovingWall` and, after the ALE
-// refresh, sets their per-face `bc_value` to the recorded wall velocity `w_wall`
+// MovingWall ALE BC. `MovingWall` (bc index 5) is a per-face Dirichlet velocity in
+// the incompressible_momentum(_ale) model, consumed by the assembly identically to
+// the Inlet Dirichlet (kind 1 → `bc_neighbor_scalar` returns the prescribed value).
+// Each regen re-tags the moving obstacle's open faces `MovingWall` and, after the
+// ALE refresh, sets their per-face `bc_value` to the recorded wall velocity `w_wall`
 // (re-applied every step because the topology seam resets per-face overrides).
-// No codegen / WGSL change — the smallest correct path.
-// =============================================================================
 
 /// Obstacle+free-stream translation velocity for the rigid-body gate.
 const W_TRANS: f64 = 0.1;
@@ -608,7 +593,7 @@ fn run_freestream_cpu(scheme: TimeScheme, moving_wall_on: bool) -> FsOut {
     }
 }
 
-/// The core stage-2 physics gate: a rigidly translating obstacle in a uniform
+/// The core physics gate: a rigidly translating obstacle in a uniform
 /// free stream equal to its velocity. With the MovingWall BC ON the fluid moves
 /// WITH the wall (free stream preserved, no-penetration to GCL scale); with it
 /// OFF (identical mesh motion, wall BC = 0) the fluid is dragged off the free
@@ -664,9 +649,8 @@ fn moving_wall_freestream_preserved_cpu_bdf2() {
     moving_wall_freestream(TimeScheme::BDF2, "bdf2");
 }
 
-/// Area preservation + boundedness (M6 stage-4 review, FINDING 1 — honestly
-/// framed): a closed all-walls box with a rigidly OSCILLATING internal MovingWall
-/// obstacle, driven from rest.
+/// Area preservation + boundedness: a closed all-walls box with a rigidly
+/// OSCILLATING internal MovingWall obstacle, driven from rest.
 ///
 /// **What Σρ·V measures.** For constant ρ, `mass = ρ·Σ cell_vol = ρ·(box_area −
 /// obstacle_area)`. A RIGID map preserves a polygon's area exactly in f64, so
@@ -789,14 +773,13 @@ struct NoPenOut {
 /// = `w_wall`; the control (`false`) oscillates the identical mesh but leaves the
 /// contour a zero-velocity `Wall`, so the fluid is NOT told to track the wall.
 ///
-/// FINDING 2: unlike `run_freestream` (where `U ≡ w_wall` everywhere, so the
-/// no-pen number is free-stream preservation restated), here there is NO free
-/// stream — the ONLY motion is driven by the oscillating wall, and `w_wall·n ≠ 0`,
-/// so `(U − w_wall)·n` is a real, independent no-penetration measure (a quiescent
-/// far field, the reviewer's suggested regime; a streamwise stream instead swamps
-/// the owner-cell normal with flow AROUND the cylinder). FINDING 5: in the ON run
-/// the MovingWall face set is asserted EQUAL to the geometric contour set (no
-/// untagged / plain-Wall hole in the moving wall).
+/// Unlike `run_freestream` (where `U ≡ w_wall` everywhere, so the no-pen number is
+/// free-stream preservation restated), here there is NO free stream — the ONLY
+/// motion is driven by the oscillating wall, and `w_wall·n ≠ 0`, so `(U − w_wall)·n`
+/// is a real, independent no-penetration measure (a streamwise stream instead swamps
+/// the owner-cell normal with flow AROUND the cylinder). In the ON run the MovingWall
+/// face set is asserted EQUAL to the geometric contour set (no untagged / plain-Wall
+/// hole in the moving wall).
 fn run_nopen(moving_wall_on: bool) -> NoPenOut {
     use std::collections::HashSet;
     let cvt = build_cvt();
@@ -854,8 +837,8 @@ fn run_nopen(moving_wall_on: bool) -> NoPenOut {
         out.min_faces = out.min_faces.min(contour.len());
 
         if moving_wall_on {
-            // FINDING 5: the MovingWall-tagged set == the geometric contour set,
-            // so no obstacle face is a static-Wall no-penetration hole.
+            // The MovingWall-tagged set == the geometric contour set, so no
+            // obstacle face is a static-Wall no-penetration hole.
             let geo: HashSet<usize> = contour.iter().copied().collect();
             let tagged: HashSet<usize> = (0..mesh.num_faces())
                 .filter(|&f| mesh.face_boundary[f] == Some(BoundaryType::MovingWall))
@@ -893,8 +876,8 @@ fn run_nopen_cpu(moving_wall_on: bool) -> NoPenOut {
     }
 }
 
-/// M6 stage-4 review, FINDING 2 gate: the moving wall drives near-wall
-/// no-penetration in a genuinely NON-co-moving field. A cross-stream-oscillating
+/// The moving wall drives near-wall no-penetration in a genuinely NON-co-moving
+/// field. A cross-stream-oscillating
 /// cylinder (`w_wall·n ≠ 0`) in a QUIESCENT closed box — the ONLY motion is
 /// wall-driven, so `(U−w)·n` is a real, independent measure, NOT the free-stream
 /// preservation the co-moving `run_freestream` test collapses to.
@@ -960,7 +943,7 @@ fn no_penetration_cross_stream_oscillation_cpu() {
 
 /// Do-no-harm: enabling `moving_wall_bc` on a STATIC boundary must change
 /// nothing — no face is tagged MovingWall, the regen is byte-identical, w_wall
-/// stays zero. (Complements the stage-1 static do-no-harm anchor.)
+/// stays zero.
 #[test]
 fn moving_wall_bc_static_do_no_harm() {
     let _g = ENV_LOCK.lock().unwrap();
@@ -1015,8 +998,8 @@ fn oscillate_tiny(t: f64, p: [f64; 2]) -> [f64; 2] {
     [p[0] + 0.005 * (std::f64::consts::TAU * 0.1 * t).sin(), p[1]]
 }
 
-/// Regression (M6 stage-4 review, HIGH): a `Wall → MovingWall` retag on a step
-/// whose motion is too small to change the Voronoi connectivity must route
+/// Regression: a `Wall → MovingWall` retag on a step whose motion is too small to
+/// change the Voronoi connectivity must route
 /// through the TOPOLOGY seam (which rebuilds `face_boundary` + BC tables), NOT
 /// the geometry seam (which asserts identical `face_boundary` and would hard-error
 /// on the tag flip — the crash reachable directly from the GUI slider minima).
@@ -1071,29 +1054,25 @@ fn tiny_amplitude_moving_wall_first_step_ok_cpu() {
     );
 }
 
-// =============================================================================
-// M6 stage 3 — the headline demo: an oscillating cylinder in the channel.
-//
-// A cross-stream forced sinusoidal cylinder oscillation (the new first-class
-// `BoundaryMotionSpec::Oscillation`) driven through the FULL M4 moving-mesh loop
-// + the stage-2 MovingWall BC over 2+ forcing periods, with:
+// The headline demo: a cross-stream forced sinusoidal cylinder oscillation
+// (`BoundaryMotionSpec::Oscillation`) driven through the moving-mesh loop + the
+// MovingWall BC over 2+ forcing periods, with:
 //   * bounded/finite solution (max|U| < 10·U_scale over the whole run),
 //   * wall boundary integrity every step (obstacle faces tagged MovingWall,
 //     watertight, zero untagged, positive volumes, SCL closed),
 //   * a NEAR-WALL QUALITY instrument (max skew + min cell volume within 3 cell
-//     layers of the moving wall) reported + bounded every step (roadmap risk 10:
-//     seeds crowding/starving at a moving wall),
+//     layers of the moving wall) reported + bounded every step (seeds
+//     crowding/starving at a moving wall),
 //   * a measurable FLOW RESPONSE to the forcing: the downstream transverse
-//     velocity in the forced run is many times the static-control run (the
-//     honest signal — NOT a claim of a specific shedding lock-in; Re is low so
-//     the static case is steady/symmetric and any transverse signal is forced).
-// =============================================================================
+//     velocity in the forced run is many times the static-control run (NOT a claim
+//     of a specific shedding lock-in; Re is low so the static case is
+//     steady/symmetric and any transverse signal is forced).
 
 /// Cross-stream oscillation amplitude (< H so the frozen interior seeds near the
 /// obstacle are squeezed but never swallowed — the near-wall instrument watches
 /// exactly this margin).
 const OSC_AMP: f64 = 0.015;
-/// Oscillation period (s). `OMEGA` above (period 0.4) is reused via `OSC_OMEGA`.
+/// Oscillation angular frequency (period 0.4 s).
 const OSC_OMEGA: f64 = std::f64::consts::TAU / 0.4;
 /// Free-stream / forcing velocity scale for the demo (low Re ⇒ steady symmetric
 /// static control, so the forced transverse response is unambiguous).
@@ -1298,7 +1277,7 @@ fn run_demo(oscillate_on: bool) -> DemoOut {
         assert!(worst_closure < 1e-6, "demo step {step}: worst closure {worst_closure:.3e}");
         assert!(stats.scl_defect < 1e-6, "demo step {step}: SCL defect {:.3e}", stats.scl_defect);
 
-        // --- near-wall quality instrument (roadmap risk 10) ---------------
+        // --- near-wall quality instrument ---------------------------------
         if oscillate_on {
             let (near_skew, near_min_vol, near_n) = near_wall_quality(mesh, 3);
             out.worst_near_skew = out.worst_near_skew.max(near_skew);
@@ -1339,7 +1318,7 @@ fn run_demo(oscillate_on: bool) -> DemoOut {
     out
 }
 
-/// The headline M6 demo gate: an oscillating cylinder in the channel, forced for
+/// The headline demo gate: an oscillating cylinder in the channel, forced for
 /// 2+ periods on the CPU, bounded + wall-integrity + near-wall quality + a
 /// measurable flow response vs the static control.
 #[test]

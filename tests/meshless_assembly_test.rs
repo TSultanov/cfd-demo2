@@ -1,18 +1,18 @@
-//! Meshless engine assembly gates (M0.4, review-corrected F2/F3/F7):
+//! Meshless engine assembly gates:
 //!
-//! 1. **Equivalence vs the incumbent Voronoi generator on identical seeds**
-//!    (review F2): the incumbent's exact post-smoothing point set (via the
-//!    re-exported `triangulate` seed seam) is fed to BOTH the incumbent's
-//!    dualization (`generate_voronoi_mesh`, which re-triangulates the same
-//!    deterministic points) and the meshless from-seeds path (pure-bbox
-//!    `MeshlessInput` + `assemble_mesh`). Compared INTERIOR-only, matched by
-//!    generator coordinate — the incumbent culls dead generators and splits
-//!    concave cells, so index comparison is invalid: neighbor sets equal
-//!    after dropping faces shorter than the `vertex_merge`-scale eps
-//!    (1e-6·h, the incumbent's own quantization — NOT 1e-9), cell area rel
-//!    diff < 1e-6, centroid within 1e-6·h. Boundary handling is compared by
-//!    per-`BoundaryType` wall LENGTH sums (review F3: face counts differ
-//!    legitimately between the seeding protocols).
+//! 1. **Equivalence vs the incumbent Voronoi generator on identical seeds**:
+//!    the incumbent's exact post-smoothing point set (via the re-exported
+//!    `triangulate` seed seam) is fed to BOTH the incumbent's dualization
+//!    (`generate_voronoi_mesh`, which re-triangulates the same deterministic
+//!    points) and the meshless from-seeds path (pure-bbox `MeshlessInput` +
+//!    `assemble_mesh`). Compared INTERIOR-only, matched by generator
+//!    coordinate — the incumbent culls dead generators and splits concave
+//!    cells, so index comparison is invalid: neighbor sets equal after
+//!    dropping faces shorter than the `vertex_merge`-scale eps (1e-6·h, the
+//!    incumbent's own quantization — NOT 1e-9), cell area rel diff < 1e-6,
+//!    centroid within 1e-6·h. Boundary handling is compared by
+//!    per-`BoundaryType` wall LENGTH sums (face counts differ legitimately
+//!    between the seeding protocols).
 //! 2. Face reciprocity + seed identity on the full loops-based generator
 //!    (`generate_meshless_voronoi_mesh`): every interior face is listed by
 //!    exactly its owner and neighbor cells (owner < neighbor), every
@@ -128,7 +128,7 @@ fn wall_length_census(mesh: &Mesh) -> (f64, f64, f64) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Equivalence vs incumbent (review F2)
+// 1. Equivalence vs incumbent
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -250,7 +250,7 @@ fn interior_cells_match_incumbent_on_identical_seeds() {
 }
 
 // ---------------------------------------------------------------------------
-// 1b. Boundary comparison by per-type wall length (review F3)
+// 1b. Boundary comparison by per-type wall length
 // ---------------------------------------------------------------------------
 
 #[test]

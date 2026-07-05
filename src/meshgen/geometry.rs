@@ -19,20 +19,18 @@ pub trait Geometry {
         f64x4::from(res)
     }
 
-    // Returns boundary points with given spacing
     fn get_boundary_points(&self, spacing: f64) -> Vec<Point2<f64>>;
 
     /// Ordered, closed boundary polylines with per-segment BC tags, walked
     /// with the fluid on the LEFT (outer loop CCW, embedded holes CW) — the
-    /// meshless engine's boundary input (roadmap M0.3). Tags follow
-    /// `classify_boundary` on segment midpoints with the `Wall` fallback.
+    /// meshless engine's boundary input. Tags follow `classify_boundary` on
+    /// segment midpoints with the `Wall` fallback.
     ///
-    /// Default (review F5: out-of-module implementors must keep compiling):
-    /// the domain bounding box only — correct solely for geometries whose
-    /// fluid region is the whole box; anything with embedded or curved
+    /// Default: the domain bounding box only — correct solely for geometries
+    /// whose fluid region is the whole box; anything with embedded or curved
     /// boundaries must override. Note `get_boundary_points` implementations
     /// are deliberately NOT derived from the loops: their point order feeds
-    /// the Poisson RNG of the incumbent generators and must stay byte-stable.
+    /// the Poisson RNG of the generators and must stay byte-stable.
     fn get_boundary_loops(
         &self,
         spacing: f64,
@@ -105,7 +103,6 @@ impl Geometry for ChannelWithObstacle {
         let mut points = Vec::new();
 
         // Outer box
-        // Bottom
         let nx = (self.length / spacing).ceil() as usize;
         let ny = (self.height / spacing).ceil() as usize;
 
@@ -228,7 +225,7 @@ impl Geometry for BackwardsStep {
 
     fn get_boundary_points(&self, spacing: f64) -> Vec<Point2<f64>> {
         let mut points = Vec::new();
-        // Simplified boundary generation: just walk the perimeter
+        // Walk the perimeter.
         // Vertices: (0, h_out), (L, h_out), (L, 0), (step_x, 0), (step_x, step_h), (0, step_h)
 
         let step_h = self.height_outlet - self.height_inlet;

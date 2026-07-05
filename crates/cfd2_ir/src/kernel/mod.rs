@@ -1,6 +1,4 @@
-// Internal IR facade.
-//
-// Incremental boundary: codegen must depend on types from this module rather than reaching into
+// Internal IR facade: codegen must depend on types from this module rather than reaching into
 // `crate::equation` directly.
 
 #[allow(unused_imports)]
@@ -147,17 +145,14 @@ pub enum LowMachParam {
     Model,
     ThetaFloor,
     PressureCouplingAlpha,
-    /// Arc N4b biharmonic dissipation coefficient (epsilon_4). Reuses the
-    /// formerly-padding slot of the LowMachParams uniform; default 0 (term off).
+    /// Biharmonic dissipation coefficient (epsilon_4); default 0 (term off).
     Eps4,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FaceVec2Builtin {
     Normal,
-    /// Vector from the given side's cell center to the face center.
-    ///
-    /// This is geometry-only (PDE-agnostic) and enables IR-driven reconstruction.
+    /// Vector from the given side's cell center to the face center (geometry-only).
     CellToFace {
         side: FaceSide,
     },
@@ -361,18 +356,14 @@ pub enum LimiterSpec {
     VanLeer,
 }
 
-/// Shared epsilon used by VanLeer-style limiter guards.
-///
-/// This constant is a *cross-path drift guard*: both unified_assembly reconstruction and
-/// flux-module MUSCL reconstruction should use this value (via a shared constant) rather than
-/// embedding separate numeric literals.
+/// Shared epsilon for VanLeer-style limiter guards; both unified_assembly reconstruction and
+/// flux-module MUSCL reconstruction must use this value rather than separate literals.
 pub const VANLEER_EPS: f32 = 1e-8;
 
 pub mod program;
 
 pub mod reconstruction;
 
-// Re-export port types for convenience
 pub use program::{
     BindingAccess, DispatchDomain, EffectResource, KernelBinding,
     KernelProgram, LaunchSemantics, SideEffectMetadata,

@@ -110,12 +110,9 @@ pub const CELL_REL_TOL_P: f64 = 1e-3;
 
 /// Enforced per-case error bands for the OpenFOAM reference comparisons.
 ///
-/// Values are the measured errors as of 2026-03-09
-/// (`target/openfoam_reference_logs/after_phase4_iter_bc.metrics`) plus ~20-25%
-/// headroom for run-to-run GPU variance, rounded up. Every reference test passes
-/// at these bands, making any error *growth* a hard failure (previously all tests
-/// failed the aspirational tolerances and only manual before/after metric diffs
-/// guarded regressions).
+/// Values are the measured per-case errors plus ~20-25% headroom for run-to-run
+/// GPU variance, rounded up. Every reference test passes at these bands, so any
+/// error *growth* is a hard failure.
 ///
 /// Ratchet policy: when a numerics improvement lands, tighten the affected bands
 /// to the new measured value + headroom in the same changeset.
@@ -128,38 +125,27 @@ pub struct ReferenceBands {
 
 pub fn reference_bands(case: &str) -> ReferenceBands {
     let (max_cell_u, max_cell_p) = match case {
-        // measured June 2026 against the STEADY reference (t=32,
-        // machine-converged pimpleFoam) at the canonical configuration
-        // dt = 0.02 / alpha_u = 0.7: u=0.0938, p=0.1142. NOTE the
-        // configuration matters: d_p ∝ alpha_u·dt/rho is part of cfd2's
-        // spatial discretization, so dt is NOT a free steady-marching
-        // knob (lid measures 0.0713/0.0337 at dt=0.05 — better, but a
-        // coincidental dissipation match; dt=0.02 is the reference's own
-        // dt and the historical d_p). The old t=1.6 reference was
-        // mid-transient (10% of lid speed from the Ghia steady state).
-        // Absolute accuracy vs literature: tests/ghia_lid_cavity_test.rs.
+        // Steady reference (machine-converged pimpleFoam) at the canonical
+        // dt=0.02 / alpha_u=0.7: u=0.0938, p=0.1142. dt is NOT a free
+        // steady-marching knob: d_p ∝ alpha_u·dt/rho is part of cfd2's spatial
+        // discretization (dt=0.02 is the reference's own dt; dt=0.05 gives a
+        // better but coincidental dissipation match). Absolute accuracy vs
+        // literature: tests/ghia_lid_cavity_test.rs.
         "incompressible_lid" => (0.11, 0.14),
-        // measured June 2026, steady-march at dt=0.02 vs the (audited:
-        // machine-steady at its t=1.6 already, bit-identical to t=6.4)
-        // reference: u=0.0800, p=0.1154. Errors concentrate at the inlet
-        // ring; centerline rel_l2 ~1e-5, asserted separately.
+        // steady-march at dt=0.02: u=0.0800, p=0.1154. Errors concentrate at
+        // the inlet ring; centerline rel_l2 ~1e-5, asserted separately.
         "incompressible_channel" => (0.095, 0.14),
-        // measured June 2026 against the STEADY reference (t=24; the old
-        // t=2.0 snapshot was mid-transient, 17%/31% of u/p rms from
-        // steady) at dt=0.02: u=0.0734, p=0.1073 (max at the re-entrant
-        // corner / step wake).
+        // steady reference at dt=0.02: u=0.0734, p=0.1073 (max at the
+        // re-entrant corner / step wake).
         "incompressible_backstep" => (0.085, 0.125),
-        // measured: u=0.0247, p=1.0e-5 (June 2026, after the tauMC
-        // doubled-shear fix: was u=0.5983 — the long-standing ~60% mismatch
-        // was the doubled effective shear viscosity thickening the developing
-        // lid boundary layer, proved by the compressible MMS; this is the one
-        // viscous-dominated compressible reference case).
+        // u=0.0247, p=1.0e-5; the one viscous-dominated compressible
+        // reference case.
         "compressible_lid" => (0.035, 1e-4),
-        // measured: u=0.00352, p=0.001776
+        // u=0.00352, p=0.001776
         "compressible_backstep" => (0.0045, 0.0023),
-        // measured: u_x=0.0080, p=5e-6 (p band kept above run-to-run noise)
+        // u_x=0.0080, p=5e-6 (p band kept above run-to-run noise)
         "compressible_acoustic" => (0.010, 1e-4),
-        // measured: u=0.000849, p=0.001772
+        // u=0.000849, p=0.001772
         "compressible_wedge" => (0.0011, 0.0023),
         other => panic!("no reference bands defined for case '{other}'"),
     };

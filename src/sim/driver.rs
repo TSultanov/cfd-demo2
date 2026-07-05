@@ -1,20 +1,16 @@
 //! The shared solver driver.
 //!
-//! `SolverDriver` owns a [`UnifiedSolver`] plus the runtime knobs and the small
-//! amount of scalar context the driver layer needs (min cell size, sound-speed
-//! support, the compressible/incompressible split, and the last max velocity that
-//! feeds the adaptive timestep). It is the single home for the logic the GUI
-//! worker and the headless tests used to each hand-copy:
+//! `SolverDriver` owns a [`UnifiedSolver`] plus the runtime knobs and the scalar
+//! context the driver layer needs (min cell size, sound-speed support, the
+//! compressible/incompressible split, and the last max velocity that feeds the
+//! adaptive timestep). It is the single home for the solver-driving logic shared
+//! by the GUI worker and the headless tests:
 //!
-//! * [`build`](SolverDriver::build) — derive the [`SolverConfig`] (stepping mode +
-//!   preconditioner), construct the solver, apply the phase-1 setters, and set the
-//!   initial / boundary conditions (the compressible-vs-incompressible branch).
-//! * [`apply_params`](SolverDriver::apply_params) — the phase-2 live parameter
-//!   application (was `solver_worker_apply_params`).
-//! * [`step`](SolverDriver::step) — the acoustic-aware adaptive timestep, one
-//!   `step_with_stats`, and divergence / steady-state detection, returned as a
-//!   [`StepOutcome`]. GUI-only concerns (viz upload, channel publishing, trace) stay
-//!   in the worker, which calls `step` and reacts to the outcome.
+//! * [`build`](SolverDriver::build) — phase-1: derive the [`SolverConfig`],
+//!   construct the solver, apply setters, set the initial / boundary conditions.
+//! * [`apply_params`](SolverDriver::apply_params) — phase-2 live parameter application.
+//! * [`step`](SolverDriver::step) — acoustic-aware adaptive timestep, one
+//!   `step_with_stats`, and divergence / steady-state detection as a [`StepOutcome`].
 //! * [`run_steps`](SolverDriver::run_steps) — a thin headless driving loop for tests.
 
 use std::ops::ControlFlow;
@@ -47,15 +43,13 @@ pub struct SolverDriver {
     supports_sound_speed: bool,
     /// The model carries `rho`/`rho_u`/`rho_e`/`u` (density-based compressible).
     compressible: bool,
-    /// The model is `allmach_pressure` (pressure-based all-Mach): it carries the
-    /// extra `psi`/`rho`/`dt_local` state fields this driver seeds at build, keeps
-    /// `psi` live in [`apply_params`](SolverDriver::apply_params), and refreshes
-    /// `rho = rho_ref + psi*p` from the gauge pressure on each *readback* — i.e. at the
-    /// caller's readback cadence (the GUI's ~100ms snapshot interval, not every step),
-    /// with history-preserving current-buffer writes. Between refreshes `rho` lags `p`;
-    /// that is a bounded low-Mach approximation (constant `rho` was independently
-    /// validated stable — the stabilization is the implicit `ddt(psi,p)` diagonal, not
-    /// the density coupling). The proper fix is an on-device `rho` refresh kernel.
+    /// The model is `allmach_pressure`/`allmach_thermal` (pressure-based all-Mach):
+    /// it carries extra `psi`/`rho`/`dt_local` state fields this driver seeds at build,
+    /// keeps `psi` live in [`apply_params`](SolverDriver::apply_params), and refreshes
+    /// `rho = rho_ref + psi*p` from the gauge pressure on each *readback* (the caller's
+    /// readback cadence, not every step), with history-preserving current-buffer writes.
+    /// Between refreshes `rho` lags `p`; that is a bounded low-Mach approximation — the
+    /// stabilization is the implicit `ddt(psi,p)` diagonal, not the density coupling.
     allmach: bool,
     /// Last observed max velocity (from a readback); feeds the adaptive timestep.
     prev_max_vel: f64,
@@ -80,9 +74,8 @@ const ALLMACH_PRECOND_MACH_K: f64 = 2.0;
 /// gauge-pressure undershoot below `-P_REF` would drive `P_abs < 0` and `rho <= 0`,
 /// breaking every term that divides by density. Clamping `P_abs >= ABS_PRESSURE_FLOOR`
 /// (equivalently `rho >= psi * ABS_PRESSURE_FLOOR`) holds the EOS at a tiny positive
-/// density so a temporary negative-pressure numerical artifact stays well-posed and the
-/// solve can recover, rather than blowing up. A near-vacuum floor (1e-5 Pa): inert
-/// wherever the pressure is physical.
+/// density so a temporary negative-pressure artifact stays well-posed. A near-vacuum
+/// floor (1e-5 Pa): inert wherever the pressure is physical.
 const ALLMACH_ABS_PRESSURE_FLOOR: f64 = 1.0e-5;
 
 /// Low-Mach preconditioned pseudo-compressibility for the all-Mach pressure model.
@@ -120,19 +113,16 @@ fn allmach_psi_precond(u: &[(f64, f64)], real_psi: f64, u_ref: f64) -> Vec<f64> 
 impl SolverDriver {
     /// Build a configured solver (phase 1).
     ///
-    /// Mirrors the solver portion of the GUI's `build_init_outcome`: it derives the
-    /// `SolverConfig` (the `eos.gamma ? Implicit{1} : Coupled` stepping rule and the
-    /// BlockJacobi→Jacobi clamp), constructs the [`UnifiedSolver`], clears state,
-    /// applies the phase-1 setters, and sets the initial + boundary conditions. The
-    /// **compressible** branch uses a uniform-freestream initial condition derived
-    /// from `params` and ignores `initial_u`/`initial_p`; the **incompressible**
-    /// branch seeds `initial_u`/`initial_p` (the GUI passes its geometry IC — which
-    /// is currently rest — and the tests pass rest).
+    /// Derives the `SolverConfig` (the `eos.gamma ? Implicit{1} : Coupled` stepping
+    /// rule and the BlockJacobi→Jacobi clamp), constructs the [`UnifiedSolver`], clears
+    /// state, applies the phase-1 setters, and sets the initial + boundary conditions.
+    /// The **compressible** branch uses a uniform-freestream initial condition derived
+    /// from `params` and ignores `initial_u`/`initial_p`; the **incompressible** branch
+    /// seeds `initial_u`/`initial_p`.
     ///
-    /// Phase-2 knobs (dtau, outer_iters, low-Mach, under-relaxation,
-    /// convergence-stats collection) are **not** applied here — call
-    /// [`apply_params`](SolverDriver::apply_params) after building, exactly as the
-    /// GUI applies them via `sync_worker_params` after `SetSolver`.
+    /// Phase-2 knobs (dtau, outer_iters, low-Mach, under-relaxation, convergence-stats
+    /// collection) are **not** applied here — call
+    /// [`apply_params`](SolverDriver::apply_params) after building.
     #[allow(clippy::too_many_arguments)]
     pub async fn build(
         mesh: &Mesh,
@@ -149,8 +139,7 @@ impl SolverDriver {
         let unknowns_per_cell = model.system.unknowns_per_cell();
 
         // Preconditioner: clamp BlockJacobi to Jacobi for wide blocks, and force
-        // Jacobi when the model doesn't expose a preconditioner knob (matches the
-        // GUI's `effective_preconditioner`).
+        // Jacobi when the model doesn't expose a preconditioner knob.
         let mut selected_preconditioner = params.preconditioner;
         if matches!(selected_preconditioner, PreconditionerType::BlockJacobi)
             && unknowns_per_cell > UI_MAX_BLOCK_JACOBI
@@ -245,18 +234,17 @@ impl SolverDriver {
             // Pressure-inlet nozzle: DEVELOP FROM SCRATCH. The IC is a quiescent field
             // (rest velocity from the caller + flat gauge p=0 from `set_p` above); the
             // flow accelerates purely from the pinned inlet pressure (applied in
-            // `apply_params`). We deliberately do NOT seed a spatial pressure ramp or a
-            // freestream velocity: at the rocket-scale drop the throat chokes and the
-            // supersonic branch forms from rest (validated in `nozzle_from_rest_probe`).
+            // `apply_params`). Deliberately no spatial pressure ramp or freestream
+            // velocity: at the rocket-scale drop the throat chokes and the supersonic
+            // branch forms from rest.
             // All-Mach: seed the extra state fields the bare incompressible path has
             // no concept of. `psi` (compressibility = 1/c^2) activates the
             // `ddt(psi,p)` term and sets the Mach regime; `rho` MUST start at the
             // reference density (0 would break the Rhie–Chow mass flux and the
             // `ddt(rho,U)` coefficient — it is then refreshed to `rho_ref + psi*p`
             // each readback); `dt_local = 0` selects the global (time-accurate) dt.
-            // `set_field_scalar` (initial-condition semantics, writes all history
-            // buffers) is intentional HERE — this is the IC, and `initialize_history`
-            // below re-propagates it; the mid-run refreshes use `_current` instead.
+            // `set_field_scalar` (IC semantics, writes all history buffers) is intentional
+            // HERE — this is the IC; the mid-run refreshes use `_current` instead.
             if allmach {
                 let psi = params.compressibility_psi.max(0.0) as f64;
                 let _ = solver.set_field_scalar("psi", &vec![psi; n_cells]);
@@ -272,8 +260,7 @@ impl SolverDriver {
                 // Thermal variant: seed the temperature at the reference and the
                 // constant EOS reference `rho_t_ref = rho_ref * T_ref`. The density
                 // is recovered on-device as `rho = rho_t_ref/T + psi*p`; an unseeded
-                // (0) `rho_t_ref` would make `rho` blow up. Matches the manual seeding
-                // in the thermal validation tests.
+                // (0) `rho_t_ref` would make `rho` blow up.
                 if thermal {
                     let t_ref = crate::solver::model::ALLMACH_T_REF;
                     let _ = solver
@@ -320,9 +307,8 @@ impl SolverDriver {
 
     /// Apply the runtime parameters to the live solver (phase 2).
     ///
-    /// Byte-for-byte the GUI's `solver_worker_apply_params`: enable the convergence
-    /// monitor, push `dt`, then the `has_param`-gated setters, then re-apply the
-    /// inlet boundary condition (compressible vs incompressible).
+    /// Enable the convergence monitor, push `dt`, then the `has_param`-gated setters,
+    /// then re-apply the inlet boundary condition (compressible vs incompressible).
     pub fn apply_params(&mut self, params: &RuntimeParams) {
         self.params = *params;
         let solver = &mut self.solver;
@@ -435,8 +421,7 @@ impl SolverDriver {
     /// the low-Mach preconditioning floor — or the fixed `requested_dt`), runs one
     /// `step_with_stats`, and classifies divergence / steady-state. When `readback`
     /// is true it reads the fields, updates the adaptive-dt velocity scale, and (if
-    /// the fields went non-finite) reports it as divergence. The numbers are
-    /// identical to the GUI worker's inline loop; only the GUI-only side effects
+    /// the fields went non-finite) reports it as divergence. GUI-only side effects
     /// (viz upload, publishing, trace) are left to the caller.
     pub fn step(&mut self, readback: bool) -> StepOutcome {
         if self.params.adaptive_dt {
@@ -526,7 +511,7 @@ impl SolverDriver {
 
     /// Read the velocity/pressure (and, for compressible models, density) fields,
     /// returning the raw fields plus their summary and updating the adaptive-dt
-    /// velocity scale. Matches the GUI worker's readback block.
+    /// velocity scale.
     fn read_back(&mut self) -> Readback {
         let u = pollster::block_on(self.solver.get_u());
         let p = pollster::block_on(self.solver.get_p());
@@ -575,13 +560,11 @@ impl SolverDriver {
             let hi = rho_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             // `_current` (NOT set_field_scalar): write rho into the CURRENT buffer only,
             // preserving the BDF2 time history. set_field_scalar writes all three
-            // ping-pong buffers (initial-condition semantics) — mid-run that would reset
-            // U/p history (old = current) on every readback, zeroing the velocity
-            // time-derivative, making the GUI transient non-deterministic (readback is
-            // wall-clock throttled) and divergent between the GPU (history reset) and CPU
-            // (history preserved) backends. rho is a coefficient sampled at the current
-            // time (ddt(rho,U) uses U_old, never rho_old), so a current-only update is
-            // exact and backend-consistent.
+            // ping-pong buffers (IC semantics), which mid-run would reset U/p history
+            // (old = current) every readback, zeroing the velocity time-derivative and
+            // diverging the wall-clock-throttled GPU/CPU backends. rho is a coefficient
+            // sampled at the current time (ddt(rho,U) uses U_old, never rho_old), so a
+            // current-only update is exact and backend-consistent.
             let _ = self.solver.set_field_scalar_current("rho", &rho_vals);
             // Refresh the preconditioned pseudo-compressibility from the live velocity
             // (one-snapshot lag, same discipline + correctness argument as `rho`: a
@@ -680,7 +663,6 @@ impl SolverDriver {
         level: crate::solver::MeshRefreshLevel,
     ) -> Result<(), String> {
         self.solver.refresh_mesh(mesh, level)?;
-        // Same reduction as `build` (driver.rs `min_cell_size` construction).
         // Level-agnostic: both Geometry and Topology may change cell volumes.
         self.min_cell_size = mesh
             .cell_vol
@@ -708,15 +690,13 @@ impl SolverDriver {
     /// fluxes), then recompute the driver's mesh-derived `min_cell_size`
     /// (the adaptive-dt length scale). Call once per step, before `step()`.
     ///
-    /// **dt handshake (review-solver-ale F2)**: the mesh fluxes are closed
-    /// against ONE dt (the `dt` argument of `swept_mesh_fluxes_closed`), and
-    /// the SCL only holds if the solver steps with exactly that dt. This
-    /// driver's [`Self::step`] pins `params.requested_dt` when adaptive dt is
-    /// off, so the contract is: close the fluxes against `params.requested_dt`
-    /// and keep `params.adaptive_dt == false`. Adaptive dt would silently
-    /// re-scale dt after the closure (Σφ·dt ≠ ΔV ⇒ mass injection with no
-    /// diagnostic firing), so it is rejected here until the M4 motion↔dt
-    /// handshake lands.
+    /// **dt handshake**: the mesh fluxes are closed against ONE dt (the `dt`
+    /// argument of `swept_mesh_fluxes_closed`), and the SCL only holds if the
+    /// solver steps with exactly that dt. [`Self::step`] pins `params.requested_dt`
+    /// when adaptive dt is off, so the contract is: close the fluxes against
+    /// `params.requested_dt` and keep `params.adaptive_dt == false`. Adaptive dt
+    /// would silently re-scale dt after the closure (Σφ·dt ≠ ΔV ⇒ mass injection
+    /// with no diagnostic firing), so it is rejected here.
     pub fn begin_ale_step(&mut self, mesh: &Mesh, mesh_fluxes: &[f32]) -> Result<(), String> {
         if self.params.adaptive_dt {
             return Err(
@@ -736,8 +716,8 @@ impl SolverDriver {
         Ok(())
     }
 
-    /// ALE step entry for a **topology-changing** move (M2 Tier B; passthrough
-    /// to [`UnifiedSolver::begin_ale_step_topology`]): rotate the volume
+    /// ALE step entry for a **topology-changing** move (passthrough to
+    /// [`UnifiedSolver::begin_ale_step_topology`]): rotate the volume
     /// history → rebuild the topology-derived stack → upload the closed mesh
     /// fluxes, then recompute the driver's `min_cell_size`. Use this instead of
     /// [`Self::begin_ale_step`] when the move changed the face set / adjacency
@@ -794,8 +774,8 @@ impl SolverDriver {
     /// after each `begin_ale_step_topology`, the same way the ALE gates
     /// re-apply their inlet override by hand. Touches only the BC buffers.
     ///
-    /// v1 ALE is incompressible-only (`incompressible_momentum_ale`), so only
-    /// the incompressible inlet is re-applied; the compressible / all-Mach
+    /// ALE is incompressible-only (`incompressible_momentum_ale`), so only the
+    /// incompressible inlet is re-applied; the compressible / all-Mach
     /// inlet+pressure BCs of `apply_params` are intentionally not mirrored here.
     pub fn reapply_boundary_conditions(&mut self) {
         let params = self.params;
@@ -804,8 +784,8 @@ impl SolverDriver {
         }
     }
 
-    /// Pin the fixed timestep (the moving-mesh dt handshake, review-solver-ale
-    /// F2). Sets both the driver's `params.requested_dt` — the value
+    /// Pin the fixed timestep (the moving-mesh dt handshake). Sets both the
+    /// driver's `params.requested_dt` — the value
     /// [`Self::step`] pins when `adaptive_dt` is off — and the live solver dt,
     /// so a subsequent non-adaptive `step()` marches with exactly `dt`. The
     /// [`MovingMeshDriver`](crate::sim::MovingMeshDriver) calls this AFTER

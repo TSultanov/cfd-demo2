@@ -10,10 +10,6 @@ use std::pin::Pin;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
-// =============================================================================
-// Canonical field name constants for compressible conserved-state seeding
-// =============================================================================
-
 const FIELD_RHO: &str = "rho";
 const FIELD_RHO_U: &str = "rho_u";
 const FIELD_RHO_E: &str = "rho_e";
@@ -22,10 +18,6 @@ const FIELD_T: &str = "T";
 const FIELD_U_LOWER: &str = "u";
 const FIELD_U_UPPER: &str = "U";
 const FIELD_MU: &str = "mu";
-
-// =============================================================================
-// Resolved offset bundle for compressible conserved-state seeding
-// =============================================================================
 
 /// Resolved state offsets for compressible conserved-state seeding.
 ///
@@ -255,7 +247,7 @@ pub trait SolverRuntimeParamsExt {
     /// Enable or disable in-step retries for nonconverged dual-time steps.
     ///
     /// Compressible dual-time runs enable this by default; callers can opt out
-    /// when they need the old accepted-nonconverged behavior without an in-step retry.
+    /// to accept a nonconverged step without an in-step retry.
     fn set_nonconverged_retry_enabled(&mut self, enabled: bool) -> Result<(), String>;
     /// Set the maximum number of in-step retry attempts for a nonconverged dual-time step.
     fn set_nonconverged_retry_max_attempts(&mut self, attempts: usize) -> Result<(), String>;
@@ -461,10 +453,8 @@ struct SeededInletValues {
 /// and `T` against a prescribed `(rho, u)` state and a reference pressure
 /// standing in for the interior pressure.
 ///
-/// Falls back to the historical closed forms for entries a model does not
-/// declare (kept so the helper still works on hand-rolled model variants);
-/// the stock compressible model declares all three, and
-/// `inlet_seeding_matches_declared_expressions` pins the equivalence.
+/// Falls back to closed forms for entries a model does not declare (so the
+/// helper still works on hand-rolled model variants).
 fn evaluate_inlet_declarations(
     model: &crate::solver::model::ModelSpec,
     rho: f32,
@@ -520,7 +510,7 @@ fn evaluate_inlet_declarations(
         eval_boundary_expr_f32(expr, &interior, &bc, &param).map(Some)
     };
 
-    // Historical closed forms (fallback for undeclared entries).
+    // Closed-form fallback for undeclared entries.
     let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
     let legacy_rho_e = if eos_params.gm1 > 0.0 {
         p0 / eos_params.gm1 + ke
@@ -782,15 +772,14 @@ impl SolverIncompressibleControlsExt for GpuUnifiedSolver {
 mod tests {
     use super::*;
 
-    /// The declared inlet expressions must reproduce the historical
-    /// closed-form seeding math bit-for-bit (f32 evaluation matches both the
-    /// legacy host formulas and the GPU kernel arithmetic).
+    /// The declared inlet expressions must reproduce the closed-form seeding
+    /// math bit-for-bit (f32 evaluation matches the GPU kernel arithmetic).
     #[test]
     fn inlet_seeding_matches_declared_expressions() {
         // Physically sensible prescribed states per EOS (the declared
         // expressions apply the GPU kernel's pressure floor, so a state
         // with negative reference pressure would intentionally diverge
-        // from the unfloored legacy formula).
+        // from the unfloored closed form).
         let cases = [
             (
                 EosSpec::IdealGas {

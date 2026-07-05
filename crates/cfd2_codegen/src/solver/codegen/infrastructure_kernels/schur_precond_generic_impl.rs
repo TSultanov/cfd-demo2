@@ -1,11 +1,7 @@
-//! Schur Preconditioner Generic kernel generator implementation.
+//! Schur Preconditioner Generic kernel generator.
 //!
-//! This module contains the implementation of generate_schur_precond_generic()
-//! which was ported from the handwritten
-//! src/solver/gpu/shaders/schur_precond_generic.wgsl file.
-//!
-//! Implements the SIMPLE-like preconditioner for the coupled solver with
-//! 3 entry points: relax_pressure, correct_velocity, predict_and_form_schur.
+//! SIMPLE-like preconditioner for the coupled solver with 3 entry points:
+//! relax_pressure, correct_velocity, predict_and_form_schur.
 
 use crate::solver::codegen::kernel_wgsl::KernelWgsl;
 use crate::solver::codegen::wgsl_ast::*;
@@ -42,7 +38,6 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
 
     // ── Group 0: Vectors ────────────────────────────────────────────────────
 
-    // @group(0) @binding(0) var<storage, read> r_in: array<f32>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "r_in",
         Type::array(Type::F32),
@@ -50,7 +45,6 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
         Some(AccessMode::Read),
         vec![Attribute::Group(0), Attribute::Binding(0)],
     )));
-    // @group(0) @binding(1) var<storage, read_write> z_out: array<f32>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "z_out",
         Type::array(Type::F32),
@@ -58,7 +52,6 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
         Some(AccessMode::ReadWrite),
         vec![Attribute::Group(0), Attribute::Binding(1)],
     )));
-    // @group(0) @binding(2) var<storage, read_write> temp_p: array<f32>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "temp_p",
         Type::array(Type::F32),
@@ -66,7 +59,6 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
         Some(AccessMode::ReadWrite),
         vec![Attribute::Group(0), Attribute::Binding(2)],
     )));
-    // @group(0) @binding(3) var<storage, read_write> p_sol: array<f32>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "p_sol",
         Type::array(Type::F32),
@@ -74,7 +66,6 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
         Some(AccessMode::ReadWrite),
         vec![Attribute::Group(0), Attribute::Binding(3)],
     )));
-    // @group(0) @binding(4) var<storage, read_write> p_prev: array<f32>;
     m.push(Item::GlobalVar(GlobalVar::new(
         "p_prev",
         Type::array(Type::F32),
@@ -157,7 +148,6 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
 
     // ── Helper functions ────────────────────────────────────────────────────
 
-    // fn safe_inverse(val: f32) -> f32
     m.push(Item::Function(Function::new(
         "safe_inverse",
         vec![Param::new("val", Type::F32, vec![])],
@@ -173,7 +163,6 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
         ]),
     )));
 
-    // fn u_index(i: u32) -> u32
     m.push(Item::Function(Function::new(
         "u_index",
         vec![Param::new("i", Type::U32, vec![])],
@@ -195,14 +184,12 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
         ]),
     )));
 
-    // const WORKGROUP_SIZE: u32 = 64u;
     m.push(Item::Const {
         name: "WORKGROUP_SIZE".into(),
         ty: Type::U32,
         expr: Expr::lit_u32(64),
     });
 
-    // fn global_cell(global_id: vec3<u32>, num_workgroups: vec3<u32>) -> u32
     m.push(Item::Function(Function::new(
         "global_cell",
         vec![
@@ -424,7 +411,6 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                 block(vec![return_void()]),
                 None,
             ),
-            // Part 1: Predict Velocity (Local)
             comment("Part 1: Predict Velocity (Local)"),
             let_expr(
                 "base",
@@ -468,7 +454,6 @@ pub fn generate_schur_precond_generic() -> KernelWgsl {
                 Expr::ident("z_out").index(Expr::ident("row_p")),
                 Expr::lit_f32(0.0),
             ),
-            // Part 2: Form Schur RHS
             comment("Part 2: Form Schur RHS"),
             var_expr("rhs_p", Expr::ident("r_in").index(Expr::ident("row_p"))),
             let_expr(

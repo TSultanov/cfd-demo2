@@ -1,19 +1,19 @@
-//! M1 stage-4 gates for GPU Lloyd/CVT relaxation (`encode_lloyd_iterations`
+//! Gates for GPU Lloyd/CVT relaxation (`encode_lloyd_iterations`
 //! + max-displacement reduce, src/solver/gpu/voronoi/lloyd.rs):
 //!
 //! 1. CPU/GPU relaxation equivalence: from the SAME f32-rounded Poisson
-//!    seed set, N GPU Lloyd iterations vs N iterations of M0 `lloyd_relax`
+//!    seed set, N GPU Lloyd iterations vs N iterations of `lloyd_relax`
 //!    (same density exponent / omega / sizing) — the assembled meshes'
 //!    interior skew statistics (mean, p99) agree within 10% (f32-drift
 //!    tolerance: the trajectories decouple at f32 rounding per iteration,
 //!    so per-seed positions are NOT compared). Uniform-density obstacle
 //!    case + graded nozzle case (ρ = h⁻⁴ with the exact Poisson sizing
 //!    rule — the GPU evaluates it through a bilerp node grid).
-//! 2. Fixed seeds bit-unmoved: `SeedKind::Boundary` seeds (kind-keyed,
-//!    like M0) and `SEED_FLAG_FIXED`-pinned interior seeds keep their f32
-//!    bit patterns through the whole chained relaxation.
-//! 3. Flag-rate budget after 50 Lloyd iterations ≤ 5e-3 (design gate 2:
-//!    the near-hex/cocircular stress) on a 30k interior set, zero
+//! 2. Fixed seeds bit-unmoved: `SeedKind::Boundary` seeds (kind-keyed)
+//!    and `SEED_FLAG_FIXED`-pinned interior seeds keep their f32 bit
+//!    patterns through the whole chained relaxation.
+//! 3. Flag-rate budget after 50 Lloyd iterations ≤ 5e-3 (the
+//!    near-hex/cocircular stress) on a 30k interior set, zero
 //!    overflow statuses; the rate is printed.
 //! 4. Max-displacement reduce validated against a CPU recompute of the
 //!    seed movement; the standalone one-f32 convergence loop terminates.
@@ -118,14 +118,13 @@ fn run_lloyd_case(
     let n = seeds.len();
     let tol = MeshgenTolerances::from_geometry(hmin, domain);
     let (seeds_f32, rounded) = round_f32(&seeds);
-    // The exact Poisson sizing rule (M0 generate_cvt_mesh); constant for
-    // uniform cases (hmin == hmax).
+    // The exact Poisson sizing rule; constant for uniform cases (hmin == hmax).
     let sizing = |p: Point2<f64>| -> f64 {
         let dist = geo.sdf(&p).abs();
         (hmin + (growth - 1.0).max(0.0) * dist).min(hmax)
     };
     // FIXED flag mirrors the kind table (exercises the flag upload path;
-    // the kernel keys fixedness off the kinds regardless, like M0).
+    // the kernel keys fixedness off the kinds regardless).
     let flags: Vec<u32> = kinds
         .iter()
         .map(|k| match k {
@@ -189,7 +188,7 @@ fn run_lloyd_case(
     };
     let gpu_mesh = assemble_mesh(&gpu_input, &diag);
 
-    // --- CPU relaxation (M0 lloyd_relax, N forced iterations) ------------
+    // --- CPU relaxation (lloyd_relax, N forced iterations) ------------
     let mut seeds_cpu = rounded.clone();
     let lcfg = LloydConfig {
         max_iters: iters as usize,
@@ -300,11 +299,10 @@ fn gpu_lloyd_graded_nozzle_matches_cpu() {
     );
 }
 
-/// Design gate 2 stress: 50 Lloyd iterations (the design §8.3 number —
-/// stage-5 review restored it from 30) drive a jittered-lattice 30k
-/// interior set toward the near-hex (near-cocircular everywhere) CVT — the
-/// epsilon filter's worst case. Budget: flag rate ≤ 5e-3 on the fresh-grid
-/// final regen, zero overflows.
+/// 50 Lloyd iterations drive a jittered-lattice 30k interior set toward
+/// the near-hex (near-cocircular everywhere) CVT — the epsilon filter's
+/// worst case. Budget: flag rate ≤ 5e-3 on the fresh-grid final regen,
+/// zero overflows.
 #[test]
 fn gpu_lloyd_flag_rate_after_50_iters_30k() {
     let Some(ctx) = gpu_context() else { return };
@@ -385,7 +383,7 @@ fn gpu_lloyd_flag_rate_after_50_iters_30k() {
 /// pinning of interior seeds:
 ///  - the (abs, rel) max-displacement readback matches a CPU recompute
 ///    from before/after seed snapshots;
-///  - one-f32 convergence polling reaches the M0 default tol (0.01 h) and
+///  - one-f32 convergence polling reaches the default tol (0.01 h) and
 ///    a converged CVT is a near-fixed-point;
 ///  - `SEED_FLAG_FIXED` interior seeds keep their bits.
 #[test]
@@ -454,7 +452,7 @@ fn gpu_lloyd_reduce_convergence_and_pinning() {
         "reduce rel max {rel:.6e} disagrees with recompute {expect_rel:.6e}"
     );
 
-    // Standalone convergence loop: one-f32 polling to the M0 default tol.
+    // Standalone convergence loop: one-f32 polling to the default tol.
     let mut iters_run = 1u32;
     let mut last_rel = rel;
     while last_rel >= 0.01 && iters_run < 300 {
@@ -474,7 +472,7 @@ fn gpu_lloyd_reduce_convergence_and_pinning() {
         post_rel < 0.02,
         "converged CVT moved {post_rel:.3e} h on the next iteration"
     );
-    // Decay, not tautology (stage-5 review): 20 further iterations must not
+    // Decay, not tautology: 20 further iterations must not
     // climb back over the convergence tolerance — a 'converged' CVT that
     // keeps drifting would pass the one-shot check above but fail here.
     poll(&ctx, engine.run_lloyd_iterations(&ctx.device, &ctx.queue, 20));

@@ -40,17 +40,16 @@ impl UiPortSet {
     pub fn from_registry(registry: &PortRegistry) -> Self {
         let stride = registry.state_layout().stride();
 
-        // Try "U" first, then "u" for velocity
+        // Prefer "U", fall back to "u" for velocity.
         let u_offset = registry
             .get_field_entry_by_name("U")
             .or_else(|| registry.get_field_entry_by_name("u"))
-            .filter(|entry| entry.component_count() == 2) // must be vec2
+            .filter(|entry| entry.component_count() == 2)
             .map(|entry| entry.offset());
 
-        // Get pressure field - must be scalar (1 component)
         let p_offset = registry
             .get_field_entry_by_name("p")
-            .filter(|entry| entry.component_count() == 1) // must be scalar
+            .filter(|entry| entry.component_count() == 1)
             .map(|entry| entry.offset());
 
         Self {
@@ -65,7 +64,6 @@ impl UiPortSet {
     pub fn from_layout(layout: &StateLayout) -> Self {
         let stride = layout.stride();
 
-        // Scan layout.fields() once to collect offsets by name/kind
         let mut u_offset: Option<u32> = None;
         let mut p_offset: Option<u32> = None;
 
@@ -74,12 +72,10 @@ impl UiPortSet {
             let kind = field.kind();
             let offset = field.offset();
 
-            // Try "U" first, then "u" for velocity - must be Vector2
+            // Prefer "U", fall back to "u" for velocity.
             if kind == FieldKind::Vector2 && (name == "U" || (name == "u" && u_offset.is_none())) {
                 u_offset = Some(offset);
-            }
-            // Get pressure field - must be Scalar
-            else if kind == FieldKind::Scalar && name == "p" {
+            } else if kind == FieldKind::Scalar && name == "p" {
                 p_offset = Some(offset);
             }
         }
@@ -140,19 +136,16 @@ pub struct GpuUnifiedSolver {
     config: SolverConfig,
     /// Post-step State-Redistribution operator for cut-cell small cells. `None`
     /// unless the mesh carries sliver cut cells (see [`crate::solver::gpu::srd`]).
-    /// Built but **not applied by default**: the cut-cell small-cell instability
-    /// is properly fixed by the immersed no-slip wall BC (see
-    /// `generate_cut_cell_mesh`), which also produces the physical boundary
-    /// layer. SRD is retained as an opt-in (`set_srd_enabled`) stabilizer.
+    /// Opt-in stabilizer (`set_srd_enabled`), default-off: the primary small-cell
+    /// fix is the immersed no-slip wall BC in `generate_cut_cell_mesh`.
     srd: Option<crate::solver::gpu::srd::SrdGpu>,
-    /// Runtime toggle for the SRD pass (**default off**; only meaningful when
-    /// `srd` is `Some`). Opt-in via [`Self::set_srd_enabled`].
+    /// Runtime toggle for the SRD pass (default off; only meaningful when `srd`
+    /// is `Some`).
     srd_enabled: bool,
     /// ALE sequencing guard: set by [`Self::begin_ale_step`], cleared by
-    /// `step`/`step_with_stats`. A second `begin_ale_step` without an
-    /// intervening step would double-rotate the volume history (the `V^n`
-    /// slot silently becomes `V^{n+1}` — a corrupted moving-volume ddt), so
-    /// double-arming is rejected.
+    /// `step`/`step_with_stats`. Double-arming without an intervening step is
+    /// rejected: it would double-rotate the volume history (the `V^n` slot
+    /// silently becomes `V^{n+1}`), corrupting the moving-volume ddt.
     ale_step_armed: bool,
     #[cfg(feature = "cpu")]
     cpu_render: Option<CpuRender>,
@@ -168,11 +161,9 @@ impl GpuUnifiedSolver {
     ) -> Result<Self, String> {
         #[cfg(feature = "cpu")]
         if let Some(cpu_cfg) = cpu_backend_from_env() {
-            // Honor the requested stepping mode (config.stepping) exactly like the
-            // GPU path below — the GUI selects Implicit for compressible and Coupled
-            // for the saddle-point models, so the CPU backend must use the same to
-            // match the GPU's outer-loop behavior (was hardcoded Coupled via
-            // CpuSolver::new, which mis-stepped compressible in the GUI).
+            // Honor config.stepping like the GPU path: the GUI selects Implicit
+            // for compressible and Coupled for the saddle-point models, and the
+            // CPU backend must match to reproduce the GPU's outer-loop behavior.
             let cpu = crate::solver::cpu::CpuSolver::with_stepping(
                 mesh,
                 model.clone(),
@@ -206,8 +197,7 @@ impl GpuUnifiedSolver {
                 model,
                 backend: SolverBackend::Cpu(Box::new(cpu)),
                 config,
-                // SRD is a GPU-only cut-cell stabilizer; the CPU backend never
-                // builds or applies it.
+                // SRD is GPU-only; the CPU backend never builds or applies it.
                 srd: None,
                 srd_enabled: false,
                 ale_step_armed: false,
@@ -248,15 +238,11 @@ impl GpuUnifiedSolver {
             cpu_render: None,
         };
 
-        // Build the cut-cell State-Redistribution operator from the mesh (kept
-        // available as an opt-in stabilizer; NOT applied by default — the
-        // immersed no-slip wall BC is the primary small-cell fix). `None` unless
-        // the mesh carries sliver cut cells, so structured/graded meshes are
-        // untouched.
+        // Build the opt-in cut-cell SRD operator: `None` unless the mesh carries
+        // sliver cut cells, so structured/graded meshes are untouched.
         let ports = solver.ui_ports();
         if let Some(u_offset) = ports.u_offset {
-            // Borrow the GPU plan to build the operator in an inner scope, then
-            // assign (the plan borrow must end before writing `solver.srd`).
+            // Inner scope: the plan borrow must end before writing `solver.srd`.
             // `plan()` is safe here — the CPU backend returned early above.
             let srd = {
                 let plan = solver.plan();
@@ -296,11 +282,9 @@ impl GpuUnifiedSolver {
         self.srd.is_some()
     }
 
-    /// Enable/disable the post-step SRD pass (**default off**). Only meaningful
-    /// when [`Self::srd_active`]. Opt-in stabilizer for cut-cell slivers; the
-    /// immersed no-slip wall BC is the primary fix, so this is normally left off
-    /// (it slightly smooths the near-wall boundary layer). Also used by the
-    /// GPU-vs-CPU cross-check and the boundary-layer diagnostic.
+    /// Enable/disable the post-step SRD pass (default off). Only meaningful when
+    /// [`Self::srd_active`]. Normally left off (it slightly smooths the near-wall
+    /// boundary layer); the immersed no-slip wall BC is the primary fix.
     pub fn set_srd_enabled(&mut self, enabled: bool) {
         self.srd_enabled = enabled;
     }
@@ -364,10 +348,8 @@ impl GpuUnifiedSolver {
         }
     }
 
-    /// Test/diagnostic accessor: the CPU backend's scalar-CSR topology (the
-    /// four arrays); `None` on the GPU backend (no CSR readback plumbing —
-    /// the GPU CSR-rebuild correctness is covered by the deterministic-builder
-    /// gate + the no-op topology byte gate). Used by `csr_rebuild_correctness`.
+    /// Test/diagnostic accessor: the CPU backend's scalar-CSR topology (the four
+    /// arrays); `None` on the GPU backend (no CSR readback plumbing).
     #[doc(hidden)]
     #[cfg(feature = "cpu")]
     pub fn debug_scalar_csr(&self) -> Option<(Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>)> {
@@ -443,10 +425,9 @@ impl GpuUnifiedSolver {
     pub fn step_stats(&self) -> PlanStepStats {
         #[cfg(feature = "cpu")]
         if let Some(c) = self.cpu_ref() {
-            // CPU has no GPU convergence monitor / per-graph telemetry, but it can
-            // report steady-state auto-pause (should_stop) so the GUI behaves like
-            // the GPU under pseudo-transient continuation, plus the outer count
-            // actually executed (the CPU plateau detector's early exit).
+            // CPU has no per-graph telemetry, but reports steady-state auto-pause
+            // (should_stop) and the outer count actually executed, so the GUI
+            // behaves like the GPU under pseudo-transient continuation.
             let mut stats = PlanStepStats::default();
             stats.should_stop = Some(c.should_stop());
             stats.outer_iterations = Some(c.outer_iterations_done());
@@ -523,11 +504,10 @@ impl GpuUnifiedSolver {
             let n = (size_bytes as usize / 4).min(bytes.len());
             r.queue
                 .write_buffer(dst, 0, bytemuck::cast_slice(&bytes[..n]));
-            // Flush the upload now (an empty submit drains the staging belt), so the
-            // GUI render thread sees the new state this frame. The GPU branch below
-            // submits its copy explicitly; without this, the CPU write_buffer would
-            // only flush at egui's next submit — racy across the worker/render
-            // threads, which manifested as "Run does nothing visible" on CPU.
+            // Flush the upload now (empty submit drains the staging belt) so the
+            // GUI render thread sees the new state this frame. Without it the CPU
+            // write_buffer would only flush at egui's next submit — racy across
+            // the worker/render threads.
             r.queue.submit(std::iter::empty());
             return;
         }
@@ -725,23 +705,18 @@ impl GpuUnifiedSolver {
         }
     }
 
-    /// Refresh the solver's mesh-derived state after the caller's `Mesh` changed
-    /// (M2 of the meshless/moving-mesh roadmap).
+    /// Refresh the solver's mesh-derived state after the caller's `Mesh` changed.
     ///
-    /// [`MeshRefreshLevel::Geometry`] (Tier A): the mesh must be
-    /// topology-identical to the build-time mesh — same cell/face counts, same
-    /// owners/neighbors/boundary tags, same cell→face connectivity (validated;
-    /// `Err` on any mismatch) — with only positions moved. The six geometry
-    /// arrays (face areas/normals/centers/wrap shifts, cell centers/volumes)
-    /// are overwritten in place from the shared f64→f32 cast, on both backends.
-    /// Cell-indexed solver state (state ×3 history, warm-start `x`) is never
-    /// touched: cell `i` keeps its identity.
+    /// [`MeshRefreshLevel::Geometry`]: the mesh must be topology-identical to the
+    /// build-time mesh — same cell/face counts, owners/neighbors/boundary tags,
+    /// cell→face connectivity (validated; `Err` on any mismatch) — with only
+    /// positions moved. The six geometry arrays (face areas/normals/centers/wrap
+    /// shifts, cell centers/volumes) are overwritten in place from the shared
+    /// f64→f32 cast, on both backends. Cell-indexed solver state (state ×3
+    /// history, warm-start `x`) is never touched: cell `i` keeps its identity.
     ///
-    /// [`MeshRefreshLevel::Topology`] (Tier B) is not yet implemented.
-    ///
-    /// Note: the opt-in SRD operator (cut-cell sliver stabilizer) bakes mesh
-    /// geometry at build and is NOT rebuilt here; refresh is refused while SRD
-    /// is enabled (it is default-off, and unsupported with mesh motion in v1).
+    /// The opt-in SRD operator bakes mesh geometry at build and is NOT rebuilt
+    /// here, so refresh is refused while SRD is enabled.
     pub fn refresh_mesh(
         &mut self,
         mesh: &Mesh,
@@ -754,14 +729,11 @@ impl GpuUnifiedSolver {
                     .into(),
             );
         }
-        // ALE sequencing guard: on an ALE model, a plain geometry refresh
-        // updates `cell_vols` WITHOUT rotating the volume history and leaves
-        // the (stale, likely zero) mesh fluxes bound — the moving-volume ddt
-        // then sees an inconsistent (V^{n+1}, V^n) pair and the SCL breaks
-        // silently. The ALE seam is `begin_ale_step` (rotation + geometry +
-        // fluxes in the correct order); use it for any mid-run mesh change.
-        // Same hazard applies to a Topology refresh (it reallocates the mesh
-        // fluxes zero-filled), so both levels are rejected on ALE models.
+        // ALE sequencing guard: a plain refresh updates `cell_vols` WITHOUT
+        // rotating the volume history and leaves stale/zero mesh fluxes bound,
+        // so the moving-volume ddt sees an inconsistent (V^{n+1}, V^n) pair and
+        // the SCL breaks silently. Both levels are rejected on ALE models; use
+        // `begin_ale_step` (rotation + geometry + fluxes in the correct order).
         if self.model.system.is_ale() {
             return Err(
                 "refresh_mesh on an ALE model is rejected: it would update cell volumes \
@@ -787,13 +759,13 @@ impl GpuUnifiedSolver {
         }
     }
 
-    /// Capture the solver's stepping state (M2 Tier B stage 3) — see
+    /// Capture the solver's stepping state — see
     /// [`crate::solver::SolverStateSnapshot`]. The **CPU** backend captures the
     /// full time/warm-start/volume history (`has_history == true`), so a fresh
     /// solver restored from it reproduces the next step byte-identically. The
     /// **GPU** backend captures the current state + scalars only
-    /// (`has_history == false`); history/warm-start readback plumbing is a later
-    /// stage, so a GPU restore re-seeds the history from the current state.
+    /// (`has_history == false`), so a GPU restore re-seeds the history from the
+    /// current state.
     pub fn snapshot(&self) -> crate::solver::SolverStateSnapshot {
         #[cfg(feature = "cpu")]
         if let Some(c) = self.cpu_ref() {
@@ -823,8 +795,8 @@ impl GpuUnifiedSolver {
         }
     }
 
-    /// Restore a snapshot (M2 Tier B stage 3). CPU restores the full history
-    /// byte-exactly; GPU writes the current state (initial-condition semantics
+    /// Restore a snapshot. CPU restores the full history byte-exactly; GPU
+    /// writes the current state (initial-condition semantics
     /// propagate it to the time-history buffers) — exact for single-step
     /// schemes, a documented startup fallback for BDF2.
     pub fn restore(&mut self, snap: &crate::solver::SolverStateSnapshot) -> Result<(), String> {
@@ -840,26 +812,23 @@ impl GpuUnifiedSolver {
         Ok(())
     }
 
-    /// ALE step entry (M3.2 of the meshless/moving-mesh roadmap): after the
-    /// caller moved the mesh (topology-identical; `recalculate_geometry`
-    /// already run), rotate the volume history (`cell_vols_old_old ←
-    /// cell_vols_old ← cell_vols`), upload the new geometry, and upload the
-    /// per-face volumetric mesh fluxes — in that order (the rotation must
-    /// capture the pre-refresh volumes as `V^n`; see
-    /// `MeshResources::begin_ale_step`). Call once per step, before `step()`.
+    /// ALE step entry: after the caller moved the mesh (topology-identical;
+    /// `recalculate_geometry` already run), rotate the volume history
+    /// (`cell_vols_old_old ← cell_vols_old ← cell_vols`), upload the new
+    /// geometry, then upload the per-face volumetric mesh fluxes — in that order
+    /// (the rotation must capture the pre-refresh volumes as `V^n`). Call once
+    /// per step, before `step()`.
     ///
     /// `mesh_fluxes` must be the f32-CLOSED swept rates from
     /// [`crate::solver::mesh::ale::swept_mesh_fluxes_closed`] (owner-signed,
     /// Volume/Time); they are uploaded verbatim so the per-cell SCL closure
     /// `Σ_f flux_f ≈ (V^{n+1}−V^n)/dt` survives byte-exactly. Only `*_ale`
-    /// model kernels consume them; calling this on a static model is
-    /// harmless but pointless.
+    /// model kernels consume them.
     ///
-    /// **dt handshake (review-solver-ale F2)**: the closure fixes ONE dt; the
-    /// caller must step with exactly that dt (`set_dt` with the same value)
-    /// or the SCL silently breaks (Σφ·dt ≠ ΔV). `SolverDriver::begin_ale_step`
-    /// enforces this by rejecting `adaptive_dt`; raw-solver callers own the
-    /// contract themselves.
+    /// dt handshake: the closure fixes ONE dt; the caller must step with exactly
+    /// that dt (`set_dt` with the same value) or the SCL silently breaks
+    /// (Σφ·dt ≠ ΔV). `SolverDriver::begin_ale_step` enforces this by rejecting
+    /// `adaptive_dt`; raw-solver callers own the contract themselves.
     pub fn begin_ale_step(&mut self, mesh: &Mesh, mesh_fluxes: &[f32]) -> Result<(), String> {
         if self.srd_enabled && self.srd.is_some() {
             return Err(
@@ -888,28 +857,24 @@ impl GpuUnifiedSolver {
         Ok(())
     }
 
-    /// ALE step entry for a **topology-changing** mesh move (M2 Tier B): like
+    /// ALE step entry for a **topology-changing** mesh move: like
     /// [`Self::begin_ale_step`] but for a mesh whose face set / adjacency / nnz
     /// changed (same cell count). Rotates the volume history, rebuilds the whole
     /// topology-derived solver stack (CSR, linear system, bc tables,
-    /// preconditioner, bind groups), then uploads the closed mesh fluxes — the
-    /// M2 Tier B topology refresh fused with the M3 ALE rotation, in the correct
-    /// order (rotate → rebuild → geometry → fluxes).
+    /// preconditioner, bind groups), then uploads the closed mesh fluxes, in the
+    /// correct order (rotate → rebuild → geometry → fluxes).
     ///
     /// Returns the [`MeshRefreshReport`] so the caller re-applies any per-face
     /// BC overrides against the new face indexing (`bc_overrides_reset`). The
-    /// same M3 sequencing guards apply: the SRD stabilizer is refused, and
+    /// same sequencing guards apply: the SRD stabilizer is refused, and
     /// double-arming without an intervening `step()` is rejected (it would
     /// double-rotate the volume history).
     ///
-    /// NOTE (v1 scope): the closed `mesh_fluxes` a caller can supply today come
-    /// from [`crate::solver::mesh::ale::swept_mesh_fluxes_closed`], which needs
-    /// a fixed vertex set with linear motion (a persistent face↔swept-quad
-    /// correspondence). A genuine Voronoi *flip* regenerates the mesh with a new
-    /// vertex/face set, for which no swept-quad correspondence exists — that
-    /// conservative remap is M4. This arm is the machinery: it correctly fuses
-    /// the topology rebuild with the ALE rotation for any mesh whose fluxes are
-    /// validly closed (proven by the topology-driven GCL gate).
+    /// The closed `mesh_fluxes` must come from
+    /// [`crate::solver::mesh::ale::swept_mesh_fluxes_closed`], which needs a
+    /// fixed vertex set with linear motion (a persistent face↔swept-quad
+    /// correspondence); a genuine Voronoi flip that regenerates the vertex/face
+    /// set has no such correspondence and is not supported here.
     pub fn begin_ale_step_topology(
         &mut self,
         mesh: &Mesh,

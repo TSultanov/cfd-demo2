@@ -55,10 +55,9 @@ impl<M: GpuComputeModule> ModuleGraph<M> {
         Self { nodes }
     }
 
-    /// Create a clone of this graph containing only the nodes whose label
-    /// passes `keep`. Used for schedule variants that drop kernels which are
-    /// redundant in context (e.g. the pressure-gradient recompute on outer
-    /// iterations after the first, where `rhie_chow/grad_p_update` already
+    /// Clone this graph keeping only the nodes whose label passes `keep`. Used to
+    /// drop kernels redundant in context (e.g. the pressure-gradient recompute on
+    /// outer iterations after the first, where `rhie_chow/grad_p_update` already
     /// left an identical gradient).
     pub fn clone_filtered(&self, keep: impl Fn(&str) -> bool) -> Self {
         let nodes = self
@@ -179,7 +178,6 @@ impl<P: Copy, B: Copy> ModuleNode<P, B> {
                     }
                 }
 
-                // Count this dispatch for profiling
                 crate::count_dispatch!("Kernel Graph", spec.label);
             }
         }

@@ -158,11 +158,10 @@ pub fn run_to_steady_vec2(
 /// Effective mesh spacing for convergence fits on non-uniform meshes: the
 /// maximum cell extent (width or height) over all cells.
 ///
-/// Decision (Arc M): on a smoothly graded mesh the LARGEST cell bounds the
-/// truncation error, so fitting orders against it is the conservative
-/// choice — a mean or minimum spacing would inflate apparent orders. On a
-/// uniform n x n unit square this reduces to 1/n, so graded and uniform
-/// studies share one fit convention.
+/// On a graded mesh the LARGEST cell bounds the truncation error, so fitting
+/// orders against it is the conservative choice — a mean or minimum spacing
+/// would inflate apparent orders. On a uniform n x n unit square this reduces
+/// to 1/n, so graded and uniform studies share one fit convention.
 #[allow(dead_code)]
 pub fn max_cell_extent(mesh: &Mesh) -> f64 {
     let mut h_max = 0.0f64;

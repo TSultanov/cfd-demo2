@@ -2,7 +2,6 @@
 
 use crate::solver::model::ports::*;
 
-// Tests from inline module
 #[test]
 fn port_id_uniqueness() {
     let id1 = PortId::new(1);
@@ -16,12 +15,7 @@ fn port_id_uniqueness() {
 
 #[test]
 fn dimension_compatibility() {
-    // These should work - same dimensions
     assert!(Velocity::IS_COMPATIBLE_WITH::<Velocity>());
-
-    // These should also work - both dimensionless
     assert!(Dimensionless::IS_COMPATIBLE_WITH::<Dimensionless>());
-
-    // Different dimensions should not be compatible
     assert!(!Velocity::IS_COMPATIBLE_WITH::<Pressure>());
 }

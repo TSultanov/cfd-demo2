@@ -44,13 +44,7 @@ pub fn refine_node(node: &mut QuadNode, geo: &impl Geometry, min_size: f64, grow
         return;
     }
 
-    // Check if we need to split
-    // Split if boundary passes through
-    // Evaluate SDF at corners. If signs differ, boundary is inside.
-    // Also check center?
-    // Conservative: check min/max SDF in the box?
-    // Simple: check corners.
-
+    // Split if the boundary passes through the box: SDF signs differ at corners.
     let p00 = min;
     let p10 = Point2::new(max.x, min.y);
     let p11 = max;
@@ -66,12 +60,9 @@ pub fn refine_node(node: &mut QuadNode, geo: &impl Geometry, min_size: f64, grow
 
     let mut should_split = has_inside && has_outside;
 
-    // Growth rate restriction
     if !should_split {
-        // Even if not crossing boundary, we might need to split if we are close to boundary
-        // and the cell size is too large compared to distance.
-        // Max allowed size = min_size + growth_rate * distance
-        // Distance is approx min(|d|)
+        // Away from the boundary, still split if the cell is large relative to
+        // its distance: max allowed size = min_size + slope*dist, dist ≈ min|SDF|.
         let dist = d00.abs().min(d10.abs()).min(d11.abs()).min(d01.abs());
 
         // Interpret growth_rate as a ratio (e.g. 1.2), so slope is rate - 1.0

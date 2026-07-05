@@ -1,36 +1,8 @@
-//! M4.2 gates (meshless/moving-mesh roadmap §M4): PRESCRIBED seed motion
-//! through the FULL Voronoi-regen + swept-flux + refresh + ALE loop.
-//!
-//! Where M3's `ale_gcl_test` moved STRUCTURED-mesh vertices analytically (no
-//! regen), these gates move the meshless *seeds* and regenerate the Voronoi
-//! `Mesh` every step via the M0 engine — so the swept fluxes are built through
-//! the stage-2 seed-set vertex correspondence (`align_old_vertices_by_seed_set`,
-//! roadmap R2: vertex ≡ seed-triple), not the M3 same-index vertex arrays. The
-//! `MovingMeshDriver` owns the whole cycle (dt handshake → advect → regen →
-//! swept-flux → geometry seam → step); these tests only prescribe the motion
-//! and audit the physics.
-//!
-//! Gates:
-//!   * `gcl_moving_uniform_flow_preserved_cpu_{euler,bdf2}` — uniform diagonal
-//!     flow on a CVT mesh with a prescribed flip-free interior swirl stays
-//!     uniform through 120 regen steps: the moving-mesh GCL, at the CPU M3
-//!     ~1e-6 scale, plus the per-step f32 SCL defect / f64 telescoping identity
-//!     asserted every step.
-//!   * `conservation_moving_closed_box_cpu` — closed box, from rest, prescribed
-//!     interior swirl: Σρ·V tracks the (constant) box area to f64 and the run
-//!     develops only f32-noise spurious velocity (the M3 conservation audit
-//!     through the regen path).
-//!   * `flip_frequency_vs_amplitude` — a mesh-level probe (no solver): counts
-//!     how often adjacency flips as a rigid interior-translation amplitude
-//!     grows, documenting the persistent-topology envelope that motivates the
-//!     stage-3 conservative-remap work.
-//!
-//! Boundary conditions mirror `ale_gcl_test` exactly (a slip wall would
-//! contradict the diagonal free stream): flow enters left+bottom (Inlet,
-//! Dirichlet U0), leaves right+top (Outlet, zero-gradient U, gauge p=0). The
-//! meshless generator tags the box bottom/top as `Wall`, so the initial mesh's
-//! boundary tags are rewritten to that arrangement before build; the surgical
-//! geometry seam then preserves them across every regen.
+//! Prescribed seed motion through the full Voronoi-regen + swept-flux + refresh
+//! + ALE loop. The seeds move and the Voronoi `Mesh` is regenerated every step,
+//! so swept fluxes are built through the seed-set vertex correspondence
+//! (`align_old_vertices_by_seed_set`, vertex ≡ seed-triple). `MovingMeshDriver`
+//! owns the cycle; these tests prescribe the motion and audit the physics.
 #![cfg(all(feature = "meshgen", feature = "cpu"))]
 
 use cfd2::meshgen::meshless::{assemble_meshless_from_seeds, generate_cvt_mesh_with_seeds};
@@ -58,9 +30,8 @@ const PERIOD: f64 = 80.0 * DT as f64;
 /// Horizontal free stream. Uniform `(U,0)` is an exact discrete fixed point:
 /// inlet Dirichlet `(U,0)`, outlet zero-gradient, and slip walls `U·n=0` on the
 /// (horizontal) top/bottom are all satisfied — so any drift is a GCL/solve
-/// artifact, not BC physics. Horizontal (not the M3 diagonal) lets the natural
-/// scalar inlet BC carry it, so the topology seam's bc rebuild needs no vector
-/// re-override each step.
+/// artifact, not BC physics. Horizontal lets the scalar inlet BC carry it, so
+/// the topology seam's bc rebuild needs no vector re-override each step.
 const U0: (f32, f32) = (1.0, 0.0);
 
 /// Flip-free interior swirl: rotate each seed about the domain centre by an
@@ -80,9 +51,9 @@ fn swirl(p: [f64; 2], t: f64) -> [f64; 2] {
     [cx + c * dx - s * dy, cy + s * dx + c * dy]
 }
 
-/// Rigid translation of the interior seed block (boundary seeds fixed): the
-/// design's named M4.2 motion, and the flip-prone one — the fixed boundary
-/// seeds shear against the translating interior. Used only by the flip probe.
+/// Rigid translation of the interior seed block (boundary seeds fixed) — the
+/// flip-prone motion: fixed boundary seeds shear against the translating
+/// interior. Used only by the flip probe.
 fn rigid_at(p: [f64; 2], amp: f64) -> [f64; 2] {
     [p[0] + amp, p[1] + 0.6 * amp]
 }
@@ -195,8 +166,6 @@ fn run_gcl(time_scheme: TimeScheme) -> GclOut {
     // the bc tables from the regenerated mesh's tags each step).
     moving.set_boundary_retag(Some(tag_slip_channel));
     moving.driver_mut().apply_params(&params);
-    // Horizontal free stream is carried by the scalar inlet BC (apply_params
-    // sets U=(inlet_velocity, 0) = (1,0)); no per-step vector override needed.
 
     let layout = moving.driver().solver().model().state_layout.clone();
     let stride = layout.stride() as usize;
@@ -217,8 +186,8 @@ fn run_gcl(time_scheme: TimeScheme) -> GclOut {
     };
 
     for step in 0..STEPS {
-        // A genuine flip makes step() return Err (conservative remap deferred to
-        // stage 3); the flip-free swirl must never trigger it.
+        // A genuine flip makes step() return Err; the flip-free swirl must never
+        // trigger it.
         let (outcome, stats) = moving.step(false).unwrap_or_else(|e| {
             panic!("step {step} failed (a flip means the amplitude is too large): {e}")
         });
@@ -226,13 +195,11 @@ fn run_gcl(time_scheme: TimeScheme) -> GclOut {
         out.max_scl_defect = out.max_scl_defect.max(stats.scl_defect);
         out.max_identity_err = out.max_identity_err.max(stats.identity_err);
         out.max_skew = out.max_skew.max(stats.max_skew);
-        // `topo_changed` here counts topology-seam REBUILDS (any motion step),
-        // not flips — flips would have Err'd above.
+        // `topo_changed` counts topology-seam rebuilds (any motion step), not
+        // flips — flips would have Err'd above.
         if stats.topo_changed {
             out.rebuilds += 1;
         }
-        // Per-step SCL diagnostics: f64 telescoping identity and post-closure
-        // f32 defect, at roundoff scale.
         assert!(
             stats.identity_err < 1e-10,
             "step {step}: f64 swept-quad identity {:.3e} above roundoff",
@@ -292,14 +259,8 @@ fn run_gcl_cpu(scheme: TimeScheme, label: &str) -> GclOut {
     out
 }
 
-/// Caps pinned after first measurement (July 2026, 125-cell CVT square, 120
-/// steps, 6 outers, VanLeer, f64 CPU linear solve, swirl θ_peak=0.03):
-///   euler: max|U-U0| = 1.43e-6, max|p| = 2.00e-5 (SCL 9.8e-11, id 4.4e-14)
-///   bdf2:  see the printed line.
-/// The swirl reorders the face emission on ~24/120 steps (topology seam there,
-/// surgical geometry seam on the rest); a genuine flip would have Err'd out of
-/// `step`, so completing all `STEPS` proves flip-free. Caps ~3-4× measured, at
-/// the same scale as the M3 structured-mesh GCL gate.
+/// Caps are ~3-4× the measured drift (125-cell CVT square, swirl θ_peak=0.03).
+/// Completing all `STEPS` proves flip-free (a genuine flip Err's out of `step`).
 fn assert_gcl_caps(out: &GclOut) {
     assert!(out.max_identity_err < 1e-11, "f64 identity {:.3e}", out.max_identity_err);
     assert!(out.max_scl_defect < 1e-8, "SCL defect {:.3e}", out.max_scl_defect);
@@ -330,8 +291,6 @@ fn gcl_moving_uniform_flow_preserved_cpu_bdf2() {
     let out = run_gcl_cpu(TimeScheme::BDF2, "bdf2");
     assert_gcl_caps(&out);
 }
-
-// ─── Conservation: closed box, from rest, prescribed interior swirl ───────────
 
 struct ConsOut {
     max_area_err: f64,
@@ -388,7 +347,6 @@ fn run_conservation(time_scheme: TimeScheme) -> ConsOut {
             .step(false)
             .unwrap_or_else(|e| panic!("step {step} failed: {e}"));
         assert!(outcome.diverged.is_none(), "step {step} diverged");
-        // A genuine flip Err's out of step(); reaching here means flip-free.
         out.max_scl_defect = out.max_scl_defect.max(stats.scl_defect);
         out.max_identity_err = out.max_identity_err.max(stats.identity_err);
 
@@ -440,13 +398,10 @@ fn conservation_moving_closed_box_cpu() {
     assert!(out.max_scl_defect < 1e-7, "SCL defect {:.3e}", out.max_scl_defect);
 }
 
-// ─── Flip-frequency probe (mesh-level, no solver) ─────────────────────────────
-
 /// How large a rigid interior translation the persistent-topology swept-flux
-/// path tolerates before the Voronoi adjacency flips. This documents the
-/// stage-2 envelope and motivates the stage-3 conservative flip remap: at the
-/// amplitude the GCL/conservation swirl uses, zero flips; a rigid translation
-/// past a few hundredths of h starts flipping.
+/// path tolerates before the Voronoi adjacency flips: at the swirl amplitude
+/// the GCL/conservation gates use, zero flips; a rigid translation past a few
+/// hundredths of h starts flipping.
 #[test]
 fn flip_frequency_vs_amplitude() {
     let (geo, domain) = square();

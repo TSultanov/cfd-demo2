@@ -22,15 +22,13 @@
 //! `psi -> 0` limit. As `psi` grows, acoustic/compressible effects appear.
 //!
 //! **f32 by construction:** `p` is a gauge/perturbation pressure (O(rho*U^2),
-//! centred at 0, pinned to 0 at the outlet — inherited from the incompressible
-//! model), so `grad(p)` is resolved at full f32 precision. This is the property
-//! the density-based solver lacks (it carries absolute thermodynamic pressure
-//! ~1e5, burying the O(1e-4) wake signal below f32 epsilon).
+//! centred at 0, pinned to 0 at the outlet), so `grad(p)` is resolved at full f32
+//! precision — a density-based solver carrying absolute pressure ~1e5 buries the
+//! O(1e-4) wake signal below f32 epsilon.
 //!
-//! `psi` is a runtime state field (set uniformly to `1/c^2`); the density `rho`
-//! is likewise a state field. For the first slice `rho` is held at `rho_ref`
-//! (correct to O(Mach^2)); a `rho = rho_ref + psi*p` refresh kernel (true
-//! barotropic density coupling) is layered on in a later slice.
+//! `psi` and the density `rho` are runtime state fields. `rho` is initialised to
+//! `rho_ref` and refreshed from the EOS (`rho = rho_ref + psi*p`) each outer
+//! iteration.
 
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{
@@ -109,8 +107,7 @@ pub const ALLMACH_T_REF_FIELD: &str = "t_ref";
 /// set `rho_t_ref = density * ALLMACH_T_REF`.
 pub const ALLMACH_T_REF: f64 = 1.0;
 /// Thermal conduction coefficient divided by specific heat (`k / cp`, i.e.
-/// `rho * thermal_diffusivity`). Baked as a typed constant for now; promote to
-/// a runtime uniform param when GUI tuning is needed.
+/// `rho * thermal_diffusivity`).
 pub const ALLMACH_K_OVER_CP: f64 = 1.0e-2;
 
 /// Ratio of specific heats (diatomic / air). Sets the compression-heating
@@ -186,10 +183,9 @@ impl Default for AllMachPressureFields {
     }
 }
 
-/// Mirror of the incompressible momentum model's shipped viscous stress form
-/// (`FullDev2`): laplacian(mu,U) plus the explicit transpose/deviatoric
-/// correction. Kept identical so the incompressible limit (psi -> 0) is
-/// byte-comparable to `incompressible_momentum`.
+/// Full viscous stress (`FullDev2`): laplacian(mu,U) plus the explicit
+/// transpose/deviatoric correction. Kept identical to `incompressible_momentum`
+/// so the incompressible limit (psi -> 0) is byte-comparable.
 const USE_FULL_DEV2: bool = true;
 
 fn build_allmach_system(
@@ -208,10 +204,8 @@ fn build_allmach_system(
     let rho_coeff = TypedCoeff::from_field(rho_typed);
     let mu_coeff = TypedCoeff::from_field(mu_typed);
     // Pressure-Laplacian coefficient `rho_dp = rho * d_p` (the elliptic pressure
-    // coupling). The transonic/supersonic robustness comes from the pressure-flux
-    // Newton linearization attached to the `div_flux` term below (an implicit,
-    // upwinded hyperbolic coupling that stays diagonally dominant as the gas
-    // expands), not from the d_p formulation.
+    // coupling). Transonic/supersonic robustness comes from the pressure-flux
+    // Newton linearization on the `div_flux` term below, not from the d_p form.
     let rho_dp_coeff =
         TypedCoeff::from_field(rho_typed).multiply(TypedCoeff::from_field(d_p_typed));
     // The pressure-row ddt uses the LOW-MACH PRECONDITIONED compressibility (not the
@@ -219,7 +213,7 @@ fn build_allmach_system(
     // physical-`psi` refs inline (real thermodynamics, not the pseudo time scale).
     let psi_precond_coeff = TypedCoeff::from_field(psi_precond_typed);
 
-    // ----- Momentum equation (identical to incompressible_momentum) -----
+    // Momentum equation (identical to incompressible_momentum).
     let ddt_term = typed_fvm::ddt_coeff(rho_coeff, u_typed);
     let div_term = typed_fvm::div(phi_typed, u_typed).bounded();
     let laplacian_term = typed_fvm::laplacian(mu_coeff, u_typed);
@@ -243,28 +237,23 @@ fn build_allmach_system(
     }
     let momentum_eqn = momentum_sum.eqn(u_typed);
 
-    // ----- Continuity/pressure equation: incompressible terms + ddt(psi_precond,p) -----
+    // Continuity/pressure equation: incompressible terms + ddt(psi_precond,p).
     // ddt(psi_precond,p) integrates to: psi_precond * p * Vol / Time =
-    //   (Density/Pressure) * Pressure * Vol/Time = Density * Vol / Time = MassFlux. ✓
+    //   (Density/Pressure) * Pressure * Vol/Time = Density * Vol / Time = MassFlux.
     // The coefficient is the LOW-MACH PRECONDITIONED compressibility (not the physical
     // psi): it sets only the pseudo-acoustic time scale and vanishes at steady state
     // (dp/dt -> 0), so the converged solution is the real-psi physics. The physical psi
     // still drives the density recovery (host) and the thermal compression heating below.
     let compressibility_term = typed_fvm::ddt_coeff(psi_precond_coeff, p_typed);
     let p_laplacian_term = typed_fvm::laplacian(rho_dp_coeff, p_typed);
-    // The predicted mass-flux divergence `div(phi_pred)` is the explicit source
-    // of the pressure equation. On its own it is elliptic-only (the implicit
-    // p-coupling lives entirely in the Laplacian above), so at a SUPERSONIC
-    // outlet — where the pressure is extrapolated and the Laplacian contributes
-    // no constraint — the lagged `phi = rho_f * U_f` feedback runs the exit
-    // density to vacuum. Attaching the deferred-correction Newton linearization
-    // (Jacobian `d(div phi)/dp = psi * U.n * A`, upwinded) makes the pressure
-    // row well-posed there without touching the converged solution: the implicit
-    // damping and its frozen-state RHS correction cancel at convergence, so every
-    // low-Mach and steady result is unchanged, while the transonic/supersonic
-    // iteration stops diverging. Omitted on the `_mms` variant (byte-identical
-    // steady order test; its pinned box never approaches the runaway) and when
-    // `psi = 0` the term is identically zero (incompressible limit is unaffected).
+    // The predicted mass-flux divergence `div(phi_pred)` is the explicit source of
+    // the pressure equation, elliptic-only on its own. At a SUPERSONIC outlet (p
+    // extrapolated, Laplacian gives no constraint) the lagged `phi = rho_f * U_f`
+    // feedback would run the exit density to vacuum. The deferred-correction Newton
+    // linearization (Jacobian `d(div phi)/dp = psi * U.n * A`, upwinded) makes the
+    // pressure row well-posed there: its implicit damping and frozen-state RHS
+    // correction cancel at convergence, so every low-Mach/steady result is
+    // unchanged. Omitted on the `_mms` variant; identically zero when `psi = 0`.
     let p_div_flux_term = {
         let term = typed_fvm::div_flux(phi_typed, p_typed);
         if with_mms_source {
@@ -283,14 +272,10 @@ fn build_allmach_system(
     // Thermal expansion in continuity: d(rho)/dt = psi*dp/dt + rho_dT*dT/dt.
     // `compressibility_term` is the psi*dp/dt half; this adds the rho_dT*dT/dt half
     // (a p<-T cross-coupling). rho_dT = d(rho)/dT = -rho_t_ref/T^2 < 0 is recovered
-    // on-device. Units: ddt_coeff(rho_dT,T) = rho_dT*T*Vol/Time =
-    // (Density/Temp)*Temp*Vol/Time = Density*Vol/Time = MassFlux. ✓
-    // It is a TRANSIENT term (zero at steady state, dT/dt -> 0), so it is OMITTED
-    // from the `_mms` variant: the steady manufactured-solution order test measures
-    // spatial-operator accuracy, to which this term contributes nothing, and
-    // including it only stalls the fully-pinned closed-box march. It is validated
-    // for real (open) flows by the functional + transient tests. Production
-    // (`allmach_thermal`) always carries it.
+    // on-device. Units: ddt_coeff(rho_dT,T) = rho_dT*T*Vol/Time = MassFlux.
+    // TRANSIENT term (zero at steady state), so OMITTED from the `_mms` steady
+    // order test (contributes nothing to spatial-operator accuracy, only stalls the
+    // pinned closed-box march); production (`allmach_thermal`) always carries it.
     if thermal && !with_mms_source {
         let t_typed_p = TypedFieldRef::<Temperature, Scalar>::new(ALLMACH_TEMPERATURE_FIELD);
         let rho_dt_coeff =
@@ -312,20 +297,18 @@ fn build_allmach_system(
     system.add_equation(momentum_eqn);
     system.add_equation(pressure_eqn);
 
-    // ----- Temperature transport (thermal variant only) -----
-    // Low-Mach energy, declared divided by cp (so all terms share unit
-    // Density*Temperature*Volume/Time): ddt(rho,T) + div(phi,T) - lap(k/cp,T).
-    // T is advected by the SOLVED Rhie–Chow mass flux phi (same as buoyant),
-    // and rho is the EOS density recovered from (p,T) each outer iteration.
+    // Temperature transport (thermal variant only). Low-Mach energy, declared
+    // divided by cp (all terms share unit Density*Temperature*Volume/Time):
+    // ddt(rho,T) + div(phi,T) - lap(k/cp,T). T is advected by the SOLVED Rhie–Chow
+    // mass flux phi; rho is the EOS density recovered from (p,T) each outer iteration.
     if thermal {
         let t_typed = TypedFieldRef::<Temperature, Scalar>::new(ALLMACH_TEMPERATURE_FIELD);
         let rho_coeff_t = TypedCoeff::from_field(rho_typed);
         let t_ddt = typed_fvm::ddt_coeff(rho_coeff_t, t_typed);
-        // Production (compressible) uses BOUNDED convection so the energy is a clean
-        // rho*DT/Dt: the .bounded() form subtracts T*div(phi) = +T*d(rho)/dt, which
-        // cancels the conservative-form defect (ddt(rho,T)+div(phi,T) = rho*DT/Dt -
-        // T*d(rho)/dt). The steady _mms variant keeps the validated conservative form
-        // (compression terms are zero at steady state, so it stays byte-identical).
+        // Production uses BOUNDED convection for a clean rho*DT/Dt: .bounded()
+        // subtracts T*div(phi) = +T*d(rho)/dt, cancelling the conservative-form
+        // defect (ddt(rho,T)+div(phi,T) = rho*DT/Dt - T*d(rho)/dt). The `_mms`
+        // variant keeps the conservative form (compression terms zero at steady state).
         let t_div = if with_mms_source {
             typed_fvm::div(phi_typed, t_typed)
         } else {
@@ -338,14 +321,12 @@ fn build_allmach_system(
             + t_div.cast_to::<TEquationUnit>()
             + t_lap.cast_to::<TEquationUnit>();
 
-        // Compression heating (production only): the energy gains -(1/cp)*Dp/Dt so the
-        // gas heats under compression (stagnation / weak-shock T-rise) — the enabling
-        // physics for transonic flow. This first increment adds the dp/dt half as an
-        // implicit T<-p cross-ddt (rides the cross-variable ddt path in
-        // time_integration.rs). inv_cp = (gamma-1)*T_ref*psi keeps it consistent with
-        // the EOS (psi = 1/c^2) so the isentropic relation T/T0 = (p/p0)^((g-1)/g)
-        // emerges. SIGN (subtract) certified empirically by the uniform-fill test:
-        // a positive dp/dt must drive dT/dt > 0.
+        // Compression heating (production only): the energy gains -(1/cp)*Dp/Dt so
+        // the gas heats under compression. Two halves: (T1) the implicit dp/dt
+        // cross-ddt, (T2) the explicit U.grad(p) source. inv_cp = (gamma-1)*T_ref*psi
+        // keeps it consistent with the EOS (psi = 1/c^2) so the isentropic relation
+        // T/T0 = (p/p0)^((g-1)/g) emerges. SIGN certified empirically: a positive
+        // dp/dt must drive dT/dt > 0.
         if !with_mms_source {
             // (T1) dp/dt half: implicit T<-p cross-ddt, coefficient -inv_cp.
             let inv_cp_const: TypedCoeff<Temperature> =
@@ -357,20 +338,17 @@ fn build_allmach_system(
             t_sum = t_sum + comp_ddt.cast_to::<TEquationUnit>();
 
             // (T2) U.grad(p) half: explicit source for the pressure-advection part of
-            // -(1/cp)*Dp/Dt. u_dot_grad_p (=U.grad_p) is recovered on-device; using
-            // the stored grad_p makes it Picard-lagged by one outer iteration
-            // (vanishes at convergence). Coeff unit: Temperature * (Density/Pressure)
-            // * (Pressure/Time) = Density*Temp/Time = TSourceUnit, so source_coeff(.,T)
-            // integrates to TEquationUnit.
+            // -(1/cp)*Dp/Dt. u_dot_grad_p (=U.grad_p) is recovered on-device from the
+            // stored grad_p, so it is Picard-lagged one outer iteration (vanishes at
+            // convergence). Coeff unit: Temperature * (Density/Pressure) *
+            // (Pressure/Time) = TSourceUnit.
             //
-            // SIGN: +inv_cp here, the OPPOSITE source-code sign to the T1 dp/dt half
-            // (-inv_cp), even though both represent the same -(1/cp)Dp/Dt. The reason
-            // is the codegen convention: an implicit cross-ddt nets a sign flip via its
-            // matrix term (so ddt_coeff(-inv_cp,p) forces T by +inv_cp*dp/dt, heating),
-            // whereas an explicit source goes straight to the RHS unflipped (so
-            // source_coeff(c,T) forces T by +c). To get the SAME +inv_cp*U.grad(p)
-            // heating we therefore need c=+inv_cp. Certified empirically (a wrong sign
-            // cools under compression — verified to reduce, not add, the box T-rise).
+            // SIGN: +inv_cp here, OPPOSITE to the T1 half (-inv_cp), though both are
+            // the same -(1/cp)Dp/Dt. Codegen convention: an implicit cross-ddt nets a
+            // sign flip via its matrix term (ddt_coeff(-inv_cp,p) forces T by
+            // +inv_cp*dp/dt), whereas an explicit source hits the RHS unflipped
+            // (source_coeff(c,T) forces T by +c); so the same +inv_cp*U.grad(p) heating
+            // needs c=+inv_cp. Certified empirically (wrong sign cools under compression).
             let inv_cp_src: TypedCoeff<Temperature> =
                 TypedCoeff::constant((ALLMACH_GAMMA - 1.0) * ALLMACH_T_REF);
             let comp_adv_coeff = inv_cp_src
@@ -431,27 +409,21 @@ pub fn allmach_thermal_mms_model() -> Result<ModelSpec, String> {
     allmach_pressure_model_impl(true, true)
 }
 
-/// In-place flip of an all-Mach model's Inlet/Outlet boundary KINDS to the
-/// physically-correct CD-nozzle driving: a **pressure inlet** + a **supersonic
-/// (fully-extrapolated) outlet**.
-///
-/// The shipping model pins the gauge at the OUTLET (`p` Dirichlet there) and drives
-/// the flow with an inlet VELOCITY. This moves the single gauge anchor UPSTREAM and
-/// lets the outlet float:
-/// - `U` Inlet: Dirichlet(velocity) -> [ZeroGradient (axial speed develops with the
-///   pressure drop), Dirichlet(0) (transverse pinned — blocks corner backflow)];
-/// - `p` Inlet: ZeroGradient -> **Dirichlet** (the NEW gauge anchor; value set at
-///   runtime via `set_boundary_scalar(Inlet, "p", inlet_pressure)`);
-/// - `p` Outlet: Dirichlet(0) -> **ZeroGradient** (no back-pressure; extrapolate);
-/// - `T` Outlet (thermal only): Dirichlet(T_ref) -> ZeroGradient (a supersonic outlet
-///   must let the gas cool, not pin the reservoir temperature).
+/// In-place flip of an all-Mach model's Inlet/Outlet boundary KINDS to CD-nozzle
+/// driving: a pressure inlet + a supersonic (fully-extrapolated) outlet. Moves the
+/// single gauge anchor from the outlet upstream to the inlet and lets the outlet float:
+/// - `U` Inlet -> [ZeroGradient (axial speed develops with the drop), Dirichlet(0)
+///   (transverse pinned, blocks corner backflow)];
+/// - `p` Inlet -> Dirichlet (the new gauge anchor; value set at runtime via
+///   `set_boundary_scalar(Inlet, "p", inlet_pressure)`);
+/// - `p` Outlet -> ZeroGradient (no back-pressure; extrapolate);
+/// - `T` Outlet (thermal only) -> ZeroGradient (supersonic outlet must let the gas cool).
 ///
 /// The pressure-Dirichlet face count is unchanged (one boundary's worth moves from
 /// Outlet to Inlet), so the discrete pressure operator stays non-singular. BC kind is
 /// a runtime `bc_table` (not baked into kernels), so the model id / committed kernels
-/// are untouched — only the table differs. Validated stable + vacuum-free in
-/// `tests/nozzle_pressure_inlet_probe.rs`; NB this driving is over-expanded in the
-/// artificial-compressibility model (throat over-chokes, diverging section diffuses).
+/// are untouched. NB this driving is over-expanded in the artificial-compressibility
+/// model (throat over-chokes, diverging section diffuses).
 pub fn apply_pressure_inlet_nozzle_bcs(model: &mut ModelSpec) {
     use cfd2_ir::dimensions::{DivDim, InvTime, Length, Pressure, Temperature, Velocity};
 
@@ -487,7 +459,7 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
     let system = build_allmach_system(&fields, with_mms_source, thermal);
 
     // Keep U,p,d_p,grad_p,grad_p_old at the same offsets as incompressible
-    // (0,2,3,4,6); append psi (and any MMS sources) after.
+    // (0,2,3,4,6); append psi (and any MMS sources) after. Offsets are load-bearing.
     let mut layout_fields = vec![
         fields.u,
         fields.p,
@@ -541,11 +513,10 @@ fn allmach_pressure_model_impl(with_mms_source: bool, thermal: bool) -> Result<M
     }
     let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
 
-    // Historical ClosedForm d_p (= α_u·dt/ρ_ref): preserves the manufactured-solution
-    // order (the SIMPLEC `FromAssembledRowSum` row-sum d_p was tried for the supersonic
-    // runaway but degraded the coupled MMS u-order to ~1.6 < 1.65 — the runaway is now
-    // cured structurally by the pressure-flux Newton linearization instead, which does
-    // not touch the spatial operator / MMS order).
+    // ClosedForm d_p (= α_u·dt/ρ_ref) preserves the manufactured-solution order;
+    // the SIMPLEC `FromAssembledRowSum` row-sum d_p degrades coupled MMS u-order to
+    // ~1.6 < 1.65. The supersonic runaway is cured by the pressure-flux Newton
+    // linearization instead, which does not touch the spatial operator / MMS order.
     let derived_rhie_chow =
         crate::solver::model::flux_derivation::derive_rhie_chow(&system, &layout)
             .map_err(|e| format!("failed to derive Rhie–Chow flux: {e}"))?;

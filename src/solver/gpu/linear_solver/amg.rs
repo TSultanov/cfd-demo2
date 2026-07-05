@@ -45,8 +45,7 @@ pub struct AmgLevel {
     pub b_matrix_col_indices: wgpu::Buffer,
     pub b_matrix_values: wgpu::Buffer,
 
-    // Prolongation P (Coarse -> Fine)
-    // For aggregation, P is boolean/simple. We store it as CSR.
+    // Prolongation P (Coarse -> Fine), stored as CSR.
     pub b_p_row_offsets: wgpu::Buffer,
     pub b_p_col_indices: wgpu::Buffer,
     pub b_p_values: wgpu::Buffer,
@@ -56,12 +55,10 @@ pub struct AmgLevel {
     pub b_r_col_indices: wgpu::Buffer,
     pub b_r_values: wgpu::Buffer,
 
-    // State vectors
-    pub b_x: wgpu::Buffer, // Solution
-    pub b_b: wgpu::Buffer, // RHS
+    pub b_x: wgpu::Buffer,
+    pub b_b: wgpu::Buffer,
     pub b_params: wgpu::Buffer,
 
-    // Bind groups
     pub bg_matrix: wgpu::BindGroup,
     pub bg_p: wgpu::BindGroup,
     pub bg_r: wgpu::BindGroup,
@@ -88,37 +85,30 @@ pub struct AmgResources {
     bindings: &'static [wgsl_reflect::WgslBindingDesc],
 }
 
-// Simple greedy aggregation
 pub fn aggregate(matrix: &CsrMatrix) -> (Vec<usize>, usize) {
     let n = matrix.num_rows;
     let mut aggregates = vec![usize::MAX; n];
     let mut num_aggregates = 0;
 
-    // Simple greedy pass
     for i in 0..n {
         if aggregates[i] != usize::MAX {
             continue;
         }
 
-        // Start new aggregate
         aggregates[i] = num_aggregates;
 
-        // Add unaggregated neighbors (strong connections)
         let start = matrix.row_offsets[i] as usize;
         let end = matrix.row_offsets[i + 1] as usize;
 
         for k in start..end {
             let j = matrix.col_indices[k] as usize;
             if j != i && aggregates[j] == usize::MAX {
-                // Check strength? For now just connectivity
                 aggregates[j] = num_aggregates;
             }
         }
 
         num_aggregates += 1;
     }
-
-    // Cleanup singletons (optional: merge into neighbors)
 
     (aggregates, num_aggregates)
 }
@@ -128,8 +118,7 @@ pub fn build_prolongation(
     num_aggregates: usize,
     fine_size: usize,
 ) -> CsrMatrix {
-    // P is fine_size x num_aggregates
-    // P_ij = 1 if fine node i is in aggregate j
+    // P is fine_size x num_aggregates; P_ij = 1 iff fine node i is in aggregate j.
     let mut p = CsrMatrix::new(fine_size, num_aggregates);
 
     let mut count = 0;
@@ -148,13 +137,11 @@ pub fn build_prolongation(
 pub fn transpose(matrix: &CsrMatrix) -> CsrMatrix {
     let mut t = CsrMatrix::new(matrix.num_cols, matrix.num_rows);
 
-    // Count entries per row in T (cols in M)
     let mut row_counts = vec![0; matrix.num_cols];
     for col in &matrix.col_indices {
         row_counts[*col as usize] += 1;
     }
 
-    // Build row offsets
     let mut count = 0;
     for (i, &row_count) in row_counts.iter().enumerate() {
         t.row_offsets[i] = count;
@@ -162,8 +149,6 @@ pub fn transpose(matrix: &CsrMatrix) -> CsrMatrix {
     }
     t.row_offsets[matrix.num_cols] = count;
 
-    // Fill
-    // Re-do with vec of vecs for simplicity
     let mut rows = vec![Vec::new(); matrix.num_cols];
     for (i, (&start, &end)) in matrix.row_offsets[..matrix.num_rows]
         .iter()
@@ -196,14 +181,12 @@ pub fn transpose(matrix: &CsrMatrix) -> CsrMatrix {
 }
 
 pub fn mat_mat_mult(a: &CsrMatrix, b: &CsrMatrix) -> CsrMatrix {
-    // C = A * B
     let mut c = CsrMatrix::new(a.num_rows, b.num_cols);
 
     let mut offset = 0;
     for i in 0..a.num_rows {
         c.row_offsets[i] = offset;
 
-        // Row i of A
         let start_a = a.row_offsets[i] as usize;
         let end_a = a.row_offsets[i + 1] as usize;
 
@@ -213,7 +196,6 @@ pub fn mat_mat_mult(a: &CsrMatrix, b: &CsrMatrix) -> CsrMatrix {
             let j = a.col_indices[k_a] as usize;
             let val_a = a.values[k_a];
 
-            // Row j of B
             let start_b = b.row_offsets[j] as usize;
             let end_b = b.row_offsets[j + 1] as usize;
 
@@ -225,7 +207,7 @@ pub fn mat_mat_mult(a: &CsrMatrix, b: &CsrMatrix) -> CsrMatrix {
             }
         }
 
-        // Sort by column index
+        // keep col_indices sorted per row
         let mut sorted_cols: Vec<_> = row_vals.into_iter().collect();
         sorted_cols.sort_by_key(|k| k.0);
 
@@ -240,7 +222,6 @@ pub fn mat_mat_mult(a: &CsrMatrix, b: &CsrMatrix) -> CsrMatrix {
 }
 
 pub fn galerkin_product(r: &CsrMatrix, a: &CsrMatrix, p: &CsrMatrix) -> CsrMatrix {
-    // R * A * P
     let ra = mat_mat_mult(r, a);
     mat_mat_mult(&ra, p)
 }
@@ -263,8 +244,8 @@ impl AmgResources {
         let mut levels = Vec::new();
         let mut current_matrix = fine_matrix.clone();
 
-        // `restrict_src` is still fetched for its `.bindings`; the pipelines are
-        // served from the per-device cache (no recompile across a refresh).
+        // restrict_src is fetched only for its `.bindings`; the pipelines come
+        // from the per-device cache.
         let restrict_src =
             kernel_registry::kernel_source_by_id("", KernelId::AMG_RESTRICT_RESIDUAL)
                 .map_err(|e| format!("amg/restrict_residual shader missing: {e}"))?;
@@ -290,11 +271,9 @@ impl AmgResources {
             mapped_at_creation: false,
         });
 
-        // Build Hierarchy
         for level_idx in 0..max_levels {
             let n = current_matrix.num_rows;
 
-            // Create buffers for matrix
             let b_matrix_row_offsets =
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some(&format!("AMG L{} Matrix Row Offsets", level_idx)),
@@ -313,7 +292,6 @@ impl AmgResources {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
 
-            // Create state buffers
             let b_x = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(&format!("AMG L{} x", level_idx)),
                 size: (n as u64) * 4,
@@ -331,7 +309,6 @@ impl AmgResources {
                 mapped_at_creation: false,
             });
 
-            // Bind Groups
             let bg_matrix = {
                 let registry = ResourceRegistry::new()
                     .with_buffer("row_offsets", &b_matrix_row_offsets)
@@ -348,7 +325,6 @@ impl AmgResources {
                 .map_err(|e| format!("AMG L{level_idx} matrix BG creation failed: {e}"))?
             };
 
-            // Params buffer
             let params = AmgParams {
                 n: n as u32,
                 omega: 0.8,
@@ -376,14 +352,12 @@ impl AmgResources {
                 .map_err(|e| format!("AMG L{level_idx} state BG creation failed: {e}"))?
             };
 
-            // Coarsening (if not last level)
             let (p, r) = if level_idx < max_levels - 1 && n > 100 {
                 let (aggregates, num_aggs) = aggregate(&current_matrix);
                 if num_aggs < n {
                     let p_mat = build_prolongation(&aggregates, num_aggs, n);
                     let r_mat = transpose(&p_mat);
 
-                    // Galerkin product for next level
                     let next_matrix = galerkin_product(&r_mat, &current_matrix, &p_mat);
                     current_matrix = next_matrix;
 
@@ -395,7 +369,6 @@ impl AmgResources {
                 (None, None)
             };
 
-            // Create P and R buffers (dummy if None)
             let create_csr_buffers = |mat: Option<&CsrMatrix>| {
                 if let Some(m) = mat {
                     (
@@ -416,7 +389,6 @@ impl AmgResources {
                         }),
                     )
                 } else {
-                    // Dummy buffers
                     (
                         device.create_buffer(&wgpu::BufferDescriptor {
                             label: None,
@@ -502,7 +474,6 @@ impl AmgResources {
             }
         }
 
-        // Create cross-level bind groups
         for i in 0..levels.len() - 1 {
             let coarse_b = &levels[i + 1].b_b;
             let coarse_x = &levels[i + 1].b_x;
@@ -657,14 +628,9 @@ impl AmgResources {
             // 2. Fused Residual + Restrict (r_fine implicit, r_coarse = R * (b - Ax))
             if let Some(bg_cross) = &fine.bg_restrict {
                 pass.set_pipeline(&self.pipeline_restrict_residual);
-                // Bind groups used:
-                // 0: Matrix (Fine)
-                // 1: State (Fine x, b)
-                // 2: Op (R)
-                // 3: Cross (Coarse b)
                 pass.set_bind_group(0, &fine.bg_matrix, &[]);
                 pass.set_bind_group(1, state_bg(i), &[]);
-                pass.set_bind_group(2, &fine.bg_r, &[]); // bg_r contains R op buffers
+                pass.set_bind_group(2, &fine.bg_r, &[]); // bg_r holds the R op buffers
                 pass.set_bind_group(3, bg_cross, &[]);
                 pass.dispatch_workgroups(coarse_dispatch_x, coarse_dispatch_y, 1);
             }
@@ -715,8 +681,8 @@ impl AmgResources {
                 pass.set_pipeline(&self.pipeline_prolongate);
                 pass.set_bind_group(0, &fine.bg_matrix, &[]);
                 pass.set_bind_group(1, state_bg(i), &[]);
-                pass.set_bind_group(2, &fine.bg_p, &[]); // P op
-                pass.set_bind_group(3, bg_cross, &[]); // Coarse x
+                pass.set_bind_group(2, &fine.bg_p, &[]);
+                pass.set_bind_group(3, bg_cross, &[]);
                 pass.dispatch_workgroups(fine_dispatch_x, fine_dispatch_y, 1);
             }
 

@@ -1,14 +1,8 @@
 //! Fusion parity tests for the `generic_diffusion_demo` and
 //! `generic_diffusion_demo_neumann` models.
 //!
-//! Neither model has fusion rules declared (FUSION_COVERAGE.md).
-//! The `assembly` / `assembly_grad_state` pair has a safe-fuseable opportunity
-//! identified but no rule is declared, so all policies should produce the same
-//! schedule and identical solver output.
-//!
-//! These tests verify:
-//! - All three policies produce identical solver output for `phi`.
-//! - Dispatch counts are unchanged across policies.
+//! Neither model has fusion rules declared, so all three policies should produce
+//! identical solver output for `phi` and identical dispatch counts.
 
 use cfd2::solver::gpu::dispatch_counter::{get_dispatch_stats, DispatchScope};
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
@@ -21,10 +15,6 @@ use cfd2::solver::model::{
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 use std::sync::{Mutex, OnceLock};
-
-// ---------------------------------------------------------------------------
-// Snapshot and helpers
-// ---------------------------------------------------------------------------
 
 struct DiffusionSnapshot {
     phi: Vec<f64>,
@@ -61,7 +51,7 @@ fn run_diffusion_with_policy(
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let mut model = model_fn().expect("model");
-    // generic_diffusion_demo has linear_solver = None. Set it to control fusion policy.
+    // Model has linear_solver = None; set one to control the fusion policy.
     let mut spec = ModelLinearSolverSpec::default();
     spec.solver.kernel_fusion_policy = policy;
     model.linear_solver = Some(spec);
@@ -80,7 +70,6 @@ fn run_diffusion_with_policy(
     solver.set_density(1.0).expect("set density");
     solver.set_viscosity(1e-3).expect("set viscosity");
 
-    // Set initial condition: phi = sin(pi * x).
     let phi_init: Vec<f64> = mesh
         .cell_cx
         .iter()
@@ -142,10 +131,6 @@ fn run_diffusion_dispatch_count(
     let stats = get_dispatch_stats();
     stats.by_category.get("Kernel Graph").copied().unwrap_or(0)
 }
-
-// ---------------------------------------------------------------------------
-// generic_diffusion_demo tests
-// ---------------------------------------------------------------------------
 
 /// All three fusion policies should produce identical `phi` for
 /// `generic_diffusion_demo` since no fusion rules are declared.
@@ -229,10 +214,6 @@ fn generic_diffusion_demo_dispatch_count_unchanged() {
         "expected identical dispatch count for Safe ({safe}) and Aggressive ({aggressive}) policies"
     );
 }
-
-// ---------------------------------------------------------------------------
-// generic_diffusion_demo_neumann tests
-// ---------------------------------------------------------------------------
 
 /// All three fusion policies should produce identical `phi` for
 /// `generic_diffusion_demo_neumann` since no fusion rules are declared.

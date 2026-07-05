@@ -1,7 +1,7 @@
 //! Fusion parity tests for the `compressible` model.
 //!
-//! The compressible model has no fusion rules declared (FUSION_COVERAGE.md).
-//! The `assembly` / `assembly_grad_state` pair is mutually exclusive
+//! The compressible model has no fusion rules declared. The `assembly` /
+//! `assembly_grad_state` pair is mutually exclusive
 //! (`RequiresNoGradState` / `RequiresGradState`), so no fusion can occur.
 //!
 //! These tests verify:
@@ -18,10 +18,6 @@ use cfd2::solver::model::ModelLinearSolverSpec;
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 use std::sync::{Mutex, OnceLock};
-
-// ---------------------------------------------------------------------------
-// Snapshot and helpers
-// ---------------------------------------------------------------------------
 
 struct CompressibleSnapshot {
     rho: Vec<f64>,
@@ -58,8 +54,7 @@ fn run_compressible_with_policy(
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let mut model = compressible_model().expect("model");
-    // compressible_model().expect("model") defaults to linear_solver = None. We set it to
-    // control the fusion policy.
+    // model defaults to linear_solver = None; set it to control the fusion policy.
     let mut spec = ModelLinearSolverSpec::default();
     spec.solver.kernel_fusion_policy = policy;
     model.linear_solver = Some(spec);
@@ -152,10 +147,6 @@ fn run_compressible_dispatch_count(mesh: &Mesh, policy: KernelFusionPolicy, step
     let stats = get_dispatch_stats();
     stats.by_category.get("Kernel Graph").copied().unwrap_or(0)
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 /// All three fusion policies should produce identical results for the
 /// compressible model since no fusion rules are declared.

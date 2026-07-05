@@ -330,10 +330,8 @@ impl ScalarCgModule {
                 .queue
                 .write_buffer(&self.b_solver_params, 0, bytemuck::bytes_of(&params));
 
-            // Zero the solution vector.
             encoder.clear_buffer(&self.b_x, 0, None);
 
-            // Initial copies: rhs -> r, rhs -> p, rhs -> r0
             encoder.copy_buffer_to_buffer(&self.b_rhs, 0, &self.b_r, 0, buffer_size);
             encoder.copy_buffer_to_buffer(&self.b_rhs, 0, &self.b_p, 0, buffer_size);
             encoder.copy_buffer_to_buffer(&self.b_rhs, 0, &self.b_r0, 0, buffer_size);

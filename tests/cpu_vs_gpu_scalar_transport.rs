@@ -109,7 +109,6 @@ fn run_gpu(mesh: &Mesh, scheme: Scheme) -> Vec<f64> {
 
 #[test]
 fn cpu_matches_gpu_scalar_transport() {
-    // Validate every CPU computation option against the GPU for both schemes.
     let configs = [
         (
             "interp/1t",

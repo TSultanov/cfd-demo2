@@ -7,9 +7,6 @@ use cfd2_ir::ports::{
 use cfd2_ir::kernel::StateLayout;
 
 /// Stable identifier for a compute kernel.
-///
-/// This is used by the unified solver orchestration to decouple scheduling and lookup
-/// from handwritten enums/matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KernelId(pub &'static str);
 
@@ -17,7 +14,7 @@ impl KernelId {
     pub const FLUX_MODULE_GRADIENTS: KernelId = KernelId("flux_module_gradients");
     pub const FLUX_MODULE: KernelId = KernelId("flux_module");
 
-    /// Rhie-Chow post-solve pressure-gradient refresh (modules/rhie_chow.rs).
+    /// Rhie-Chow post-solve pressure-gradient refresh.
     /// Schedule logic keys on this (see [`Self::refreshes_grad_p`]): it writes
     /// the SAME state grad_p slots with the SAME Green-Gauss stencil as
     /// [`Self::FLUX_MODULE_GRADIENTS`], which both backends therefore skip on
@@ -49,18 +46,16 @@ impl KernelId {
             || id == Self::RHIE_CHOW_DP_INIT_DP_UPDATE_STORE_GRAD_P_GRAD_P_UPDATE_CORRECT_VELOCITY_DELTA_FUSED.0
     }
 
-    /// Generic refresh of expression-valued boundary-table entries
-    /// (`BcValue::Expr`); see modules/bc_expr.rs.
+    /// Generic refresh of expression-valued boundary-table entries (`BcValue::Expr`).
     pub const BC_EXPR_UPDATE: KernelId = KernelId("bc_expr_update");
     pub const COMPRESSIBLE_VISCOUS_P_DIV_U: KernelId = KernelId("compressible/viscous_p_div_u");
 
     pub const GENERIC_COUPLED_ASSEMBLY: KernelId = KernelId("generic_coupled_assembly");
     pub const GENERIC_COUPLED_ASSEMBLY_GRAD_STATE: KernelId =
         KernelId("generic_coupled_assembly_grad_state");
-    /// RHS-only variants of the two assembly kernels (matrix writes stripped,
-    /// see cfd2_codegen::solver::codegen::rhs_only) for outer iterations that
-    /// FREEZE the assembled matrix (KernelPhaseId::AssemblyRhsOnly; scheduled
-    /// only when matrix freezing is active, default off).
+    /// RHS-only variants of the two assembly kernels (matrix writes stripped)
+    /// for outer iterations that FREEZE the assembled matrix; scheduled only
+    /// when matrix freezing is active (default off).
     pub const GENERIC_COUPLED_ASSEMBLY_RHS_ONLY: KernelId =
         KernelId("generic_coupled_assembly_rhs_only");
     pub const GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY: KernelId =
@@ -131,12 +126,7 @@ impl KernelId {
     }
 }
 
-/// Build-time-generated kernels.
-///
 /// Kernel filenames are derived from `KernelId` by replacing `/` with `_`.
-///
-/// To support pluggable numerical modules (Gap 0 in `CODEGEN_PLAN.md`), per-model kernel WGSL
-/// generators are looked up via the model's module list.
 /// Model-owned kernel phase classification (GPU-agnostic).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KernelPhaseId {
@@ -144,10 +134,9 @@ pub enum KernelPhaseId {
     Gradients,
     FluxComputation,
     Assembly,
-    /// RHS-only re-assembly for outer iterations with a FROZEN matrix
-    /// (see cfd2_codegen::solver::codegen::rhs_only). Never part of the
-    /// normal per-iteration graphs; scheduled only by the matrix-freeze
-    /// paths (default off).
+    /// RHS-only re-assembly for outer iterations with a FROZEN matrix. Never
+    /// part of the normal per-iteration graphs; scheduled only by the
+    /// matrix-freeze paths (default off).
     AssemblyRhsOnly,
     Apply,
     Update,
@@ -223,9 +212,9 @@ pub enum FusionGuard {
     /// terms). Fusing the gradients kernel into the assembly dispatch then
     /// makes neighbor gradient reads racy (fresh-or-stale within the same
     /// dispatch), breaking the Safe policy's bit-identical contract.
-    /// (The SOU reconstruction's neighbor gradient reads predate this guard
-    /// and are tolerated as a lagged correction; dev2 terms make gradient
-    /// values first-class operands, so the fusion must not apply.)
+    /// (SOU reconstruction's neighbor gradient reads are tolerated as a
+    /// lagged correction; dev2 terms make gradient values first-class
+    /// operands, so the fusion must not apply.)
     RequiresNoNeighborGradConsumers,
 }
 
@@ -234,7 +223,7 @@ pub struct KernelPatternAtom {
     pub id: KernelId,
     pub dispatch: Option<DispatchKindId>,
     /// Override the expected phase for this atom.  When `None` the atom
-    /// inherits the rule-level `phase` (the original behaviour).
+    /// inherits the rule-level `phase`.
     pub phase: Option<KernelPhaseId>,
 }
 
@@ -609,11 +598,7 @@ pub fn kernel_output_name_for_model(model_id: &str, kernel_id: KernelId) -> Resu
     }
 }
 
-/// Convert a StateLayout to a ResolvedStateSlotsSpec for use in codegen.
-/// Build a [`ResolvedStateSlotsSpec`] from a [`StateLayout`].
-///
-/// Delegates to [`PortRegistry::to_resolved_state_slots()`] to avoid duplicating
-/// the field-to-slot conversion logic.
+/// Build a [`ResolvedStateSlotsSpec`] from a [`StateLayout`] for use in codegen.
 fn resolved_slots_from_layout(layout: &StateLayout) -> ResolvedStateSlotsSpec {
     let registry = crate::solver::model::ports::PortRegistry::new(layout.clone());
     registry.to_resolved_state_slots()
@@ -776,8 +761,8 @@ pub(crate) fn generate_packed_state_gradients_kernel_program(
     // reconstruction reads), so the generator needs each solved unknown's
     // state offset in equation-declaration (boundary-table rank) order.
     // Unknown rank == state offset only for models whose unknowns are a
-    // prefix of the state layout; the buoyant model's temperature (behind
-    // d_p/grad_p aux fields) is the counterexample that exposed this.
+    // prefix of the state layout; the buoyant model's temperature sits
+    // behind d_p/grad_p aux fields.
     let unknown_state_offsets = model_unknown_state_offsets(model)
         .map_err(|e| format!("packed_state_gradients: {e}"))?;
     cfd2_codegen::solver::codegen::generate_packed_state_gradients_kernel_program(
@@ -812,9 +797,7 @@ pub(crate) fn model_unknown_state_offsets(
 }
 
 /// Resolve a state offset by field name, supporting component suffixes (e.g., "rho_u_x").
-/// Uses the ResolvedStateSlotsSpec to find the base offset and add component index.
 fn resolve_offset_from_slots(slots: &ResolvedStateSlotsSpec, name: &str) -> Option<u32> {
-    // Helper to find a slot by field name
     fn find_slot<'a>(
         slots: &'a ResolvedStateSlotsSpec,
         field: &str,
@@ -822,12 +805,10 @@ fn resolve_offset_from_slots(slots: &ResolvedStateSlotsSpec, name: &str) -> Opti
         slots.slots.iter().find(|s| s.name == field)
     }
 
-    // First, try direct field lookup
     if let Some(slot) = find_slot(slots, name) {
         return Some(slot.base_offset);
     }
 
-    // Try to parse component suffix (_x, _y, _z)
     let (base, component) = name.rsplit_once('_')?;
     let component = match component {
         "x" => 0,
@@ -1494,8 +1475,6 @@ mod contract_tests {
         let _ = std::fs::remove_dir_all(&out_dir);
     }
 }
-
-// (intentionally no additional kernel-analysis helpers here; kernel selection is recipe-driven)
 
 #[cfg(test)]
 mod tests {

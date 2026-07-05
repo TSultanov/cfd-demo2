@@ -1,9 +1,8 @@
 //! CPU-backend MMS convergence for the diffusion operator
 //! (`generic_diffusion_demo_*_mms` models): constructs a `CpuSolver` directly
 //! (no GPU adapter) and verifies the manufactured solution converges at design
-//! order. This is the first *coupled-path* model on the CPU backend (the
-//! recipe-phase-driven driver: prepare/assembly/solve/update, Neumann + per-face
-//! Dirichlet BCs, the no-flux path) even though diffusion is `S == 1`.
+//! order. Exercises the coupled recipe-phase driver (prepare/assembly/solve/
+//! update), Neumann + per-face Dirichlet BCs, and the no-flux path.
 #![cfg(feature = "cpu")]
 
 use cfd2::solver::cpu::{CpuBackendConfig, CpuEngine, CpuSolver};

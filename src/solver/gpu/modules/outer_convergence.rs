@@ -39,13 +39,10 @@ struct GpuOuterConvergenceBreakParams {
     plateau_ceiling: f32,
     min_iters_tol: u32,
     min_iters_stall: u32,
-    /// 0 = legacy per-target tolerance check; nonzero = the GPU port of the
-    /// host outer plateau detector (tolerance + stall exits).
+    /// 0 = per-target tolerance check; nonzero = plateau detector (tolerance + stall exits).
     plateau_mode: u32,
 }
 
-/// Builds the outer convergence break kernel WGSL via the structured DSL.
-///
 pub(crate) struct OuterConvergenceMonitor {
     target_names: Vec<String>,
     pipeline: wgpu::ComputePipeline,
@@ -111,7 +108,6 @@ impl OuterConvergenceMonitor {
             }
             unknown_offset_cursor += comps as u32;
 
-            // Get state offsets from the pre-resolved mapping
             let mut offsets_state = [0u32; 4];
             let mut has_all_offsets = true;
             for (comp, offset) in offsets_state.iter_mut().enumerate().take(comps) {
@@ -247,9 +243,8 @@ impl OuterConvergenceMonitor {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        // Plateau-mode state (see the break kernel docs): previous-sweep delta
-        // maxima and the on-device sweep counter, both rolled by the break
-        // kernel itself and cleared at each step's first outer.
+        // Plateau-mode state: previous-sweep delta maxima and the on-device sweep
+        // counter, both rolled by the break kernel and cleared at each step's first outer.
         let b_delta_prev = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("outer_convergence:delta_prev"),
             size: (num_targets as u64) * 4,
@@ -639,8 +634,6 @@ impl OuterConvergenceMonitor {
         Ok(converged)
     }
 
-    // --- Encode-only methods for GPU-driven adaptive outer break ---
-
     /// Create a bind group for the reduction pipeline bound to the state buffer.
     /// Call this once before the one-submission encoder loop.
     pub(crate) fn create_state_bind_group(
@@ -688,10 +681,9 @@ impl OuterConvergenceMonitor {
         queue.write_buffer(&self.b_break_params, 0, bytes_of(&params));
     }
 
-    /// Upload PLATEAU-mode break parameters: the break kernel then evaluates
-    /// the host outer plateau detector's tolerance + stall exits on-device
-    /// (see the codegen doc for the exact semantics), letting plateau-driven
-    /// models run the batched one-submission outer path.
+    /// Upload PLATEAU-mode break parameters: the break kernel then evaluates the
+    /// outer plateau detector's tolerance + stall exits on-device, letting
+    /// plateau-driven models run the batched one-submission outer path.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn upload_break_params_plateau(
         &self,

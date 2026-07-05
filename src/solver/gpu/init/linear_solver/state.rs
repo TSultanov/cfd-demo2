@@ -71,7 +71,6 @@ pub fn init_state(device: &wgpu::Device, num_cells: u32) -> StateResources {
         mapped_at_creation: false,
     });
 
-    // Dot Product & Params
     let workgroup_size = 64;
     let num_groups = num_cells.div_ceil(workgroup_size);
 

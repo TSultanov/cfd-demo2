@@ -11,7 +11,6 @@ use nalgebra::{Point2, Vector2};
 
 #[test]
 fn test_gpu_divergence_channel_obstacle() {
-    // Setup similar to UI
     let length = 3.0;
     let domain_size = Vector2::new(length, 1.0);
     let geo = ChannelWithObstacle {
@@ -33,12 +32,10 @@ fn test_gpu_divergence_channel_obstacle() {
         .fold(f64::INFINITY, f64::min)
         .sqrt();
 
-    // Initialize Solver
     let timestep = 0.01;
     let density = 1.0;
     let viscosity = 0.01;
 
-    // GPU Init
     println!("Initializing GPU solver...");
     let config = SolverConfig {
         advection_scheme: Scheme::Upwind,
@@ -63,7 +60,6 @@ fn test_gpu_divergence_channel_obstacle() {
     gpu_solver.set_inlet_velocity(1.0).unwrap();
     gpu_solver.set_outer_iters(2).unwrap();
 
-    // Initial Conditions
     let mut u_init = Vec::new();
     for i in 0..mesh.num_cells() {
         let cx = mesh.cell_cx[i];
@@ -75,13 +71,11 @@ fn test_gpu_divergence_channel_obstacle() {
     }
     gpu_solver.set_u(&u_init);
 
-    // Run loop
     println!("Starting simulation loop...");
     let max_steps = 200;
     let target_cfl = 0.5;
 
     for step in 0..max_steps {
-        // Adaptive Timestep Logic
         let u = pollster::block_on(gpu_solver.get_u());
         let mut max_vel = 0.0f64;
         for (vx, vy) in &u {

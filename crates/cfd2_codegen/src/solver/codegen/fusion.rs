@@ -344,7 +344,6 @@ pub fn synthesize_fused_program_with_report_remapped(
         return Err("fusion synthesis requires at least one input kernel".to_string());
     }
 
-    // Apply binding remaps to produce adjusted programs for merging.
     let remapped: Vec<KernelProgram> = if binding_remaps.is_empty() {
         programs.to_vec()
     } else {
@@ -352,7 +351,6 @@ pub fn synthesize_fused_program_with_report_remapped(
     };
 
     if policy == FusionSafetyPolicy::Aggressive {
-        // AST-based cleanup operates directly on body — no additional metadata needed.
     }
 
     let hazards = ensure_safe_composition(&remapped, policy, expected_hazards)?;
@@ -369,14 +367,12 @@ pub fn synthesize_fused_program_with_report_remapped(
         let local_syms = program.local_symbols();
         let rename_map = deterministic_symbol_rename_map(idx, &local_syms);
 
-        // Merge helper functions (deduplicate by content).
         for helper in &program.helper_functions {
             if !helper_functions.contains(helper) {
                 helper_functions.push(helper.clone());
             }
         }
 
-        // AST-based body concatenation with segment markers.
         fused_body.push(cfd2_ir::ast::Stmt::Comment(format!("begin fused segment: {}", program.id)));
         fused_body.extend(rename_stmts(&program.preamble, &rename_map));
         fused_body.extend(rename_stmts(&program.body, &rename_map));
@@ -405,8 +401,6 @@ pub fn synthesize_fused_program_with_report_remapped(
     fused.side_effects = side_effects;
     fused.eos_params = merge_eos_params(&remapped);
 
-    // Cleanup policy: Aggressive safety policy enables standard cleanup;
-    // Safe policy skips cleanup (preserving current behavior).
     let cleanup_policy = match policy {
         FusionSafetyPolicy::Safe => FusionCleanupPolicy::None,
         FusionSafetyPolicy::Aggressive => FusionCleanupPolicy::Standard,
@@ -416,7 +410,6 @@ pub fn synthesize_fused_program_with_report_remapped(
         apply_fusion_cleanup(&mut fused);
     }
 
-    // Attach an explicit synthesis marker as a deterministic first preamble line.
     fused
         .preamble
         .insert(0, cfd2_ir::ast::Stmt::Comment(format!("synthesized by fusion rule: {rule_name}")));
@@ -514,7 +507,6 @@ fn ensure_safe_composition(
 
     match policy {
         FusionSafetyPolicy::Safe => {
-            // Under Safe policy, any hazard is a hard rejection.
             if let Some(h) = hazards.first() {
                 return Err(format!(
                     "fusion rejected: {} hazard at kernel '{}'",
@@ -523,12 +515,8 @@ fn ensure_safe_composition(
             }
         }
         FusionSafetyPolicy::Aggressive => {
-            // Under Aggressive policy, only whitelisted hazards are tolerated.
-            // Any hazard not covered by an ExpectedHazard entry is a hard rejection.
-            //
-            // When expected_hazards is empty AND hazards exist, this is a
-            // whitelist-not-yet-populated situation. Still reject to enforce the
-            // invariant that every hazard must be explicitly audited.
+            // Only whitelisted hazards are tolerated; an empty whitelist still
+            // rejects, so every hazard must be explicitly audited.
             for h in &hazards {
                 if !expected_hazards.iter().any(|e| e.matches(h)) {
                     return Err(format!(
@@ -585,7 +573,6 @@ fn apply_binding_remaps(
 
         let program = &mut result[remap.program_index];
 
-        // Remap binding slots.
         let mut found = false;
         for binding in &mut program.bindings {
             if binding.group == remap.from_group && binding.binding == remap.from_binding {
@@ -602,7 +589,6 @@ fn apply_binding_remaps(
             ));
         }
 
-        // Remap side-effect metadata.
         let from_res = EffectResource::binding(remap.from_group, remap.from_binding);
         let to_res = EffectResource::binding(remap.to_group, remap.to_binding);
         if program.side_effects.read_set.remove(&from_res) {
@@ -612,7 +598,7 @@ fn apply_binding_remaps(
             program.side_effects.write_set.insert(to_res);
         }
 
-        // Also remap any component-level side-effects at the same slot.
+        // Component-level side-effects at the same slot.
         let read_to_remap: Vec<_> = program
             .side_effects
             .read_set
@@ -677,9 +663,6 @@ fn merge_bindings(
                         binding.wgsl_type,
                     ));
                 }
-                // Promote to most permissive access mode:
-                // ReadOnlyStorage + ReadWriteStorage → ReadWriteStorage
-                // Uniform is incompatible with storage modes.
                 if prev.access != binding.access {
                     let promoted = promote_access(prev.access, binding.access).ok_or_else(|| {
                         format!(
@@ -752,7 +735,6 @@ fn deterministic_symbol_rename_map(
 fn program_references_constants_field(program: &KernelProgram, field: &str) -> bool {
     let needle = format!("constants.{field}");
 
-    // Structural AST search across all sections.
     let all_stmts = program.indexing.iter()
         .chain(program.preamble.iter())
         .chain(program.body.iter());
@@ -856,8 +838,6 @@ fn constants_extra_params_for_program(program: &KernelProgram) -> Vec<ParamSpec>
     }
     extras
 }
-
-// ── AST-based rename and optimization passes ────────────────────────────
 
 /// Rename identifiers in an expression tree using a rename map.
 fn rename_expr(expr: &cfd2_ir::ast::Expr, rename_map: &BTreeMap<String, String>) -> cfd2_ir::ast::Expr {
@@ -1008,8 +988,6 @@ fn apply_fusion_cleanup(program: &mut KernelProgram) {
     apply_ast_noop_self_assign_cleanup(program);
 }
 
-// ── AST-based aggressive cleanup passes ────────────────────────────────
-
 /// AST-based load-after-store forwarding.
 ///
 /// Walks the flat body statement list. For each store (`Assign` to a
@@ -1067,8 +1045,7 @@ fn apply_ast_load_after_store_forwarding(program: &mut KernelProgram) {
 /// AST-based noop self-assign cleanup.
 ///
 /// Removes statements of the form `ident = ident` where both sides are the
-/// same identifier. Also keeps body consistent by filtering out the
-/// removed statements (no line-index tracking needed).
+/// same identifier.
 fn apply_ast_noop_self_assign_cleanup(program: &mut KernelProgram) {
     use cfd2_ir::ast::{ExprNode, Stmt};
 
@@ -1148,7 +1125,6 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
             .then(a.name.cmp(&b.name))
     });
 
-    // Reject duplicate bind slots with incompatible definitions up front.
     let mut by_slot = BTreeMap::<(u32, u32), KernelBinding>::new();
     for binding in &sorted_bindings {
         let key = (binding.group, binding.binding);
@@ -1185,11 +1161,8 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
             ));
         }
         if needs_constants_struct {
-            // Use the structured eos_params declaration from the KernelProgram IR
-            // instead of scanning body strings for field references (§2d fix).
-            // Falls back to the legacy string-scan heuristic when eos_params is
-            // empty to keep backward compatibility with programs that haven't
-            // been updated yet.
+            // Prefer the structured eos_params declaration; fall back to the
+            // AST string-scan heuristic when it is empty.
             let extra_constants = if program.eos_params.is_empty() {
                 constants_extra_params_for_program(program)
             } else {
@@ -1232,7 +1205,6 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
         lines.push(decl);
     }
 
-    // Emit module-level helper functions between bindings and the compute entry point.
     if !program.helper_functions.is_empty() {
         lines.push(String::new());
         for helper in &program.helper_functions {
@@ -1256,17 +1228,14 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
         lines.push(format!("    if ({check}) {{ return; }}"));
     }
 
-    // Emit indexing section
     for line in cfd2_ir::ast::stmt::render_stmt_lines(&program.indexing) {
         lines.push(format!("    {line}"));
     }
 
-    // Emit preamble section
     for line in cfd2_ir::ast::stmt::render_stmt_lines(&program.preamble) {
         lines.push(format!("    {line}"));
     }
 
-    // Emit body section
     for line in cfd2_ir::ast::stmt::render_stmt_lines(&program.body) {
         lines.push(format!("    {line}"));
     }
@@ -1494,7 +1463,6 @@ mod tests {
     fn aggressive_cleanup_removes_noop_local_self_assignment() {
         use cfd2_ir::ast::{Expr, Stmt};
         let mut a = sample_program("a");
-        // Insert a noop self-assignment at the beginning of body.
         a.body.insert(0, Stmt::Assign {
             target: Expr::ident("value"),
             value: Expr::ident("value"),
@@ -1814,7 +1782,6 @@ mod tests {
             .read_set
             .insert(EffectResource::binding(0, 0));
 
-        // Provide empty whitelist — should reject even under Aggressive.
         let err = synthesize_fused_program_with_report_remapped(
             "fused",
             "rule/a_b",
@@ -1829,7 +1796,6 @@ mod tests {
             "unexpected error: {err}"
         );
 
-        // Provide wrong hazard kind — should also reject.
         let wrong_whitelist = vec![ExpectedHazard {
             kind: HazardKind::WAW,
             kernel_id: "b",
@@ -1901,7 +1867,6 @@ mod tests {
                 KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
             ],
         );
-        // Declare eos_gamma and eos_r via structured IR field
         program.eos_params = vec![
             ParamSpec {
                 key: "eos.gamma",

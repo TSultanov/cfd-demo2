@@ -1,20 +1,15 @@
-//! Capacity-reserved allocation for topology-sized GPU buffers (M2 Tier B).
+//! Capacity-reserved allocation for topology-sized GPU buffers.
 //!
-//! Roadmap decision (docs/meshless-moving-mesh-roadmap.md §3 "Sparsity
-//! format"): CSR semantics stay exact (logical sizes are the true face/nnz
-//! counts) but device buffers MAY be allocated with headroom so a
-//! topology-level mesh refresh reuses allocations and only rebuilds bind
-//! groups. Kernels keep their `arrayLength` guards correct because these
-//! buffers are bound as **sized ranges** (`wgpu::BufferBinding { offset: 0,
-//! size: Some(logical) }`) — `arrayLength` of a sized binding is the bound
-//! size, not the allocation size.
+//! CSR semantics stay exact (logical sizes are the true face/nnz counts) but
+//! device buffers MAY be allocated with headroom so a topology-level mesh
+//! refresh reuses allocations and only rebuilds bind groups. Buffers are bound
+//! as sized ranges (`wgpu::BufferBinding { offset: 0, size: Some(logical) }`)
+//! so kernel `arrayLength` guards see the bound size, not the allocation size.
 //!
-//! Defaults are behavior-neutral: [`CapacityPlan::default`] reserves EXACTLY
+//! Defaults are behavior-neutral: [`CapacityPlan::default`] reserves exactly
 //! the logical size (headroom 1.0), and a sized binding whose size equals the
-//! full buffer size is definitionally equivalent to
-//! `as_entire_buffer_binding` (which binds `size: None` = "rest of the
-//! buffer"). Headroom > 1.0 is only requested by a refresh/build context that
-//! expects topology churn (later stages).
+//! full buffer size is equivalent to `as_entire_buffer_binding` (`size: None`).
+//! Headroom > 1.0 is only requested by a context that expects topology churn.
 
 /// Allocation policy for face-/nnz-sized device buffers.
 #[derive(Clone, Copy, Debug, PartialEq)]

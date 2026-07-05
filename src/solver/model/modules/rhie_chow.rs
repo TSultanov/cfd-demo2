@@ -20,7 +20,7 @@ use cfd2_ir::kernel::{
 /// How the Rhie–Chow coupling coefficient `d_p` is computed each outer
 /// iteration (the `dp_update_from_diag` kernel).
 ///
-/// `ClosedForm` is the historical default: a uniform `alpha_u * dt / rho`.
+/// `ClosedForm` is a uniform `alpha_u * dt / rho`.
 /// `FromAssembledDiagonal` is the OpenFOAM `rAU` analogue: `V / a_P` from
 /// the assembled momentum diagonal (averaged over the two momentum
 /// components), optionally scaled by `alpha_u` (`include_relaxation`;
@@ -33,7 +33,7 @@ use cfd2_ir::kernel::{
 /// iterations.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DpFormulation {
-    /// `d_p = alpha_u * dt / rho` (uniform; historical default).
+    /// `d_p = alpha_u * dt / rho` (uniform).
     ClosedForm,
     /// `d_p = [alpha_u *] V / a_P` from the assembled momentum diagonal,
     /// damped across outer iterations by `theta`.
@@ -49,13 +49,8 @@ pub enum DpFormulation {
     /// boundaries where wall friction inflates the diagonal. No `alpha_u`
     /// factor anywhere: SIMPLEC's point is relaxation-consistency. Same
     /// damped update across outer iterations as `FromAssembledDiagonal`.
-    ///
-    /// Rationale (June 2026): the plain `V / a_P` formulation is
-    /// kernel-correct but its `~1/d_p` outer-loop gain is unstable at the
-    /// Schur-consistent scale even with f32-floor linear solves
-    /// (tests/dp_diag_probe.rs), and a pressure-row equilibration cannot
-    /// help — row scaling leaves exact-solve outer dynamics unchanged.
-    /// The row-sum denominator avoids that scale by construction.
+    /// The row-sum denominator avoids the unstable `~1/d_p` outer-loop gain
+    /// of the plain `V / a_P` (diagonal) scale by construction.
     FromAssembledRowSum { theta: f32 },
 }
 
@@ -113,8 +108,7 @@ pub fn rhie_chow_aux_module(
 
     let pressure_name = coupling.pressure.name();
 
-    // Precompute derived gradient field names once
-    // These are interned/leaked to obtain &'static str for PortManifest
+    // Leaked to obtain &'static str for PortManifest.
     let grad_p_name: &'static str = Box::leak(format!("grad_{}", pressure_name).into_boxed_str());
     let grad_p_old_name: &'static str =
         Box::leak(format!("grad_{}_old", pressure_name).into_boxed_str());
@@ -216,31 +210,26 @@ pub fn rhie_chow_aux_module(
         ),
     ];
 
-    // Build PortManifest with required fields
     use crate::solver::dimensions::{PressureGradient, UnitDimension, D_P};
     use crate::solver::ir::ports::{FieldSpec, PortFieldKind, PortManifest};
 
     let port_manifest = Some(PortManifest {
         fields: vec![
-            // dp field: Scalar with D_P unit
             FieldSpec {
                 name: dp_field,
                 kind: PortFieldKind::Scalar,
                 unit: D_P::UNIT,
             },
-            // grad_p field: Vector2 with PRESSURE_GRADIENT unit
             FieldSpec {
                 name: grad_p_name,
                 kind: PortFieldKind::Vector2,
                 unit: PressureGradient::UNIT,
             },
-            // grad_p_old field: Vector2 with PRESSURE_GRADIENT unit
             FieldSpec {
                 name: grad_p_old_name,
                 kind: PortFieldKind::Vector2,
                 unit: PressureGradient::UNIT,
             },
-            // momentum field: Vector2 with ANY_DIMENSION (dynamic dimension)
             FieldSpec {
                 name: coupling.momentum.name(),
                 kind: PortFieldKind::Vector2,
@@ -451,7 +440,6 @@ pub fn rhie_chow_aux_module(
                 },
             ],
         },
-        // Standalone fusion rule for grad_p_update + correct_velocity_delta (aggressive-only)
         ModelKernelFusionRule {
             name: "rhie_chow:grad_p_update_correct_velocity_delta_v1",
             priority: 105,
@@ -486,7 +474,6 @@ pub fn rhie_chow_aux_module(
                 },
             ],
         },
-        // Standalone fusion rule for store_grad_p + grad_p_update (aggressive-only)
         ModelKernelFusionRule {
             name: "rhie_chow:store_grad_p_grad_p_update_v1",
             priority: 106,
@@ -934,8 +921,8 @@ fn generate_dp_update_from_assembled_diagonal(
             dsl::max(Expr::ident("constants").field("dt"), Expr::lit_f32(0.0)),
         ),
         // Closed-form fallback (used while the matrix is unassembled). Keep
-        // the historical alpha_u scaling here regardless of
-        // include_relaxation: it is only the pre-assembly seed magnitude.
+        // the alpha_u scaling here regardless of include_relaxation: it is
+        // only the pre-assembly seed magnitude.
         dsl::let_expr(
             "d_p_closed",
             alpha_u * Expr::ident("dt") / Expr::ident("rho"),
@@ -1368,7 +1355,6 @@ fn generate_rhie_chow_store_grad_p_kernel_program(
 
     let mut registry = PortRegistry::new(model.state_layout.clone());
 
-    // Register gradient fields using pre-computed derived names
     let grad_p = registry
         .register_vector2_field::<PressureGradient>(grad_p_name)
         .map_err(|e| {
@@ -1455,12 +1441,10 @@ fn generate_rhie_chow_correct_velocity_delta_kernel_program(
 
     let momentum = coupling.momentum;
 
-    // Register momentum field
     let u = registry
         .register_vector2_field::<AnyDimension>(momentum.name())
         .map_err(|e| format!("rhie_chow/correct_velocity_delta: {e}"))?;
 
-    // Register gradient fields using pre-computed derived names
     let grad_p = registry
         .register_vector2_field::<PressureGradient>(grad_p_name)
         .map_err(|e| {

@@ -1,20 +1,13 @@
-//! Linear solver encoding helpers for one-submission outer-loop batching.
+//! Linear solver encoding helpers. Three execution families:
 //!
-//! This module provides three families of linear solver execution:
-//!
-//! 1. **Host-driven** (`solve_fgmres`) — Standard FGMRES solve with host readbacks
-//!    between restarts.  Used for the per-iteration recipe-level path.
-//!
-//! 2. **Encoded** (`encode_solve_fgmres_fixed_iterations`) — Encodes a fixed budget
-//!    of FGMRES restarts into a caller-provided `CommandEncoder` without host
-//!    readbacks.  Used for parity testing and the single-encoder batched path.
-//!
+//! 1. **Host-driven** (`solve_fgmres`) — FGMRES with host readbacks between restarts.
+//! 2. **Encoded** (`encode_solve_fgmres_fixed_iterations`) — a fixed budget of restarts
+//!    into a caller-provided `CommandEncoder`, no host readbacks.
 //! 3. **Chunked submit** (`submit_solve_fgmres_fixed_iterations_chunked`,
-//!    `submit_solve_cg_fixed_iterations_chunked`) — Splits the iteration budget
-//!    across multiple encoder→submit cycles to avoid Metal backend command buffer
-//!    size limits.  Used by the one-submission outer-loop orchestration.
+//!    `submit_solve_cg_fixed_iterations_chunked`) — splits the budget across multiple
+//!    encoder→submit cycles to avoid Metal command-buffer size limits.
 //!
-//! All three share the same `FgmresChunkLayout` computation for consistency.
+//! All three share the same `FgmresChunkLayout` computation.
 
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::linear_solver::fgmres::{
@@ -29,7 +22,6 @@ use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::structs::LinearSolverStats;
 use std::time::Instant;
 
-/// Arguments for the `solve_fgmres` function to reduce parameter count.
 pub struct SolveFgmresArgs<'a> {
     pub context: &'a GpuContext,
     pub system: LinearSystemView<'a>,
@@ -42,13 +34,11 @@ pub struct SolveFgmresArgs<'a> {
     pub tol_abs: f32,
     pub precond_label: &'a str,
     pub use_encoded_seed_basis0: bool,
-    /// Tighter AIMD budget policy for the chunked path (see
-    /// [`submit_solve_fgmres_fixed_iterations_chunked`]): floor/margin of a
-    /// few iterations instead of a full restart cycle, and a first-solve
-    /// budget of one restart cycle instead of `max_iters`. Used by the
-    /// per-outer host-driven route, where encoding a 60-iteration cycle for a
-    /// ~10-iteration solve costs more than the submits it saves. The batched
-    /// one-submission outer path keeps the legacy floor (`false`).
+    /// Tighter AIMD budget policy (see
+    /// [`submit_solve_fgmres_fixed_iterations_chunked`]): floor/margin of a few
+    /// iterations and a first-solve budget of one restart cycle instead of
+    /// `max_iters`, so a ~10-iteration solve does not encode a full 60-iteration
+    /// cycle. The batched one-submission outer path keeps the full floor (`false`).
     pub tight_budget: bool,
 }
 
@@ -71,28 +61,10 @@ impl OneSubmissionEnvTunables {
     }
 }
 
-/// CGS2 re-orthogonalization switch, three-state (Arc C, June 2026):
-/// `CFD2_FGMRES_CGS2` unset → AUTO (default), "0" → force off, anything
-/// else → force on.
-///
-/// Decision record (measured June 12, linear tolerance 1e-4,
-/// max_iters=200, post-dev2/M1):
-/// - actual_iters/max_iters distributions: channel p99 = 0.18, backstep
-///   p99 = 0.07 (max 0.30), lid hard-solve cluster 0.86–1.0 (22.7% of
-///   solves above 0.5). The 0.5 arming threshold separates them cleanly:
-///   lid arms 450 of 4125 solves, channel 1 (AIMD warmup), backstep 0.
-/// - AUTO is shipped for ROBUSTNESS, not wall: armed lid solves converge
-///   in mean 27 iters instead of exhausting the budget (at-cap solves
-///   313 → 3; total lid iterations −25%), with wall NEUTRAL on all three
-///   cases (the capped iterations were already wall-cheap: frozen chunks
-///   are GPU no-ops and the adaptive budget contains their encoding).
-/// - The June 11 "lid −30% wall" for always-on CGS2 is STALE: re-measured
-///   −10% (256 → 229 s), and that residual win lives in the MID-GRADE
-///   solves (mean 0.24 of max_iters) — capturing them needs an arming
-///   threshold of ~0.2, knife-edge against channel's 0.18 p99. Declined
-///   as fragile wall-tuning; revisit only if solve dynamics change.
-/// Read per solve, not cached: a process-wide cache froze the first
-/// test's environment (see `one_submission_env_tunables`).
+/// CGS2 re-orthogonalization switch, three-state: `CFD2_FGMRES_CGS2` unset →
+/// AUTO (default), "0" → force off, anything else → force on. AUTO arms CGS2
+/// for hard solves (see `CGS2_AUTO_ARM_FRACTION`), which is about robustness,
+/// not wall time. Read per solve, not cached (see `one_submission_env_tunables`).
 #[derive(Clone, Copy, PartialEq)]
 enum Cgs2Mode {
     Auto,
@@ -104,15 +76,10 @@ enum Cgs2Mode {
 /// max_iters enables CGS2 for the next solve (see `Cgs2Mode`).
 const CGS2_AUTO_ARM_FRACTION: f32 = 0.5;
 
-/// AUTO-mode disarming low-water mark (hysteresis): once armed, CGS2 stays
-/// on until a solve finishes below this fraction, guarding against
-/// oscillation across a hard-solve cluster (a CGS2-accelerated hard solve
-/// finishing under the arm threshold would disarm and leave the next slow
-/// solve bare). 0.25 sits between the fast cases' p99 (0.18, must disarm
-/// immediately) and the armed lid solves. Measured June 12: on the lid the
-/// hysteresis trace is bit-identical to the plain threshold (the armed
-/// cluster's solves stay above 0.5 anyway) — kept as cheap insurance for
-/// other regimes.
+/// AUTO-mode disarming low-water mark (hysteresis): once armed, CGS2 stays on
+/// until a solve finishes below this fraction, so a CGS2-accelerated hard solve
+/// that finishes under the arm threshold does not disarm and leave the next slow
+/// solve bare. 0.25 sits between the fast cases' p99 (~0.18) and armed solves.
 const CGS2_AUTO_DISARM_FRACTION: f32 = 0.25;
 
 /// Sticky AUTO arming update from a finished solve's iteration count.
@@ -143,13 +110,10 @@ fn cgs2_enabled_for(auto_engaged: bool) -> bool {
     }
 }
 
-/// Stall-stop level factor (0.0 disables; see the stall branch in
-/// gmres_logic/restart_guard and the host loop in `solve_fgmres`).
-/// Default OFF by measurement (June 2026): at the reachable
-/// inexact-Picard tolerance the suite's solves converge before the
-/// stall can fire (walls and metrics identical at 1e-2), so it stays a
-/// diagnostic/safety knob for floor-stuck regimes. Read per solve, not
-/// cached (see `one_submission_env_tunables`).
+/// Stall-stop level factor (0.0 disables; mirrors the stall branch in
+/// gmres_logic/restart_guard and the host loop in `solve_fgmres`). Default OFF:
+/// a diagnostic/safety knob for floor-stuck regimes. Read per solve, not cached
+/// (see `one_submission_env_tunables`).
 fn stall_level_rel() -> f32 {
     std::env::var("CFD2_FGMRES_STALL_REL")
         .ok()
@@ -157,10 +121,9 @@ fn stall_level_rel() -> f32 {
         .unwrap_or(0.0)
 }
 
-/// Linear-solve relative-tolerance override (sweep/diagnostic knob for the
-/// inexact-Picard tolerance arc). When set, overrides the model-declared
-/// FGMRES relative tolerance at every solve entry point. Read per solve,
-/// not cached (see `one_submission_env_tunables`).
+/// Linear-solve relative-tolerance override (sweep/diagnostic knob). When set,
+/// overrides the model-declared FGMRES relative tolerance at every solve entry
+/// point. Read per solve, not cached (see `one_submission_env_tunables`).
 fn lin_tol_override() -> Option<f32> {
     std::env::var("CFD2_LIN_TOL")
         .ok()
@@ -174,12 +137,10 @@ fn parse_usize_env(key: &str) -> Option<usize> {
         .and_then(|v| v.parse::<usize>().ok())
 }
 
-/// Read the one-submission env tunables.
-///
-/// Deliberately *not* a process-global cache: both call sites run once per linear
-/// solve (chunk-layout computation), so the env reads are cheap there, and a
-/// process-wide `OnceLock` froze the first test's environment for the whole test
-/// process, making env-guard-based tests order-dependent.
+/// Read the one-submission env tunables. Deliberately *not* a process-global
+/// cache: a `OnceLock` would freeze the first test's environment for the whole
+/// process, making env-guard-based tests order-dependent. Both call sites run
+/// once per solve, so the env reads are cheap.
 fn one_submission_env_tunables() -> OneSubmissionEnvTunables {
     OneSubmissionEnvTunables::from_env()
 }
@@ -299,14 +260,10 @@ pub fn solve_fgmres<P: PreconditionerModule>(
         return LinearSolverStats::diverged(0, rhs_norm, start.elapsed());
     }
 
-    // Use the existing `x` buffer contents as the initial guess.
-    //
-    // This is important for coupled solvers where `x` stores the current iterate (absolute
-    // unknown values, not a correction). Starting from a good initial guess can dramatically
-    // reduce the number of Krylov iterations needed to reach tight tolerances.
-    //
-    // Note: wgpu ensures newly-created buffers are initialized before use, so the first solve
-    // still effectively starts from x0=0 unless something has written into `x`.
+    // Use the existing `x` buffer contents as the initial guess. Coupled solvers
+    // store the current iterate (absolute unknown values, not a correction) in `x`,
+    // so a good guess cuts Krylov iterations. wgpu zero-initializes new buffers, so
+    // the first solve effectively starts from x0=0 until something writes into `x`.
 
     let max_iters = max_iters.max(1);
     let capacity = krylov.fgmres.max_restart();
@@ -336,20 +293,16 @@ pub fn solve_fgmres<P: PreconditionerModule>(
     let mut precond_prepared = false;
 
     // Restart-boundary monotonicity guard. A restart cycle whose f32 Arnoldi
-    // basis lost orthogonality can APPLY an update that increases the true
-    // residual; left unguarded this compounds across restarts (observed:
-    // residual growth by orders of magnitude, ending in NaN, on the coupled
-    // incompressible system — see tests/dp_diag_probe.rs). Track the
-    // best-so-far x at the true-residual checkpoints and restore it when a
+    // basis lost orthogonality can apply an update that increases the true
+    // residual; left unguarded this compounds across restarts into NaN. Track
+    // the best-so-far x at the true-residual checkpoints and restore it when a
     // cycle made things worse.
     let mut best_residual = f32::INFINITY;
     let mut have_snapshot = false;
     const RESTART_GROWTH_TOL: f32 = 1.25;
 
-    // Stall-stop (mirrors the GPU-side stall branch in
-    // gmres_logic/restart_guard — keep the two in sync): with an
-    // unreachable tolerance every solve burns to the iteration cap at its
-    // f32 floor; stop when the checkpoint residual improves <2% twice in a
+    // Stall-stop (mirrors the GPU-side stall branch in gmres_logic/restart_guard
+    // — keep in sync): stop when the checkpoint residual improves <2% twice in a
     // row AND is already below stall_rel * rel_scale. 0.0 disables.
     let stall_rel = stall_level_rel();
     let mut prev_checkpoint_residual: Option<f32> = None;
@@ -556,8 +509,6 @@ pub fn solve_fgmres<P: PreconditionerModule>(
     stats
 }
 
-// NOTE: Prefer `CFD2_DEBUG_FGMRES=1` over hardcoded debug logging.
-
 /// Encode a fixed-budget FGMRES solve into an existing command encoder.
 ///
 /// This path is intended for one-submission outer-loop batching where host readbacks inside the
@@ -645,12 +596,10 @@ pub fn encode_solve_fgmres_fixed_iterations<P: PreconditionerModule>(
         encoded_total = encoded_total.saturating_add(consumed);
     }
 
-    // Note: this function only encodes into the caller's encoder — the actual
-    // submission and readback happen externally.  The last chunk has
-    // `capture_solver_scalars: true`, so after submitting the caller can use
-    // `KrylovSolveModule::read_last_solver_stats` to get a real residual.
-    // We still return a placeholder here because we cannot read back without
-    // a submission index.
+    // This function only encodes; submission and readback happen externally. The
+    // last chunk has `capture_solver_scalars: true`, so the caller can use
+    // `KrylovSolveModule::read_last_solver_stats` after submitting to get a real
+    // residual. Returns a placeholder here (no submission index to read back).
     LinearSolverStats::max_iterations(encoded_total as u32, f32::INFINITY, start.elapsed())
 }
 
@@ -687,21 +636,17 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
     let tol = lin_tol_override().unwrap_or(tol);
     let start = Instant::now();
 
-    // Adaptive iteration budget: encode only ~what the previous solve
-    // actually needed. Engages whenever solves stop early — convergence
-    // (reachable tolerance), stall, or guard; the configured max_iters
-    // always caps it, and a solve that exhausts its budget without
-    // stopping doubles the next budget (AIMD). Inert at an unreachable
-    // tolerance with the stall off: stopped_early never fires, so the
-    // budget stays max_iters. The wall-time win is on the HOST side:
-    // frozen chunks execute as GPU no-ops either way, but encoding them
-    // is what dominates small-system solves.
+    // Adaptive iteration budget (AIMD): encode only ~what the previous solve
+    // needed. Engages when solves stop early (convergence, stall, or guard);
+    // max_iters always caps it, and a solve that exhausts its budget doubles the
+    // next. Inert at an unreachable tolerance with the stall off. The wall win is
+    // host-side: frozen chunks are GPU no-ops, but encoding them dominates
+    // small-system solves.
     //
-    // `tight_budget` (per-outer host route): floor/margin of a few
-    // iterations instead of a full restart cycle, first solve starts at one
-    // restart cycle instead of max_iters — a ~10-iteration solve then
-    // encodes ~18 iterations, not 60. Under-budgeting costs one AIMD
-    // doubling on the next solve; physics is unaffected (inexact Picard).
+    // `tight_budget`: floor/margin of a few iterations and a first solve of one
+    // restart cycle instead of max_iters, so a ~10-iteration solve encodes ~18,
+    // not 60. Under-budgeting costs one AIMD doubling; physics is unaffected
+    // (inexact Picard).
     let restart_len_u32 = max_restart.max(1) as u32;
     let (budget_floor, budget_margin, initial_budget) = if tight_budget {
         (16u32.min(restart_len_u32).max(1), 8u32, restart_len_u32)
@@ -729,8 +674,6 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
     let mut encoded_total = 0usize;
     let mut last_submission_index: Option<wgpu::SubmissionIndex> = None;
     // Opt-in CPU breakdown of the chunked solve: encode vs submit vs readback.
-    // (The node-level profiler localizes the coupled step's cost to this solve;
-    // this splits it finer without threading `profiling_stats` through the module.)
     let profile_fgmres = std::env::var("CFD2_PROFILE_FGMRES").is_ok();
     let mut encode_ns: u128 = 0;
     let mut finish_ns: u128 = 0;
@@ -903,7 +846,6 @@ pub fn submit_solve_cg_fixed_iterations_chunked(
         .unwrap_or(DEFAULT_CG_CHUNK_SIZE)
         .max(1);
 
-    // Build chunk layout.
     let mut chunk_sizes: Vec<usize> = Vec::new();
     let mut remaining = max_iters;
     while remaining > 0 {
@@ -930,7 +872,6 @@ pub fn submit_solve_cg_fixed_iterations_chunked(
             pre_encode(&mut encoder);
         }
 
-        // Encode CG iterations for this chunk.
         cg.encode_solve_cg_fixed_iterations(
             context,
             &mut encoder,

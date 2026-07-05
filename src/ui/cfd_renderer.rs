@@ -19,7 +19,6 @@ pub struct CfdVertex {
     pub position: [f32; 2],
     /// Cell index for looking up field values
     pub cell_index: u32,
-    /// Padding for alignment
     pub _padding: u32,
 }
 
@@ -39,26 +38,20 @@ pub struct CfdUniforms {
     pub offset: u32,
     /// Visualization mode (0: value, 1: magnitude)
     pub mode: u32,
-    /// Padding
     pub _padding: u32,
 }
 
-/// Extra capacity to bake into the initial vertex/line buffers, over the
-/// initial tessellated vertex count, for a moving (ALE) mesh. A moving mesh
-/// re-tessellates every step and per-cell vertex counts drift as the Voronoi
-/// topology changes, so its buffers are sized with headroom to absorb small
-/// growth without a reallocation on the very first refresh. The static path
-/// passes `NO_HEADROOM` (1.0) — it never re-tessellates, so it must not pay a
-/// 50% buffer over-allocation it can never use.
+/// Headroom over the initial tessellated count for a moving (ALE) mesh, which
+/// re-tessellates every step with drifting per-cell vertex counts, so early
+/// refreshes fit without a reallocation.
 pub const VERTEX_HEADROOM: f32 = 1.5;
 
 /// Headroom factor for a mesh that never grows (the static path): allocate
-/// exactly the initial tessellated count.
+/// exactly the initial count.
 pub const NO_HEADROOM: f32 = 1.0;
 
-/// Growth factor applied when a mesh refresh needs more vertices than the
-/// current allocation holds. We over-allocate past the immediate need so a
-/// steadily growing topology does not reallocate on every single step.
+/// Over-allocation factor when a refresh outgrows the current allocation, so a
+/// steadily growing topology does not reallocate every step.
 const VERTEX_GROW_FACTOR: f32 = 1.5;
 
 /// Round a required vertex count up to an allocation size using `factor`,
@@ -110,13 +103,11 @@ impl CfdRenderResources {
         max_vertices: usize,
         headroom: f32,
     ) -> Self {
-        // Create shader module
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("CFD Mesh Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("cfd_mesh_shader.wgsl").into()),
         });
 
-        // Create bind group layout for uniforms and field data
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("CFD Bind Group Layout"),
             entries: &[
@@ -143,14 +134,12 @@ impl CfdRenderResources {
             ],
         });
 
-        // Create pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("CFD Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
-        // Create render pipeline
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("CFD Render Pipeline"),
             layout: Some(&pipeline_layout),
@@ -200,7 +189,6 @@ impl CfdRenderResources {
             cache: None,
         });
 
-        // Create line pipeline
         let line_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("CFD Line Pipeline"),
             layout: Some(&pipeline_layout),
@@ -250,9 +238,7 @@ impl CfdRenderResources {
             cache: None,
         });
 
-        // Create vertex + line buffers with headroom over the initial count so
-        // a moving mesh's first few refreshes fit without a reallocation. The
-        // draw range is always `num_vertices` (<= the written count), so a
+        // Draw range is always `num_vertices` (<= the written count), so a
         // larger allocation is visually identical for the static path.
         let capacity_vertices = capacity_for(max_vertices, headroom);
         let capacity_line_vertices = capacity_vertices;
@@ -260,7 +246,6 @@ impl CfdRenderResources {
         let line_vertex_buffer =
             alloc_vertex_buffer(device, "CFD Line Vertex Buffer", capacity_line_vertices);
 
-        // Create uniform buffer
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("CFD Uniform Buffer"),
             contents: bytemuck::bytes_of(&CfdUniforms {
@@ -283,7 +268,6 @@ impl CfdRenderResources {
             mapped_at_creation: false,
         });
 
-        // Create bind group
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("CFD Bind Group"),
             layout: &bind_group_layout,
@@ -353,8 +337,7 @@ impl CfdRenderResources {
     /// Overflow-proof by construction: `ensure_capacity` grows the target
     /// buffer(s) to fit *before* any `write_buffer`, so the write can never
     /// exceed the allocation regardless of how the mesh topology (and hence the
-    /// per-cell vertex count) changed. This is the crash-safety guarantee for
-    /// the moving (ALE) mesh, whose tessellation size changes every step.
+    /// per-cell vertex count) changed.
     pub fn update_mesh(
         &mut self,
         device: &wgpu::Device,
@@ -427,9 +410,8 @@ pub fn build_mesh_vertices(cells: &[Vec<[f64; 2]>]) -> Vec<CfdVertex> {
             continue;
         }
 
-        // Triangulate the polygon using fan triangulation
+        // Fan triangulation
         for i in 1..polygon.len() - 1 {
-            // Triangle: polygon[0], polygon[i], polygon[i+1]
             vertices.push(CfdVertex {
                 position: [polygon[0][0] as f32, polygon[0][1] as f32],
                 cell_index: cell_idx as u32,

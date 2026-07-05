@@ -97,7 +97,6 @@ impl StagingBufferCache {
         let mut c = self.counters.lock().unwrap();
         c.cached_bytes += size;
 
-        // Evict LRU entries that exceed capacity.
         while entries.len() > STAGING_CACHE_CAPACITY {
             let (evicted_size, _evicted_buf) = entries.pop().unwrap();
             c.evictions += 1;

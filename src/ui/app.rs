@@ -207,8 +207,8 @@ struct SolverInitRequest {
     min_cell_size: f64,
     max_cell_size: f64,
     growth_rate: f64,
-    // Per-knob solver settings now travel as a single `RuntimeParams` snapshot
-    // (built via `current_runtime_params`) that the shared `SolverDriver` consumes.
+    // Solver settings travel as a single `RuntimeParams` snapshot (built via
+    // `current_runtime_params`) that the shared `SolverDriver` consumes.
     current_fluid: Fluid,
     params: RuntimeParams,
     // Moving-mesh (ALE) request: when `enable_moving_mesh`, build a
@@ -217,7 +217,7 @@ struct SolverInitRequest {
     enable_moving_mesh: bool,
     moving_motion: MovingMotionChoice,
     moving_regularization: f64,
-    // M6: oscillating-obstacle boundary motion (ChannelObstacle only). When set,
+    // Oscillating-obstacle boundary motion (ChannelObstacle only). When set,
     // `build_moving_init` declares the obstacle loop a cross-stream
     // `BoundaryMotionSpec::Oscillation` and enables the MovingWall BC.
     moving_oscillate_obstacle: bool,
@@ -271,14 +271,12 @@ struct CachedGpuStats {
     step_time_ms: f32,
 }
 
-/// What the solver worker is driving. The `Static` arm is the pre-existing
-/// [`SolverDriver`] path (byte-unchanged — every existing model/mesh/backend
-/// selection runs through it exactly as before). `MovingMesh` is the additive,
-/// opt-in ALE path: a [`MovingMeshDriver`] that re-generates the CVT-Voronoi mesh
-/// each step. Both delegate field/stats/params access to the wrapped
-/// [`SolverDriver`] via [`SolverMode::driver`]/[`SolverMode::driver_mut`], so the
-/// worker's telemetry, trace, and `apply_params` plumbing is shared and the step
-/// dispatch is the only fork.
+/// What the solver worker is driving. `Static` wraps a [`SolverDriver`];
+/// `MovingMesh` is the ALE path — a [`MovingMeshDriver`] that re-generates the
+/// CVT-Voronoi mesh each step. Both delegate field/stats/params access to the
+/// wrapped [`SolverDriver`] via [`SolverMode::driver`]/[`SolverMode::driver_mut`],
+/// so the worker's telemetry, trace, and `apply_params` plumbing is shared and
+/// the step dispatch is the only fork.
 enum SolverMode {
     Static(SolverDriver),
     MovingMesh(MovingMeshDriver),
@@ -389,7 +387,7 @@ pub struct MovingWorkerSmoke {
     /// Number of `MeshRefreshed` events the worker emitted.
     pub mesh_refresh_events: usize,
     /// Min / max cell count across all emitted refreshes (should be equal —
-    /// fixed-seed v1). `None` if no refresh was seen.
+    /// fixed seed). `None` if no refresh was seen.
     pub min_cells: Option<usize>,
     pub max_cells: Option<usize>,
     /// A refresh carried an empty / degenerate (< 3 vertex) polygon set.
@@ -540,17 +538,16 @@ pub struct CFDApp {
     mesh: Option<Mesh>,
     cached_cells: Vec<Vec<[f64; 2]>>,
     actual_min_cell_size: f64,
-    // --- Moving-mesh (ALE) opt-in mode. Additive; the static path ignores these. ---
+    // --- Moving-mesh (ALE) opt-in mode ---
     /// Enable the moving-mesh (ALE) path on the next Initialize / Reset.
-    /// Selectable on both compute backends (M5 shipped the GPU moving loop).
-    /// Enabling it steers the mesh to Voronoi (CVT) and the model to
-    /// incompressible ALE.
+    /// Selectable on both compute backends. Enabling it steers the mesh to
+    /// Voronoi (CVT) and the model to incompressible ALE.
     enable_moving_mesh: bool,
     /// How the CVT seeds move each step (Frozen / prescribed swirl / flow-coupled).
     moving_motion: MovingMotionChoice,
     /// FlowCoupled centroid-steering strength χ (0 = pure flow advection).
     moving_regularization: f64,
-    /// M6: cross-stream-oscillate the obstacle (ChannelObstacle geometry only).
+    /// Cross-stream-oscillate the obstacle (ChannelObstacle geometry only).
     /// The obstacle loop's boundary seeds move rigidly with it and its contour
     /// faces carry the moving-wall material velocity (MovingWall BC). Orthogonal
     /// to `moving_motion` (which governs the interior seeds). Applied on
@@ -1182,8 +1179,8 @@ impl CFDApp {
         // keeps the UI free while preventing a NaN/∞/divide-by-zero, and — crucially
         // for the UNSTRUCTURED meshers — bounding the base grid. `generate_cut_cell_mesh`
         // et al. build an uncapped `(domain/max_cell_size)^2` base grid, so a tiny
-        // hand-typed size would OOM; the `MIN_CELL_SIZE` floor matches the old
-        // Always-clamped slider minimum (base grid ≲ few·1e6 cells on these domains).
+        // hand-typed size would OOM; the `MIN_CELL_SIZE` floor keeps the base grid
+        // ≲ few·1e6 cells on these domains.
         // The fitted structured grid is unaffected: its resolution is bounded by the
         // nx/ny clamp (≈5.9e-3 cell), coarser than this floor, so the floor never binds.
         const MIN_CELL_SIZE: f64 = 1e-3;
@@ -1576,10 +1573,9 @@ impl CFDApp {
         // Nozzle: develop FROM REST (zero velocity). No seeded freestream — the flow
         // accelerates purely from the rocket-scale inlet pressure drop. The large
         // pressure ratio (1 MPa gauge, see `ALLMACH_THERMAL_NOZZLE`) forces the throat
-        // to choke, so the supersonic branch forms from scratch; the old low-pressure
-        // case needed a freestream IC to avoid settling on the subsonic diffuser branch.
+        // to choke, so the supersonic branch forms from scratch.
         if selected_geometry == GeometryType::Nozzle {
-            let _ = inlet_velocity; // no longer used to seed the nozzle IC
+            let _ = inlet_velocity; // unused for the nozzle IC
             return vec![(0.0, 0.0); mesh.num_cells()];
         }
         let mut u = vec![(0.0, 0.0); mesh.num_cells()];
@@ -1822,11 +1818,11 @@ impl CFDApp {
         let init_start = std::time::Instant::now();
         let mut trace_init_events: Vec<tracefmt::TraceInitEvent> = Vec::new();
 
-        // Build the mesh + driver. The static path (byte-unchanged) builds the
-        // selected mesh + model and a plain `SolverDriver`; the moving-mesh path
-        // builds a CVT mesh WITH its seeds and wraps a `MovingMeshDriver` around
-        // the incompressible ALE model. Both yield the same downstream tuple, so
-        // the renderer / viz / return tail below is shared.
+        // Build the mesh + driver. The static path builds the selected mesh +
+        // model and a plain `SolverDriver`; the moving-mesh path builds a CVT mesh
+        // WITH its seeds and wraps a `MovingMeshDriver` around the incompressible
+        // ALE model. Both yield the same downstream tuple, so the renderer / viz /
+        // return tail below is shared.
         let (mode, mesh, cached_u, cached_p, mut model_caps) = if request.enable_moving_mesh {
             CFDApp::build_moving_init(&request, &mut trace_init_events)?
         } else {
@@ -2009,9 +2005,8 @@ impl CFDApp {
         }
     }
 
-    /// Static (non-moving) init path — the pre-existing behaviour, factored out
-    /// verbatim so the moving-mesh branch is purely additive: build the selected
-    /// mesh + model and a plain `SolverDriver`.
+    /// Static (non-moving) init path: build the selected mesh + model and a plain
+    /// `SolverDriver`.
     fn build_static_init(
         request: &SolverInitRequest,
         trace_init_events: &mut Vec<tracefmt::TraceInitEvent>,
@@ -2054,7 +2049,7 @@ impl CFDApp {
         // The shared driver derives the `SolverConfig` (stepping mode + effective
         // preconditioner), constructs the solver, and applies the phase-1 setters +
         // initial / boundary conditions. Phase-2 knobs arrive via `sync_worker_params`
-        // (→ `apply_params`) after `SetSolver`, exactly as before.
+        // (→ `apply_params`) after `SetSolver`.
         let solver_start = std::time::Instant::now();
         let init_guard = tracefmt::install_init_collector(trace_init_events);
         let DriverBuild {
@@ -2089,7 +2084,7 @@ impl CFDApp {
 
     /// Moving-mesh (ALE) init path: build a CVT mesh WITH its authoritative seeds
     /// and wrap a [`MovingMeshDriver`] around the incompressible ALE model
-    /// (CPU-first). The mesh type is forced to CVT-Voronoi and the model to
+    /// The mesh type is forced to CVT-Voronoi and the model to
     /// `incompressible_momentum_ale`; `adaptive_dt` is forced off (the swept mesh
     /// fluxes are SCL-closed against a fixed dt — the driver rejects an adaptive
     /// re-scale). `cached_u`/`cached_p` are the seeded IC (the driver's initial
@@ -2146,8 +2141,8 @@ impl CFDApp {
         ))?;
         drop(init_guard);
 
-        // M6: an oscillating obstacle (ChannelObstacle only — the obstacle is
-        // loop 1 of its boundary spec). Cross-stream sinusoidal rigid motion; the
+        // An oscillating obstacle (ChannelObstacle only — the obstacle is loop 1
+        // of its boundary spec). Cross-stream sinusoidal rigid motion; the
         // MovingWall BC feeds the wall's material velocity into the fluid. A
         // no-op for any other geometry (no obstacle loop) or when off — so the
         // FlowCoupled / Frozen / swirl interior-motion demos are unchanged.
@@ -2530,7 +2525,6 @@ impl CFDApp {
                             let renderer = renderer.clone();
                             let viewport_size = [rect.width(), rect.height()];
 
-                            // Compute bounds
                             let (min_x, max_x, min_y, max_y) = cfd_renderer::compute_bounds(cells);
                             let mesh_width = max_x - min_x;
                             let mesh_height = max_y - min_y;
@@ -2718,9 +2712,9 @@ impl eframe::App for CFDApp {
                             );
                         }
                         // For the fitted grid the sole control is the target cell
-                        // size; give it a low floor (and see the raised nx/ny clamp in
-                        // `build_mesh_with`) so the user can drive the mesh much finer
-                        // than the old 0.025 lower bound — and finer still by typing.
+                        // size; give it a low floor (and see the nx/ny clamp in
+                        // `build_mesh_with`) so the user can drive the mesh finer by
+                        // typing.
                         let cell_size_base = if show_grading {
                             self.min_cell_size..=0.5
                         } else {
@@ -2774,10 +2768,8 @@ impl eframe::App for CFDApp {
 
                         ui.group(|ui| {
                         ui.label("Moving Mesh (ALE)");
-                        // The moving solver is correct on BOTH backends (M5 shipped
-                        // the GPU surgical topology refresh + GPU moving loop). The
-                        // toggle steers the mesh/model selections the moving path
-                        // requires and is available on GPU and CPU alike.
+                        // The moving solver runs on both backends. The toggle steers
+                        // the mesh/model selections the moving path requires.
                         let mut enable = self.enable_moving_mesh;
                         ui.add(egui::Checkbox::new(&mut enable, "Enable Moving Mesh (ALE)"))
                             .on_hover_text(
@@ -2821,7 +2813,7 @@ impl eframe::App for CFDApp {
                                      cell centroids to hold mesh quality.",
                                 );
                             }
-                            // M6: oscillating obstacle (ChannelObstacle only — its
+                            // Oscillating obstacle (ChannelObstacle only — its
                             // boundary spec has the obstacle as loop 1).
                             if self.selected_geometry == GeometryType::ChannelObstacle {
                                 ui.separator();
@@ -3027,7 +3019,6 @@ impl eframe::App for CFDApp {
                             }
                         }
 
-                        // Reynolds Number Estimation
                         let char_length = 1.0; // Characteristic length (channel height)
                         let re = self.current_fluid.density
                             * self.inlet_velocity.abs() as f64
@@ -3599,9 +3590,9 @@ impl eframe::App for CFDApp {
                                  levels — a rounding-level result change, fastest \
                                  on solve-heavy runs.",
                             );
-                        // Moving mesh runs on both backends (M5): switching the
-                        // compute backend keeps the moving-mesh selection intact —
-                        // the next Initialize / Reset rebuilds on the chosen backend.
+                        // Moving mesh runs on both backends: switching the compute
+                        // backend keeps the moving-mesh selection intact — the next
+                        // Initialize / Reset rebuilds on the chosen backend.
                         if self.backend.is_cpu() {
                             ui.add(
                                 adaptive_slider(&mut self.cpu_threads, 1..=16).text("Cores"),
@@ -4018,15 +4009,14 @@ fn solver_worker_main(
             || last_snapshot_publish.elapsed() >= snapshot_publish_interval
             || should_log;
 
-        // Acoustic-aware adaptive timestep + one step + divergence / steady-state
-        // detection all live in the shared driver now (was an inline adaptive-dt
-        // block + `step_with_stats` + readback). GUI-only concerns — viz upload,
-        // publishing, trace — stay here.
+        // Adaptive timestep + step + divergence / steady-state detection live in
+        // the shared driver; GUI-only concerns (viz upload, publishing, trace)
+        // stay here.
         //
-        // Static vs moving is the ONLY step-dispatch fork: the static arm is the
-        // pre-existing `SolverDriver::step` (byte-unchanged); the moving arm runs
-        // the ALE cycle (advect → regen → swept fluxes → refresh → step), and
-        // yields the re-generated polygons + per-step telemetry to publish.
+        // Static vs moving is the ONLY step-dispatch fork: the static arm runs
+        // `SolverDriver::step`; the moving arm runs the ALE cycle (advect → regen
+        // → swept fluxes → refresh → step), yielding the re-generated polygons +
+        // per-step telemetry to publish.
         let (outcome, moving_refresh) = match mode {
             SolverMode::Static(d) => (d.step(should_readback), None),
             SolverMode::MovingMesh(m) => match m.step(should_readback) {
@@ -4037,9 +4027,9 @@ fn solver_worker_main(
                     // every solver step (many per frame on a fast CPU solve)
                     // is wasted worker CPU + channel churn — and an unbounded
                     // queue balloon if the UI stalls while the worker steps.
-                    // Geometry + ALE diagnostics tolerate frame-cadence lag
-                    // (design landmine 4); colors track per-step via the
-                    // separate viz-field path regardless.
+                    // Geometry + ALE diagnostics tolerate frame-cadence lag;
+                    // colors track per-step via the separate viz-field path
+                    // regardless.
                     let refresh = if should_readback {
                         Some((CFDApp::cache_cells(m.mesh()), mstats))
                     } else {
@@ -4166,7 +4156,6 @@ fn solver_worker_main(
                         let scaled_residuals = solver.outer_field_residuals_scaled();
 
                         if let (Some(abs), Some(scaled)) = (abs_residuals, scaled_residuals) {
-                            // Both absolute and scaled residuals available
                             let fields = abs
                                 .iter()
                                 .zip(scaled.iter())
@@ -4177,7 +4166,6 @@ fn solver_worker_main(
                                 .join(", ");
                             format!(" outer(iters={iters}, res=[{fields}]{status_suffix})")
                         } else if let Some(fields) = abs_residuals {
-                            // Only absolute residuals available
                             let fields = fields
                                 .iter()
                                 .map(|(name, res)| format!("{name}={res:.3e}"))
@@ -4318,8 +4306,7 @@ fn solver_worker_handle_cmd(
             *last_snapshot_publish = now;
             let _ = evt_tx.send(SolverWorkerEvent::Running(false));
 
-            // Phase-2 parameter application (was `solver_worker_apply_params`), in
-            // the same order as before: build sets phase 1, this sets phase 2.
+            // Phase-2 parameter application: build sets phase 1, this sets phase 2.
             if let Some(m) = mode.as_mut() {
                 m.driver_mut().apply_params(params);
             }

@@ -14,7 +14,6 @@ async fn run_coupled_solver(
 ) -> (Vec<(f64, f64)>, Vec<f64>) {
     println!("Running Coupled Solver Test: {}", name);
 
-    // Create Mesh
     let length = 3.5;
     let domain_size = Vector2::new(length, 1.0);
     let geo = BackwardsStep {
@@ -29,7 +28,6 @@ async fn run_coupled_solver(
     let mut mesh = generate_cut_cell_mesh(&geo, min_cell_size, max_cell_size, 1.2, domain_size);
     mesh.smooth(&geo, 0.3, 50);
 
-    // Initialize Solver
     let mut solver = UnifiedSolver::new(
         &mesh,
         incompressible_momentum_model().expect("model"),
@@ -45,13 +43,11 @@ async fn run_coupled_solver(
     .await
     .expect("solver init");
 
-    // Initial Conditions
     let init_u: Vec<(f64, f64)> = (0..mesh.num_cells()).map(|_| (0.1, 0.0)).collect();
     let init_p: Vec<f64> = (0..mesh.num_cells()).map(|_| 0.0).collect();
     solver.set_u(&init_u);
     solver.set_p(&init_p);
 
-    // Constants
     solver.set_dt(0.001);
     solver.set_density(1.0).unwrap();
     solver.set_viscosity(0.01).unwrap();
@@ -60,12 +56,10 @@ async fn run_coupled_solver(
     solver.set_advection_scheme(scheme);
     solver.set_time_scheme(time_scheme);
 
-    // Run Steps
     const NUM_STEPS: usize = 2;
     for i in 0..NUM_STEPS {
         solver.step();
 
-        // Check for NaN early
         let u = solver.get_u().await;
         let p = solver.get_p().await;
 
@@ -84,25 +78,21 @@ async fn run_coupled_solver(
 #[test]
 fn test_coupled_schemes() {
     pollster::block_on(async {
-        // 1. Upwind + Euler (Baseline)
         let (u_upwind, p_upwind) =
             run_coupled_solver(Scheme::Upwind, TimeScheme::Euler, "Upwind + Euler").await;
         assert!(u_upwind.iter().all(|(x, y)| x.is_finite() && y.is_finite()));
         assert!(p_upwind.iter().all(|x| x.is_finite()));
 
-        // 2. SOU + Euler
         let (u_sou, p_sou) =
             run_coupled_solver(Scheme::SecondOrderUpwind, TimeScheme::Euler, "SOU + Euler").await;
         assert!(u_sou.iter().all(|(x, y)| x.is_finite() && y.is_finite()));
         assert!(p_sou.iter().all(|x| x.is_finite()));
 
-        // 3. QUICK + Euler
         let (u_quick, p_quick) =
             run_coupled_solver(Scheme::QUICK, TimeScheme::Euler, "QUICK + Euler").await;
         assert!(u_quick.iter().all(|(x, y)| x.is_finite() && y.is_finite()));
         assert!(p_quick.iter().all(|x| x.is_finite()));
 
-        // 4. Upwind + BDF2
         let (u_bdf2, p_bdf2) =
             run_coupled_solver(Scheme::Upwind, TimeScheme::BDF2, "Upwind + BDF2").await;
         assert!(u_bdf2.iter().all(|(x, y)| x.is_finite() && y.is_finite()));

@@ -34,10 +34,6 @@ impl DispatchGrids {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Solver-agnostic preconditioner abstraction (ARCH_FIX_6)
-// ---------------------------------------------------------------------------
-
 /// Solver-agnostic context passed to preconditioners.
 ///
 /// Bundles the shared GPU resources that any linear solver (FGMRES, CG,
@@ -83,9 +79,6 @@ impl<'a> PrecondContext<'a> {
     pub const INDIRECT_DISPATCH_CELLS_OFFSET: u64 = 16;
 
     /// Create a group-0 vector bind group binding `vec_x`, `vec_y`, `vec_z`.
-    ///
-    /// This is the solver-agnostic replacement for
-    /// `FgmresWorkspace::create_vector_bind_group`.
     pub fn create_vector_bind_group(
         &self,
         device: &wgpu::Device,
@@ -155,7 +148,6 @@ pub trait PreconditionerModule {
         _ctx: &PrecondContext<'_>,
         _rhs: wgpu::BindingResource<'_>,
     ) {
-        // Default: no-op.
     }
 
     /// Encode the preconditioner application: `output ← M⁻¹ · input`.

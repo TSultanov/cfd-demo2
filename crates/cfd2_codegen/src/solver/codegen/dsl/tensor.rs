@@ -8,8 +8,6 @@ pub trait Axis<const N: usize> {
     fn to_usize(index: Self::Index) -> usize;
 }
 
-// ── Coupled-system axis types ─────────────────────────────────────────
-
 /// Trait for coupled-system axis types used in block CSR matrices.
 ///
 /// Unlike `Axis<N>` which is const-generic, this trait enables
@@ -82,8 +80,6 @@ pub fn block_row<Ax: CoupledAxis>(index: u32) -> BlockRow<Ax> {
 pub fn block_col<Ax: CoupledAxis>(index: u32) -> BlockCol<Ax> {
     BlockCol::new(Ax::from_u32(index))
 }
-
-// ── Concrete coupled axis enums ───────────────────────────────────────
 
 /// Single-scalar coupled system (e.g., generic diffusion demo).
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -1009,8 +1005,6 @@ mod tests {
         assert_eq!(z.at(XY::Y).to_string(), "0.0");
     }
 
-    // ── CoupledAxis enum tests ────────────────────────────────────────
-
     #[test]
     fn scalar_axis_roundtrips() {
         assert_eq!(ScalarAxis::Phi.to_u8(), 0);
@@ -1079,8 +1073,6 @@ mod tests {
         CompressibleAxis2D::from_u32(8);
     }
 
-    // ── BlockRow / BlockCol tests ─────────────────────────────────────
-
     #[test]
     fn block_row_preserves_axis() {
         let row = BlockRow::new(IncompressibleAxis2D::P);
@@ -1106,8 +1098,6 @@ mod tests {
         assert_eq!(col.to_u8(), 3);
     }
 
-    // ── dispatch_by_coupled_stride tests ──────────────────────────────
-
     struct StrideChecker;
 
     impl DispatchByStride<u32> for StrideChecker {
@@ -1131,8 +1121,6 @@ mod tests {
         assert!(result.unwrap_err().contains("unsupported coupled_stride 5"));
     }
 
-    // ── scatter_assign_to_named_block_entry_scaled tests ──────────────
-
     #[test]
     fn scatter_named_matches_untyped() {
         let mat = MatExpr::<3, 3>::from_prefix("jac");
@@ -1146,10 +1134,8 @@ mod tests {
         );
         let entry = soa.row_entry(&Expr::ident("rank"));
 
-        // Untyped version
         let untyped = mat.scatter_assign_to_block_entry_scaled(&entry, Some(Expr::ident("area")));
 
-        // Typed version
         let named_entry =
             super::super::matrix::NamedBlockCsrSoaEntry::<IncompressibleAxis2D>::new(entry);
         let typed =

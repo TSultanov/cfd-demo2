@@ -1,5 +1,5 @@
-//! THE GCL GATE (M3.2 of the meshless/moving-mesh roadmap): a uniform flow on
-//! a prescribed smoothly-deforming structured mesh must stay uniform.
+//! THE GCL GATE: a uniform flow on a prescribed smoothly-deforming structured
+//! mesh must stay uniform.
 //!
 //! Free-stream preservation is the discrete Geometric Conservation Law: with
 //! the moving-volume ddt, the mesh-relative convection (`phi_rel = phi −
@@ -11,40 +11,24 @@
 //!     the scheme-matched bounded rate (`ale_dvdt_ddt`),
 //! which is why the gate runs under BOTH schemes on BOTH backends.
 //!
-//! Protocol per step (the M4 loop in miniature, driven directly with a FIXED
-//! dt — adaptive dt off; the dt used for the swept fluxes must be the dt the
-//! solver steps with):
+//! Protocol per step (fixed dt — the dt used for the swept fluxes must be the
+//! dt the solver steps with, so adaptive dt is off):
 //!   move vertices analytically → `recalculate_geometry` → swept-quad fluxes
 //!   + f32 SCL closure (`swept_mesh_fluxes_closed`) → `begin_ale_step`
 //!   (rotates the volume history BEFORE uploading the new geometry) → `step`.
 //!
-//! Boundary conditions — DELIBERATE deviation from the roadmap sketch
-//! ("inlet left / outlet right / slip top+bottom"): a slip wall enforces
-//! `U·n = 0`, which contradicts the uniform `U=(1,0.5)` crossing the top and
-//! bottom (the discrete fixed point would not be the uniform state and the
-//! gate would measure BC physics, not GCL). Instead the flow enters through
-//! the left+bottom (Inlet, Dirichlet U=(1,0.5)) and leaves through the
-//! right+top (Outlet, zero-gradient U, gauge p=0) — every boundary condition
-//! is exactly satisfied by the uniform state. Interior vertex motion is zero
-//! at the boundary, so boundary faces have zero mesh flux.
+//! Boundary conditions: a slip wall enforces `U·n = 0`, which contradicts the
+//! uniform `U=(1,0.5)` crossing the top and bottom (the discrete fixed point
+//! would not be the uniform state and the gate would measure BC physics, not
+//! GCL). Instead the flow enters through the left+bottom (Inlet, Dirichlet
+//! U=(1,0.5)) and leaves through the right+top (Outlet, zero-gradient U, gauge
+//! p=0) — every boundary condition is exactly satisfied by the uniform state.
+//! Interior vertex motion is zero at the boundary, so boundary faces have zero
+//! mesh flux.
 //!
-//! Scope deviations from the roadmap sketch (recorded per adversarial review,
-//! July 2026 — the roadmap's M3 gate section carries the same note):
-//!   * 220 steps, not 500: 2.2 motion periods with the late-window
-//!     no-compounding split below. The gate's power is per-step margin, not
-//!     duration — mesh flux is ~6% of convective flux, so a sign error or a
-//!     missing `ale_dvdt_ddt` produces per-step drift 10²–10⁴× above the
-//!     late-window caps; extra periods add wall time (the GCL suite is
-//!     already ~5 min), not sensitivity.
-//!   * NO topology-flip case: flips need the M2 Tier-B topology refresh,
-//!     which is not shipped (the seam is geometry-only and structured-mesh
-//!     motion cannot induce flips). DEFERRED to M2 Tier-B/M4 — when topology
-//!     refresh lands, add a flip-inducing uniform-flow case here.
-//!
-//! Tolerances follow the repo's pin-after-first-measurement convention; the
-//! caps are ~2× (CPU) / ~4× (GPU) the measured drift (values recorded at the
-//! asserts). The SCL defect diagnostic is asserted at f32-roundoff scale
-//! EVERY step.
+//! Tolerances are pinned ~2× (CPU) / ~4× (GPU) the measured drift (values
+//! recorded at the asserts). The SCL defect diagnostic is asserted at
+//! f32-roundoff scale EVERY step.
 #![cfg(all(feature = "meshgen", feature = "cpu"))]
 
 use cfd2::sim::{DriverBuild, RuntimeParams, SolverDriver};
@@ -135,18 +119,14 @@ struct GclRun {
     /// run, steps [STEPS/4, STEPS/2)): the cold-start linear-solve transient
     /// (step ≤10) has settled, so this is the baseline the late window is
     /// compared against. A compounding GCL error makes `late ≫ early`; a
-    /// saturated solve-noise floor makes `late ≈ early`. Retained as an
-    /// instrument (the GPU topology-seam gate compared against it before M5
-    /// stage 1's warm-start carry brought that seam down to the geometry-seam
-    /// late-window floor, which is now an absolute cap).
+    /// saturated solve-noise floor makes `late ≈ early`.
     #[allow(dead_code)]
     early_du: f32,
     #[allow(dead_code)]
     early_dp: f32,
     /// Worst drift over the FINAL QUARTER of the run — the actual GCL
     /// statement: a conservation-law violation compounds step over step,
-    /// while solve noise saturates/decays (the traces show the maximum at
-    /// step ≤10 decaying ~50× by the end). Compared against `early_*` (NOT
+    /// while solve noise saturates/decays. Compared against `early_*` (NOT
     /// against `max_*`, which trivially dominates the final quarter).
     late_du: f32,
     late_dp: f32,
@@ -157,9 +137,9 @@ struct GclRun {
 /// Which ALE seam each step drives the mesh move through.
 #[derive(Clone, Copy, PartialEq)]
 enum AleArm {
-    /// M3 geometry-only seam (`begin_ale_step`): same topology, positions moved.
+    /// Geometry-only seam (`begin_ale_step`): same topology, positions moved.
     Geometry,
-    /// M2 Tier B topology seam (`begin_ale_step_topology`): rebuilds the whole
+    /// Topology seam (`begin_ale_step_topology`): rebuilds the whole
     /// topology-derived stack EVERY step (rotate → topology rebuild → geometry
     /// → fluxes). On this structured mesh the topology does not actually change,
     /// so the swept fluxes stay valid — this exercises the topology-rebuild
@@ -339,7 +319,7 @@ fn run_cpu_arm(scheme: TimeScheme, arm: AleArm, label: &str) -> GclRun {
     out
 }
 
-/// Asserts, pinned ~2-4x the July 2026 measurements (32x16, 220 steps, 6
+/// Asserts, pinned ~2-4x the measured drift (32x16, 220 steps, 6
 /// outers, VanLeer, f64 CPU linear solve):
 ///   euler: max|U-U0| = 8.3e-7, max|p-p0| = 1.5e-5
 ///   bdf2:  max|U-U0| = 1.1e-6, max|p-p0| = 1.3e-5
@@ -366,7 +346,7 @@ fn gcl_uniform_flow_preserved_cpu_bdf2() {
     assert_cpu_caps(&out);
 }
 
-// ─── M2 Tier B: the ALE TOPOLOGY seam under a GCL free-stream ─────────────────
+// The ALE TOPOLOGY seam under a GCL free-stream.
 //
 // These gates drive the SAME uniform-flow protocol but route every step through
 // `begin_ale_step_topology` (rotate volume history → FULL topology rebuild →
@@ -378,24 +358,17 @@ fn gcl_uniform_flow_preserved_cpu_bdf2() {
 // topology-rebuild machinery, fused with the ALE volume-history rotation,
 // corrupts none of the moving-mesh physics.
 //
-// FLIP DEFERRAL (crisp, per the stage-4 brief). This is the no-op-TOPOLOGY case:
-// the machinery is exercised, but the face set does not change. A genuine
-// Voronoi *flip* under motion (a seed crossing another's territory) regenerates
-// the mesh with a NEW vertex and face set, for which `swept_mesh_fluxes_closed`
-// cannot produce fluxes: it needs a persistent face↔swept-quad correspondence
-// (a fixed vertex set moving linearly), and on a flip step there is no old
-// counterpart for a born face nor a new counterpart for a dead one. Supplying
-// SCL-consistent mesh fluxes across a re-tessellation is a conservative-remap /
-// generalized swept-volume problem — it belongs to M4 (the mesh-motion loop),
-// not M2 Tier B. What is missing, precisely: (1) a born/dead-face correspondence
-// across the regen, and (2) a swept-volume accounting that still telescopes to
-// the per-cell ΔV when faces appear/disappear. The topology-refresh MACHINERY
-// this milestone ships is exactly what such a flux path would drive; only the
-// flux construction is deferred.
+// This is the no-op-TOPOLOGY case: the machinery is exercised, but the face set
+// does not change. There is no genuine Voronoi flip case because
+// `swept_mesh_fluxes_closed` needs a persistent face↔swept-quad correspondence
+// (a fixed vertex set moving linearly); a flip regenerates the mesh with a new
+// vertex and face set, for which a born face has no old counterpart nor a dead
+// one a new counterpart, so SCL-consistent fluxes across a re-tessellation are a
+// separate conservative-remap problem.
 
 /// CPU + Euler through the topology seam. The CPU topology refresh is surgical
 /// (cell-indexed state, incl. the warm-start `x`, is preserved; no pipeline
-/// recompile), so drift tracks the M3 geometry-seam numbers.
+/// recompile), so drift tracks the geometry-seam numbers.
 #[test]
 fn gcl_topology_seam_preserves_uniform_flow_cpu_euler() {
     let out = run_cpu_arm(TimeScheme::Euler, AleArm::Topology, "topo-euler");
@@ -413,21 +386,16 @@ fn gcl_topology_seam_preserves_uniform_flow_cpu_bdf2() {
 
 /// GPU, both schemes, through the topology seam.
 ///
-/// M5 STAGE 1 — the GPU topology seam now holds the SAME drift scale as the GPU
-/// geometry seam. The topology refresh still reconstructs the hand-written LA
-/// modules (to resize their bind groups), but (a) the compiled pipelines are
-/// served from a per-device cache so nothing recompiles, and (b) the warm-start
-/// `x` (a cell-indexed = dof-indexed iterate, invariant across the refresh) is
-/// carried forward with an on-device buffer→buffer copy instead of being
-/// re-zeroed. So every step's coupled solve resumes WARM from the previous
-/// converged iterate — no cold-restart residual is re-injected. Measured drop
-/// (Apple M-series): euler max|U-U0| 1.53e-3 → 5.5e-5, late 1.53e-3 → 1.3e-6
-/// (the CPU-surgical ~1e-6 scale); bdf2 max 9.6e-5 / late 2.6e-6. These now
-/// match `gcl_uniform_flow_preserved_gpu_euler_and_bdf2` (the geometry seam):
-/// the residual is the same f32 step-0 cold-START transient that decays ~50× to
-/// a ~1e-6 steady band, NOT a topology-seam artifact. Caps are therefore pinned
-/// to the geometry-seam magnitudes; a regression back to the re-zeroed cold
-/// restart (or a real compounding GCL error) blows the late-window caps.
+/// The topology refresh reconstructs the hand-written LA modules (to resize
+/// their bind groups) but serves compiled pipelines from a per-device cache (no
+/// recompile) and carries the warm-start `x` (a cell-indexed = dof-indexed
+/// iterate, invariant across the refresh) forward with an on-device
+/// buffer→buffer copy, so each step's coupled solve resumes WARM. Drift then
+/// holds the geometry-seam scale (see `gcl_uniform_flow_preserved_gpu_...`):
+/// the residual is the f32 step-0 cold-START transient that decays ~50× to a
+/// ~1e-6 steady band. Caps are pinned to the geometry-seam magnitudes; a
+/// regression to a re-zeroed cold restart (or a real compounding GCL error)
+/// blows the late-window caps.
 #[test]
 fn gcl_topology_seam_preserves_uniform_flow_gpu() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -466,7 +434,7 @@ fn gcl_topology_seam_preserves_uniform_flow_gpu() {
 
 /// GPU, both schemes (one adapter init; skips without a GPU).
 ///
-/// Measured July 2026 (Apple M-series): the worst drift is a COLD-START
+/// Measured (Apple M-series): the worst drift is a COLD-START
 /// artifact of the f32 GPU linear solve — euler peaks at step<=10 with
 /// max|U-U0| = 5.5e-5 / max|p-p0| = 5.3e-5, bdf2 at 9.6e-5 / 1.5e-4 — then
 /// DECAYS ~50x to a 1e-6..2e-5 steady band (see CFD2_GCL_TRACE=1). Full-run

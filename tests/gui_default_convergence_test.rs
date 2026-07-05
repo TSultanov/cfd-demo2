@@ -1,19 +1,13 @@
 //! Headless gate for the per-model default GUI solver parameters.
 //!
 //! The desktop GUI applies model-aware defaults (`cfd2::ui::model_defaults`).
-//! This test is the arbiter for them: it builds the GUI's **actual default
-//! geometries** (the cut-cell BackwardsStep and Channel-with-obstacle meshes, at
+//! This test is the arbiter for them: it builds the GUI's actual default
+//! geometries (the cut-cell BackwardsStep and Channel-with-obstacle meshes, at
 //! the default 0.025 cell size) with the real inlet boundary conditions, then
 //! replicates the GUI worker loop (acoustic-aware adaptive-dt — or a fixed dt when
 //! the model default disables it — + `set_*` parameter application +
 //! `step_with_stats`) and asserts the shipped defaults do not diverge or produce
 //! unphysical (checkerboard) fields.
-//!
-//! An earlier version of this gate used a closed lid cavity as a proxy and MISSED
-//! two real failures: the compressible backstep checkerboards (a through-flow,
-//! low-Mach instability the closed cavity never excited) and the incompressible
-//! channel-with-obstacle diverges (high-Re Air past the cylinder on small cut-cell
-//! slivers). Hence: test the real geometries.
 //!
 //! Tuning aids (run with `--ignored`): `sweep_compressible_backstep` and
 //! `sweep_incompressible_obstacle` grid the stability knobs.
@@ -37,9 +31,8 @@ use std::ops::ControlFlow;
 
 const N_STEPS: usize = 150;
 /// Compressible gate horizon: long enough to surface the slow low-Mach inlet
-/// blow-up (unfixed: bounded for ~1000 steps, then max|u| rockets past the cap by
-/// ~step 1300). 2000 steps clears that with margin; the fixed default holds at
-/// the freestream (max|u| ~ inlet) the whole way.
+/// blow-up (an unfixed default stays bounded ~1000 steps before rocketing past the
+/// cap). The fixed default holds at the freestream (max|u| ~ inlet) the whole way.
 const COMPRESSIBLE_STEPS: usize = 2000;
 const READBACK_EVERY: usize = 5;
 /// With the laminar low inlet speeds the physical max |u| is small (a few x the
@@ -144,11 +137,10 @@ fn adaptive_next_dt(
     }
 }
 
-/// Drives the shared [`SolverDriver`] for `n_steps` and records samples. This is now
-/// a thin adapter over `SolverDriver::run_steps` (the *same* adaptive-dt + step +
-/// divergence path the GUI worker runs), so the gate exercises the production loop
-/// rather than a hand-copy. The driver flags hard divergence (non-finite / step
-/// error); the gate adds its own unphysical-`VEL_CAP` policy via the callback.
+/// Drives the shared [`SolverDriver`] for `n_steps` and records samples — a thin
+/// adapter over `SolverDriver::run_steps` (the adaptive-dt + step + divergence path
+/// the GUI worker runs). The driver flags hard divergence (non-finite / step error);
+/// the gate adds its own unphysical-`VEL_CAP` policy via the callback.
 fn drive(driver: &mut SolverDriver, n_steps: usize) -> DriveResult {
     let mut samples = Vec::new();
     let result = driver.run_steps(n_steps, READBACK_EVERY, |step, outcome| {
@@ -169,8 +161,7 @@ fn drive(driver: &mut SolverDriver, n_steps: usize) -> DriveResult {
             rho_max,
             outer_iters: outcome.outer_iters.unwrap_or(0),
         });
-        // Gate policy: a non-finite field or an unphysical max velocity is divergence
-        // (the driver already stops the loop on its own hard-divergence detection).
+        // Gate policy: a non-finite field or an unphysical max velocity is divergence.
         if fs.nonfinite_u > 0 || !fs.p_finite || !fs.max_vel.is_finite() || fs.max_vel > VEL_CAP {
             ControlFlow::Break(())
         } else {
@@ -227,10 +218,9 @@ fn assert_bounded(label: &str, res: &DriveResult, p_lo: f64, p_hi: f64, rho_lo: 
     }
 }
 
-/// Build the incompressible solver through the shared driver — the *same*
-/// construction (config / stepping derivation, phase-1 setters, IC/BC) + phase-2
-/// `apply_params` the GUI runs. The model-default → `RuntimeParams` mapping is the
-/// canonical `ModelGuiDefaults::to_runtime_params` the app startup also uses.
+/// Build the incompressible solver through the shared driver — the construction
+/// (config / stepping derivation, phase-1 setters, IC/BC) + phase-2 `apply_params`
+/// the GUI runs, via the canonical `ModelGuiDefaults::to_runtime_params` mapping.
 fn build_incompressible_driver(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> SolverDriver {
     let params = d.to_runtime_params(fluid.density as f32, fluid.viscosity as f32, fluid.eos);
     let n = mesh.num_cells();
@@ -304,18 +294,13 @@ fn run_incompressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> Drive
     drive(&mut driver, N_STEPS)
 }
 
-/// Compressible runs need a LONG horizon: the low-Mach inlet instability this
-/// gate guards against is slow — it stays under the cap for ~1000 steps before
-/// blowing past it (the old 150-step gate passed straight through the blow-up).
-/// `COMPRESSIBLE_STEPS` is well past where the unfixed default diverges.
+/// Compressible runs need a LONG horizon: the low-Mach inlet instability this gate
+/// guards against is slow — it stays under the cap ~1000 steps before blowing past
+/// it. `COMPRESSIBLE_STEPS` is well past where an unfixed default diverges.
 fn run_compressible(d: &ModelGuiDefaults, fluid: &Fluid, mesh: &Mesh) -> DriveResult {
     let mut driver = build_compressible_driver(d, fluid, mesh);
     drive(&mut driver, COMPRESSIBLE_STEPS)
 }
-
-// --------------------------------------------------------------------------
-// Gate
-// --------------------------------------------------------------------------
 
 #[test]
 fn gui_default_incompressible_backstep_bounded() {
@@ -330,12 +315,9 @@ fn gui_default_incompressible_backstep_bounded() {
 }
 
 // The cut-cell channel-obstacle has slivers (cells down to ~2% nominal). The
-// root-cause fix is the immersed no-slip wall BC on the cylinder (see
-// `generate_cut_cell_mesh`): it produces the physical boundary layer AND
-// stabilizes the tiny cut cells (the no-slip wall-shear damping grows as cells
-// shrink), so this stays bounded with SRD OFF (the default). The earlier
-// mesh-level merge (geometry-distorting) and viscosity floor (unphysical) were
-// both rejected/reverted; SRD is retained only as an opt-in stabilizer.
+// immersed no-slip wall BC on the cylinder (in `generate_cut_cell_mesh`) produces
+// the physical boundary layer AND stabilizes the tiny cut cells (no-slip wall-shear
+// damping grows as cells shrink), so this stays bounded with SRD OFF (the default).
 #[test]
 fn gui_default_incompressible_obstacle_bounded() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -350,9 +332,9 @@ fn gui_default_incompressible_obstacle_bounded() {
 
 /// The all-Mach pressure-based default, driven through the GUI's exact default path
 /// (dropdown → `gui_defaults_for("allmach_pressure")` → `SolverDriver`). The
-/// compressibility is now **EOS-derived** (`psi = 1/c^2` from the fluid's real sound
-/// speed) times a GUI exaggeration factor (default ×1 = real physics), not a hardcoded
-/// constant. This gate asserts the honest two-regime behaviour:
+/// compressibility is EOS-derived (`psi = 1/c^2` from the fluid's real sound speed)
+/// times a GUI exaggeration factor (default ×1 = real physics). This gate asserts
+/// the honest two-regime behaviour:
 ///   (a) DEFAULT (×1): `psi` equals the fluid's real `1/c^2` (Air ≈ 8.3e-6), so the
 ///       flow is honestly near-incompressible — bounded, finite, and the wake still
 ///       develops (the all-Mach model reduces to the validated incompressible street).
@@ -483,9 +465,8 @@ fn wake_oscillation_stats(uy: &[f64]) -> (f64, usize, f64, f64) {
 /// HEADLINE: the channel-with-obstacle default must shed a **Kármán vortex street**,
 /// not freeze into a steady wake. With the shipped defaults (Van Leer + Re≈150) the
 /// wake develops a self-sustained transverse oscillation; first-order Upwind or a
-/// sub-critical Reynolds number (the old `inlet_velocity`) would smear/decay it into
-/// a steady blob (the wake `u_y` would sit dead-constant — verified: the Re≈27
-/// baseline gives std/U ~ 1e-5).
+/// sub-critical Reynolds number would smear/decay it into a steady blob (the wake
+/// `u_y` would sit dead-constant — the Re≈27 baseline gives std/U ~ 1e-5).
 ///
 /// We assert the two qualitative features that define the street: it stays **bounded**
 /// (a limit cycle, not a blow-up) AND the wake `u_y` **sustains an oscillation**
@@ -521,8 +502,7 @@ fn gui_default_incompressible_obstacle_sheds_vortex_street() {
     // or merely biased wake would sit one-signed near zero). The Re≈27 / Upwind
     // baseline gives std/U ~ 1e-5 and no sign change, so these thresholds (std > 5%
     // of U, and a ±5%-of-U bidirectional swing) cleanly separate shedding from a
-    // smeared/steady wake while being robust to the still-saturating mean drift at
-    // 1000 steps (which made a fixed sign-change count fragile).
+    // smeared/steady wake while tolerating the mean drift still saturating at 1000 steps.
     assert!(
         std > 0.05 * u_in,
         "wake u_y too steady (std={std:.3e}, {:.4}xU): no vortex street — the flow is not shedding (Upwind/sub-critical Re regression?)",
@@ -620,8 +600,8 @@ fn gui_default_compressible_backstep_bounded_and_smooth() {
 /// defaults it must stay bounded and smooth there too (no slow low-Mach blow-up on
 /// the slivers, no pressure/density excursion). The flow itself is a slow low-Mach
 /// near-incompressible wake (genuine vortex shedding is impractical for the
-/// density-based solver at Air's near-zero Mach — see the model notes); "sensible"
-/// here means bounded + smooth, not a street.
+/// density-based solver at Air's near-zero Mach); "sensible" here means bounded +
+/// smooth, not a street.
 #[test]
 fn gui_default_compressible_obstacle_bounded_and_smooth() {
     std::env::set_var("CFD2_QUIET", "1");
@@ -663,7 +643,6 @@ fn srd_gpu_matches_cpu_reference() {
         .collect();
     solver.set_u(&u0);
 
-    // GPU apply (through the solver), then read back.
     solver.apply_srd_pass();
     let gpu = pollster::block_on(solver.get_u());
 
@@ -685,11 +664,7 @@ fn srd_gpu_matches_cpu_reference() {
     );
 }
 
-// --------------------------------------------------------------------------
-// Tuning aids (run with --ignored)
-// --------------------------------------------------------------------------
-
-/// Build State-Redistribution (Berger & Giuliani 2021) neighborhoods for a mesh:
+/// Build State-Redistribution neighborhoods for a mesh:
 /// every cell has a neighborhood N_i (itself); cells below `threshold` grow N_i by
 /// adding the largest face-adjacent cells until the neighborhood volume reaches
 /// `target`. Returns (neighborhoods, theta) where theta_j = # neighborhoods
@@ -763,7 +738,7 @@ fn srd_apply(u: &mut [(f64, f64)], mesh: &Mesh, neigh: &[Vec<usize>], theta: &[u
 }
 
 /// CPU prototype: does post-step State Redistribution stabilize the true-geometry
-/// obstacle? Validates the method before the GPU implementation.
+/// obstacle?
 #[test]
 #[ignore]
 fn prototype_srd_stabilizes_obstacle() {
@@ -929,8 +904,8 @@ fn diagnose_obstacle_boundary_layer() {
 }
 
 /// Decisive check: does the runtime advection scheme actually change GPU output?
-/// (Memory claims the GPU bakes the scheme; the generated assembly WGSL branches
-/// on `constants.scheme`, so this verifies the value is plumbed end-to-end.)
+/// The generated assembly WGSL branches on `constants.scheme`, so this verifies the
+/// value is plumbed end-to-end.
 #[test]
 #[ignore]
 fn scheme_actually_changes_gpu_output() {
@@ -984,7 +959,7 @@ fn scheme_actually_changes_gpu_output() {
         rt_upwind, rt_vanleer
     );
 
-    // Compressible (the memory's specific case): config scheme.
+    // Compressible: config scheme.
     let run_comp = |scheme: cfd2::solver::scheme::Scheme| -> f64 {
         let mut d = gui_defaults_for("compressible");
         d.advection_scheme = scheme;
@@ -1061,9 +1036,8 @@ fn sweep_compressible_backstep() {
 /// Long-run probe of the compressible GUI default on EITHER default geometry, on
 /// whatever backend `CFD2_BACKEND` selects (gpu default; `cpu` routes to the CPU
 /// solver). Prints the trajectory every 100 steps and the divergence step (if
-/// any). This is the instrument that surfaced the low-Mach inlet blow-up the
-/// 150-step gate missed (see [[cfd2-compressible-gui-divergence]]); with the
-/// shipped defaults (uniform IC + `dtau`) it holds at the freestream.
+/// any). This is the instrument that surfaced the slow low-Mach inlet blow-up;
+/// with the shipped defaults (uniform IC + `dtau`) it holds at the freestream.
 ///
 /// Env knobs (each OVERRIDES the model default for one-recompile sweeps):
 /// `CFD2_PROBE_STEPS` (default 3000), `CFD2_PROBE_GEO` (`backstep`|`obstacle`),

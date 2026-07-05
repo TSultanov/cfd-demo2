@@ -161,7 +161,6 @@ impl MeshBuilder {
         mesh.vy = self.vy;
         mesh.v_fixed = self.v_fixed;
 
-        // Flatten faces
         for f in &self.faces {
             mesh.face_v1.push(f.v1.0);
             mesh.face_v2.push(f.v2.0);
@@ -176,7 +175,6 @@ impl MeshBuilder {
             mesh.face_area.push(0.0);
         }
 
-        // Flatten cells
         mesh.cell_face_offsets.push(0);
         mesh.cell_vertex_offsets.push(0);
         for cell in &self.cells {

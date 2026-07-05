@@ -22,7 +22,6 @@ pub mod state_layout {
     pub use cfd2_ir::equation::state_layout::*;
 }
 
-// Re-export typed_ast module itself
 pub mod typed_ast {
     pub use cfd2_ir::equation::typed_ast::*;
 }

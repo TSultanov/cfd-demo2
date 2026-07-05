@@ -123,8 +123,8 @@ fn allmach_thermal_recovery_tracks_temperature() {
     assert!(max_rho < 5.0 * rho_ref, "rho blew up: {max_rho}");
 
     // The core check: on-device recovery to f32 precision against the REAL ideal-gas EOS
-    // `rho = rho_t_ref/T + (gamma*psi*t_ref/T)*p` (= p_abs/(R*T); the Stage-B T-varying
-    // compressibility, d(rho)/dp|_T = gamma*psi*t_ref/T rising as the gas cools). At
+    // `rho = rho_t_ref/T + (gamma*psi*t_ref/T)*p` (= p_abs/(R*T); the T-varying
+    // compressibility d(rho)/dp|_T = gamma*psi*t_ref/T rises as the gas cools). At
     // T = T_ref this reduces to the barotropic `rho_t_ref/T + psi*p`.
     let rho_t_ref = rho_ref * ALLMACH_T_REF;
     let mut worst = 0.0_f64;

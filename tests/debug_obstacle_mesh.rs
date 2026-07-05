@@ -16,7 +16,6 @@ mod tests {
         };
         let domain_size = Vector2::new(3.0, 1.0);
 
-        // Generate Voronoi mesh
         let mesh = generate_voronoi_mesh(&geo, 0.05, 0.05, 1.2, domain_size);
 
         println!(
@@ -162,7 +161,6 @@ mod tests {
             bad_normals, bad_centroids, bad_boundary_pos
         );
         assert!(bad_normals == 0, "Found bad normals");
-        // assert!(bad_centroids == 0, "Found bad centroids"); // Relaxed for now
 
         // 3. Check Non-Orthogonality at Boundary
         let mut max_angle_deg = 0.0;
@@ -186,7 +184,6 @@ mod tests {
                 }
 
                 if angle > 20.0 {
-                    // println!("Boundary Face {} has high non-orthogonality: {:.2} degrees", i, angle);
                     bad_ortho += 1;
                 }
             }

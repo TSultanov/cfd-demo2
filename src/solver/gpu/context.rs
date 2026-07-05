@@ -15,13 +15,12 @@ pub struct GpuContext {
     /// Nanoseconds per timestamp tick (`queue.get_timestamp_period()`), used to
     /// convert raw query deltas to durations. `0.0` when timestamps are disabled.
     pub timestamp_period_ns: f32,
-    /// Per-device compute-pipeline cache (M5 stage 1). Memoizes the compiled
-    /// hand-written LA pipelines by `(model_id, KernelId)` so a Tier B topology
-    /// refresh (which reconstructs the LA modules to resize their bind groups)
-    /// reuses the already-compiled pipeline instead of recompiling it — the
-    /// dominant, size-independent cost of a GPU topology refresh. Held behind an
-    /// `Arc` so lazily-compiling modules can keep a clone. Lives with the device
-    /// and survives every refresh (the context is never rebuilt).
+    /// Per-device compute-pipeline cache. Memoizes the compiled hand-written LA
+    /// pipelines by `(model_id, KernelId)` so a topology refresh (which rebuilds
+    /// the LA modules to resize their bind groups) reuses the already-compiled
+    /// pipeline instead of recompiling it — the dominant, size-independent cost
+    /// of a GPU topology refresh. Held behind an `Arc` so lazily-compiling
+    /// modules can keep a clone; lives with the device and survives every refresh.
     pub pipeline_cache: std::sync::Arc<crate::solver::gpu::pipeline_cache::PipelineCache>,
 }
 

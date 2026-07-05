@@ -60,9 +60,6 @@ pub fn resolve_flux_module_state_slots(
 }
 
 /// Resolve flux module state slots using a [`PortRegistry`] as the single source of truth.
-///
-/// This replaces `resolve_flux_module_state_slots` by delegating layout resolution to
-/// `PortRegistry::to_resolved_state_slots_for()` instead of manually walking `StateLayout`.
 pub fn resolve_flux_module_state_slots_via_registry(
     spec: &FluxModuleKernelSpec,
     primitives: &[(String, Expr)],
@@ -81,9 +78,6 @@ pub fn resolve_flux_module_state_slots_via_registry(
 }
 
 /// Resolve flux module state slots for runtime scheme selection using a [`PortRegistry`].
-///
-/// This replaces `resolve_flux_module_state_slots_runtime_scheme` by delegating layout
-/// resolution to `PortRegistry::to_resolved_state_slots_for()`.
 pub fn resolve_flux_module_state_slots_runtime_scheme_via_registry(
     variants: &[(crate::solver::scheme::Scheme, FluxModuleKernelSpec)],
     primitives: &[(String, Expr)],
@@ -400,7 +394,6 @@ mod tests {
             ],
         };
 
-        // Verify old (layout-based) and new (registry-based) resolvers produce the same result.
         let resolved_old = resolve_flux_module_state_slots(&spec, &primitives, &layout).unwrap();
         let registry = PortRegistry::new(layout);
         let resolved_new =

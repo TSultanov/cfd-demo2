@@ -1,10 +1,10 @@
-//! Per-cell Voronoi clip kernel (meshless engine M0.2, design §3).
+//! Per-cell Voronoi clip kernel.
 //!
 //! A cell starts as the domain bounding box and is cut by one half-plane per
 //! neighbor — the seed/neighbor bisector — in ascending neighbor distance.
-//! All arithmetic is *seed-relative* (the seed sits at the origin), the
-//! paper's precision trick, and the same idea as the relative-coordinate
-//! in-circle predicate in `delaunay.rs`. The bisector is kept unnormalized,
+//! All arithmetic is *seed-relative* (the seed sits at the origin) for
+//! precision, the same idea as the relative-coordinate in-circle predicate
+//! in `delaunay.rs`. The bisector is kept unnormalized,
 //! `s(x) = x·q − ½|q|²` with `q = p_j − p_i` (no sqrt/normalize, robust for
 //! near-coincident seeds), and intersections use the stable parametric form
 //! `t = s_u/(s_u − s_v)`. Once the next neighbor satisfies `d² > 4·r2`

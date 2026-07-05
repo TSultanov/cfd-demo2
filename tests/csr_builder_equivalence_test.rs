@@ -1,15 +1,9 @@
-//! M2 Tier B stage 1: the scalar-CSR topology builders were factored out of the
-//! two backend init paths into `solver::mesh::csr` so a `Topology`-level mesh
-//! refresh rebuilds byte-identically what init built. This gate pins that the
-//! factored builders produce **bit-equal** output to a re-inlined reference copy
-//! of the historical inlined logic, on four mesh families (structured, graded,
-//! meshless-Voronoi, cut-cell) — the neutrality proof for the factoring.
-//!
-//! The reference copies below are verbatim transcriptions of the pre-factoring
-//! inlined logic (GPU: `gpu::init::mesh::init_mesh`; CPU:
-//! `cpu::solver::build_csr_topology`). They live in the test, not in production,
-//! so the production path can be simplified (delegated) without weakening the
-//! equivalence check.
+//! Pins that the factored scalar-CSR topology builders in `solver::mesh::csr`
+//! produce bit-equal output to reference copies of the original inlined logic,
+//! across four mesh families (structured, graded, meshless-Voronoi, cut-cell).
+//! The reference copies below are verbatim transcriptions of that inlined logic
+//! (GPU: `gpu::init::mesh::init_mesh`; CPU: `cpu::solver::build_csr_topology`),
+//! kept in the test so production can delegate without weakening the check.
 #![cfg(feature = "meshgen")]
 
 use cfd2::solver::mesh::csr::{build_diag_first_scalar_csr, build_sorted_scalar_csr, ScalarCsr};
@@ -20,10 +14,10 @@ use cfd2::solver::mesh::{
 };
 use nalgebra::{Point2, Vector2};
 
-// ── Re-inlined reference builders (verbatim pre-factoring logic) ──────────────
+// ── Reference builders ────────────────────────────────────────────────────────
 
-/// Reference copy of the GPU sorted-adjacency scalar-CSR build previously inlined
-/// in `gpu::init::mesh::init_mesh`.
+/// Reference copy of the GPU sorted-adjacency scalar-CSR build
+/// (`gpu::init::mesh::init_mesh`).
 fn reference_sorted_scalar_csr(mesh: &Mesh) -> ScalarCsr {
     let num_cells = mesh.cell_cx.len() as u32;
 
@@ -104,8 +98,8 @@ fn reference_sorted_scalar_csr(mesh: &Mesh) -> ScalarCsr {
     }
 }
 
-/// Reference copy of the CPU diag-first scalar-CSR build previously inlined as
-/// `cpu::solver::build_csr_topology`.
+/// Reference copy of the CPU diag-first scalar-CSR build
+/// (`cpu::solver::build_csr_topology`).
 fn reference_diag_first_scalar_csr(mesh: &Mesh) -> ScalarCsr {
     let n = mesh.num_cells();
     let mut row_offsets = vec![0u32; n + 1];

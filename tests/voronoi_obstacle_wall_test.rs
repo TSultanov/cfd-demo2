@@ -1,10 +1,9 @@
 #![cfg(all(feature = "meshgen", feature = "dev-tests"))]
 
-//! Solver-level regression test for the unstructured-mesh wall-tagging fix:
-//! on a Voronoi (and Delaunay) obstacle-channel mesh the obstacle contour
-//! faces must act as a no-slip wall, not as an open zero-gradient hole
-//! (BC-table row 0). Before the fix the contour faces were untyped, so the
-//! incompressible solve let mass flow straight through the circle.
+//! Solver-level regression test: on a Voronoi (and Delaunay) obstacle-channel
+//! mesh the obstacle contour faces must act as a no-slip wall, not as an open
+//! zero-gradient hole (BC-table row 0), so the incompressible solve cannot let
+//! mass flow straight through the circle.
 
 use cfd2::sim::{DriverBuild, RuntimeParams, SolverDriver};
 use cfd2::solver::mesh::{

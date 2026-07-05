@@ -4,9 +4,8 @@
 // (`bc_value`) takes for one unknown component: a function of interior
 // (owner-cell) state, other prescribed boundary values, uniform model
 // params, and literals. A generic Preparation-phase kernel (the `bc_expr`
-// module) evaluates these per boundary face every outer iteration,
-// replacing hand-written runtime-BC kernels; the same expressions can be
-// evaluated host-side in f64 for seeding helpers.
+// module) evaluates these per boundary face every outer iteration; the
+// same expressions can be evaluated host-side in f64 for seeding helpers.
 //
 // Compilation contexts: like `algebraic.rs`/`typed_ast.rs`, this file is
 // compiled both as `cfd2_ir::equation::boundary` and (via include!) inside

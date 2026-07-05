@@ -13,7 +13,6 @@ use cfd2::solver::model::incompressible_momentum_model;
 use nalgebra::Vector2;
 use std::time::{Duration, Instant};
 
-/// Setup solver for analysis
 fn setup_solver(cell_size: f64, preconditioner: PreconditionerType) -> (GpuUnifiedSolver, usize) {
     let length = 2.0;
     let domain_size = Vector2::new(length, 1.0);
@@ -50,7 +49,6 @@ fn setup_solver(cell_size: f64, preconditioner: PreconditionerType) -> (GpuUnifi
     (solver, num_cells)
 }
 
-/// Analyze step timing in detail
 fn analyze_step_timing() {
     println!("\n========================================");
     println!("  STEP TIMING ANALYSIS");
@@ -68,7 +66,6 @@ fn analyze_step_timing() {
             cell_size, num_cells, num_faces
         );
 
-        // Collect timing samples
         let mut samples: Vec<Duration> = Vec::with_capacity(steps_per_test);
 
         for _ in 0..steps_per_test {
@@ -77,14 +74,12 @@ fn analyze_step_timing() {
             samples.push(start.elapsed());
         }
 
-        // Calculate statistics
         samples.sort();
         let min = samples[0];
         let max = samples[samples.len() - 1];
         let median = samples[samples.len() / 2];
         let mean: Duration = samples.iter().sum::<Duration>() / samples.len() as u32;
 
-        // Calculate standard deviation
         let mean_secs = mean.as_secs_f64();
         let variance: f64 = samples
             .iter()
@@ -96,7 +91,6 @@ fn analyze_step_timing() {
             / samples.len() as f64;
         let std_dev = Duration::from_secs_f64(variance.sqrt());
 
-        // Throughput calculations
         let cells_per_sec = num_cells as f64 / mean.as_secs_f64();
         let faces_per_sec = num_faces as f64 / mean.as_secs_f64();
 
@@ -114,7 +108,6 @@ fn analyze_step_timing() {
     }
 }
 
-/// Compare different preconditioners
 fn compare_preconditioners() {
     println!("\n========================================");
     println!("  PRECONDITIONER COMPARISON");
@@ -131,7 +124,6 @@ fn compare_preconditioners() {
     for (name, precond) in &preconditioners {
         let (mut solver, num_cells) = setup_solver(cell_size, *precond);
 
-        // Collect timing samples
         let mut samples: Vec<Duration> = Vec::with_capacity(steps_per_test);
 
         for _ in 0..steps_per_test {
@@ -152,7 +144,6 @@ fn compare_preconditioners() {
     }
 }
 
-/// Analyze scaling behavior
 fn analyze_scaling() {
     println!("\n========================================");
     println!("  SCALING ANALYSIS");
@@ -172,12 +163,10 @@ fn analyze_scaling() {
     for &cell_size in &cell_sizes {
         let (mut solver, num_cells) = setup_solver(cell_size, PreconditionerType::Jacobi);
 
-        // Warmup
         for _ in 0..5 {
             solver.step();
         }
 
-        // Collect timing samples
         let start = Instant::now();
         for _ in 0..steps_per_test {
             solver.step();
@@ -188,7 +177,6 @@ fn analyze_scaling() {
         let cells_per_sec = num_cells as f64 / mean.as_secs_f64();
         let time_ms = mean.as_secs_f64() * 1000.0;
 
-        // Calculate scaling efficiency vs smallest mesh
         let scaling = if let Some(base) = baseline_throughput {
             (cells_per_sec / base) * 100.0
         } else {
@@ -208,7 +196,6 @@ fn analyze_scaling() {
     println!();
 }
 
-/// Memory analysis - rough estimate based on mesh size
 fn analyze_memory_usage() {
     println!("\n========================================");
     println!("  MEMORY USAGE ESTIMATION");
@@ -226,7 +213,6 @@ fn analyze_memory_usage() {
         let (solver, num_cells) = setup_solver(cell_size, PreconditionerType::Jacobi);
         let num_faces = num_cells * 2; // Approximation for structured grid
 
-        // Rough estimates based on typical solver structure
         // State: 4 fields × 4 bytes × num_cells (U, V, P, and working buffers)
         let state_bytes = num_cells * 4 * 4;
 
@@ -255,7 +241,6 @@ fn analyze_memory_usage() {
     println!();
 }
 
-/// Main analysis
 fn main() {
     println!("\n╔══════════════════════════════════════════════════════════╗");
     println!("║       GPU SOLVER PERFORMANCE ANALYSIS                    ║");

@@ -8,9 +8,7 @@ struct Uniforms {
     viewport_size: vec2<f32>,
     // Value range [min, max]
     range: vec2<f32>,
-    // Stride between elements
     stride: u32,
-    // Offset to start reading
     offset: u32,
     // Mode: 0=value, 1=magnitude
     mode: u32,

@@ -15,21 +15,13 @@ use super::{CategoryStats, MemoryDomain, MemoryStats, ProfileCategory};
 pub struct ProfilingStats {
     enabled: AtomicBool,
     stats: Mutex<[CategoryStats; 7]>,
-    /// Start time for the current profiling session
     session_start: Mutex<Option<Instant>>,
-    /// Total wall-clock time for the session
     session_total: Mutex<Duration>,
-    /// Number of solver iterations profiled
     iteration_count: AtomicU64,
-    /// Per-location profiling for identifying hotspots
     location_stats: Mutex<Vec<(String, CategoryStats)>>,
-    /// CPU memory profiling stats
     memory_cpu: Mutex<MemoryStats>,
-    /// GPU memory profiling stats
     memory_gpu: Mutex<MemoryStats>,
-    /// Per-location CPU memory profiling
     memory_locations_cpu: Mutex<HashMap<String, MemoryStats>>,
-    /// Per-location GPU memory profiling
     memory_locations_gpu: Mutex<HashMap<String, MemoryStats>>,
 }
 
@@ -122,10 +114,8 @@ impl ProfilingStats {
         if !self.is_enabled() {
             return;
         }
-        // Record in category stats
         self.record(category, duration, bytes);
 
-        // Record in location stats
         let mut locations = self.location_stats.lock().unwrap();
         let key = format!("{}:{}", category.name(), location);
         if let Some(entry) = locations.iter_mut().find(|(k, _)| k == &key) {
@@ -262,7 +252,6 @@ impl ProfilingStats {
         }
         println!();
 
-        // Category breakdown
         println!("Category Breakdown:");
         println!(
             "{:<25} {:>12} {:>10} {:>12} {:>12} {:>12}",
@@ -296,7 +285,6 @@ impl ProfilingStats {
             }
         }
 
-        // Unaccounted time
         if session_total > total_profiled {
             let unaccounted = session_total - total_profiled;
             let pct = (unaccounted.as_nanos() as f64 / session_total.as_nanos() as f64) * 100.0;
@@ -308,16 +296,11 @@ impl ProfilingStats {
 
         println!();
 
-        // Per-node wall + GPU time, normalized per solver step. This is the
-        // actionable headline: each program node (Graph or Host) is measured both by
-        // total CPU wall-clock (the localizer — dominates when the step is bound by
-        // per-iteration readback polls) and by real GPU-timeline time. `wall − gpu`
-        // is the node's CPU/sync overhead, so the biggest `wall` node is the
-        // optimization target and its `gpu` share says whether to chase GPU compute
-        // or CPU/host overhead.
+        // Per-node wall + GPU time, per solver step: `wall` (dominates when the step is
+        // bound by readback polls) vs real GPU-timeline time. `wall − gpu` is the node's
+        // CPU/sync overhead — says whether the hot node is GPU-compute- or host-bound.
         self.print_per_node_time(iterations);
 
-        // Top hotspots by location
         let mut location_stats = self.get_location_stats();
         location_stats.sort_by(|a, b| b.1.total_time.cmp(&a.1.total_time));
 
@@ -340,20 +323,13 @@ impl ProfilingStats {
 
         println!();
 
-        // Memory usage summary
         self.print_memory_report();
-
-        // Optimization suggestions
         self.print_optimization_suggestions();
     }
 
-    /// Print per-node wall + GPU time, normalized per solver step.
-    ///
-    /// Merges the `CpuCompute:label` (wall-clock) and `GpuDispatch:label` (GPU
-    /// timeline) location stats populated in `GpuProgramPlan::execute_block` into
-    /// one row per node, sorted by wall time. `wall − gpu` is the node's CPU/sync
-    /// overhead — the signal that says whether a hot node is GPU-compute-bound or
-    /// (as the coupled solve is) bound by CPU-side per-iteration polls.
+    /// Per-node wall + GPU time per solver step. Merges the `CpuCompute:label` (wall)
+    /// and `GpuDispatch:label` (GPU timeline) location stats into one row per node,
+    /// sorted by wall. `wall − gpu` is the node's CPU/sync overhead.
     fn print_per_node_time(&self, iterations: u64) {
         let wall_prefix = format!("{}:", ProfileCategory::CpuCompute.name());
         let gpu_prefix = format!("{}:", ProfileCategory::GpuDispatch.name());
@@ -446,7 +422,6 @@ impl ProfilingStats {
             gpu.net_bytes(),
         );
 
-        // Top memory hotspots by location
         for domain in [MemoryDomain::Cpu, MemoryDomain::Gpu] {
             let mut locations = self.get_memory_location_stats(domain);
             locations.sort_by(|a, b| b.1.alloc_bytes.cmp(&a.1.alloc_bytes));
@@ -482,7 +457,6 @@ impl ProfilingStats {
 
         let mut suggestions = Vec::new();
 
-        // Check for excessive GPU reads
         if gpu_read.call_count > 100 {
             suggestions.push(format!(
                 "• HIGH GPU READ COUNT ({} calls): Consider batching reads or \
@@ -491,7 +465,6 @@ impl ProfilingStats {
             ));
         }
 
-        // Check GPU sync time
         let total = self.get_session_total();
         if total.as_nanos() > 0 {
             let sync_pct =
@@ -505,7 +478,6 @@ impl ProfilingStats {
             }
         }
 
-        // Check CPU compute time
         if total.as_nanos() > 0 {
             let cpu_pct =
                 (cpu_compute.total_time.as_nanos() as f64 / total.as_nanos() as f64) * 100.0;
@@ -518,7 +490,6 @@ impl ProfilingStats {
             }
         }
 
-        // Check transfer size efficiency
         if gpu_read.call_count > 0 {
             let avg_bytes = gpu_read.total_bytes / gpu_read.call_count;
             if avg_bytes < 1024 {

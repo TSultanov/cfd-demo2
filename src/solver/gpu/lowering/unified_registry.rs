@@ -80,7 +80,6 @@ pub fn build_unified_registry(
                 config.finalize.unwrap_or(noop_host),
             )?;
 
-            // Back-compat / future hook.
             if recipe.needs_gradients() {
                 registry.register_graph(
                     GraphOpKind("explicit:gradients"),
@@ -233,7 +232,6 @@ mod tests {
 
         let registry = build_unified_registry(&recipe, config).expect("should build registry");
 
-        // Registry should have the expected ops registered
         assert!(registry.has_count(&CountOpKind("coupled:outer_iters")));
 
         assert!(registry.has_host(&HostOpKind("coupled:begin_step")));

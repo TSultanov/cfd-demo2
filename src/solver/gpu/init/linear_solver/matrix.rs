@@ -11,25 +11,25 @@ pub struct MatrixResources {
 /// Allocate the (block-expanded) CSR matrix buffers.
 ///
 /// `num_nonzeros` stays the LOGICAL count; `capacity` only widens the
-/// `col_indices`/`matrix_values` allocations (M2 Tier B: a topology refresh
-/// rewrites them in place instead of reallocating; the block CSR is ~S² x the
-/// scalar nnz and dominates uploads — review-solver-ale F7). `row_offsets` is
-/// dof-sized (cell count invariant) and stays exact.
+/// `col_indices`/`matrix_values` allocations (a topology refresh rewrites them
+/// in place instead of reallocating; the block CSR is ~S² x the scalar nnz and
+/// dominates uploads). `row_offsets` is dof-sized (cell count invariant) and
+/// stays exact.
 pub fn init_matrix(
     device: &wgpu::Device,
     row_offsets: &[u32],
     col_indices: &[u32],
     capacity: CapacityPlan,
 ) -> MatrixResources {
-    // GUARD (M2 Tier B): the block-CSR `col_indices`/`matrix_values` are bound
-    // ENTIRE (`ResourceRegistry::with_buffer` → `as_entire_buffer_binding`) by
-    // every LA-stack consumer (FGMRES, AMG, Schur). Unlike the scalar mesh CSR —
-    // whose buffers resolve through `binding_resource_for` as sized ranges —
-    // there is no sized-binding path for these named buffers yet, so a capacity
-    // headroom would make their WGSL `arrayLength` over-report into the
-    // zero-padded tail and SpMV would iterate phantom nnz. Refuse headroom here
-    // until the block-CSR named buffers are wired to sized bindings (M4). Exact
-    // capacity (the default) is byte-neutral.
+    // GUARD: the block-CSR `col_indices`/`matrix_values` are bound ENTIRE
+    // (`ResourceRegistry::with_buffer` → `as_entire_buffer_binding`) by every
+    // LA-stack consumer (FGMRES, AMG, Schur). Unlike the scalar mesh CSR — whose
+    // buffers resolve through `binding_resource_for` as sized ranges — there is
+    // no sized-binding path for these named buffers yet, so a capacity headroom
+    // would make their WGSL `arrayLength` over-report into the zero-padded tail
+    // and SpMV would iterate phantom nnz. Refuse headroom here until the
+    // block-CSR named buffers are wired to sized bindings. Exact capacity (the
+    // default) is byte-neutral.
     assert!(
         capacity.headroom == 1.0,
         "init_matrix: block-CSR buffers are bound entire; capacity headroom \

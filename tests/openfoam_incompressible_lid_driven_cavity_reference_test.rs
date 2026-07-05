@@ -10,68 +10,23 @@ use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, U
 
 /// Test incompressible lid-driven cavity against OpenFOAM reference.
 ///
-/// # Reference provenance (June 2026): STEADY end state
 /// The reference CSV is the machine-converged steady state (t = 32, final
-/// pimpleFoam initial residuals ~5e-12). The original t = 1.6 snapshot was
-/// MID-TRANSIENT — 10% of lid speed from the Ghia steady state with the
-/// primary vortex still descending — so the old comparison anchored a
-/// transient path, not physics; regenerating it at steady state dropped
-/// the p mismatch 3.3x with no solver change. Absolute accuracy vs
-/// literature is anchored separately by tests/ghia_lid_cavity_test.rs.
+/// pimpleFoam initial residuals ~5e-12), so the transient path drops out of
+/// the comparison. Absolute accuracy vs literature is anchored separately by
+/// tests/ghia_lid_cavity_test.rs.
 ///
-/// # Canonical configuration: dt = 0.02, alpha_u = 0.7
-/// d_p ∝ alpha_u·dt/rho is part of cfd2's SPATIAL discretization, so dt is
-/// NOT a free steady-marching knob: the discrete steady state depends on
-/// it (this case: u 0.0938 at dt=0.02 vs 0.0713 at dt=0.05; the channel
-/// moves the OPPOSITE way, 0.0800 vs 0.1317 — the same per-case
-/// d_p-sensitivity split as the SIMPLEC and alpha findings). dt=0.02 is
-/// canonical: the reference's own dt, hence matched coupling-coefficient
-/// inputs, and continuity with every historical comparison.
+/// Canonical config: dt = 0.02, alpha_u = 0.7. d_p ∝ alpha_u·dt/rho is part
+/// of cfd2's SPATIAL discretization, so dt is NOT a free steady-marching knob
+/// — the discrete steady state depends on it. dt=0.02 matches the reference's
+/// own dt and hence its coupling-coefficient inputs.
 ///
-/// # Mismatch classification (June 2026, measured)
-/// History of the max-cell u metric: 0.149 (laplacian-only viscous,
-/// transient ref) → 0.0933 (dev2 shipped, transient ref) → 0.0938 /
-/// p 0.1142 (dev2, STEADY ref, canonical dt) — the steady rebuild barely
-/// moved the lid numbers at matched dt; it mattered for honesty, not
-/// magnitude. Findings along the way, all measured:
+/// Error structure is corner-localized at the two singular lid corners
+/// ((0,1)/(1,1)); away from them the two codes agree to ~0.24%. The band is
+/// the all-cells value; the corner-exclusion diag reports the smooth-field
+/// agreement.
 ///
-/// - Time scheme (Euler reference vs BDF2 here): REFUTED — switching this
-///   test to Euler moves max-cell u by 3.5e-5; the t=1.6 field is nearly
-///   steady, so the mismatch is spatial.
-/// - dev2 transpose stress: RESOLVED — shipping
-///   `div(mu dev2(T(grad U)))` (Arc D, 6fe28e9) cut max-cell u 37% and
-///   p 54%. The pre-dev2 "MINOR, 2-6% of local viscous" probe estimate
-///   badly underpredicted the global effect: the error was corner-SOURCED,
-///   so term-local smallness did not bound the solution error. The diag
-///   probe below now measures the reference-field quantity for context
-///   only (the term is in the solver).
-/// - Rhie-Chow coupling coefficient (cfd2: uniform d_p ∝ alpha_u dt/rho;
-///   OpenFOAM: rAU = 1/a_P): the alpha_u sensitivity REVERSED when the
-///   reference went steady. Vs the TRANSIENT t=1.6 snapshot, alpha 1.0
-///   halved the mismatch and looked like the "faithful unrelaxed-PISO
-///   comparison"; vs the STEADY reference it nearly doubles it (measured
-///   at dt=0.05: 0.0713 → 0.1305). The transient-era gain was an artifact
-///   of matching OpenFOAM's transient path — the alpha-1.0 candidate is
-///   REFUTED; default alpha 0.7 stays. Together with the dt finding above:
-///   the lid wants MORE RC dissipation than the channel at this mesh, and
-///   no uniform d_p satisfies both — the residual mismatch is the price of
-///   cfd2's uniform-d_p formulation vs OpenFOAM's spatial rAU.
-/// - SIMPLEC spatial d_p (FromAssembledRowSum): RE-REFUTED under dev2
-///   (Arc S, June 12): lid u +27% (band fail) while channel improves 62% —
-///   the boundary-shrunk d_p intrinsically hurts wall-bounded
-///   recirculation. Permanently default-off; see the decision record at
-///   the model's derive call.
-///
-/// Error structure vs the STEADY reference (canonical config):
-/// corner-localized — max-cell u 0.0938 all-cells vs corner-exclusion
-/// r=1..4 max 0.093/0.036/0.022/0.014, smooth-field rel_l2 0.0082/0.0049/
-/// 0.0031/0.0024 — the two codes agree to ~0.24% away from the singular
-/// corners. The band stays at the measured all-cells value; the
-/// corner-exclusion diag lines report the smooth-field agreement.
-///
-/// # Timeout
-/// This test requires extended timeout (~60-120s) due to GPU compute.
-/// Run with: `cargo test --test openfoam_incompressible_lid_driven_cavity_reference_test -- --ignored --timeout 120`
+/// Requires extended timeout (~60-120s) due to GPU compute:
+/// `cargo test --test openfoam_incompressible_lid_driven_cavity_reference_test -- --ignored --timeout 120`
 #[test]
 #[ignore]
 fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
@@ -83,7 +38,6 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     let length = 1.0;
     let height = 1.0;
 
-    // Use `MovingWall` on the moving lid to properly model the lid-driven cavity.
     let mesh = generate_structured_rect_mesh(
         nx,
         ny,
@@ -102,10 +56,8 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
         incompressible_momentum_model().expect("model"),
         SolverConfig {
             advection_scheme: Scheme::Upwind,
-            // The reference is the machine-steady end state (t = 32, final
-            // pimpleFoam initial residuals ~5e-12), so the transient path —
-            // time scheme, dt, outer iterations — drops out of the
-            // comparison entirely; both codes compare converged states.
+            // Reference is the machine-steady end state, so the transient
+            // path (time scheme, dt, outer iters) drops out of the comparison.
             time_scheme: TimeScheme::BDF2,
             preconditioner: PreconditionerType::Jacobi,
             stepping: SteppingMode::Coupled,
@@ -121,12 +73,10 @@ fn openfoam_incompressible_lid_driven_cavity_matches_reference_field() {
     solver.set_dtau(0.0).unwrap();
     solver.set_density(1.0).unwrap();
     solver.set_viscosity(0.01).unwrap();
-    // Set moving wall velocity for the lid (u_x = 1.0, u_y = 0.0)
     solver
         .set_boundary_vec2(GpuBoundaryType::MovingWall, "U", [1.0, 0.0])
         .unwrap();
-    // d_p sensitivity probe knob (diagnostic only) — see the
-    // classification comment at the top for the sensitivity reversal.
+    // d_p sensitivity probe knob (diagnostic only).
     let alpha_u_probe: f32 = std::env::var("CFD2_LID_ALPHA_U")
         .ok()
         .and_then(|v| v.parse().ok())

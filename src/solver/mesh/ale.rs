@@ -1,5 +1,4 @@
-//! ALE swept-face mesh fluxes + the f32 SCL closure (M3.2 of the
-//! meshless/moving-mesh roadmap).
+//! ALE swept-face mesh fluxes + the f32 SCL closure.
 //!
 //! **SCL by construction**: the per-face volumetric mesh flux `V̇_f` is
 //! computed GEOMETRICALLY from the old→new vertex positions (the signed area
@@ -18,7 +17,7 @@
 //! `swept_quads_telescope_to_volume_change` pins this identity to f64
 //! roundoff.
 //!
-//! **The f32 closure** (review-solver-ale F1): the solver kernels see
+//! **The f32 closure**: the solver kernels see
 //! f32-rounded volumes and f32 mesh fluxes, so after casting, the identity
 //! only holds to independent-rounding noise. A per-cell "fix the largest
 //! face" repair is ill-posed — interior faces are shared with opposite signs,
@@ -157,7 +156,7 @@ fn swept_area_along_normal(
 /// match the previously-uploaded buffer bit-for-bit).
 ///
 /// Errors on meshes with a boundary-free connected component (a closure slack
-/// face cannot be chosen — periodic domains are out of ALE v1 scope).
+/// face cannot be chosen — periodic domains are unsupported).
 ///
 /// PERSISTENT-topology entry: the swept-quad geometry must be self-consistent,
 /// so the f64 telescoping identity is HARD-asserted (>1e-9 ⇒ Err). For a
@@ -172,8 +171,8 @@ pub fn swept_mesh_fluxes_closed(
     swept_closed_impl(mesh, old_vx, old_vy, None, dt)
 }
 
-/// Flip-aware swept-flux construction (roadmap M4 / review-solver-ale R2): the
-/// conservative-remap flux path across a Voronoi RE-TESSELLATION.
+/// Flip-aware swept-flux construction: the conservative-remap flux path across
+/// a Voronoi RE-TESSELLATION.
 ///
 /// `born_mask[f]` (length `mesh.num_faces()`) marks each NEW-mesh face whose
 /// `(i,j)` adjacency did not exist at t^n — a **born** face with no swept quad.
@@ -189,8 +188,8 @@ pub fn swept_mesh_fluxes_closed(
 /// it is absorbed into the exact per-cell balance of the surviving new faces.
 ///
 /// The per-FACE flux on and around a flip is only locally first-order accurate
-/// (the slack face soaks the whole `e_i`); this is the roadmap's accepted flip
-/// cost. The pre-closure `max_identity_err_rel` IS that per-cell flip defect —
+/// (the slack face soaks the whole `e_i`). The pre-closure
+/// `max_identity_err_rel` IS that per-cell flip defect —
 /// reported as the always-on diagnostic, NOT hard-asserted (born faces are
 /// EXPECTED to break the telescoping identity). The post-closure
 /// `max_defect_rel` is still f32-roundoff by construction: the closure is the
@@ -201,8 +200,8 @@ pub fn swept_mesh_fluxes_closed(
 /// for a BFS parent — the forest closure is unchanged.
 ///
 /// `old_cell_vol` are the ACTUAL t^n cell volumes (the previous mesh's
-/// `cell_vol`, == what the kernel's `cell_vols_old` buffer holds after the M2
-/// rotation). This is load-bearing: on a flip the new ring's aligned old
+/// `cell_vol`, == what the kernel's `cell_vols_old` buffer holds). This is
+/// load-bearing: on a flip the new ring's aligned old
 /// positions do NOT reconstruct the old cell's polygon (the born vertices carry
 /// their new position), so the ring-reconstructed old volume would spuriously
 /// equal the NEW volume and the closure would target a zero ΔV — missing the
@@ -211,7 +210,7 @@ pub fn swept_mesh_fluxes_closed(
 /// exactly the GCL condition. Cell `i` == cell `i` across the regen (fixed
 /// seeds), so the volumes are directly comparable.
 ///
-/// `hard_assert_exclude` (review July 2026, F1): when `Some(exclude)`, the caller
+/// `hard_assert_exclude`: when `Some(exclude)`, the caller
 /// asserts this step is NOT a genuine adjacency flip — the only faces forced to
 /// zero are geometrically DEGENERATE (sliver) faces — so the load-bearing >1e-9
 /// telescoping-identity check must stay LIVE on every cell NOT incident to such a
@@ -276,7 +275,7 @@ fn swept_closed_impl(
 ) -> Result<SweptMeshFluxes, String> {
     let born_mask: Option<&[bool]> = flip.map(|(m, _, _)| m);
     // Some(exclude): a degeneracy-only step — hard-assert the telescoping identity
-    // on every cell NOT incident to a forced-degenerate face (review July 2026 F1).
+    // on every cell NOT incident to a forced-degenerate face.
     let hard_assert_exclude: Option<&[bool]> = flip.and_then(|(_, _, ex)| ex);
     let num_cells = mesh.num_cells();
     let num_faces = mesh.num_faces();
@@ -311,8 +310,8 @@ fn swept_closed_impl(
     }
 
     // Old cell volumes for the closure target + identity diagnostic. Persistent
-    // path: reconstruct from the aligned old ring (byte-identical to the M3
-    // behaviour, and == the actual old volume because the topology is the same).
+    // path: reconstruct from the aligned old ring (== the actual old volume
+    // because the topology is the same).
     // Flip path: the caller-supplied ACTUAL old volumes (the new ring's aligned
     // old positions do NOT reproduce the old polygon across a flip — see
     // `swept_mesh_fluxes_closed_flip`).
@@ -354,13 +353,12 @@ fn swept_closed_impl(
     // linear vertex motion. A violation means the swept-quad geometry does
     // NOT describe the actual volume change (wrong old positions, stale
     // volumes, inverted/degenerate cells — `cell_volumes_from` takes |·|, so
-    // an inversion shows up HERE, not in the volumes). Failing is load-bearing
-    // (adversarial review, July 2026): the f32 closure downstream would
-    // otherwise silently "repair" arbitrarily wrong fluxes to the per-cell
-    // sums — free-stream preservation only senses those sums, so the GCL gate
-    // would stay green while the per-face flux distribution is garbage. The
-    // 1e-9 threshold is ~3-4 orders looser than roundoff and ~orders tighter
-    // than any real defect.
+    // an inversion shows up HERE, not in the volumes). Failing is load-bearing:
+    // the f32 closure downstream would otherwise silently "repair" arbitrarily
+    // wrong fluxes to the per-cell sums — free-stream preservation only senses
+    // those sums, so the GCL gate would stay green while the per-face flux
+    // distribution is garbage. The 1e-9 threshold is ~3-4 orders looser than
+    // roundoff and ~orders tighter than any real defect.
     //
     // FLIP path (born_mask = Some): the born faces deliberately zero out their
     // swept quads, so the identity is EXPECTED to be violated by exactly the
@@ -378,7 +376,7 @@ fn swept_closed_impl(
             max_identity_err_rel
         ));
     }
-    // Degeneracy-only step (F1): the only forced-zero faces are slivers, so the
+    // Degeneracy-only step: the only forced-zero faces are slivers, so the
     // identity is still load-bearing on every cell away from them. Keep the hard
     // check there — a sliver must not silently disable it for the whole step.
     if hard_assert_exclude.is_some() && max_hard_err_rel > 1e-9 {
@@ -515,8 +513,8 @@ fn swept_closed_impl(
     })
 }
 
-/// Topology-flip report between two same-cell-count meshes (roadmap M4 flip
-/// detection): which NEW-mesh faces were BORN (an `(i,j)` adjacency absent at
+/// Topology-flip report between two same-cell-count meshes: which NEW-mesh
+/// faces were BORN (an `(i,j)` adjacency absent at
 /// t^n), how many DIED (an old adjacency with no new face), and which cells a
 /// flip touched. Adjacency is keyed by the incident cell/seed pair — interior
 /// faces by the sorted `(owner,neighbor)` pair, boundary faces by
@@ -612,8 +610,8 @@ pub fn detect_flips(old_mesh: &Mesh, new_mesh: &Mesh) -> Result<FlipReport, Stri
 }
 
 /// The old→new vertex correspondence across a Voronoi **regeneration**, keyed
-/// by the incident-seed SET (roadmap R2: a Voronoi vertex ≡ the set of seeds
-/// meeting at it — a triple point for three cells, more at degeneracies). Seed
+/// by the incident-seed SET (a Voronoi vertex ≡ the set of seeds meeting at it
+/// — a triple point for three cells, more at degeneracies). Seed
 /// `i` == cell `i`, so a vertex's incident-seed set is exactly the set of cells
 /// whose `cell_vertices` ring contains it.
 ///
@@ -767,8 +765,7 @@ mod tests {
         );
     }
 
-    /// The f32 closure: per-cell defect at f32-roundoff scale (measured
-    /// ~1e-11..1e-10 relative; asserted with margin), deterministic.
+    /// The f32 closure: per-cell defect at f32-roundoff scale, deterministic.
     #[test]
     fn f32_closure_defect_at_roundoff_scale() {
         let mut mesh = test_mesh();
@@ -783,7 +780,6 @@ mod tests {
         // Scale: defect ≤ ~0.5 ulp of the slack face's flux × dt / V. This
         // test moves by the full 0.15·h amplitude in one step, so
         // A_swept ~ 0.1·V and the ulp bound is ~0.1·V·2⁻²⁴ ≈ 6e-9·V.
-        // Measured 4.8e-9 (July 2026); asserted at ~4× measured.
         assert!(
             out.max_defect_rel < 2e-8,
             "f32 SCL closure defect too large: {:.3e}",
@@ -798,9 +794,9 @@ mod tests {
         );
     }
 
-    /// Inconsistent inputs are REJECTED, not laundered (adversarial review,
-    /// July 2026): stale `cell_vol` (geometry not recalculated after the
-    /// move) violates the telescoping identity, and the function must error
+    /// Inconsistent inputs are REJECTED, not laundered: stale `cell_vol`
+    /// (geometry not recalculated after the move) violates the telescoping
+    /// identity, and the function must error
     /// instead of letting the f32 closure silently repair the per-cell sums.
     /// Note perturbing the OLD positions alone does not violate the identity
     /// (both sides derive from the same old/new vertex sets — the geometry is
@@ -821,8 +817,8 @@ mod tests {
     }
 
     /// The degeneracy-only escape hatch must NOT disable the load-bearing
-    /// telescoping-identity assert for the whole step (review July 2026, F1):
-    /// when the only forced-zero faces are slivers (no genuine adjacency flip),
+    /// telescoping-identity assert for the whole step: when the only forced-zero
+    /// faces are slivers (no genuine adjacency flip),
     /// the flip path still hard-asserts the identity on every cell NOT incident
     /// to a forced face. So an inconsistency (a wrong old volume) on a FAR cell
     /// is still rejected, while a matching inconsistency on an EXCLUDED
@@ -889,7 +885,7 @@ mod tests {
         assert_eq!(out.max_identity_err_rel, 0.0);
     }
 
-    // ── Hand-constructed 2-cell Voronoi flip (deliverable 4) ─────────────────
+    // ── Hand-constructed 2-cell Voronoi flip ─────────────────
 
     /// A specced face of the hand-built windmill mesh.
     struct FaceSpec {
@@ -1051,7 +1047,7 @@ mod tests {
         }
     }
 
-    /// THE flip unit test (deliverable 4): a known 4-seed cocircular
+    /// THE flip unit test: a known 4-seed cocircular
     /// reconfiguration (N–S adjacency → W–E adjacency). One face is BORN, one
     /// DIES; the flip-aware swept flux must close each cell's defect onto its
     /// slack faces so `Σ_f σ·flux·dt = ΔV_i` holds per cell to f32-closure

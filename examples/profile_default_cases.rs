@@ -9,7 +9,7 @@
 //! desktop app runs. It reports:
 //!
 //!   * true per-step wall time (unprofiled), plus average outer/linear iterations,
-//!   * the per-graph GPU-time breakdown from the improved profiler.
+//!   * the per-graph GPU-time breakdown from the profiler.
 //!
 //! Run (backstep default + channel-obstacle headline demo):
 //!   cargo run --release --example profile_default_cases --features "meshgen profiling"

@@ -10,22 +10,19 @@ pub(crate) fn named_params_for_model(
     let mut out: HashMap<&'static str, ProgramParamHandler> = HashMap::new();
 
     for module in &model.modules {
-        // Collect keys from both named_params (legacy) and port_manifest (new)
+        // Collect keys from both named_params and port_manifest.
         let mut keys_to_process: Vec<&'static str> = Vec::new();
 
-        // Add keys from named_params
         for key in &module.named_params {
             keys_to_process.push(*key);
         }
 
-        // Add keys from port_manifest
         if let Some(ref port_manifest) = module.port_manifest {
             for param in &port_manifest.params {
                 keys_to_process.push(param.key);
             }
         }
 
-        // Deduplicate keys within this module
         keys_to_process.sort_unstable();
         keys_to_process.dedup();
 
@@ -164,7 +161,6 @@ mod tests {
         let model = crate::solver::model::compressible_model().expect("model");
         let params = named_params_for_model(&model).expect("named params");
 
-        // Relaxation params should be present for compressible model
         assert!(
             params.contains_key("alpha_u"),
             "alpha_u should be present when relaxation is enabled"

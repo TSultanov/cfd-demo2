@@ -171,7 +171,6 @@ pub enum SteppingMode {
     Coupled,
 }
 
-/// High-level program structure emitted for a recipe.
 /// A complete recipe for constructing a GPU solver.
 #[derive(Debug, Clone)]
 pub struct SolverRecipe {
@@ -229,15 +228,10 @@ impl SolverRecipe {
     ) -> Result<Self, String> {
         model.validate_module_manifests()?;
 
-        // Build a PortRegistry and register all state fields first, then port manifests from modules.
-        // This ensures all equation target fields are available for runtime resolution.
-        // The registry is stored in the recipe for runtime field access and validation.
+        // State fields must be registered before module manifests so equation target
+        // fields are available for runtime resolution.
         let mut port_registry = PortRegistry::new(model.state_layout.clone());
 
-        // Pre-register all StateLayout fields so they're available for runtime resolution.
-        // This allows runtime code to look up field offsets via PortRegistry without
-        // querying StateLayout directly. The actual dimensions are already validated
-        // by StateLayout, so we don't need to track them in the registry.
         for field in model.state_layout.fields() {
             let name = field.name();
             if let Err(e) = port_registry.register_state_field(name) {
@@ -248,7 +242,6 @@ impl SolverRecipe {
             }
         }
 
-        // Register port manifests from modules (params, additional fields, buffers)
         for module in &model.modules {
             if let Some(ref manifest) = module.port_manifest {
                 if let Err(e) = port_registry.register_manifest(module.name, manifest) {
@@ -297,18 +290,15 @@ impl SolverRecipe {
         let needs_gradients = !gradient_fields.is_empty();
         let has_grad_state = gradient_fields.iter().any(|field| field == "state");
 
-        // Low-Mach parameter resource needs are manifest-driven.
-        //
-        // The EOS module declares `low_mach.*` named params only when the model/config requires
-        // the auxiliary uniform buffer, so allocation should follow the declared interface rather
-        // than branching on EOS variants here.
+        // Manifest-driven: the EOS module declares `low_mach.*` named params only when the
+        // auxiliary uniform buffer is required, so follow the declared interface rather than
+        // branching on EOS variants here.
         let eos = model.eos_checked()?;
         let requires_low_mach_params = model
             .named_param_keys()
             .into_iter()
             .any(|k| k.starts_with("low_mach."));
 
-        // Initialize constants purely from the EOS module (and override only the EOS fields).
         let eos_params = eos.runtime_params();
         let mut initial_constants = GpuConstants {
             eos_gamma: eos_params.gamma,
@@ -326,14 +316,10 @@ impl SolverRecipe {
             initial_constants.alpha_p = defaults.alpha_p;
         }
 
-        // Solver-level settings are model-owned defaults used for recipe derivation.
         let model_solver = model.linear_solver.unwrap_or_default();
 
-        // Resolve a precomputed compile-time kernel schedule keyed by
-        // (model, stepping mode, grad-state shape, fusion policy).
-        //
-        // This keeps fusion fully build-time and avoids runtime fusion-pass logic in recipe
-        // construction.
+        // Precomputed compile-time kernel schedule keyed by (model, stepping mode,
+        // grad-state shape, fusion policy); keeps fusion fully build-time.
         let (kernels, applied_fusions) =
             crate::solver::gpu::lowering::fusion_schedule_registry::schedule_for_model(
                 model.id,
@@ -342,7 +328,7 @@ impl SolverRecipe {
                 model_solver.solver.kernel_fusion_policy,
             )?;
 
-        // Optional resource needs are derived from binding metadata (kernel interface), not from
+        // Derive optional resource needs from binding metadata (the kernel interface), not from
         // solver-side assumptions about which modules imply which buffers.
         let mut binds_state_iter = false;
         let mut binds_fluxes = false;
@@ -386,16 +372,14 @@ impl SolverRecipe {
             None
         };
 
-        // Some kernels may bind `state_iter` as an optional dual-time / outer-iteration reference.
-        // Allocate the backing buffer regardless of stepping mode so the bind group layout is
-        // always satisfiable (even when the shader gates the feature on `dtau > 0`).
+        // Kernels may bind `state_iter` as an optional dual-time / outer-iteration reference.
+        // Allocate it regardless of stepping mode so the bind group layout is always
+        // satisfiable (even when the shader gates the feature on `dtau > 0`).
         let requires_iteration_snapshot = binds_state_iter;
 
-        // Derive auxiliary buffers
         let mut aux_buffers = Vec::new();
 
         if needs_gradients {
-            // Add gradient buffers for each field that needs them
             for field_name in &gradient_fields {
                 let size_per_cell =
                     if gradient_storage == GradientStorage::PackedState && field_name == "state" {
@@ -413,7 +397,6 @@ impl SolverRecipe {
 
         let time_integration = TimeIntegrationSpec::for_scheme(time_scheme);
 
-        // Linear solver spec
         if matches!(
             model_solver.preconditioner,
             ModelPreconditionerSpec::Schur { .. }
@@ -907,7 +890,6 @@ mod tests {
         .expect("should create recipe");
 
         let spec = recipe.build_program_spec();
-        // Verify spec has expected structure for coupled solver
         let root_block = spec.block(spec.root);
         assert!(
             !root_block.nodes.is_empty(),
@@ -928,7 +910,6 @@ mod tests {
         .expect("should create recipe");
 
         let spec = recipe.build_program_spec();
-        // Find a Repeat node (outer loop) anywhere in the program blocks.
         let has_repeat = spec
             .blocks
             .iter()
@@ -954,7 +935,6 @@ mod tests {
 
         let spec = recipe.build_program_spec();
 
-        // Find a Repeat node (outer corrector loop) anywhere in the program blocks.
         let has_repeat = spec
             .blocks
             .iter()
@@ -965,7 +945,6 @@ mod tests {
             "incompressible coupled spec should have a Repeat loop"
         );
 
-        // Verify that coupled:batch_tail is NOT in the spec (removed in ARCH_FIX_7 phase 4).
         let has_batch_tail = spec.blocks.iter().flat_map(|b| b.nodes.iter()).any(|n| {
             matches!(
                 n,
@@ -1170,8 +1149,6 @@ mod tests {
 
     #[test]
     fn recipe_standalone_grad_p_update_correct_velocity_delta_fusion_is_aggressive_only() {
-        // Test that the standalone grad_p_update + correct_velocity_delta fusion rule
-        // is only applied under Aggressive policy, not Safe or Off.
         let mut off_model = incompressible_momentum_model().expect("model");
         let mut off_solver = off_model
             .linear_solver
@@ -1218,7 +1195,6 @@ mod tests {
         )
         .expect("aggressive recipe");
 
-        // Off policy: no fusion rules applied
         assert!(
             !off_recipe
                 .applied_fusions
@@ -1226,7 +1202,6 @@ mod tests {
             "off policy should not apply grad_p_update_correct_velocity_delta fusion"
         );
 
-        // Safe policy: should not include the aggressive-only standalone rule
         assert!(
             !safe_recipe
                 .applied_fusions
@@ -1234,9 +1209,8 @@ mod tests {
             "safe policy should not apply aggressive-only grad_p_update_correct_velocity_delta fusion"
         );
 
-        // Aggressive policy: may include the standalone rule (when pattern matches)
-        // Note: The full 4-kernel fusion takes precedence, so this rule may not always be applied
-        // depending on the kernel ordering. We verify the rule exists and is classified correctly.
+        // Under Aggressive the full 5-kernel fusion takes precedence over the standalone rule,
+        // so verify the full rule is applied rather than the standalone one.
         assert!(
             aggressive_recipe.applied_fusions.contains(
                 &"rhie_chow:dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1"
@@ -1293,7 +1267,6 @@ mod tests {
 
     #[test]
     fn recipe_populates_port_registry_from_eos_manifest() {
-        // Regression test: ensure PortRegistry is populated at runtime from module manifests
         let model = compressible_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
@@ -1304,7 +1277,6 @@ mod tests {
         )
         .expect("recipe build");
 
-        // Verify EOS params are registered in the port registry
         assert!(
             recipe.port_registry.lookup_param("eos.gamma").is_some(),
             "eos.gamma should be registered in port registry"
@@ -1329,7 +1301,6 @@ mod tests {
 
     #[test]
     fn recipe_populates_port_registry_from_generic_coupled_manifest() {
-        // Regression test: ensure generic_coupled port manifest is registered at runtime
         let model = generic_diffusion_demo_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
@@ -1340,7 +1311,6 @@ mod tests {
         )
         .expect("recipe build");
 
-        // Verify generic_coupled params are registered in the port registry
         assert!(
             recipe.port_registry.lookup_param("dt").is_some(),
             "dt should be registered in port registry"
@@ -1380,8 +1350,7 @@ mod tests {
 
     #[test]
     fn recipe_populates_relaxation_params_when_enabled() {
-        // Test that alpha_u/alpha_p are registered when relaxation is enabled
-        // (compressible model has apply_relaxation_in_update = true)
+        // compressible model has apply_relaxation_in_update = true
         let model = compressible_model().expect("model");
         let recipe = SolverRecipe::from_model(
             &model,
@@ -1392,7 +1361,6 @@ mod tests {
         )
         .expect("recipe build");
 
-        // Relaxation params should be present for compressible model
         assert!(
             recipe.port_registry.lookup_param("alpha_u").is_some(),
             "alpha_u should be registered when relaxation is enabled"

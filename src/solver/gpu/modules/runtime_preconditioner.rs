@@ -41,9 +41,8 @@ pub(crate) struct RuntimePreconditionerModule {
     row_offsets: Vec<u32>,
     col_indices: Vec<u32>,
     matrix_values: wgpu::Buffer,
-    /// Per-device pipeline cache, kept so the lazily-compiled Jacobi /
-    /// block-Jacobi / AMG pipelines reuse cached compiled shaders after a
-    /// topology refresh reconstructed this module (M5 stage 1).
+    /// Per-device pipeline cache so lazily-compiled Jacobi / block-Jacobi / AMG
+    /// pipelines reuse cached compiled shaders.
     cache: Arc<PipelineCache>,
 }
 

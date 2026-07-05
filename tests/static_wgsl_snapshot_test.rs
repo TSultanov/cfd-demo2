@@ -1,7 +1,7 @@
-//! Hash-pinned snapshot of the generated WGSL (meshless/moving-mesh roadmap,
-//! governing principle 1: "static path untouched").
+//! Hash-pinned snapshot of the generated WGSL (asserts the static path stays
+//! byte-identical).
 //!
-//! WHY THIS EXISTS (review-validation #3): the `check-generated-wgsl.yml` CI
+//! WHY THIS EXISTS: the `check-generated-wgsl.yml` CI
 //! (`scripts/check_generated_wgsl.sh`) asserts **freshness** — committed files
 //! match what the current code regenerates. It does NOT assert **invariance**:
 //! if a codegen change perturbs a static model's WGSL, the developer commits
@@ -16,7 +16,7 @@
 //!      file must be explained by your change (new `*_<model>` files for a new
 //!      model; content diffs ONLY for models whose numerics you intended to
 //!      change — static models must stay byte-identical unless the changeset
-//!      explicitly declares otherwise, per AGENTS.md).
+//!      explicitly declares otherwise).
 //!   3. Re-bless: `CFD2_BLESS_WGSL_SNAPSHOT=1 cargo test --test
 //!      static_wgsl_snapshot_test` rewrites `tests/static_wgsl_snapshot.txt`.
 //!      For the common "adding a new model" case prefer

@@ -1,12 +1,8 @@
-//! Block Jacobi preconditioner kernel generator implementation.
+//! Block Jacobi preconditioner kernel generator.
 //!
-//! This module contains the implementation of generate_block_precond()
-//! which was ported from the handwritten
-//! src/solver/gpu/shaders/block_precond.wgsl file.
-//!
-//! Implements the cell-block Jacobi preconditioner for generic-coupled FGMRES with
-//! 2 entry points: build_block_inv (Gauss-Jordan inversion), apply_block_precond
-//! (block matrix-vector multiply).
+//! Cell-block Jacobi preconditioner for generic-coupled FGMRES, with two entry
+//! points: build_block_inv (Gauss-Jordan block inversion with partial pivoting)
+//! and apply_block_precond (block matrix-vector multiply M^{-1}*x -> y).
 
 use crate::solver::codegen::kernel_wgsl::KernelWgsl;
 use crate::solver::codegen::wgsl_ast::*;
@@ -21,8 +17,6 @@ pub fn generate_block_precond() -> KernelWgsl {
     m.push(Item::Comment(
         "Cell-block Jacobi preconditioner for generic-coupled FGMRES.".into(),
     ));
-
-    // ── Structs ────────────────────────────────────────────────────────────
 
     m.push(Item::Struct(StructDef::new(
         "GmresParams",
@@ -48,8 +42,6 @@ pub fn generate_block_precond() -> KernelWgsl {
         ],
     )));
 
-    // ── Group 0: vectors ───────────────────────────────────────────────────
-
     m.push(Item::GlobalVar(GlobalVar::new(
         "vec_x",
         Type::array(Type::F32),
@@ -71,8 +63,6 @@ pub fn generate_block_precond() -> KernelWgsl {
         Some(AccessMode::ReadWrite),
         vec![Attribute::Group(0), Attribute::Binding(2)],
     )));
-
-    // ── Group 1: matrix (CSR) ──────────────────────────────────────────────
 
     m.push(Item::GlobalVar(GlobalVar::new(
         "row_offsets",
@@ -96,8 +86,6 @@ pub fn generate_block_precond() -> KernelWgsl {
         vec![Attribute::Group(1), Attribute::Binding(2)],
     )));
 
-    // ── Group 2: block inverse ─────────────────────────────────────────────
-
     m.push(Item::GlobalVar(GlobalVar::new(
         "block_inv",
         Type::array(Type::F32),
@@ -105,8 +93,6 @@ pub fn generate_block_precond() -> KernelWgsl {
         Some(AccessMode::ReadWrite),
         vec![Attribute::Group(2), Attribute::Binding(0)],
     )));
-
-    // ── Group 3: params ────────────────────────────────────────────────────
 
     m.push(Item::GlobalVar(GlobalVar::new(
         "params",
@@ -144,8 +130,6 @@ pub fn generate_block_precond() -> KernelWgsl {
         vec![Attribute::Group(3), Attribute::Binding(4)],
     )));
 
-    // ── safe_inverse ───────────────────────────────────────────────────────
-
     m.push(Item::Function(Function::new(
         "safe_inverse",
         vec![Param::new("val", Type::F32, vec![])],
@@ -169,17 +153,13 @@ pub fn generate_block_precond() -> KernelWgsl {
         ]),
     )));
 
-    // ── const MAX_BLOCK ────────────────────────────────────────────────────
-
     m.push(Item::Const {
         name: "MAX_BLOCK".into(),
         ty: Type::U32,
         expr: Expr::lit_u32(16),
     });
 
-    // ── swap_rows ──────────────────────────────────────────────────────────
-    // The nested array type: array<array<f32, MAX_BLOCK>, MAX_BLOCK>
-    // Since MAX_BLOCK is a const, we use Type::Custom to reference it by name.
+    // MAX_BLOCK is a const, so reference the nested array type by name via Type::Custom.
     let nested_array_ty = Type::Custom("array<array<f32, MAX_BLOCK>, MAX_BLOCK>".into());
     let ptr_ty = Type::Ptr(Box::new(nested_array_ty.clone()), AddressSpace::Function);
 
@@ -205,7 +185,6 @@ pub fn generate_block_precond() -> KernelWgsl {
                 Expr::ident("c").lt(Expr::ident("n")),
                 for_step_assign_expr(Expr::ident("c"), Expr::ident("c") + 1u32),
                 block(vec![
-                    // let tmp = (*a)[r0][c];
                     let_expr(
                         "tmp",
                         Expr::ident("a")
@@ -213,7 +192,6 @@ pub fn generate_block_precond() -> KernelWgsl {
                             .index(Expr::ident("r0"))
                             .index(Expr::ident("c")),
                     ),
-                    // (*a)[r0][c] = (*a)[r1][c];
                     assign_expr(
                         Expr::ident("a")
                             .deref()
@@ -224,7 +202,6 @@ pub fn generate_block_precond() -> KernelWgsl {
                             .index(Expr::ident("r1"))
                             .index(Expr::ident("c")),
                     ),
-                    // (*a)[r1][c] = tmp;
                     assign_expr(
                         Expr::ident("a")
                             .deref()
@@ -232,7 +209,6 @@ pub fn generate_block_precond() -> KernelWgsl {
                             .index(Expr::ident("c")),
                         Expr::ident("tmp"),
                     ),
-                    // let tmp_b = (*b)[r0][c];
                     let_expr(
                         "tmp_b",
                         Expr::ident("b")
@@ -240,7 +216,6 @@ pub fn generate_block_precond() -> KernelWgsl {
                             .index(Expr::ident("r0"))
                             .index(Expr::ident("c")),
                     ),
-                    // (*b)[r0][c] = (*b)[r1][c];
                     assign_expr(
                         Expr::ident("b")
                             .deref()
@@ -251,7 +226,6 @@ pub fn generate_block_precond() -> KernelWgsl {
                             .index(Expr::ident("r1"))
                             .index(Expr::ident("c")),
                     ),
-                    // (*b)[r1][c] = tmp_b;
                     assign_expr(
                         Expr::ident("b")
                             .deref()
@@ -264,7 +238,6 @@ pub fn generate_block_precond() -> KernelWgsl {
         ]),
     )));
 
-    // ── Standard params for compute entry points ───────────────────────────
     let std_params = vec![
         Param::new(
             "global_id",
@@ -279,15 +252,12 @@ pub fn generate_block_precond() -> KernelWgsl {
     ];
     let std_attrs = vec![Attribute::Compute, Attribute::WorkgroupSize(64)];
 
-    // ── build_block_inv ────────────────────────────────────────────────────
-
     let params = Expr::ident("params");
     let a = Expr::ident("a");
     let inv = Expr::ident("inv");
     let b_var = Expr::ident("b");
 
     let build_body = block(vec![
-        // Compute cell index
         let_expr("stride_x", Expr::ident("num_workgroups").field("x") * 64u32),
         let_expr(
             "cell",
@@ -311,7 +281,6 @@ pub fn generate_block_precond() -> KernelWgsl {
             None,
         ),
         let_expr("base", Expr::ident("cell") * b_var.clone()),
-        // Declare local arrays
         var_typed_expr("a", nested_array_ty.clone(), None),
         var_typed_expr("inv", nested_array_ty.clone(), None),
         var_typed_expr(
@@ -319,13 +288,12 @@ pub fn generate_block_precond() -> KernelWgsl {
             Type::Custom("array<f32, MAX_BLOCK>".into()),
             None,
         ),
-        // Initialize a and inv, extract diagonal block from CSR
+        // Initialize a and inv, extract each row's diagonal block from CSR.
         for_loop_expr(
             for_init_var_expr("r", Expr::lit_u32(0)),
             Expr::ident("r").lt(b_var.clone()),
             for_step_assign_expr(Expr::ident("r"), Expr::ident("r") + 1u32),
             block(vec![
-                // Zero out a[r][c] and inv[r][c]
                 for_loop_expr(
                     for_init_var_expr("c", Expr::lit_u32(0)),
                     Expr::ident("c").lt(b_var.clone()),
@@ -350,7 +318,6 @@ pub fn generate_block_precond() -> KernelWgsl {
                     "end",
                     Expr::ident("row_offsets").index(Expr::ident("row") + 1u32),
                 ),
-                // Extract diagonal block from CSR
                 for_loop_expr(
                     for_init_var_expr("k", Expr::ident("start")),
                     Expr::ident("k").lt(Expr::ident("end")),
@@ -371,12 +338,10 @@ pub fn generate_block_precond() -> KernelWgsl {
                         ),
                     ]),
                 ),
-                // inv[r][r] = 1.0
                 assign_expr(
                     inv.clone().index(Expr::ident("r")).index(Expr::ident("r")),
                     Expr::lit_f32(1.0),
                 ),
-                // diag_orig[r] = a[r][r]
                 assign_expr(
                     Expr::ident("diag_orig").index(Expr::ident("r")),
                     a.clone().index(Expr::ident("r")).index(Expr::ident("r")),
@@ -423,7 +388,6 @@ pub fn generate_block_precond() -> KernelWgsl {
                     )]),
                     None,
                 ),
-                // swap_rows(&a, &inv, i, pivot, b)
                 call_stmt_expr(Expr::call_named(
                     "swap_rows",
                     vec![
@@ -434,7 +398,7 @@ pub fn generate_block_precond() -> KernelWgsl {
                         b_var.clone(),
                     ],
                 )),
-                // Clamp pivot value
+                // Clamp a near-zero pivot away from zero to keep the inverse finite.
                 var_expr("piv", a.clone().index(Expr::ident("i")).index(Expr::ident("i"))),
                 if_block_expr(
                     abs(Expr::ident("piv")).lt(Expr::lit_f32(1e-12)),
@@ -530,7 +494,6 @@ pub fn generate_block_precond() -> KernelWgsl {
             )]),
             None,
         ),
-        // Write result to block_inv buffer
         let_expr("offset", Expr::ident("cell") * (b_var.clone() * b_var.clone())),
         for_loop_expr(
             for_init_var_expr("r", Expr::lit_u32(0)),
@@ -556,8 +519,6 @@ pub fn generate_block_precond() -> KernelWgsl {
         std_attrs.clone(),
         build_body,
     )));
-
-    // ── apply_block_precond ────────────────────────────────────────────────
 
     let apply_body = block(vec![
         let_expr("stride_x", Expr::ident("num_workgroups").field("x") * 64u32),

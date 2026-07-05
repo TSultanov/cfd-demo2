@@ -1,22 +1,16 @@
 //! Runtime-selectable parallel-for over a kernel dispatch domain.
 //!
-//! All threading goes through this single module so the mechanism stays
-//! swappable. The user is (rightly) skeptical of per-dispatch fork/join overhead
-//! from a work-stealing pool, so the helpers split the domain into a few
-//! **coarse contiguous chunks**; each worker owns a cache-friendly cell/face
-//! range with no per-index task overhead. Execution runs on the persistent
-//! worker pool in [`super::pool`] (parked threads, ~1-5 µs region launch); the
-//! previous scoped-thread spawn+join (~100-280 µs per region at 16 threads —
-//! the measured wall of the Schur inner solve) remains available via
-//! `CFD2_CPU_POOL=0`.
+//! The domain is split into a few coarse contiguous chunks; each worker owns a
+//! cache-friendly cell/face range with no per-index task overhead. Execution
+//! runs on the persistent worker pool in [`super::pool`]; scoped-thread
+//! spawn+join is available via `CFD2_CPU_POOL=0`.
 //!
 //! Soundness: callers run CPU kernels that write disjoint per-cell/face buffer
 //! slots, and the buffer store is relaxed-atomic, so concurrent invocations for
 //! distinct indices never race. Determinism: every chunk split below depends
-//! only on `n`/`threads` and fixed constants — never on which pool thread runs
-//! a chunk — and each output element is produced exactly once with identical
-//! arithmetic, so results are bit-identical across thread counts and across
-//! pool/scoped mechanisms.
+//! only on `n`/`threads` and fixed constants, and each output element is
+//! produced exactly once with identical arithmetic, so results are bit-identical
+//! across thread counts and across pool/scoped mechanisms.
 
 use super::pool;
 
@@ -44,11 +38,10 @@ where
     });
 }
 
-/// Run `f(start, end)` over contiguous disjoint index ranges covering `0..n`,
-/// using up to `threads` workers — the range-granular sibling of
-/// [`parallel_for`] (identical chunk math) for callers that amortize per-chunk
-/// setup, e.g. the transpiled kernels' chunk-range entry points, which resolve
-/// their buffer handles once per range instead of once per index.
+/// Run `f(start, end)` over contiguous disjoint index ranges covering `0..n` —
+/// the range-granular sibling of [`parallel_for`] (identical chunk math) for
+/// callers that amortize per-chunk setup by resolving buffer handles once per
+/// range instead of once per index.
 pub fn parallel_ranges<F>(n: usize, threads: usize, f: F)
 where
     F: Fn(usize, usize) + Sync,
@@ -70,19 +63,14 @@ where
 /// Minimum output elements per worker for the fine-grained (BLAS-1 style)
 /// parallel helpers. Below this, region-launch latency exceeds the memory-bound
 /// work itself, so the helpers scale the worker count down (bit-exactness is
-/// unaffected: every element is still produced by identical arithmetic).
-/// 8k f64 ≈ 64 KB per worker ≈ the break-even for a persistent-pool region
-/// (~1-5 µs launch) against ~10 GB/s-per-core streaming. (The scoped-thread era
-/// used 64k: spawn+join cost ~20-30 µs/worker; the pool moves the knee down and
-/// lets mid-size vectors — e.g. the 118k-cell obstacle's BLAS-1 — actually use
-/// the machine instead of being capped at 1-2 workers.)
+/// unaffected). 8k f64 ≈ 64 KB per worker ≈ the break-even for a persistent-pool
+/// region against ~10 GB/s-per-core streaming.
 const MIN_ELEMS_PER_WORKER: usize = 8 * 1024;
 
 /// Same idea for the row-wise chunk helpers ([`parallel_cell_chunks_mut`] and
 /// friends), whose per-element work (a CSR row gather, a block solve) is
-/// several times heavier than BLAS-1 streaming: coarse AMG levels (a few k
-/// rows) run serial instead of fanning out 16 workers for microseconds of
-/// work, while every production-size dispatch keeps its full worker count.
+/// several times heavier than BLAS-1 streaming, so coarse levels (a few k rows)
+/// run serial rather than fan out for microseconds of work.
 const MIN_CELL_ELEMS_PER_WORKER: usize = 4 * 1024;
 
 /// Worker count for the deterministic dot helpers (shared with the f32
@@ -111,8 +99,7 @@ fn effective_row_workers(threads: usize, total_elems: usize) -> usize {
 /// mutable sub-slices. Each worker owns `y[start*width .. end*width]` and no
 /// other, so writes never race — the caller is responsible only for reading
 /// shared immutable inputs. `width` is the per-cell stride (S for block-CSR, 1
-/// for scalar). The split is the same coarse contiguous chunking as
-/// [`parallel_for`]; results are independent of `threads` (each output element is
+/// for scalar). Results are independent of `threads` (each output element is
 /// produced by exactly one worker with the identical arithmetic).
 pub fn parallel_cell_chunks_mut<T, F>(num_cells: usize, width: usize, threads: usize, y: &mut [T], f: F)
 where
@@ -188,9 +175,8 @@ pub fn parallel_cell_chunks_mut2<T, F>(
 /// sums are computed per `DOT_CHUNK`-element chunk (4-wide SIMD within a chunk)
 /// and then reduced serially in chunk order. The result depends only on the
 /// input (and the fixed chunk size) — NOT on `threads` — so the linear solvers
-/// stay bit-identical across thread counts while the O(n) reduction runs on all
-/// cores. (This is a different summation ORDER from a plain serial loop, i.e. a
-/// one-time rounding-level change, validated by the tolerance-based suites.)
+/// stay bit-identical across thread counts. (Note: a different summation ORDER
+/// from a plain serial loop, i.e. a one-time rounding-level change.)
 pub fn par_dot(threads: usize, a: &[f64], b: &[f64]) -> f64 {
     const DOT_CHUNK: usize = 8192;
     debug_assert_eq!(a.len(), b.len());

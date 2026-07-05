@@ -1,7 +1,4 @@
 //! Shared helpers for coupled assembly kernel code generation.
-//!
-//! Functions extracted from `generic_coupled_kernels.rs` and `unified_assembly.rs`
-//! to eliminate duplication.
 
 use std::collections::HashMap;
 
@@ -258,10 +255,6 @@ pub fn group_binding_from_attributes(attrs: &[Attribute]) -> Option<(u32, u32)> 
     }
     group.zip(binding)
 }
-
-// ---------------------------------------------------------------------------
-// Time-derivative (ddt) contribution helpers
-// ---------------------------------------------------------------------------
 
 /// Emit AST statements for all implicit time-derivative contributions across
 /// all equations in the system.

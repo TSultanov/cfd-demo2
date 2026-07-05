@@ -16,18 +16,16 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
         MethodSpec::Coupled(caps) => caps.apply_relaxation_in_update,
     };
 
-    // Set the port-based manifest for uniform params
-    // This is done via a helper function in a separate module to avoid
-    // proc-macro issues in build scripts
+    // Built via a helper in a separate module to avoid proc-macro issues in
+    // build scripts.
     let port_manifest: Option<PortManifest> = Some(
         crate::solver::model::modules::generic_coupled_ports::generic_coupled_uniform_port_manifest(
             apply_relaxation_in_update,
         ),
     );
 
-    // Keep named_params for host-only parameters
-    // Uniform params (dt, dtau, viscosity, density, schemes, relaxation) are now
-    // declared via port_manifest
+    // Host-only parameters; uniform params (dt, dtau, viscosity, density,
+    // schemes, relaxation) are declared via port_manifest instead.
     let mut named_params = vec![
         "preconditioner",
         "linear_solver.max_restart",

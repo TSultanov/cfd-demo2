@@ -92,7 +92,6 @@ fn run_transfer_profile() {
         solver.set_alpha_p(0.3).unwrap();
         solver.set_alpha_u(0.7).unwrap();
 
-        // Set initial conditions - inlet velocity
         let mut u_init = vec![(0.0, 0.0); mesh.num_cells()];
         for i in 0..mesh.num_cells() {
             let cx = mesh.cell_cx[i];
@@ -104,7 +103,6 @@ fn run_transfer_profile() {
         solver.set_u(&u_init);
         solver.initialize_history();
 
-        // Enable detailed profiling
         solver
             .enable_detailed_profiling(true)
             .expect("profiling enable");
@@ -126,7 +124,6 @@ fn run_transfer_profile() {
 
         solver.end_profiling_session().expect("profiling end");
 
-        // Print step timing summary
         println!("\n");
         println!("Step Timing Summary:");
         println!("{}", "-".repeat(40));
@@ -138,10 +135,8 @@ fn run_transfer_profile() {
         );
         println!("  Average time per step: {:?}", avg_step_time);
 
-        // Print detailed profiling report
         solver.print_profiling_report().expect("profiling report");
 
-        // Additional analysis
         println!("\n");
         println!("{}", "=".repeat(80));
         println!("Analysis and Recommendations");
@@ -150,7 +145,6 @@ fn run_transfer_profile() {
         let stats = solver.get_profiling_stats().expect("profiling stats");
         let location_stats = stats.get_location_stats();
 
-        // Find top GPU read operations
         let mut gpu_reads: Vec<_> = location_stats
             .iter()
             .filter(|(k, _)| k.contains("GPU -> CPU"))
@@ -169,7 +163,6 @@ fn run_transfer_profile() {
             }
         }
 
-        // Find CPU computations
         let mut cpu_compute: Vec<_> = location_stats
             .iter()
             .filter(|(k, _)| k.contains("CPU Compute"))
@@ -188,12 +181,10 @@ fn run_transfer_profile() {
             }
         }
 
-        // Specific recommendations
         println!("\n");
         println!("Specific Optimization Opportunities:");
         println!("{}", "-".repeat(70));
 
-        // Check for norm computation reads
         let norm_reads: Vec<_> = location_stats
             .iter()
             .filter(|(k, _)| k.contains("gpu_norm") || k.contains("read_partial"))
@@ -214,7 +205,6 @@ fn run_transfer_profile() {
             );
         }
 
-        // Check for convergence check reads
         let convergence_reads: Vec<_> = location_stats
             .iter()
             .filter(|(k, _)| k.contains("convergence"))
@@ -228,7 +218,6 @@ fn run_transfer_profile() {
             println!("   This could reduce transfer size from O(n) to O(1).");
         }
 
-        // Check for debug reads
         let debug_reads: Vec<_> = location_stats
             .iter()
             .filter(|(k, _)| k.contains("debug"))
@@ -324,7 +313,6 @@ fn run_scaling_profile() {
         step_x: 0.5,
     };
 
-    // Test with different mesh sizes
     let cell_sizes = [0.1, 0.05, 0.025];
 
     for cell_size in cell_sizes {
@@ -407,7 +395,6 @@ fn run_scaling_profile() {
                 }
             }
 
-            // Calculate time per cell for GPU reads
             let gpu_read_stats = all_stats
                 .iter()
                 .find(|(c, _)| *c == ProfileCategory::GpuRead);

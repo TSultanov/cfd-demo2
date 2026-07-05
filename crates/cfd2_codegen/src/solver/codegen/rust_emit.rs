@@ -1,4 +1,4 @@
-//! IR → Rust transpiler for the CPU backend (Phase 3).
+//! IR → Rust transpiler for the CPU backend.
 //!
 //! The *second renderer* over the same `KernelProgram` IR the WGSL emitter
 //! (`fusion::lower_kernel_program_to_wgsl`) consumes. It renders each kernel to a
@@ -69,10 +69,8 @@ pub fn emit_kernel_fn(fn_name: &str, program: &KernelProgram) -> String {
         "pub fn {fn_name}(bufs: &Buffers, start: u32, end: u32, constants: &GpuConstants) {{\n"
     ));
     // Resolve each buffer handle once PER CHUNK, not per index: `bufs.atom` is
-    // a HashMap<String, _> lookup, and the per-index entry point measured
-    // ~25-30% of the assembly phase in name lookups alone (the grad_state
-    // kernel resolves 23 handles per cell). The dispatch loop lives inside
-    // the function so the optimiser can also keep the handles in registers.
+    // a HashMap<String, _> lookup that dominates otherwise. The dispatch loop
+    // lives inside the function so the optimiser can keep handles in registers.
     for name in tx.bufs.keys() {
         s.push_str(&format!("    let {name} = bufs.atom(\"{name}\");\n"));
     }

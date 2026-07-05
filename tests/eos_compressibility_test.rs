@@ -1,7 +1,5 @@
-//! EOS-derived compressibility `psi = 1/c^2` from the materials database.
-//!
-//! Replaces the artificial `psi = 50`: the all-Mach compressibility is now the
-//! material's real isentropic compressibility, `1/sound_speed^2`, for every preset.
+//! EOS-derived compressibility `psi = 1/c^2` (isentropic, `1/sound_speed^2`)
+//! from the materials database, for every preset.
 
 #![cfg(feature = "ui")]
 

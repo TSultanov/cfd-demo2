@@ -14,13 +14,12 @@ use std::collections::HashMap;
 
 /// Test compressible supersonic wedge against OpenFOAM reference.
 ///
-/// # Reference provenance (audited June 2026): MATCHED-TIME TRANSIENT
-/// This is a transient-by-design comparison, NOT a steady-state anchor:
-/// both codes are time-accurate and compared at the identical instant
-/// (cfd2: 200 steps at the reference dt = endTime 7e-5 s; shock formation phase).
-/// Unlike the incompressible cases (steady references since June 2026),
-/// extending this case's endTime would change the reference field --
-/// the matched-time contract is what makes the comparison valid.
+/// # Matched-time transient
+/// Transient-by-design comparison, NOT a steady-state anchor: both codes are
+/// time-accurate and compared at the identical instant (cfd2: 200 steps at the
+/// reference dt = endTime 7e-5 s; shock formation phase). Extending endTime
+/// would change the reference field — the matched-time contract is what makes
+/// the comparison valid.
 ///
 /// # Timeout
 /// This test requires extended timeout (~60-120s) due to GPU compute.
@@ -93,22 +92,15 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
     solver.set_uniform_state(rho0, [u0, 0.0], p0);
     solver.initialize_history();
 
-    // Startup classification (numerics-honesty contract for this case):
-    // the impulsive uniform free-stream IC violates the wedge-wall BC, so
-    // exactly one early step — the one where the BDF2 history first carries
-    // that correction at full stiffness — may stagnate against the
-    // linear-iteration cap under Jacobi. The transient is bounded: no step
-    // may DIVERGE, at most ONE of the first five steps may miss the cap,
-    // and the final field is separately held to the reference bands (the
-    // scorecard's allowed_nonconverged=1 guards the remaining 195 steps).
-    // WHICH step stalls depends on the viscous operator: with the pre-2026
-    // doubled-shear tauMC it was step 1 (resid 1.26e3 at the cap); after
-    // the tauMC fix step 1 converges in 86 iterations and the stiff moment
-    // moves to step 4 (resid 1.58e3 at the cap). A startup dtau ramp was
-    // tried and made things strictly worse with outer_iters=1
-    // (pseudo-relaxed steps never complete the physical step, the transient
-    // compounds, and the bands fail) — do not reintroduce it without an
-    // inner-convergence loop.
+    // Startup contract: the impulsive uniform free-stream IC violates the
+    // wedge-wall BC, so exactly one early step — where the BDF2 history first
+    // carries that correction at full stiffness — may stagnate against the
+    // linear-iteration cap under Jacobi. The transient is bounded: no step may
+    // DIVERGE, at most ONE of the first five steps may miss the cap, and the
+    // final field is separately held to the reference bands (the scorecard's
+    // allowed_nonconverged=1 guards the remaining 195 steps). Do not add a
+    // startup dtau ramp with outer_iters=1: pseudo-relaxed steps never complete
+    // the physical step, the transient compounds, and the bands fail.
     let mut scorecard = common::CrutchScorecard::new("compressible_wedge", &solver);
     let mut capped_startup_steps: Vec<usize> = Vec::new();
     for step in 0..200 {
@@ -144,9 +136,8 @@ fn openfoam_compressible_supersonic_wedge_matches_reference_field() {
         }
         scorecard.sample(&solver);
     }
-    // The impulsive start makes step 1 the lone allowed nonconverged step
-    // (see the startup contract above); positivity/backoff crutches must
-    // stay silent throughout.
+    // Exactly one nonconverged step is allowed; positivity/backoff crutches
+    // must stay silent throughout.
     scorecard.assert_quiet(&solver, 1);
 
     let u = pollster::block_on(solver.get_u());

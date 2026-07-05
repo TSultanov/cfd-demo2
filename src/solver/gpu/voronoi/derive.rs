@@ -1,65 +1,19 @@
-//! GPU-resident `derive_faces` — cell-major → face-major, design-gpu §6.2.
-//!
-//! ## What this lands (M5 stage 3, honest partial)
-//!
-//! The M1 engine writes **cell-major**, padded, per-cell face slots
-//! (`b_nbr_ids`/`b_face_bc`/`b_face_geom`/…, each `n · K_FACE_MAX`). The
-//! roadmap's GPU-resident regen needs those turned into the **face-major** mesh
-//! buffers (one entry per unique face) *without a CPU round-trip*. §6.2 splits
-//! that into **count → scan → emit → gather**. This module lands the first half
-//! on the GPU — the genuinely novel piece that the new scan primitive
-//! (`scan.rs`, §4.1) exists to serve:
+//! GPU-resident `derive_faces` — turns the engine's cell-major padded face
+//! slots into face-major addressing without a CPU round-trip, via count → scan:
 //!
 //!  1. `count_owned_faces` — one thread per cell counts the faces this cell
 //!     *owns* under the canonical `owner = min(i, j)` rule (interior face `i↔j`
-//!     owned by the lower id; every boundary/box face owned by its cell). This
-//!     is exactly the per-cell entry count of the face-major arrays.
+//!     owned by the lower id; every boundary/box face owned by its cell).
 //!  2. [`crate::solver::gpu::voronoi::GpuScan`] — exclusive-scan those counts →
-//!     per-cell base **offsets** into the face-major arrays; the grand total is
-//!     the new `num_faces`, all on the GPU.
+//!     per-cell base offsets into the face-major arrays; the grand total is the
+//!     new `num_faces`.
 //!
-//! ## Ceiling
+//! Capped at [`MAX_SCAN_ELEMS`] = 2²⁰ cells by the two-level scan.
 //!
-//! The scan is a two-level `1024×1024` primitive, so `derive_offsets` is capped
-//! at [`MAX_SCAN_ELEMS`] = 2²⁰ = 1,048,576 cells (it guards `n` with a
-//! domain-specific message rather than letting the scan's own assert fire deep in
-//! `encode`). The roadmap targets ≤300k; a >1M-cell moving mesh needs the v2
-//! multi-level scan escalation (design-gpu §4.1) before this path applies.
-//!
-//! ## Reciprocity assumption (reconcile before `emit` lands)
-//!
-//! `count_owned_faces` emits an interior face `i<j` from `i`'s side whenever `i`
-//! is SUCCESS, WITHOUT re-checking neighbor `j`'s status or clip reciprocity. On
-//! a *reciprocal* diagram (every `i↔j` seen from both cells, both SUCCESS — the
-//! release-build invariant `resolve_flagged` enforces, design §2.3) this is the
-//! exact owned-count, and the test drives it on such output. But a non-reciprocal
-//! f32 clip (`i` lists `j` while `j` does not list `i`, or `j` is flagged with no
-//! geometry) would make the count disagree with a real `assemble_mesh`. This is
-//! foundation-only (validated against a CPU reference derived from the SAME
-//! cell-major outputs, not wired into the live regen), so it is not a shipped
-//! bug — but the deferred `emit`/CSR-bridge stage must reconcile it with the
-//! reciprocity enforcement before scattering geometry off these offsets.
-//!
-//! The result (`offsets` + `total`) is the addressing the `emit` pass would
-//! scatter into. It is validated bit-exact against a CPU reference computed from
-//! the *same* cell-major outputs (`gpu_derive_faces_test`), i.e. the count+scan
-//! kernels are proven correct on genuine Voronoi output, driven by the primitive.
-//!
-//! ## What is deferred (the documented blocker)
-//!
-//! The `emit`/`gather` passes that write the face-major **geometry** buffers
-//! (`b_face_owner`/`b_face_areas`/`b_face_normals`/`b_face_centers` + the
-//! `cell_faces` CSR) and match them to the CPU `Mesh` are **not** landed here,
-//! because the CPU face-major geometry is not a direct projection of the
-//! cell-major clip outputs: `assemble_mesh` (meshgen/meshless/assemble.rs)
-//! produces it *after* a disjoint-set vertex merge on the quantization grid and
-//! a geometric (shared-vertex-pair) face resolution with chain/orphan handling.
-//! Reproducing the CPU face-major buffers to f32 therefore requires porting that
-//! merge + pairing to the GPU, and then the scalar/block **CSR bridge** (§6.3 —
-//! `b_scalar_*`, `b_cell_face_matrix_indices`, `b_diagonal_indices`) which the
-//! design itself scopes as CPU-readback in v1 and needs the padded-stencil
-//! format (out of scope) to go fully no-readback. Those remain the next M5
-//! optimization, on top of the count→scan foundation this module provides.
+//! Owner-count assumes a reciprocal diagram (every `i↔j` seen from both cells,
+//! both SUCCESS): `count_owned_faces` emits an interior face `i<j` from `i`'s
+//! side without re-checking `j`. A non-reciprocal f32 clip would disagree with
+//! `assemble_mesh`; the `emit`/geometry passes are not landed here.
 
 use crate::solver::gpu::buffers::create_buffer;
 use crate::solver::gpu::context::GpuContext;
@@ -82,7 +36,7 @@ struct DeriveParams {
     _pad1: u32,
 }
 
-/// GPU-derived face addressing (design §6.2, count→scan half).
+/// GPU-derived face addressing (count → scan half).
 #[derive(Clone, Debug)]
 pub struct DerivedFaceOffsets {
     /// Per-cell owned-face count (canonical `owner = min(i,j)` rule).
@@ -152,9 +106,7 @@ impl DeriveFaces {
     }
 
     /// Run count → scan over the engine's current cell-major outputs and read
-    /// back the per-cell owned-face counts + offsets + total. No custom kernel
-    /// touches the CPU except this one readback (which the CSR bridge needs
-    /// anyway in v1, §6.3).
+    /// back the per-cell owned-face counts + offsets + total.
     pub fn derive_offsets(
         &self,
         ctx: &GpuContext,
@@ -235,7 +187,7 @@ impl DeriveFaces {
             let (x, y) = dispatch_2d(n.div_ceil(WORKGROUP_SIZE).max(1));
             pass.dispatch_workgroups(x, y, 1);
         }
-        // count → scan (offsets) in the SAME encoder — no intermediate readback.
+        // count → scan in the same encoder — no intermediate readback.
         self.scan.encode(
             &ctx.device,
             &ctx.queue,

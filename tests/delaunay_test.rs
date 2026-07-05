@@ -21,15 +21,7 @@ fn test_delaunay_005_correctness() {
     assert!(mesh.num_cells() > 0);
     println!("Generated mesh with {} cells", mesh.num_cells());
 
-    // Check that we have a reasonable number of cells for this resolution
-    // Area approx 3.5 * 1.0 - 0.5 * 0.5 = 3.25
-    // Cell area approx 0.5 * 0.005^2 (very rough)
-    // Actually, Delaunay triangles.
-    // Point spacing 0.005.
-    // Number of points approx Area / (0.005^2) ? No, spacing is edge length.
-    // Area of equilateral triangle with side a is sqrt(3)/4 * a^2.
-    // N_triangles approx Area / Area_tri.
-    // 3.25 / (0.433 * 0.005^2) = 3.25 / 0.0000108 = ~300,000 cells.
-
+    // ~300k triangles expected: area 3.25 / equilateral-tri area (sqrt(3)/4 *
+    // 0.005^2) = 3.25 / 1.08e-5. Assert a loose lower bound.
     assert!(mesh.num_cells() > 100_000);
 }

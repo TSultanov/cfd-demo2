@@ -25,7 +25,7 @@ the topology change, and rendered live in the GUI.
 - **M3** — ALE physics in the EDSL/codegen (GCL ~1e-6, temporal order 2.15, conservation 6e-15/step).
 - **M4** — moving-mesh loop (CPU): dt handshake → advect → regen → swept flux → refresh → step.
 - **M5** — GPU-resident loop: **core shipped** — GPU surgical topology refresh (recompile
-  eliminated via a per-device pipeline cache; refresh 20k −68%, GCL cold-restart artifact gone),
+  eliminated via a per-device pipeline cache; refresh 20k −69% A/B-verified, GCL cold-restart gone),
   the full GPU moving loop with surgical BDF2 history (CPU↔GPU field RMS 3e-6), and the GUI GPU
   backend. **GPU-resident regen: foundation shipped** (the two-level exclusive scan primitive +
   the `derive_faces` count→scan half, both bit-exact on GPU); the face-major emit + CSR bridge
@@ -453,10 +453,13 @@ the face-major emit + the CSR bridge remain CPU, documented below with the exact
 (`src/solver/gpu/pipeline_cache.rs`) keyed on `(model_id, KernelId)` that survives every refresh
 (pipelines are keyed on constant shader source ⇒ reuse is bit-identical), and a buffer→buffer
 blit carrying warm-start `x` across the reallocation (no readback). Reconstruction still rebuilds
-bind groups; only the recompile is gone. **Measured: refresh 20k 17.7→5.6 ms (−68%), 300k
-75.2→60.5 ms (−20%, residual = CSR host-build + block-CSR upload, *not* recompile). GPU
-topology-seam GCL euler max|U−U0| 1.53e-3→5.5e-5 (late 1.31e-6, CPU ~1e-6 scale) — cold-restart
-artifact gone, non-compounding.** Instrument: `CFD2_REFRESH_PROFILE=1`.
+bind groups; only the recompile is gone. **Measured (A/B self-verifying via the
+`CFD2_GPU_PIPELINE_CACHE=0` cache-disable toggle in `bench_topology_refresh_cost`): refresh 20k
+cache-ON 5.3 ms vs cache-OFF/recompile 17.3 ms (−69%), 300k 57.1 vs 72.3 ms (−21%, residual =
+CSR host-build + block-CSR upload, *not* recompile — the fixed ~12 ms recompile is a shrinking
+share as the size-scaling rebuild grows). GPU topology-seam GCL euler max|U−U0| 1.53e-3→5.5e-5
+(late 1.31e-6, CPU ~1e-6 scale) — cold-restart artifact gone, non-compounding.** Instruments:
+`CFD2_REFRESH_PROFILE=1`, `CFD2_GPU_PIPELINE_CACHE=0`.
 
 **Stage 2 — GPU moving loop end-to-end + surgical BDF2 history.** The GPU `MovingMeshDriver`
 runs the full per-step cycle (dt handshake → CPU M0 regen → swept fluxes → surgical topology

@@ -18,6 +18,28 @@
 //!     per-cell base **offsets** into the face-major arrays; the grand total is
 //!     the new `num_faces`, all on the GPU.
 //!
+//! ## Ceiling
+//!
+//! The scan is a two-level `1024×1024` primitive, so `derive_offsets` is capped
+//! at [`MAX_SCAN_ELEMS`] = 2²⁰ = 1,048,576 cells (it guards `n` with a
+//! domain-specific message rather than letting the scan's own assert fire deep in
+//! `encode`). The roadmap targets ≤300k; a >1M-cell moving mesh needs the v2
+//! multi-level scan escalation (design-gpu §4.1) before this path applies.
+//!
+//! ## Reciprocity assumption (reconcile before `emit` lands)
+//!
+//! `count_owned_faces` emits an interior face `i<j` from `i`'s side whenever `i`
+//! is SUCCESS, WITHOUT re-checking neighbor `j`'s status or clip reciprocity. On
+//! a *reciprocal* diagram (every `i↔j` seen from both cells, both SUCCESS — the
+//! release-build invariant `resolve_flagged` enforces, design §2.3) this is the
+//! exact owned-count, and the test drives it on such output. But a non-reciprocal
+//! f32 clip (`i` lists `j` while `j` does not list `i`, or `j` is flagged with no
+//! geometry) would make the count disagree with a real `assemble_mesh`. This is
+//! foundation-only (validated against a CPU reference derived from the SAME
+//! cell-major outputs, not wired into the live regen), so it is not a shipped
+//! bug — but the deferred `emit`/CSR-bridge stage must reconcile it with the
+//! reciprocity enforcement before scattering geometry off these offsets.
+//!
 //! The result (`offsets` + `total`) is the addressing the `emit` pass would
 //! scatter into. It is validated bit-exact against a CPU reference computed from
 //! the *same* cell-major outputs (`gpu_derive_faces_test`), i.e. the count+scan
@@ -142,6 +164,12 @@ impl DeriveFaces {
         use wgpu::BufferUsages as U;
         let n = engine.n_seeds();
         assert!(n > 0, "derive_offsets called before a regen (n_seeds == 0)");
+        assert!(
+            n <= super::MAX_SCAN_ELEMS,
+            "derive_offsets: {n} cells exceeds the two-level scan ceiling \
+             ({} = 2^20); needs the v2 multi-level scan (design-gpu §4.1)",
+            super::MAX_SCAN_ELEMS,
+        );
         let params = DeriveParams { n, k: K_FACE_MAX as u32, _pad0: 0, _pad1: 0 };
         let b_params = create_buffer(
             &ctx.device,

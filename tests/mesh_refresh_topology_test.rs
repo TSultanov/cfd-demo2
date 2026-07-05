@@ -733,13 +733,27 @@ fn bench_topology_refresh_cost() {
         let mesh = structured_n(target);
         let n = mesh.num_cells();
 
-        // GPU.
+        // GPU — measure BOTH legs so the roadmap's "−68%" figure is
+        // self-verifying: cache ON (default, surgical) vs OFF
+        // (`CFD2_GPU_PIPELINE_CACHE=0`, the pre-M5 recompile-per-refresh cost).
         if let Ok(ctx) = pollster::block_on(GpuContext::new(None, None)) {
             let _g = lock_env();
             std::env::remove_var("CFD2_BACKEND");
-            let mut d = build_driver(&mesh, Some(ctx.device.clone()), Some(ctx.queue.clone()));
-            let ms = median_refresh_ms(&mut d, &mesh);
-            println!("[refresh-cost] GPU {n} cells / {} faces: {ms:.2} ms/topology-refresh", mesh.num_faces());
+
+            std::env::set_var("CFD2_GPU_PIPELINE_CACHE", "0");
+            let mut d_off = build_driver(&mesh, Some(ctx.device.clone()), Some(ctx.queue.clone()));
+            let ms_off = median_refresh_ms(&mut d_off, &mesh);
+
+            std::env::remove_var("CFD2_GPU_PIPELINE_CACHE");
+            let mut d_on = build_driver(&mesh, Some(ctx.device.clone()), Some(ctx.queue.clone()));
+            let ms_on = median_refresh_ms(&mut d_on, &mesh);
+
+            let delta = 100.0 * (ms_on - ms_off) / ms_off.max(1e-9);
+            println!(
+                "[refresh-cost] GPU {n} cells / {} faces: cache-ON {ms_on:.2} ms vs \
+                 cache-OFF(recompile) {ms_off:.2} ms/topology-refresh ({delta:+.0}%)",
+                mesh.num_faces()
+            );
         }
 
         // CPU.

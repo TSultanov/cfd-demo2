@@ -26,9 +26,15 @@
 //!     the GPU moving loop keeps a uniform free stream uniform at the stage-1
 //!     scale, non-compounding, over the run. BDF2 additionally proves the
 //!     surgical history preservation.
-//!   * `gpu_vs_cpu_moving_mesh_physics` — the SAME prescribed-motion case on both
-//!     backends; the physics observables (field L2, GCL drift, mass) match within
-//!     an f32 cross-backend tolerance (bits differ, physics must not).
+//!   * `gpu_vs_cpu_moving_mesh_freestream_gcl` — the SAME prescribed-motion case
+//!     on both backends must agree on the CONSERVATION observables of the moving
+//!     mesh: both preserve the uniform free stream (GCL) and their final fields
+//!     match to an f32 cross-backend RMS. The free stream is an exact discrete
+//!     fixed point, so this proves cross-backend GCL/free-stream preservation of
+//!     the swept-flux + moving-volume machinery — NOT a developed-field physics
+//!     match (a cross-backend comparison on a nontrivial wake is a documented gap,
+//!     deferred; the GPU FlowCoupled path is smoke-tested single-backend in
+//!     `moving_mesh_gui_worker_gpu_backend`).
 //!   * `gpu_moving_perf` — per-step overhead split (plan/regen/swept/refresh vs
 //!     total) at ~20k cells: with stage 1 the refresh no longer dominates.
 //!
@@ -282,21 +288,33 @@ fn print_gcl(label: &str, out: &RunOut) {
 /// (July 2026, 125-cell CVT square, 120 steps, swirl θ_peak=0.03):
 ///   euler: max|U-U0| = 1.32e-5, max|p| = 1.05e-5 (late 8.3e-7 / 7.7e-6)
 ///   bdf2:  max|U-U0| = 2.14e-5, max|p| = 8.12e-5 (late 1.4e-6 / 1.1e-5)
-/// Caps ~4× measured — the GPU f32 scale, only ~10× the CPU f64 GCL gate and
-/// non-compounding (the late window is BELOW the early one on both schemes: a
-/// lost-history BDF2 cold-restart or a broken GCL would instead COMPOUND it).
+/// The whole-run caps are ~4× the measured max (the GPU f32 scale, ~10× the CPU
+/// f64 GCL gate). The NON-COMPOUNDING statement is the LATE-window absolute cap,
+/// matching the sibling `ale_gcl_test`: a conservation-law (GCL) violation or a
+/// lost-history BDF2 cold-restart COMPOUNDS step-over-step, so the final quarter
+/// would rise toward the whole-run cap instead of settling an order below it
+/// (the sibling measured ~1.5e-3 when the warm-start carry was lost — 100× these
+/// late caps). The late caps are tight ABSOLUTE bounds at the measured late scale
+/// (not the whole-run floor, which made the old ratio-only check vacuous).
 fn assert_gpu_gcl_caps(out: &RunOut) {
     assert!(out.max_identity_err < 1e-11, "f64 identity {:.3e}", out.max_identity_err);
     assert!(out.max_scl_defect < 1e-8, "SCL defect {:.3e}", out.max_scl_defect);
     assert!(out.max_du < 1e-4, "U drift {:.3e} above cap", out.max_du);
     assert!(out.max_dp < 3e-4, "p drift {:.3e} above cap", out.max_dp);
+    // Late-window (final quarter) absolute caps — the live no-compounding floor.
+    // Measured late: euler 8.3e-7 / 7.7e-6, bdf2 1.4e-6 / 1.1e-5; these caps give
+    // ~2-7× headroom yet a compounding drift blows them well before the run end.
+    assert!(out.late_du < 1e-5, "late U drift {:.3e}: GCL error compounds", out.late_du);
+    assert!(out.late_dp < 3e-5, "late p drift {:.3e}: GCL error compounds", out.late_dp);
+    // ...and the late window must not exceed the settled early window (floors at
+    // the measured late scale keep this ratio bound live, not vacuous).
     assert!(
-        out.late_du <= (out.early_du * 2.5).max(1e-4),
+        out.late_du <= (out.early_du * 2.5).max(1e-5),
         "late U drift {:.3e} vs early {:.3e}: GCL error compounds",
         out.late_du, out.early_du
     );
     assert!(
-        out.late_dp <= (out.early_dp * 2.5).max(3e-4),
+        out.late_dp <= (out.early_dp * 2.5).max(2e-5),
         "late p drift {:.3e} vs early {:.3e}: GCL error compounds",
         out.late_dp, out.early_dp
     );
@@ -337,16 +355,22 @@ fn gpu_moving_mesh_gcl_bdf2() {
     assert_gpu_gcl_caps(&out);
 }
 
-// ─── Gate 2: CPU vs GPU physics match (same moving-mesh case) ─────────────────
+// ─── Gate 2: CPU vs GPU free-stream / GCL preservation (same moving case) ─────
 
-/// The cross-backend correctness gate: the SAME prescribed-motion case on CPU
-/// (f64 linear solve) and GPU (f32) must agree on the PHYSICS OBSERVABLES — the
-/// final field, the GCL drift, the conservation — within an f32 cross-backend
-/// tolerance. Bits differ (that is expected and never asserted); the physics
-/// must not.
+/// Cross-backend conservation gate: the SAME prescribed-motion case on CPU (f64
+/// linear solve) and GPU (f32) must agree on the CONSERVATION observables of the
+/// moving mesh. The flow is a uniform (1,0) free stream — an exact discrete fixed
+/// point on both backends — so this proves the swept-flux + moving-volume GCL
+/// machinery preserves it identically across backends (final-field RMS + both
+/// legs' free-stream drift), within an f32 cross-backend tolerance. Bits differ
+/// (expected, never asserted). This is deliberately NOT a developed-field physics
+/// match: any bug that vanishes on uniform flow is invisible here; a genuine
+/// cross-backend nontrivial-wake comparison is a documented deferred gap (the
+/// f32-GPU/f64-CPU spread on a chaotic wake is itself a known open question — see
+/// the compressible marched-MMS notes).
 #[test]
 #[cfg(feature = "cpu")]
-fn gpu_vs_cpu_moving_mesh_physics() {
+fn gpu_vs_cpu_moving_mesh_freestream_gcl() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     std::env::remove_var("CFD2_BACKEND");
     let Some(ctx) = gpu_ctx() else { return };
@@ -386,9 +410,11 @@ fn gpu_vs_cpu_moving_mesh_physics() {
 
     // Both backends must preserve the free stream (physics observable, not bits).
     assert!(cpu.max_du < 5e-3 && gpu.max_du < 5e-3, "a backend lost the free stream");
-    // The two near-uniform fields agree to f32 cross-backend scale (measured RMS
+    // The two free-stream fields agree to f32 cross-backend scale (measured RMS
     // 3.0e-6, max 1.3e-5; caps ~two decades above — meaningful, not knife-edge).
-    assert!(l2 < 5e-4, "cross-backend field RMS {l2:.3e} too large — physics disagree");
+    // This is a free-stream/GCL agreement, not a developed-field match (see the
+    // fn doc): the fixed point is trivial, only conservation-breaking bugs show.
+    assert!(l2 < 5e-4, "cross-backend free-stream RMS {l2:.3e} too large — GCL disagrees");
     assert!(max_abs < 5e-3, "cross-backend field max|diff| {max_abs:.3e} too large");
 }
 
@@ -456,8 +482,24 @@ fn gpu_moving_perf() {
         100.0 * refresh / total_ms.max(1e-6),
         100.0 * refresh / overhead.max(1e-6),
     );
-    // Do-no-harm sanity: the surgical refresh must not dominate the step. It is
-    // now a minority of the per-step wall time (the solve + regen dominate).
+    // Do-no-harm regression gate. The OLD check (`refresh <= total_ms`) only
+    // caught a refresh exceeding the ENTIRE step — a 2× refresh regression that
+    // stayed under the step wall passed silently. Pin refresh below the larger of
+    // the two genuine size-scaling mesh passes (regen / swept-flux) instead: the
+    // pre-M5 recompile of the whole LA stack was a size-INDEPENDENT ~10.6 ms that
+    // dominated; a reintroduced recompile adds that back to `refresh` while
+    // regen/swept are unchanged, pushing refresh above them. All three are GPU
+    // passes on the same adapter, so the bound scales with the machine (portable,
+    // not an absolute wall-clock cap). Measured: refresh 7.6 vs regen 12.7 /
+    // swept 12.3 ms (22% of overhead); the 1.25× cushion absorbs run-to-run noise
+    // while a ~10 ms recompile still blows it.
+    let mesh_pass = regen.max(swept);
+    assert!(
+        refresh < mesh_pass * 1.25,
+        "refresh {refresh:.2} ms exceeds 1.25× the larger mesh pass \
+         (regen {regen:.2} / swept {swept:.2}) — the LA pipeline cache regressed \
+         (recompile-per-refresh reintroduced?)"
+    );
     assert!(
         refresh <= total_ms,
         "refresh {refresh:.2} ms exceeds the whole step {total_ms:.2} ms — stage-1 regressed"

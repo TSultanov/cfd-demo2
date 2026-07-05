@@ -27,9 +27,27 @@
 //! reconstruction path would have compiled from the same source, so caching is
 //! transparent to results — the no-op-refresh byte gate and the
 //! refresh-vs-fresh physics gate both stay green.
+//!
+//! ## A/B toggle (`CFD2_GPU_PIPELINE_CACHE=0`)
+//!
+//! Setting `CFD2_GPU_PIPELINE_CACHE=0` disables the memoization: every
+//! [`PipelineCache::pipeline`] call compiles a fresh pipeline, reproducing the
+//! pre-M5 recompile-per-refresh cost. This is what makes the roadmap's
+//! "topology refresh −68%" figure self-verifying — `bench_topology_refresh_cost`
+//! measures the refresh with the cache both ON (default) and OFF and prints the
+//! delta. It is a pure benchmarking/diagnostic knob: results are identical either
+//! way (the compiled pipeline is a function of the static source), only the wall
+//! time differs. Read per call (`pipeline()` is a setup/refresh-time call, never
+//! in the per-iteration solve loop), so a test can flip it between legs.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+
+/// Whether pipeline memoization is enabled (default true; `CFD2_GPU_PIPELINE_CACHE=0`
+/// forces a fresh compile on every lookup for the refresh-cost A/B benchmark).
+fn cache_enabled() -> bool {
+    !matches!(std::env::var("CFD2_GPU_PIPELINE_CACHE").as_deref(), Ok("0"))
+}
 
 use crate::solver::gpu::lowering::kernel_registry;
 use crate::solver::model::KernelId;
@@ -60,16 +78,18 @@ impl PipelineCache {
         model_id: &str,
         kernel: KernelId,
     ) -> Result<wgpu::ComputePipeline, String> {
+        let enabled = cache_enabled();
         let key: CacheKey = (model_id.to_string(), kernel.0);
-        if let Some(p) = self.map.lock().unwrap().get(&key) {
-            return Ok(p.clone());
+        if enabled {
+            if let Some(p) = self.map.lock().unwrap().get(&key) {
+                return Ok(p.clone());
+            }
         }
         let src = kernel_registry::kernel_source_by_id(model_id, kernel)?;
         let pipeline = (src.create_pipeline)(device);
-        self.map
-            .lock()
-            .unwrap()
-            .insert(key, pipeline.clone());
+        if enabled {
+            self.map.lock().unwrap().insert(key, pipeline.clone());
+        }
         Ok(pipeline)
     }
 

@@ -43,12 +43,18 @@ pub struct CfdUniforms {
     pub _padding: u32,
 }
 
-/// Extra capacity baked into the initial vertex/line buffers, over the
-/// initial tessellated vertex count. A moving (ALE) mesh re-tessellates every
-/// step and per-cell vertex counts drift as the Voronoi topology changes, so
-/// the buffers are sized with headroom to absorb small growth without a
-/// reallocation on the very first refresh.
-const VERTEX_HEADROOM: f32 = 1.5;
+/// Extra capacity to bake into the initial vertex/line buffers, over the
+/// initial tessellated vertex count, for a moving (ALE) mesh. A moving mesh
+/// re-tessellates every step and per-cell vertex counts drift as the Voronoi
+/// topology changes, so its buffers are sized with headroom to absorb small
+/// growth without a reallocation on the very first refresh. The static path
+/// passes `NO_HEADROOM` (1.0) — it never re-tessellates, so it must not pay a
+/// 50% buffer over-allocation it can never use.
+pub const VERTEX_HEADROOM: f32 = 1.5;
+
+/// Headroom factor for a mesh that never grows (the static path): allocate
+/// exactly the initial tessellated count.
+pub const NO_HEADROOM: f32 = 1.0;
 
 /// Growth factor applied when a mesh refresh needs more vertices than the
 /// current allocation holds. We over-allocate past the immediate need so a
@@ -93,10 +99,16 @@ pub struct CfdRenderResources {
 
 impl CfdRenderResources {
     /// Create render resources for CFD visualization
+    /// `headroom` scales the initial fill/line buffer allocation over
+    /// `max_vertices`: pass [`VERTEX_HEADROOM`] for a moving (ALE) mesh that
+    /// re-tessellates every step, or [`NO_HEADROOM`] for the static path so it
+    /// allocates exactly what it needs (overflow is still impossible either way
+    /// — `ensure_capacity` grows on demand before every write).
     pub fn new(
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
         max_vertices: usize,
+        headroom: f32,
     ) -> Self {
         // Create shader module
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -242,7 +254,7 @@ impl CfdRenderResources {
         // a moving mesh's first few refreshes fit without a reallocation. The
         // draw range is always `num_vertices` (<= the written count), so a
         // larger allocation is visually identical for the static path.
-        let capacity_vertices = capacity_for(max_vertices, VERTEX_HEADROOM);
+        let capacity_vertices = capacity_for(max_vertices, headroom);
         let capacity_line_vertices = capacity_vertices;
         let vertex_buffer = alloc_vertex_buffer(device, "CFD Vertex Buffer", capacity_vertices);
         let line_vertex_buffer =

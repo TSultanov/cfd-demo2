@@ -284,6 +284,7 @@ fn replay_through_renderer(meshes: &[Vec<Vec<[f64; 2]>>], n_cells: usize) {
         &device,
         wgpu::TextureFormat::Rgba8Unorm,
         v0.len().max(l0.len()).max(1),
+        cfd_renderer::VERTEX_HEADROOM,
     );
 
     for (step, cells) in meshes.iter().enumerate() {

@@ -545,6 +545,12 @@ pub struct CFDApp {
     moving_regularization: f64,
     /// Latest per-step moving-mesh telemetry (from `MeshRefreshed`), for display.
     cached_moving_stats: Option<MovingMeshStats>,
+    /// Whether the driver the worker is *actually running* is a moving-mesh
+    /// (ALE) driver — captured at Initialize/Reset from the built `SolverMode`,
+    /// independent of the `enable_moving_mesh` checkbox (which the user can
+    /// un-tick mid-run without reinitializing). Used to keep controls the
+    /// moving driver forbids (e.g. adaptive dt) disabled while it is live.
+    solver_is_moving: bool,
     min_cell_size: f64,
     max_cell_size: f64,
     growth_rate: f64,
@@ -707,6 +713,7 @@ impl CFDApp {
             moving_motion: MovingMotionChoice::default(),
             moving_regularization: 0.5,
             cached_moving_stats: None,
+            solver_is_moving: false,
             min_cell_size: 0.025,
             max_cell_size: 0.025,
             growth_rate: 1.2,
@@ -1758,6 +1765,11 @@ impl CFDApp {
         self.cached_error = None;
         self.cached_message = None;
 
+        // Track what the worker is about to run so controls the moving driver
+        // forbids stay disabled for the driver's whole life, not just while the
+        // enable checkbox happens to be ticked.
+        self.solver_is_moving = matches!(mode, SolverMode::MovingMesh(_));
+
         self.solver_worker.send(SolverWorkerCommand::SetSolver {
             mode,
             viz_field,
@@ -1862,10 +1874,19 @@ impl CFDApp {
             let vertices = cfd_renderer::build_mesh_vertices(&cached_cells);
             let line_vertices = cfd_renderer::build_line_vertices(&cached_cells);
             let max_vertices = vertices.len().max(line_vertices.len()).max(1);
+            // Only the moving (ALE) mesh re-tessellates per step, so only it
+            // needs pre-grown buffers; the static path allocates exactly its
+            // one-time count (no 50% over-allocation for never-moving runs).
+            let headroom = if request.enable_moving_mesh {
+                cfd_renderer::VERTEX_HEADROOM
+            } else {
+                cfd_renderer::NO_HEADROOM
+            };
             let mut renderer = cfd_renderer::CfdRenderResources::new(
                 device,
                 request.target_format,
                 max_vertices,
+                headroom,
             );
             renderer.update_mesh(device, queue, &vertices, &line_vertices);
             renderer.update_bind_group(device, &viz_buffer);
@@ -2986,8 +3007,25 @@ impl eframe::App for CFDApp {
                             self.update_gpu_dt();
                         }
 
+                        // The moving-mesh (ALE) driver pins a fixed dt and hard-
+                        // rejects adaptive dt at step time (it would break the
+                        // GCL dt handshake) — enabling this mid-run would error
+                        // and halt the sim. Disable it whenever the moving path
+                        // is selected OR a moving driver is actually running
+                        // (the user may un-tick Enable without reinitializing).
+                        let adaptive_dt_allowed =
+                            !(self.enable_moving_mesh || self.solver_is_moving);
                         if ui
-                            .checkbox(&mut self.adaptive_dt, "Adaptive Timestep")
+                            .add_enabled(
+                                adaptive_dt_allowed,
+                                egui::Checkbox::new(&mut self.adaptive_dt, "Adaptive Timestep"),
+                            )
+                            .on_hover_text(if adaptive_dt_allowed {
+                                "Acoustically-adaptive timestep (CFL-targeted)."
+                            } else {
+                                "Disabled for the moving mesh (ALE): the ALE cycle pins a \
+                                 fixed dt for the GCL dt handshake."
+                            })
                             .changed()
                         {
                             self.sync_worker_params();
@@ -3900,8 +3938,21 @@ fn solver_worker_main(
             SolverMode::Static(d) => (d.step(should_readback), None),
             SolverMode::MovingMesh(m) => match m.step(should_readback) {
                 Ok((o, mstats)) => {
-                    let cells = CFDApp::cache_cells(m.mesh());
-                    (o, Some((cells, mstats)))
+                    // Clone + publish the regenerated mesh only at readback
+                    // cadence. The UI coalesces `MeshRefreshed` to one upload
+                    // per frame anyway, so cloning the full f64 polygon set on
+                    // every solver step (many per frame on a fast CPU solve)
+                    // is wasted worker CPU + channel churn — and an unbounded
+                    // queue balloon if the UI stalls while the worker steps.
+                    // Geometry + ALE diagnostics tolerate frame-cadence lag
+                    // (design landmine 4); colors track per-step via the
+                    // separate viz-field path regardless.
+                    let refresh = if should_readback {
+                        Some((CFDApp::cache_cells(m.mesh()), mstats))
+                    } else {
+                        None
+                    };
+                    (o, refresh)
                 }
                 Err(err) => {
                     running = false;

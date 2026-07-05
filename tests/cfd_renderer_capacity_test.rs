@@ -66,10 +66,12 @@ fn voronoi_mesh_upload_fits_render_buffers() {
     .expect("device");
 
     let max_vertices = vertices.len().max(line_vertices.len()).max(1);
+    // Static upload path — allocate exactly, as the GUI static path now does.
     let mut renderer = cfd_renderer::CfdRenderResources::new(
         &device,
         wgpu::TextureFormat::Rgba8Unorm,
         max_vertices,
+        cfd_renderer::NO_HEADROOM,
     );
     renderer.update_mesh(&device, &queue, &vertices, &line_vertices);
     let _ = device.poll(wgpu::PollType::Wait {
@@ -126,10 +128,13 @@ fn moving_mesh_growing_topology_never_overflows() {
     let la = cfd_renderer::build_line_vertices(&cells_a);
     let max_vertices = va.len().max(la.len()).max(1);
 
+    // Moving path — headroom over the initial count, exactly as the GUI ALE
+    // path allocates. Mesh B is chosen to exceed even this headroom'd capacity.
     let mut renderer = cfd_renderer::CfdRenderResources::new(
         &device,
         wgpu::TextureFormat::Rgba8Unorm,
         max_vertices,
+        cfd_renderer::VERTEX_HEADROOM,
     );
     renderer.update_mesh(&device, &queue, &va, &la);
     assert_eq!(renderer.num_vertices as usize, va.len());

@@ -53,6 +53,26 @@
 //! no readback plumbing yet, so a GPU restore re-seeds the history from the
 //! current state (IC semantics) — exact for single-step schemes, a documented
 //! startup-fallback for BDF2. Full GPU history capture is a later stage.
+//!
+//! ## M5 stage 2 — the moving-mesh loop does NOT need GPU history readback
+//!
+//! The [`crate::sim::MovingMeshDriver`] preserves ALL cross-step state
+//! *surgically in place* across the per-step topology refresh — it never uses
+//! `snapshot`/`restore`. On the GPU backend:
+//!   * `state`, `state_old`, `state_old_old` are cell-indexed field buffers the
+//!     topology refresh never reallocates (only the face-flux buffer is resized),
+//!     so the BDF2 time history survives a topology change untouched;
+//!   * the ALE volume history `cell_vols_old{,_old}` is rotated then carried over
+//!     by swap in `MeshResources::refresh_topology`;
+//!   * the warm-start `x` is blitted across the reallocation (M5 stage 1).
+//! So the moving loop preserves BDF2 history across steps with NO readback — a
+//! device→device path strictly cheaper than a snapshot round-trip. This is
+//! proven by `tests/gpu_moving_mesh_test.rs::gpu_moving_mesh_gcl_bdf2` (a lost
+//! `state_old_old` would silently cold-start BDF2 to Euler each step and the GCL
+//! drift would compound; it does not). GPU `has_history==true` readback is only
+//! needed for a snapshot/restore that crosses a *rebuild boundary* (e.g. a
+//! fresh-build-equivalence check), which the moving loop does not exercise, and
+//! remains deferred.
 
 /// Captured stepping state of a solver — see the module docs for the inventory
 /// and the exclusion rationale.

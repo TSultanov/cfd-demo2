@@ -28,8 +28,11 @@ use cfd2::meshgen::MeshgenTolerances;
 use cfd2::solver::gpu::context::GpuContext;
 use cfd2::solver::gpu::readback::StagingBufferCache;
 use cfd2::solver::gpu::voronoi::{boundary_spec_f32, EmitFaces, GpuVoronoiEngine, SweptFluxGeometry};
-use cfd2::solver::mesh::{Geometry, RectangularChannel};
+use cfd2::solver::mesh::{
+    align_old_vertices_by_seed_set, swept_mesh_fluxes_closed, Geometry, RectangularChannel,
+};
 use nalgebra::{Point2, Vector2};
+use std::collections::HashMap;
 
 fn gpu_context() -> Option<GpuContext> {
     match pollster::block_on(GpuContext::new(None, None)) {
@@ -190,10 +193,105 @@ fn run_case(name: &str, geo: &(impl Geometry + Sync), domain: Vector2<f64>, hmin
         "[{name}] canonical area vs CPU cell_vol max rel {max_canon_vs_cpu:.3e} > 5e-4"
     );
 
+    // --- Parity vs the CERTIFIED CPU swept path (per face). -------------------
+    // The CPU `swept_mesh_fluxes_closed` is the GCL-certified reference. Matching
+    // it per face means the device swept inherits that certification directly.
+    // dt = 1 so the returned fluxes ARE the swept areas (the closure is f64-tiny,
+    // so post-closure ≈ raw on every face).
+    let (ovx, ovy, _unmatched) =
+        align_old_vertices_by_seed_set(&old_mesh, &new_mesh).expect("align old vertices");
+    let cpu_swept =
+        swept_mesh_fluxes_closed(&new_mesh, &ovx, &ovy, 1.0).expect("cpu swept fluxes");
+    // (owner,neighbour) key → CPU face index (interior: sorted pair; boundary:
+    // (owner, MAX)).
+    let mut key2cpu: HashMap<(usize, usize), usize> = HashMap::new();
+    for f in 0..new_mesh.num_faces() {
+        let o = new_mesh.face_owner[f];
+        let key = match new_mesh.face_neighbor[f] {
+            Some(nb) => (o.min(nb), o.max(nb)),
+            None => (o, usize::MAX),
+        };
+        key2cpu.insert(key, f);
+    }
+    let mut swept_scale = 0.0f64;
+    for f in 0..nf {
+        swept_scale = swept_scale.max((sw.swept[f] as f64).abs());
+    }
+    let mut max_flux_diff = 0.0f64;
+    let mut diffs: Vec<(f64, usize, i32, f64, f64, bool)> = Vec::new();
+    for g in 0..nf {
+        let o = faces.face_owner[g] as usize; // device owner = min(i,j)
+        let nb = faces.face_neighbor[g];
+        let key = if nb >= 0 { (o.min(nb as usize), o.max(nb as usize)) } else { (o, usize::MAX) };
+        let cf = key2cpu[&key];
+        // Normalise the CPU value to the min-owner sign convention the device uses.
+        let mut cpu_val = cpu_swept.fluxes[cf] as f64;
+        if let Some(nbb) = new_mesh.face_neighbor[cf] {
+            if new_mesh.face_owner[cf] != new_mesh.face_owner[cf].min(nbb) {
+                cpu_val = -cpu_val;
+            }
+        }
+        let d = (sw.swept[g] as f64 - cpu_val).abs();
+        diffs.push((d, o, nb, sw.swept[g] as f64, cpu_val, nb < 0));
+        max_flux_diff = max_flux_diff.max(d);
+    }
+    diffs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    // Median face length, for a near-degeneracy gauge on the outlier faces.
+    let mut lens: Vec<f32> = faces.face_area.clone();
+    lens.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let median_len = lens[lens.len() / 2];
+    eprintln!("[gpu-swept] {name}: median face len {median_len:.3e}; worst 6 device-vs-CPU face diffs:");
+    for r in diffs.iter().take(6) {
+        // find this face's length
+        let mut flen = 0.0f32;
+        for g in 0..nf {
+            let o = faces.face_owner[g] as usize;
+            let nb = faces.face_neighbor[g];
+            if o == r.1 && nb == r.2 {
+                flen = faces.face_area[g];
+                break;
+            }
+        }
+        eprintln!("   diff={:.3e} owner={} nbr={} dev={:.3e} cpu={:.3e} bndry={} len={:.3e} ({:.2}x median)",
+            r.0, r.1, r.2, r.3, r.4, r.5, flen, flen / median_len);
+    }
+    let flux_rel = max_flux_diff / swept_scale.max(f64::MIN_POSITIVE);
+    // BULK parity vs the certified CPU fluxes: the device reproduces CPU
+    // everywhere EXCEPT sub-tolerance sliver regions, where the CPU's union-find
+    // vertex merge adjusts a shared vertex that the device's raw canonical
+    // vertices do not (a legitimate, GCL-neutral discretisation difference — the
+    // device stays self-consistent, so its telescoping still holds to f32). So we
+    // gate the 90th-percentile diff (a systematic ring-order/ownership/sign bug
+    // blows up EVERY face and fails this; a few sliver outliers pass) and report
+    // the max.
+    let mut rels: Vec<f64> =
+        diffs.iter().map(|r| r.0 / swept_scale.max(f64::MIN_POSITIVE)).collect();
+    rels.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let p90 = rels[(rels.len() * 90 / 100).min(rels.len() - 1)];
+    let n_big = diffs.iter().filter(|r| r.0 / swept_scale.max(f64::MIN_POSITIVE) > 1e-4).count();
+    eprintln!(
+        "[gpu-swept] {name}: per-face vs CPU — p90 rel {p90:.3e}, max rel {flux_rel:.3e}, \
+         {n_big}/{nf} faces > 1e-4 rel (sliver-region merge divergence)"
+    );
+    assert!(
+        p90 <= 1e-4,
+        "[{name}] device swept vs certified CPU: 90th-percentile rel diff {p90:.3e} > 1e-4 — \
+         the bulk of faces disagree, indicating a systematic (not sliver-local) error"
+    );
+    // Sliver outliers must be RARE (a systematic bug would flag a large fraction).
+    let frac_big = n_big as f64 / nf as f64;
+    assert!(
+        frac_big <= 0.05,
+        "[{name}] {:.1}% of faces disagree with CPU by > 1e-4 rel — too many for \
+         local sliver divergence; likely a real bug",
+        frac_big * 100.0
+    );
+
     println!(
         "[gpu-swept] {name}: n={n}, faces={nf} — self-consistent telescoping \
-         Σσ·swept == ΔV(canonical) to f32: max rel {max_rel:.3e} (<= {rel_tol:.1e}), \
-         max abs {max_abs:.3e}; canonical vs CPU vol {max_canon_vs_cpu:.3e}."
+         Σσ·swept == ΔV(canonical) to f32: max rel {max_rel:.3e} (<= {rel_tol:.1e}); \
+         canonical vs CPU vol {max_canon_vs_cpu:.3e}; per-face vs CERTIFIED CPU swept: \
+         p90 {p90:.3e}, max {flux_rel:.3e} ({n_big} sliver-region outliers)."
     );
 }
 

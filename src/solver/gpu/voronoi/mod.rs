@@ -55,6 +55,7 @@ mod emit;
 mod engine;
 mod lloyd;
 mod scan;
+mod swept_gpu;
 mod wgsl;
 
 pub use cell_geom::{CellGeometry, GpuCellGeometry};
@@ -65,6 +66,7 @@ pub use engine::{
     boundary_spec_f32, GpuVoronoiCells, GpuVoronoiEngine, VoronoiResolveReport,
 };
 pub use scan::{GpuScan, ELEMS_PER_BLOCK, MAX_SCAN_ELEMS};
+pub use swept_gpu::{GpuSweptAreas, SweptFluxGeometry};
 
 /// Max clip-polygon vertices per cell (intermediate ring). 2D Voronoi cells
 /// of Poisson-disk sets average 6 vertices with tails under 12; the bbox

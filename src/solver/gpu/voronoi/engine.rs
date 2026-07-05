@@ -439,6 +439,18 @@ impl GpuVoronoiEngine {
         self.n_seeds
     }
 
+    /// Domain extent this engine was built for (used by the on-device swept-flux
+    /// geometry to build the box-side lines).
+    pub(super) fn domain(&self) -> Vector2<f64> {
+        self.domain
+    }
+
+    /// The determinant epsilon (near-degenerate line-intersection guard) shared
+    /// with the CPU tolerances — fed to the swept-flux kernel's `line_intersect`.
+    pub(super) fn determinant_eps(&self) -> f64 {
+        self.tol.determinant_eps
+    }
+
     /// Interior-only convenience wrapper over `upload_case` (no boundary
     /// loops, every seed `Interior`).
     pub fn upload_seeds(

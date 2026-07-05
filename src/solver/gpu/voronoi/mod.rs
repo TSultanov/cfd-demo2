@@ -80,13 +80,17 @@
 //! and the grid-staleness slack that keeps the stale CPU `SeedGrid`'s
 //! security stop conservative across chained iterations (lloyd.rs docs).
 
+mod derive;
 mod engine;
 mod lloyd;
+mod scan;
 mod wgsl;
 
+pub use derive::{DeriveFaces, DerivedFaceOffsets};
 pub use engine::{
     boundary_spec_f32, GpuVoronoiCells, GpuVoronoiEngine, VoronoiResolveReport,
 };
+pub use scan::{GpuScan, ELEMS_PER_BLOCK, MAX_SCAN_ELEMS};
 
 /// Max clip-polygon vertices per cell (intermediate ring). 2D Voronoi cells
 /// of Poisson-disk sets average 6 vertices with tails under 12; the bbox

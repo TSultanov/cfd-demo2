@@ -541,9 +541,10 @@ pub struct CFDApp {
     cached_cells: Vec<Vec<[f64; 2]>>,
     actual_min_cell_size: f64,
     // --- Moving-mesh (ALE) opt-in mode. Additive; the static path ignores these. ---
-    /// Enable the moving-mesh (ALE) path on the next Initialize / Reset. Only
-    /// selectable on a CPU backend (GPU moving mesh is roadmap M5). Enabling it
-    /// steers the mesh to Voronoi (CVT) and the model to incompressible ALE.
+    /// Enable the moving-mesh (ALE) path on the next Initialize / Reset.
+    /// Selectable on both compute backends (M5 shipped the GPU moving loop).
+    /// Enabling it steers the mesh to Voronoi (CVT) and the model to
+    /// incompressible ALE.
     enable_moving_mesh: bool,
     /// How the CVT seeds move each step (Frozen / prescribed swirl / flow-coupled).
     moving_motion: MovingMotionChoice,
@@ -2761,24 +2762,19 @@ impl eframe::App for CFDApp {
 
                         ui.group(|ui| {
                         ui.label("Moving Mesh (ALE)");
-                        // CPU-first: the moving solver is correct on the CPU backend
-                        // (GPU moving mesh is roadmap M5). Gate the toggle to CPU and
-                        // steer the mesh/model selections the moving path requires.
-                        let cpu = self.backend.is_cpu();
+                        // The moving solver is correct on BOTH backends (M5 shipped
+                        // the GPU surgical topology refresh + GPU moving loop). The
+                        // toggle steers the mesh/model selections the moving path
+                        // requires and is available on GPU and CPU alike.
                         let mut enable = self.enable_moving_mesh;
-                        ui.add_enabled(
-                            cpu,
-                            egui::Checkbox::new(&mut enable, "Enable Moving Mesh (ALE)"),
-                        )
-                        .on_hover_text(if cpu {
-                            "Advect the CVT-Voronoi mesh with the flow (CPU incompressible \
-                             ALE). Locks Mesh Type to Voronoi (CVT) and the model to \
-                             incompressible ALE, and pins a fixed timestep. Applied on \
-                             Initialize / Reset."
-                        } else {
-                            "GPU moving mesh is not yet supported (roadmap M5). Select a CPU \
-                             compute backend to enable the moving-mesh path."
-                        });
+                        ui.add(egui::Checkbox::new(&mut enable, "Enable Moving Mesh (ALE)"))
+                            .on_hover_text(
+                                "Advect the CVT-Voronoi mesh with the flow (incompressible \
+                                 ALE). Runs on the selected compute backend — GPU (surgical \
+                                 topology refresh, M5) or CPU. Locks Mesh Type to Voronoi \
+                                 (CVT) and the model to incompressible ALE, and pins a fixed \
+                                 timestep. Applied on Initialize / Reset.",
+                            );
                         if enable != self.enable_moving_mesh {
                             self.enable_moving_mesh = enable;
                             if enable {
@@ -2790,7 +2786,7 @@ impl eframe::App for CFDApp {
                                 self.refresh_model_caps();
                             }
                         }
-                        if self.enable_moving_mesh && cpu {
+                        if self.enable_moving_mesh {
                             egui::ComboBox::from_label("Seed motion")
                                 .selected_text(self.moving_motion.label())
                                 .show_ui(ui, |ui| {
@@ -3584,12 +3580,9 @@ impl eframe::App for CFDApp {
                                  levels — a rounding-level result change, fastest \
                                  on solve-heavy runs.",
                             );
-                        // Moving mesh is CPU-only (GPU moving is M5): a switch to the
-                        // GPU backend disables it so init never takes the moving path
-                        // on the GPU.
-                        if !self.backend.is_cpu() {
-                            self.enable_moving_mesh = false;
-                        }
+                        // Moving mesh runs on both backends (M5): switching the
+                        // compute backend keeps the moving-mesh selection intact —
+                        // the next Initialize / Reset rebuilds on the chosen backend.
                         if self.backend.is_cpu() {
                             ui.add(
                                 adaptive_slider(&mut self.cpu_threads, 1..=16).text("Cores"),

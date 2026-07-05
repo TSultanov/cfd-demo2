@@ -10,6 +10,32 @@ motion, the diagram is regenerated every step, the solver runs ALE on it. **Both
 opt-in; the static path stays the default; existing defaults stay byte-identical; the old
 generators (structured, cut-cell, Bowyer–Watson Delaunay/Voronoi) are untouched.
 
+---
+
+## Roadmap status — COMPLETE (M0–M6), 2026-07
+
+**End-to-end, on both CPU and GPU:** a meshless CVT-Voronoi mesh whose seeds advect with the flow
+(or with prescribed rigid boundary motion), regenerated every step, solved with a conservative ALE
+(moving-volume ddt + SCL-closed swept fluxes) incompressible model, surgically refreshed across
+the topology change, and rendered live in the GUI.
+
+- **M0** — CPU meshless Voronoi + Lloyd/CVT (Ghia 40% better than the old generator).
+- **M1** — GPU engine port (WGSL f32, zero-tolerance parity, regen ~12 ms @264k).
+- **M2** — solver mesh-refresh seam (byte-identical no-op refresh, both backends).
+- **M3** — ALE physics in the EDSL/codegen (GCL ~1e-6, temporal order 2.15, conservation 6e-15/step).
+- **M4** — moving-mesh loop (CPU): dt handshake → advect → regen → swept flux → refresh → step.
+- **M5** — GPU-resident loop: **core shipped** — GPU surgical topology refresh (recompile
+  eliminated via a per-device pipeline cache; refresh 20k −68%, GCL cold-restart artifact gone),
+  the full GPU moving loop with surgical BDF2 history (CPU↔GPU field RMS 3e-6), and the GUI GPU
+  backend. **GPU-resident regen: foundation shipped** (the two-level exclusive scan primitive +
+  the `derive_faces` count→scan half, both bit-exact on GPU); the face-major emit + CSR bridge
+  stay CPU (blocker documented in §M5 — CPU face geometry is a post-vertex-merge product of
+  `assemble_mesh`; that merge port + the padded-stencil CSR is the remaining v2 optimization).
+- **M6** — moving boundaries (oscillating cylinder, MovingWall BC), CPU-authored, GPU-enabled by M5.
+
+The regen still runs on the CPU M0 engine feeding the GPU solver via the CSR bridge (as scoped);
+per-step GPU moving is now viable because the refresh is surgical, not a recompile-cold-restart.
+
 **Provenance:** synthesized from 4 parallel architecture designs + 4 adversarial code-grounded
 reviews (all verdicts SOUND-WITH-FIXES; fixes incorporated below). Every `file:line` cited here
 was verified against the working tree as of 2026-07-03 (branch `codegen`).
@@ -413,25 +439,66 @@ closure) → surgical geometry/topology seam (owns vols rotation) → step. `Mes
   every step; a GUI capacity/resize gate is an M4/M5 GUI concern, deferred with the GPU loop
   (this stage is headless/CPU).
 
-### M5 — GPU-resident loop
+### M5 — GPU-resident loop — **SHIPPED (core); GPU-resident regen partial (honest)**
 
-M1 engine + derive_faces (count/scan/emit/gather → face-major `b_face_*` written in place —
-9 of 15 mesh buffers GPU-writable; STORAGE suffices for kernel writes) + swept-flux kernel +
-seed_advect/Lloyd kernels, orchestrated as separate submissions around the solver graph
-(SRD precedent).
+The milestone **core** — making per-step GPU moving-mesh viable — shipped in three stages.
+The **stretch** (regen computed on the GPU feeding solver buffers without a CPU round-trip)
+landed its foundation (the missing scan primitive + the count→scan half of `derive_faces`);
+the face-major emit + the CSR bridge remain CPU, documented below with the exact blocker.
 
-- **v1 keeps CPU legs:** seed readback (needed for fallback anyway), scalar-CSR + block-CSR +
-  bc-table + Schur-CSR rebuild on CPU (~20-30 ms @300k), `write_buffer` uploads (needs
-  COPY_DST added to `cell_face_matrix_indices`/`diagonal_indices`) — the full M2 inventory
-  applies. Host CSR mirrors must be updated with the buffers.
-- **AMG is the elephant:** once-built hierarchy incompatible with per-step topology change;
-  v1 = stale-hierarchy-for-K-steps or Chebyshev-under-motion; budget honestly (worst case
-  20-30%+ overhead on integrated GPUs; scope the overhead gate to discrete adapters or to the
-  v2 config).
-- **v2 escape hatches (only if measured walls demand):** GPU counting-sort grid; padded-stencil
-  assembly format retiring the CSR readback entirely (engine outputs already shaped for it).
-- **Gates:** no-op regen ≡ static within f32 tol; GCL through GPU path; overhead gate;
-  1000-step soak with zero unresolved statuses and bounded capacity growth.
+**Stage 1 — GPU surgical topology refresh (the core).** The GPU Tier-B refresh used to
+*recompile* the entire hand-written LA stack (scalar-CG / FGMRES / Schur / AMG / block-precond,
+~45 `create_compute_pipeline` sites) and re-zero warm-start `x` on **every** refresh — ~98 ms
+@300k, recompile-dominated, plus a cold restart each step. Fix: a per-device `PipelineCache`
+(`src/solver/gpu/pipeline_cache.rs`) keyed on `(model_id, KernelId)` that survives every refresh
+(pipelines are keyed on constant shader source ⇒ reuse is bit-identical), and a buffer→buffer
+blit carrying warm-start `x` across the reallocation (no readback). Reconstruction still rebuilds
+bind groups; only the recompile is gone. **Measured: refresh 20k 17.7→5.6 ms (−68%), 300k
+75.2→60.5 ms (−20%, residual = CSR host-build + block-CSR upload, *not* recompile). GPU
+topology-seam GCL euler max|U−U0| 1.53e-3→5.5e-5 (late 1.31e-6, CPU ~1e-6 scale) — cold-restart
+artifact gone, non-compounding.** Instrument: `CFD2_REFRESH_PROFILE=1`.
+
+**Stage 2 — GPU moving loop end-to-end + surgical BDF2 history.** The GPU `MovingMeshDriver`
+runs the full per-step cycle (dt handshake → CPU M0 regen → swept fluxes → surgical topology
+refresh → GPU step). BDF2 history needs **no** snapshot readback: `state`/`state_old`/
+`state_old_old` are cell-indexed buffers the refresh never reallocates, and the ALE volume
+history is carried by swap — strictly cheaper than snapshot/restore. **Measured: GPU moving GCL
+euler/bdf2 1.32e-5 / 2.14e-5 (late 8.3e-7 / 1.4e-6), CPU↔GPU field RMS 3.0e-6; per-step refresh
+7.5 ms = 3% of a 292 ms debug step (23% of the 33 ms overhead) — the solve dominates, not the
+refresh.** Gates in `tests/gpu_moving_mesh_test.rs`.
+
+**Stage 3 — UI GPU backend + GPU-resident regen foundation.**
+- **UI (shipped):** the moving-mesh toggle is now enabled on the GPU backend too (was CPU-only
+  "GPU moving is M5"). `src/ui/app.rs` — the enable/gating + tooltip + backend-switch handler.
+  Gate: `moving_mesh_gui_worker_gpu_backend` drives the real solver worker in moving mode on the
+  GPU backend (CFD2_BACKEND path) and observes `MeshRefreshed`; the CPU worker path is unchanged;
+  renderer capacity holds. Skips cleanly without an adapter.
+- **GPU-resident regen (stretch — partial, foundation landed):**
+  - **Scan primitive (`src/solver/gpu/voronoi/scan.rs`) — LANDED.** The design flagged that *no*
+    prefix-sum existed anywhere in `src/solver/gpu/**` (only workgroup reductions). This is the
+    standard two-level exclusive scan (256-thread workgroup, 4 elems/thread, Hillis–Steele block
+    scan + block-sums level), deterministic and **bit-exact** vs a CPU reference across sub-block /
+    exact-block / block+1 / 300k / random sizes (`tests/gpu_scan_test.rs`).
+  - **`derive_faces` count→scan (`src/solver/gpu/voronoi/derive.rs`) — LANDED.** The
+    `count_owned_faces` kernel counts each cell's owned faces (canonical `owner = min(i,j)` +
+    boundary faces) from the M1 cell-major outputs, and the scan turns those into per-cell
+    face-major **offsets** + the total `num_faces`, **all on the GPU**, in one encoder. Validated
+    bit-exact vs a CPU reference on real Voronoi output (~3 faces/cell, single- and multi-block)
+    in `tests/gpu_derive_faces_test.rs`. This is the scan's first real consumer.
+  - **DEFERRED (the documented blocker):** the `emit`/`gather` passes that write the face-major
+    *geometry* buffers (`b_face_owner`/`areas`/`normals`/`centers` + `cell_faces` CSR) and match
+    them to the CPU `Mesh`, plus the §6.3 **CSR bridge** (`b_scalar_*`,
+    `cell_face_matrix_indices`, `diagonal_indices`). Blocker: the CPU face-major geometry is **not**
+    a direct projection of the cell-major clip slots — `assemble_mesh` produces it *after* a
+    disjoint-set vertex merge on the quantization grid and a geometric shared-vertex-pair face
+    resolution (chain/orphan handling). Matching it to f32 requires porting that merge + pairing
+    to the GPU, then the CSR rebuild (CPU-readback in v1 by design; fully no-readback needs the
+    padded-stencil format, out of scope). So the **face-major buffer readback is NOT yet
+    eliminated** — only the count→offset addressing is now GPU-resident. That merge port + CSR
+    bridge is the remaining M5-v2 optimization, on the count→scan foundation this stage provides.
+- **AMG note (still the elephant, unchanged):** once-built hierarchy incompatible with per-step
+  topology; v1 rebuilds it in the refresh (part of the 300k residual cost). Chebyshev-under-motion
+  / stale-hierarchy-for-K-steps stays a v2 lever.
 
 ### M6 — Moving boundaries + applications — **SHIPPED (v1, CPU)**
 
@@ -506,15 +573,16 @@ wall trajectory is analytic); pure TRANSLATION only — a rotating wall is NOT s
 (the per-seed `w_wall`, uniform across the wall face, matches the per-vertex swept `mesh_flux`
 only for translation; rotation needs a per-wall-face `w_wall`, deferred, review stage-4 FINDING 3);
 fixed seed count (rigid motion, small amplitude < near-wall cell spacing so the frozen interior
-seeds are never swallowed — an amplitude that swallows a seed is a hard `Err`, by design); CPU-first
-(GPU moving mesh is M5); interior seeds are `Frozen` in the demos (the obstacle deforms the
-near-wall cells, which the near-wall instrument watches).
+seeds are never swallowed — an amplitude that swallows a seed is a hard `Err`, by design); runs on
+both backends (M5 shipped the GPU moving loop; M6 was authored CPU-first); interior seeds are
+`Frozen` in the demos (the obstacle deforms the near-wall cells, which the near-wall instrument
+watches).
 Headless / test-driven; the live GPU-render animation is the manual smoke below.
 
 **Manual GUI smoke — oscillating obstacle** (needs a display; not covered by CI):
 
-1. `cargo run --release --features "cpu ui"` (a CPU backend is required — GPU moving mesh is M5).
-2. Left panel → **Compute backend** → a CPU option (Interpreter / Transpiled).
+1. `cargo run --release --features "cpu ui"`.
+2. Left panel → **Compute backend** → GPU or a CPU option (moving mesh runs on both as of M5).
 3. **Geometry** → *Channel with obstacle* (the oscillating-obstacle controls appear only for it —
    the obstacle is loop 1 of its boundary spec).
 4. **Moving Mesh (ALE)** group → tick **Enable Moving Mesh (ALE)** (auto-steers Mesh Type →

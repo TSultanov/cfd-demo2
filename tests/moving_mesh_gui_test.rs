@@ -25,10 +25,10 @@
 //! Headless CI cannot open the window, so the actual mesh-advecting animation
 //! must be confirmed by a human. To do so, run the GUI and:
 //!
-//!  1. `cargo run --release --features "cpu ui"` (a CPU backend is required —
-//!     GPU moving mesh is roadmap M5 and the toggle is disabled on GPU).
-//!  2. In the left panel, under **Compute backend**, pick a CPU option
-//!     (Interpreter / Transpiled).
+//!  1. `cargo run --release --features "cpu ui"`.
+//!  2. In the left panel, under **Compute backend**, pick GPU or any CPU option
+//!     (moving mesh runs on both backends as of M5 — the GPU path uses the
+//!     surgical topology refresh).
 //!  3. In the **Moving Mesh (ALE)** group, tick **Enable Moving Mesh (ALE)**.
 //!     This auto-steers Mesh Type → *Voronoi (CVT)*, model →
 //!     *incompressible_momentum_ale*, and forces a fixed timestep.
@@ -48,8 +48,8 @@
 //! a live **ALE mesh / ALE / ALE time** block (cells, faces, flip counts, dt,
 //! skew, SCL defect, flip defect, and the plan/regen/swept/refresh millisecond
 //! split) next to the usual step-time/residual labels. **Pause** (Run toggles
-//! off) freezes it; **Initialize / Reset** rebuilds from scratch. Switching the
-//! compute backend to **GPU** disables the toggle and reverts to the static path.
+//! off) freezes it; **Initialize / Reset** rebuilds from scratch. The moving-mesh
+//! toggle is available on both the GPU and CPU backends (M5).
 #![cfg(feature = "ui")]
 
 use cfd2::meshgen::ChannelWithObstacle;
@@ -61,6 +61,17 @@ use cfd2::sim::{BoundaryMotionSpec, MeshMotionSpec, MovingMeshDriver, OscAxis, R
 use cfd2::ui::app::moving_mesh_worker_smoke;
 use cfd2::ui::cfd_renderer;
 use nalgebra::{Point2, Vector2};
+use std::sync::Mutex;
+
+/// `CFD2_BACKEND` is process-global; serialize the two backend-selecting worker
+/// tests so one never flips the backend out from under the other's driver build.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// Is a GPU adapter present? (The GPU worker gate skips cleanly without one.)
+fn gpu_adapter_available() -> bool {
+    let instance = wgpu::Instance::default();
+    pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).is_ok()
+}
 
 /// Fixed-dt incompressible params for the ALE model (adaptive_dt MUST be off —
 /// the swept mesh fluxes are SCL-closed against a fixed dt).
@@ -215,6 +226,7 @@ fn driver_steps_produce_finite_stats(motion: MeshMotionSpec, steps: usize) {
 /// and the real worker message path, both on the CPU backend.
 #[test]
 fn moving_mesh_gui_worker_and_driver_smoke() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     std::env::set_var("CFD2_BACKEND", "cpu");
     std::env::set_var("CFD2_CPU_ENGINE", "interpreter");
 
@@ -437,4 +449,71 @@ fn replay_through_renderer(meshes: &[Vec<Vec<[f64; 2]>>], n_cells: usize) {
          capacity path — no overflow, no truncation",
         meshes.len()
     );
+}
+
+/// M5 Stage 3 gate — the moving-mesh worker on the **GPU backend**.
+///
+/// Stage 1/2 made the GPU moving loop viable (surgical topology refresh + carried
+/// BDF2 history); this proves the GUI's moving-mesh worker message path runs that
+/// loop end-to-end on the GPU backend now that the M5 UI gate is lifted. It drives
+/// the real private solver worker (`SetSolver { MovingMesh } + SetRunning`) with a
+/// flow-coupled CVT backstep built on the GPU backend (`CFD2_BACKEND` unset ⇒ GPU
+/// device), collects the `MeshRefreshed` events, and replays the emitted meshes
+/// through the renderer capacity path — the same assertions as the CPU worker
+/// smoke, but on the GPU. Skips cleanly when no GPU adapter is present.
+#[test]
+fn moving_mesh_gui_worker_gpu_backend() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    if !gpu_adapter_available() {
+        eprintln!("[moving-gui][gpu] no GPU adapter present; skipping GPU worker gate");
+        return;
+    }
+    // GPU backend = CFD2_BACKEND not "cpu". Clear both so the driver build selects
+    // the GPU device (and no stale CPU-engine hint leaks in).
+    std::env::remove_var("CFD2_BACKEND");
+    std::env::remove_var("CFD2_CPU_ENGINE");
+
+    // Flow-coupled CVT backstep with a uniform freestream IC so the seeds advect
+    // from step one — genuine per-step topology drift through the GPU surgical
+    // refresh, not a near-frozen mesh.
+    let (driver, n_cells) =
+        build_driver(MeshMotionSpec::FlowCoupled { regularization: 0.5 }, (1.0, 0.0));
+    let smoke = moving_mesh_worker_smoke(driver, 300_000, 10, true);
+    println!(
+        "[moving-gui][gpu] refreshes={} cells=[{:?},{:?}] max_scl={:.2e} max_skew={:.3} \
+         meshes={} empty={} nonfinite={} err={:?}",
+        smoke.mesh_refresh_events,
+        smoke.min_cells,
+        smoke.max_cells,
+        smoke.max_scl_defect,
+        smoke.max_skew,
+        smoke.meshes.len(),
+        smoke.saw_empty_cells,
+        smoke.saw_nonfinite_stats,
+        smoke.error,
+    );
+    assert!(smoke.error.is_none(), "GPU moving worker reported an error: {:?}", smoke.error);
+    assert!(
+        smoke.mesh_refresh_events >= 10,
+        "GPU moving worker did not emit MeshRefreshed via the message path (got {})",
+        smoke.mesh_refresh_events
+    );
+    assert!(!smoke.saw_empty_cells, "a GPU MeshRefreshed carried empty/degenerate cells");
+    assert!(!smoke.saw_nonfinite_stats, "a GPU MeshRefreshed carried non-finite stats");
+    assert_eq!(
+        (smoke.min_cells, smoke.max_cells),
+        (Some(n_cells), Some(n_cells)),
+        "GPU worker mesh cell count must stay fixed at {n_cells}"
+    );
+    assert!(
+        smoke.max_scl_defect < 1e-3,
+        "GPU moving worker max SCL defect too large (non-conservative mesh): {:.3e}",
+        smoke.max_scl_defect
+    );
+    // The emitted GPU meshes re-tessellate + upload without overflow, exactly as
+    // the CPU path.
+    replay_through_renderer(&smoke.meshes, n_cells);
+
+    std::env::remove_var("CFD2_BACKEND");
+    std::env::remove_var("CFD2_CPU_ENGINE");
 }

@@ -575,6 +575,11 @@ pub struct CFDApp {
     cfd_renderer: Option<Arc<Mutex<cfd_renderer::CfdRenderResources>>>,
     viz_field: Option<VizFieldBuffers>,
     viz_field_front: usize,
+    /// A moving-mesh refresh arrived and `cached_cells` changed since the GPU
+    /// renderer's vertex buffers were last re-tessellated. Multiple solver
+    /// steps may land between frames; only the latest matters, so this is a
+    /// coalescing flag consumed once per frame at the render-frame boundary.
+    pending_mesh_upload: bool,
 }
 
 struct CfdRenderCallback {
@@ -718,6 +723,7 @@ impl CFDApp {
             cfd_renderer: None,
             viz_field: None,
             viz_field_front: 0,
+            pending_mesh_upload: false,
         };
         app.apply_model_defaults();
         app.refresh_model_caps();
@@ -1615,12 +1621,16 @@ impl CFDApp {
                     cached_cells,
                     stats,
                 } => {
-                    // The moving mesh re-generated: adopt the new polygons (the
-                    // egui-plot fallback renders them directly; the GPU renderer's
-                    // per-refresh re-tessellation + capacity growth lands in a
-                    // later stage). Coalesced — only the latest per frame matters.
+                    // The moving mesh re-generated: adopt the new polygons. The
+                    // egui-plot fallback renders `cached_cells` directly; the
+                    // GPU-direct renderer re-tessellates from them once per frame
+                    // (below, gated on `pending_mesh_upload`), growing its vertex
+                    // buffers if the new topology needs more room. Coalesced —
+                    // only the latest cells per frame matter, so intermediate
+                    // steps between frames are dropped.
                     self.cached_cells = cached_cells;
                     self.cached_moving_stats = Some(stats);
+                    self.pending_mesh_upload = true;
                     self.snapshot_seq = self.snapshot_seq.wrapping_add(1);
                     self.invalidate_plot_cache();
                     self.cached_error = None;
@@ -1650,6 +1660,29 @@ impl CFDApp {
                 renderer.update_bind_group(device, &viz.buffers[ready]);
                 self.viz_field_front = ready;
                 viz.front_idx.store(ready, Ordering::Release);
+            }
+        }
+
+        // Re-tessellate the GPU-direct renderer once per frame if a moving-mesh
+        // refresh arrived. Done here at the render-frame boundary (not per event)
+        // so multiple solver steps between frames upload only the latest mesh.
+        // `update_mesh` grows the vertex/line buffers if the new topology needs
+        // more room, so this can never overflow. The cell count is invariant
+        // (only geometry/topology moves), so the field bind path — which indexes
+        // by fixed `cell_index` — is untouched.
+        if self.pending_mesh_upload {
+            self.pending_mesh_upload = false;
+            if let (Some(renderer), Some(device), Some(queue)) = (
+                self.cfd_renderer.as_ref(),
+                self.wgpu_device.as_ref(),
+                self.wgpu_queue.as_ref(),
+            ) {
+                if !self.cached_cells.is_empty() {
+                    let vertices = cfd_renderer::build_mesh_vertices(&self.cached_cells);
+                    let line_vertices = cfd_renderer::build_line_vertices(&self.cached_cells);
+                    let mut renderer = renderer.lock().unwrap();
+                    renderer.update_mesh(device, queue, &vertices, &line_vertices);
+                }
             }
         }
     }
@@ -1804,7 +1837,7 @@ impl CFDApp {
                 request.target_format,
                 max_vertices,
             );
-            renderer.update_mesh(queue, &vertices, &line_vertices);
+            renderer.update_mesh(device, queue, &vertices, &line_vertices);
             renderer.update_bind_group(device, &viz_buffer);
             (
                 Some(renderer),

@@ -43,6 +43,35 @@ pub struct CfdUniforms {
     pub _padding: u32,
 }
 
+/// Extra capacity baked into the initial vertex/line buffers, over the
+/// initial tessellated vertex count. A moving (ALE) mesh re-tessellates every
+/// step and per-cell vertex counts drift as the Voronoi topology changes, so
+/// the buffers are sized with headroom to absorb small growth without a
+/// reallocation on the very first refresh.
+const VERTEX_HEADROOM: f32 = 1.5;
+
+/// Growth factor applied when a mesh refresh needs more vertices than the
+/// current allocation holds. We over-allocate past the immediate need so a
+/// steadily growing topology does not reallocate on every single step.
+const VERTEX_GROW_FACTOR: f32 = 1.5;
+
+/// Round a required vertex count up to an allocation size using `factor`,
+/// never returning less than `required` (or less than 1).
+fn capacity_for(required: usize, factor: f32) -> usize {
+    let scaled = (required as f32 * factor).ceil() as usize;
+    scaled.max(required).max(1)
+}
+
+/// Allocate a vertex buffer holding `capacity` `CfdVertex` slots.
+fn alloc_vertex_buffer(device: &wgpu::Device, label: &str, capacity: usize) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: (capacity.max(1) * std::mem::size_of::<CfdVertex>()) as u64,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
 /// GPU resources for CFD rendering
 #[derive(Clone)]
 pub struct CfdRenderResources {
@@ -56,6 +85,10 @@ pub struct CfdRenderResources {
     pub field_buffer: wgpu::Buffer,
     pub num_vertices: u32,
     pub num_line_vertices: u32,
+    /// Allocated `CfdVertex` slots in `vertex_buffer` (the triangle-fill buffer).
+    pub capacity_vertices: usize,
+    /// Allocated `CfdVertex` slots in `line_vertex_buffer` (the wireframe buffer).
+    pub capacity_line_vertices: usize,
 }
 
 impl CfdRenderResources {
@@ -205,21 +238,15 @@ impl CfdRenderResources {
             cache: None,
         });
 
-        // Create vertex buffer with max capacity
-        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("CFD Vertex Buffer"),
-            size: (max_vertices * std::mem::size_of::<CfdVertex>()) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // Create line vertex buffer
-        let line_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("CFD Line Vertex Buffer"),
-            size: (max_vertices * std::mem::size_of::<CfdVertex>()) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        // Create vertex + line buffers with headroom over the initial count so
+        // a moving mesh's first few refreshes fit without a reallocation. The
+        // draw range is always `num_vertices` (<= the written count), so a
+        // larger allocation is visually identical for the static path.
+        let capacity_vertices = capacity_for(max_vertices, VERTEX_HEADROOM);
+        let capacity_line_vertices = capacity_vertices;
+        let vertex_buffer = alloc_vertex_buffer(device, "CFD Vertex Buffer", capacity_vertices);
+        let line_vertex_buffer =
+            alloc_vertex_buffer(device, "CFD Line Vertex Buffer", capacity_line_vertices);
 
         // Create uniform buffer
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -271,16 +298,60 @@ impl CfdRenderResources {
             field_buffer,
             num_vertices: 0,
             num_line_vertices: 0,
+            capacity_vertices,
+            capacity_line_vertices,
         }
     }
 
-    /// Update the vertex buffer with new mesh data
+    /// True if the current allocation can hold `vertex_count` fill vertices and
+    /// `line_count` wireframe vertices without a reallocation.
+    pub fn can_fit(&self, vertex_count: usize, line_count: usize) -> bool {
+        vertex_count <= self.capacity_vertices && line_count <= self.capacity_line_vertices
+    }
+
+    /// Ensure the vertex/line buffers can hold at least `vertex_count` /
+    /// `line_count` vertices, growing (reallocating) any buffer that is too
+    /// small. Growing replaces the buffer handle only; the vertex buffers are
+    /// bound per-draw via `set_vertex_buffer` (not through the bind group), so
+    /// no rebind is required. Returns true if any buffer was reallocated.
+    pub fn ensure_capacity(
+        &mut self,
+        device: &wgpu::Device,
+        vertex_count: usize,
+        line_count: usize,
+    ) -> bool {
+        let mut grew = false;
+        if vertex_count > self.capacity_vertices {
+            self.capacity_vertices = capacity_for(vertex_count, VERTEX_GROW_FACTOR);
+            self.vertex_buffer =
+                alloc_vertex_buffer(device, "CFD Vertex Buffer", self.capacity_vertices);
+            grew = true;
+        }
+        if line_count > self.capacity_line_vertices {
+            self.capacity_line_vertices = capacity_for(line_count, VERTEX_GROW_FACTOR);
+            self.line_vertex_buffer =
+                alloc_vertex_buffer(device, "CFD Line Vertex Buffer", self.capacity_line_vertices);
+            grew = true;
+        }
+        grew
+    }
+
+    /// Update the vertex buffer with new mesh data.
+    ///
+    /// Overflow-proof by construction: `ensure_capacity` grows the target
+    /// buffer(s) to fit *before* any `write_buffer`, so the write can never
+    /// exceed the allocation regardless of how the mesh topology (and hence the
+    /// per-cell vertex count) changed. This is the crash-safety guarantee for
+    /// the moving (ALE) mesh, whose tessellation size changes every step.
     pub fn update_mesh(
         &mut self,
+        device: &wgpu::Device,
         queue: &wgpu::Queue,
         vertices: &[CfdVertex],
         line_vertices: &[CfdVertex],
     ) {
+        self.ensure_capacity(device, vertices.len(), line_vertices.len());
+
         self.num_vertices = vertices.len() as u32;
         queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(vertices));
 

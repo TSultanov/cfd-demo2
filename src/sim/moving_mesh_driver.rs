@@ -562,9 +562,10 @@ pub struct MovingMeshDriver {
     /// steps, run `smoothing_iters` blended Lloyd sweeps at weight
     /// `smoothing_omega` over the interior seeds — UNCONDITIONAL, unlike the
     /// quality escalation (which fires only on skew/sizing violations).
-    /// `0` = off (default). FlowCoupled only: Frozen/Prescribed recompute
-    /// positions from the t=0 labels every step, so a smooth would be
-    /// overwritten.
+    /// `0` = off (default). FlowCoupled + Frozen (a stationary mesh advances
+    /// from its current seeds, so the smooth persists); ignored under
+    /// Prescribed (positions recomputed from the t=0 labels every step
+    /// would overwrite it).
     smoothing_every_n: usize,
     smoothing_iters: usize,
     smoothing_omega: f64,
@@ -788,14 +789,18 @@ impl MovingMeshDriver {
         self.mesh_cfl = cfl;
     }
 
-    /// Configure periodic mesh smoothing (FlowCoupled): every `every_n`
-    /// committed steps, run `iters` blended Lloyd sweeps at weight `omega`
-    /// (0..1) over the interior seeds — a scheduled, unconditional
-    /// regularization on top of the on-demand quality escalation. `every_n
-    /// == 0` disables (default). Small `omega` keeps the smooth from erasing
-    /// the flow-coupled displacement; the hard per-step displacement clamp
-    /// still applies to the following advection, and the smooth itself is
-    /// mesh motion like any other — the swept-flux closure keeps the GCL.
+    /// Configure periodic mesh smoothing: every `every_n` committed steps,
+    /// run `iters` blended Lloyd sweeps at weight `omega` (0..1) over the
+    /// interior seeds — a scheduled, unconditional regularization on top of
+    /// the on-demand quality escalation. `every_n == 0` disables (default).
+    /// Active under FlowCoupled AND Frozen (a stationary mesh advances from
+    /// its current seeds, so the smooth persists — with flow-adaptive
+    /// sizing enabled, the Lloyd target preserves the LOCAL adapted spacing
+    /// instead of pulling toward uniform, see `lloyd_sizing`); ignored
+    /// under Prescribed (positions are recomputed from the t=0 labels every
+    /// step, which would overwrite it). Small `omega` keeps the smooth from
+    /// erasing the flow-coupled displacement; the smooth itself is mesh
+    /// motion like any other — the swept-flux closure keeps the GCL.
     pub fn set_smoothing(&mut self, every_n: usize, iters: usize, omega: f64) {
         self.smoothing_every_n = every_n;
         self.smoothing_iters = iters.max(1);
@@ -825,7 +830,10 @@ impl MovingMeshDriver {
     /// are split. Rate-limited ([`ADAPT_MAX_BIRTHS_PER_EVENT`] /
     /// [`ADAPT_MAX_KILLS_PER_EVENT`]) and budget-bounded
     /// ([`ADAPT_BUDGET_MIN_FACTOR`]‥[`ADAPT_BUDGET_MAX_FACTOR`] × the initial
-    /// count). `0` = off (default). Skipped for `Prescribed` motion (its
+    /// count). `0` = off (default). Available under FlowCoupled AND Frozen —
+    /// a STATIONARY mesh adapts to the developing flow too (pair with
+    /// [`Self::set_smoothing`] for post-resize relaxation; the quality
+    /// escalation activates alongside). Skipped for `Prescribed` motion (its
     /// analytic law is indexed by the t=0 labels, which a resize re-anchors).
     pub fn set_adaptive_sizing(&mut self, every_n: usize) {
         self.adapt_every_n = every_n;
@@ -1693,10 +1701,14 @@ impl MovingMeshDriver {
 
     /// The seed positions at absolute time `t`, evaluated from the t=0 labels
     /// `f(seed0_i, t)` for interior seeds; boundary seeds are held fixed.
-    /// Frozen returns the labels unchanged (t is irrelevant).
+    /// Frozen advances from the CURRENT seeds (t is irrelevant): a stationary
+    /// mesh has no analytic law to re-sample, and holding the current set —
+    /// rather than the t=0 labels — lets a scheduled smooth or a quality
+    /// escalation PERSIST (label-based advection would revert it next step).
+    /// Identical to the label set whenever nothing has moved the seeds.
     fn advect_to(&self, t: f64) -> Vec<Point2<f64>> {
         match self.motion {
-            MeshMotionSpec::Frozen | MeshMotionSpec::FlowCoupled { .. } => self.seeds0.clone(),
+            MeshMotionSpec::Frozen | MeshMotionSpec::FlowCoupled { .. } => self.seeds.clone(),
             MeshMotionSpec::Prescribed(f) => self
                 .seeds0
                 .iter()
@@ -2684,24 +2696,89 @@ impl MovingMeshDriver {
         Ok((kills, births))
     }
 
+    /// The Lloyd SIZING function for scheduled smoothing / quality
+    /// escalation. Without adaptation: the uniform meshgen scale (the
+    /// shipped behaviour — a uniform-density CVT pull). With adaptation
+    /// enabled (`adapt_every_n > 0`): the LOCAL CURRENT spacing — each
+    /// query returns the nearest seed's realized cell pitch
+    /// `√(vol/(√3/2))` via a bucket grid — so relaxation regularizes
+    /// SHAPES while PRESERVING the adapted density distribution (a uniform
+    /// sizing would erode the refinement the adaptation just built,
+    /// pointfully so on a stationary mesh with no steering to counter it).
+    fn lloyd_sizing(&self) -> Box<dyn Fn(Point2<f64>) -> f64 + Sync + '_> {
+        let min_cell = self.min_cell_size;
+        if self.adapt_every_n == 0 {
+            return Box::new(move |_| min_cell);
+        }
+        // Bucket the seeds on a uniform grid (pitch = 2·min_cell) for O(1)
+        // nearest-seed queries; per-seed pitch from the committed volumes.
+        let hex = 3.0f64.sqrt() / 2.0;
+        let pitch = 2.0 * min_cell;
+        let nx = (self.domain.x / pitch).ceil().max(1.0) as usize;
+        let ny = (self.domain.y / pitch).ceil().max(1.0) as usize;
+        let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); nx * ny];
+        let cell_of = move |p: &Point2<f64>| -> (usize, usize) {
+            (
+                ((p.x / pitch) as isize).clamp(0, nx as isize - 1) as usize,
+                ((p.y / pitch) as isize).clamp(0, ny as isize - 1) as usize,
+            )
+        };
+        for (i, s) in self.seeds.iter().enumerate() {
+            let (bx, by) = cell_of(s);
+            buckets[by * nx + bx].push(i as u32);
+        }
+        let h: Vec<f64> = self
+            .mesh
+            .cell_vol
+            .iter()
+            .map(|&v| (v.max(0.0) / hex).sqrt())
+            .collect();
+        let seeds = self.seeds.clone();
+        Box::new(move |p: Point2<f64>| -> f64 {
+            let (bx, by) = cell_of(&p);
+            // Expanding ring search (radius 2 covers 5·min_cell — beyond any
+            // seed gap); fall back to the meshgen scale if somehow empty.
+            for r in 0..3usize {
+                let (mut best, mut best_d2) = (usize::MAX, f64::INFINITY);
+                for gy in by.saturating_sub(r)..=(by + r).min(ny - 1) {
+                    for gx in bx.saturating_sub(r)..=(bx + r).min(nx - 1) {
+                        for &i in &buckets[gy * nx + gx] {
+                            let d2 = (seeds[i as usize] - p).norm_squared();
+                            if d2 < best_d2 {
+                                best_d2 = d2;
+                                best = i as usize;
+                            }
+                        }
+                    }
+                }
+                if best != usize::MAX {
+                    return h[best];
+                }
+            }
+            min_cell
+        })
+    }
+
     /// Scheduled periodic Lloyd smoothing (see [`Self::set_smoothing`]): on
-    /// every `smoothing_every_n`-th step, blend the interior seeds toward the
-    /// uniform-density CVT. A no-op when disabled or for non-FlowCoupled
-    /// motion (Frozen/Prescribed recompute positions from labels each step).
+    /// every `smoothing_every_n`-th step, blend the interior seeds toward
+    /// the CVT of [`Self::lloyd_sizing`]. A no-op when disabled or under
+    /// `Prescribed` motion (positions are recomputed from the t=0 labels
+    /// each step, so a smooth would be overwritten). Under `Frozen` the
+    /// mesh advances from its current seeds, so the smooth persists — the
+    /// stationary-adaptive relaxation path.
     fn maybe_periodic_smooth(
         &self,
         spec: &BoundarySpec,
         seeds: Vec<Point2<f64>>,
     ) -> Vec<Point2<f64>> {
         if self.smoothing_every_n == 0
-            || !matches!(self.motion, MeshMotionSpec::FlowCoupled { .. })
+            || matches!(self.motion, MeshMotionSpec::Prescribed(_))
             || (self.step_index + 1) % self.smoothing_every_n != 0
         {
             return seeds;
         }
         let mut relaxed = seeds;
-        let min_cell = self.min_cell_size;
-        let sizing = move |_: Point2<f64>| min_cell;
+        let sizing = self.lloyd_sizing();
         let tol = MeshgenTolerances::from_geometry(self.min_cell_size, self.domain);
         let cfg = EngineConfig::default();
         let lcfg = LloydConfig {
@@ -2723,21 +2800,28 @@ impl MovingMeshDriver {
         relaxed
     }
 
-    /// FlowCoupled quality escalation: if the advected seed set would regenerate
-    /// a mesh whose max skew exceeds `quality_skew_target`, run
-    /// `lloyd_escalation_iters` blended Lloyd regularization sweeps (reusing the
-    /// meshgen [`lloyd_relax`]) to pull the interior seeds back toward CVT, then
-    /// return the regularized seeds. Returns `(seeds, escalated?)`. A no-op for
-    /// non-FlowCoupled motion, when escalation is disabled, or when the mesh is
-    /// already well-shaped — so it never perturbs the frozen/prescribed gates.
+    /// Quality escalation: if the advected seed set would regenerate a mesh
+    /// whose max skew exceeds `quality_skew_target` (or whose volumes leave
+    /// the sizing-hold band), run `lloyd_escalation_iters` blended Lloyd
+    /// regularization sweeps (reusing the meshgen [`lloyd_relax`], sizing
+    /// per [`Self::lloyd_sizing`]) to pull the interior seeds back toward
+    /// CVT, then return the regularized seeds. Returns `(seeds, escalated?)`.
+    /// Active under FlowCoupled always, and under Frozen only when the
+    /// flow-adaptive sizing is enabled (a stationary ADAPTIVE mesh needs the
+    /// same post-resize quality hold; a plain Frozen run must stay
+    /// byte-identical AND probe-free — the escalation assembles a probe mesh
+    /// every step). Never under Prescribed (labels would overwrite it).
     fn maybe_quality_escalate(
         &self,
         spec: &BoundarySpec,
         seeds: Vec<Point2<f64>>,
     ) -> (Vec<Point2<f64>>, bool) {
-        if !matches!(self.motion, MeshMotionSpec::FlowCoupled { .. })
-            || self.lloyd_escalation_iters == 0
-        {
+        let active = match self.motion {
+            MeshMotionSpec::FlowCoupled { .. } => true,
+            MeshMotionSpec::Frozen => self.adapt_every_n > 0,
+            MeshMotionSpec::Prescribed(_) => false,
+        };
+        if !active || self.lloyd_escalation_iters == 0 {
             return (seeds, false);
         }
         let probe = assemble_meshless_from_seeds(
@@ -2764,12 +2848,13 @@ impl MovingMeshDriver {
         if !size_violated && probe.calculate_max_skewness() <= self.quality_skew_target {
             return (seeds, false);
         }
-        // Gentle, blended Lloyd toward the (uniform-density) CVT. `tol_disp = 0`
-        // forces the full iteration budget (no early convergence break); the
-        // small `omega` keeps it from erasing the flow displacement.
+        // Gentle, blended Lloyd toward the CVT of `lloyd_sizing` (uniform
+        // without adaptation; the local adapted spacing with it). `tol_disp
+        // = 0` forces the full iteration budget (no early convergence
+        // break); the small `omega` keeps it from erasing the flow
+        // displacement.
         let mut relaxed = seeds;
-        let min_cell = self.min_cell_size;
-        let sizing = move |_: Point2<f64>| min_cell;
+        let sizing = self.lloyd_sizing();
         let tol = MeshgenTolerances::from_geometry(self.min_cell_size, self.domain);
         let cfg = EngineConfig::default();
         let lcfg = LloydConfig {

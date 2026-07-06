@@ -3085,6 +3085,16 @@ impl eframe::App for CFDApp {
                                      0 = pure flow advection; higher pulls seeds toward \
                                      cell centroids to hold mesh quality.",
                                 );
+                            }
+                            // Smoothing, memory reordering and flow-adaptive
+                            // sizing apply to FlowCoupled AND Frozen (a
+                            // STATIONARY mesh adapts to the flow and relaxes
+                            // in place; only Prescribed motion — recomputed
+                            // from t=0 labels each step — excludes them).
+                            if matches!(
+                                self.moving_motion,
+                                MovingMotionChoice::Frozen | MovingMotionChoice::FlowCoupled
+                            ) {
                                 ui.add(
                                     egui::Slider::new(&mut self.moving_smooth_every_n, 0..=100)
                                         .text("Lloyd smooth every N steps"),
@@ -3092,8 +3102,9 @@ impl eframe::App for CFDApp {
                                 .on_hover_text(
                                     "Scheduled mesh smoothing: every N steps, one gentle \
                                      blended Lloyd sweep regularizes the interior seeds \
-                                     (0 = off). The on-demand quality escalation (skew / \
-                                     sizing violations) stays active either way. Applied on \
+                                     (0 = off). With adaptive sizing enabled the Lloyd \
+                                     target preserves the local adapted spacing (it will \
+                                     not pull the mesh back toward uniform). Applied on \
                                      Initialize / Reset.",
                                 );
                                 ui.add(

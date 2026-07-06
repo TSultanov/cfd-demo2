@@ -380,6 +380,42 @@ fn movingmesh_adaptive_sizing_obstacle() {
 }
 
 fn adaptive_obstacle_body() {
+    run_adaptive_obstacle(
+        "adapt-obstacle",
+        MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+        200,
+        0,
+    );
+}
+
+/// STATIONARY adaptive mesh: `Frozen` motion + flow-adaptive sizing +
+/// scheduled smoothing — the mesh never advects, but cells birth/kill toward
+/// the flow's gradient field and the Lloyd relaxation (which under Frozen
+/// persists: the mesh advances from its current seeds) regularizes the
+/// resized neighborhoods while PRESERVING the adapted spacing.
+#[test]
+fn movingmesh_adaptive_sizing_stationary_obstacle() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    let result = std::panic::catch_unwind(|| {
+        run_adaptive_obstacle("adapt-stationary", MeshMotionSpec::Frozen, 100, 5);
+    });
+    std::env::remove_var("CFD2_BACKEND");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// Shared graded-obstacle adaptive run: FlowCoupled or Frozen (stationary)
+/// motion, adapt every 20 steps, optional scheduled smoothing. Asserts a
+/// resize fired, the count stayed inside the budget, dt never collapsed and
+/// the flow stayed bounded.
+fn run_adaptive_obstacle(
+    label: &str,
+    motion: MeshMotionSpec,
+    steps: usize,
+    smooth_every: usize,
+) {
     let (lx, ly) = (2.0, 1.0);
     let geo = ChannelWithObstacle {
         length: lx,
@@ -400,7 +436,7 @@ fn adaptive_obstacle_body() {
     let mut moving = pollster::block_on(MovingMeshDriver::build(
         cvt,
         &params,
-        MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+        motion,
         &vec![(U0 as f64, 0.0); n0],
         &vec![0.0; n0],
         None,
@@ -409,9 +445,11 @@ fn adaptive_obstacle_body() {
     .expect("obstacle driver build");
     moving.driver_mut().apply_params(&params);
     moving.set_adaptive_sizing(20);
+    if smooth_every > 0 {
+        moving.set_smoothing(smooth_every, 1, 0.5);
+    }
 
     let (mut born, mut killed) = (0usize, 0usize);
-    let steps = 200;
     for step in 0..steps {
         let (outcome, stats) = moving
             .step(false)
@@ -422,8 +460,8 @@ fn adaptive_obstacle_body() {
         killed += stats.cells_killed;
         if stats.cells_born > 0 || stats.cells_killed > 0 {
             eprintln!(
-                "[adapt-obstacle] step {step}: +{} / −{} cells → {}",
-                stats.cells_born, stats.cells_killed, stats.n_cells
+                "[{label}] step {step}: +{} / −{} cells → {} (skew {:.3})",
+                stats.cells_born, stats.cells_killed, stats.n_cells, stats.max_skew
             );
         }
     }
@@ -443,7 +481,7 @@ fn adaptive_obstacle_body() {
         .fold(0.0f64, f64::max);
 
     eprintln!(
-        "[adapt-obstacle] n0={n0} → {n_final}: born={born} killed={killed} max|u|={max_u:.3}"
+        "[{label}] n0={n0} → {n_final}: born={born} killed={killed} max|u|={max_u:.3}"
     );
     assert!(
         born + killed > 0,

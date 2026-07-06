@@ -454,6 +454,14 @@ pub struct MovingMeshDriver {
     /// strain gradients and birth/kill cells toward it
     /// ([`Self::set_adaptive_sizing`]). `0` = off (default).
     adapt_every_n: usize,
+    /// Explicit flow-adaptation TARGET band (cell VOLUMES, `lo ≤ hi`), set
+    /// via [`Self::set_adaptive_sizing_band`] in cell-size units. `None`
+    /// (default) = the initial mesh's realized volume band. When set, the
+    /// FlowCoupled sizing hold widens to the UNION of this band and the
+    /// initial band ([`Self::hold_vol_band`]) so the quality escalation
+    /// never fights cells the adaptation deliberately refined/coarsened
+    /// past the initial sizing.
+    adapt_band: Option<(f64, f64)>,
     /// Authoritative seed positions (f64), seed `i` == cell `i` — the CURRENT
     /// (t^n) realized set. Advanced each step by [`MeshMotionSpec`].
     seeds: Vec<Point2<f64>>,
@@ -712,6 +720,7 @@ impl MovingMeshDriver {
             model: model_kept,
             initial_cell_count: n_seeds,
             adapt_every_n: 0,
+            adapt_band: None,
             seeds0: seeds.clone(),
             time: 0.0,
             seeds,
@@ -820,6 +829,47 @@ impl MovingMeshDriver {
     /// analytic law is indexed by the t=0 labels, which a resize re-anchors).
     pub fn set_adaptive_sizing(&mut self, every_n: usize) {
         self.adapt_every_n = every_n;
+    }
+
+    /// Set the flow-adaptation TARGET band explicitly, in CELL-SIZE units
+    /// (the meshgen length scale): the indicator maps high gradients →
+    /// `min_size` and smooth regions → `max_size`, independent of the mesh
+    /// the run was built with — e.g. build coarse and let the adaptation
+    /// refine below the built sizing. Sizes are converted to cell volumes
+    /// via the regular-hexagon area `(√3/2)·h²` (the realized CVT volume at
+    /// pitch `h`) and ordered. `None` (default) restores the initial mesh's
+    /// realized band. The FlowCoupled sizing hold widens to the union of
+    /// this band and the initial band, so the escalation never undoes
+    /// deliberate refinement; the cell-count budget
+    /// ([`ADAPT_BUDGET_MIN_FACTOR`]‥[`ADAPT_BUDGET_MAX_FACTOR`] × the
+    /// initial count) still caps growth regardless of the band.
+    pub fn set_adaptive_sizing_band(&mut self, band: Option<(f64, f64)>) {
+        self.adapt_band = band.map(|(a, b)| {
+            let hex_vol = |h: f64| 3.0f64.sqrt() / 2.0 * h * h;
+            let (va, vb) = (hex_vol(a.max(0.0)), hex_vol(b.max(0.0)));
+            (va.min(vb), va.max(vb))
+        });
+    }
+
+    /// The flow-adaptation TARGET volume band: the explicit band when set,
+    /// else the initial mesh's realized band.
+    fn adapt_vol_band(&self) -> (f64, f64) {
+        self.adapt_band.unwrap_or(self.initial_vol_band)
+    }
+
+    /// The FlowCoupled sizing-HOLD volume band (the chi_size ramp + the
+    /// quality-escalation sizing trigger): the initial realized band widened
+    /// to include any explicit adaptation band — never narrower than the
+    /// initial band (a fresh mesh must not self-trigger), never excluding
+    /// volumes the adaptation deliberately targets.
+    fn hold_vol_band(&self) -> (f64, f64) {
+        match self.adapt_band {
+            Some((lo, hi)) => (
+                self.initial_vol_band.0.min(lo),
+                self.initial_vol_band.1.max(hi),
+            ),
+            None => self.initial_vol_band,
+        }
     }
 
     /// Whether the flow-adaptive sizing will PLAN a resize on the upcoming
@@ -1983,16 +2033,19 @@ impl MovingMeshDriver {
             } else {
                 chi_max
             };
-            // SIZING ramp: a cell squeezed below the initial sizing band
+            // SIZING ramp: a cell squeezed below the sizing-HOLD band
             // (persistent advective compression — e.g. converging streamlines
             // against fixed boundary guards) escalates its centroid pull
             // toward FULL Lloyd weight (χ=1), regardless of `chi_max`. The
             // shape ramp cannot see this (a uniformly squeezed cell stays
             // centroidal), and the global blended escalation is too gentle
             // to balance a steady seed inflow. χ ramps 0→1 as the volume
-            // falls from `LO·initial_min` to half that; the hard
-            // displacement clamp below keeps the move flip-safe.
-            let lo = QUALITY_VOL_BAND_LO * self.initial_vol_band.0;
+            // falls from `LO·hold_min` to half that; the hard displacement
+            // clamp below keeps the move flip-safe. The hold band is the
+            // initial realized band widened by any explicit adaptation band
+            // (cells deliberately refined below the initial sizing must not
+            // trigger the ramp).
+            let lo = QUALITY_VOL_BAND_LO * self.hold_vol_band().0;
             let vol = self.mesh.cell_vol[i];
             let chi_size = if vol >= lo {
                 0.0
@@ -2428,9 +2481,11 @@ impl MovingMeshDriver {
     /// |∇p| over the current mesh, each normalized by its
     /// [`ADAPT_INDICATOR_QUANTILE`] quantile over the adapt-eligible cells
     /// (robust to a single spike; boundary-band jumps excluded from the
-    /// scale), combined by max, then mapped linearly onto the INITIAL mesh's
-    /// realized volume band — the user's selected sizing: indicator 0 →
-    /// the coarsest initial volume, 1 → the finest.
+    /// scale), combined by max, then mapped linearly onto the adaptation
+    /// band ([`Self::adapt_vol_band`] — the explicit
+    /// [`Self::set_adaptive_sizing_band`] when set, else the initial mesh's
+    /// realized volume band): indicator 0 → the coarsest band volume, 1 →
+    /// the finest.
     fn adapt_target_vols(&self) -> Result<Vec<f64>, String> {
         let layout = &self.driver.solver().model().state_layout;
         let stride = layout.stride() as usize;
@@ -2510,7 +2565,7 @@ impl MovingMeshDriver {
         };
         let (su, ss, sp) = (scale(&grad_u), scale(&strain), scale(&grad_p));
         let norm = |v: f64, s: f64| if s > 0.0 { (v / s).min(1.0) } else { 0.0 };
-        let (vmin_t, vmax_t) = self.initial_vol_band;
+        let (vmin_t, vmax_t) = self.adapt_vol_band();
         Ok((0..n)
             .map(|i| {
                 let ind = norm(grad_u[i], su)
@@ -2526,8 +2581,9 @@ impl MovingMeshDriver {
     /// first, thinned to an adjacency-independent set so no survivor absorbs
     /// two removals at once) and the birth list (under-resolved cells split
     /// at the midpoint toward their farthest face centre — the cell's long
-    /// axis — subject to the fluid test and the coalescing-pitch separation
-    /// floor). Pure planning; [`Self::resize_cells`] executes it.
+    /// axis — subject to the fluid test and a separation floor scaled to
+    /// the cell's TARGET spacing, capped by the meshgen scale). Pure
+    /// planning; [`Self::resize_cells`] executes it.
     fn plan_adaptation(&self) -> Result<(Vec<usize>, Vec<(Point2<f64>, usize)>), String> {
         use crate::meshgen::meshless::point_in_fluid;
         use std::collections::HashSet;
@@ -2570,7 +2626,6 @@ impl MovingMeshDriver {
         }
 
         let spec_t = self.moved_spec(self.time);
-        let min_sep2 = (RECYCLE_MIN_SEP_CELLS * self.min_cell_size).powi(2);
         let mut birth_cand: Vec<usize> = (0..n)
             .filter(|&i| {
                 self.adapt_eligible(i)
@@ -2603,6 +2658,16 @@ impl MovingMeshDriver {
             if !point_in_fluid(p, &spec_t) {
                 continue;
             }
+            // Clearance floor scaled to the CELL'S target spacing, capped by
+            // the global meshgen scale: an explicit adaptation band FINER
+            // than the built mesh must be reachable — a split toward target
+            // pitch h_t legitimately places the child ~h_t/2 from its
+            // parent, which the global 0.35·min_cell floor would reject.
+            // For targets at/above the mesh scale this reduces to the old
+            // global floor (the coalescing-pitch guard).
+            let target_h = (targets[i] / (3.0f64.sqrt() / 2.0)).sqrt();
+            let min_sep2 =
+                (RECYCLE_MIN_SEP_CELLS * target_h.min(self.min_cell_size)).powi(2);
             let clear = self
                 .seeds
                 .iter()
@@ -2682,16 +2747,15 @@ impl MovingMeshDriver {
             self.domain,
             self.min_cell_size,
         );
-        // Sizing hold: volumes leaving the band anchored to the INITIAL
-        // mesh's realized sizing (the user's min/max cell settings) trigger
-        // the same Lloyd pull-back as excess skew. A shape-only trigger
-        // cannot see this — a uniformly squeezed cell stays centroidal — and
-        // mutilated undersized cells are what breed the continuous-flip
-        // slivers (faces flip-flopping through zero length every step).
-        let (lo, hi) = (
-            QUALITY_VOL_BAND_LO * self.initial_vol_band.0,
-            QUALITY_VOL_BAND_HI * self.initial_vol_band.1,
-        );
+        // Sizing hold: volumes leaving the HOLD band (the initial mesh's
+        // realized sizing — the user's min/max cell settings — widened by
+        // any explicit adaptation band) trigger the same Lloyd pull-back as
+        // excess skew. A shape-only trigger cannot see this — a uniformly
+        // squeezed cell stays centroidal — and mutilated undersized cells
+        // are what breed the continuous-flip slivers (faces flip-flopping
+        // through zero length every step).
+        let hold = self.hold_vol_band();
+        let (lo, hi) = (QUALITY_VOL_BAND_LO * hold.0, QUALITY_VOL_BAND_HI * hold.1);
         let (vmin, vmax) = probe
             .cell_vol
             .iter()

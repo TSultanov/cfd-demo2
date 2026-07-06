@@ -234,6 +234,10 @@ struct SolverInitRequest {
     // Flow-adaptive sizing cadence (0 = off): every N steps birth/kill cells
     // toward a target volume derived from |∇U|/|∇p|/strain gradients.
     moving_adapt_every_n: usize,
+    // Explicit adaptation target band in cell-size units (fine/coarse limit
+    // the indicator maps onto). 0 = auto (the mesh's realized sizing band).
+    moving_adapt_min_size: f64,
+    moving_adapt_max_size: f64,
     wgpu_device: Option<wgpu::Device>,
     wgpu_queue: Option<wgpu::Queue>,
     target_format: wgpu::TextureFormat,
@@ -612,6 +616,13 @@ pub struct CFDApp {
     /// gradients and births/kills cells toward it — the cell COUNT changes at
     /// runtime, bounded to [0.5, 2]× the initial count (0 = off).
     moving_adapt_every_n: usize,
+    /// Explicit adaptation target band in cell-size units: the FINEST cell
+    /// size high-gradient regions refine toward, and the COARSEST smooth
+    /// regions may grow to — independent of the built mesh's sizing (e.g.
+    /// build coarse, adapt finer). `0` = auto: the mesh's realized band.
+    /// Applied only when BOTH are > 0.
+    moving_adapt_min_size: f64,
+    moving_adapt_max_size: f64,
     /// Latest per-step moving-mesh telemetry (from `MeshRefreshed`), for display.
     cached_moving_stats: Option<MovingMeshStats>,
     /// Whether the driver the worker is *actually running* is a moving-mesh
@@ -794,6 +805,8 @@ impl CFDApp {
             moving_smooth_every_n: 0,
             moving_reorder_every_n: 500,
             moving_adapt_every_n: 0,
+            moving_adapt_min_size: 0.0,
+            moving_adapt_max_size: 0.0,
             cached_moving_stats: None,
             solver_is_moving: false,
             min_cell_size: 0.025,
@@ -1194,6 +1207,8 @@ impl CFDApp {
             moving_smooth_every_n: self.moving_smooth_every_n,
             moving_reorder_every_n: self.moving_reorder_every_n,
             moving_adapt_every_n: self.moving_adapt_every_n,
+            moving_adapt_min_size: self.moving_adapt_min_size,
+            moving_adapt_max_size: self.moving_adapt_max_size,
             wgpu_device: self.wgpu_device.clone(),
             wgpu_queue: self.wgpu_queue.clone(),
             target_format: self.target_format,
@@ -2339,6 +2354,14 @@ impl CFDApp {
         // volume derived from the flow's velocity/pressure/strain gradients.
         // The viz buffers are allocated with the driver's 2× budget headroom.
         moving.set_adaptive_sizing(request.moving_adapt_every_n);
+        // Explicit adaptation band (both sliders > 0); otherwise the driver
+        // defaults to the built mesh's realized sizing band.
+        if request.moving_adapt_min_size > 0.0 && request.moving_adapt_max_size > 0.0 {
+            moving.set_adaptive_sizing_band(Some((
+                request.moving_adapt_min_size,
+                request.moving_adapt_max_size,
+            )));
+        }
         CFDApp::push_trace_init_event(
             trace_init_events,
             "solver.new",
@@ -3097,13 +3120,47 @@ impl eframe::App for CFDApp {
                                     "Flow-adaptive cell birth/kill (0 = off): every N steps \
                                      a per-cell target volume is derived from the flow's \
                                      velocity, pressure and strain gradients (high gradients \
-                                     → the mesh's finest initial sizing, smooth regions → \
-                                     its coarsest); over-resolved cells are removed and \
+                                     → the adapt band's finest sizing, smooth regions → its \
+                                     coarsest); over-resolved cells are removed and \
                                      under-resolved cells split, so the CELL COUNT adapts at \
                                      runtime (bounded to 0.5–2× the initial count; each \
                                      event rebuilds the solver and transfers the state). \
                                      Applied on Initialize / Reset.",
                                 );
+                                if self.moving_adapt_every_n > 0 {
+                                    ui.add(
+                                        adaptive_slider(
+                                            &mut self.moving_adapt_min_size,
+                                            0.0..=0.1,
+                                        )
+                                        .text("Adapt min cell size"),
+                                    )
+                                    .on_hover_text(
+                                        "The FINEST cell size the adaptation refines \
+                                         high-gradient regions toward — independent of the \
+                                         built mesh (build coarse, adapt finer). 0 = auto \
+                                         (the mesh's realized sizing band; both sliders \
+                                         must be > 0 to take effect). Growth stays capped \
+                                         at 2× the initial cell count. Applied on \
+                                         Initialize / Reset.",
+                                    );
+                                    ui.add(
+                                        adaptive_slider(
+                                            &mut self.moving_adapt_max_size,
+                                            0.0..=0.2,
+                                        )
+                                        .text("Adapt max cell size"),
+                                    )
+                                    .on_hover_text(
+                                        "The COARSEST cell size smooth regions may grow \
+                                         to (their cells are merged away until local \
+                                         sizing reaches it). 0 = auto (the mesh's \
+                                         realized sizing band; both sliders must be > 0 \
+                                         to take effect). Shrink stays capped at 0.5× \
+                                         the initial cell count. Applied on Initialize / \
+                                         Reset.",
+                                    );
+                                }
                             }
                             // Oscillating obstacle (ChannelObstacle only — its
                             // boundary spec has the obstacle as loop 1).

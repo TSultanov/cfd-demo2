@@ -289,6 +289,80 @@ fn movingmesh_resize_gpu_regen_smoke() {
     }
 }
 
+/// One adaptation run on the uniform slip channel with an EXPLICIT target
+/// band ([`MovingMeshDriver::set_adaptive_sizing_band`], cell-size units):
+/// returns cumulative (born, killed). Frozen motion + free stream — the
+/// indicator is flow-agnostic here because the band places every eligible
+/// cell decisively outside its hysteresis window in ONE direction.
+fn band_run(band: (f64, f64), steps: usize) -> (usize, usize) {
+    let geo = RectangularChannel {
+        length: LX,
+        height: LY,
+    };
+    let domain = Vector2::new(LX, LY);
+    let mut cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.0, domain, &LloydConfig::default());
+    tag_slip_channel(&mut cvt.mesh);
+    let n0 = cvt.mesh.num_cells();
+    let params = test_params();
+    let mut moving = pollster::block_on(MovingMeshDriver::build(
+        cvt,
+        &params,
+        MeshMotionSpec::Frozen,
+        &vec![(U0 as f64, 0.0); n0],
+        &vec![0.0; n0],
+        None,
+        None,
+    ))
+    .expect("band driver build");
+    moving.set_boundary_retag(Some(tag_slip_channel));
+    moving.driver_mut().apply_params(&params);
+    moving.set_adaptive_sizing(10);
+    moving.set_adaptive_sizing_band(Some(band));
+    let (mut born, mut killed) = (0usize, 0usize);
+    for step in 0..steps {
+        let (outcome, stats) = moving
+            .step(false)
+            .unwrap_or_else(|e| panic!("band step {step}: {e}"));
+        assert!(outcome.diverged.is_none(), "band step {step} diverged");
+        born += stats.cells_born;
+        killed += stats.cells_killed;
+    }
+    (born, killed)
+}
+
+/// The explicit adaptation band steers the planner independently of the
+/// built mesh: a band FINER than the mesh makes every bulk cell exceed 2×
+/// its target (births must fire, kills must not — this also exercises the
+/// target-scaled birth-clearance floor, which the global meshgen floor
+/// would veto), and a band COARSER than the mesh puts every cell below
+/// 0.45× its target (kills only).
+#[test]
+fn movingmesh_adaptive_band_steers_planner() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    let result = std::panic::catch_unwind(|| {
+        // Fine band (half the mesh pitch): refine-only.
+        let (born_f, killed_f) = band_run((0.5 * H, 0.6 * H), 15);
+        // Coarse band (double the mesh pitch): coarsen-only.
+        let (born_c, killed_c) = band_run((2.0 * H, 2.5 * H), 15);
+        eprintln!(
+            "[adapt-band] fine band: +{born_f}/−{killed_f}; coarse band: +{born_c}/−{killed_c}"
+        );
+        assert!(
+            born_f > 0 && killed_f == 0,
+            "fine band must refine only (+{born_f}/−{killed_f})"
+        );
+        assert!(
+            killed_c > 0 && born_c == 0,
+            "coarse band must coarsen only (+{born_c}/−{killed_c})"
+        );
+    });
+    std::env::remove_var("CFD2_BACKEND");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
 /// The flow-adaptive planner on a GRADED obstacle channel (FlowCoupled): the
 /// gradient indicator must fire resize events within the run (the
 /// boundary-distance grading mismatches the developing obstacle/wake

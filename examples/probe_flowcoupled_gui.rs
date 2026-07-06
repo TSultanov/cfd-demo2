@@ -74,8 +74,7 @@ mod probe {
             obstacle_center: Point2::new(1.0, 0.51),
             obstacle_radius: 0.1,
         };
-        let cvt =
-            generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
         let n = cvt.mesh.num_cells();
 
         // Initial-mesh anatomy: volume extremes + where they live.
@@ -101,8 +100,12 @@ mod probe {
                 "[{label}] initial mesh: {n} cells, vol [{vmin:.3e} @({:.3},{:.3}), \
                  {vmax:.3e} @({:.3},{:.3})], outlet band (x>{:.3}): {band} cells, \
                  band vmax {band_vmax:.3e}, skew {:.3}",
-                m.cell_cx[imin], m.cell_cy[imin], m.cell_cx[imax], m.cell_cy[imax],
-                LX - 2.5 * H, m.calculate_max_skewness()
+                m.cell_cx[imin],
+                m.cell_cy[imin],
+                m.cell_cx[imax],
+                m.cell_cy[imax],
+                LX - 2.5 * H,
+                m.calculate_max_skewness()
             );
         }
 
@@ -113,7 +116,10 @@ mod probe {
             cvt, &params, motion, &initial_u, &initial_p, None, None,
         ))
         .expect("driver build");
-        if let Some(n_reorder) = std::env::var("PROBE_REORDER").ok().and_then(|s| s.parse().ok()) {
+        if let Some(n_reorder) = std::env::var("PROBE_REORDER")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
             moving.set_reorder_every_n(n_reorder);
         }
         moving.driver_mut().apply_params(&params);
@@ -138,8 +144,7 @@ mod probe {
             }
             total_recycled += stats.recycled;
             if step % report_every == 0 || step == steps - 1 {
-                let state =
-                    pollster::block_on(moving.driver().solver().read_state_f32());
+                let state = pollster::block_on(moving.driver().solver().read_state_f32());
                 let mesh = moving.mesh();
                 let (mut umax, mut iu) = (0.0f32, 0usize);
                 let mut umax_interior = 0.0f32;
@@ -167,9 +172,15 @@ mod probe {
                      @({:.3},{:.3}) vol@argmax={:.2e} |U|max_interior={umax_interior:.3e} \
                      vol_min={vmin:.2e} @({:.3},{:.3}) vol_max={vmax:.2e} skew={:.3} \
                      flip={} SCL={:.1e} recycled_total={total_recycled} locality={:.1}",
-                    stats.dt, mesh.cell_cx[iu], mesh.cell_cy[iu], mesh.cell_vol[iu],
-                    mesh.cell_cx[ivm], mesh.cell_cy[ivm],
-                    stats.max_skew, stats.flipped, stats.scl_defect,
+                    stats.dt,
+                    mesh.cell_cx[iu],
+                    mesh.cell_cy[iu],
+                    mesh.cell_vol[iu],
+                    mesh.cell_cx[ivm],
+                    mesh.cell_cy[ivm],
+                    stats.max_skew,
+                    stats.flipped,
+                    stats.scl_defect,
                     locality(mesh),
                 );
             }
@@ -201,7 +212,9 @@ mod probe {
         let mut moving = pollster::block_on(MovingMeshDriver::build(
             cvt,
             &params,
-            MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+            MeshMotionSpec::FlowCoupled {
+                regularization: 0.5,
+            },
             &initial_u,
             &initial_p,
             None,
@@ -242,7 +255,8 @@ mod probe {
                 let n = mesh.num_cells();
                 let state = pollster::block_on(moving.driver().solver().read_state_f32());
                 let mut umax = 0.0f32;
-                let (mut v_near, mut c_near, mut v_far, mut c_far) = (0.0f64, 0usize, 0.0f64, 0usize);
+                let (mut v_near, mut c_near, mut v_far, mut c_far) =
+                    (0.0f64, 0usize, 0.0f64, 0usize);
                 for c in 0..n {
                     let (ux, uy) = (state[c * stride + u_off], state[c * stride + u_off + 1]);
                     umax = umax.max((ux * ux + uy * uy).sqrt());
@@ -289,7 +303,10 @@ mod probe {
             };
             generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default())
         } else {
-            let geo = RectangularChannel { length: LX, height: LY };
+            let geo = RectangularChannel {
+                length: LX,
+                height: LY,
+            };
             generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default())
         };
         let mesh = cvt.mesh;
@@ -353,15 +370,20 @@ mod probe {
             obstacle_center: Point2::new(1.0, 0.51),
             obstacle_radius: 0.1,
         };
-        let cvt =
-            generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
         let n = cvt.mesh.num_cells();
         let mesh = cvt.mesh.clone();
         let params = gui_params();
         let initial_u = vec![(INLET as f64, 0.0); n];
         let initial_p = vec![0.0; n];
         let mut moving = pollster::block_on(MovingMeshDriver::build(
-            cvt, &params, MeshMotionSpec::Frozen, &initial_u, &initial_p, None, None,
+            cvt,
+            &params,
+            MeshMotionSpec::Frozen,
+            &initial_u,
+            &initial_p,
+            None,
+            None,
         ))
         .expect("driver build");
         moving.driver_mut().apply_params(&params);
@@ -418,8 +440,7 @@ mod probe {
             obstacle_center: Point2::new(1.0, 0.51),
             obstacle_radius: 0.1,
         };
-        let cvt =
-            generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
         let mesh = cvt.mesh;
         let n = mesh.num_cells();
         let params = gui_params();
@@ -497,7 +518,10 @@ mod probe {
                 (ux * ux + uy * uy).sqrt()
             })
             .fold(0.0f32, f32::max);
-        println!("[mode-dump] second-column max|U| = {c2max:.3e} over {} cells", col2.len());
+        println!(
+            "[mode-dump] second-column max|U| = {c2max:.3e} over {} cells",
+            col2.len()
+        );
     }
 
     /// Quantify the RECYCLE transient at the outlet: on steps where seeds
@@ -514,8 +538,7 @@ mod probe {
             obstacle_center: Point2::new(1.0, 0.51),
             obstacle_radius: 0.1,
         };
-        let cvt =
-            generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
         let n = cvt.mesh.num_cells();
         let params = gui_params();
         let initial_u = vec![(INLET as f64, 0.0); n];
@@ -523,7 +546,9 @@ mod probe {
         let mut moving = pollster::block_on(MovingMeshDriver::build(
             cvt,
             &params,
-            MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+            MeshMotionSpec::FlowCoupled {
+                regularization: 0.5,
+            },
             &initial_u,
             &initial_p,
             None,
@@ -559,7 +584,13 @@ mod probe {
                     pmin = pmin.min(p);
                     pmax = pmax.max(p);
                 }
-                let tag = if stats.recycled > 0 { "RECYCLE" } else if watch > 0 { "after  " } else { "ambient" };
+                let tag = if stats.recycled > 0 {
+                    "RECYCLE"
+                } else if watch > 0 {
+                    "after  "
+                } else {
+                    "ambient"
+                };
                 println!(
                     "[recycle-spike] step {step:4} {tag} n_rec={} strip |U|max={umax:.3e} \
                      p=[{pmin:+.3e},{pmax:+.3e}]",
@@ -578,6 +609,196 @@ mod probe {
         );
     }
 
+    /// PHANTOM-DIPOLE watch at the user's EXACT GUI config: incompressible,
+    /// FlowCoupled, obstacle, adaptation every step, budget 5x, smoothing
+    /// every step, band (0.001, 0.03) — the extreme-refinement regime.
+    /// Renders the PRESSURE field to PNG EVERY STEP and screens each frame
+    /// with a dipole metric: the max adjacent-cell |p| jump normalized by
+    /// the frame's robust p-range (5th..95th percentile). A phantom dipole
+    /// is a +/- pair on neighboring cells with amplitude comparable to (or
+    /// exceeding) the whole smooth field's range — exactly what saturates
+    /// the GUI color scale. Prints the worst frames for eyeball follow-up.
+    fn run_dipole_watch(steps: usize) {
+        let out_dir = std::path::Path::new("target/probe_dipole");
+        std::fs::create_dir_all(out_dir).expect("mkdir probe_dipole");
+        let domain = Vector2::new(LX, LY);
+        let (ocx, ocy, orad) = (1.0f64, 0.51f64, 0.1f64);
+        let geo = ChannelWithObstacle {
+            length: LX,
+            height: LY,
+            obstacle_center: Point2::new(ocx, ocy),
+            obstacle_radius: orad,
+        };
+        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let n0 = cvt.mesh.num_cells();
+        let mut params = gui_params();
+        if let Some(outers) = std::env::var("PROBE_DIPOLE_OUTERS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
+            // Fixed outer budget for the experiment: auto-converge's plateau
+            // exit would cut it before the slow wall modes relax.
+            params.outer_iters = outers;
+            params.outer_auto_converge = false;
+        }
+        let mut moving = pollster::block_on(MovingMeshDriver::build(
+            cvt,
+            &params,
+            MeshMotionSpec::FlowCoupled {
+                regularization: 0.5,
+            },
+            &vec![(INLET as f64, 0.0); n0],
+            &vec![0.0; n0],
+            None,
+            None,
+        ))
+        .expect("driver build");
+        moving.driver_mut().apply_params(&params);
+        // The user's GUI settings, verbatim.
+        moving.set_adaptive_sizing(1);
+        moving.set_adaptive_sizing_band(Some((0.001, 0.03)));
+        moving.set_adaptive_budget_factor(5.0);
+        moving.set_smoothing(1, 1, 0.5);
+        // PROBE_DIPOLE_ADAPTIVE_DT=cfl enables the driver-side flow-CFL dt
+        // (the shipped GUI default on the moving path). The transfer-noise
+        // pressure response scales ~ rho*du*h/dt = interp-error/CFL — at the
+        // GUI's fixed dt=0.02 with inlet 0.011 and 0.001-band cells the CFL
+        // is ~0.02, a ~45x amplifier of interpolation noise into pressure.
+        if let Some(cfl) = std::env::var("PROBE_DIPOLE_ADAPTIVE_DT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
+            moving.set_adaptive_dt(Some(cfl));
+        }
+
+        let layout = moving.driver().solver().model().state_layout.clone();
+        let stride = layout.stride() as usize;
+        let p_off = layout.offset_for("p").expect("p") as usize;
+        // DISCRIMINATOR: PROBE_DIPOLE_FREEZE=N disables adaptation+smoothing
+        // at step N. If the wall checkerboard decays afterwards, it is
+        // churn-maintained (re-injected by the every-step rebuilds); if it
+        // persists on the frozen mesh, it is a steady discrete mode of the
+        // refined wall discretization itself.
+        let freeze_at: Option<usize> = std::env::var("PROBE_DIPOLE_FREEZE")
+            .ok()
+            .and_then(|s| s.parse().ok());
+        // What the freeze disables: "both" (default) | "adapt" | "smooth".
+        let freeze_mode =
+            std::env::var("PROBE_DIPOLE_FREEZE_MODE").unwrap_or_else(|_| "both".into());
+        let mut worst: Vec<(f64, usize)> = Vec::new(); // (dipole metric, step)
+        for step in 0..steps {
+            if freeze_at == Some(step) {
+                if freeze_mode != "smooth" {
+                    moving.set_adaptive_sizing(0);
+                }
+                if freeze_mode != "adapt" {
+                    moving.set_smoothing(0, 1, 0.5);
+                }
+                println!("[dipole-watch] step {step}: FROZE ({freeze_mode})");
+            }
+            let (outcome, stats) = moving.step(false).expect("step");
+            assert!(
+                outcome.diverged.is_none(),
+                "[dipole-watch] diverged at step {step}"
+            );
+            let state = pollster::block_on(moving.driver().solver().read_state_f32());
+            let mesh = moving.mesh();
+            let n = mesh.num_cells();
+            let p_of = |c: usize| state[c * stride + p_off] as f64;
+            // Robust field range: 5th..95th percentile of p.
+            let mut ps: Vec<f64> = (0..n).map(p_of).collect();
+            ps.sort_by(f64::total_cmp);
+            let range = (ps[(n * 95) / 100] - ps[(n * 5) / 100]).max(1e-30);
+            // Dipole metric: worst adjacent-cell jump / robust range.
+            let mut max_jump = 0.0f64;
+            let mut max_face = 0usize;
+            for f in 0..mesh.num_faces() {
+                if let Some(nb) = mesh.face_neighbor[f] {
+                    let d = (p_of(mesh.face_owner[f]) - p_of(nb)).abs();
+                    if d > max_jump {
+                        max_jump = d;
+                        max_face = f;
+                    }
+                }
+            }
+            let dip = max_jump / range;
+            worst.push((dip, step));
+            render_voronoi_field(
+                mesh,
+                &p_of,
+                (ocx, ocy, orad),
+                &out_dir.join(format!("p{step:04}.png")),
+            );
+            if step % 50 == 0 || dip > 1.5 {
+                println!(
+                    "[dipole-watch] step {step:4}: {} cells, dip {dip:.3} \
+                     (jump {max_jump:.3e} / range {range:.3e}) at face ({:.3},{:.3}), \
+                     +{}/-{} recycled {} defect {:.2e}->{:.2e}",
+                    n,
+                    mesh.face_cx[max_face],
+                    mesh.face_cy[max_face],
+                    stats.cells_born,
+                    stats.cells_killed,
+                    stats.recycled,
+                    stats.transfer_defect_pre,
+                    stats.transfer_defect_post,
+                );
+            }
+        }
+        worst.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let top: Vec<String> = worst
+            .iter()
+            .take(10)
+            .map(|(d, s)| format!("step {s}: dip {d:.3}"))
+            .collect();
+        println!("[dipole-watch] WORST frames: {}", top.join("; "));
+        let late_max = worst
+            .iter()
+            .filter(|(_, s)| *s >= steps / 2)
+            .map(|(d, _)| *d)
+            .fold(0.0f64, f64::max);
+        println!(
+            "[dipole-watch] late-half worst dip {late_max:.3} over {} frames",
+            steps - steps / 2
+        );
+
+        // ANATOMY of the final frame's worst faces: are the offending cells
+        // slivers, wall guards, freshly-born, or normal fluid? A persistent
+        // dipole at a FIXED face is a steady discretization artifact, not a
+        // transfer transient — the geometry is the suspect.
+        {
+            let state = pollster::block_on(moving.driver().solver().read_state_f32());
+            let mesh = moving.mesh();
+            let n = mesh.num_cells();
+            let p_of = |c: usize| state[c * stride + p_off] as f64;
+            let mut faces: Vec<(f64, usize)> = (0..mesh.num_faces())
+                .filter_map(|f| {
+                    mesh.face_neighbor[f].map(|nb| ((p_of(mesh.face_owner[f]) - p_of(nb)).abs(), f))
+                })
+                .collect();
+            faces.sort_by(|a, b| b.0.total_cmp(&a.0));
+            let kinds = moving.seed_kinds();
+            for &(jump, f) in faces.iter().take(10) {
+                let (o, nb) = (mesh.face_owner[f], mesh.face_neighbor[f].unwrap());
+                println!(
+                    "[dipole-anatomy] face ({:.4},{:.4}) area {:.2e} jump {jump:.3e}: \
+                     owner c{o} kind {:?} vol {:.2e} p {:+.3e} | neighbor c{nb} kind {:?} \
+                     vol {:.2e} p {:+.3e}",
+                    mesh.face_cx[f],
+                    mesh.face_cy[f],
+                    mesh.face_area[f],
+                    kinds[o],
+                    mesh.cell_vol[o],
+                    p_of(o),
+                    kinds[nb],
+                    mesh.cell_vol[nb],
+                    p_of(nb),
+                );
+            }
+            let _ = n;
+        }
+    }
+
     /// STABILITY MATRIX: the `visual` case exposed a SLOW blow-up of the
     /// every-step-adaptation + every-step-smoothing + recycling regime at
     /// GUI params (healthy at step 100, |U| 5x inlet by 400, diverged by
@@ -594,12 +815,54 @@ mod probe {
             projection: bool,
         }
         let variants = [
-            Variant { label: "A adapt1+smooth1+recycle (fail cfg)", adapt_every: 1, band: None, smooth_every: 1, recycling: true, projection: true },
-            Variant { label: "B adapt1+smooth1 no-recycle      ", adapt_every: 1, band: None, smooth_every: 1, recycling: false, projection: true },
-            Variant { label: "C adapt5+smooth1+recycle         ", adapt_every: 5, band: None, smooth_every: 1, recycling: true, projection: true },
-            Variant { label: "D adapt1 WIDE band+smooth1+recycle", adapt_every: 1, band: Some((0.03, 0.07)), smooth_every: 1, recycling: true, projection: true },
-            Variant { label: "E smooth1+recycle no-adapt       ", adapt_every: 0, band: None, smooth_every: 1, recycling: true, projection: true },
-            Variant { label: "F adapt1+smooth1+recycle proj-OFF", adapt_every: 1, band: None, smooth_every: 1, recycling: true, projection: false },
+            Variant {
+                label: "A adapt1+smooth1+recycle (fail cfg)",
+                adapt_every: 1,
+                band: None,
+                smooth_every: 1,
+                recycling: true,
+                projection: true,
+            },
+            Variant {
+                label: "B adapt1+smooth1 no-recycle      ",
+                adapt_every: 1,
+                band: None,
+                smooth_every: 1,
+                recycling: false,
+                projection: true,
+            },
+            Variant {
+                label: "C adapt5+smooth1+recycle         ",
+                adapt_every: 5,
+                band: None,
+                smooth_every: 1,
+                recycling: true,
+                projection: true,
+            },
+            Variant {
+                label: "D adapt1 WIDE band+smooth1+recycle",
+                adapt_every: 1,
+                band: Some((0.03, 0.07)),
+                smooth_every: 1,
+                recycling: true,
+                projection: true,
+            },
+            Variant {
+                label: "E smooth1+recycle no-adapt       ",
+                adapt_every: 0,
+                band: None,
+                smooth_every: 1,
+                recycling: true,
+                projection: true,
+            },
+            Variant {
+                label: "F adapt1+smooth1+recycle proj-OFF",
+                adapt_every: 1,
+                band: None,
+                smooth_every: 1,
+                recycling: true,
+                projection: false,
+            },
         ];
         let hh = 0.035;
         for v in &variants {
@@ -673,10 +936,7 @@ mod probe {
                     track.push((step + 1, umax));
                 }
             }
-            let traj: Vec<String> = track
-                .iter()
-                .map(|(s, u)| format!("{s}:{u:.2e}"))
-                .collect();
+            let traj: Vec<String> = track.iter().map(|(s, u)| format!("{s}:{u:.2e}")).collect();
             println!(
                 "[matrix] {} | umax@[{}] births {births} kills {kills} recycle-steps {recycles}{}",
                 v.label,
@@ -770,7 +1030,10 @@ mod probe {
         let mut late_umax = 0.0f64;
         for step in 0..steps {
             let (outcome, stats) = moving.step(false).expect("step");
-            assert!(outcome.diverged.is_none(), "[visual] diverged at step {step}");
+            assert!(
+                outcome.diverged.is_none(),
+                "[visual] diverged at step {step}"
+            );
             let state = pollster::block_on(moving.driver().solver().read_state_f32());
             let mesh = moving.mesh();
             let n = mesh.num_cells();
@@ -801,10 +1064,7 @@ mod probe {
 
             if snaps.contains(&step) {
                 let fields: [(&str, Box<dyn Fn(usize) -> f64>); 3] = [
-                    (
-                        "p",
-                        Box::new(|c| state[c * stride + p_off] as f64),
-                    ),
+                    ("p", Box::new(|c| state[c * stride + p_off] as f64)),
                     (
                         "umag",
                         Box::new(|c| {
@@ -882,8 +1142,7 @@ mod probe {
                 for dby in by.saturating_sub(1)..=(by + 1).min(bh - 1) {
                     for dbx in bx.saturating_sub(2)..=(bx + 2).min(bw - 1) {
                         for &c in &buckets[dby * bw + dbx] {
-                            let d2 = (mesh.cell_cx[c] - x).powi(2)
-                                + (mesh.cell_cy[c] - y).powi(2);
+                            let d2 = (mesh.cell_cx[c] - x).powi(2) + (mesh.cell_cy[c] - y).powi(2);
                             if d2 < best_d2 {
                                 best_d2 = d2;
                                 best = c;
@@ -964,7 +1223,10 @@ mod probe {
             for step in 0..steps {
                 let n_before = moving.mesh().num_cells();
                 let (outcome, stats) = moving.step(false).expect("step");
-                assert!(outcome.diverged.is_none(), "[{tag}] diverged at step {step}");
+                assert!(
+                    outcome.diverged.is_none(),
+                    "[{tag}] diverged at step {step}"
+                );
                 let state = pollster::block_on(moving.driver().solver().read_state_f32());
                 let mesh = moving.mesh();
                 let n = mesh.num_cells();
@@ -1008,7 +1270,7 @@ mod probe {
     /// each run to divergence or `steps`. Prints the death step.
     fn run_thermal_ladder(steps: usize) {
         use cfd2::sim::SolverDriver;
-        use cfd2::solver::model::{allmach_thermal_ale_model, all_models};
+        use cfd2::solver::model::{all_models, allmach_thermal_ale_model};
         let domain = Vector2::new(LX, LY);
         let geo = ChannelWithObstacle {
             length: LX,
@@ -1027,8 +1289,14 @@ mod probe {
 
         // Static (non-ALE) thermal on the same CVT mesh.
         {
-            let cvt =
-                generate_cvt_mesh_with_seeds(&geo, 0.06, 0.06, 1.0, domain, &LloydConfig::default());
+            let cvt = generate_cvt_mesh_with_seeds(
+                &geo,
+                0.06,
+                0.06,
+                1.0,
+                domain,
+                &LloydConfig::default(),
+            );
             let mesh = cvt.mesh;
             let n = mesh.num_cells();
             let model = all_models()
@@ -1062,10 +1330,21 @@ mod probe {
         // Frozen-ALE and FlowCoupled thermal.
         for (label, motion) in [
             ("frozen-ale ", MeshMotionSpec::Frozen),
-            ("flowcoupled", MeshMotionSpec::FlowCoupled { regularization: 0.5 }),
+            (
+                "flowcoupled",
+                MeshMotionSpec::FlowCoupled {
+                    regularization: 0.5,
+                },
+            ),
         ] {
-            let cvt =
-                generate_cvt_mesh_with_seeds(&geo, 0.06, 0.06, 1.0, domain, &LloydConfig::default());
+            let cvt = generate_cvt_mesh_with_seeds(
+                &geo,
+                0.06,
+                0.06,
+                1.0,
+                domain,
+                &LloydConfig::default(),
+            );
             let n = cvt.mesh.num_cells();
             let mut moving = pollster::block_on(MovingMeshDriver::build_with_model(
                 cvt,
@@ -1127,7 +1406,9 @@ mod probe {
             cvt,
             allmach_thermal_ale_model().expect("thermal ale"),
             &params,
-            MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+            MeshMotionSpec::FlowCoupled {
+                regularization: 0.5,
+            },
             &vec![(params.inlet_velocity as f64, 0.0); n],
             &vec![0.0; n],
             None,
@@ -1179,9 +1460,11 @@ mod probe {
     fn run_reorder_frozen(steps: usize, every_n: usize) {
         use cfd2::solver::mesh::{BoundaryType, RectangularChannel};
         let domain = Vector2::new(LX, LY);
-        let geo = RectangularChannel { length: LX, height: LY };
-        let cvt =
-            generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let geo = RectangularChannel {
+            length: LX,
+            height: LY,
+        };
+        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
         let n = cvt.mesh.num_cells();
         fn retag(mesh: &mut cfd2::solver::mesh::Mesh) {
             let eps = 1e-4;
@@ -1246,13 +1529,23 @@ mod probe {
         let which = std::env::var("PROBE_CASES").unwrap_or_else(|_| "all".into());
         let has = |k: &str| which == "all" || which.split(',').any(|c| c == k);
         if has("static") {
-            run_static("static-vanleer", Scheme::SecondOrderUpwindVanLeer, true, STEPS);
+            run_static(
+                "static-vanleer",
+                Scheme::SecondOrderUpwindVanLeer,
+                true,
+                STEPS,
+            );
         }
         if has("static-upwind") {
             run_static("static-upwind", Scheme::Upwind, true, STEPS);
         }
         if has("static-rect") {
-            run_static("static-rect-vanleer", Scheme::SecondOrderUpwindVanLeer, false, 600);
+            run_static(
+                "static-rect-vanleer",
+                Scheme::SecondOrderUpwindVanLeer,
+                false,
+                600,
+            );
         }
         if has("recycle-spike") {
             run_recycle_spike(800);
@@ -1265,6 +1558,13 @@ mod probe {
         }
         if has("stability-matrix") {
             run_stability_matrix(500);
+        }
+        if has("dipole-watch") {
+            let steps = std::env::var("PROBE_DIPOLE_STEPS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(600);
+            run_dipole_watch(steps);
         }
         if has("reorder-frozen") {
             run_reorder_frozen(200, 20);
@@ -1294,12 +1594,19 @@ mod probe {
             run_case("frozen", MeshMotionSpec::Frozen);
         }
         if has("flowcoupled") {
-            run_case("flowcoupled", MeshMotionSpec::FlowCoupled { regularization: 0.5 });
+            run_case(
+                "flowcoupled",
+                MeshMotionSpec::FlowCoupled {
+                    regularization: 0.5,
+                },
+            );
         }
         if has("flowcoupled-long") {
             run_case_steps(
                 "flowcoupled-long",
-                MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+                MeshMotionSpec::FlowCoupled {
+                    regularization: 0.5,
+                },
                 2000,
             );
         }

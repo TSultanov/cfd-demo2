@@ -52,12 +52,12 @@ use crate::meshgen::meshless::{
 };
 use crate::meshgen::MeshgenTolerances;
 use crate::solver::gpu::enums::GpuBoundaryType;
-use crate::solver::GpuLowMachPrecondModel;
 use crate::solver::mesh::{
     align_old_vertices_by_seed_set, detect_flips, swept_mesh_fluxes_closed,
     swept_mesh_fluxes_closed_flip, BoundaryType, FlipReport, Mesh,
 };
 use crate::solver::model::incompressible_momentum_ale_model;
+use crate::solver::GpuLowMachPrecondModel;
 
 /// Default per-step seed-displacement cap, as a fraction of the local cell
 /// radius `R_i = √(V_i/π)`. Under `FlowCoupled` a seed cannot move more than
@@ -850,10 +850,8 @@ impl MovingMeshDriver {
         let queue_kept = queue.clone();
         // Keep the model spec for cell-count RESIZE rebuilds (resize_cells).
         let model_kept = model.clone();
-        let build = SolverDriver::build(
-            &mesh, model, params, initial_u, initial_p, device, queue,
-        )
-        .await?;
+        let build =
+            SolverDriver::build(&mesh, model, params, initial_u, initial_p, device, queue).await?;
 
         let prev_vx = mesh.vx.clone();
         let prev_vy = mesh.vy.clone();
@@ -1130,7 +1128,9 @@ impl MovingMeshDriver {
     /// persistence at any cadence (exactly 1 event at cadences ≥ 5).
     fn adapt_persist_needed(&self) -> i16 {
         let every = self.adapt_every_n.max(1);
-        ADAPT_PERSIST_STEPS.div_ceil(every).clamp(1, ADAPT_PERSIST_STEPS) as i16
+        ADAPT_PERSIST_STEPS
+            .div_ceil(every)
+            .clamp(1, ADAPT_PERSIST_STEPS) as i16
     }
 
     /// The flow-adaptation TARGET volume band: the explicit band when set,
@@ -1446,8 +1446,7 @@ impl MovingMeshDriver {
                 out.1.at_adapt_budget = self.adapt_budget_reached();
                 out.1.motion_iters = iters_done;
                 out.1.transfer_defect_pre = out.1.transfer_defect_pre.max(transfer_defect.0);
-                out.1.transfer_defect_post =
-                    out.1.transfer_defect_post.max(transfer_defect.1);
+                out.1.transfer_defect_post = out.1.transfer_defect_post.max(transfer_defect.1);
                 if converged || iters_done >= outer || out.0.diverged.is_some() {
                     self.motion_u_override = None;
                     return Ok(out);
@@ -1477,10 +1476,8 @@ impl MovingMeshDriver {
                     out.1.cells_born = cells_born;
                     out.1.cells_killed = cells_killed;
                     out.1.at_adapt_budget = self.adapt_budget_reached();
-                    out.1.transfer_defect_pre =
-                        out.1.transfer_defect_pre.max(transfer_defect.0);
-                    out.1.transfer_defect_post =
-                        out.1.transfer_defect_post.max(transfer_defect.1);
+                    out.1.transfer_defect_pre = out.1.transfer_defect_pre.max(transfer_defect.0);
+                    out.1.transfer_defect_post = out.1.transfer_defect_post.max(transfer_defect.1);
                     return Ok(out);
                 }
                 DeviceStep::Fallback(reason) => fallback = Some(reason),
@@ -1840,8 +1837,7 @@ impl MovingMeshDriver {
             }
             let state = pollster::block_on(self.driver.solver().read_state_f32());
             let stride = self.driver.solver().model().state_layout.stride() as usize;
-            let recycled_set: std::collections::HashSet<usize> =
-                recycled.iter().cloned().collect();
+            let recycled_set: std::collections::HashSet<usize> = recycled.iter().cloned().collect();
             let mut cells: Vec<u32> = Vec::with_capacity(recycled.len());
             let mut rows: Vec<f32> = Vec::with_capacity(recycled.len() * stride);
             let mut vols: Vec<f64> = Vec::with_capacity(recycled.len());
@@ -1925,7 +1921,11 @@ impl MovingMeshDriver {
             swept_ms,
             refresh_ms,
             scl_defect: swept.max_defect_rel,
-            identity_err: if is_flip { 0.0 } else { swept.max_identity_err_rel },
+            identity_err: if is_flip {
+                0.0
+            } else {
+                swept.max_identity_err_rel
+            },
             max_skew,
             n_cells,
             n_faces,
@@ -1937,7 +1937,11 @@ impl MovingMeshDriver {
             born_faces: flip.born_faces,
             died_faces: flip.died_faces,
             flipped_cells: flip.flipped_cells,
-            flip_defect: if is_flip { swept.max_identity_err_rel } else { 0.0 },
+            flip_defect: if is_flip {
+                swept.max_identity_err_rel
+            } else {
+                0.0
+            },
             dt,
             regen_backend: gpu_fallback
                 .map(RegenBackend::GpuFallback)
@@ -1967,11 +1971,7 @@ impl MovingMeshDriver {
     /// sliver, or a resolve-unresolved cell (`needs_cpu`) returns
     /// [`DeviceStep::Fallback`] and the caller re-runs the step on the CPU
     /// path (which handles flips natively).
-    fn try_step_device(
-        &mut self,
-        plan: &StepPlan,
-        readback: bool,
-    ) -> Result<DeviceStep, String> {
+    fn try_step_device(&mut self, plan: &StepPlan, readback: bool) -> Result<DeviceStep, String> {
         use std::collections::HashSet;
 
         let dt = plan.dt;
@@ -1999,7 +1999,10 @@ impl MovingMeshDriver {
             let tol = MeshgenTolerances::from_geometry(self.min_cell_size, self.domain);
             let device = &self.gpu_ctx.as_ref().unwrap().device;
             self.gpu_regen_state = Some(crate::solver::gpu::voronoi::GpuMeshRegen::new(
-                device, n, self.domain, &tol,
+                device,
+                n,
+                self.domain,
+                &tol,
             ));
         }
 
@@ -2007,8 +2010,15 @@ impl MovingMeshDriver {
         //      against the t^{n+1} boundary spec (an identity clone of
         //      `self.spec` under Static boundary motion).
         let regen_start = Instant::now();
-        let old_f32: Vec<f32> = self.seeds.iter().flat_map(|p| [p.x as f32, p.y as f32]).collect();
-        let new_f32: Vec<f32> = new_seeds.iter().flat_map(|p| [p.x as f32, p.y as f32]).collect();
+        let old_f32: Vec<f32> = self
+            .seeds
+            .iter()
+            .flat_map(|p| [p.x as f32, p.y as f32])
+            .collect();
+        let new_f32: Vec<f32> = new_seeds
+            .iter()
+            .flat_map(|p| [p.x as f32, p.y as f32])
+            .collect();
         let dt_f = self.driver.params().requested_dt;
         let old_spec = self.moved_spec(self.time);
         let result = {
@@ -2053,20 +2063,21 @@ impl MovingMeshDriver {
         // Either change ⇒ the device swept quads are invalid ⇒ the CPU path
         // (which handles flips natively via the flip-aware closure) takes the
         // step.
-        let topo_signature = |mesh: &crate::solver::mesh::Mesh| -> (HashSet<(usize, usize)>, Vec<u32>) {
-            let mut open = vec![0u32; mesh.num_cells()];
-            let mut adj = HashSet::new();
-            for f in 0..mesh.num_faces() {
-                match mesh.face_neighbor[f] {
-                    Some(nb) => {
-                        let o = mesh.face_owner[f];
-                        adj.insert((o.min(nb), o.max(nb)));
+        let topo_signature =
+            |mesh: &crate::solver::mesh::Mesh| -> (HashSet<(usize, usize)>, Vec<u32>) {
+                let mut open = vec![0u32; mesh.num_cells()];
+                let mut adj = HashSet::new();
+                for f in 0..mesh.num_faces() {
+                    match mesh.face_neighbor[f] {
+                        Some(nb) => {
+                            let o = mesh.face_owner[f];
+                            adj.insert((o.min(nb), o.max(nb)));
+                        }
+                        None => open[mesh.face_owner[f]] += 1,
                     }
-                    None => open[mesh.face_owner[f]] += 1,
                 }
-            }
-            (adj, open)
-        };
+                (adj, open)
+            };
         if topo_signature(&self.mesh) != topo_signature(&new_mesh) {
             return Ok(DeviceStep::Fallback("Voronoi flip"));
         }
@@ -2082,21 +2093,30 @@ impl MovingMeshDriver {
         // volumes the solver holds (`self.mesh.cell_vol`, cell i == cell i).
         let mut scl_defect = 0.0f64;
         for i in 0..n {
-            let (fb, fe) = (new_mesh.cell_face_offsets[i], new_mesh.cell_face_offsets[i + 1]);
+            let (fb, fe) = (
+                new_mesh.cell_face_offsets[i],
+                new_mesh.cell_face_offsets[i + 1],
+            );
             let mut s = 0.0f64;
             for &f in &new_mesh.cell_faces[fb..fe] {
-                let sgn = if new_mesh.face_owner[f] == i { 1.0 } else { -1.0 };
+                let sgn = if new_mesh.face_owner[f] == i {
+                    1.0
+                } else {
+                    -1.0
+                };
                 s += sgn * result.mesh_fluxes[f] as f64 * dt;
             }
             let dv = new_mesh.cell_vol[i] - self.mesh.cell_vol[i];
-            scl_defect = scl_defect
-                .max((s - dv).abs() / new_mesh.cell_vol[i].max(f64::MIN_POSITIVE));
+            scl_defect =
+                scl_defect.max((s - dv).abs() / new_mesh.cell_vol[i].max(f64::MIN_POSITIVE));
         }
 
         // 5. Refresh (always the topology seam — the device face order changes
         //    every regen) + reapply runtime BC overrides the refresh drops.
         let refresh_start = Instant::now();
-        let report = self.driver.begin_ale_step_topology(&new_mesh, &result.mesh_fluxes)?;
+        let report = self
+            .driver
+            .begin_ale_step_topology(&new_mesh, &result.mesh_fluxes)?;
         if report.bc_overrides_reset {
             self.driver.reapply_boundary_conditions();
         }
@@ -2460,9 +2480,9 @@ impl MovingMeshDriver {
             _ => self.read_cell_velocities()?,
         };
         let dead_len = FLOW_ADVECT_BOX_DEAD_CELLS * self.min_cell_size;
-        let ramp_len =
-            ((FLOW_ADVECT_BOX_RAMP_CELLS - FLOW_ADVECT_BOX_DEAD_CELLS) * self.min_cell_size)
-                .max(1e-30);
+        let ramp_len = ((FLOW_ADVECT_BOX_RAMP_CELLS - FLOW_ADVECT_BOX_DEAD_CELLS)
+            * self.min_cell_size)
+            .max(1e-30);
         let domain = self.domain;
         // With seed RECYCLING active the x (through-flow) sides must NOT park
         // seeds: they advect at full speed to the recycle line and relabel to
@@ -2745,9 +2765,8 @@ impl MovingMeshDriver {
         }
 
         // Driver per-seed arrays.
-        let take = |v: &Vec<Point2<f64>>| -> Vec<Point2<f64>> {
-            gather.iter().map(|&s| v[s]).collect()
-        };
+        let take =
+            |v: &Vec<Point2<f64>>| -> Vec<Point2<f64>> { gather.iter().map(|&s| v[s]).collect() };
         self.seeds = take(&self.seeds);
         self.seeds0 = take(&self.seeds0);
         self.kinds = gather.iter().map(|&s| self.kinds[s]).collect();
@@ -2770,8 +2789,9 @@ impl MovingMeshDriver {
         let mut cell_face_offsets = Vec::with_capacity(n + 1);
         cell_face_offsets.push(0usize);
         for &src in &gather {
-            cell_faces
-                .extend_from_slice(&m.cell_faces[m.cell_face_offsets[src]..m.cell_face_offsets[src + 1]]);
+            cell_faces.extend_from_slice(
+                &m.cell_faces[m.cell_face_offsets[src]..m.cell_face_offsets[src + 1]],
+            );
             cell_face_offsets.push(cell_faces.len());
         }
         m.cell_faces = cell_faces;
@@ -2866,7 +2886,9 @@ impl MovingMeshDriver {
         }
         for &i in kills {
             if i >= n {
-                return Err(format!("resize_cells: kill index {i} out of range ({n} cells)"));
+                return Err(format!(
+                    "resize_cells: kill index {i} out of range ({n} cells)"
+                ));
             }
             if self.kinds[i] != SeedKind::Interior {
                 return Err(format!("resize_cells: kill index {i} is a boundary seed"));
@@ -2901,7 +2923,13 @@ impl MovingMeshDriver {
             segs.sort_unstable_by(|x, y| y.cmp(x));
             segs.dedup();
             for &g in &segs {
-                split_wall_segment(&mut spec_new, &self.seeds, &mut kinds_upd, &mut wall_births, g);
+                split_wall_segment(
+                    &mut spec_new,
+                    &self.seeds,
+                    &mut kinds_upd,
+                    &mut wall_births,
+                    g,
+                );
             }
         }
 
@@ -3035,7 +3063,9 @@ impl MovingMeshDriver {
         let mut driver = build.driver;
         driver.apply_params(&params);
         let cells: Vec<u32> = (0..n_new as u32).collect();
-        driver.solver().reinit_cells(&cells, &rows, &new_mesh.cell_vol)?;
+        driver
+            .solver()
+            .reinit_cells(&cells, &rows, &new_mesh.cell_vol)?;
 
         // MASS-ROW TRANSFER PROJECTION: the interpolated rows carry a
         // residual defect in the solver's OWN continuity row, and the first
@@ -3152,14 +3182,17 @@ impl MovingMeshDriver {
         let mut tmp = build.driver;
         tmp.apply_params(params);
         let cells: Vec<u32> = (0..new_mesh.num_cells() as u32).collect();
-        tmp.solver().reinit_cells(&cells, rows, &new_mesh.cell_vol)?;
+        tmp.solver()
+            .reinit_cells(&cells, rows, &new_mesh.cell_vol)?;
         let cpu = tmp
             .solver_mut()
             .cpu_solver_mut()
             .ok_or("transfer projection: build_forced_cpu returned a non-CPU backend")?;
         let out = project_transferred_state(cpu, new_mesh, layout, rows, &new_mesh.cell_vol)?;
         if out.applied {
-            driver.solver().reinit_cells(&cells, rows, &new_mesh.cell_vol)?;
+            driver
+                .solver()
+                .reinit_cells(&cells, rows, &new_mesh.cell_vol)?;
         }
         Ok(Some(out))
     }
@@ -3179,8 +3212,12 @@ impl MovingMeshDriver {
             .iter()
             .filter(|lp| lp.signed_area() < 0.0)
             .map(|lp| {
-                let (mut x0, mut y0, mut x1, mut y1) =
-                    (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+                let (mut x0, mut y0, mut x1, mut y1) = (
+                    f64::INFINITY,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    f64::NEG_INFINITY,
+                );
                 for p in &lp.pts {
                     x0 = x0.min(p.x);
                     y0 = y0.min(p.y);
@@ -3433,7 +3470,9 @@ impl MovingMeshDriver {
         for _ in 0..ADAPT_GRADING_SWEEPS {
             let mut changed = false;
             for f in 0..m.num_faces() {
-                let Some(nb) = m.face_neighbor[f] else { continue };
+                let Some(nb) = m.face_neighbor[f] else {
+                    continue;
+                };
                 let o = m.face_owner[f];
                 if targets[nb] > targets[o] * cap {
                     targets[nb] = targets[o] * cap;
@@ -3513,8 +3552,7 @@ impl MovingMeshDriver {
             (m.cell_vol[a] / targets[a]).total_cmp(&(m.cell_vol[b] / targets[b]))
         });
         let kill_budget = kills.len()
-            + ADAPT_MAX_KILLS_PER_EVENT
-                .min(n.saturating_sub(n_min).saturating_sub(kills.len()));
+            + ADAPT_MAX_KILLS_PER_EVENT.min(n.saturating_sub(n_min).saturating_sub(kills.len()));
         'cand: for &i in &kill_cand {
             if kills.len() >= kill_budget {
                 break;
@@ -3565,8 +3603,8 @@ impl MovingMeshDriver {
         birth_cand.sort_by(|&a, &b| {
             (m.cell_vol[b] / targets[b]).total_cmp(&(m.cell_vol[a] / targets[a]))
         });
-        let birth_budget = ADAPT_MAX_BIRTHS_PER_EVENT
-            .min(n_max.saturating_sub(n.saturating_sub(kills.len())));
+        let birth_budget =
+            ADAPT_MAX_BIRTHS_PER_EVENT.min(n_max.saturating_sub(n.saturating_sub(kills.len())));
         let mut births: Vec<(Point2<f64>, usize)> = Vec::new();
         for &i in &birth_cand {
             if births.len() >= birth_budget {
@@ -3595,8 +3633,7 @@ impl MovingMeshDriver {
             // For targets at/above the mesh scale this reduces to the old
             // global floor (the coalescing-pitch guard).
             let target_h = (targets[i] / (3.0f64.sqrt() / 2.0)).sqrt();
-            let min_sep2 =
-                (RECYCLE_MIN_SEP_CELLS * target_h.min(self.min_cell_size)).powi(2);
+            let min_sep2 = (RECYCLE_MIN_SEP_CELLS * target_h.min(self.min_cell_size)).powi(2);
             let clear = self
                 .seeds
                 .iter()
@@ -3629,6 +3666,15 @@ impl MovingMeshDriver {
     fn plan_wall_refinement(&self, targets: &[f64]) -> Vec<usize> {
         let total = self.spec.num_segments();
         if total == 0 {
+            return Vec::new();
+        }
+        // Diagnostic kill switch (probes/A-B only): no wall subdivision —
+        // walls keep their build discretization and the wall-adjacent
+        // interior stays locked at its unlock gate.
+        if std::env::var("CFD2_ADAPT_NO_WALL_SPLITS")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+        {
             return Vec::new();
         }
         let hex = 3.0f64.sqrt() / 2.0;
@@ -3697,8 +3743,7 @@ impl MovingMeshDriver {
                     };
                     if let Some(nb) = other {
                         if self.kinds[nb] == SeedKind::Interior {
-                            h_adj =
-                                h_adj.min((self.mesh.cell_vol[nb].max(0.0) / hex).sqrt());
+                            h_adj = h_adj.min((self.mesh.cell_vol[nb].max(0.0) / hex).sqrt());
                         }
                     }
                 }
@@ -3762,7 +3807,9 @@ impl MovingMeshDriver {
             for _ in 0..ADAPT_GRADING_SWEEPS {
                 let mut changed = false;
                 for f in 0..m.num_faces() {
-                    let Some(nb) = m.face_neighbor[f] else { continue };
+                    let Some(nb) = m.face_neighbor[f] else {
+                        continue;
+                    };
                     let o = m.face_owner[f];
                     if h[nb] > h[o] * ADAPT_GRADING_FACTOR {
                         h[nb] = h[o] * ADAPT_GRADING_FACTOR;
@@ -3896,8 +3943,7 @@ impl MovingMeshDriver {
         // the global floor blind to compression.
         let size_violated = match &self.adapt_targets {
             Some(t) if t.len() == probe.num_cells() => {
-                (0..probe.num_cells())
-                    .any(|i| probe.cell_vol[i] < QUALITY_VOL_BAND_LO * t[i])
+                (0..probe.num_cells()).any(|i| probe.cell_vol[i] < QUALITY_VOL_BAND_LO * t[i])
                     || vmax > hi
             }
             _ => vmin < lo || vmax > hi,
@@ -4035,6 +4081,11 @@ impl MovingMeshDriver {
     /// The authoritative seed positions (seed `i` == cell `i`).
     pub fn seeds(&self) -> &[Point2<f64>] {
         &self.seeds
+    }
+
+    /// The per-seed kinds (seed `i` == cell `i`) — diagnostics/probes.
+    pub fn seed_kinds(&self) -> &[SeedKind] {
+        &self.kinds
     }
 
     /// Committed step count.
@@ -4326,7 +4377,6 @@ fn topology_differs(a: &Mesh, b: &Mesh) -> bool {
         || a.cell_face_offsets != b.cell_face_offsets
         || a.cell_faces != b.cell_faces
         || a.face_boundary.iter().zip(&b.face_boundary).any(|(x, y)| {
-            x.map(|t| t.bc_table_index()).unwrap_or(0)
-                != y.map(|t| t.bc_table_index()).unwrap_or(0)
+            x.map(|t| t.bc_table_index()).unwrap_or(0) != y.map(|t| t.bc_table_index()).unwrap_or(0)
         })
 }

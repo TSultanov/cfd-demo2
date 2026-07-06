@@ -2979,13 +2979,38 @@ impl MovingMeshDriver {
             src.push(donor);
         }
 
-        // Assemble the new mesh (CPU — a resize is a rare, full topology
-        // event) against the moved variant of the UPDATED spec (the seg ids
-        // in the updated kinds index it) and re-stamp the tags against the
-        // NEW indexing. Midpoint subdivision leaves the polyline shape (and
-        // the fluid area) bit-identical, so the pre-split fluid validation
-        // above still holds.
+        // PRE-RELAX the new seed set (gentle local Lloyd toward the adapted
+        // sizing) BEFORE assembling: a fresh child at its split position sits
+        // far from CVT, and without this the FIRST post-resize smoothing/
+        // escalation pass moves the patch violently — that one-step local
+        // mesh deformation published as the residual 1-3-cell pressure mark
+        // (the re-solve below absorbs the state/topology transition, but not
+        // motion that happens on the NEXT step). Relaxing here folds the
+        // settling INTO the resize event, where the re-solve absorbs it too;
+        // the first-order transfer handles the resulting centroid shifts by
+        // construction.
         let assemble_spec = self.moved_spec_from(&spec_new, self.time);
+        if !births.is_empty() || !wall_births.is_empty() {
+            let sizing = self.lloyd_sizing();
+            let tol = MeshgenTolerances::from_geometry(self.min_cell_size, self.domain);
+            let cfg = EngineConfig::default();
+            let lcfg = LloydConfig {
+                max_iters: 2,
+                tol_disp: 0.0,
+                omega: 0.7,
+                density_exponent: 4.0,
+            };
+            lloyd_relax(
+                &mut new_seeds,
+                &new_kinds,
+                &assemble_spec,
+                &sizing,
+                self.domain,
+                &tol,
+                &cfg,
+                &lcfg,
+            );
+        }
         let mut new_mesh = assemble_meshless_from_seeds(
             &new_seeds,
             &new_kinds,
@@ -3157,12 +3182,12 @@ impl MovingMeshDriver {
                     state_stride: stride as u32,
                     unknowns_per_cell: s_unk,
                     state: rows.clone(),
-                    state_old,
-                    state_old_old,
+                    state_old: state_old.clone(),
+                    state_old_old: state_old_old.clone(),
                     x,
                     cell_vols: vols_f32.clone(),
                     cell_vols_old: vols_f32.clone(),
-                    cell_vols_old_old: vols_f32,
+                    cell_vols_old_old: vols_f32.clone(),
                     mesh_fluxes: vec![0.0; new_mesh.num_faces()],
                     time: old_snap.time,
                     dt: old_snap.dt,
@@ -3175,6 +3200,62 @@ impl MovingMeshDriver {
                 };
                 if let Err(e) = driver.restore(&snap) {
                     eprintln!("moving-mesh: resize BDF continuity skipped: {e}");
+                } else {
+                    // RESIZE RE-SOLVE: the published post-resize frame used
+                    // to be the INTERPOLATED state — the first real step
+                    // then carried the transition between the old and the
+                    // new discretization as a visible 1-3-cell pressure
+                    // mark at every re-meshed site (transfer-order
+                    // independent; it is the difference between the two
+                    // meshes' own solutions, not a state error). Absorb the
+                    // transition BEFORE anything is published: rewind one
+                    // level (state <- t^{n-1}, old <- t^{n-2}, time -= dt)
+                    // and RE-SOLVE the same physical step on the NEW mesh —
+                    // no extra physical time, the original dt (no 1/dt
+                    // amplification: this is NOT the refuted dt/M
+                    // settle-substeps), one extra solve per resize event.
+                    // The state the next real step starts from is then the
+                    // new mesh's OWN converged level-n solution. On any
+                    // re-solve failure, fall back to the transferred state.
+                    let mut x_prev = vec![0.0f32; n_new * s_unk];
+                    for c in 0..n_new {
+                        for (r, &off) in offsets.iter().enumerate() {
+                            x_prev[c * s_unk + r] = state_old[c * stride + off];
+                        }
+                    }
+                    let redo = crate::solver::SolverStateSnapshot {
+                        num_cells: n_new,
+                        num_faces: new_mesh.num_faces(),
+                        state_stride: stride as u32,
+                        unknowns_per_cell: s_unk,
+                        state: state_old.clone(),
+                        state_old: state_old_old.clone(),
+                        state_old_old: state_old_old.clone(),
+                        x: x_prev,
+                        cell_vols: vols_f32.clone(),
+                        cell_vols_old: vols_f32.clone(),
+                        cell_vols_old_old: vols_f32,
+                        mesh_fluxes: vec![0.0; new_mesh.num_faces()],
+                        time: old_snap.time - old_snap.dt,
+                        dt: old_snap.dt,
+                        dt_old: old_snap.dt_old,
+                        dtau: old_snap.dtau,
+                        step_count: old_snap.step_count.saturating_sub(1),
+                        last_rel_delta: old_snap.last_rel_delta,
+                        schur_amg_active: old_snap.schur_amg_active,
+                        has_history: true,
+                    };
+                    if driver.restore(&redo).is_ok() {
+                        let outcome = driver.step(false);
+                        if outcome.diverged.is_some() {
+                            // Fall back to the transferred t^n state.
+                            if let Err(e) = driver.restore(&snap) {
+                                eprintln!("moving-mesh: resize re-solve fallback failed: {e}");
+                            }
+                        }
+                    } else if let Err(e) = driver.restore(&snap) {
+                        eprintln!("moving-mesh: resize re-solve fallback failed: {e}");
+                    }
                 }
             }
         }

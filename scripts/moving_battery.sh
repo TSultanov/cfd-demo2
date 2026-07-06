@@ -12,12 +12,13 @@
 #   wall-clock-budgeted (expect N mesh refreshes within a deadline) and go
 #   flaky under CPU contention.
 #
-# Sizing: BINS concurrent binaries x THREADS solver threads ~= physical
-# cores. Override via env: BINS=4 THREADS=4 scripts/moving_battery.sh
+# Sizing: BINS concurrent binaries x THREADS solver threads. CAPPED AT 6
+# CORES TOTAL by default (user preference: more spins the machine fan up).
+# Override via env: BINS=4 THREADS=4 scripts/moving_battery.sh
 set -u
 cd "$(dirname "$0")/.."
-BINS="${BINS:-4}"
-THREADS="${THREADS:-4}"
+BINS="${BINS:-3}"
+THREADS="${THREADS:-2}"
 OUT="target/parbat"
 mkdir -p "$OUT"
 rm -f "$OUT"/*.log

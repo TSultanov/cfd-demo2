@@ -731,6 +731,7 @@ impl CpuSolver {
             state_old: self.buffers.f32_vec("state_old"),
             state_old_old: self.buffers.f32_vec("state_old_old"),
             x: self.buffers.f32_vec("x"),
+            cell_vols: self.buffers.f32_vec("cell_vols"),
             cell_vols_old: self.buffers.f32_vec("cell_vols_old"),
             cell_vols_old_old: self.buffers.f32_vec("cell_vols_old_old"),
             mesh_fluxes: self.buffers.f32_vec("mesh_fluxes"),
@@ -755,6 +756,9 @@ impl CpuSolver {
             self.buffers.copy_into_f32("state_old", &snap.state_old);
             self.buffers.copy_into_f32("state_old_old", &snap.state_old_old);
             self.buffers.copy_into_f32("x", &snap.x);
+            if !snap.cell_vols.is_empty() {
+                self.buffers.copy_into_f32("cell_vols", &snap.cell_vols);
+            }
             self.buffers.copy_into_f32("cell_vols_old", &snap.cell_vols_old);
             self.buffers.copy_into_f32("cell_vols_old_old", &snap.cell_vols_old_old);
             if snap.num_faces == self.num_faces {

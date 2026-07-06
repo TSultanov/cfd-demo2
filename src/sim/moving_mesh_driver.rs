@@ -456,6 +456,12 @@ pub struct MovingMeshStats {
     /// `budget factor × initial` — births suppressed until kills free
     /// room). Surfaced so a cell count that stops growing is explained.
     pub at_adapt_budget: bool,
+    /// Fixed-point mesh-motion iterations this step actually ran
+    /// ([`MovingMeshDriver::set_implicit_mesh_motion`]): `1` = the explicit
+    /// single pass; `k > 1` = the step was re-solved `k` times, advecting
+    /// with the previous attempt's end-of-step velocity, until the planned
+    /// seed set converged (or the cap).
+    pub motion_iters: usize,
 }
 
 /// One step's shared pre-regen plan ([`MovingMeshDriver::plan_step`]): the
@@ -484,6 +490,21 @@ struct StepPlan {
 enum DeviceStep {
     Done((StepOutcome, MovingMeshStats)),
     Fallback(&'static str),
+}
+
+/// The rewind point of an implicit-mesh-motion attempt: the solver's
+/// full-history snapshot plus every driver field a committed step mutates
+/// (see [`MovingMeshDriver::motion_checkpoint`]).
+struct MotionCheckpoint {
+    snap: crate::solver::SolverStateSnapshot,
+    seeds: Vec<Point2<f64>>,
+    mesh: Mesh,
+    prev_vx: Vec<f64>,
+    prev_vy: Vec<f64>,
+    w_wall: Vec<[f64; 2]>,
+    time: f64,
+    step_index: usize,
+    last_escalated: bool,
 }
 
 /// The moving-mesh loop driver. Owns the authoritative seed set, the current
@@ -533,6 +554,18 @@ pub struct MovingMeshDriver {
     /// indistinguishable by volume alone), which let the stagnation-side
     /// pileup against the obstacle run unchecked.
     adapt_targets: Option<Vec<f64>>,
+    /// IMPLICIT mesh motion ([`Self::set_implicit_mesh_motion`]): max
+    /// fixed-point iterations of {advect with the previous attempt's
+    /// END-of-step velocity → regen → ALE solve} per step. `1` = the
+    /// explicit (lagged-velocity) motion (default).
+    motion_outer_iters: usize,
+    /// Fixed-point convergence tolerance: accept once the planned seed set
+    /// changes by less than `tol × min_cell_size` between attempts.
+    motion_outer_tol: f64,
+    /// The previous attempt's end-of-step cell velocities — the advection
+    /// source of the NEXT attempt's plan (implicit motion). `None` = read
+    /// the solver's current (t^n) state, the explicit behaviour.
+    motion_u_override: Option<Vec<(f64, f64)>>,
     /// Authoritative seed positions (f64), seed `i` == cell `i` — the CURRENT
     /// (t^n) realized set. Advanced each step by [`MeshMotionSpec`].
     seeds: Vec<Point2<f64>>,
@@ -796,6 +829,9 @@ impl MovingMeshDriver {
             adapt_budget_factor: ADAPT_BUDGET_MAX_FACTOR,
             adapt_thresholds: (1.0, 1.0, 1.0),
             adapt_targets: None,
+            motion_outer_iters: 1,
+            motion_outer_tol: 0.02,
+            motion_u_override: None,
             seeds0: seeds.clone(),
             time: 0.0,
             seeds,
@@ -962,6 +998,26 @@ impl MovingMeshDriver {
     pub fn set_adaptive_indicator_thresholds(&mut self, u: f64, p: f64, strain: f64) {
         let c = |v: f64| v.clamp(0.0, 100.0);
         self.adapt_thresholds = (c(u), c(p), c(strain));
+    }
+
+    /// IMPLICIT (fixed-point) mesh motion: iterate `{advect the seeds with
+    /// the previous attempt's END-of-step cell velocity → regenerate → ALE
+    /// solve}` from a byte-exactly rewound t^n state, until the planned
+    /// seed set changes by less than `tol_cells × min_cell_size` between
+    /// attempts (or `max_iters` attempts ran). The accepted attempt's mesh
+    /// motion is consistent with its own end-of-step solution — the
+    /// explicit (lagged-velocity) coupling noise a per-step remesh injects
+    /// is solved away instead of committed. `max_iters = 1` (default) is
+    /// the explicit single pass, byte-identical to the shipped behaviour.
+    /// Each extra attempt costs a full regen + ALE solve.
+    ///
+    /// FlowCoupled + CPU backend only: only FlowCoupled motion depends on
+    /// the solution (Frozen/Prescribed converge trivially), and the GPU
+    /// snapshot restores with initial-condition semantics (it would reset
+    /// the BDF2 history every attempt) — elsewhere the knob is inert.
+    pub fn set_implicit_mesh_motion(&mut self, max_iters: usize, tol_cells: f64) {
+        self.motion_outer_iters = max_iters.max(1);
+        self.motion_outer_tol = tol_cells.max(0.0);
     }
 
     /// Whether the adaptivity growth budget is exhausted (births suppressed;
@@ -1189,6 +1245,7 @@ impl MovingMeshDriver {
                 cells_born: 0,
                 cells_killed: 0,
                 at_adapt_budget: false,
+                motion_iters: 1,
             };
             return Ok((outcome, stats));
         }
@@ -1228,6 +1285,60 @@ impl MovingMeshDriver {
             }
         }
 
+        // IMPLICIT (fixed-point) mesh motion — FlowCoupled + CPU backend +
+        // opt-in (`set_implicit_mesh_motion`): iterate {advect with the
+        // previous attempt's end-of-step velocity → regen → ALE solve} from
+        // a byte-exactly rewound t^n state, until the planned seed set
+        // converges or the attempt cap. Every attempt is a fully
+        // GCL-consistent ALE step; discarded attempts leave no trace (the
+        // full-history CPU snapshot rewinds state, time levels, warm start,
+        // volume history AND current volumes). The adaptation event above
+        // deliberately stays OUTSIDE the loop: a resize rebuilds the
+        // solver, which would invalidate the checkpoint.
+        let outer = if self.motion_outer_iters > 1
+            && matches!(self.motion, MeshMotionSpec::FlowCoupled { .. })
+            && self.driver.solver().is_cpu()
+        {
+            self.motion_outer_iters
+        } else {
+            1
+        };
+        if outer > 1 {
+            let checkpoint = self.motion_checkpoint();
+            let tol = self.motion_outer_tol * self.min_cell_size;
+            let mut prev_planned: Option<Vec<Point2<f64>>> = None;
+            let mut iters_done = 0usize;
+            loop {
+                iters_done += 1;
+                let plan = self.plan_step()?;
+                // Fixed-point residual: how far THIS attempt's planned seed
+                // set moved from the previous attempt's. Converged ⇒ this
+                // attempt's mesh is (within tol) the one its own end-state
+                // velocity would produce — solve it and accept.
+                let converged = prev_planned.as_ref().is_some_and(|prev| {
+                    plan.new_seeds
+                        .iter()
+                        .zip(prev.iter())
+                        .all(|(a, b)| (a - b).norm() <= tol)
+                });
+                let planned = plan.new_seeds.clone();
+                let mut out = self.step_cpu_planned(plan, readback, None)?;
+                out.1.cells_born = cells_born;
+                out.1.cells_killed = cells_killed;
+                out.1.at_adapt_budget = self.adapt_budget_reached();
+                out.1.motion_iters = iters_done;
+                if converged || iters_done >= outer || out.0.diverged.is_some() {
+                    self.motion_u_override = None;
+                    return Ok(out);
+                }
+                // Rewind to t^n and retry, advecting with the velocities the
+                // discarded attempt ENDED with (the implicit coupling).
+                self.motion_u_override = Some(self.read_cell_velocities()?);
+                self.motion_restore(&checkpoint)?;
+                prev_planned = Some(planned);
+            }
+        }
+
         // Shared step plan: pinned dt, advected seeds, moved boundary spec,
         // quality escalation, recorded wall velocity — identical for the CPU
         // and device paths.
@@ -1256,6 +1367,42 @@ impl MovingMeshDriver {
         out.1.cells_killed = cells_killed;
         out.1.at_adapt_budget = self.adapt_budget_reached();
         Ok(out)
+    }
+
+    /// Everything an implicit-mesh-motion retry must rewind: the full
+    /// solver snapshot (state × time levels, warm start, volume history +
+    /// current volumes, mesh fluxes, dt bookkeeping) plus the driver's own
+    /// step-committed fields.
+    fn motion_checkpoint(&self) -> MotionCheckpoint {
+        MotionCheckpoint {
+            snap: self.driver.snapshot(),
+            seeds: self.seeds.clone(),
+            mesh: self.mesh.clone(),
+            prev_vx: self.prev_vx.clone(),
+            prev_vy: self.prev_vy.clone(),
+            w_wall: self.w_wall.clone(),
+            time: self.time,
+            step_index: self.step_index,
+            last_escalated: self.last_escalated,
+        }
+    }
+
+    /// Rewind a discarded implicit-motion attempt (see
+    /// [`Self::motion_checkpoint`]). The solver's face-indexed stacks keep
+    /// the discarded attempt's topology — the NEXT attempt's
+    /// `begin_ale_step_topology` rebuilds them from the restored t^n mesh,
+    /// and the restored CURRENT volumes make its history rotation exact.
+    fn motion_restore(&mut self, c: &MotionCheckpoint) -> Result<(), String> {
+        self.driver.restore(&c.snap)?;
+        self.seeds = c.seeds.clone();
+        self.mesh = c.mesh.clone();
+        self.prev_vx = c.prev_vx.clone();
+        self.prev_vy = c.prev_vy.clone();
+        self.w_wall = c.w_wall.clone();
+        self.time = c.time;
+        self.step_index = c.step_index;
+        self.last_escalated = c.last_escalated;
+        Ok(())
     }
 
     /// The shared pre-regen work of one moving step (both paths): pin the
@@ -1638,6 +1785,7 @@ impl MovingMeshDriver {
             cells_born: 0,
             cells_killed: 0,
             at_adapt_budget: false,
+            motion_iters: 1,
         };
         Ok((outcome, stats))
     }
@@ -1840,6 +1988,7 @@ impl MovingMeshDriver {
             cells_born: 0,
             cells_killed: 0,
             at_adapt_budget: false,
+            motion_iters: 1,
         };
         Ok(DeviceStep::Done((outcome, stats)))
     }
@@ -2138,7 +2287,13 @@ impl MovingMeshDriver {
         chi_max: f64,
     ) -> Result<(f64, Vec<Point2<f64>>, Vec<usize>), String> {
         use std::f64::consts::PI;
-        let u = self.read_cell_velocities()?;
+        // Advection velocity: the implicit-motion override (the previous
+        // attempt's END-of-step velocities) when live, else the solver's
+        // current (t^n) state — the explicit coupling.
+        let u = match &self.motion_u_override {
+            Some(u) if u.len() == self.mesh.num_cells() => u.clone(),
+            _ => self.read_cell_velocities()?,
+        };
         let dead_len = FLOW_ADVECT_BOX_DEAD_CELLS * self.min_cell_size;
         let ramp_len =
             ((FLOW_ADVECT_BOX_RAMP_CELLS - FLOW_ADVECT_BOX_DEAD_CELLS) * self.min_cell_size)

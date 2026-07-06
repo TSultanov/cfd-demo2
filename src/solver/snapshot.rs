@@ -72,6 +72,12 @@ pub struct SolverStateSnapshot {
     /// Warm-start linear-solve solution, `num_cells * unknowns_per_cell`; empty
     /// if `!has_history`.
     pub x: Vec<f32>,
+    /// CURRENT cell volumes (`num_cells`); empty if `!has_history` or on
+    /// captures predating the field. The ALE seam's volume-history ROTATION
+    /// input — an implicit-mesh-motion retry must rewind it along with the
+    /// history, or the next attempt rotates a stale trial mesh's volumes
+    /// into `V^n`.
+    pub cell_vols: Vec<f32>,
     /// ALE volume history `V^n` (`num_cells`); empty if `!has_history`.
     pub cell_vols_old: Vec<f32>,
     /// ALE volume history `V^{n-1}` (`num_cells`); empty if `!has_history`.

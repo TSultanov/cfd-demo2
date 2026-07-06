@@ -863,6 +863,7 @@ impl GpuUnifiedSolver {
             state_old: Vec::new(),
             state_old_old: Vec::new(),
             x: Vec::new(),
+            cell_vols: Vec::new(),
             cell_vols_old: Vec::new(),
             cell_vols_old_old: Vec::new(),
             mesh_fluxes: Vec::new(),

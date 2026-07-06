@@ -586,6 +586,126 @@ fn hernia_guard_body() {
     );
 }
 
+/// IMPLICIT mesh motion on a uniform free stream: the fixed point is exact
+/// (the end-of-step velocity equals the t^n velocity), so the loop must
+/// accept on its SECOND attempt every step — and preserve the stream. Any
+/// corruption in the rewind (state, BDF2 history, warm start, volume
+/// history, CURRENT volumes) shows up as free-stream drift here.
+#[test]
+fn movingmesh_implicit_motion_freestream_exact() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    let result = std::panic::catch_unwind(|| {
+        let geo = RectangularChannel {
+            length: LX,
+            height: LY,
+        };
+        let domain = Vector2::new(LX, LY);
+        let mut cvt =
+            generate_cvt_mesh_with_seeds(&geo, H, H, 1.0, domain, &LloydConfig::default());
+        tag_slip_channel(&mut cvt.mesh);
+        let n0 = cvt.mesh.num_cells();
+        let params = test_params();
+        let mut moving = pollster::block_on(MovingMeshDriver::build(
+            cvt,
+            &params,
+            MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+            &vec![(U0 as f64, 0.0); n0],
+            &vec![0.0; n0],
+            None,
+            None,
+        ))
+        .expect("implicit driver build");
+        moving.set_boundary_retag(Some(tag_slip_channel));
+        moving.driver_mut().apply_params(&params);
+        moving.set_implicit_mesh_motion(3, 0.02);
+        for step in 0..30 {
+            let (outcome, stats) = moving
+                .step(false)
+                .unwrap_or_else(|e| panic!("implicit step {step}: {e}"));
+            assert!(outcome.diverged.is_none(), "implicit step {step} diverged");
+            assert_eq!(
+                stats.motion_iters, 2,
+                "step {step}: a uniform stream must converge on the verification attempt"
+            );
+        }
+        let err = max_freestream_err(&moving);
+        eprintln!("[implicit-freestream] max|U-U0| = {err:.3e}");
+        assert!(
+            err < 1e-3,
+            "free stream corrupted by the implicit-motion rewind: {err:.3e}"
+        );
+    });
+    std::env::remove_var("CFD2_BACKEND");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// IMPLICIT mesh motion on the obstacle channel: the loop must ENGAGE
+/// (the transient's velocities change between attempts, so re-solves
+/// happen), stay within the cap, and remain stable.
+#[test]
+fn movingmesh_implicit_motion_obstacle_stable() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    let result = std::panic::catch_unwind(|| {
+        let (lx, ly) = (2.0, 1.0);
+        let geo = ChannelWithObstacle {
+            length: lx,
+            height: ly,
+            obstacle_center: Point2::new(0.6, 0.51),
+            obstacle_radius: 0.1,
+        };
+        let domain = Vector2::new(lx, ly);
+        let mut params = test_params();
+        params.requested_dt = 0.01;
+        params.viscosity = 1.33e-3;
+        let cvt =
+            generate_cvt_mesh_with_seeds(&geo, 0.05, 0.05, 1.0, domain, &LloydConfig::default());
+        let n0 = cvt.mesh.num_cells();
+        let mut moving = pollster::block_on(MovingMeshDriver::build(
+            cvt,
+            &params,
+            MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+            &vec![(U0 as f64, 0.0); n0],
+            &vec![0.0; n0],
+            None,
+            None,
+        ))
+        .expect("implicit obstacle build");
+        moving.driver_mut().apply_params(&params);
+        moving.set_implicit_mesh_motion(3, 0.02);
+        let (mut max_iters, mut sum_iters) = (0usize, 0usize);
+        let steps = 40;
+        for step in 0..steps {
+            let (outcome, stats) = moving
+                .step(false)
+                .unwrap_or_else(|e| panic!("implicit obstacle step {step}: {e}"));
+            assert!(outcome.diverged.is_none(), "step {step} diverged");
+            assert!(
+                (1..=3).contains(&stats.motion_iters),
+                "motion_iters {} out of range at step {step}",
+                stats.motion_iters
+            );
+            max_iters = max_iters.max(stats.motion_iters);
+            sum_iters += stats.motion_iters;
+        }
+        eprintln!(
+            "[implicit-obstacle] motion iters: mean {:.2}, max {max_iters}",
+            sum_iters as f64 / steps as f64
+        );
+        assert!(
+            max_iters >= 2,
+            "the implicit motion loop never engaged on a developing flow"
+        );
+    });
+    std::env::remove_var("CFD2_BACKEND");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
 /// The GUI "leak" configuration: FlowCoupled + very aggressive adaptation
 /// (band far below the built mesh, sensitive thresholds, 5× budget) around
 /// the obstacle. The stagnation-side advection presses seeds against the

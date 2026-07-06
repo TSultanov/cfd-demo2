@@ -246,6 +246,8 @@ struct SolverInitRequest {
     moving_adapt_thresh_u: f64,
     moving_adapt_thresh_p: f64,
     moving_adapt_thresh_strain: f64,
+    // Implicit mesh-motion fixed-point iterations (1 = explicit).
+    moving_motion_iters: usize,
     wgpu_device: Option<wgpu::Device>,
     wgpu_queue: Option<wgpu::Queue>,
     target_format: wgpu::TextureFormat,
@@ -643,6 +645,11 @@ pub struct CFDApp {
     moving_adapt_thresh_u: f64,
     moving_adapt_thresh_p: f64,
     moving_adapt_thresh_strain: f64,
+    /// IMPLICIT mesh motion: max fixed-point iterations per step — the mesh
+    /// is re-advected with the attempt's own end-of-step velocity and the
+    /// step re-solved from a rewound t^n state until the motion converges.
+    /// 1 = explicit (default). FlowCoupled + CPU backend only.
+    moving_motion_iters: usize,
     /// Latest per-step moving-mesh telemetry (from `MeshRefreshed`), for display.
     cached_moving_stats: Option<MovingMeshStats>,
     /// Whether the driver the worker is *actually running* is a moving-mesh
@@ -831,6 +838,7 @@ impl CFDApp {
             moving_adapt_thresh_u: 1.0,
             moving_adapt_thresh_p: 1.0,
             moving_adapt_thresh_strain: 1.0,
+            moving_motion_iters: 1,
             cached_moving_stats: None,
             solver_is_moving: false,
             min_cell_size: 0.025,
@@ -1237,6 +1245,7 @@ impl CFDApp {
             moving_adapt_thresh_u: self.moving_adapt_thresh_u,
             moving_adapt_thresh_p: self.moving_adapt_thresh_p,
             moving_adapt_thresh_strain: self.moving_adapt_thresh_strain,
+            moving_motion_iters: self.moving_motion_iters.max(1),
             wgpu_device: self.wgpu_device.clone(),
             wgpu_queue: self.wgpu_queue.clone(),
             target_format: self.target_format,
@@ -2401,6 +2410,9 @@ impl CFDApp {
             request.moving_adapt_thresh_p,
             request.moving_adapt_thresh_strain,
         );
+        // Implicit mesh motion (1 = explicit; FlowCoupled + CPU only —
+        // inert elsewhere). Tolerance: 2% of the near-wall cell spacing.
+        moving.set_implicit_mesh_motion(request.moving_motion_iters, 0.02);
         CFDApp::push_trace_init_event(
             trace_init_events,
             "solver.new",
@@ -3146,6 +3158,22 @@ impl eframe::App for CFDApp {
                                     "Centroid-steering strength for flow-coupled motion: \
                                      0 = pure flow advection; higher pulls seeds toward \
                                      cell centroids to hold mesh quality.",
+                                );
+                                ui.add(
+                                    egui::Slider::new(&mut self.moving_motion_iters, 1..=5)
+                                        .text("Implicit motion iterations"),
+                                )
+                                .on_hover_text(
+                                    "Fixed-point coupling of the mesh motion to the \
+                                     solution: each step is re-solved from a rewound \
+                                     state with the seeds advected by its own \
+                                     end-of-step velocity, until the motion converges \
+                                     (2% of a cell) or this many attempts ran. Cures \
+                                     the phantom pressure noise the explicit \
+                                     (lagged-velocity) remeshing injects. 1 = explicit \
+                                     (default). Each extra iteration costs a full \
+                                     regen + solve. CPU backend only. Applied on \
+                                     Initialize / Reset.",
                                 );
                             }
                             // Smoothing, memory reordering and flow-adaptive
@@ -4265,8 +4293,16 @@ impl eframe::App for CFDApp {
                                 }
                             ));
                             ui.label(format!(
-                                "ALE: dt={:.2e} skew={:.3} SCL={:.1e} flip_defect={:.1e}",
-                                m.dt, m.max_skew, m.scl_defect, m.flip_defect,
+                                "ALE: dt={:.2e} skew={:.3} SCL={:.1e} flip_defect={:.1e}{}",
+                                m.dt,
+                                m.max_skew,
+                                m.scl_defect,
+                                m.flip_defect,
+                                if m.motion_iters > 1 {
+                                    format!(" motion_iters={}", m.motion_iters)
+                                } else {
+                                    String::new()
+                                },
                             ));
                             ui.label(format!(
                                 "ALE time (ms): plan={:.1} regen={:.1} swept={:.1} refresh={:.1}",

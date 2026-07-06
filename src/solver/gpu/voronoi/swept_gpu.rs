@@ -18,10 +18,15 @@
 //! same canonical re-evaluation `meshless::assemble::canonical_vertex` performs;
 //! reproducing it here makes shared endpoints consistent between the two cells
 //! incident to a face without any global merge. For a boundary vertex the third
-//! plane is a domain-box side (`bisector ∩ box`) or a domain corner
-//! (`box ∩ box`); polyline BOUNDARY-segment vertices are not yet handled (they
-//! do not occur on a rectangular domain — the free-stream GCL config) and fall
-//! back to a flagged zero.
+//! plane is a domain-box side (`bisector ∩ box`), a domain corner (`box ∩ box`),
+//! or a polyline BOUNDARY-segment line (`bisector ∩ segment`, and at polyline
+//! corners `segment ∩ segment`) — the segment tables at BOTH seed sets are
+//! bound (the engine's t^{n+1} table + a caller-supplied t^n table, so a moving
+//! boundary sweeps its wall faces correctly). Adjacent ring edges are never
+//! EXACTLY collinear (a redundant clip plane creates no edge), but f32
+//! rounding of nearly-collinear segment lines can leave an ill-conditioned
+//! bracket — `vertex_at` flags those to the CPU fallback via a RELATIVE
+//! near-parallel guard instead of fabricating a far vertex.
 //!
 //! ## Precision
 //!
@@ -40,6 +45,7 @@
 //! the same face with the opposite sign in the per-cell GCL sum, so the flux is
 //! single-valued by construction.
 
+use crate::meshgen::meshless::BoundarySpec;
 use crate::solver::gpu::buffers::create_buffer;
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::linear_solver::fgmres::dispatch_2d;
@@ -47,7 +53,7 @@ use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
 
 use super::derive::DeriveFaces;
-use super::engine::GpuVoronoiEngine;
+use super::engine::{boundary_spec_f32, GpuVoronoiEngine};
 use super::K_FACE_MAX;
 
 const WORKGROUP_SIZE: u32 = 64;
@@ -80,8 +86,9 @@ pub struct GpuSweptAreas {
     /// Signed swept area per face (owner-outward normal convention), same
     /// quantity as the CPU `swept[f]` before the `/dt` cast + closure.
     pub swept: Vec<f32>,
-    /// Per-face flag: `1` if the swept quad could not be built on device (a
-    /// polyline BOUNDARY-segment endpoint — not yet ported), so the caller must
+    /// Per-face flag: `1` if the swept quad could not be built on device (an
+    /// edge tag that is neither a bisector, a box side, nor a polyline
+    /// segment — defensive; no such tag is emitted today), so the caller must
     /// fall back to the CPU path for this regen. Written per OWNED face; a cell
     /// that hits an unsupported edge flags ALL its owned faces.
     pub needs_cpu: Vec<u32>,
@@ -138,6 +145,8 @@ impl SweptFluxGeometry {
                 storage(10, false), // out: needs_cpu
                 storage(11, false), // out: canon_area_new (per cell)
                 storage(12, false), // out: canon_area_old (per cell)
+                storage(13, true), // segments at the NEW boundary (engine's table)
+                storage(14, true), // segments at the OLD boundary (caller-packed)
             ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -162,14 +171,19 @@ impl SweptFluxGeometry {
 
     /// Compute per-face swept areas from the engine's current (NEW-seed) diagram
     /// and the supplied OLD seed positions (interleaved f32 x/y, one pair per
-    /// cell — the seeds BEFORE this step's motion). The engine must already hold
-    /// the new diagram (post `run_regen` + `resolve_flagged`).
+    /// cell — the seeds BEFORE this step's motion). `old_spec` is the boundary
+    /// spec at t^n — its segment table gives polyline BOUNDARY-segment faces
+    /// their old line (identical to the engine's table for a static boundary;
+    /// segment COUNT must match, the diagram's seg ids index both tables). The
+    /// engine must already hold the new diagram (post `run_regen` +
+    /// `resolve_flagged`).
     pub fn compute(
         &self,
         ctx: &GpuContext,
         cache: &StagingBufferCache,
         engine: &GpuVoronoiEngine,
         old_seeds_xy: &[f32],
+        old_spec: &BoundarySpec,
     ) -> GpuSweptAreas {
         use wgpu::BufferUsages as U;
         let n = engine.n_seeds();
@@ -181,6 +195,28 @@ impl SweptFluxGeometry {
             old_seeds_xy.len(),
             2 * n
         );
+        // Pack the OLD segment table exactly like `upload_case` packs the new
+        // one: f32-rounded spec, `[ax, ay, bx, by]` per segment, one degenerate
+        // pad entry when empty (storage buffers must be non-empty; never
+        // referenced then — no face carries a segment tag).
+        let old_spec32 = boundary_spec_f32(old_spec);
+        let nseg_old = old_spec32.num_segments();
+        assert_eq!(
+            nseg_old,
+            engine.num_segments(),
+            "swept::compute: old_spec has {} segments, engine holds {} — the \
+             diagram's segment ids must index both tables",
+            nseg_old,
+            engine.num_segments()
+        );
+        let mut segs_old: Vec<[f32; 4]> = Vec::with_capacity(nseg_old.max(1));
+        for s in 0..nseg_old {
+            let (a, b) = old_spec32.segment_points(s as u32);
+            segs_old.push([a.x as f32, a.y as f32, b.x as f32, b.y as f32]);
+        }
+        if segs_old.is_empty() {
+            segs_old.push([0.0; 4]);
+        }
 
         let scan = self.derive.encode_offsets(ctx, cache, engine);
         let num_faces = scan.total;
@@ -221,6 +257,13 @@ impl SweptFluxGeometry {
             create_buffer(&ctx.device, "swept:canon_area_new", nn * 4, U::STORAGE | U::COPY_SRC);
         let b_area_old =
             create_buffer(&ctx.device, "swept:canon_area_old", nn * 4, U::STORAGE | U::COPY_SRC);
+        let b_segs_old = create_buffer(
+            &ctx.device,
+            "swept:segments_old",
+            (segs_old.len() * 16) as u64,
+            U::STORAGE | U::COPY_DST,
+        );
+        ctx.queue.write_buffer(&b_segs_old, 0, bytemuck::cast_slice(&segs_old));
 
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("swept:bg"),
@@ -254,6 +297,11 @@ impl SweptFluxGeometry {
                 wgpu::BindGroupEntry { binding: 10, resource: b_needs.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 11, resource: b_area_new.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 12, resource: b_area_old.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: engine.segments_buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry { binding: 14, resource: b_segs_old.as_entire_binding() },
             ],
         });
 
@@ -313,6 +361,8 @@ struct Params {{ n: u32, k: u32, det_eps: f32, pad0: u32,
 @group(0) @binding(10) var<storage, read_write> out_needs: array<u32>;
 @group(0) @binding(11) var<storage, read_write> out_area_new: array<f32>;
 @group(0) @binding(12) var<storage, read_write> out_area_old: array<f32>;
+@group(0) @binding(13) var<storage, read>       segments_new: array<vec4<f32>>;
+@group(0) @binding(14) var<storage, read>       segments_old: array<vec4<f32>>;
 
 const NBR_NONE: u32 = 0xffffffffu;
 const BC_NONE: u32  = 0xffffffffu;
@@ -351,6 +401,19 @@ fn line_intersect(a: Line, b: Line) -> vec2<f32> {{
     return vec2<f32>(x, y);
 }}
 
+// Polyline BOUNDARY-segment line in the origin-subtracted frame, from the
+// segment table at the given seed set (the new table is the engine's own
+// clip table; the old table is caller-packed with the identical rule). Any
+// normal orientation defines the same line — only the intersection point is
+// consumed here, never a side test.
+fn segment_line(seg: u32, origin: vec2<f32>, is_new: bool) -> Line {{
+    var s4: vec4<f32>;
+    if (is_new) {{ s4 = segments_new[seg]; }} else {{ s4 = segments_old[seg]; }}
+    let d = s4.zw - s4.xy;
+    let nrm = vec2<f32>(d.y, -d.x);
+    return Line(nrm, dot(nrm, s4.xy - origin), true);
+}}
+
 // The line of ring edge `e` of cell `i`, in the origin-subtracted frame at the
 // given seed set (old or new). `pi` = seed[i] at that set.
 fn edge_line(i: u32, nbr: u32, bc: u32, pi: vec2<f32>, origin: vec2<f32>, is_new: bool) -> Line {{
@@ -359,9 +422,12 @@ fn edge_line(i: u32, nbr: u32, bc: u32, pi: vec2<f32>, origin: vec2<f32>, is_new
         if (is_new) {{ pj = new_seeds[nbr]; }} else {{ pj = old_seeds[nbr]; }}
         return bisector_line(pi, pj, origin);
     }}
-    // Boundary edge: box side (< 4) is supported; polyline segment is not.
+    // Boundary edge: box side (< 4) or polyline segment (BC_SEG_FLAG | seg).
     if (bc < 4u) {{ return box_line(bc, origin); }}
-    return Line(vec2<f32>(0.0), 0.0, false);   // BC_SEG_FLAG | seg  (unsupported)
+    if (bc != BC_NONE && (bc & BC_SEG_FLAG) != 0u) {{
+        return segment_line(bc & 0x7fffffffu, origin, is_new);
+    }}
+    return Line(vec2<f32>(0.0), 0.0, false);   // defensive: unknown tag
 }}
 
 // The canonical vertex where ring edges `ea` and `eb` of cell `i` meet, in the
@@ -376,6 +442,17 @@ fn vertex_at(i: u32, na: u32, ba: u32, nb: u32, bb: u32,
     let la = edge_line(i, na, ba, pi, origin, is_new);
     let lb = edge_line(i, nb, bb, pi, origin, is_new);
     if (!la.ok || !lb.ok) {{ *needs = true; return vec2<f32>(0.0); }}
+    // RELATIVE near-parallel guard: a bounded cell's bracket cannot be this
+    // flat (its vertex would sit orders of magnitude outside the domain —
+    // valid brackets have angles >> h/L_domain), but f32 rounding of
+    // nearly-collinear adjacent segment lines can be. An ill-conditioned
+    // intersect must fall back to the CPU path, never fabricate a far (or
+    // origin-substituted) vertex silently.
+    let det = la.n.x * lb.n.y - la.n.y * lb.n.x;
+    if (abs(det) <= max(P.det_eps, 1e-8 * length(la.n) * length(lb.n))) {{
+        *needs = true;
+        return vec2<f32>(0.0);
+    }}
     return line_intersect(la, lb);
 }}
 
@@ -411,8 +488,9 @@ fn swept_areas(@builtin(workgroup_id) wid: vec3<u32>,
         vnew[v] = ring_vertex(i, v, nf, origin, true,  &need);
     }}
     if (need) {{
-        // Unsupported edge (polyline segment): flag every owned face; the caller
-        // falls back to the CPU path this regen. Areas left 0 (unused on fallback).
+        // Unsupported edge tag (defensive — bisector/box/segment all resolve):
+        // flag every owned face; the caller falls back to the CPU path this
+        // regen. Areas left 0 (unused on fallback).
         var rank0: u32 = offsets[i];
         for (var e: u32 = 0u; e < nf; e = e + 1u) {{
             let nbr = nbr_ids[i * P.k + e];

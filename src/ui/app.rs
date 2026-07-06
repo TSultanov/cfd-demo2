@@ -23,7 +23,8 @@ use std::thread;
 use crate::meshgen::meshless::{generate_cvt_mesh_with_seeds, CvtMeshSeeds};
 use crate::sim::{
     BoundaryMotionSpec, DivergeReason, DriverBuild, MeshMotionSpec, MovingMeshDriver,
-    MovingMeshStats, OscAxis, RuntimeParams, SolverDriver, OSC_AMPLITUDE_CELL_FRACTION,
+    MovingMeshStats, OscAxis, RegenBackend, RuntimeParams, SolverDriver,
+    OSC_AMPLITUDE_CELL_FRACTION,
 };
 
 /// Rendering mode for the mesh visualization
@@ -222,6 +223,10 @@ struct SolverInitRequest {
     moving_oscillate_obstacle: bool,
     moving_osc_amplitude: f64,
     moving_osc_frequency: f64,
+    // Reconstruct the moving mesh ON DEVICE each step (GPU solver backend
+    // only — pre-gated by `make_init_request`, so `build_moving_init` can
+    // apply it directly).
+    moving_gpu_regen: bool,
     wgpu_device: Option<wgpu::Device>,
     wgpu_queue: Option<wgpu::Queue>,
     target_format: wgpu::TextureFormat,
@@ -404,6 +409,11 @@ pub struct MovingWorkerSmoke {
     /// the live render loop's `build_mesh_vertices` → `update_mesh` capacity path
     /// on the REAL moving meshes. Empty unless `collect_meshes` was requested.
     pub meshes: Vec<Vec<Vec<[f64; 2]>>>,
+    /// Refreshes whose step ran fully on device ([`RegenBackend::GpuOnDevice`]).
+    pub gpu_ondevice_refreshes: usize,
+    /// Refreshes whose step fell back to the CPU path
+    /// ([`RegenBackend::GpuFallback`]).
+    pub gpu_fallback_refreshes: usize,
     /// The worker reported an error (step failure / divergence).
     pub error: Option<String>,
 }
@@ -471,6 +481,11 @@ pub fn moving_mesh_worker_smoke(
                     }
                     smoke.max_scl_defect = smoke.max_scl_defect.max(stats.scl_defect);
                     smoke.max_skew = smoke.max_skew.max(stats.max_skew);
+                    match stats.regen_backend {
+                        RegenBackend::GpuOnDevice => smoke.gpu_ondevice_refreshes += 1,
+                        RegenBackend::GpuFallback(_) => smoke.gpu_fallback_refreshes += 1,
+                        _ => {}
+                    }
                     if collect_meshes {
                         smoke.meshes.push(cached_cells);
                     }
@@ -561,6 +576,12 @@ pub struct CFDApp {
     moving_osc_amplitude: f64,
     /// Oscillating-obstacle forcing frequency (Hz); `ω = 2π·f`.
     moving_osc_frequency: f64,
+    /// Reconstruct the moving mesh ON DEVICE each step (the meshless-Voronoi
+    /// GPU pipeline). Only meaningful on the GPU compute backend — the
+    /// request pre-gates it (`backend == Gpu`), and steps the device cannot
+    /// certify re-run on the CPU transparently. Default on: a GPU-backend
+    /// moving run reconstructs on-device out of the box.
+    moving_gpu_regen: bool,
     /// Latest per-step moving-mesh telemetry (from `MeshRefreshed`), for display.
     cached_moving_stats: Option<MovingMeshStats>,
     /// Whether the driver the worker is *actually running* is a moving-mesh
@@ -739,6 +760,7 @@ impl CFDApp {
             // an honest default keeps the slider value == the realized motion.
             moving_osc_amplitude: 0.01,
             moving_osc_frequency: 0.5,
+            moving_gpu_regen: true,
             cached_moving_stats: None,
             solver_is_moving: false,
             min_cell_size: 0.025,
@@ -1132,6 +1154,10 @@ impl CFDApp {
             moving_oscillate_obstacle: self.moving_oscillate_obstacle,
             moving_osc_amplitude: self.moving_osc_amplitude,
             moving_osc_frequency: self.moving_osc_frequency,
+            // Pre-gate on the COMPUTE backend: the render device exists even
+            // for CPU-solver runs, so the checkbox alone must not enable the
+            // device path there.
+            moving_gpu_regen: self.moving_gpu_regen && self.backend == BackendChoice::Gpu,
             wgpu_device: self.wgpu_device.clone(),
             wgpu_queue: self.wgpu_queue.clone(),
             target_format: self.target_format,
@@ -1579,6 +1605,57 @@ impl CFDApp {
     }
 
     fn cache_cells(mesh: &Mesh) -> Vec<Vec<[f64; 2]>> {
+        // An on-device (GPU-regen) mesh is vertex-less: reconstruct each
+        // cell's polygon from its faces' stored geometry instead. A face is a
+        // segment of length `area` through `(face_cx, face_cy)` perpendicular
+        // to `(face_nx, face_ny)`; its two endpoints are the cell's Voronoi
+        // vertices. Order corners by angle around the cell centre (cells are
+        // convex) and merge the shared endpoint of adjacent faces.
+        if mesh.cell_vertex_offsets.is_empty() && mesh.num_cells() > 0 {
+            let mut cells = Vec::with_capacity(mesh.num_cells());
+            for i in 0..mesh.num_cells() {
+                let (cx, cy) = (mesh.cell_cx[i], mesh.cell_cy[i]);
+                let mut corners: Vec<[f64; 2]> = Vec::new();
+                let mut merge_tol2 = f64::INFINITY;
+                for &f in &mesh.cell_faces
+                    [mesh.cell_face_offsets[i]..mesh.cell_face_offsets[i + 1]]
+                {
+                    let (tx, ty) = (-mesh.face_ny[f], mesh.face_nx[f]);
+                    let h = 0.5 * mesh.face_area[f];
+                    corners.push([mesh.face_cx[f] + tx * h, mesh.face_cy[f] + ty * h]);
+                    corners.push([mesh.face_cx[f] - tx * h, mesh.face_cy[f] - ty * h]);
+                    merge_tol2 = merge_tol2.min(mesh.face_area[f] * mesh.face_area[f]);
+                }
+                // Duplicate-merge tolerance: well below the shortest face, so
+                // only true shared corners (f32-noise apart) collapse.
+                let merge_tol2 = merge_tol2 * 1e-6;
+                corners.sort_by(|a, b| {
+                    let ta = (a[1] - cy).atan2(a[0] - cx);
+                    let tb = (b[1] - cy).atan2(b[0] - cx);
+                    ta.total_cmp(&tb)
+                });
+                let mut poly: Vec<[f64; 2]> = Vec::with_capacity(corners.len() / 2 + 1);
+                for c in corners {
+                    if let Some(last) = poly.last() {
+                        let d2 = (c[0] - last[0]).powi(2) + (c[1] - last[1]).powi(2);
+                        if d2 <= merge_tol2 {
+                            continue;
+                        }
+                    }
+                    poly.push(c);
+                }
+                if poly.len() > 1 {
+                    let first = poly[0];
+                    let last = *poly.last().unwrap();
+                    let d2 = (first[0] - last[0]).powi(2) + (first[1] - last[1]).powi(2);
+                    if d2 <= merge_tol2 {
+                        poly.pop();
+                    }
+                }
+                cells.push(poly);
+            }
+            return cells;
+        }
         let mut cells = Vec::with_capacity(mesh.num_cells());
         for i in 0..mesh.num_cells() {
             let start = mesh.cell_vertex_offsets[i];
@@ -2202,6 +2279,11 @@ impl CFDApp {
             });
             moving.set_moving_wall_bc(true);
         }
+        // On-device reconstruction (GPU backend only — the request pre-gates
+        // it, and the driver additionally checks the solver backend). Steps
+        // the device cannot certify (flip/sliver) re-run on the CPU for that
+        // step; the per-step `regen_backend` stat surfaces the live path.
+        moving.set_gpu_regen(request.moving_gpu_regen);
         CFDApp::push_trace_init_event(
             trace_init_events,
             "solver.new",
@@ -2837,11 +2919,14 @@ impl eframe::App for CFDApp {
                         if ale_variant.is_some() {
                             checkbox.on_hover_text(format!(
                                 "Advect the CVT-Voronoi mesh with the flow (ALE) using the \
-                                 selected solver's moving-mesh variant ({}). Runs on the \
-                                 selected compute backend — GPU (surgical topology refresh) or \
-                                 CPU. While enabled, Mesh Type is locked to Voronoi (CVT) and a \
-                                 fixed timestep is pinned; the Model selection is kept (mapped to \
-                                 its ALE variant), not changed. Applied on Initialize / Reset.",
+                                 selected solver's moving-mesh variant ({}). The mesh is \
+                                 RECONSTRUCTED every step: fully on-device on the GPU backend \
+                                 (when 'On-device mesh regen' is on), on the CPU at compute \
+                                 time otherwise — the live 'Mesh regen' stats line shows which \
+                                 path ran. While enabled, Mesh Type is locked to Voronoi (CVT) \
+                                 and a fixed timestep is pinned; the Model selection is kept \
+                                 (mapped to its ALE variant), not changed. Applied on \
+                                 Initialize / Reset.",
                                 CFDApp::model_label(ale_variant.unwrap()),
                             ));
                         } else {
@@ -2871,6 +2956,36 @@ impl eframe::App for CFDApp {
                             }
                         }
                         if self.enable_moving_mesh {
+                            // Where the per-step mesh reconstruction runs. GPU
+                            // backend: fully on-device (opt-out); any step the
+                            // device cannot certify (Voronoi flip / sliver)
+                            // transparently re-runs on the CPU for that step.
+                            // CPU backends: always CPU at compute time.
+                            let gpu_backend = self.backend == BackendChoice::Gpu;
+                            if gpu_backend {
+                                ui.checkbox(
+                                    &mut self.moving_gpu_regen,
+                                    "On-device mesh regen (GPU)",
+                                )
+                                .on_hover_text(
+                                    "Rebuild the mesh ENTIRELY on the GPU every step — \
+                                     Voronoi diagram, topology, geometry, and the ALE swept \
+                                     fluxes (the meshless-Voronoi-on-GPU pipeline). Steps the \
+                                     device cannot certify (a Voronoi topology flip or a \
+                                     sub-tolerance sliver) automatically re-run on the CPU \
+                                     for that step and retry the GPU on the next; the 'Mesh \
+                                     regen' stats line shows the live path. Off = rebuild on \
+                                     the CPU every step. Applied on Initialize / Reset.",
+                                );
+                            } else {
+                                ui.label("Mesh regen: CPU at compute time (per step)")
+                                    .on_hover_text(
+                                        "On a CPU compute backend the mesh is re-assembled \
+                                         from the advected seeds by the CPU meshless engine \
+                                         every step. Select the GPU backend to enable \
+                                         on-device reconstruction.",
+                                    );
+                            }
                             egui::ComboBox::from_label("Seed motion")
                                 .selected_text(self.moving_motion.label())
                                 .show_ui(ui, |ui| {
@@ -3817,6 +3932,23 @@ impl eframe::App for CFDApp {
                         // Moving-mesh (ALE) per-step telemetry, when active.
                         if let Some(m) = &self.cached_moving_stats {
                             ui.separator();
+                            // Where THIS step's mesh was rebuilt — the
+                            // requirement is that the reconstruction path is
+                            // obvious, so it leads the ALE block.
+                            let regen_line = match m.regen_backend {
+                                RegenBackend::GpuFallback(reason) => {
+                                    format!("Mesh regen: GPU→CPU this step ({reason})")
+                                }
+                                other => format!("Mesh regen: {}", other.label()),
+                            };
+                            ui.label(regen_line).on_hover_text(
+                                "GPU on-device: Voronoi diagram, topology, geometry and ALE \
+                                 swept fluxes are rebuilt entirely on the GPU every step. \
+                                 CPU (per step): the CPU meshless engine re-assembles the \
+                                 mesh from the advected seeds at compute time. GPU→CPU: the \
+                                 device could not certify this step (Voronoi flip / sliver) \
+                                 and the CPU path took it; the GPU is retried next step.",
+                            );
                             ui.label(format!(
                                 "ALE mesh: {} cells, {} faces{}",
                                 m.n_cells,

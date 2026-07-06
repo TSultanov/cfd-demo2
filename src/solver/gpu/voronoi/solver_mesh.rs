@@ -16,9 +16,11 @@
 //! `cell_vol` uses the CANONICAL polygon area (`GpuSweptAreas::canon_area_new`),
 //! NOT the engine's clipped `b_cell_area`: the swept quads telescope to the
 //! canonical area, so cell_vols + fluxes stay self-consistent and the GCL closes
-//! (see `swept_gpu`). Boundary faces are left untagged (`None`) — the caller
-//! applies its geometry-based tagging (e.g. Inlet/Outlet/SlipWall by face
-//! centre), exactly as the CPU path does.
+//! (see `swept_gpu`). Boundary faces are left untagged (`None`) HERE — the
+//! caller must tag them before the mesh reaches the solver ([`super::regen`]
+//! maps the device `face_bc` tags through `tag_boundary_type`, byte-identical
+//! to the CPU assembler; an untagged open face would silently scatter to bc
+//! row 0 with a zeroed kind).
 
 use crate::solver::mesh::Mesh;
 

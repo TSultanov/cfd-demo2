@@ -454,3 +454,113 @@ fn moving_mesh_gui_worker_gpu_backend() {
     std::env::remove_var("CFD2_BACKEND");
     std::env::remove_var("CFD2_CPU_ENGINE");
 }
+
+/// The GPU-backend worker path with ON-DEVICE mesh reconstruction — the exact
+/// configuration the GUI now enables by default on the GPU backend for a
+/// moving-mesh run ("On-device mesh regen (GPU)" + oscillating obstacle):
+/// drive the real worker message pump with `set_gpu_regen(true)` on a
+/// polyline-boundary (obstacle) case with a MOVING boundary, and assert
+/// (1) refreshes flow with no error, (2) at least one step ran fully on
+/// device (the counter comes from `MovingMeshStats::regen_backend` — the same
+/// field the GUI's "Mesh regen" status line shows), (3) the vertex-less
+/// device meshes tessellate + render through the GUI's real capacity path
+/// (`cache_cells` face-geometry reconstruction feeding `update_mesh`), and
+/// (4) the cell count stays fixed and the run stays conservative.
+#[test]
+fn moving_mesh_gui_worker_gpu_regen_smoke() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    if !gpu_adapter_available() {
+        eprintln!("SKIP: no GPU adapter available");
+        return;
+    }
+    // GPU solver backend (the gpu_regen eligibility check reads it).
+    std::env::remove_var("CFD2_BACKEND");
+    std::env::remove_var("CFD2_CPU_ENGINE");
+
+    let ctx = pollster::block_on(cfd2::solver::gpu::context::GpuContext::new(None, None))
+        .expect("GPU context");
+    let domain = Vector2::new(3.0, 1.0);
+    let geo = ChannelWithObstacle {
+        length: 3.0,
+        height: 1.0,
+        obstacle_center: Point2::new(1.0, 0.51),
+        obstacle_radius: 0.1,
+    };
+    let cvt = cfd2::meshgen::meshless::generate_cvt_mesh_with_seeds(
+        &geo,
+        0.06,
+        0.06,
+        1.0,
+        domain,
+        &LloydConfig::default(),
+    );
+    let n_cells = cvt.mesh.num_cells();
+    let params = ale_params();
+    let mut driver = pollster::block_on(MovingMeshDriver::build(
+        cvt,
+        &params,
+        MeshMotionSpec::Frozen, // interior frozen; only the obstacle oscillates
+        &vec![(params.inlet_velocity as f64, 0.0); n_cells],
+        &vec![0.0; n_cells],
+        Some(ctx.device.clone()),
+        Some(ctx.queue.clone()),
+    ))
+    .expect("MovingMeshDriver::build (GPU) must succeed");
+    driver.driver_mut().apply_params(&params);
+    driver.set_boundary_motion(BoundaryMotionSpec::Oscillation {
+        loop_index: 1,
+        amplitude: 0.03,
+        omega: std::f64::consts::TAU * 0.5,
+        axis: OscAxis::CrossStream,
+    });
+    driver.set_moving_wall_bc(true);
+    driver.set_gpu_regen(true);
+    assert!(driver.gpu_regen_active(), "gpu_regen must be active on the GPU backend");
+
+    let smoke = moving_mesh_worker_smoke(driver, 120_000, 20, true);
+    println!(
+        "[moving-gui][gpu-regen] refreshes={} (on-device {}, cpu-fallback {}) \
+         cells=[{:?},{:?}] max_scl={:.2e} empty={} nonfinite={} err={:?}",
+        smoke.mesh_refresh_events,
+        smoke.gpu_ondevice_refreshes,
+        smoke.gpu_fallback_refreshes,
+        smoke.min_cells,
+        smoke.max_cells,
+        smoke.max_scl_defect,
+        smoke.saw_empty_cells,
+        smoke.saw_nonfinite_stats,
+        smoke.error,
+    );
+    assert!(smoke.error.is_none(), "gpu-regen worker reported an error: {:?}", smoke.error);
+    assert!(
+        smoke.mesh_refresh_events >= 20,
+        "expected >=20 gpu-regen refreshes through the message API, got {}",
+        smoke.mesh_refresh_events
+    );
+    assert!(
+        smoke.gpu_ondevice_refreshes > 0,
+        "no refresh ran on device — gpu_regen was requested but never took a step \
+         (fallback {} / {} refreshes)",
+        smoke.gpu_fallback_refreshes,
+        smoke.mesh_refresh_events
+    );
+    assert!(
+        !smoke.saw_empty_cells,
+        "a gpu-regen refresh carried empty/degenerate cells — the vertex-less \
+         face-geometry polygon reconstruction is broken"
+    );
+    assert!(!smoke.saw_nonfinite_stats, "a gpu-regen refresh carried non-finite stats");
+    assert_eq!(
+        (smoke.min_cells, smoke.max_cells),
+        (Some(n_cells), Some(n_cells)),
+        "gpu-regen cell count must stay fixed at {n_cells}"
+    );
+    assert!(
+        smoke.max_scl_defect < 1e-3,
+        "gpu-regen max SCL defect too large: {:.3e}",
+        smoke.max_scl_defect
+    );
+    // The vertex-less meshes must survive the GUI's real tessellation +
+    // renderer capacity path.
+    replay_through_renderer(&smoke.meshes, n_cells);
+}

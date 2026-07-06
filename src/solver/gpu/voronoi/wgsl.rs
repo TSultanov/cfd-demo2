@@ -55,12 +55,13 @@ pub(super) const C_DOT_EPS: f32 = 4.8e-7;
 pub(super) const C_VERT_EPS: f32 = 4.8e-7;
 
 /// Cramer numerator/determinant product-rounding slack: 4 × f32 unit
-/// roundoff (each product term carries one multiply rounding plus ≤ 2
-/// roundings of input representation — pa.z of a bisector is
-/// `fl(0.5·fl(dot))`). Deliberately tighter than `C_DOT_EPS`: the
-/// componentwise numerator-magnitude bound is honest under cancellation
-/// but scales like `(|A|+|B|)/sin θ`, so slack here directly multiplies
-/// the flag rate on moderate-angle plane pairs.
+/// roundoff — the PER-TERM chain remainder AFTER the bisector offset's own
+/// representation error is carried separately by `C_OFF_REPR` through the
+/// plane's `oerr` slot: dot-internal roundings (≤ 2u) + factor
+/// representation (≤ 1u) + the product multiply (1u). Deliberately tighter
+/// than `C_DOT_EPS`: the componentwise numerator-magnitude bound is honest
+/// under cancellation but scales like `(|A|+|B|)/sin θ`, so slack here
+/// directly multiplies the flag rate on moderate-angle plane pairs.
 ///
 /// HEADROOM NOTE: the `/det` in the canonical solve is
 /// only 2.5 ULP under the WGSL accuracy spec (division is NOT correctly
@@ -70,6 +71,19 @@ pub(super) const C_VERT_EPS: f32 = 4.8e-7;
 /// division). The headroom is thin: do NOT tighten below 4u without
 /// redoing that budget.
 pub(super) const C_NUM_EPS: f32 = 2.4e-7;
+
+/// Bisector-offset representation slack: 2 × f32 unit roundoff. A bisector's
+/// offset `0.5·|fl(p_j − p_i)|²` differs from the f64 oracle's
+/// `0.5·|p_j − p_i|²` (computed on the same f32-quantized seeds, where the
+/// f64 subtraction is exact up to a ~2⁻⁵³ residual — 6 orders below this
+/// slack) by up to ~2u·|off| whenever the f32 seed subtraction rounds — the
+/// q-representation error enters the offset SQUARED. Without this term the certified vertex bound is ~1.5×
+/// understated in the deep-numerator-cancellation regime (vertex nearly
+/// above the seed), where the `dmag·|vi|` headroom that normally absorbs it
+/// vanishes. Carried in the plane's `oerr` slot so it flows into both the
+/// classification band and the vertex bound exactly like a segment plane's
+/// offset error; box sides stay exact (oerr = 0).
+pub(super) const C_OFF_REPR: f32 = 1.2e-7;
 
 /// Exact-degeneracy threshold for the 2×2 canonical solve (relative to
 /// `|A||B|`); below it the lerp fallback vertex is kept and the cell is
@@ -116,6 +130,7 @@ pub fn voronoi_cell_shader() -> String {
          const C_DOT_EPS: f32 = {c_dot:e};\n\
          const C_VERT_EPS: f32 = {c_vert:e};\n\
          const C_NUM_EPS: f32 = {c_num:e};\n\
+         const C_OFF_REPR: f32 = {c_off:e};\n\
          const DET_ZERO: f32 = {det_zero:e};\n\
          const EPS_SHORT: f32 = {eps_short:e};\n\
          const VE_MAX_REL: f32 = {ve_max:e};\n\
@@ -132,6 +147,7 @@ pub fn voronoi_cell_shader() -> String {
         c_dot = C_DOT_EPS,
         c_vert = C_VERT_EPS,
         c_num = C_NUM_EPS,
+        c_off = C_OFF_REPR,
         det_zero = DET_ZERO,
         eps_short = EPS_SHORT,
         ve_max = VE_MAX_REL,
@@ -242,8 +258,10 @@ fn segment_plane(seg: u32, p: vec2<f32>) -> vec4<f32> {
 // Seed-relative plane of an edge tag as (q.x, q.y, off, oerr):
 // { x : dot(x, q) <= off + eps }. Plane coefficients are pure functions of
 // the seeds/segments/domain — no chain error; oerr bounds the offset's own
-// f32 computation error (zero for bisectors/box sides, whose offsets are
-// single-rounding and covered by the |off| running term).
+// f32 error vs the f64 oracle (zero for box sides, whose offsets are
+// single-rounding and covered by the |off| running term; C_OFF_REPR·|off|
+// for bisectors — the f32 seed-subtraction representation error enters the
+// offset squared).
 fn plane_of(tag: u32, p: vec2<f32>) -> vec4<f32> {
     if (tag >= TAG_BOX_BASE) {
         switch (tag - TAG_BOX_BASE) {
@@ -257,7 +275,8 @@ fn plane_of(tag: u32, p: vec2<f32>) -> vec4<f32> {
         return segment_plane(tag & 0x7fffffffu, p);
     }
     let q = seeds[tag] - p;
-    return vec4<f32>(q.x, q.y, 0.5 * dot(q, q), 0.0);
+    let q2 = dot(q, q);
+    return vec4<f32>(q.x, q.y, 0.5 * q2, C_OFF_REPR * 0.5 * q2);
 }
 
 struct ClipResult {
@@ -444,7 +463,7 @@ fn process_bin(
         let ql = sqrt(q2);
         let res = clip_plane(
             pv, pt, pe, *pn, *pr2,
-            vec4<f32>(q.x, q.y, 0.5 * q2, 0.0),
+            vec4<f32>(q.x, q.y, 0.5 * q2, C_OFF_REPR * 0.5 * q2),
             ql * params.edge_len_eps, ql, j, p, pu,
         );
         if (res.n == CLIP_OVERFLOW) {

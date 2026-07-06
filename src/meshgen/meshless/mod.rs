@@ -328,6 +328,7 @@ pub fn compute_cell(input: &MeshlessInput, grid: &SeedGrid, i: usize) -> CellOut
     loop {
         let exhaustive = k >= max_nb;
         grid.knn(seeds, i as u32, k, &mut nbrs);
+        let before = nbrs.len();
         let mut is_dup = false;
         nbrs.retain(|&(_, j)| {
             let q = seeds[j as usize];
@@ -340,6 +341,18 @@ pub fn compute_cell(input: &MeshlessInput, grid: &SeedGrid, i: usize) -> CellOut
         });
         if is_dup {
             return CellOut::empty(p);
+        }
+        // A list EMPTIED by coalescing certifies nothing: `drive` reads an
+        // empty list as "no other seeds exist" (bbox cell, Certified), but a
+        // quantization bin holding more than k seeds swallows the whole kNN
+        // window while real seeds sit farther out. Widen the window instead
+        // of certifying (at `exhaustive` an emptied list really does mean
+        // every other seed is a duplicate — the bbox cell is exact and
+        // matches `compute_cell_exhaustive` bitwise).
+        if nbrs.is_empty() && before > 0 && !exhaustive {
+            doublings = doublings.saturating_add(1);
+            k = if k * 2 <= input.cfg.k_max { k * 2 } else { max_nb };
+            continue;
         }
 
         let attempt = if use_slow {

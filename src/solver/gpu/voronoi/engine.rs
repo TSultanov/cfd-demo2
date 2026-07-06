@@ -451,6 +451,22 @@ impl GpuVoronoiEngine {
         self.tol.determinant_eps
     }
 
+    /// The uploaded t^{n+1} segment table (`[ax, ay, bx, by]` f32 per global
+    /// SegId, one degenerate pad entry when the spec has no loops) — bound by
+    /// the swept-flux pass so polyline BOUNDARY-segment ring edges resolve to
+    /// their clip line. Panics before the first `upload_case`.
+    pub(super) fn segments_buffer(&self) -> &wgpu::Buffer {
+        self.b_segments
+            .as_ref()
+            .expect("segments_buffer: no case uploaded")
+    }
+
+    /// Number of REAL segments in the uploaded spec (0 for a rect-only case —
+    /// the buffer then holds only the never-referenced pad entry).
+    pub(super) fn num_segments(&self) -> usize {
+        self.boundary.num_segments()
+    }
+
     /// Interior-only convenience wrapper over `upload_case` (no boundary
     /// loops, every seed `Interior`).
     pub fn upload_seeds(

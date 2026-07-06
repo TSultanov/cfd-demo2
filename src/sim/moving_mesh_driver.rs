@@ -205,6 +205,38 @@ impl BoundaryMotionSpec {
     }
 }
 
+/// Where a moving step's mesh reconstruction ran (per-step telemetry; the
+/// GUI surfaces it verbatim so the regen mode is obvious to the user).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegenBackend {
+    /// CPU `assemble_meshless_from_seeds` + CPU swept-quad path, at compute
+    /// time every step.
+    Cpu,
+    /// Fully on-device ([`crate::solver::gpu::voronoi::GpuMeshRegen`]):
+    /// Voronoi + topology + geometry + ALE swept fluxes on the GPU.
+    GpuOnDevice,
+    /// The device regen ran but could not certify this step (reason
+    /// attached: a Voronoi flip, a sub-tolerance sliver, or an unresolved
+    /// cell); the step re-ran on the CPU path. The next step retries the
+    /// device — fallback is per-step, not sticky.
+    GpuFallback(&'static str),
+    /// Skip-regen passthrough (`set_regen_each_step(false)`) — no
+    /// reconstruction happened.
+    Skipped,
+}
+
+impl RegenBackend {
+    /// Short human-readable label for status lines.
+    pub fn label(&self) -> &'static str {
+        match self {
+            RegenBackend::Cpu => "CPU (per step)",
+            RegenBackend::GpuOnDevice => "GPU on-device",
+            RegenBackend::GpuFallback(_) => "GPU→CPU fallback",
+            RegenBackend::Skipped => "off",
+        }
+    }
+}
+
 /// Per-step moving-mesh telemetry (always-on diagnostics the gates and the UI
 /// observe).
 #[derive(Clone, Copy, Debug)]
@@ -260,6 +292,30 @@ pub struct MovingMeshStats {
     /// stepped with (they are equal by the dt handshake). f64-widened f32 —
     /// exactly `params.requested_dt as f64`.
     pub dt: f64,
+    /// Where THIS step's mesh reconstruction ran (GPU on-device, CPU, a
+    /// per-step GPU→CPU fallback, or skipped).
+    pub regen_backend: RegenBackend,
+}
+
+/// One step's shared pre-regen plan ([`MovingMeshDriver::plan_step`]): the
+/// pinned dt, the advected seed set, the t^{n+1} boundary spec, the quality-
+/// escalation flag, and the plan wall time — identical inputs for the CPU and
+/// device regen paths, computed exactly once per step.
+struct StepPlan {
+    dt: f64,
+    new_time: f64,
+    new_seeds: Vec<Point2<f64>>,
+    step_spec: BoundarySpec,
+    escalated: bool,
+    plan_ms: f32,
+}
+
+/// Outcome of a device-regen attempt: the completed step, or a per-step
+/// fallback request the caller routes to the CPU path (reason surfaced in
+/// [`MovingMeshStats::regen_backend`]).
+enum DeviceStep {
+    Done((StepOutcome, MovingMeshStats)),
+    Fallback(&'static str),
 }
 
 /// The moving-mesh loop driver. Owns the authoritative seed set, the current
@@ -358,24 +414,27 @@ pub struct MovingMeshDriver {
     /// Last committed FlowCoupled quality-escalation flag (telemetry).
     last_escalated: bool,
     /// GPU device/queue clones, retained so the opt-in on-device regen path can
-    /// build its own [`GpuMeshRegen`]. `None` on the CPU backend.
+    /// build its own [`GpuMeshRegen`]. `None` when the caller supplied no GPU
+    /// handles. NOTE: presence does NOT imply the GPU solver backend — the GUI
+    /// passes its RENDER device even for CPU-solver runs (`CFD2_BACKEND=cpu`),
+    /// so device-path eligibility additionally checks
+    /// `!driver.solver().is_cpu()` (see [`Self::gpu_regen_active`]).
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
     /// Opt-in: reconstruct the mesh ENTIRELY on the GPU each step
     /// ([`Self::set_gpu_regen`]) instead of the CPU `assemble_meshless_from_seeds`
     /// + CPU swept path. Default `false` (the shipped CPU path is byte-identical).
-    /// Requires the GPU backend; a flip or a sub-tolerance sliver falls back to
-    /// the CPU path for that step (the device swept assumes a persistent adjacency).
+    /// Requires the GPU solver backend. A step the device cannot certify (a
+    /// Voronoi flip — the device swept assumes a persistent adjacency —, a
+    /// sub-tolerance sliver, or an unresolved cell) re-runs on the CPU path for
+    /// that step and retries the device on the next
+    /// ([`RegenBackend::GpuFallback`] in the step stats).
     gpu_regen: bool,
     /// Lazily-built on-device regen bundle (engine + passes), created on the
     /// first `gpu_regen` step.
     gpu_regen_state: Option<crate::solver::gpu::voronoi::GpuMeshRegen>,
     /// Lazily-built GPU context (reusing `device`/`queue`) for the regen passes.
     gpu_ctx: Option<crate::solver::gpu::context::GpuContext>,
-    /// Interior-face adjacency `(min,max)` of the last committed mesh — the
-    /// on-device flip discriminator (a changed set ⇒ a Voronoi flip ⇒ CPU
-    /// fallback). `None` until the first step.
-    prev_adjacency: Option<std::collections::HashSet<(usize, usize)>>,
 }
 
 impl MovingMeshDriver {
@@ -492,22 +551,28 @@ impl MovingMeshDriver {
             gpu_regen: false,
             gpu_regen_state: None,
             gpu_ctx: None,
-            prev_adjacency: None,
         })
     }
 
     /// Opt in to reconstructing the mesh ENTIRELY on the GPU each step (Voronoi
     /// diagram + topology + geometry + ALE swept fluxes) instead of the CPU
-    /// `assemble_meshless_from_seeds` + CPU swept path. Requires the GPU backend
-    /// (no-op error at step time on CPU). A Voronoi flip or a sub-tolerance
-    /// sliver falls back to the CPU path for that step. Default `false`.
+    /// `assemble_meshless_from_seeds` + CPU swept path. Requires the GPU solver
+    /// backend AND a device handle — otherwise the flag is inert and every step
+    /// runs the CPU path (see [`Self::gpu_regen_active`]). A step the device
+    /// cannot certify (Voronoi flip / sub-tolerance sliver / unresolved cell)
+    /// re-runs on the CPU path for that step and retries the device on the
+    /// next; the per-step [`MovingMeshStats::regen_backend`] reports which path
+    /// ran. Default `false`.
     pub fn set_gpu_regen(&mut self, on: bool) {
         self.gpu_regen = on;
     }
 
-    /// Whether the on-device regen path is enabled AND available (GPU backend).
+    /// Whether the on-device regen path is enabled AND available: the flag is
+    /// set, a device handle exists, and the wrapped solver actually runs on the
+    /// GPU (the GUI passes its RENDER device even for `CFD2_BACKEND=cpu` runs,
+    /// so the device handle alone is not a backend discriminator).
     pub fn gpu_regen_active(&self) -> bool {
-        self.gpu_regen && self.device.is_some()
+        self.gpu_regen && self.device.is_some() && !self.driver.solver().is_cpu()
     }
 
     /// Set the mesh-motion CFL cap factor (default [`DEFAULT_MESH_CFL`]).
@@ -654,14 +719,6 @@ impl MovingMeshDriver {
             );
         }
 
-        // Opt-in on-device regen path: reconstruct the mesh ENTIRELY on the GPU
-        // (Voronoi + topology + geometry + swept fluxes) instead of the CPU
-        // assemble + CPU swept below. Only when enabled AND on the GPU backend AND
-        // regenerating each step; it falls back to the CPU path on a flip/sliver.
-        if self.gpu_regen_active() && self.regen_each_step {
-            return self.step_device(readback);
-        }
-
         // Skip-regen variant: pin the fixed dt and step. No seed motion, no
         // regen, no ALE refresh — a pure passthrough, byte-identical to a static
         // ALE run driven by `SolverDriver::step`.
@@ -686,38 +743,122 @@ impl MovingMeshDriver {
                 flipped_cells: 0,
                 flip_defect: 0.0,
                 dt,
+                regen_backend: RegenBackend::Skipped,
             };
             return Ok((outcome, stats));
         }
 
-        // 1-2. Motion: pin the fixed dt (mesh-motion CFL capped) BEFORE the
-        //      swept fluxes are closed — so the flux dt == the step dt exactly —
-        //      and advect the interior seeds (boundary seeds fixed).
+        // Shared step plan: pinned dt, advected seeds, moved boundary spec,
+        // quality escalation, recorded wall velocity — identical for the CPU
+        // and device paths.
+        let plan = self.plan_step()?;
+
+        // Opt-in on-device regen: build the mesh + swept fluxes ENTIRELY on
+        // the GPU. A step the device cannot certify (Voronoi flip /
+        // sub-tolerance sliver / unresolved cell) falls back to the CPU path
+        // below FOR THIS STEP — the device is retried next step — with the
+        // reason surfaced in `MovingMeshStats::regen_backend`.
+        let mut fallback: Option<&'static str> = None;
+        if self.gpu_regen_active() {
+            match self.try_step_device(&plan, readback)? {
+                DeviceStep::Done(out) => return Ok(out),
+                DeviceStep::Fallback(reason) => fallback = Some(reason),
+            }
+        }
+
+        self.step_cpu_planned(plan, readback, fallback)
+    }
+
+    /// The shared pre-regen work of one moving step (both paths): pin the
+    /// fixed dt (mesh-motion CFL capped) BEFORE the swept fluxes are closed —
+    /// so the flux dt == the step dt exactly — advect the interior seeds, move
+    /// the boundary-bound seeds RIGIDLY with the moving boundary at t^{n+1},
+    /// build the t^{n+1} boundary spec, run the FlowCoupled quality
+    /// escalation, and record the per-seed material velocity `w_wall` while
+    /// `self.seeds` still holds the t^n set (the `MovingWall` Dirichlet BC
+    /// applied later feeds THIS step's solve a wall velocity consistent with
+    /// the mesh motion swept during [t^n, t^{n+1}]).
+    fn plan_step(&mut self) -> Result<StepPlan, String> {
         let plan_start = Instant::now();
         let (dt, mut new_seeds) = self.plan_seed_motion()?;
         let new_time = self.time + dt;
-        // Move the boundary-bound seeds RIGIDLY with the moving boundary at
-        // t^{n+1} (they keep their parametric position on the moving wall);
-        // interior + static-boundary seeds untouched. No-op under `Static`.
         self.apply_boundary_motion(new_time, &mut new_seeds);
         // The boundary spec at t^{n+1}: the moved loops the regen clips against
         // (an identity clone of `self.spec` under Static ⇒ byte-identical regen).
         let step_spec = self.moved_spec(new_time);
-
-        // 2b. FlowCoupled quality escalation: if the advected seed set would
-        //     regenerate a too-skewed mesh, run a gentle Lloyd regularization
-        //     pass to pull it back toward CVT before the authoritative regen.
-        //     A no-op for Frozen/Prescribed and for well-shaped sets.
         let (new_seeds, escalated) = self.maybe_quality_escalate(&step_spec, new_seeds);
         let plan_ms = ms_since(plan_start);
-
-        // Record the per-seed material velocity w_wall = (new − old)/dt for THIS
-        // step's wall motion, while `self.seeds` still holds the t^n set.
-        // Computed before the solve so the `MovingWall` Dirichlet BC applied
-        // below feeds this step's solve the wall velocity consistent with the
-        // mesh motion swept during [t^n,t^{n+1}]. Zero for interior +
-        // static-boundary seeds (no-op under `Static`).
         self.record_wall_velocity(&new_seeds, dt);
+        Ok(StepPlan {
+            dt,
+            new_time,
+            new_seeds,
+            step_spec,
+            escalated,
+            plan_ms,
+        })
+    }
+
+    /// The CPU regen + swept step body, from an already-computed [`StepPlan`].
+    /// `gpu_fallback` carries the device-rejection reason when this step is a
+    /// per-step GPU→CPU fallback (stats-only — the physics is identical).
+    fn step_cpu_planned(
+        &mut self,
+        plan: StepPlan,
+        readback: bool,
+        gpu_fallback: Option<&'static str>,
+    ) -> Result<(StepOutcome, MovingMeshStats), String> {
+        let StepPlan {
+            dt,
+            new_time,
+            new_seeds,
+            step_spec,
+            escalated,
+            plan_ms,
+        } = plan;
+
+        // A device-committed t^n mesh is vertex-less, but the CPU swept path
+        // aligns old vertices through the t^n mesh's `cell_vertices` rings.
+        // Re-assemble the t^n mesh from the authoritative seeds (deterministic).
+        //
+        // Volumes: the rebuilt mesh keeps its own CPU f64 volumes — the
+        // degeneracy-only flip closure hard-asserts the telescoping identity
+        // against `self.mesh.cell_vol`, and the CPU swept quads telescope to
+        // the CPU ring volumes, so patching device volumes in here would blow
+        // that assert by the f64-vs-f32 volume gap (~1e-7 rel). The DEVICE
+        // volumes (what the solver's volume history actually holds) are
+        // stashed separately and used as the closure target only on a GENUINE
+        // flip, where the identity check is relaxed and the forest closure is
+        // the sole guarantee — there the GCL then closes EXACTLY against the
+        // solver-held V^n. On non-flip / degeneracy-only fallback steps the
+        // solver-held V^n differs from the CPU closure target by the same
+        // O(f32) gap for ONE step — the device path's own accepted floor.
+        //
+        // The SOLVER also still holds the DEVICE face ordering, which the CPU
+        // assembler's deterministic emission does not reproduce — so this step
+        // must take the TOPOLOGY seam even when the CPU-side face arrays are
+        // unchanged between the rebuilt t^n mesh and the new one
+        // (`rebuilt_from_device` below); the geometry seam would reject the
+        // order mismatch.
+        let mut rebuilt_from_device = false;
+        let mut device_vols: Option<Vec<f64>> = None;
+        if self.mesh.vx.is_empty() && self.mesh.num_cells() > 0 {
+            rebuilt_from_device = true;
+            device_vols = Some(self.mesh.cell_vol.clone());
+            let spec_n = self.moved_spec(self.time);
+            let mut rebuilt = assemble_meshless_from_seeds(
+                &self.seeds,
+                &self.kinds,
+                &spec_n,
+                self.domain,
+                self.min_cell_size,
+            );
+            if let Some(retag) = self.boundary_retag {
+                retag(&mut rebuilt);
+            }
+            self.retag_moving_wall_faces(&mut rebuilt);
+            self.mesh = rebuilt;
+        }
 
         // 3. Regenerate the mesh from the advected seeds (deterministic; a
         //    frozen seed set reproduces `self.mesh` byte-for-byte).
@@ -813,12 +954,20 @@ impl MovingMeshDriver {
             // The actual t^n cell volumes (`self.mesh` is still the old mesh
             // here) are the closure target's old-volume — the born vertices'
             // aligned old positions cannot reconstruct the old polygon across a
-            // flip, so the ring-reconstructed old volume would be wrong.
+            // flip, so the ring-reconstructed old volume would be wrong. On a
+            // GENUINE flip after a device-committed step, target the DEVICE
+            // volumes the solver actually holds (the identity check is relaxed
+            // there, so the f64-vs-f32 gap cannot trip it) — the closure then
+            // repairs the GCL exactly against the solver's V^n.
+            let old_vols: &[f64] = match (&device_vols, genuine_flip) {
+                (Some(dv), true) => dv,
+                _ => &self.mesh.cell_vol,
+            };
             swept_mesh_fluxes_closed_flip(
                 &new_mesh,
                 &old_vx_aligned,
                 &old_vy_aligned,
-                &self.mesh.cell_vol,
+                old_vols,
                 &flip.born_face_mask,
                 hard_assert_exclude,
                 dt,
@@ -844,7 +993,7 @@ impl MovingMeshDriver {
         //    A genuine flip changes adjacency ⇒ `face_arrays_differ` is already
         //    true; the explicit `is_flip` guard makes the coupling defensive.
         let refresh_start = Instant::now();
-        if face_arrays_differ || is_flip || self.force_topology_seam {
+        if face_arrays_differ || is_flip || self.force_topology_seam || rebuilt_from_device {
             let report = self
                 .driver
                 .begin_ale_step_topology(&new_mesh, &swept.fluxes)?;
@@ -861,7 +1010,7 @@ impl MovingMeshDriver {
         // velocity. No-op unless moving_wall_bc is on.
         self.apply_moving_wall_velocity(&new_mesh)?;
         let refresh_ms = ms_since(refresh_start);
-        let topo_changed = face_arrays_differ || is_flip;
+        let topo_changed = face_arrays_differ || is_flip || rebuilt_from_device;
 
         // 6. Step.
         let outcome = self.driver.step(readback);
@@ -904,37 +1053,36 @@ impl MovingMeshDriver {
             flipped_cells: flip.flipped_cells,
             flip_defect: if is_flip { swept.max_identity_err_rel } else { 0.0 },
             dt,
+            regen_backend: gpu_fallback
+                .map(RegenBackend::GpuFallback)
+                .unwrap_or(RegenBackend::Cpu),
         };
         Ok((outcome, stats))
     }
 
-    /// The opt-in ON-DEVICE regen step: the mesh is rebuilt ENTIRELY on the GPU
-    /// (Voronoi + topology + geometry + ALE swept fluxes) via [`GpuMeshRegen`] —
-    /// no CPU `assemble_meshless_from_seeds`, no CPU swept path. The motion
-    /// planning (dt pin, seed advection, quality escalation, wall velocity) and
-    /// the solver-driving seam (`begin_ale_step_topology` + BC reapply + step) are
-    /// the SAME as [`Self::step`]; only the mesh source differs.
+    /// The opt-in ON-DEVICE regen attempt: the mesh is rebuilt ENTIRELY on the
+    /// GPU (Voronoi + topology + geometry + ALE swept fluxes) via
+    /// [`GpuMeshRegen`] — no CPU `assemble_meshless_from_seeds`, no CPU swept
+    /// path. The motion planning is shared ([`StepPlan`]) and the
+    /// solver-driving seam (`begin_ale_step_topology` + BC reapply + step) is
+    /// the SAME as the CPU path; only the mesh source differs.
     ///
     /// Non-flip only: the device swept assumes a persistent adjacency, so a
-    /// Voronoi flip (a changed interior-face adjacency set) or a sub-tolerance
-    /// sliver (`needs_cpu`) returns an error — the caller disables `gpu_regen`
-    /// for that motion (a graceful CPU fallback is a follow-on).
-    fn step_device(
+    /// Voronoi flip (interior adjacency changed vs the committed t^n mesh —
+    /// derived FRESH from `self.mesh` every attempt, so the check holds on the
+    /// first device step and across CPU-path interludes), a sub-tolerance
+    /// sliver, or a resolve-unresolved cell (`needs_cpu`) returns
+    /// [`DeviceStep::Fallback`] and the caller re-runs the step on the CPU
+    /// path (which handles flips natively).
+    fn try_step_device(
         &mut self,
+        plan: &StepPlan,
         readback: bool,
-    ) -> Result<(StepOutcome, MovingMeshStats), String> {
+    ) -> Result<DeviceStep, String> {
         use std::collections::HashSet;
 
-        // 1-2. Motion (identical to `step`): pin dt, advect interior seeds, move
-        //      the boundary-bound seeds, quality-escalate, record wall velocity.
-        let plan_start = Instant::now();
-        let (dt, mut new_seeds) = self.plan_seed_motion()?;
-        let new_time = self.time + dt;
-        self.apply_boundary_motion(new_time, &mut new_seeds);
-        let step_spec = self.moved_spec(new_time);
-        let (new_seeds, escalated) = self.maybe_quality_escalate(&step_spec, new_seeds);
-        let plan_ms = ms_since(plan_start);
-        self.record_wall_velocity(&new_seeds, dt);
+        let dt = plan.dt;
+        let new_seeds = &plan.new_seeds;
 
         // Lazy-init the GPU context (reusing the solver device/queue) + the regen
         // bundle (engine + passes) at the fixed seed count.
@@ -955,15 +1103,26 @@ impl MovingMeshDriver {
             ));
         }
 
-        // 3-4. Regenerate the solver mesh + ALE fluxes ON DEVICE.
+        // 3-4. Regenerate the solver mesh + ALE fluxes ON DEVICE, clipping
+        //      against the t^{n+1} boundary spec (an identity clone of
+        //      `self.spec` under Static boundary motion).
         let regen_start = Instant::now();
         let old_f32: Vec<f32> = self.seeds.iter().flat_map(|p| [p.x as f32, p.y as f32]).collect();
         let new_f32: Vec<f32> = new_seeds.iter().flat_map(|p| [p.x as f32, p.y as f32]).collect();
         let dt_f = self.driver.params().requested_dt;
+        let old_spec = self.moved_spec(self.time);
         let result = {
             let ctx = self.gpu_ctx.as_ref().unwrap();
             let regen = self.gpu_regen_state.as_mut().unwrap();
-            regen.regen(ctx, &new_f32, &old_f32, &self.kinds, &self.spec, dt_f)
+            regen.regen(
+                ctx,
+                &new_f32,
+                &old_f32,
+                &self.kinds,
+                &plan.step_spec,
+                &old_spec,
+                dt_f,
+            )
         };
         let mut new_mesh = result.mesh;
         let regen_ms = ms_since(regen_start);
@@ -975,31 +1134,41 @@ impl MovingMeshDriver {
                 new_mesh.num_cells()
             ));
         }
-        // Flip / sliver ⇒ the device swept is invalid; refuse (no CPU fallback yet).
+        // Sliver / unresolved cell ⇒ the device build is not certified for
+        // this step; the CPU path takes it.
         if result.needs_cpu > 0 {
-            return Err(format!(
-                "gpu_regen: {} face(s) hit the sub-tolerance sliver / unported-boundary path at \
-                 step {} — disable gpu_regen for this mesh (CPU fallback is a follow-on)",
-                result.needs_cpu, self.step_index
-            ));
+            return Ok(DeviceStep::Fallback("sliver/unresolved cell"));
         }
-        let adjacency: HashSet<(usize, usize)> = (0..new_mesh.num_faces())
-            .filter_map(|f| {
-                new_mesh.face_neighbor[f].map(|nb| {
-                    let o = new_mesh.face_owner[f];
-                    (o.min(nb), o.max(nb))
-                })
-            })
-            .collect();
-        if let Some(prev) = &self.prev_adjacency {
-            if *prev != adjacency {
-                return Err(format!(
-                    "gpu_regen: Voronoi flip at step {} (interior adjacency changed) — the device \
-                     swept assumes a persistent adjacency; disable gpu_regen for this motion \
-                     (CPU fallback is a follow-on)",
-                    self.step_index
-                ));
+        // Topology discriminator vs the COMMITTED t^n mesh (derived fresh —
+        // valid on the first device step and across CPU-path interludes; both
+        // mesh sources carry owner/neighbor). Two components:
+        // * interior adjacency set — a changed set is a Voronoi flip;
+        // * per-cell OPEN-face count — a boundary (wall/box) face birth/death
+        //   changes NO interior pair, yet the device swept would evaluate the
+        //   t^n ring with a bracket that did not exist at t^n (wrong old
+        //   vertex, silent GCL defect). Segment IDS need no comparison:
+        //   boundary seeds move rigidly with their loop, so a face's segment
+        //   assignment persists whenever the loop moves, and a static loop
+        //   makes old and new segment tables identical.
+        // Either change ⇒ the device swept quads are invalid ⇒ the CPU path
+        // (which handles flips natively via the flip-aware closure) takes the
+        // step.
+        let topo_signature = |mesh: &crate::solver::mesh::Mesh| -> (HashSet<(usize, usize)>, Vec<u32>) {
+            let mut open = vec![0u32; mesh.num_cells()];
+            let mut adj = HashSet::new();
+            for f in 0..mesh.num_faces() {
+                match mesh.face_neighbor[f] {
+                    Some(nb) => {
+                        let o = mesh.face_owner[f];
+                        adj.insert((o.min(nb), o.max(nb)));
+                    }
+                    None => open[mesh.face_owner[f]] += 1,
+                }
             }
+            (adj, open)
+        };
+        if topo_signature(&self.mesh) != topo_signature(&new_mesh) {
+            return Ok(DeviceStep::Fallback("Voronoi flip"));
         }
 
         // Re-stamp boundary tags (the topology seam rebuilds bc tables from them).
@@ -1039,38 +1208,42 @@ impl MovingMeshDriver {
 
         let n_cells = new_mesh.num_cells();
         let n_faces = new_mesh.num_faces();
+        // Skewness is vertex-free (cell centres + face normals only), so the
+        // vertex-less device mesh reports it like the CPU path does.
+        let max_skew = new_mesh.calculate_max_skewness();
         // Commit. The device mesh is vertex-less (`prev_vx/vy` stay empty — the
-        // device swept needs no old vertices; a future CPU fallback re-assembles).
+        // device swept needs no old vertices; a CPU-fallback step re-assembles
+        // the t^n mesh from the authoritative seeds).
         self.mesh = new_mesh;
         self.prev_vx.clear();
         self.prev_vy.clear();
-        self.seeds = new_seeds;
-        self.time = new_time;
+        self.seeds = plan.new_seeds.clone();
+        self.time = plan.new_time;
         self.step_index += 1;
-        self.last_escalated = escalated;
-        let first_step = self.prev_adjacency.is_none();
-        self.prev_adjacency = Some(adjacency);
+        self.last_escalated = plan.escalated;
 
         let stats = MovingMeshStats {
-            plan_ms,
+            plan_ms: plan.plan_ms,
             regen_ms,
             swept_ms: 0.0,
             refresh_ms,
             scl_defect,
             identity_err: scl_defect,
-            // Skewness needs vertices (absent on the device mesh); reported 0.
-            max_skew: 0.0,
+            max_skew,
             n_cells,
             n_faces,
-            topo_changed: first_step,
+            // The device path always drives the topology seam (its face order
+            // changes every regen).
+            topo_changed: true,
             flipped: false,
             born_faces: 0,
             died_faces: 0,
             flipped_cells: 0,
             flip_defect: 0.0,
             dt,
+            regen_backend: RegenBackend::GpuOnDevice,
         };
-        Ok((outcome, stats))
+        Ok(DeviceStep::Done((outcome, stats)))
     }
 
     /// The seed positions at absolute time `t`, evaluated from the t=0 labels

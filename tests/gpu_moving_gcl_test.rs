@@ -160,7 +160,8 @@ impl DeviceRegen {
         let faces = self.emit.emit(ctx, &self.cache, &self.engine);
         let csr = self.csr.build_csr(ctx, &self.cache, &self.engine);
         let cells = self.cellgeom.build(ctx, &self.cache, &self.engine);
-        let sw = self.swept.compute(ctx, &self.cache, &self.engine, old_seeds);
+        // Static boundary: the t^n spec == the uploaded t^{n+1} spec.
+        let sw = self.swept.compute(ctx, &self.cache, &self.engine, old_seeds, &self.spec);
         let needs_cpu: usize = sw.needs_cpu.iter().filter(|&&x| x != 0).count();
 
         let mut mesh = assemble_solver_mesh(&faces, &csr, &cells, &sw).expect("assemble device mesh");
@@ -447,4 +448,151 @@ fn device_regen_freestream_gcl() {
     assert!(max_du < 1e-4, "free-stream U drift {max_du:.3e} — device regen not GCL-consistent");
     assert!(max_dp < 1e-3, "free-stream p drift {max_dp:.3e}");
     assert!(max_drho < 1e-4, "free-stream rho drift {max_drho:.3e}");
+}
+
+/// POLYLINE-boundary production path (the UI geometries): a channel with an
+/// embedded obstacle loop — its boundary faces are polyline SEGMENTS, not box
+/// sides — driven by `MovingMeshDriver` with `set_gpu_regen(true)`. Gates:
+/// (1) every step succeeds (pre-port, the device swept flagged every segment
+/// face `needs_cpu` and the driver errored out); (2) the device path actually
+/// runs (`RegenBackend::GpuOnDevice` steps observed — a per-step fallback that
+/// silently ate every step would pass (1) while running nothing on device);
+/// (3) the on-device SCL defect stays at the f32 floor on every device step;
+/// (4) any fallback step (Voronoi flip near the obstacle ring) also succeeds —
+/// exercising the vertex-less t^n re-assembly inside the CPU fallback.
+#[test]
+fn movingmesh_driver_gpu_regen_obstacle_polyline() {
+    use cfd2::meshgen::meshless::generate_cvt_mesh_with_seeds;
+    use cfd2::meshgen::{ChannelWithObstacle, LloydConfig};
+    use cfd2::sim::{MeshMotionSpec, MovingMeshDriver, RegenBackend};
+    let Some(ctx) = gpu_context() else { return };
+    let geo = ChannelWithObstacle {
+        length: LX,
+        height: LY,
+        obstacle_center: Point2::new(0.5 * LX, 0.5 * LY),
+        obstacle_radius: 0.18,
+    };
+    let domain = Vector2::new(LX, LY);
+    let mut cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.0, domain, &LloydConfig::default());
+    tag_channel(&mut cvt.mesh); // box sides; obstacle faces keep the engine's Wall tag
+    let n = cvt.mesh.num_cells();
+    let params = test_params();
+    let mut moving = pollster::block_on(MovingMeshDriver::build_with_model(
+        cvt,
+        allmach_pressure_ale_model().expect("model"),
+        &params,
+        MeshMotionSpec::Prescribed(swirl),
+        &vec![(U0.0 as f64, U0.1 as f64); n],
+        &vec![0.0; n],
+        Some(ctx.device.clone()),
+        Some(ctx.queue.clone()),
+    ))
+    .expect("gpu moving driver (obstacle)");
+    moving.set_gpu_regen(true);
+    assert!(moving.gpu_regen_active(), "gpu_regen should be active on the GPU backend");
+    moving.set_boundary_retag(Some(tag_channel));
+    moving.driver_mut().apply_params(&params);
+
+    let (mut gpu_steps, mut fallback_steps) = (0usize, 0usize);
+    let mut max_scl_gpu = 0.0f64;
+    for step in 0..STEPS {
+        let (outcome, stats) = moving
+            .step(false)
+            .unwrap_or_else(|e| panic!("obstacle gpu_regen step {step}: {e}"));
+        assert!(outcome.diverged.is_none(), "step {step} diverged");
+        match stats.regen_backend {
+            RegenBackend::GpuOnDevice => {
+                gpu_steps += 1;
+                max_scl_gpu = max_scl_gpu.max(stats.scl_defect);
+                assert!(
+                    stats.scl_defect < 5e-6,
+                    "step {step}: on-device SCL defect {:.3e} above the f32 floor",
+                    stats.scl_defect
+                );
+            }
+            RegenBackend::GpuFallback(reason) => {
+                fallback_steps += 1;
+                eprintln!("[gpu-regen-obstacle]   step {step}: CPU fallback ({reason})");
+            }
+            other => panic!("step {step}: unexpected regen backend {other:?}"),
+        }
+    }
+    println!(
+        "[gpu-regen-obstacle] polyline-boundary driver run: {STEPS} steps (n={n}), \
+         {gpu_steps} on-device / {fallback_steps} CPU-fallback, \
+         max on-device SCL defect = {max_scl_gpu:.3e}"
+    );
+    assert!(
+        gpu_steps > 0,
+        "no step ran on device — the polyline swept port is not being exercised"
+    );
+    assert!(
+        gpu_steps >= STEPS / 2,
+        "only {gpu_steps}/{STEPS} steps ran on device — the gentle swirl should not \
+         flip the diagram most steps"
+    );
+}
+
+/// Deterministic vertex-less-fallback gate: one on-device step commits a
+/// VERTEX-LESS mesh; the next step is forced onto the CPU path (toggle
+/// `set_gpu_regen(false)`), which must re-assemble the t^n mesh from the
+/// authoritative seeds (keeping the solver-held volumes) before the swept
+/// alignment — the exact path a mid-run flip fallback takes after a device
+/// step. Pre-fix, the CPU path indexed the empty `cell_vertex_offsets` /
+/// aligned zero vertices and blew the telescoping identity.
+#[test]
+fn movingmesh_driver_cpu_step_after_device_step() {
+    use cfd2::meshgen::meshless::generate_cvt_mesh_with_seeds;
+    use cfd2::meshgen::LloydConfig;
+    use cfd2::sim::{MeshMotionSpec, MovingMeshDriver, RegenBackend};
+    let Some(ctx) = gpu_context() else { return };
+    let geo = RectangularChannel { length: LX, height: LY };
+    let domain = Vector2::new(LX, LY);
+    let mut cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.0, domain, &LloydConfig::default());
+    tag_channel(&mut cvt.mesh);
+    let n = cvt.mesh.num_cells();
+    let params = test_params();
+    let mut moving = pollster::block_on(MovingMeshDriver::build_with_model(
+        cvt,
+        allmach_pressure_ale_model().expect("model"),
+        &params,
+        MeshMotionSpec::Prescribed(swirl),
+        &vec![(U0.0 as f64, U0.1 as f64); n],
+        &vec![0.0; n],
+        Some(ctx.device.clone()),
+        Some(ctx.queue.clone()),
+    ))
+    .expect("gpu moving driver");
+    moving.set_boundary_retag(Some(tag_channel));
+    moving.driver_mut().apply_params(&params);
+
+    // Step 1 on device: commits a vertex-less mesh.
+    moving.set_gpu_regen(true);
+    let (_, s1) = moving.step(false).expect("device step");
+    assert_eq!(s1.regen_backend, RegenBackend::GpuOnDevice, "step 1 should run on device");
+    assert!(moving.mesh().vx.is_empty(), "device mesh should be vertex-less");
+
+    // Step 2 on CPU: must rebuild the t^n mesh internally (no panic, identity
+    // intact, finite stats) and re-commit a vertexed mesh.
+    moving.set_gpu_regen(false);
+    let (outcome, s2) = moving.step(false).expect("cpu step after device step");
+    assert!(outcome.diverged.is_none(), "cpu step diverged");
+    assert_eq!(s2.regen_backend, RegenBackend::Cpu);
+    assert!(!moving.mesh().vx.is_empty(), "cpu step should commit a vertexed mesh");
+    assert!(
+        s2.identity_err < 1e-8 || s2.flipped,
+        "telescoping identity {:.3e} blown after the vertex-less rebuild",
+        s2.identity_err
+    );
+    assert!(s2.scl_defect < 5e-6, "post-rebuild SCL defect {:.3e}", s2.scl_defect);
+
+    // Step 3 back on device: the flip discriminator must compare against the
+    // CPU-committed mesh (derived fresh), not a stale cache.
+    moving.set_gpu_regen(true);
+    let (_, s3) = moving.step(false).expect("device step after cpu step");
+    assert!(
+        matches!(s3.regen_backend, RegenBackend::GpuOnDevice | RegenBackend::GpuFallback(_)),
+        "step 3 should attempt the device path (got {:?})",
+        s3.regen_backend
+    );
 }

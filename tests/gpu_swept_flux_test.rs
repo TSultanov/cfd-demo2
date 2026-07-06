@@ -109,7 +109,8 @@ fn run_case(name: &str, geo: &(impl Geometry + Sync), domain: Vector2<f64>, hmin
     let faces = emitter.emit(&ctx, &cache, &engine);
 
     let swept = SweptFluxGeometry::new(&ctx.device);
-    let sw = swept.compute(&ctx, &cache, &engine, &old_f32);
+    // Static boundary: the t^n spec == the uploaded t^{n+1} spec.
+    let sw = swept.compute(&ctx, &cache, &engine, &old_f32, &spec);
     assert_eq!(sw.num_faces, faces.num_faces, "[{name}] swept/emit face-count mismatch");
 
     // No face may need the CPU fallback on a rectangular (box-only) domain.

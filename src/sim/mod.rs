@@ -12,6 +12,8 @@
 //! `ui`-gated `Fluid`), so it is usable from `meshgen`-only tests.
 
 mod driver;
+#[cfg(feature = "cpu")]
+mod mass_projection;
 mod moving_mesh_driver;
 mod outcome;
 mod params;

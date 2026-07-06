@@ -161,50 +161,7 @@ impl GpuUnifiedSolver {
     ) -> Result<Self, String> {
         #[cfg(feature = "cpu")]
         if let Some(cpu_cfg) = cpu_backend_from_env() {
-            // Honor config.stepping like the GPU path: the GUI selects Implicit
-            // for compressible and Coupled for the saddle-point models, and the
-            // CPU backend must match to reproduce the GPU's outer-loop behavior.
-            let cpu = crate::solver::cpu::CpuSolver::with_stepping(
-                mesh,
-                model.clone(),
-                config.advection_scheme,
-                config.time_scheme,
-                config.stepping,
-                cpu_cfg,
-            )?;
-            // Optional GUI render mirror (the GUI supplies device+queue).
-            let cpu_render = match (device.as_ref(), queue) {
-                (Some(dev), Some(q)) => {
-                    let bytes =
-                        cpu.num_cells() as u64 * model.state_layout.stride() as u64 * 4;
-                    let buffer = dev.create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("CpuUnifiedSolver:state_mirror"),
-                        size: bytes.max(4),
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_SRC
-                            | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    });
-                    Some(CpuRender {
-                        queue: q,
-                        buffer,
-                        capacity: bytes,
-                    })
-                }
-                _ => None,
-            };
-            let solver = Self {
-                model,
-                backend: SolverBackend::Cpu(Box::new(cpu)),
-                config,
-                // SRD is GPU-only; the CPU backend never builds or applies it.
-                srd: None,
-                srd_enabled: false,
-                ale_step_armed: false,
-                cpu_render,
-            };
-            solver.sync_cpu_render();
-            return Ok(solver);
+            return Self::build_cpu_backend(mesh, model, config, device, queue, cpu_cfg);
         }
 
         // Model-owned preconditioners (e.g. GenericCoupled+Schur) must remain authoritative.
@@ -260,6 +217,82 @@ impl GpuUnifiedSolver {
         }
 
         Ok(solver)
+    }
+
+    /// Build a CPU-backed solver unconditionally, ignoring the `CFD2_BACKEND`
+    /// env gate. The seam for host-side companions of a GPU run — e.g. the
+    /// mass-row transfer projection at a mesh-adaptation resize, which needs
+    /// `debug_assemble` (CPU-only) against the same model/params — without
+    /// flipping the process-global env var.
+    #[cfg(feature = "cpu")]
+    pub fn new_forced_cpu(
+        mesh: &Mesh,
+        model: ModelSpec,
+        config: SolverConfig,
+    ) -> Result<Self, String> {
+        Self::build_cpu_backend(mesh, model, config, None, None, cpu_config_from_env())
+    }
+
+    #[cfg(feature = "cpu")]
+    fn build_cpu_backend(
+        mesh: &Mesh,
+        model: ModelSpec,
+        config: SolverConfig,
+        device: Option<wgpu::Device>,
+        queue: Option<wgpu::Queue>,
+        cpu_cfg: crate::solver::cpu::CpuBackendConfig,
+    ) -> Result<Self, String> {
+        // Honor config.stepping like the GPU path: the GUI selects Implicit
+        // for compressible and Coupled for the saddle-point models, and the
+        // CPU backend must match to reproduce the GPU's outer-loop behavior.
+        let cpu = crate::solver::cpu::CpuSolver::with_stepping(
+            mesh,
+            model.clone(),
+            config.advection_scheme,
+            config.time_scheme,
+            config.stepping,
+            cpu_cfg,
+        )?;
+        // Optional GUI render mirror (the GUI supplies device+queue).
+        let cpu_render = match (device.as_ref(), queue) {
+            (Some(dev), Some(q)) => {
+                let bytes = cpu.num_cells() as u64 * model.state_layout.stride() as u64 * 4;
+                let buffer = dev.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("CpuUnifiedSolver:state_mirror"),
+                    size: bytes.max(4),
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                Some(CpuRender {
+                    queue: q,
+                    buffer,
+                    capacity: bytes,
+                })
+            }
+            _ => None,
+        };
+        let solver = Self {
+            model,
+            backend: SolverBackend::Cpu(Box::new(cpu)),
+            config,
+            // SRD is GPU-only; the CPU backend never builds or applies it.
+            srd: None,
+            srd_enabled: false,
+            ale_step_armed: false,
+            cpu_render,
+        };
+        solver.sync_cpu_render();
+        Ok(solver)
+    }
+
+    /// Direct access to the CPU backend's solver, `None` on the GPU backend.
+    /// The seam for CPU-only diagnostics that need `&mut` (e.g.
+    /// `debug_assemble` for the mass-row transfer projection).
+    #[cfg(feature = "cpu")]
+    pub fn cpu_solver_mut(&mut self) -> Option<&mut crate::solver::cpu::CpuSolver> {
+        self.cpu_mut()
     }
 
     /// Apply the post-step SRD pass to the live velocity field, if built and
@@ -1314,13 +1347,21 @@ impl GpuUnifiedSolver {
 /// call sites are unchanged; the GUI sets these before constructing the solver.
 #[cfg(feature = "cpu")]
 fn cpu_backend_from_env() -> Option<crate::solver::cpu::CpuBackendConfig> {
-    use crate::solver::cpu::{CpuBackendConfig, CpuEngine};
     let on = std::env::var("CFD2_BACKEND")
         .map(|v| v.eq_ignore_ascii_case("cpu"))
         .unwrap_or(false);
     if !on {
         return None;
     }
+    Some(cpu_config_from_env())
+}
+
+/// The CPU-backend knobs from the env (engine/threads/simd/precision),
+/// WITHOUT the `CFD2_BACKEND=cpu` gate — for callers that force a CPU
+/// solver on a GPU run ([`GpuUnifiedSolver::new_forced_cpu`]).
+#[cfg(feature = "cpu")]
+fn cpu_config_from_env() -> crate::solver::cpu::CpuBackendConfig {
+    use crate::solver::cpu::{CpuBackendConfig, CpuEngine};
     let engine = match std::env::var("CFD2_CPU_ENGINE").as_deref() {
         Ok(v) if v.eq_ignore_ascii_case("transpiled") || v.eq_ignore_ascii_case("transpile") => {
             CpuEngine::Transpiled
@@ -1339,7 +1380,7 @@ fn cpu_backend_from_env() -> Option<crate::solver::cpu::CpuBackendConfig> {
         Ok("f32") | Ok("F32") => crate::solver::cpu::CpuPrecision::F32,
         _ => crate::solver::cpu::CpuPrecision::F64,
     };
-    Some(CpuBackendConfig { engine, threads, simd, precision })
+    CpuBackendConfig { engine, threads, simd, precision }
 }
 
 /// Route a runtime named-param onto the CPU backend. Params that don't apply to

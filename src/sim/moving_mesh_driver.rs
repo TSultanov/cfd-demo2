@@ -52,6 +52,7 @@ use crate::meshgen::meshless::{
 };
 use crate::meshgen::MeshgenTolerances;
 use crate::solver::gpu::enums::GpuBoundaryType;
+use crate::solver::GpuLowMachPrecondModel;
 use crate::solver::mesh::{
     align_old_vertices_by_seed_set, detect_flips, swept_mesh_fluxes_closed,
     swept_mesh_fluxes_closed_flip, BoundaryType, FlipReport, Mesh,
@@ -196,6 +197,15 @@ pub const ADAPT_MAX_WALL_SPLITS_PER_EVENT: usize = 8;
 /// wall-adjacent fluid unlocks (its own gate compares the segment to ITS
 /// realized spacing) and splits → the wall unlocks again.
 pub const ADAPT_WALL_FLUID_RATIO: f64 = 0.9;
+
+/// Sizing-hysteresis PERSISTENCE window, in STEPS: a cell acts on its
+/// split/kill threshold only after violating it for
+/// `ceil(ADAPT_PERSIST_STEPS / adapt_every_n)` consecutive adapt events —
+/// exactly 1 event at cadences ≥ 5 (the validated regime keeps single-event
+/// behavior), 5 events at cadence 1. Breaks the kill→neighbor-inflates→
+/// split-back ping-pong that saturated the per-event caps indefinitely under
+/// every-step adaptation, and rejects noise-driven one-event violations.
+pub const ADAPT_PERSIST_STEPS: usize = 5;
 
 /// Default AREPO distortion trigger `η`: the centroid steering ramps in once a
 /// cell's seed-to-centroid offset exceeds `η · R_i` and saturates at `1.1 η`.
@@ -462,6 +472,14 @@ pub struct MovingMeshStats {
     /// with the previous attempt's end-of-step velocity, until the planned
     /// seed set converged (or the cap).
     pub motion_iters: usize,
+    /// Mass-row transfer projection at THIS step's resize event: the
+    /// inf-norm of the solver's OWN continuity-row residual at the
+    /// transferred state, BEFORE the projected velocity correction.
+    /// `0.0` when no resize fired (or the projection is disabled).
+    pub transfer_defect_pre: f64,
+    /// ... and AFTER. `post == pre` means the correction was rejected by
+    /// the re-assembly verification (kept only when it measurably helps).
+    pub transfer_defect_post: f64,
 }
 
 /// One step's shared pre-regen plan ([`MovingMeshDriver::plan_step`]): the
@@ -554,6 +572,20 @@ pub struct MovingMeshDriver {
     /// indistinguishable by volume alone), which let the stagnation-side
     /// pileup against the obstacle run unchecked.
     adapt_targets: Option<Vec<f64>>,
+    /// Per-cell PERSISTENCE counters for the sizing hysteresis: `+k` = the
+    /// cell exceeded its SPLIT threshold on `k` consecutive adapt events,
+    /// `-k` = below its KILL threshold, `0` = in band. At fast cadences a
+    /// single-event trigger PING-PONGS — a kill inflates its absorbing
+    /// neighbors past the split threshold, which splits them back; at
+    /// cadence 1 the cycle saturated the per-event birth/kill caps
+    /// indefinitely (the salt-and-pepper size field + permanent recycle
+    /// storm of the visual probe). Acting only on violations persisting
+    /// ~[`ADAPT_PERSIST_STEPS`] steps breaks the cycle: fresh births and
+    /// gathered survivors re-earn their next event from 0, and noise-driven
+    /// violations flip sign before they accumulate. Cadences ≥ 5 keep
+    /// today's single-event behavior exactly. Lifecycle: gathered through
+    /// resizes (births at 0), permuted by reorder, reset on recycle.
+    adapt_persist: Vec<i16>,
     /// IMPLICIT mesh motion ([`Self::set_implicit_mesh_motion`]): max
     /// fixed-point iterations of {advect with the previous attempt's
     /// END-of-step velocity → regen → ALE solve} per step. `1` = the
@@ -566,6 +598,33 @@ pub struct MovingMeshDriver {
     /// source of the NEXT attempt's plan (implicit motion). `None` = read
     /// the solver's current (t^n) state, the explicit behaviour.
     motion_u_override: Option<Vec<(f64, f64)>>,
+    /// Mass-row transfer projection at resize events (default ON; env kill
+    /// switch `CFD2_ADAPT_PROJECTION=0`, setter
+    /// [`Self::set_transfer_projection`]): project the interpolated state
+    /// onto the solver's OWN continuity row before the first post-resize
+    /// step, so the split/merge mass defect is carried away by a least-norm
+    /// velocity correction instead of a phantom pressure dipole.
+    transfer_projection: bool,
+    /// The last resize event's projection measurement `(pre, post)` — the
+    /// inf-norm mass-row residual before/after. Surfaced per adapt step in
+    /// [`MovingMeshStats`].
+    last_transfer_projection: (f64, f64),
+    /// FLOW-adaptive dt for the moving path ([`Self::set_adaptive_dt`]):
+    /// `Some(target_cfl)` re-computes the [`Self::pin_dt`] BASE each step as
+    /// `cfl · min_h / (max(|U|, |U_in|) + c_eos)` — the same acoustic-aware
+    /// controller as the static `SolverDriver::step` adaptive branch — but
+    /// INSIDE the ALE dt handshake: the dt is chosen BEFORE the swept-flux
+    /// closure, so the GCL contract holds for any per-step dt sequence (the
+    /// BDF2 lowering carries variable-step coefficients `r = dt/dt_old`).
+    /// `params.adaptive_dt` stays hard-rejected on this path — the
+    /// solver-side controller re-scales dt AFTER the fluxes are closed,
+    /// which would silently violate the GCL.
+    adaptive_dt_cfl: Option<f64>,
+    /// The last COMMITTED step's pinned dt — the adaptive growth-limit
+    /// reference (dt may grow at most 1.2× per committed step; shrink is
+    /// unlimited). Attempts inside the implicit-motion loop re-pin from the
+    /// same reference, so retries stay deterministic.
+    last_pinned_dt: Option<f64>,
     /// Authoritative seed positions (f64), seed `i` == cell `i` — the CURRENT
     /// (t^n) realized set. Advanced each step by [`MeshMotionSpec`].
     seeds: Vec<Point2<f64>>,
@@ -829,9 +888,16 @@ impl MovingMeshDriver {
             adapt_budget_factor: ADAPT_BUDGET_MAX_FACTOR,
             adapt_thresholds: (1.0, 1.0, 1.0),
             adapt_targets: None,
+            adapt_persist: vec![0; n_seeds],
             motion_outer_iters: 1,
             motion_outer_tol: 0.02,
             motion_u_override: None,
+            transfer_projection: std::env::var("CFD2_ADAPT_PROJECTION")
+                .map(|v| v != "0")
+                .unwrap_or(true),
+            last_transfer_projection: (0.0, 0.0),
+            adaptive_dt_cfl: None,
+            last_pinned_dt: None,
             seeds0: seeds.clone(),
             time: 0.0,
             seeds,
@@ -1020,12 +1086,51 @@ impl MovingMeshDriver {
         self.motion_outer_tol = tol_cells.max(0.0);
     }
 
+    /// Enable/disable the mass-row transfer projection at resize events
+    /// (default ON; also killable via `CFD2_ADAPT_PROJECTION=0`). OFF means
+    /// the raw first-order interpolant is stepped as-is — the pre-projection
+    /// behaviour, kept reachable for A/B measurement.
+    pub fn set_transfer_projection(&mut self, on: bool) {
+        self.transfer_projection = on;
+    }
+
+    /// FLOW-adaptive timestep for the moving path: `Some(target_cfl)` makes
+    /// every step pin `dt = target_cfl · min_h / (max(|U|, |U_in|) + c_eos)`
+    /// (growth-limited to 1.2× per committed step, still capped by the
+    /// mesh-motion CFL), `None` restores the fixed configured dt. This is
+    /// the GCL-safe analogue of `params.adaptive_dt` (which stays rejected
+    /// on the moving path): the dt is chosen at the HEAD of the handshake,
+    /// before the swept fluxes are closed against it.
+    pub fn set_adaptive_dt(&mut self, target_cfl: Option<f64>) {
+        self.adaptive_dt_cfl = target_cfl.filter(|c| *c > 0.0);
+    }
+
+    /// Re-base the fixed timestep mid-run (the GUI dt slider): the
+    /// configured dt was previously captured at build only, which made a
+    /// live dt change on the moving path silently inert — `pin_dt` re-bases
+    /// from the configured value every step (the anti-ratchet), so THIS is
+    /// the knob a runtime dt change must turn. Under adaptive dt it is the
+    /// fallback base for steps where the flow readback is unavailable.
+    pub fn set_configured_dt(&mut self, dt: f64) {
+        if dt.is_finite() && dt > 0.0 {
+            self.configured_dt = dt;
+        }
+    }
+
     /// Whether the adaptivity growth budget is exhausted (births suppressed;
     /// kills still free budget). Surfaced per step in
     /// [`MovingMeshStats::at_adapt_budget`] so a count that stops growing is
     /// explained, not mysterious.
     pub fn adapt_budget_reached(&self) -> bool {
         self.adapt_every_n > 0 && self.seeds.len() >= self.adapt_cell_cap()
+    }
+
+    /// Consecutive violating adapt EVENTS required before the planner acts:
+    /// `ceil(ADAPT_PERSIST_STEPS / adapt_every_n)`, i.e. ~5 STEPS of
+    /// persistence at any cadence (exactly 1 event at cadences ≥ 5).
+    fn adapt_persist_needed(&self) -> i16 {
+        let every = self.adapt_every_n.max(1);
+        ADAPT_PERSIST_STEPS.div_ceil(every).clamp(1, ADAPT_PERSIST_STEPS) as i16
     }
 
     /// The flow-adaptation TARGET volume band: the explicit band when set,
@@ -1198,6 +1303,15 @@ impl MovingMeshDriver {
     /// Advance one moving-mesh step; returns the solver outcome + the per-step
     /// moving-mesh telemetry.
     pub fn step(&mut self, readback: bool) -> Result<(StepOutcome, MovingMeshStats), String> {
+        let out = self.step_inner(readback)?;
+        // The COMMITTED pinned dt — the flow-adaptive controller's
+        // growth-limit reference (discarded implicit-motion attempts re-pin
+        // from the same committed value, so retries stay deterministic).
+        self.last_pinned_dt = Some(out.1.dt);
+        Ok(out)
+    }
+
+    fn step_inner(&mut self, readback: bool) -> Result<(StepOutcome, MovingMeshStats), String> {
         // Re-assert the dt handshake invariant on EVERY path: the skip-regen
         // passthrough never reaches an ALE seam, so a caller that enabled
         // `adaptive_dt` via `driver_mut().apply_params(..)` after build could
@@ -1246,6 +1360,8 @@ impl MovingMeshDriver {
                 cells_killed: 0,
                 at_adapt_budget: false,
                 motion_iters: 1,
+                transfer_defect_pre: 0.0,
+                transfer_defect_post: 0.0,
             };
             return Ok((outcome, stats));
         }
@@ -1268,6 +1384,7 @@ impl MovingMeshDriver {
         // resize event. The step then proceeds at the new count with a
         // freshly rebuilt, state-transferred solver.
         let (mut cells_born, mut cells_killed) = (0usize, 0usize);
+        let mut transfer_defect = (0.0f64, 0.0f64);
         if self.adapt_fires_this_step() {
             let targets = self.adapt_target_vols()?;
             let (kills, births) = self.plan_adaptation(&targets)?;
@@ -1276,6 +1393,7 @@ impl MovingMeshDriver {
                 let wall_born = self.resize_cells_impl(&kills, &births, &wall_segs)?;
                 cells_born = births.len() + wall_born;
                 cells_killed = kills.len();
+                transfer_defect = self.last_transfer_projection;
                 // Re-derive the per-cell target cache at the NEW indexing
                 // (the resize invalidated it) — the per-cell squeeze
                 // reference for chi_size and the escalation.
@@ -1327,6 +1445,9 @@ impl MovingMeshDriver {
                 out.1.cells_killed = cells_killed;
                 out.1.at_adapt_budget = self.adapt_budget_reached();
                 out.1.motion_iters = iters_done;
+                out.1.transfer_defect_pre = out.1.transfer_defect_pre.max(transfer_defect.0);
+                out.1.transfer_defect_post =
+                    out.1.transfer_defect_post.max(transfer_defect.1);
                 if converged || iters_done >= outer || out.0.diverged.is_some() {
                     self.motion_u_override = None;
                     return Ok(out);
@@ -1356,6 +1477,10 @@ impl MovingMeshDriver {
                     out.1.cells_born = cells_born;
                     out.1.cells_killed = cells_killed;
                     out.1.at_adapt_budget = self.adapt_budget_reached();
+                    out.1.transfer_defect_pre =
+                        out.1.transfer_defect_pre.max(transfer_defect.0);
+                    out.1.transfer_defect_post =
+                        out.1.transfer_defect_post.max(transfer_defect.1);
                     return Ok(out);
                 }
                 DeviceStep::Fallback(reason) => fallback = Some(reason),
@@ -1366,6 +1491,8 @@ impl MovingMeshDriver {
         out.1.cells_born = cells_born;
         out.1.cells_killed = cells_killed;
         out.1.at_adapt_budget = self.adapt_budget_reached();
+        out.1.transfer_defect_pre = out.1.transfer_defect_pre.max(transfer_defect.0);
+        out.1.transfer_defect_post = out.1.transfer_defect_post.max(transfer_defect.1);
         Ok(out)
     }
 
@@ -1702,7 +1829,15 @@ impl MovingMeshDriver {
         // carries — U/p, psi/rho/T for the all-Mach families). AFTER the seam
         // (so the re-zeroed volume history survives the rotation), BEFORE the
         // solve.
+        let mut recycle_defect = (0.0f64, 0.0f64);
         if !recycled.is_empty() {
+            // A recycled slot is a FRESH parcel: its sizing-persistence
+            // history belongs to the dead outlet cell, not the respawn.
+            for &i in &recycled {
+                if let Some(c) = self.adapt_persist.get_mut(i) {
+                    *c = 0;
+                }
+            }
             let state = pollster::block_on(self.driver.solver().read_state_f32());
             let stride = self.driver.solver().model().state_layout.stride() as usize;
             let recycled_set: std::collections::HashSet<usize> =
@@ -1728,6 +1863,32 @@ impl MovingMeshDriver {
                 vols.push(new_mesh.cell_vol[i]);
             }
             self.driver.solver().reinit_cells(&cells, &rows, &vols)?;
+            // MASS-ROW PROJECTION of the recycle transfer: the zeroth-order
+            // neighbor copy leaves a per-parcel defect in the continuity row
+            // at the inlet re-seed site; the next step answers it with a
+            // pressure speckle that the |grad p| adaptation indicator then
+            // chases (births at the noise). Same disease and same cure as
+            // the resize transfer — the target is masked to the parcels'
+            // neighborhood and applied history-preserving. CPU backend only
+            // (a recycle step already runs the CPU regen path; the
+            // GPU-solver variant would need a mid-run assembly mirror no
+            // seam provides).
+            #[cfg(feature = "cpu")]
+            if self.transfer_projection {
+                if let Some(layout) = self.projection_layout() {
+                    if let Some(cpu) = self.driver.solver_mut().cpu_solver_mut() {
+                        match super::mass_projection::project_recycled_state(
+                            cpu, &new_mesh, layout, &recycled, &vols,
+                        ) {
+                            Ok(o) if o.pre > 0.0 => recycle_defect = (o.pre, o.post),
+                            Ok(_) => {}
+                            Err(e) => {
+                                eprintln!("moving-mesh: recycle projection skipped: {e}")
+                            }
+                        }
+                    }
+                }
+            }
         }
         let refresh_ms = ms_since(refresh_start);
         let topo_changed = face_arrays_differ || is_flip || rebuilt_from_device;
@@ -1786,6 +1947,8 @@ impl MovingMeshDriver {
             cells_killed: 0,
             at_adapt_budget: false,
             motion_iters: 1,
+            transfer_defect_pre: recycle_defect.0,
+            transfer_defect_post: recycle_defect.1,
         };
         Ok((outcome, stats))
     }
@@ -1989,6 +2152,8 @@ impl MovingMeshDriver {
             cells_killed: 0,
             at_adapt_budget: false,
             motion_iters: 1,
+            transfer_defect_pre: 0.0,
+            transfer_defect_post: 0.0,
         };
         Ok(DeviceStep::Done((outcome, stats)))
     }
@@ -2425,11 +2590,32 @@ impl MovingMeshDriver {
         // DENSITY trigger: interior seeds in the outlet strip whose CURRENT
         // cell (seed i == cell i, t^n mesh) is squeezed below the strip's
         // own initial sizing — being compressed out, most-squeezed first.
+        // ADAPTATION-AWARE: the build-time strip reference goes stale the
+        // moment the flow-adaptive sizing targets volumes below it — a
+        // deliberately-fine adapted cell advecting into the strip is NOT
+        // being squeezed (vol ~ its own target), but the stale reference
+        // read it as one, and the resulting permanent recycle storm
+        // (measured 429/500 steps under every-step default-band adaptation)
+        // fed the outlet-band churn loop that slowly diverged the run. The
+        // per-cell floor is the FINER of the strip reference and
+        // `RECYCLE_SQUEEZE_FRACTION x` the cell's own adapted target —
+        // byte-identical without adaptation (no targets cached), and the
+        // same per-cell-target pattern that cured the chi_size squeeze
+        // misread in the leak arc.
+        let targets = self.adapt_targets.as_deref();
+        let squeeze_floor = |i: usize| -> f64 {
+            match targets.and_then(|t| t.get(i)) {
+                Some(&t_vol) if t_vol.is_finite() && t_vol > 0.0 => {
+                    vol_lo.min(RECYCLE_SQUEEZE_FRACTION * t_vol)
+                }
+                _ => vol_lo,
+            }
+        };
         let mut out: Vec<usize> = (0..seeds.len())
             .filter(|&i| {
                 self.kinds[i] == SeedKind::Interior
                     && seeds[i].x > strip_x
-                    && self.mesh.cell_vol[i] < vol_lo
+                    && self.mesh.cell_vol[i] < squeeze_floor(i)
             })
             .collect();
         out.sort_by(|&a, &b| self.mesh.cell_vol[a].total_cmp(&self.mesh.cell_vol[b]));
@@ -2566,6 +2752,9 @@ impl MovingMeshDriver {
         self.seeds0 = take(&self.seeds0);
         self.kinds = gather.iter().map(|&s| self.kinds[s]).collect();
         self.w_wall = gather.iter().map(|&s| self.w_wall[s]).collect();
+        if self.adapt_persist.len() == n {
+            self.adapt_persist = gather.iter().map(|&s| self.adapt_persist[s]).collect();
+        }
         if let Some(t) = &self.adapt_targets {
             self.adapt_targets = Some(gather.iter().map(|&s| t[s]).collect());
         }
@@ -2729,6 +2918,11 @@ impl MovingMeshDriver {
         let mut new_kinds: Vec<SeedKind> = Vec::with_capacity(n_new);
         let mut new_w_wall: Vec<[f64; 2]> = Vec::with_capacity(n_new);
         let mut src: Vec<usize> = Vec::with_capacity(n_new);
+        // Persistence counters: survivors carry theirs (gathered like every
+        // per-seed array); births start at 0 — a fresh cell must re-earn any
+        // further adaptation event (the ping-pong breaker).
+        let mut new_persist: Vec<i16> = Vec::with_capacity(n_new);
+        let persist_of = |i: usize| self.adapt_persist.get(i).copied().unwrap_or(0);
         for i in 0..n {
             if kill_set.contains(&i) {
                 continue;
@@ -2737,6 +2931,7 @@ impl MovingMeshDriver {
             new_seeds0.push(self.seeds0[i]);
             new_kinds.push(kinds_upd[i]);
             new_w_wall.push(self.w_wall[i]);
+            new_persist.push(persist_of(i));
             src.push(i);
         }
         for &(p, donor) in births {
@@ -2744,6 +2939,7 @@ impl MovingMeshDriver {
             new_seeds0.push(p);
             new_kinds.push(SeedKind::Interior);
             new_w_wall.push([0.0, 0.0]);
+            new_persist.push(0);
             src.push(donor);
         }
         for &(p, donor, kind) in &wall_births {
@@ -2751,6 +2947,7 @@ impl MovingMeshDriver {
             new_seeds0.push(p);
             new_kinds.push(kind);
             new_w_wall.push([0.0, 0.0]);
+            new_persist.push(0);
             src.push(donor);
         }
 
@@ -2840,6 +3037,33 @@ impl MovingMeshDriver {
         let cells: Vec<u32> = (0..n_new as u32).collect();
         driver.solver().reinit_cells(&cells, &rows, &new_mesh.cell_vol)?;
 
+        // MASS-ROW TRANSFER PROJECTION: the interpolated rows carry a
+        // residual defect in the solver's OWN continuity row, and the first
+        // post-resize step balances whatever is left of it with a
+        // `defect/dt` pressure response — the phantom dipoles at split/merge
+        // sites. Project the transferred velocity onto the mass-row
+        // constraint (least-norm through the momentum diagonal) BEFORE the
+        // step; the correction is verified by re-assembly and reverted if it
+        // does not measurably shrink the residual. A projection failure
+        // never aborts the resize — the unprojected transfer is the
+        // fallback behaviour.
+        self.last_transfer_projection = (0.0, 0.0);
+        #[cfg(feature = "cpu")]
+        if self.transfer_projection {
+            match self.project_transferred_rows(
+                &mut driver,
+                &new_mesh,
+                &mut rows,
+                &init_u,
+                &init_p,
+                &params,
+            ) {
+                Ok(Some(out)) => self.last_transfer_projection = (out.pre, out.post),
+                Ok(None) => {}
+                Err(e) => eprintln!("moving-mesh: transfer projection skipped: {e}"),
+            }
+        }
+
         // Commit.
         self.driver = driver;
         self.prev_vx = new_mesh.vx.clone();
@@ -2849,6 +3073,7 @@ impl MovingMeshDriver {
         self.seeds0 = new_seeds0;
         self.kinds = new_kinds;
         self.w_wall = new_w_wall;
+        self.adapt_persist = new_persist;
         // The refined label spec (identical shape, subdivided segments).
         self.spec = spec_new;
         // The per-cell target cache is indexed by the OLD cells — invalid
@@ -2858,6 +3083,85 @@ impl MovingMeshDriver {
         // rebuild it lazily at the new count on the next device attempt.
         self.gpu_regen_state = None;
         Ok(wall_births.len())
+    }
+
+    /// The [`super::mass_projection::ProjectionLayout`] of the wrapped
+    /// solver's model; `None` when the model has no U/p system.
+    #[cfg(feature = "cpu")]
+    fn projection_layout(&self) -> Option<super::mass_projection::ProjectionLayout> {
+        let l = &self.driver.solver().model().state_layout;
+        let u_off = l.offset_for("U")?;
+        l.offset_for("p")?;
+        Some(super::mass_projection::ProjectionLayout {
+            stride: l.stride() as usize,
+            u_off: u_off as usize,
+            rho_off: l.offset_for("rho").map(|o| o as usize),
+            upwind_rho: l.offset_for("t_ref").is_some(),
+        })
+    }
+
+    /// Run the mass-row transfer projection against a CPU assembly of the
+    /// freshly built solver: in place on a CPU run; on a GPU run through a
+    /// params-faithful throwaway CPU companion (built via the same
+    /// `SolverDriver::build` path, so the assembled inlet/outlet closures
+    /// match the production solver), with the corrected rows re-transferred
+    /// into the GPU solver. `Ok(None)` = model without a U/p system.
+    #[cfg(feature = "cpu")]
+    fn project_transferred_rows(
+        &self,
+        driver: &mut SolverDriver,
+        new_mesh: &Mesh,
+        rows: &mut [f32],
+        init_u: &[(f64, f64)],
+        init_p: &[f64],
+        params: &RuntimeParams,
+    ) -> Result<Option<super::mass_projection::MassProjectionOutcome>, String> {
+        use super::mass_projection::{project_transferred_state, ProjectionLayout};
+        let layout = {
+            let l = &driver.solver().model().state_layout;
+            let Some(u_off) = l.offset_for("U") else {
+                return Ok(None);
+            };
+            if l.offset_for("p").is_none() {
+                return Ok(None);
+            }
+            ProjectionLayout {
+                stride: l.stride() as usize,
+                u_off: u_off as usize,
+                rho_off: l.offset_for("rho").map(|o| o as usize),
+                upwind_rho: l.offset_for("t_ref").is_some(),
+            }
+        };
+        if driver.solver().is_cpu() {
+            let cpu = driver
+                .solver_mut()
+                .cpu_solver_mut()
+                .ok_or("transfer projection: CPU backend expected")?;
+            return project_transferred_state(cpu, new_mesh, layout, rows, &new_mesh.cell_vol)
+                .map(Some);
+        }
+        // GPU backend: the assembly seam is CPU-only, so project through a
+        // throwaway CPU companion on the same mesh/model/params.
+        let build = pollster::block_on(SolverDriver::build_forced_cpu(
+            new_mesh,
+            self.model.clone(),
+            params,
+            init_u,
+            init_p,
+        ))?;
+        let mut tmp = build.driver;
+        tmp.apply_params(params);
+        let cells: Vec<u32> = (0..new_mesh.num_cells() as u32).collect();
+        tmp.solver().reinit_cells(&cells, rows, &new_mesh.cell_vol)?;
+        let cpu = tmp
+            .solver_mut()
+            .cpu_solver_mut()
+            .ok_or("transfer projection: build_forced_cpu returned a non-CPU backend")?;
+        let out = project_transferred_state(cpu, new_mesh, layout, rows, &new_mesh.cell_vol)?;
+        if out.applied {
+            driver.solver().reinit_cells(&cells, rows, &new_mesh.cell_vol)?;
+        }
+        Ok(Some(out))
     }
 
     /// The current boundary discretization size (total polyline segments
@@ -3157,13 +3461,34 @@ impl MovingMeshDriver {
     /// spacing, capped by the meshgen scale). Pure planning;
     /// [`Self::resize_cells`] executes it.
     fn plan_adaptation(
-        &self,
+        &mut self,
         targets: &[f64],
     ) -> Result<(Vec<usize>, Vec<(Point2<f64>, usize)>), String> {
         use crate::meshgen::meshless::point_in_fluid;
         use std::collections::HashSet;
-        let m = &self.mesh;
         let n = self.seeds.len();
+
+        // PERSISTENCE counters (see [`ADAPT_PERSIST_STEPS`]): classify every
+        // cell against THIS event's targets; a violation must hold its sign
+        // for `persist_needed` consecutive events before the planner may act
+        // on it. Noise flips the sign and resets the counter.
+        if self.adapt_persist.len() != n {
+            self.adapt_persist = vec![0; n];
+        }
+        for i in 0..n {
+            let v = self.mesh.cell_vol[i];
+            let c = self.adapt_persist[i];
+            self.adapt_persist[i] = if v > ADAPT_REFINE_RATIO * targets[i] {
+                c.max(0).saturating_add(1).min(16)
+            } else if v < ADAPT_COARSEN_RATIO * targets[i] {
+                c.min(0).saturating_sub(1).max(-16)
+            } else {
+                0
+            };
+        }
+        let persist_needed = self.adapt_persist_needed();
+
+        let m = &self.mesh;
         let n_max = self.adapt_cell_cap();
         let n_min = (self.initial_cell_count as f64 * ADAPT_BUDGET_MIN_FACTOR) as usize;
 
@@ -3179,6 +3504,7 @@ impl MovingMeshDriver {
         let mut kill_cand: Vec<usize> = (0..n)
             .filter(|&i| {
                 !kill_set.contains(&i)
+                    && self.adapt_persist[i] <= -persist_needed
                     && self.adapt_eligible(i)
                     && m.cell_vol[i] < ADAPT_COARSEN_RATIO * targets[i]
             })
@@ -3214,7 +3540,8 @@ impl MovingMeshDriver {
         let hex = 3.0f64.sqrt() / 2.0;
         let mut birth_cand: Vec<usize> = (0..n)
             .filter(|&i| {
-                if !self.adapt_in_bands(i)
+                if self.adapt_persist[i] < persist_needed
+                    || !self.adapt_in_bands(i)
                     || kill_set.contains(&i)
                     || m.cell_vol[i] <= ADAPT_REFINE_RATIO * targets[i]
                 {
@@ -3495,6 +3822,7 @@ impl MovingMeshDriver {
         {
             return seeds;
         }
+        let before = seeds.clone();
         let mut relaxed = seeds;
         let sizing = self.lloyd_sizing();
         let tol = MeshgenTolerances::from_geometry(self.min_cell_size, self.domain);
@@ -3515,6 +3843,7 @@ impl MovingMeshDriver {
             &cfg,
             &lcfg,
         );
+        let _ = before;
         relaxed
     }
 
@@ -3612,8 +3941,16 @@ impl MovingMeshDriver {
     fn pin_dt(&mut self, w_max: f64) -> f64 {
         // Base off the IMMUTABLE configured dt, not the previously-pinned
         // `params.requested_dt` — else the cap would ratchet the timestep down
-        // permanently (a momentary fast step could never recover).
+        // permanently (a momentary fast step could never recover). Under
+        // flow-adaptive dt the base is the CFL controller's candidate
+        // instead (self-recovering by construction: it re-derives from the
+        // flow every step).
         let mut dt = self.configured_dt;
+        if let Some(cfl) = self.adaptive_dt_cfl {
+            if let Some(flow_dt) = self.flow_adaptive_dt(cfl) {
+                dt = flow_dt;
+            }
+        }
         if w_max > 1e-30 {
             let cap = self.mesh_cfl * self.driver.min_cell() / w_max;
             if cap.is_finite() && cap < dt {
@@ -3624,6 +3961,52 @@ impl MovingMeshDriver {
         // Read the pinned value BACK through params so the flux dt is the exact
         // f32 the solver steps with (widened) — not the f64 pre-cast value.
         self.driver.params().requested_dt as f64
+    }
+
+    /// The flow-CFL dt candidate — the acoustic-aware controller of the
+    /// static `SolverDriver::step` adaptive branch, reproduced at the HEAD
+    /// of the ALE dt handshake: `dt = cfl · min_h / (adv + c_eff)` with
+    /// `adv = max(max_cells |U|, |U_inlet|)` read from the t^n state and
+    /// `c_eff` the low-Mach-reduced EOS sound speed, GATED (exactly like the
+    /// static branch) on the MODEL declaring a real EOS — NOT on
+    /// `params.eos`: the GUI forwards the fluid's physical EOS (Air c≈347)
+    /// even for the constant-EOS incompressible/all-Mach ALE families, and
+    /// dividing their advective dt by a sound speed the model never
+    /// resolves would collapse dt by ~4 orders of magnitude (the all-Mach
+    /// acoustic stiffness is handled implicitly by `psi_precond`, not by
+    /// the timestep). Growth is limited to 1.2× the last COMMITTED pinned
+    /// dt. `None` = no usable estimate this step (fall back to the
+    /// configured dt).
+    fn flow_adaptive_dt(&self, target_cfl: f64) -> Option<f64> {
+        let params = *self.driver.params();
+        let u = self.read_cell_velocities().ok()?;
+        let mut adv = (params.inlet_velocity as f64).abs();
+        for &(x, y) in &u {
+            adv = adv.max(x.hypot(y));
+        }
+        let sound = if self.driver.supports_sound_speed() {
+            params.eos.sound_speed(params.density as f64)
+        } else {
+            0.0
+        };
+        let eff_sound = match params.low_mach_model {
+            GpuLowMachPrecondModel::Off => sound,
+            GpuLowMachPrecondModel::Legacy => sound.min(adv),
+            GpuLowMachPrecondModel::WeissSmith => {
+                let theta = (params.low_mach_theta_floor as f64).max(0.0);
+                sound.min(adv.max(sound * theta.sqrt()))
+            }
+        };
+        let wave = adv + eff_sound;
+        let min_h = self.driver.min_cell();
+        if !(wave.is_finite() && wave > 1e-12 && min_h > 1e-12) {
+            return None;
+        }
+        let mut dt = target_cfl * min_h / wave;
+        if let Some(prev) = self.last_pinned_dt {
+            dt = dt.min(prev * 1.2);
+        }
+        Some(dt.clamp(1e-9, 100.0))
     }
 
     /// The wrapped [`SolverDriver`] (field reads, stats, BC setup).

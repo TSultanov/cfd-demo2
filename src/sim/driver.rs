@@ -110,6 +110,27 @@ fn allmach_psi_precond(u: &[(f64, f64)], real_psi: f64, u_ref: f64) -> Vec<f64> 
         .collect()
 }
 
+/// Construct a CPU-backend [`UnifiedSolver`] regardless of `CFD2_BACKEND`.
+/// Split out so the `cpu`-featureless build gets a clean `Err` instead of a
+/// missing-method compile error.
+#[cfg(feature = "cpu")]
+fn forced_cpu_solver(
+    mesh: &Mesh,
+    model: ModelSpec,
+    config: SolverConfig,
+) -> Result<UnifiedSolver, String> {
+    UnifiedSolver::new_forced_cpu(mesh, model, config)
+}
+
+#[cfg(not(feature = "cpu"))]
+fn forced_cpu_solver(
+    _mesh: &Mesh,
+    _model: ModelSpec,
+    _config: SolverConfig,
+) -> Result<UnifiedSolver, String> {
+    Err("SolverDriver::build_forced_cpu requires the `cpu` feature".into())
+}
+
 impl SolverDriver {
     /// Build a configured solver (phase 1).
     ///
@@ -126,12 +147,42 @@ impl SolverDriver {
     #[allow(clippy::too_many_arguments)]
     pub async fn build(
         mesh: &Mesh,
+        model: ModelSpec,
+        params: &RuntimeParams,
+        initial_u: &[(f64, f64)],
+        initial_p: &[f64],
+        device: Option<wgpu::Device>,
+        queue: Option<wgpu::Queue>,
+    ) -> Result<DriverBuild, String> {
+        Self::build_inner(mesh, model, params, initial_u, initial_p, device, queue, false).await
+    }
+
+    /// [`Self::build`] on a CPU backend regardless of `CFD2_BACKEND` — the seam
+    /// for host-side companion solvers of a GPU run (the mass-row transfer
+    /// projection assembles the coupled system with `debug_assemble`, which is
+    /// CPU-only). Goes through the SAME params/BC path as `build`, so the
+    /// assembled boundary closures (inlet velocity, outlet gauge) match the
+    /// production solver. Requires the `cpu` feature.
+    pub async fn build_forced_cpu(
+        mesh: &Mesh,
+        model: ModelSpec,
+        params: &RuntimeParams,
+        initial_u: &[(f64, f64)],
+        initial_p: &[f64],
+    ) -> Result<DriverBuild, String> {
+        Self::build_inner(mesh, model, params, initial_u, initial_p, None, None, true).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn build_inner(
+        mesh: &Mesh,
         mut model: ModelSpec,
         params: &RuntimeParams,
         initial_u: &[(f64, f64)],
         initial_p: &[f64],
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
+        force_cpu: bool,
     ) -> Result<DriverBuild, String> {
         let named_params = model.named_param_keys();
         let supports_preconditioner = named_params.iter().any(|&k| k == "preconditioner");
@@ -173,7 +224,11 @@ impl SolverDriver {
             crate::solver::model::apply_pressure_inlet_nozzle_bcs(&mut model);
         }
 
-        let mut solver = UnifiedSolver::new(mesh, model, config, device, queue).await?;
+        let mut solver = if force_cpu {
+            forced_cpu_solver(mesh, model, config)?
+        } else {
+            UnifiedSolver::new(mesh, model, config, device, queue).await?
+        };
 
         let n_cells = mesh.num_cells();
         let stride = solver.model().state_layout.stride() as usize;
@@ -796,6 +851,17 @@ impl SolverDriver {
         if !self.compressible {
             let _ = self.solver.set_inlet_velocity(params.inlet_velocity);
         }
+    }
+
+    /// Whether the model declares a real EOS (the `eos.gamma` named param) —
+    /// the adaptive-dt controller's sound-speed gate. The GUI forwards the
+    /// FLUID's physical EOS in `params.eos` regardless of the model (Air
+    /// c≈347, Water c≈1483), but only the density-based compressible family
+    /// resolves acoustics with the timestep; the constant-EOS incompressible
+    /// and all-Mach families use an advective dt (all-Mach acoustics are
+    /// handled implicitly by `psi_precond`).
+    pub fn supports_sound_speed(&self) -> bool {
+        self.supports_sound_speed
     }
 
     /// Pin the fixed timestep (the moving-mesh dt handshake). Sets both the

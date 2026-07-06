@@ -587,28 +587,52 @@ fn hernia_guard_body() {
 }
 
 /// RESIZE pressure-spike REGRESSION bound. The first-order monotone state
-/// transfer leaves a small mass inconsistency; the coupled solve answers it
-/// with a local pressure dipole that decays over 2–3 steps — measured at
-/// ~0.06 (≈7% of the settled max |p| ≈ 0.86) on this config. Two remedies
-/// were tried and REFUTED BY MEASUREMENT (keep them dead): frozen-mesh
-/// settle sub-steps at dt/M amplify the projection pressure as 1/dt
-/// (0.28 at M=4); a local average-flux patch projection of the transferred
-/// velocity WORSENS the excursion (0.11 with the correct sign, 0.53 with
-/// the sign flipped) because the solver's mass operator is the Rhie–Chow
-/// flux, not the average face flux — a consistent projection must go
-/// through the solver's own mass row. This gate pins the shipped behaviour
-/// so any future transfer change is measured against it.
+/// transfer leaves a small mass inconsistency in the solver's OWN continuity
+/// row (Rhie–Chow flux); unprojected, the coupled solve answers it with a
+/// `defect/dt` pressure dipole measured at ~0.062 (≈7% of the settled
+/// max |p| ≈ 0.86) on this config. The MASS-ROW TRANSFER PROJECTION (a
+/// least-norm velocity correction through the assembled continuity row,
+/// verified by re-assembly) closes the transfer defect to the f32 assembly
+/// floor (~3e-2 → ~5e-8) and cuts the published excursion to ~0.010 — the
+/// remainder is the momentum-transfer transient plus genuine wake evolution.
+/// Two OTHER remedies were tried first and REFUTED BY MEASUREMENT (keep them
+/// dead): frozen-mesh settle sub-steps at dt/M amplify the projection
+/// pressure as 1/dt (0.28 at M=4); a local average-flux patch projection
+/// WORSENS the excursion (0.11) because the average face flux is NOT the
+/// solver's mass operator. This gate pins both measurements.
 #[test]
 fn movingmesh_resize_pressure_spike_regression() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("CFD2_BACKEND", "cpu");
     let result = std::panic::catch_unwind(|| {
-        let spike = adapt_spike_run();
-        eprintln!("[spike-regression] worst adapt-step |p| excursion: {spike:.4}");
+        let run = adapt_spike_run();
+        eprintln!(
+            "[spike-regression] worst adapt-step |p| excursion: {:.4} (non-adapt \
+             background {:.4}); mass-row defect max pre {:.3e} -> post {:.3e} over \
+             {} adapt steps",
+            run.worst, run.worst_background, run.defect_pre_max, run.defect_post_max,
+            run.adapt_steps
+        );
         assert!(
-            spike <= 0.08,
-            "adapt-step pressure excursion {spike:.4} regressed past the validated \
-             baseline (~0.062)"
+            run.worst <= 0.055,
+            "adapt-step pressure excursion {:.4} regressed past the unprojected \
+             pathology scale (~0.062 unprojected; ~0.01-0.04 projected depending on \
+             the event pattern)",
+            run.worst
+        );
+        // `defect_pre_max > 1e-3` is load-bearing: a silently disabled
+        // projection reports (0, 0) on every resize, and a bound phrased
+        // only as `post <= 1e-3 * pre` would then pass vacuously. Measured:
+        // pre ~2.9e-2, post ~4.6e-8 over 59 resize events.
+        assert!(
+            run.adapt_steps > 0
+                && run.defect_pre_max > 1e-3
+                && run.defect_post_max <= 1e-3 * run.defect_pre_max,
+            "mass-row projection no longer closes the transfer defect: \
+             pre {:.3e} -> post {:.3e} over {} adapt steps",
+            run.defect_pre_max,
+            run.defect_post_max,
+            run.adapt_steps
         );
     });
     std::env::remove_var("CFD2_BACKEND");
@@ -617,10 +641,24 @@ fn movingmesh_resize_pressure_spike_regression() {
     }
 }
 
-/// One 120-step stationary adaptive run (the hernia configuration);
-/// returns the worst adapt-step max-|p| excursion past the impulsive cold
-/// start.
-fn adapt_spike_run() -> f64 {
+/// What [`adapt_spike_run`] measured: the worst adapt-step max-|p|
+/// excursion past the impulsive cold start, plus the mass-row transfer
+/// projection's defect telemetry (worst pre/post inf-norm residual over the
+/// run's resize events).
+struct SpikeRun {
+    worst: f64,
+    /// The same excursion measured on NON-adapt steps — the config's
+    /// PHYSICAL background (wake development moves max|p| between steps
+    /// too). The phantom-spike discriminator is `worst` vs this, not
+    /// `worst` alone.
+    worst_background: f64,
+    defect_pre_max: f64,
+    defect_post_max: f64,
+    adapt_steps: usize,
+}
+
+/// One 120-step stationary adaptive run (the hernia configuration).
+fn adapt_spike_run() -> SpikeRun {
     let (lx, ly) = (2.0, 1.0);
     let geo = ChannelWithObstacle {
         length: lx,
@@ -652,7 +690,8 @@ fn adapt_spike_run() -> f64 {
     let layout = moving.driver().solver().model().state_layout.clone();
     let stride = layout.stride() as usize;
     let p_off = layout.offset_for("p").expect("p") as usize;
-    let (mut prev_pmax, mut worst) = (0.0f64, 0.0f64);
+    let (mut prev_pmax, mut worst, mut worst_background) = (0.0f64, 0.0f64, 0.0f64);
+    let (mut defect_pre_max, mut defect_post_max, mut adapt_steps) = (0.0f64, 0.0f64, 0usize);
     for step in 0..120 {
         let (outcome, stats) = moving
             .step(false)
@@ -663,12 +702,27 @@ fn adapt_spike_run() -> f64 {
         let pmax = (0..n)
             .map(|c| (state[c * stride + p_off] as f64).abs())
             .fold(0.0f64, f64::max);
-        if step >= 20 && (stats.cells_born > 0 || stats.cells_killed > 0) {
-            worst = worst.max(pmax - prev_pmax);
+        if step >= 20 {
+            if stats.cells_born > 0 || stats.cells_killed > 0 {
+                worst = worst.max(pmax - prev_pmax);
+            } else {
+                worst_background = worst_background.max(pmax - prev_pmax);
+            }
+        }
+        if stats.cells_born > 0 || stats.cells_killed > 0 {
+            adapt_steps += 1;
+            defect_pre_max = defect_pre_max.max(stats.transfer_defect_pre);
+            defect_post_max = defect_post_max.max(stats.transfer_defect_post);
         }
         prev_pmax = pmax;
     }
-    worst
+    SpikeRun {
+        worst,
+        worst_background,
+        defect_pre_max,
+        defect_post_max,
+        adapt_steps,
+    }
 }
 
 /// IMPLICIT mesh motion on a uniform free stream: the fixed point is exact

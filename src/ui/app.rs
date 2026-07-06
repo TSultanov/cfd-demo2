@@ -959,19 +959,14 @@ impl CFDApp {
         self.outer_auto_converge = d.outer_auto_converge;
         self.target_cfl = d.target_cfl;
         self.timestep = d.timestep;
+        // Adaptive dt is supported on BOTH paths now: static runs use the
+        // solver-side controller; moving (ALE) runs route the same checkbox
+        // to the driver-side flow-CFL controller (pinned inside the GCL dt
+        // handshake), and the worker strips `params.adaptive_dt` before it
+        // can reach the inner solver — so the old force-off guard here would
+        // only silently revert the user's explicit choice on a model or
+        // geometry change.
         self.adaptive_dt = d.adaptive_dt;
-        // Moving mesh (ALE) pins a fixed dt for the GCL dt handshake, so it must
-        // never run with adaptive dt. `incompressible_momentum_ale` maps to the
-        // INCOMPRESSIBLE gui defaults, whose `adaptive_dt` is `true` — so a
-        // re-application of the per-model defaults (geometry/scenario preset,
-        // model dropdown, startup) while the moving path is selected or a moving
-        // driver is live would silently re-enable adaptive dt behind the (greyed)
-        // "Adaptive Timestep" checkbox, and a stale `true` could reach the driver
-        // via `sync_worker_params` whose next step() rejects it and halts the sim.
-        // Enforce the invariant at the reset source.
-        if self.enable_moving_mesh || self.solver_is_moving {
-            self.adaptive_dt = false;
-        }
         // Pseudo-transient continuation: the low-Mach stabilizer for the
         // compressible default (see model_defaults). Off for incompressible.
         self.dual_time = d.dual_time;
@@ -2341,7 +2336,12 @@ impl CFDApp {
             .ok_or_else(|| format!("unknown ALE model id '{ale_id}'"))?;
         let model_caps = CFDApp::model_ui_caps(&model);
 
-        // Fixed dt for the ALE seam (adaptive re-scale would break the GCL).
+        // The SOLVER-side adaptive dt stays off for the ALE seam (its
+        // re-scale happens after the swept fluxes are closed — a GCL
+        // violation); the user's Adaptive Timestep choice routes to the
+        // DRIVER-side controller below, which pins the CFL-derived dt at the
+        // head of the handshake instead.
+        let adaptive_dt = request.params.adaptive_dt;
         let mut params = request.params;
         params.adaptive_dt = false;
         let motion = request.moving_motion.to_spec(request.moving_regularization);
@@ -2413,6 +2413,8 @@ impl CFDApp {
         // Implicit mesh motion (1 = explicit; FlowCoupled + CPU only —
         // inert elsewhere). Tolerance: 2% of the near-wall cell spacing.
         moving.set_implicit_mesh_motion(request.moving_motion_iters, 0.02);
+        // Flow-adaptive dt (GCL-safe: pinned per step INSIDE the handshake).
+        moving.set_adaptive_dt(adaptive_dt.then_some(params.target_cfl));
         CFDApp::push_trace_init_event(
             trace_init_events,
             "solver.new",
@@ -3095,12 +3097,12 @@ impl eframe::App for CFDApp {
                                 // Save the pre-moving mesh selection so disabling
                                 // restores it; the model selection is untouched.
                                 self.pre_moving_mesh_type = Some(self.mesh_type);
-                                // Moving mesh requires the meshless CVT-Voronoi mesh and
-                                // a fixed dt (the swept fluxes are SCL-closed against it).
-                                // The MODEL is left as the user chose it — mapped to its
-                                // ALE variant only at build time.
+                                // Moving mesh requires the meshless CVT-Voronoi mesh.
+                                // Adaptive dt is KEPT: on this path it routes to the
+                                // driver-side flow-CFL controller, pinned inside the
+                                // GCL dt handshake. The MODEL is left as the user
+                                // chose it — mapped to its ALE variant at build time.
                                 self.mesh_type = MeshType::VoronoiCvt;
-                                self.adaptive_dt = false;
                                 self.refresh_model_caps();
                             } else if let Some(prev) = self.pre_moving_mesh_type.take() {
                                 // Restore the mesh selection the user had before.
@@ -3597,31 +3599,22 @@ impl eframe::App for CFDApp {
                         }
 
                         // The moving-mesh (ALE) driver pins a fixed dt and hard-
-                        // rejects adaptive dt at step time (it would break the
-                        // GCL dt handshake) — enabling this mid-run would error
-                        // and halt the sim. Disable it whenever the moving path
-                        // is selected OR a moving driver is actually running
-                        // (the user may un-tick Enable without reinitializing).
-                        let adaptive_dt_allowed =
-                            !(self.enable_moving_mesh || self.solver_is_moving);
-                        // Authoritative every frame: the moving path can never run
-                        // adaptive dt, so force it off before drawing the (disabled)
-                        // checkbox — this guarantees the box never displays a stale
-                        // checked state and no stale `true` survives to a param sync.
-                        if !adaptive_dt_allowed {
-                            self.adaptive_dt = false;
-                        }
+                        // On the moving path the checkbox routes to the
+                        // DRIVER-side flow-adaptive controller
+                        // (`MovingMeshDriver::set_adaptive_dt`): the dt is
+                        // chosen at the head of the ALE handshake, before the
+                        // swept-flux closure, so the GCL holds. The
+                        // solver-side `params.adaptive_dt` stays hard-rejected
+                        // there (it re-scales dt AFTER closure) — the worker
+                        // strips it from the params it forwards.
                         if ui
-                            .add_enabled(
-                                adaptive_dt_allowed,
-                                egui::Checkbox::new(&mut self.adaptive_dt, "Adaptive Timestep"),
+                            .checkbox(&mut self.adaptive_dt, "Adaptive Timestep")
+                            .on_hover_text(
+                                "Acoustically-adaptive timestep (CFL-targeted). On the \
+                                 moving mesh (ALE) it is applied inside the GCL dt \
+                                 handshake: pinned per step before the swept-flux \
+                                 closure, growth-limited 1.2×/step.",
                             )
-                            .on_hover_text(if adaptive_dt_allowed {
-                                "Acoustically-adaptive timestep (CFL-targeted)."
-                            } else {
-                                "Disabled for the moving mesh (ALE): the ALE cycle pins a \
-                                 fixed dt for the GCL dt handshake."
-                            })
                             .changed()
                         {
                             self.sync_worker_params();
@@ -4280,8 +4273,17 @@ impl eframe::App for CFDApp {
                                 },
                                 if m.cells_born > 0 || m.cells_killed > 0 {
                                     format!(
-                                        " (adapted: +{} / −{} cells)",
-                                        m.cells_born, m.cells_killed
+                                        " (adapted: +{} / −{} cells, Δmass {:.1e}→{:.1e})",
+                                        m.cells_born,
+                                        m.cells_killed,
+                                        m.transfer_defect_pre,
+                                        m.transfer_defect_post
+                                    )
+                                } else if m.transfer_defect_pre > 0.0 {
+                                    // Recycle-only transfer projection.
+                                    format!(
+                                        " (Δmass {:.1e}→{:.1e})",
+                                        m.transfer_defect_pre, m.transfer_defect_post
                                     )
                                 } else {
                                     String::new()
@@ -4910,6 +4912,17 @@ fn solver_worker_handle_cmd(
 
             // Phase-2 parameter application: build sets phase 1, this sets phase 2.
             if let Some(m) = mode.as_mut() {
+                // Strip the solver-side adaptive_dt for a moving driver (its
+                // step() rejects it — GCL handshake). Unlike the UpdateParams
+                // arm, do NOT touch the driver-side controller or the
+                // configured dt here: the builder (build_moving_init / a
+                // headless harness) configured them from ITS OWN request, and
+                // the worker's params snapshot may be stale at SetSolver time
+                // (the smoke path would silently disable a pre-configured
+                // controller). A user-driven UpdateParams re-routes both.
+                if let SolverMode::MovingMesh(_) = m {
+                    params.adaptive_dt = false;
+                }
                 m.driver_mut().apply_params(params);
             }
         }
@@ -4946,6 +4959,18 @@ fn solver_worker_handle_cmd(
         SolverWorkerCommand::UpdateParams(next_params) => {
             *params = next_params;
             if let Some(m) = mode.as_mut() {
+                // The moving path never runs the SOLVER-side adaptive dt (a
+                // post-closure re-scale breaks the GCL) — the user's choice
+                // routes to the driver-side controller instead, and the live
+                // dt slider re-bases the pinned dt (configured_dt was
+                // previously captured at build only, leaving the slider
+                // silently inert mid-run on this path).
+                if let SolverMode::MovingMesh(moving) = m {
+                    let adaptive_dt = params.adaptive_dt;
+                    params.adaptive_dt = false;
+                    moving.set_adaptive_dt(adaptive_dt.then_some(params.target_cfl));
+                    moving.set_configured_dt(params.requested_dt as f64);
+                }
                 m.driver_mut().apply_params(params);
             }
             if let (Some(trace), Some(m)) = (trace.as_mut(), mode.as_ref()) {

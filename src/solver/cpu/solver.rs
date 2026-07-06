@@ -1613,6 +1613,31 @@ impl CpuSolver {
         self.buffers.f32_vec("bc_value")
     }
 
+    /// Debug: read the per-face `bc_kind` buffer (length `num_faces * S`,
+    /// `GpuBcKind` raw values: 0 = ZeroGradient, 1 = Dirichlet, 2 = Neumann).
+    pub fn debug_bc_kind(&self) -> Vec<u32> {
+        self.buffers.u32_vec("bc_kind")
+    }
+
+    /// The coupled-system rank (block-row index) of a field's FIRST component
+    /// — e.g. `"U" -> 0`, `"p" -> 2` for the incompressible family. Ranks are
+    /// equation-declaration order, NOT state-layout offsets.
+    pub fn coupled_rank_of(&self, field: &str) -> Option<u32> {
+        self.coupled_offsets.get(field).copied()
+    }
+
+    /// Per coupled-unknown rank, the state-layout offset it reads/updates
+    /// (the rank -> state-slot map the update kernel uses).
+    pub fn unknown_state_offsets(&self) -> &[u32] {
+        &self.unknown_offsets
+    }
+
+    /// The uniform density constant the kernels see (`constants.density`) —
+    /// the mass-flux `rho_f` for models without a `rho` state field.
+    pub fn density_constant(&self) -> f32 {
+        self.constants.density
+    }
+
     /// Block-CSR topology accessors (for the MMS residual consistency check).
     pub fn debug_topology(&self) -> (&[u32], &[u32], &[u32], usize) {
         (

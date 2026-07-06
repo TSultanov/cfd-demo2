@@ -578,6 +578,430 @@ mod probe {
         );
     }
 
+    /// STABILITY MATRIX: the `visual` case exposed a SLOW blow-up of the
+    /// every-step-adaptation + every-step-smoothing + recycling regime at
+    /// GUI params (healthy at step 100, |U| 5x inlet by 400, diverged by
+    /// 1200, churn saturated at the 8+8 cap). Isolate the driver: run the
+    /// ingredient combinations at a coarser mesh and print the |U|max
+    /// trajectory + churn/recycle rates for each.
+    fn run_stability_matrix(steps: usize) {
+        struct Variant {
+            label: &'static str,
+            adapt_every: usize,
+            band: Option<(f64, f64)>,
+            smooth_every: usize,
+            recycling: bool,
+            projection: bool,
+        }
+        let variants = [
+            Variant { label: "A adapt1+smooth1+recycle (fail cfg)", adapt_every: 1, band: None, smooth_every: 1, recycling: true, projection: true },
+            Variant { label: "B adapt1+smooth1 no-recycle      ", adapt_every: 1, band: None, smooth_every: 1, recycling: false, projection: true },
+            Variant { label: "C adapt5+smooth1+recycle         ", adapt_every: 5, band: None, smooth_every: 1, recycling: true, projection: true },
+            Variant { label: "D adapt1 WIDE band+smooth1+recycle", adapt_every: 1, band: Some((0.03, 0.07)), smooth_every: 1, recycling: true, projection: true },
+            Variant { label: "E smooth1+recycle no-adapt       ", adapt_every: 0, band: None, smooth_every: 1, recycling: true, projection: true },
+            Variant { label: "F adapt1+smooth1+recycle proj-OFF", adapt_every: 1, band: None, smooth_every: 1, recycling: true, projection: false },
+        ];
+        let hh = 0.035;
+        for v in &variants {
+            let domain = Vector2::new(LX, LY);
+            let geo = ChannelWithObstacle {
+                length: LX,
+                height: LY,
+                obstacle_center: Point2::new(1.0, 0.51),
+                obstacle_radius: 0.1,
+            };
+            let cvt =
+                generate_cvt_mesh_with_seeds(&geo, hh, hh, 1.2, domain, &LloydConfig::default());
+            let n0 = cvt.mesh.num_cells();
+            let params = gui_params();
+            let mut moving = pollster::block_on(MovingMeshDriver::build(
+                cvt,
+                &params,
+                MeshMotionSpec::FlowCoupled {
+                    regularization: 0.5,
+                },
+                &vec![(INLET as f64, 0.0); n0],
+                &vec![0.0; n0],
+                None,
+                None,
+            ))
+            .expect("driver build");
+            moving.driver_mut().apply_params(&params);
+            moving.set_transfer_projection(v.projection);
+            moving.set_seed_recycling(v.recycling);
+            if v.adapt_every > 0 {
+                moving.set_adaptive_sizing(v.adapt_every);
+                if let Some(band) = v.band {
+                    moving.set_adaptive_sizing_band(Some(band));
+                }
+            }
+            if v.smooth_every > 0 {
+                moving.set_smoothing(v.smooth_every, 1, 0.5);
+            }
+
+            let layout = moving.driver().solver().model().state_layout.clone();
+            let stride = layout.stride() as usize;
+            let u_off = layout.offset_for("U").expect("U") as usize;
+            let (mut births, mut kills, mut recycles) = (0usize, 0usize, 0usize);
+            let mut track: Vec<(usize, f64)> = Vec::new();
+            let mut died = None;
+            for step in 0..steps {
+                let (outcome, stats) = match moving.step(false) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        println!("[matrix] {} step {step}: ERR {e}", v.label);
+                        died = Some(step);
+                        break;
+                    }
+                };
+                if outcome.diverged.is_some() {
+                    died = Some(step);
+                    break;
+                }
+                births += stats.cells_born;
+                kills += stats.cells_killed;
+                recycles += usize::from(stats.recycled > 0);
+                if step % 100 == 99 || step + 1 == steps {
+                    let state = pollster::block_on(moving.driver().solver().read_state_f32());
+                    let n = moving.mesh().num_cells();
+                    let umax = (0..n)
+                        .map(|c| {
+                            (state[c * stride + u_off] as f64)
+                                .hypot(state[c * stride + u_off + 1] as f64)
+                        })
+                        .fold(0.0f64, f64::max);
+                    track.push((step + 1, umax));
+                }
+            }
+            let traj: Vec<String> = track
+                .iter()
+                .map(|(s, u)| format!("{s}:{u:.2e}"))
+                .collect();
+            println!(
+                "[matrix] {} | umax@[{}] births {births} kills {kills} recycle-steps {recycles}{}",
+                v.label,
+                traj.join(", "),
+                died.map(|s| format!(" DIED@{s}")).unwrap_or_default()
+            );
+        }
+    }
+
+    /// VISUAL verification: run the GUI screenshot regime (FlowCoupled,
+    /// adaptation + smoothing every step, recycling active) and render
+    /// pressure / velocity-magnitude / cell-size maps to PNGs at snapshot
+    /// steps — metrics don't show everything (per-parcel speckle, mesh
+    /// churn, and inlet/outlet band artifacts are pattern problems). Also
+    /// prints LATE-half strip metrics (past the impulsive transient) so the
+    /// numbers aren't cold-start-contaminated.
+    fn run_visual(steps: usize, snaps: &[usize]) {
+        let family = std::env::var("PROBE_VISUAL_FAMILY").unwrap_or_else(|_| "incomp".into());
+        let out_dir_owned = format!("target/probe_visual_{family}");
+        let out_dir = std::path::Path::new(&out_dir_owned);
+        std::fs::create_dir_all(out_dir).expect("mkdir probe_visual");
+        let domain = Vector2::new(LX, LY);
+        let (ocx, ocy, orad) = (1.0f64, 0.51f64, 0.1f64);
+        let geo = ChannelWithObstacle {
+            length: LX,
+            height: LY,
+            obstacle_center: Point2::new(ocx, ocy),
+            obstacle_radius: orad,
+        };
+        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let n0 = cvt.mesh.num_cells();
+        // PROBE_VISUAL_FAMILY=allmach runs the thermal all-Mach ALE family
+        // (the GUI screenshot regime) with its proven recipe knobs; default
+        // is the incompressible GUI config.
+        let thermal = std::env::var("PROBE_VISUAL_FAMILY")
+            .map(|v| v == "allmach")
+            .unwrap_or(false);
+        let mut params = gui_params();
+        if thermal {
+            params.time_scheme = TimeScheme::Euler;
+            params.requested_dt = 0.005;
+            params.outer_iters = 6;
+            params.compressibility_psi = 1.0e-4;
+            params.viscosity = 1e-2;
+            params.inlet_velocity = 0.4;
+        }
+        let inlet = params.inlet_velocity;
+        let mut moving = if thermal {
+            use cfd2::solver::model::allmach_thermal_ale_model;
+            pollster::block_on(MovingMeshDriver::build_with_model(
+                cvt,
+                allmach_thermal_ale_model().expect("thermal ale model"),
+                &params,
+                MeshMotionSpec::FlowCoupled {
+                    regularization: 0.5,
+                },
+                &vec![(inlet as f64, 0.0); n0],
+                &vec![0.0; n0],
+                None,
+                None,
+            ))
+            .expect("driver build")
+        } else {
+            pollster::block_on(MovingMeshDriver::build(
+                cvt,
+                &params,
+                MeshMotionSpec::FlowCoupled {
+                    regularization: 0.5,
+                },
+                &vec![(inlet as f64, 0.0); n0],
+                &vec![0.0; n0],
+                None,
+                None,
+            ))
+            .expect("driver build")
+        };
+        moving.driver_mut().apply_params(&params);
+        moving.set_adaptive_sizing(1);
+        moving.set_smoothing(1, 1, 0.5);
+
+        let layout = moving.driver().solver().model().state_layout.clone();
+        let stride = layout.stride() as usize;
+        let u_off = layout.offset_for("U").expect("U") as usize;
+        let p_off = layout.offset_for("p").expect("p") as usize;
+
+        // Late-half strip telemetry (inlet x<0.5, outlet x>LX-0.5).
+        let half = steps / 2;
+        let (mut in_jump, mut out_jump) = (0.0f64, 0.0f64);
+        let (mut prev_in, mut prev_out) = (0.0f64, 0.0f64);
+        let (mut late_births, mut late_kills, mut late_recycles) = (0usize, 0usize, 0usize);
+        let mut late_umax = 0.0f64;
+        for step in 0..steps {
+            let (outcome, stats) = moving.step(false).expect("step");
+            assert!(outcome.diverged.is_none(), "[visual] diverged at step {step}");
+            let state = pollster::block_on(moving.driver().solver().read_state_f32());
+            let mesh = moving.mesh();
+            let n = mesh.num_cells();
+            let (mut ip, mut op, mut um) = (0.0f64, 0.0f64, 0.0f64);
+            for c in 0..n {
+                let p = (state[c * stride + p_off] as f64).abs();
+                let (ux, uy) = (
+                    state[c * stride + u_off] as f64,
+                    state[c * stride + u_off + 1] as f64,
+                );
+                um = um.max(ux.hypot(uy));
+                if mesh.cell_cx[c] < 0.5 {
+                    ip = ip.max(p);
+                } else if mesh.cell_cx[c] > LX - 0.5 {
+                    op = op.max(p);
+                }
+            }
+            if step >= half {
+                in_jump = in_jump.max(ip - prev_in);
+                out_jump = out_jump.max(op - prev_out);
+                late_births += stats.cells_born;
+                late_kills += stats.cells_killed;
+                late_recycles += usize::from(stats.recycled > 0);
+                late_umax = late_umax.max(um);
+            }
+            prev_in = ip;
+            prev_out = op;
+
+            if snaps.contains(&step) {
+                let fields: [(&str, Box<dyn Fn(usize) -> f64>); 3] = [
+                    (
+                        "p",
+                        Box::new(|c| state[c * stride + p_off] as f64),
+                    ),
+                    (
+                        "umag",
+                        Box::new(|c| {
+                            (state[c * stride + u_off] as f64)
+                                .hypot(state[c * stride + u_off + 1] as f64)
+                        }),
+                    ),
+                    ("cellvol", Box::new(|c| mesh.cell_vol[c].ln())),
+                ];
+                for (name, f) in &fields {
+                    render_voronoi_field(
+                        mesh,
+                        f,
+                        (ocx, ocy, orad),
+                        &out_dir.join(format!("step{step:04}_{name}.png")),
+                    );
+                }
+                println!(
+                    "[visual] step {step:4}: {} cells, snapshot written (p range on file)",
+                    n
+                );
+            }
+        }
+        println!(
+            "[visual] LATE half (steps {half}..{steps}): inlet-strip worst |p| jump {in_jump:.3e}, \
+             outlet-strip {out_jump:.3e}, births {late_births} kills {late_kills} over {} steps, \
+             recycle steps {late_recycles}, max|U| {late_umax:.3e} (inlet {inlet:.3e})",
+            steps - half
+        );
+    }
+
+    /// Rasterize a per-cell scalar onto a PNG via nearest-centroid lookup
+    /// (Voronoi cells are nearest-seed regions; post-Lloyd centroids track
+    /// the seeds closely enough for visualization). Blue -> green -> red
+    /// over the field's own range; obstacle interior black.
+    fn render_voronoi_field(
+        mesh: &cfd2::solver::mesh::Mesh,
+        value: &dyn Fn(usize) -> f64,
+        obstacle: (f64, f64, f64),
+        path: &std::path::Path,
+    ) {
+        let n = mesh.num_cells();
+        let (w, h) = (900u32, 300u32);
+        let (sx, sy) = (LX / w as f64, LY / h as f64);
+        // Bucket grid over centroids for nearest lookup.
+        let (bw, bh) = (90usize, 30usize);
+        let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); bw * bh];
+        let bidx = |x: f64, y: f64| -> (usize, usize) {
+            (
+                ((x / LX * bw as f64) as usize).min(bw - 1),
+                ((y / LY * bh as f64) as usize).min(bh - 1),
+            )
+        };
+        for c in 0..n {
+            let (bx, by) = bidx(mesh.cell_cx[c], mesh.cell_cy[c]);
+            buckets[by * bw + bx].push(c);
+        }
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for c in 0..n {
+            let v = value(c);
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+        let span = (hi - lo).max(1e-300);
+        let mut img = image::RgbImage::new(w, h);
+        for py in 0..h {
+            for px in 0..w {
+                let (x, y) = ((px as f64 + 0.5) * sx, LY - (py as f64 + 0.5) * sy);
+                if (x - obstacle.0).hypot(y - obstacle.1) < obstacle.2 {
+                    img.put_pixel(px, py, image::Rgb([0, 0, 0]));
+                    continue;
+                }
+                let (bx, by) = bidx(x, y);
+                let (mut best, mut best_d2) = (usize::MAX, f64::INFINITY);
+                for dby in by.saturating_sub(1)..=(by + 1).min(bh - 1) {
+                    for dbx in bx.saturating_sub(2)..=(bx + 2).min(bw - 1) {
+                        for &c in &buckets[dby * bw + dbx] {
+                            let d2 = (mesh.cell_cx[c] - x).powi(2)
+                                + (mesh.cell_cy[c] - y).powi(2);
+                            if d2 < best_d2 {
+                                best_d2 = d2;
+                                best = c;
+                            }
+                        }
+                    }
+                }
+                let rgb = if best == usize::MAX {
+                    [255u8, 255, 255]
+                } else {
+                    let t = ((value(best) - lo) / span).clamp(0.0, 1.0);
+                    // blue (0) -> green (0.5) -> red (1)
+                    if t < 0.5 {
+                        let s = t * 2.0;
+                        [0, (s * 255.0) as u8, ((1.0 - s) * 255.0) as u8]
+                    } else {
+                        let s = (t - 0.5) * 2.0;
+                        [(s * 255.0) as u8, ((1.0 - s) * 255.0) as u8, 0]
+                    }
+                };
+                img.put_pixel(px, py, image::Rgb(rgb));
+            }
+        }
+        img.save(path).expect("write png");
+        println!(
+            "[visual]   {} range [{lo:.4e}, {hi:.4e}]",
+            path.file_name().unwrap().to_string_lossy()
+        );
+    }
+
+    /// A/B the RECYCLE mass-row projection under the GUI screenshot regime
+    /// (FlowCoupled + adaptation & smoothing every step): the recycle
+    /// re-seed's zeroth-order copy leaves a continuity defect at the INLET
+    /// respawn site — visible as per-parcel pressure speckle that the
+    /// |grad p| adaptation indicator then chases. Reports, for projection
+    /// ON vs OFF: recycle events, the worst inlet-strip |p| jump on
+    /// recycle steps, births landing in the inlet strip, and the defect
+    /// closure telemetry.
+    fn run_recycle_inlet(steps: usize) {
+        for projection in [true, false] {
+            let tag = if projection { "proj-ON " } else { "proj-OFF" };
+            let domain = Vector2::new(LX, LY);
+            let geo = ChannelWithObstacle {
+                length: LX,
+                height: LY,
+                obstacle_center: Point2::new(1.0, 0.51),
+                obstacle_radius: 0.1,
+            };
+            let cvt =
+                generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+            let n0 = cvt.mesh.num_cells();
+            let params = gui_params();
+            let mut moving = pollster::block_on(MovingMeshDriver::build(
+                cvt,
+                &params,
+                MeshMotionSpec::FlowCoupled {
+                    regularization: 0.5,
+                },
+                &vec![(INLET as f64, 0.0); n0],
+                &vec![0.0; n0],
+                None,
+                None,
+            ))
+            .expect("driver build");
+            moving.driver_mut().apply_params(&params);
+            moving.set_transfer_projection(projection);
+            // The screenshot regime: adaptation + smoothing EVERY step.
+            moving.set_adaptive_sizing(1);
+            moving.set_smoothing(1, 1, 0.5);
+
+            let layout = moving.driver().solver().model().state_layout.clone();
+            let stride = layout.stride() as usize;
+            let p_off = layout.offset_for("p").expect("p") as usize;
+            let strip_x = 0.5; // the inlet respawn strip
+            let (mut recycles, mut births_in_strip, mut total_births) = (0usize, 0usize, 0usize);
+            let (mut worst_jump, mut prev_strip_pmax) = (0.0f64, 0.0f64);
+            let (mut defect_pre, mut defect_post) = (0.0f64, 0.0f64);
+            for step in 0..steps {
+                let n_before = moving.mesh().num_cells();
+                let (outcome, stats) = moving.step(false).expect("step");
+                assert!(outcome.diverged.is_none(), "[{tag}] diverged at step {step}");
+                let state = pollster::block_on(moving.driver().solver().read_state_f32());
+                let mesh = moving.mesh();
+                let n = mesh.num_cells();
+                let strip_pmax = (0..n)
+                    .filter(|&c| mesh.cell_cx[c] < strip_x)
+                    .map(|c| (state[c * stride + p_off] as f64).abs())
+                    .fold(0.0f64, f64::max);
+                if stats.recycled > 0 {
+                    recycles += 1;
+                    if step > 50 {
+                        worst_jump = worst_jump.max(strip_pmax - prev_strip_pmax);
+                    }
+                    defect_pre = defect_pre.max(stats.transfer_defect_pre);
+                    defect_post = defect_post.max(stats.transfer_defect_post);
+                }
+                let _ = n_before;
+                if stats.cells_born > 0 {
+                    total_births += stats.cells_born;
+                    // Births landing in the inlet strip = the indicator
+                    // chasing the recycle noise (the resize appends births
+                    // at the tail of the index range).
+                    for c in n.saturating_sub(stats.cells_born)..n {
+                        if mesh.cell_cx[c] < strip_x {
+                            births_in_strip += 1;
+                        }
+                    }
+                }
+                prev_strip_pmax = strip_pmax;
+            }
+            println!(
+                "[recycle-inlet] {tag}: {recycles} recycle steps, worst inlet-strip |p| jump \
+                 {worst_jump:.3e}, births {total_births} (in strip {births_in_strip}), \
+                 defect max {defect_pre:.3e} -> {defect_post:.3e}"
+            );
+        }
+    }
+
     /// Thermal-ALE divergence ladder: the allmach_thermal model on the GUI
     /// obstacle CVT with the PROVEN gate params (Euler, 6 outers, dt 5e-3,
     /// psi 1e-4, inlet 0.4) — static solver vs Frozen-ALE vs FlowCoupled,
@@ -832,6 +1256,15 @@ mod probe {
         }
         if has("recycle-spike") {
             run_recycle_spike(800);
+        }
+        if has("recycle-inlet") {
+            run_recycle_inlet(800);
+        }
+        if has("visual") {
+            run_visual(1200, &[100, 400, 800, 1199]);
+        }
+        if has("stability-matrix") {
+            run_stability_matrix(500);
         }
         if has("reorder-frozen") {
             run_reorder_frozen(200, 20);

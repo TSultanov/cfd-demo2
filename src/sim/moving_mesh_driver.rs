@@ -3066,16 +3066,20 @@ impl MovingMeshDriver {
 
         // PRE-RELAX the new seed set (gentle local Lloyd toward the adapted
         // sizing) BEFORE assembling: a fresh child at its split position sits
-        // far from CVT, and without this the FIRST post-resize smoothing/
-        // escalation pass moves the patch violently — that one-step local
-        // mesh deformation published as the residual 1-3-cell pressure mark
-        // (the re-solve below absorbs the state/topology transition, but not
-        // motion that happens on the NEXT step). Relaxing here folds the
-        // settling INTO the resize event, where the re-solve absorbs it too;
-        // the first-order transfer handles the resulting centroid shifts by
-        // construction.
+        // far from CVT — and a KILL's absorbing neighbors are equally far
+        // (they just swallowed the dead cell's area) — and without this the
+        // FIRST post-resize smoothing/escalation pass moves the patch
+        // violently; that one-step local mesh deformation published as the
+        // residual 1-3-cell pressure mark (the re-solve below absorbs the
+        // state/topology transition, but not motion that happens on the
+        // NEXT step). Relaxing here folds the settling INTO the resize
+        // event, where the re-solve absorbs it too; the first-order
+        // transfer handles the resulting centroid shifts by construction.
+        // Fires on ANY event — kill-only events dominate the through-flow
+        // coarsening ramp at dynamic equilibrium, and skipping them left
+        // the equilibrium's residual marks.
         let assemble_spec = self.moved_spec_from(&spec_new, self.time);
-        if !births.is_empty() || !wall_births.is_empty() {
+        if !births.is_empty() || !wall_births.is_empty() || !kills.is_empty() {
             let sizing = self.lloyd_sizing();
             let tol = MeshgenTolerances::from_geometry(self.min_cell_size, self.domain);
             let cfg = EngineConfig::default();

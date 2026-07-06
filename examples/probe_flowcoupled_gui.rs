@@ -686,6 +686,25 @@ mod probe {
         let freeze_mode =
             std::env::var("PROBE_DIPOLE_FREEZE_MODE").unwrap_or_else(|_| "both".into());
         let mut worst: Vec<(f64, usize)> = Vec::new(); // (dipole metric, step)
+                                                       // AMBIENT vs EVENT-ZONE split: recent events' positions (births and
+                                                       // wall births land at the cell-index tail of each resize) with their
+                                                       // step. A face within EVENT_R_CELLS local spacings of an event
+                                                       // younger than EVENT_AGE steps is "event zone" — the unavoidable
+                                                       // transient of an actively-refining site (a binary split is a
+                                                       // factor-2 discretization jump; its solution transition cannot be
+                                                       // zero). "No phantom dipoles" then decomposes into two testable
+                                                       // claims: the AMBIENT dip sits at the frozen-mesh floor on EVERY
+                                                       // frame, and the event-zone excess DECAYS within EVENT_AGE steps
+                                                       // instead of accumulating.
+        const EVENT_AGE: usize = 6;
+        const EVENT_R_CELLS: f64 = 4.0;
+        let mut events: Vec<(f64, f64, usize)> = Vec::new();
+        let mut ambient_worst = 0.0f64;
+        let mut ambient_top: Vec<(f64, usize, f64, f64)> = Vec::new();
+        let mut prev_seeds: Option<Vec<Point2<f64>>> = None;
+        let (mut outlet_iso_worst, mut outlet_vr_worst, mut outlet_skew_worst) =
+            (0.0f64, f64::INFINITY, 0.0f64);
+        let mut outlet_iso_top = (0.0f64, 0usize, 0.0f64, 0.0f64);
         for step in 0..steps {
             if freeze_at == Some(step) {
                 if freeze_mode != "smooth" {
@@ -704,14 +723,32 @@ mod probe {
             let state = pollster::block_on(moving.driver().solver().read_state_f32());
             let mesh = moving.mesh();
             let n = mesh.num_cells();
+            let born = stats.cells_born.min(n);
+            for c in n - born..n {
+                events.push((mesh.cell_cx[c], mesh.cell_cy[c], step));
+            }
+            // RECYCLED slots keep their index but teleport outlet -> inlet;
+            // both the drained site and the respawn site are event zones.
+            let seeds_now = moving.seeds().to_vec();
+            if let Some(prev) = &prev_seeds {
+                for i in 0..prev.len().min(seeds_now.len()) {
+                    if (seeds_now[i] - prev[i]).norm() > 0.5 {
+                        events.push((prev[i].x, prev[i].y, step));
+                        events.push((seeds_now[i].x, seeds_now[i].y, step));
+                    }
+                }
+            }
+            prev_seeds = Some(seeds_now);
+            events.retain(|&(_, _, s)| step - s < EVENT_AGE);
             let p_of = |c: usize| state[c * stride + p_off] as f64;
             // Robust field range: 5th..95th percentile of p.
             let mut ps: Vec<f64> = (0..n).map(p_of).collect();
             ps.sort_by(f64::total_cmp);
             let range = (ps[(n * 95) / 100] - ps[(n * 5) / 100]).max(1e-30);
-            // Dipole metric: worst adjacent-cell jump / robust range.
-            let mut max_jump = 0.0f64;
-            let mut max_face = 0usize;
+            // Dipole metric: worst adjacent-cell jump / robust range,
+            // globally AND excluding the event zones (ambient).
+            let (mut max_jump, mut max_face, mut ambient_jump, mut ambient_face) =
+                (0.0f64, 0usize, 0.0f64, 0usize);
             for f in 0..mesh.num_faces() {
                 if let Some(nb) = mesh.face_neighbor[f] {
                     let d = (p_of(mesh.face_owner[f]) - p_of(nb)).abs();
@@ -719,10 +756,89 @@ mod probe {
                         max_jump = d;
                         max_face = f;
                     }
+                    if d > ambient_jump {
+                        let (fx, fy) = (mesh.face_cx[f], mesh.face_cy[f]);
+                        let h_loc = mesh.cell_vol[mesh.face_owner[f]].max(1e-30).sqrt();
+                        let r = EVENT_R_CELLS * h_loc.max(H);
+                        let near_event = events
+                            .iter()
+                            .any(|&(ex, ey, _)| (ex - fx).hypot(ey - fy) < r);
+                        if !near_event {
+                            ambient_jump = d;
+                            ambient_face = f;
+                        }
+                    }
                 }
             }
             let dip = max_jump / range;
+            let ambient_dip = ambient_jump / range;
+            if step >= 30 {
+                ambient_worst = ambient_worst.max(ambient_dip);
+                ambient_top.push((
+                    ambient_dip,
+                    step,
+                    mesh.face_cx[ambient_face],
+                    mesh.face_cy[ambient_face],
+                ));
+            }
             worst.push((dip, step));
+            // OUTLET-strip cell quality: the recycle squeeze compresses
+            // cells against the outlet by design — watch that it never
+            // degenerates them into slivers. Per interior cell in the strip:
+            // isoperimetric ratio P^2/(4*pi*A) (1 = circle; slivers blow
+            // up), volume vs the strip median, and worst per-face skew
+            // (1 - |d_hat . n_hat|).
+            {
+                let strip_x = LX - 5.0 * H;
+                let strip: Vec<usize> = (0..n).filter(|&c| mesh.cell_cx[c] > strip_x).collect();
+                if !strip.is_empty() {
+                    let mut vols: Vec<f64> = strip.iter().map(|&c| mesh.cell_vol[c]).collect();
+                    vols.sort_by(f64::total_cmp);
+                    let med = vols[vols.len() / 2];
+                    let (mut worst_iso, mut worst_iso_c) = (0.0f64, 0usize);
+                    let mut worst_vr = f64::INFINITY;
+                    let mut worst_skew = 0.0f64;
+                    for &c in &strip {
+                        let (fb, fe) = (mesh.cell_face_offsets[c], mesh.cell_face_offsets[c + 1]);
+                        let perim: f64 = mesh.cell_faces[fb..fe]
+                            .iter()
+                            .map(|&f| mesh.face_area[f])
+                            .sum();
+                        let a = mesh.cell_vol[c].max(1e-30);
+                        let iso = perim * perim / (4.0 * std::f64::consts::PI * a);
+                        if iso > worst_iso {
+                            worst_iso = iso;
+                            worst_iso_c = c;
+                        }
+                        worst_vr = worst_vr.min(mesh.cell_vol[c] / med);
+                        for &f in &mesh.cell_faces[fb..fe] {
+                            if let Some(nb) = mesh.face_neighbor[f] {
+                                let o = mesh.face_owner[f];
+                                let (dx, dy) = (
+                                    mesh.cell_cx[nb] - mesh.cell_cx[o],
+                                    mesh.cell_cy[nb] - mesh.cell_cy[o],
+                                );
+                                let d = dx.hypot(dy).max(1e-30);
+                                let dot = (dx * mesh.face_nx[f] + dy * mesh.face_ny[f]).abs() / d;
+                                worst_skew = worst_skew.max(1.0 - dot);
+                            }
+                        }
+                    }
+                    if step >= 30 {
+                        outlet_iso_worst = outlet_iso_worst.max(worst_iso);
+                        outlet_vr_worst = outlet_vr_worst.min(worst_vr);
+                        outlet_skew_worst = outlet_skew_worst.max(worst_skew);
+                        if worst_iso > outlet_iso_top.0 {
+                            outlet_iso_top = (
+                                worst_iso,
+                                step,
+                                mesh.cell_cx[worst_iso_c],
+                                mesh.cell_cy[worst_iso_c],
+                            );
+                        }
+                    }
+                }
+            }
             render_voronoi_field(
                 mesh,
                 &p_of,
@@ -731,7 +847,7 @@ mod probe {
             );
             if step % 50 == 0 || dip > 1.5 {
                 println!(
-                    "[dipole-watch] step {step:4}: {} cells, dip {dip:.3} \
+                    "[dipole-watch] step {step:4}: {} cells, dip {dip:.3} ambient {ambient_dip:.3} \
                      (jump {max_jump:.3e} / range {range:.3e}) at face ({:.3},{:.3}), \
                      +{}/-{} recycled {} defect {:.2e}->{:.2e}",
                     n,
@@ -745,6 +861,37 @@ mod probe {
                 );
             }
         }
+        println!(
+            "[dipole-watch] AMBIENT worst dip (steps 30..{steps}, faces beyond \
+             {EVENT_R_CELLS} local spacings of any event younger than {EVENT_AGE} steps): \
+             {ambient_worst:.3}"
+        );
+        println!(
+            "[dipole-watch] OUTLET-strip quality (steps 30..{steps}): worst isoperimetric \
+             {outlet_iso_worst:.2} (1 = circle; hexagonal CVT ~1.1) at step {} @({:.3},{:.3}); \
+             worst vol/median {outlet_vr_worst:.3}; worst face skew {outlet_skew_worst:.3}",
+            outlet_iso_top.1, outlet_iso_top.2, outlet_iso_top.3
+        );
+        // ZOOM of the outlet strip (final frame): ln(cell volume) over the
+        // last 0.3 of the channel — the visual sliver check.
+        {
+            let mesh = moving.mesh();
+            render_voronoi_window(
+                mesh,
+                &|c| mesh.cell_vol[c].max(1e-30).ln(),
+                &out_dir.join("outlet_zoom_cellvol.png"),
+                (LX - 0.3, LX, 0.0, LY),
+                (300, 1000),
+            );
+            println!("[dipole-watch] outlet zoom written: outlet_zoom_cellvol.png");
+        }
+        ambient_top.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let top_amb: Vec<String> = ambient_top
+            .iter()
+            .take(8)
+            .map(|(d, s, x, y)| format!("step {s}: {d:.2} @({x:.3},{y:.3})"))
+            .collect();
+        println!("[dipole-watch] AMBIENT worst faces: {}", top_amb.join("; "));
         worst.sort_by(|a, b| b.0.total_cmp(&a.0));
         let top: Vec<String> = worst
             .iter()
@@ -1093,6 +1240,69 @@ mod probe {
              outlet-strip {out_jump:.3e}, births {late_births} kills {late_kills} over {} steps, \
              recycle steps {late_recycles}, max|U| {late_umax:.3e} (inlet {inlet:.3e})",
             steps - half
+        );
+    }
+
+    /// Windowed variant of [`render_voronoi_field`]: rasterize a per-cell
+    /// scalar over `(x0, x1, y0, y1)` at the given pixel size — zoom views
+    /// (e.g. the outlet strip sliver check).
+    fn render_voronoi_window(
+        mesh: &cfd2::solver::mesh::Mesh,
+        value: &dyn Fn(usize) -> f64,
+        path: &std::path::Path,
+        window: (f64, f64, f64, f64),
+        size: (u32, u32),
+    ) {
+        let n = mesh.num_cells();
+        let (x0, x1, y0, y1) = window;
+        let (w, h) = size;
+        let (sx, sy) = ((x1 - x0) / w as f64, (y1 - y0) / h as f64);
+        let cells: Vec<usize> = (0..n)
+            .filter(|&c| {
+                mesh.cell_cx[c] > x0 - 0.05
+                    && mesh.cell_cx[c] < x1 + 0.05
+                    && mesh.cell_cy[c] > y0 - 0.05
+                    && mesh.cell_cy[c] < y1 + 0.05
+            })
+            .collect();
+        if cells.is_empty() {
+            return;
+        }
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for &c in &cells {
+            let v = value(c);
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+        let span = (hi - lo).max(1e-300);
+        let mut img = image::RgbImage::new(w, h);
+        for py in 0..h {
+            for px in 0..w {
+                let (x, y) = (x0 + (px as f64 + 0.5) * sx, y1 - (py as f64 + 0.5) * sy);
+                let (mut best, mut best_d2) = (usize::MAX, f64::INFINITY);
+                for &c in &cells {
+                    let d2 = (mesh.cell_cx[c] - x).powi(2) + (mesh.cell_cy[c] - y).powi(2);
+                    if d2 < best_d2 {
+                        best_d2 = d2;
+                        best = c;
+                    }
+                }
+                let t = ((value(best) - lo) / span).clamp(0.0, 1.0);
+                let rgb = if t < 0.5 {
+                    let s = t * 2.0;
+                    [0, (s * 255.0) as u8, ((1.0 - s) * 255.0) as u8]
+                } else {
+                    let s = (t - 0.5) * 2.0;
+                    [(s * 255.0) as u8, ((1.0 - s) * 255.0) as u8, 0]
+                };
+                img.put_pixel(px, py, image::Rgb(rgb));
+            }
+        }
+        img.save(path).expect("write png");
+        println!(
+            "[visual]   {} range [{lo:.4e}, {hi:.4e}] ({} cells in window)",
+            path.file_name().unwrap().to_string_lossy(),
+            cells.len()
         );
     }
 

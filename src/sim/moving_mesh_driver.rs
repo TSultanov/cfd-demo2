@@ -3094,6 +3094,91 @@ impl MovingMeshDriver {
             }
         }
 
+        // BDF CONTINUITY across the rebuild (CPU backend): the fresh solver
+        // starts at step_count = 0 with flat history, so the ENTIRE field
+        // takes a backward-Euler step on every resize event — under
+        // every-step adaptation the integrator effectively never runs BDF2,
+        // and the BDF1-vs-BDF2 solution difference concentrates at the
+        // steepest transients (measured as recurring above-floor pressure
+        // jumps on the obstacle arc FAR from any event — the "ambient
+        // stragglers" of the dipole watch). Transfer the full time history
+        // through the same first-order map and restore integrator
+        // continuity (dt_old / step_count / time) via the snapshot seam.
+        // The VOLUME history stays FLAT (zero mesh-rate on the rebuild
+        // step, exactly like the reinit seam): a fresh cell has no
+        // meaningful V^{n-1}, and flat volumes keep the GCL cancellation
+        // intact — the STATE history is what BDF2's temporal order needs.
+        // GPU keeps the flat-history reinit (its snapshot has no history).
+        #[cfg(feature = "cpu")]
+        if driver.solver().is_cpu() {
+            let old_snap = self.driver.snapshot();
+            if old_snap.has_history
+                && old_snap.state_old.len() == n * stride
+                && old_snap.state_old_old.len() == n * stride
+            {
+                let transfer_level = |src_level: &[f32]| -> Vec<f32> {
+                    let (gx, gy, lo, hi) =
+                        state_gradients_and_bounds(&self.mesh, src_level, stride);
+                    let mut out = Vec::with_capacity(n_new * stride);
+                    for (c, &s) in src.iter().enumerate() {
+                        let dx = new_mesh.cell_cx[c] - self.mesh.cell_cx[s];
+                        let dy = new_mesh.cell_cy[c] - self.mesh.cell_cy[s];
+                        for k in 0..stride {
+                            let idx = s * stride + k;
+                            let v = src_level[idx] as f64 + gx[idx] * dx + gy[idx] * dy;
+                            out.push((v as f32).clamp(lo[idx], hi[idx]));
+                        }
+                    }
+                    out
+                };
+                let state_old = transfer_level(&old_snap.state_old);
+                let state_old_old = transfer_level(&old_snap.state_old_old);
+                let offsets: Vec<usize> = driver
+                    .solver_mut()
+                    .cpu_solver_mut()
+                    .map(|c| {
+                        c.unknown_state_offsets()
+                            .iter()
+                            .map(|&o| o as usize)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let s_unk = offsets.len();
+                let mut x = vec![0.0f32; n_new * s_unk];
+                for c in 0..n_new {
+                    for (r, &off) in offsets.iter().enumerate() {
+                        x[c * s_unk + r] = rows[c * stride + off];
+                    }
+                }
+                let vols_f32: Vec<f32> = new_mesh.cell_vol.iter().map(|&v| v as f32).collect();
+                let snap = crate::solver::SolverStateSnapshot {
+                    num_cells: n_new,
+                    num_faces: new_mesh.num_faces(),
+                    state_stride: stride as u32,
+                    unknowns_per_cell: s_unk,
+                    state: rows.clone(),
+                    state_old,
+                    state_old_old,
+                    x,
+                    cell_vols: vols_f32.clone(),
+                    cell_vols_old: vols_f32.clone(),
+                    cell_vols_old_old: vols_f32,
+                    mesh_fluxes: vec![0.0; new_mesh.num_faces()],
+                    time: old_snap.time,
+                    dt: old_snap.dt,
+                    dt_old: old_snap.dt_old,
+                    dtau: old_snap.dtau,
+                    step_count: old_snap.step_count,
+                    last_rel_delta: old_snap.last_rel_delta,
+                    schur_amg_active: old_snap.schur_amg_active,
+                    has_history: true,
+                };
+                if let Err(e) = driver.restore(&snap) {
+                    eprintln!("moving-mesh: resize BDF continuity skipped: {e}");
+                }
+            }
+        }
+
         // Commit.
         self.driver = driver;
         self.prev_vx = new_mesh.vx.clone();
@@ -4009,23 +4094,33 @@ impl MovingMeshDriver {
         self.driver.params().requested_dt as f64
     }
 
-    /// The flow-CFL dt candidate — the acoustic-aware controller of the
-    /// static `SolverDriver::step` adaptive branch, reproduced at the HEAD
-    /// of the ALE dt handshake: `dt = cfl · min_h / (adv + c_eff)` with
-    /// `adv = max(max_cells |U|, |U_inlet|)` read from the t^n state and
-    /// `c_eff` the low-Mach-reduced EOS sound speed, GATED (exactly like the
-    /// static branch) on the MODEL declaring a real EOS — NOT on
-    /// `params.eos`: the GUI forwards the fluid's physical EOS (Air c≈347)
-    /// even for the constant-EOS incompressible/all-Mach ALE families, and
-    /// dividing their advective dt by a sound speed the model never
-    /// resolves would collapse dt by ~4 orders of magnitude (the all-Mach
-    /// acoustic stiffness is handled implicitly by `psi_precond`, not by
-    /// the timestep). Growth is limited to 1.2× the last COMMITTED pinned
-    /// dt. `None` = no usable estimate this step (fall back to the
-    /// configured dt).
+    /// The flow-CFL dt candidate: `dt = cfl / max_i((|U_i| + c_eff) / h_i)`
+    /// — the TRUE per-cell advective CFL over the t^n state, not the static
+    /// controller's conservative `min_h / max|U|` law (which assumes the
+    /// fastest velocity lives in the smallest cell; under flow-adaptive
+    /// sizing the finest cells sit in the SLOW near-wall bands, so the
+    /// conservative law under-runs the realized CFL by 3-5x and leaves that
+    /// much 1/CFL amplification of re-meshing pressure flicker on the
+    /// table — measured on the extreme-band dipole watch). `c_eff` is the
+    /// low-Mach-reduced EOS sound speed, GATED (exactly like the static
+    /// branch) on the MODEL declaring a real EOS — NOT on `params.eos`: the
+    /// GUI forwards the fluid's physical EOS (Air c≈347) even for the
+    /// constant-EOS incompressible/all-Mach ALE families, and dividing
+    /// their advective dt by a sound speed the model never resolves would
+    /// collapse dt by ~4 orders of magnitude (the all-Mach acoustic
+    /// stiffness is handled implicitly by `psi_precond`, not by the
+    /// timestep). The inflow appears through the inlet-adjacent cells'
+    /// own (|U|, h) — the state is read fresh every pin, so no synthetic
+    /// global `|U_in|/min_h` floor is needed (it would re-impose the
+    /// conservative law whenever the inlet speed rivals the interior).
+    /// Growth is limited to 1.2× the last COMMITTED pinned dt. `None` = no
+    /// usable estimate this step (fall back to the configured dt).
     fn flow_adaptive_dt(&self, target_cfl: f64) -> Option<f64> {
         let params = *self.driver.params();
         let u = self.read_cell_velocities().ok()?;
+        if u.len() != self.mesh.num_cells() {
+            return None;
+        }
         let mut adv = (params.inlet_velocity as f64).abs();
         for &(x, y) in &u {
             adv = adv.max(x.hypot(y));
@@ -4043,12 +4138,21 @@ impl MovingMeshDriver {
                 sound.min(adv.max(sound * theta.sqrt()))
             }
         };
-        let wave = adv + eff_sound;
-        let min_h = self.driver.min_cell();
-        if !(wave.is_finite() && wave > 1e-12 && min_h > 1e-12) {
+        // max_i (wave_i / h_i), h_i = sqrt(cell area).
+        let mut rate = 0.0f64;
+        for (i, &(x, y)) in u.iter().enumerate() {
+            let h = self.mesh.cell_vol[i].max(0.0).sqrt();
+            if h > 1e-12 {
+                let w = x.hypot(y) + eff_sound;
+                if w.is_finite() {
+                    rate = rate.max(w / h);
+                }
+            }
+        }
+        if !(rate.is_finite() && rate > 1e-12) {
             return None;
         }
-        let mut dt = target_cfl * min_h / wave;
+        let mut dt = target_cfl / rate;
         if let Some(prev) = self.last_pinned_dt {
             dt = dt.min(prev * 1.2);
         }

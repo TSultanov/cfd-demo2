@@ -268,26 +268,32 @@ fn movingmesh_adaptive_dt_obstacle_tracks_flow() {
             dts.push(stats.dt);
             resizes += usize::from(stats.cells_born > 0 || stats.cells_killed > 0);
             let state = pollster::block_on(moving.driver().solver().read_state_f32());
-            let n = moving.mesh().num_cells();
-            let umax = (0..n)
-                .map(|c| {
-                    (state[c * stride + u_off] as f64).hypot(state[c * stride + u_off + 1] as f64)
-                })
-                .fold(0.0f64, f64::max);
+            let mesh = moving.mesh();
+            let n = mesh.num_cells();
+            let (mut umax, mut cell_cfl) = (0.0f64, 0.0f64);
+            for c in 0..n {
+                let w =
+                    (state[c * stride + u_off] as f64).hypot(state[c * stride + u_off + 1] as f64);
+                umax = umax.max(w);
+                let h = mesh.cell_vol[c].max(1e-30).sqrt();
+                cell_cfl = cell_cfl.max(stats.dt * w / h);
+            }
             assert!(
                 umax.is_finite() && umax < 10.0,
                 "step {step}: |U| {umax:.3e}"
             );
             umax_at.push(umax);
-            // THE discriminator: realized flow CFL held at the target.
-            // (Skip the cold start; 1.5x margin absorbs the pin-time vs
-            // post-step mesh/velocity drift within one step.)
+            // THE discriminator: the realized PER-CELL flow CFL held at the
+            // target — the controller law is `dt = cfl / max_i(|U_i|/h_i)`
+            // (not the conservative min_h/max|U|, which under-runs the true
+            // CFL when the finest cells sit in slow near-wall bands). Skip
+            // the cold start; 1.5x margin absorbs the pin-time vs post-step
+            // mesh/velocity drift within one step.
             if step >= 10 {
-                let cfl = stats.dt * umax / stats.vol_min.sqrt();
                 assert!(
-                    cfl <= 0.15,
-                    "step {step}: realized CFL {cfl:.3} exceeds 1.5x the 0.1 target — \
-                     the flow-CFL controller is not in charge of the pinned dt"
+                    cell_cfl <= 0.15,
+                    "step {step}: realized per-cell CFL {cell_cfl:.3} exceeds 1.5x the \
+                     0.1 target — the flow-CFL controller is not in charge of the pinned dt"
                 );
             }
         }

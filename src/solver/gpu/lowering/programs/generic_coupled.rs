@@ -1308,6 +1308,91 @@ pub(crate) fn spec_write_state_bytes_current(
     Ok(())
 }
 
+/// Re-initialize a SUBSET of cells as FRESH fluid parcels (the seed-recycling
+/// seam): per-cell `write_buffer` rows into ALL THREE state ping-pong buffers
+/// (every time level — the cell's ddt sees a zero rate), the ALE volume
+/// history rows (`cell_vols_old = cell_vols_old_old = new_vol`; the CURRENT
+/// `cell_vols` was already refreshed by the ALE seam), and the coupled
+/// warm-start `x` rows re-packed from the new state (equation-target unknown
+/// order — the same packing the CPU `sync_x_from_state` uses). Per-cell on
+/// purpose: `write_state_bytes` has initial-condition semantics and would
+/// reset the time history of EVERY cell.
+pub(crate) fn spec_reinit_cells(
+    plan: &GpuProgramPlan,
+    cells: &[u32],
+    rows: &[f32],
+    new_vols: &[f64],
+) -> Result<(), String> {
+    let r = res(plan);
+    let queue = &plan.context.queue;
+    let stride = plan.model.state_layout.stride() as usize;
+    if rows.len() != cells.len() * stride {
+        return Err(format!(
+            "reinit_cells: rows length {} != cells*stride {}",
+            rows.len(),
+            cells.len() * stride
+        ));
+    }
+    if new_vols.len() != cells.len() {
+        return Err(format!(
+            "reinit_cells: new_vols length {} != cells {}",
+            new_vols.len(),
+            cells.len()
+        ));
+    }
+    let num_cells = r.runtime.common.num_cells as usize;
+    let s = r.recipe.unknowns_per_cell as usize;
+    // Unknown-order offsets (equation-target order).
+    let mut offs: Vec<(usize, &str)> = Vec::new();
+    {
+        let mut cur = 0usize;
+        for eq in plan.model.system.equations() {
+            offs.push((cur, eq.target().name()));
+            cur += eq.target().kind().component_count();
+        }
+    }
+    let mesh = &r.runtime.common.mesh;
+    for (k, &cell) in cells.iter().enumerate() {
+        if cell as usize >= num_cells {
+            return Err(format!(
+                "reinit_cells: cell {cell} out of range ({num_cells} cells)"
+            ));
+        }
+        let row = &rows[k * stride..(k + 1) * stride];
+        let row_bytes: &[u8] = bytemuck::cast_slice(row);
+        let state_off = (cell as u64) * (stride as u64) * 4;
+        for buf in r.fields.state_buffers() {
+            queue.write_buffer(buf, state_off, row_bytes);
+        }
+        let v_bytes = (new_vols[k] as f32).to_le_bytes();
+        queue.write_buffer(&mesh.b_cell_vols_old, (cell as u64) * 4, &v_bytes);
+        queue.write_buffer(&mesh.b_cell_vols_old_old, (cell as u64) * 4, &v_bytes);
+        if s > 1 {
+            let mut x_row = vec![0.0f32; s];
+            for (i, (xbase, field)) in offs.iter().enumerate() {
+                let next = offs.get(i + 1).map(|(o, _)| *o).unwrap_or(s);
+                let width = next - xbase;
+                let Some(soff) = plan.model.state_layout.offset_for(field) else {
+                    continue;
+                };
+                for c in 0..width {
+                    x_row[xbase + c] = row[soff as usize + c];
+                }
+            }
+            let x_buf = r
+                .runtime
+                .linear_port_space
+                .buffer(r.runtime.linear_ports.x);
+            queue.write_buffer(
+                x_buf,
+                (cell as u64) * (s as u64) * 4,
+                bytemuck::cast_slice(&x_row),
+            );
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn spec_set_bc_value(
     plan: &GpuProgramPlan,
     boundary: crate::solver::gpu::enums::GpuBoundaryType,

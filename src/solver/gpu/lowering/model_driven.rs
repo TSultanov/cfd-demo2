@@ -113,6 +113,7 @@ async fn lower_parts_for_model(
             state_buffer: programs::universal::spec_state_buffer,
             write_state_bytes: programs::universal::spec_write_state_bytes,
             write_state_bytes_current: Some(programs::universal::spec_write_state_bytes_current),
+            reinit_cells: Some(programs::universal::spec_reinit_cells),
             set_bc_value: Some(programs::universal::spec_set_bc_value),
             set_bc_values_per_face: Some(programs::universal::spec_set_bc_values_per_face),
             initialize_history: None,

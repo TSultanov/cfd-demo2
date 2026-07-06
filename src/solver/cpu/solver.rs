@@ -952,6 +952,81 @@ impl CpuSolver {
             .any(|a| !f32::from_bits(a.load(Ordering::Relaxed)).is_finite())
     }
 
+    /// Re-initialize a SUBSET of cells as FRESH fluid parcels (seed-recycling
+    /// seam): overwrite the packed state row in EVERY time level
+    /// (`state`/`state_old`/`state_old_old`/`state_iter` — the cell's ddt sees
+    /// a zero rate), zero the ALE volume-history rate
+    /// (`cell_vols_old = cell_vols_old_old = new_vol`; the CURRENT `cell_vols`
+    /// was already refreshed by the ALE seam), and re-pack the cell's
+    /// warm-start `x` rows from the new state (same unknown packing as
+    /// `sync_x_from_state`). Per-cell writes on purpose: `write_state_f32`
+    /// has initial-condition semantics and would reset the time history of
+    /// EVERY cell. `rows` is `cells.len() × state_stride`; `new_vols` one
+    /// volume per cell.
+    pub fn reinit_cells(
+        &self,
+        cells: &[usize],
+        rows: &[f32],
+        new_vols: &[f64],
+    ) -> Result<(), String> {
+        let stride = self.state_stride as usize;
+        if rows.len() != cells.len() * stride {
+            return Err(format!(
+                "reinit_cells: rows length {} != cells*stride {}",
+                rows.len(),
+                cells.len() * stride
+            ));
+        }
+        if new_vols.len() != cells.len() {
+            return Err(format!(
+                "reinit_cells: new_vols length {} != cells {}",
+                new_vols.len(),
+                cells.len()
+            ));
+        }
+        // Unknown-order offsets (equation-target order), as in
+        // `sync_x_from_state`.
+        let s = self.unknowns_per_cell;
+        let mut offs: Vec<(u32, String)> = self
+            .coupled_offsets
+            .iter()
+            .map(|(k, &v)| (v, k.clone()))
+            .collect();
+        offs.sort();
+        for (k, &cell) in cells.iter().enumerate() {
+            if cell >= self.num_cells {
+                return Err(format!(
+                    "reinit_cells: cell {cell} out of range ({} cells)",
+                    self.num_cells
+                ));
+            }
+            let row = &rows[k * stride..(k + 1) * stride];
+            for (c, &v) in row.iter().enumerate() {
+                for buf in ["state", "state_old", "state_old_old", "state_iter"] {
+                    self.buffers.set_f32(buf, cell * stride + c, v);
+                }
+            }
+            let v = new_vols[k] as f32;
+            self.buffers.set_f32("cell_vols_old", cell, v);
+            self.buffers.set_f32("cell_vols_old_old", cell, v);
+            if s > 1 {
+                for (i, (xbase, field)) in offs.iter().enumerate() {
+                    let xbase = *xbase as usize;
+                    let next = offs.get(i + 1).map(|(o, _)| *o as usize).unwrap_or(s);
+                    let width = next - xbase;
+                    let Some(soff) = self.state_layout.offset_for(field) else {
+                        continue;
+                    };
+                    for c in 0..width {
+                        self.buffers
+                            .set_f32("x", cell * s + xbase + c, row[soff as usize + c]);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Overwrite the full packed state.
     pub fn write_state_f32(&self, state: &[f32]) -> Result<(), String> {
         let expected = self.num_cells * self.state_stride as usize;

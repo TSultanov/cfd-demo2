@@ -120,6 +120,7 @@ mod probe {
         let u_off = layout.offset_for("U").expect("U") as usize;
 
         let report_every = (steps / 15).max(20);
+        let mut total_recycled = 0usize;
         for step in 0..steps {
             let (outcome, stats) = match moving.step(false) {
                 Ok(r) => r,
@@ -132,6 +133,7 @@ mod probe {
                 println!("[{label}] step {step}: DIVERGED {reason:?}");
                 return;
             }
+            total_recycled += stats.recycled;
             if step % report_every == 0 || step == steps - 1 {
                 let state =
                     pollster::block_on(moving.driver().solver().read_state_f32());
@@ -156,10 +158,12 @@ mod probe {
                         ivm = c;
                     }
                 }
+                let vmax = mesh.cell_vol.iter().cloned().fold(0.0f64, f64::max);
                 println!(
                     "[{label}] step {step:3}: dt={:.2e} |U|max={umax:.3e} \
                      @({:.3},{:.3}) vol@argmax={:.2e} |U|max_interior={umax_interior:.3e} \
-                     vol_min={vmin:.2e} @({:.3},{:.3}) skew={:.3} flip={} SCL={:.1e}",
+                     vol_min={vmin:.2e} @({:.3},{:.3}) vol_max={vmax:.2e} skew={:.3} \
+                     flip={} SCL={:.1e} recycled_total={total_recycled}",
                     stats.dt, mesh.cell_cx[iu], mesh.cell_cy[iu], mesh.cell_vol[iu],
                     mesh.cell_cx[ivm], mesh.cell_cy[ivm],
                     stats.max_skew, stats.flipped, stats.scl_defect,
@@ -396,6 +400,242 @@ mod probe {
         println!("[mode-dump] second-column max|U| = {c2max:.3e} over {} cells", col2.len());
     }
 
+    /// Quantify the RECYCLE transient at the outlet: on steps where seeds
+    /// recycle (and the two steps after), print the outlet-strip |U| / p
+    /// extremes vs the running ambient — separates a real solver spike (the
+    /// old neighbors absorb the dying cell's area in one step) from the
+    /// rendering-cadence artifact (stale polygon painted with the slot's new
+    /// inlet state).
+    fn run_recycle_spike(steps: usize) {
+        let domain = Vector2::new(LX, LY);
+        let geo = ChannelWithObstacle {
+            length: LX,
+            height: LY,
+            obstacle_center: Point2::new(1.0, 0.51),
+            obstacle_radius: 0.1,
+        };
+        let cvt =
+            generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let n = cvt.mesh.num_cells();
+        let params = gui_params();
+        let initial_u = vec![(INLET as f64, 0.0); n];
+        let initial_p = vec![0.0; n];
+        let mut moving = pollster::block_on(MovingMeshDriver::build(
+            cvt,
+            &params,
+            MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+            &initial_u,
+            &initial_p,
+            None,
+            None,
+        ))
+        .expect("driver build");
+        moving.driver_mut().apply_params(&params);
+        let layout = moving.driver().solver().model().state_layout.clone();
+        let stride = layout.stride() as usize;
+        let u_off = layout.offset_for("U").expect("U") as usize;
+        let p_off = layout.offset_for("p").expect("p") as usize;
+
+        let strip_x = LX - 4.0 * H;
+        let mut watch = 0usize; // steps left to report after a recycle
+        let (mut peak_u, mut peak_p) = (0.0f32, 0.0f32);
+        for step in 0..steps {
+            let (outcome, stats) = moving.step(false).expect("step");
+            assert!(outcome.diverged.is_none(), "diverged at step {step}");
+            if stats.recycled > 0 {
+                watch = 3;
+            }
+            if watch > 0 || step % 100 == 0 {
+                let state = pollster::block_on(moving.driver().solver().read_state_f32());
+                let mesh = moving.mesh();
+                let (mut umax, mut pmin, mut pmax) = (0.0f32, f32::MAX, f32::MIN);
+                for c in 0..n {
+                    if mesh.cell_cx[c] < strip_x {
+                        continue;
+                    }
+                    let (ux, uy) = (state[c * stride + u_off], state[c * stride + u_off + 1]);
+                    umax = umax.max((ux * ux + uy * uy).sqrt());
+                    let p = state[c * stride + p_off];
+                    pmin = pmin.min(p);
+                    pmax = pmax.max(p);
+                }
+                let tag = if stats.recycled > 0 { "RECYCLE" } else if watch > 0 { "after  " } else { "ambient" };
+                println!(
+                    "[recycle-spike] step {step:4} {tag} n_rec={} strip |U|max={umax:.3e} \
+                     p=[{pmin:+.3e},{pmax:+.3e}]",
+                    stats.recycled
+                );
+                if stats.recycled > 0 || watch == 3 {
+                    peak_u = peak_u.max(umax);
+                    peak_p = peak_p.max(pmax.abs().max(pmin.abs()));
+                }
+                watch = watch.saturating_sub(1);
+            }
+        }
+        println!(
+            "[recycle-spike] PEAK on recycle steps: |U|={peak_u:.3e} (inlet {INLET:.3e}), \
+             |p|={peak_p:.3e}"
+        );
+    }
+
+    /// Thermal-ALE divergence ladder: the allmach_thermal model on the GUI
+    /// obstacle CVT with the PROVEN gate params (Euler, 6 outers, dt 5e-3,
+    /// psi 1e-4, inlet 0.4) — static solver vs Frozen-ALE vs FlowCoupled,
+    /// each run to divergence or `steps`. Prints the death step.
+    fn run_thermal_ladder(steps: usize) {
+        use cfd2::sim::SolverDriver;
+        use cfd2::solver::model::{allmach_thermal_ale_model, all_models};
+        let domain = Vector2::new(LX, LY);
+        let geo = ChannelWithObstacle {
+            length: LX,
+            height: LY,
+            obstacle_center: Point2::new(1.0, 0.51),
+            obstacle_radius: 0.1,
+        };
+        let mut params = gui_params();
+        params.time_scheme = TimeScheme::Euler;
+        params.outer_iters = 6;
+        params.requested_dt = 5e-3;
+        params.compressibility_psi = 1e-4;
+        params.inlet_velocity = 0.4;
+        params.viscosity = 0.01;
+        params.density = 1.0;
+
+        // Static (non-ALE) thermal on the same CVT mesh.
+        {
+            let cvt =
+                generate_cvt_mesh_with_seeds(&geo, 0.06, 0.06, 1.0, domain, &LloydConfig::default());
+            let mesh = cvt.mesh;
+            let n = mesh.num_cells();
+            let model = all_models()
+                .expect("models")
+                .into_iter()
+                .find(|m| m.id == "allmach_thermal")
+                .expect("allmach_thermal");
+            let build = pollster::block_on(SolverDriver::build(
+                &mesh,
+                model,
+                &params,
+                &vec![(params.inlet_velocity as f64, 0.0); n],
+                &vec![0.0; n],
+                None,
+                None,
+            ))
+            .expect("static thermal build");
+            let mut driver = build.driver;
+            driver.apply_params(&params);
+            let mut died = None;
+            for step in 0..steps {
+                let outcome = driver.step(false);
+                if outcome.diverged.is_some() {
+                    died = Some(step);
+                    break;
+                }
+            }
+            println!("[thermal-ladder] static:       died={died:?} (None = survived {steps})");
+        }
+
+        // Frozen-ALE and FlowCoupled thermal.
+        for (label, motion) in [
+            ("frozen-ale ", MeshMotionSpec::Frozen),
+            ("flowcoupled", MeshMotionSpec::FlowCoupled { regularization: 0.5 }),
+        ] {
+            let cvt =
+                generate_cvt_mesh_with_seeds(&geo, 0.06, 0.06, 1.0, domain, &LloydConfig::default());
+            let n = cvt.mesh.num_cells();
+            let mut moving = pollster::block_on(MovingMeshDriver::build_with_model(
+                cvt,
+                allmach_thermal_ale_model().expect("thermal ale"),
+                &params,
+                motion,
+                &vec![(params.inlet_velocity as f64, 0.0); n],
+                &vec![0.0; n],
+                None,
+                None,
+            ))
+            .expect("thermal moving build");
+            moving.driver_mut().apply_params(&params);
+            let mut died = None;
+            for step in 0..steps {
+                match moving.step(false) {
+                    Ok((outcome, _)) => {
+                        if outcome.diverged.is_some() {
+                            died = Some(step);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        println!("[thermal-ladder] {label}: step {step} ERROR {e}");
+                        died = Some(step);
+                        break;
+                    }
+                }
+            }
+            println!("[thermal-ladder] {label}: died={died:?} (None = survived {steps})");
+        }
+    }
+
+    /// One long thermal FlowCoupled run with the worker smoke's exact params
+    /// (outer_auto_converge OFF, dtau 0) and the given advection scheme.
+    fn run_thermal_long(scheme: Scheme, steps: usize) {
+        use cfd2::solver::model::allmach_thermal_ale_model;
+        let domain = Vector2::new(LX, LY);
+        let geo = ChannelWithObstacle {
+            length: LX,
+            height: LY,
+            obstacle_center: Point2::new(1.0, 0.51),
+            obstacle_radius: 0.1,
+        };
+        let mut params = gui_params();
+        params.advection_scheme = scheme;
+        params.time_scheme = TimeScheme::Euler;
+        params.outer_iters = 6;
+        params.outer_auto_converge = false;
+        params.requested_dt = 5e-3;
+        params.compressibility_psi = 1e-4;
+        params.inlet_velocity = 0.4;
+        params.viscosity = 0.01;
+        params.density = 1.0;
+        let cvt =
+            generate_cvt_mesh_with_seeds(&geo, 0.06, 0.06, 1.0, domain, &LloydConfig::default());
+        let n = cvt.mesh.num_cells();
+        let mut moving = pollster::block_on(MovingMeshDriver::build_with_model(
+            cvt,
+            allmach_thermal_ale_model().expect("thermal ale"),
+            &params,
+            MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+            &vec![(params.inlet_velocity as f64, 0.0); n],
+            &vec![0.0; n],
+            None,
+            None,
+        ))
+        .expect("thermal moving build");
+        moving.driver_mut().apply_params(&params);
+        let mut died = None;
+        let mut total_recycled = 0usize;
+        for step in 0..steps {
+            match moving.step(false) {
+                Ok((outcome, stats)) => {
+                    total_recycled += stats.recycled;
+                    if let Some(r) = &outcome.diverged {
+                        println!("[thermal-long] {scheme:?}: DIVERGED {r:?} at step {step}");
+                        died = Some(step);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    println!("[thermal-long] {scheme:?}: step {step} ERROR {e}");
+                    died = Some(step);
+                    break;
+                }
+            }
+        }
+        println!(
+            "[thermal-long] {scheme:?}: died={died:?} recycled_total={total_recycled} \
+             (None = survived {steps})"
+        );
+    }
+
     pub fn run() {
         let which = std::env::var("PROBE_CASES").unwrap_or_else(|_| "all".into());
         let has = |k: &str| which == "all" || which.split(',').any(|c| c == k);
@@ -407,6 +647,20 @@ mod probe {
         }
         if has("static-rect") {
             run_static("static-rect-vanleer", Scheme::SecondOrderUpwindVanLeer, false, 600);
+        }
+        if has("recycle-spike") {
+            run_recycle_spike(800);
+        }
+        if has("thermal-ladder") {
+            run_thermal_ladder(1500);
+        }
+        if has("thermal-long") {
+            // Replicate the WORKER smoke's exact configuration (which
+            // diverges within its 120s budget ≈ 5000–8000 steps) at a fixed
+            // long horizon, with the advection scheme as the variable.
+            for scheme in [Scheme::Upwind, Scheme::SecondOrderUpwindVanLeer] {
+                run_thermal_long(scheme, 8000);
+            }
         }
         if has("mode-dump") {
             let step = std::env::var("PROBE_DUMP_STEP")

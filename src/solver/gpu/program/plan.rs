@@ -19,6 +19,8 @@ pub(crate) type ProgramU32Fn = fn(&GpuProgramPlan) -> u32;
 pub(crate) type ProgramF32Fn = fn(&GpuProgramPlan) -> f32;
 pub(crate) type ProgramStateBufferFn = for<'a> fn(&'a GpuProgramPlan) -> &'a wgpu::Buffer;
 pub(crate) type ProgramWriteStateFn = fn(&GpuProgramPlan, bytes: &[u8]) -> Result<(), String>;
+pub(crate) type ProgramReinitCellsFn =
+    fn(&GpuProgramPlan, cells: &[u32], rows: &[f32], new_vols: &[f64]) -> Result<(), String>;
 pub(crate) type ProgramSetBcValueFn =
     fn(&GpuProgramPlan, crate::solver::gpu::enums::GpuBoundaryType, u32, f32) -> Result<(), String>;
 pub(crate) type ProgramSetBcValuesPerFaceFn = fn(
@@ -325,6 +327,7 @@ pub(crate) struct ModelGpuProgramSpec {
     pub state_buffer: ProgramStateBufferFn,
     pub write_state_bytes: ProgramWriteStateFn,
     pub write_state_bytes_current: Option<ProgramWriteStateFn>,
+    pub reinit_cells: Option<ProgramReinitCellsFn>,
     pub set_bc_value: Option<ProgramSetBcValueFn>,
     pub set_bc_values_per_face: Option<ProgramSetBcValuesPerFaceFn>,
     pub program: ProgramSpec,
@@ -517,6 +520,22 @@ impl GpuProgramPlan {
             return Err("plan does not support history-preserving state writes".into());
         };
         write_current(self, bytes)
+    }
+
+    /// Re-initialize a SUBSET of cells as fresh fluid parcels: the state row
+    /// into every time level, the ALE volume-history rows zeroed to
+    /// `new_vols`, and the warm-start x rows re-packed — other cells' time
+    /// history untouched (the seed-recycling seam).
+    pub fn reinit_cells(
+        &self,
+        cells: &[u32],
+        rows: &[f32],
+        new_vols: &[f64],
+    ) -> Result<(), String> {
+        let Some(reinit) = self.spec.reinit_cells else {
+            return Err("plan does not support per-cell reinitialization".into());
+        };
+        reinit(self, cells, rows, new_vols)
     }
 
     pub fn set_bc_value(

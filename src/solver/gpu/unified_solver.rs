@@ -721,6 +721,31 @@ impl GpuUnifiedSolver {
         }
     }
 
+    /// Re-initialize a SUBSET of cells as FRESH fluid parcels (the
+    /// seed-recycling seam): overwrite the packed state row in EVERY time
+    /// level (the cell's ddt sees a zero rate), zero the ALE volume-history
+    /// rate for those cells (`vols_old = vols_old_old = new_vol`), and
+    /// re-pack their warm-start x rows — all OTHER cells' time history is
+    /// untouched (unlike `write_state_f32`, whose GPU arm has
+    /// initial-condition semantics for the whole field). Call between the
+    /// ALE seam (`begin_ale_step*`) and `step()`. `rows` is
+    /// `cells.len() × state stride`; `new_vols` one volume per cell.
+    pub fn reinit_cells(
+        &self,
+        cells: &[u32],
+        rows: &[f32],
+        new_vols: &[f64],
+    ) -> Result<(), String> {
+        match &self.backend {
+            SolverBackend::Gpu(p) => p.reinit_cells(cells, rows, new_vols),
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(c) => {
+                let cells_usize: Vec<usize> = cells.iter().map(|&c| c as usize).collect();
+                c.reinit_cells(&cells_usize, rows, new_vols)
+            }
+        }
+    }
+
     /// Refresh the solver's mesh-derived state after the caller's `Mesh` changed.
     ///
     /// [`MeshRefreshLevel::Geometry`]: the mesh must be topology-identical to the

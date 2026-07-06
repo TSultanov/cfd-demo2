@@ -85,6 +85,41 @@ pub const FLOW_ADVECT_BOX_DEAD_CELLS: f64 = 1.5;
 pub const QUALITY_VOL_BAND_LO: f64 = 0.5;
 pub const QUALITY_VOL_BAND_HI: f64 = 2.0;
 
+/// Minimum distance (in `min_cell_size` units) from a recycled seed's spawn
+/// slot to the nearest existing seed. Deliberately BELOW the fresh-CVT
+/// deepest-hole depth (~0.58·h, the hexagon circumradius): a spawn must
+/// always be possible, or crossing seeds pile into a parked column at the
+/// recycle line while the inlet stretches unfilled — the intake rate must
+/// match the exit rate BY CONSTRUCTION, and the Lloyd sizing hold relaxes
+/// the temporarily tight spawn neighborhood within a few steps. The floor
+/// only guards the coalescing pitch (sub-pitch duplicates).
+pub const RECYCLE_MIN_SEP_CELLS: f64 = 0.35;
+
+/// Width (in `min_cell_size` units) of the OUTLET strip in which a squeezed
+/// cell is eligible for recycling. The trigger is DENSITY, not position: a
+/// position line either parks arrivals into a compression column (if spawns
+/// lag) or drains the strip into oversized cells (if exports outrun the
+/// upstream advection refill) — both observed. A squeeze trigger
+/// (vol < `QUALITY_VOL_BAND_LO`·initial_min) is self-regulating: a drained
+/// strip has no squeezed cells ⇒ exports stop ⇒ advection refills ⇒ density
+/// recovers ⇒ exports resume — cells exit when they are compressed out,
+/// exactly like the fluid they carry.
+pub const RECYCLE_TRIGGER_CELLS: f64 = 3.0;
+
+/// Max seeds recycled per step: staggers bulk squeeze events (a whole column
+/// compressing at once would otherwise teleport in ONE giant flip step).
+pub const RECYCLE_MAX_PER_STEP: usize = 8;
+
+/// Squeeze fraction for the recycle trigger, applied to the OUTLET STRIP's
+/// initial interior minimum volume (captured at build). The strip's natural
+/// sizing differs from the bulk (its cells neighbor the boundary half-cells),
+/// so neither the global minimum (a boundary half-cell — interior cells never
+/// compress 10× against the steering) nor the bulk average (already below it
+/// on a fresh strip) can calibrate the trigger; the strip's own initial
+/// minimum is the reference that fires on genuine compression and never on
+/// the fresh mesh.
+pub const RECYCLE_SQUEEZE_FRACTION: f64 = 0.75;
+
 /// Default AREPO distortion trigger `η`: the centroid steering ramps in once a
 /// cell's seed-to-centroid offset exceeds `η · R_i` and saturates at `1.1 η`.
 /// Below `0.9 η` the steering is OFF, so well-shaped cells advect PURELY with
@@ -321,6 +356,10 @@ pub struct MovingMeshStats {
     /// Where THIS step's mesh reconstruction ran (GPU on-device, CPU, a
     /// per-step GPU→CPU fallback, or skipped).
     pub regen_backend: RegenBackend,
+    /// Seeds RECYCLED this step (outflow → inflow relabel-in-place): their
+    /// cells were re-seeded as fresh inlet parcels. 0 unless FlowCoupled
+    /// with recycling enabled.
+    pub recycled: usize,
 }
 
 /// One step's shared pre-regen plan ([`MovingMeshDriver::plan_step`]): the
@@ -334,6 +373,13 @@ struct StepPlan {
     step_spec: BoundarySpec,
     escalated: bool,
     plan_ms: f32,
+    /// Seeds RECYCLED this step (outflow → inflow relabel-in-place, see
+    /// [`MovingMeshDriver::set_seed_recycling`]): their slot keeps its index,
+    /// but the cell is a REMOVED + INSERTED pair — the step is forced onto
+    /// the flip path, the closure targets ΔV = 0 for these cells, and their
+    /// solver rows (state, time history, volume history, warm-start x) are
+    /// re-seeded from the nearest surviving cell after the ALE seam.
+    recycled: Vec<usize>,
 }
 
 /// Outcome of a device-regen attempt: the completed step, or a per-step
@@ -433,6 +479,17 @@ pub struct MovingMeshDriver {
     /// when the advected mesh's volumes leave
     /// `[QUALITY_VOL_BAND_LO·min, QUALITY_VOL_BAND_HI·max]` (sizing hold).
     initial_vol_band: (f64, f64),
+    /// FlowCoupled seed RECYCLING: an interior seed whose cell is squeezed
+    /// below [`Self::recycle_vol_floor`] inside the outlet strip is relabeled
+    /// in place to the deepest fluid hole in the inlet band, its cell
+    /// re-seeded as a fresh parcel — the mesh "flows through" the domain
+    /// instead of straining against the fixed boundary guards. Default on
+    /// (inert for non-FlowCoupled motion).
+    seed_recycling: bool,
+    /// Recycle squeeze threshold: `RECYCLE_SQUEEZE_FRACTION ×` the OUTLET
+    /// strip's initial interior minimum cell volume (see
+    /// [`RECYCLE_SQUEEZE_FRACTION`]).
+    recycle_vol_floor: f64,
     /// Number of Lloyd regularization iterations a quality escalation runs
     /// (0 = escalation disabled). Blended (`omega`) so it nudges toward CVT
     /// without erasing the flow displacement.
@@ -554,6 +611,20 @@ impl MovingMeshDriver {
             .cell_vol
             .iter()
             .fold((f64::MAX, 0.0f64), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+        // Recycle trigger reference: the OUTLET strip's initial interior
+        // minimum (see `RECYCLE_SQUEEZE_FRACTION`).
+        let recycle_vol_floor = {
+            let strip_x = domain.x - RECYCLE_TRIGGER_CELLS * min_cell_size;
+            let strip_min = (0..n_seeds)
+                .filter(|&i| kinds[i] == SeedKind::Interior && seeds[i].x > strip_x)
+                .map(|i| mesh.cell_vol[i])
+                .fold(f64::MAX, f64::min);
+            if strip_min.is_finite() {
+                RECYCLE_SQUEEZE_FRACTION * strip_min
+            } else {
+                QUALITY_VOL_BAND_LO * initial_vol_band.0
+            }
+        };
 
         Ok(Self {
             driver: build.driver,
@@ -580,6 +651,8 @@ impl MovingMeshDriver {
             arepo_eta: DEFAULT_AREPO_ETA,
             quality_skew_target: DEFAULT_QUALITY_SKEW_TARGET,
             initial_vol_band,
+            seed_recycling: true,
+            recycle_vol_floor,
             lloyd_escalation_iters: 1,
             lloyd_escalation_omega: 0.4,
             step_index: 0,
@@ -616,6 +689,17 @@ impl MovingMeshDriver {
     /// Set the mesh-motion CFL cap factor (default [`DEFAULT_MESH_CFL`]).
     pub fn set_mesh_cfl(&mut self, cfl: f64) {
         self.mesh_cfl = cfl;
+    }
+
+    /// Enable/disable FlowCoupled seed RECYCLING (default on): seeds advected
+    /// into the outlet dead zone relabel in place to the largest fluid gap in
+    /// the inlet band, and their cells are re-seeded as fresh parcels (state
+    /// + time history + volume history + warm-start x from the nearest
+    /// surviving cell) — the mesh flows through the domain instead of
+    /// straining/compressing against the fixed boundary guards. Inert for
+    /// Frozen/Prescribed motion.
+    pub fn set_seed_recycling(&mut self, on: bool) {
+        self.seed_recycling = on;
     }
 
     /// Install a per-regen boundary-tag rewrite (see the `boundary_retag`
@@ -782,6 +866,7 @@ impl MovingMeshDriver {
                 flip_defect: 0.0,
                 dt,
                 regen_backend: RegenBackend::Skipped,
+                recycled: 0,
             };
             return Ok((outcome, stats));
         }
@@ -818,7 +903,7 @@ impl MovingMeshDriver {
     /// the mesh motion swept during [t^n, t^{n+1}]).
     fn plan_step(&mut self) -> Result<StepPlan, String> {
         let plan_start = Instant::now();
-        let (dt, mut new_seeds) = self.plan_seed_motion()?;
+        let (dt, mut new_seeds, recycled) = self.plan_seed_motion()?;
         let new_time = self.time + dt;
         self.apply_boundary_motion(new_time, &mut new_seeds);
         // The boundary spec at t^{n+1}: the moved loops the regen clips against
@@ -834,6 +919,7 @@ impl MovingMeshDriver {
             step_spec,
             escalated,
             plan_ms,
+            recycled,
         })
     }
 
@@ -853,6 +939,7 @@ impl MovingMeshDriver {
             step_spec,
             escalated,
             plan_ms,
+            recycled,
         } = plan;
 
         // A device-committed t^n mesh is vertex-less, but the CPU swept path
@@ -965,7 +1052,10 @@ impl MovingMeshDriver {
         // closure is the sole guarantee. On a step that is NOT a genuine flip but
         // has a sliver face, the identity is still load-bearing everywhere else, so
         // we keep the hard check alive there (see the `hard_assert_exclude` arg).
-        let genuine_flip = flip.is_flip() || unmatched != 0;
+        // A recycle step is BY CONSTRUCTION a flip: the recycled cell's whole
+        // adjacency teleported (removed at the outlet + inserted at the inlet
+        // sharing a slot).
+        let genuine_flip = flip.is_flip() || unmatched != 0 || !recycled.is_empty();
         // Robustness: a face that is geometrically DEGENERATE (near-zero length at
         // t^n or t^{n+1}) is a collapsing/near-flip face the adjacency scan did
         // not flag — it has no reliable swept quad and the persistent path would
@@ -979,6 +1069,31 @@ impl MovingMeshDriver {
             self.min_cell_size,
         );
         let mut is_flip = genuine_flip || degen > 0;
+        // Closure old-volume target. Base: the actual t^n cell volumes
+        // (`self.mesh` is still the old mesh here) — the born vertices'
+        // aligned old positions cannot reconstruct the old polygon across a
+        // flip, so the ring-reconstructed old volume would be wrong. On a
+        // GENUINE flip after a device-committed step, target the DEVICE
+        // volumes the solver actually holds (the identity check is relaxed
+        // there, so the f64-vs-f32 gap cannot trip it) — the closure then
+        // repairs the GCL exactly against the solver's V^n. RECYCLED cells'
+        // target is ΔV = 0 (their volume history is re-zeroed to the new
+        // volume after the seam): no mesh flux may connect the outlet cell
+        // they were to the inlet cell they become.
+        let base_old_vols: &[f64] = match (&device_vols, genuine_flip) {
+            (Some(dv), true) => dv,
+            _ => &self.mesh.cell_vol,
+        };
+        let old_vols_owned: Option<Vec<f64>> = if recycled.is_empty() {
+            None
+        } else {
+            let mut v = base_old_vols.to_vec();
+            for &i in &recycled {
+                v[i] = new_mesh.cell_vol[i];
+            }
+            Some(v)
+        };
+        let old_vols: &[f64] = old_vols_owned.as_deref().unwrap_or(base_old_vols);
         let strict = if is_flip {
             // Degeneracy-ONLY step (no genuine adjacency change): keep the >1e-9
             // telescoping-identity assert LIVE on every cell not incident to a
@@ -988,18 +1103,6 @@ impl MovingMeshDriver {
                 None
             } else {
                 Some(flip.cell_flipped.as_slice())
-            };
-            // The actual t^n cell volumes (`self.mesh` is still the old mesh
-            // here) are the closure target's old-volume — the born vertices'
-            // aligned old positions cannot reconstruct the old polygon across a
-            // flip, so the ring-reconstructed old volume would be wrong. On a
-            // GENUINE flip after a device-committed step, target the DEVICE
-            // volumes the solver actually holds (the identity check is relaxed
-            // there, so the f64-vs-f32 gap cannot trip it) — the closure then
-            // repairs the GCL exactly against the solver's V^n.
-            let old_vols: &[f64] = match (&device_vols, genuine_flip) {
-                (Some(dv), true) => dv,
-                _ => &self.mesh.cell_vol,
             };
             swept_mesh_fluxes_closed_flip(
                 &new_mesh,
@@ -1033,7 +1136,7 @@ impl MovingMeshDriver {
                     &new_mesh,
                     &old_vx_aligned,
                     &old_vy_aligned,
-                    &self.mesh.cell_vol,
+                    old_vols,
                     &flip.born_face_mask,
                     None,
                     dt,
@@ -1075,6 +1178,39 @@ impl MovingMeshDriver {
         // w_wall[owner] — no-slip + no-penetration at the wall's material
         // velocity. No-op unless moving_wall_bc is on.
         self.apply_moving_wall_velocity(&new_mesh)?;
+        // Re-seed the RECYCLED cells as fresh parcels — state + every time
+        // level + volume history + warm-start x — from the nearest surviving
+        // cell's state row (model-agnostic: copies whatever the state layout
+        // carries — U/p, psi/rho/T for the all-Mach families). AFTER the seam
+        // (so the re-zeroed volume history survives the rotation), BEFORE the
+        // solve.
+        if !recycled.is_empty() {
+            let state = pollster::block_on(self.driver.solver().read_state_f32());
+            let stride = self.driver.solver().model().state_layout.stride() as usize;
+            let recycled_set: std::collections::HashSet<usize> =
+                recycled.iter().cloned().collect();
+            let mut cells: Vec<u32> = Vec::with_capacity(recycled.len());
+            let mut rows: Vec<f32> = Vec::with_capacity(recycled.len() * stride);
+            let mut vols: Vec<f64> = Vec::with_capacity(recycled.len());
+            for &i in &recycled {
+                let p = new_seeds[i];
+                let (mut best, mut best_d2) = (usize::MAX, f64::INFINITY);
+                for (j, q) in new_seeds.iter().enumerate() {
+                    if recycled_set.contains(&j) {
+                        continue;
+                    }
+                    let d2 = (q - p).norm_squared();
+                    if d2 < best_d2 {
+                        best_d2 = d2;
+                        best = j;
+                    }
+                }
+                cells.push(i as u32);
+                rows.extend_from_slice(&state[best * stride..(best + 1) * stride]);
+                vols.push(new_mesh.cell_vol[i]);
+            }
+            self.driver.solver().reinit_cells(&cells, &rows, &vols)?;
+        }
         let refresh_ms = ms_since(refresh_start);
         let topo_changed = face_arrays_differ || is_flip || rebuilt_from_device;
 
@@ -1122,6 +1258,7 @@ impl MovingMeshDriver {
             regen_backend: gpu_fallback
                 .map(RegenBackend::GpuFallback)
                 .unwrap_or(RegenBackend::Cpu),
+            recycled: recycled.len(),
         };
         Ok((outcome, stats))
     }
@@ -1149,6 +1286,13 @@ impl MovingMeshDriver {
 
         let dt = plan.dt;
         let new_seeds = &plan.new_seeds;
+
+        // A recycle step is a guaranteed topology flip (the recycled cell's
+        // whole adjacency teleports) AND needs the per-cell solver reinit the
+        // CPU path performs — skip the device build outright.
+        if !plan.recycled.is_empty() {
+            return Ok(DeviceStep::Fallback("seed recycle"));
+        }
 
         // Lazy-init the GPU context (reusing the solver device/queue) + the regen
         // bundle (engine + passes) at the fixed seed count.
@@ -1308,6 +1452,7 @@ impl MovingMeshDriver {
             flip_defect: 0.0,
             dt,
             regen_backend: RegenBackend::GpuOnDevice,
+            recycled: 0,
         };
         Ok(DeviceStep::Done((outcome, stats)))
     }
@@ -1522,7 +1667,7 @@ impl MovingMeshDriver {
     /// Pin the fixed dt and produce the advected seed set for the current
     /// [`MeshMotionSpec`]. This is the whole dt-handshake + advection front of a
     /// step, factored so the regen→swept→refresh→step tail is motion-agnostic.
-    fn plan_seed_motion(&mut self) -> Result<(f64, Vec<Point2<f64>>), String> {
+    fn plan_seed_motion(&mut self) -> Result<(f64, Vec<Point2<f64>>, Vec<usize>), String> {
         match self.motion {
             // Frozen: no INTERIOR motion. `advect_to` returns the labels; the dt
             // is capped only by the moving BOUNDARY speed, zero otherwise — so a
@@ -1530,7 +1675,7 @@ impl MovingMeshDriver {
             MeshMotionSpec::Frozen => {
                 let w_max = self.max_boundary_speed(self.configured_dt);
                 let dt = self.pin_dt(w_max);
-                Ok((dt, self.advect_to(self.time + dt)))
+                Ok((dt, self.advect_to(self.time + dt), Vec::new()))
             }
             // Prescribed: FD-estimate max seed speed over the base step, cap dt,
             // then sample the analytic law at the pinned t^{n+1}. The moving
@@ -1541,7 +1686,7 @@ impl MovingMeshDriver {
                     .max_seed_speed(dt_base)
                     .max(self.max_boundary_speed(dt_base));
                 let dt = self.pin_dt(w_max);
-                Ok((dt, self.advect_to(self.time + dt)))
+                Ok((dt, self.advect_to(self.time + dt), Vec::new()))
             }
             MeshMotionSpec::FlowCoupled { regularization } => {
                 self.plan_flow_coupled(regularization)
@@ -1573,7 +1718,10 @@ impl MovingMeshDriver {
     ///   obstacle region (interior loops are NOT the box) keeps full advection,
     ///   and the steering stays active everywhere (quality hold). No-slip walls
     ///   are unaffected in practice (u ≈ 0 there anyway).
-    fn plan_flow_coupled(&mut self, chi_max: f64) -> Result<(f64, Vec<Point2<f64>>), String> {
+    fn plan_flow_coupled(
+        &mut self,
+        chi_max: f64,
+    ) -> Result<(f64, Vec<Point2<f64>>, Vec<usize>), String> {
         use std::f64::consts::PI;
         let u = self.read_cell_velocities()?;
         let dead_len = FLOW_ADVECT_BOX_DEAD_CELLS * self.min_cell_size;
@@ -1581,8 +1729,19 @@ impl MovingMeshDriver {
             ((FLOW_ADVECT_BOX_RAMP_CELLS - FLOW_ADVECT_BOX_DEAD_CELLS) * self.min_cell_size)
                 .max(1e-30);
         let domain = self.domain;
+        // With seed RECYCLING active the x (through-flow) sides must NOT park
+        // seeds: they advect at full speed to the recycle line and relabel to
+        // the inlet — the dead zone would otherwise stall them just short of
+        // the trigger and recycling would never fire (measured: 0 recycles in
+        // 2000 steps), while freshly spawned inlet seeds would sit at ramp=0
+        // and never leave. The wall (y) ramp stays either way (inert for
+        // no-slip walls where u ≈ 0, protective for slip walls).
+        let through_flow = self.seed_recycling;
         let box_ramp = move |s: &Point2<f64>| -> f64 {
-            let d = s.x.min(domain.x - s.x).min(s.y).min(domain.y - s.y);
+            let mut d = s.y.min(domain.y - s.y);
+            if !through_flow {
+                d = d.min(s.x).min(domain.x - s.x);
+            }
             ((d - dead_len) / ramp_len).clamp(0.0, 1.0)
         };
         // dt handshake: cap off the max EFFECTIVE advection speed (the ramped
@@ -1653,7 +1812,110 @@ impl MovingMeshDriver {
             }
             new_seeds[i] = Point2::new(s.x + dx, s.y + dy);
         }
-        Ok((dt, new_seeds))
+        // Outflow -> inflow seed recycling (relabel-in-place; inert when
+        // disabled). Runs AFTER advection/steering/clamp so the trigger sees
+        // the step's final positions; the teleport is not advection, so it
+        // does not enter the mesh-CFL dt cap above.
+        let recycled = if self.seed_recycling {
+            self.recycle_seeds(&mut new_seeds)
+        } else {
+            Vec::new()
+        };
+        Ok((dt, new_seeds, recycled))
+    }
+
+    /// Relabel every interior seed that crossed into the OUTLET dead zone
+    /// (x > domain.x − dead) to the largest FLUID gap along the inlet band —
+    /// the mesh analogue of fluid leaving the outflow and entering the
+    /// inflow. The slot keeps its index (fixed-seed contract); the caller
+    /// re-seeds the cell's solver rows after the ALE seam. A respawn keeps
+    /// the Poisson spacing discipline ([`RECYCLE_MIN_HALFGAP_CELLS`]); when
+    /// no admissible gap exists the seed simply stays parked in the dead
+    /// zone until one opens.
+    fn recycle_seeds(&self, seeds: &mut [Point2<f64>]) -> Vec<usize> {
+        use crate::meshgen::meshless::point_in_fluid;
+        let h = self.min_cell_size;
+        let strip_x = self.domain.x - RECYCLE_TRIGGER_CELLS * h;
+        let park_x = self.domain.x - FLOW_ADVECT_BOX_DEAD_CELLS * h;
+        let vol_lo = self.recycle_vol_floor;
+
+        // DENSITY trigger: interior seeds in the outlet strip whose CURRENT
+        // cell (seed i == cell i, t^n mesh) is squeezed below the strip's
+        // own initial sizing — being compressed out, most-squeezed first.
+        let mut out: Vec<usize> = (0..seeds.len())
+            .filter(|&i| {
+                self.kinds[i] == SeedKind::Interior
+                    && seeds[i].x > strip_x
+                    && self.mesh.cell_vol[i] < vol_lo
+            })
+            .collect();
+        out.sort_by(|&a, &b| self.mesh.cell_vol[a].total_cmp(&self.mesh.cell_vol[b]));
+        out.truncate(RECYCLE_MAX_PER_STEP);
+
+        // Anti-guard-squeeze backstop for everyone else: advection is
+        // full-speed on the through-flow sides when recycling is on, so a
+        // seed that presses past the park line (1.5 cells from the outlet
+        // guards) is clamped there — squeezing then shows up as shrinking
+        // volumes IN the strip, which is exactly the recycle trigger.
+        for i in 0..seeds.len() {
+            if self.kinds[i] == SeedKind::Interior && !out.contains(&i) && seeds[i].x > park_x {
+                seeds[i].x = park_x;
+            }
+        }
+        if out.is_empty() {
+            return Vec::new();
+        }
+
+        // Spawn placement: the deepest 2D hole over a candidate grid spanning
+        // the inlet band (x ∈ [1.5h, 3h], y at h/4), scored by distance to
+        // the nearest occupant. 2D distance, not a y-projection gap — the
+        // x=0 inlet guards' own ~h spacing caps any projected gap regardless
+        // of real holes. The admissibility floor is BELOW the fresh-CVT
+        // deepest hole (~0.58h), so a spawn is always possible and the
+        // intake rate matches the export rate by construction; the sizing
+        // hold relaxes the temporarily tight neighborhood within steps.
+        let out_set: std::collections::HashSet<usize> = out.iter().cloned().collect();
+        let band_lim = (RECYCLE_TRIGGER_CELLS + 1.0) * h;
+        let mut occupants: Vec<Point2<f64>> = (0..seeds.len())
+            .filter(|&i| seeds[i].x < band_lim && !out_set.contains(&i))
+            .map(|i| seeds[i])
+            .collect();
+
+        let min_sep = RECYCLE_MIN_SEP_CELLS * h;
+        let cand_step = 0.25 * h;
+        let x_levels = [1.5 * h, 2.0 * h, 2.5 * h, 3.0 * h];
+        let n_cand = (self.domain.y / cand_step).floor() as usize;
+        let mut recycled = Vec::new();
+        for &i in &out {
+            let mut best: Option<(f64, Point2<f64>)> = None;
+            for &cx in &x_levels {
+                for k in 1..n_cand {
+                    let p = Point2::new(cx, k as f64 * cand_step);
+                    if !point_in_fluid(p, &self.spec) {
+                        continue;
+                    }
+                    let d2 = occupants
+                        .iter()
+                        .map(|q| (q - p).norm_squared())
+                        .fold(f64::INFINITY, f64::min);
+                    if best.map_or(true, |(b, _)| d2 > b) {
+                        best = Some((d2, p));
+                    }
+                }
+            }
+            match best {
+                Some((d2, p)) if d2.sqrt() >= min_sep => {
+                    seeds[i] = p;
+                    occupants.push(p);
+                    recycled.push(i);
+                }
+                _ => {
+                    // No admissible hole (pathological): park instead.
+                    seeds[i].x = seeds[i].x.min(park_x);
+                }
+            }
+        }
+        recycled
     }
 
     /// Read the current per-cell velocity `(u_x, u_y)` (f64-widened f32) from the

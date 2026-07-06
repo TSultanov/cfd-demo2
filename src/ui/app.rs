@@ -454,6 +454,15 @@ pub fn moving_mesh_worker_smoke(
     use std::time::{Duration, Instant};
 
     let handle = SolverWorkerHandle::spawn();
+    // Mirror the GUI's init sequence (`init_solver` → `sync_worker_params`):
+    // the worker's SetSolver arm re-applies ITS params snapshot over the
+    // driver (phase-2 application), so the driver's own runtime params must
+    // be sent first or the worker silently overwrites the test's carefully
+    // configured solver (a default-params overwrite destabilized the
+    // thermal-ALE smoke while coincidentally matching the incompressible
+    // ones).
+    let driver_params = *moving.driver().params();
+    handle.send(SolverWorkerCommand::UpdateParams(driver_params));
     handle.send(SolverWorkerCommand::SetSolver {
         mode: SolverMode::MovingMesh(moving),
         viz_field: None,
@@ -3755,27 +3764,35 @@ impl eframe::App for CFDApp {
                         ui.label("Model");
                         let prev_model_id = self.model_id;
                         // Moving mesh keeps the user's model and runs it as its ALE
-                        // variant — grey the dropdown (rather than overwriting it)
-                        // so the running physics is the model shown, and the lock is
-                        // visible instead of a silent swap.
-                        let model_locked = self.enable_moving_mesh || self.solver_is_moving;
-                        let model_combo = ui.add_enabled_ui(!model_locked, |ui| {
-                            egui::ComboBox::from_label("Model")
-                                .selected_text(CFDApp::model_label(self.model_id))
-                                .show_ui(ui, |ui| {
-                                    for (id, label) in CFDApp::supported_ui_models() {
-                                        ui.selectable_value(&mut self.model_id, id, label);
+                        // variant. The dropdown stays LIVE while moving is enabled
+                        // (the selection applies on Initialize / Reset like any
+                        // model change); only entries WITHOUT an ALE variant
+                        // (density-based `compressible`) are disabled, with the
+                        // reason on hover — so switching e.g. incompressible →
+                        // All-Mach thermal under ALE is one click, never a
+                        // disable-retick-reenable dance.
+                        let moving_active = self.enable_moving_mesh || self.solver_is_moving;
+                        egui::ComboBox::from_label("Model")
+                            .selected_text(CFDApp::model_label(self.model_id))
+                            .show_ui(ui, |ui| {
+                                for (id, label) in CFDApp::supported_ui_models() {
+                                    let selectable =
+                                        !moving_active || CFDApp::ale_model_for(id).is_some();
+                                    let entry = ui.add_enabled(
+                                        selectable,
+                                        egui::SelectableLabel::new(self.model_id == id, label),
+                                    );
+                                    if entry.clicked() && selectable {
+                                        self.model_id = id;
                                     }
-                                });
-                        });
-                        if model_locked {
-                            model_combo.response.on_hover_text(format!(
-                                "Locked while Moving Mesh (ALE) is enabled — the '{}' solver \
-                                 runs as its moving-mesh (ALE) variant. Disable Moving Mesh to \
-                                 change the model.",
-                                CFDApp::model_label(self.model_id),
-                            ));
-                        }
+                                    if !selectable {
+                                        entry.on_disabled_hover_text(format!(
+                                            "'{label}' has no moving-mesh (ALE) variant — \
+                                             disable Moving Mesh (ALE) to select it.",
+                                        ));
+                                    }
+                                }
+                            });
                         if prev_model_id != self.model_id {
                             // Re-seed every solver knob from the per-model defaults
                             // (scheme, relaxation, outer cap, adaptive-dt target,
@@ -3950,7 +3967,7 @@ impl eframe::App for CFDApp {
                                  and the CPU path took it; the GPU is retried next step.",
                             );
                             ui.label(format!(
-                                "ALE mesh: {} cells, {} faces{}",
+                                "ALE mesh: {} cells, {} faces{}{}",
                                 m.n_cells,
                                 m.n_faces,
                                 if m.flipped {
@@ -3958,6 +3975,11 @@ impl eframe::App for CFDApp {
                                         " (flip: {} born / {} died, {} cells)",
                                         m.born_faces, m.died_faces, m.flipped_cells
                                     )
+                                } else {
+                                    String::new()
+                                },
+                                if m.recycled > 0 {
+                                    format!(" (recycled {} seeds)", m.recycled)
                                 } else {
                                     String::new()
                                 }
@@ -4267,7 +4289,17 @@ fn solver_worker_main(
                     // Geometry + ALE diagnostics tolerate frame-cadence lag;
                     // colors track per-step via the separate viz-field path
                     // regardless.
-                    let refresh = if should_readback {
+                    //
+                    // EXCEPTION — recycle steps publish immediately: a
+                    // recycled cell's slot keeps its index but its polygon
+                    // teleports outlet → inlet, and the per-step viz colors
+                    // would otherwise paint the STALE outlet polygon with the
+                    // slot's fresh inlet-donor state until the next snapshot
+                    // (a visible wrong-velocity/pressure flash at the
+                    // outlet). Recycle steps are rare (≤ RECYCLE_MAX_PER_STEP
+                    // seeds, ~0.2/step measured), so the extra publish is
+                    // negligible.
+                    let refresh = if should_readback || mstats.recycled > 0 {
                         Some((CFDApp::cache_cells(m.mesh()), mstats))
                     } else {
                         None

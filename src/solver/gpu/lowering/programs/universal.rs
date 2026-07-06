@@ -92,6 +92,15 @@ pub(in crate::solver::gpu::lowering) fn spec_write_state_bytes_current(
     generic_coupled_program::spec_write_state_bytes_current(plan, bytes)
 }
 
+pub(in crate::solver::gpu::lowering) fn spec_reinit_cells(
+    plan: &GpuProgramPlan,
+    cells: &[u32],
+    rows: &[f32],
+    new_vols: &[f64],
+) -> Result<(), String> {
+    generic_coupled_program::spec_reinit_cells(plan, cells, rows, new_vols)
+}
+
 pub(in crate::solver::gpu::lowering) fn spec_set_bc_value(
     plan: &GpuProgramPlan,
     boundary: crate::solver::gpu::enums::GpuBoundaryType,

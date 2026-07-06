@@ -564,3 +564,97 @@ fn moving_mesh_gui_worker_gpu_regen_smoke() {
     // renderer capacity path.
     replay_through_renderer(&smoke.meshes, n_cells);
 }
+
+/// The GUI's "All-Mach thermal + Moving Mesh (ALE)" combination, end-to-end
+/// through the worker pump: the Model dropdown offers `allmach_thermal`, the
+/// moving toggle maps it to `allmach_thermal_ale` (`ale_model_for`), and the
+/// driver seeds the thermal state (T / rho_t_ref / psi / dt_local) via
+/// `SolverDriver::build`. This gate mirrors that exact path — thermal ALE
+/// model + FlowCoupled interior motion on the ChannelObstacle CVT — and
+/// asserts refreshes flow with finite stats, a fixed cell count, and a
+/// conservative mesh, so the UI enablement is backed by a running solver,
+/// not just an enabled checkbox.
+#[test]
+fn moving_mesh_gui_worker_allmach_thermal_smoke() {
+    use cfd2::solver::model::allmach_thermal_ale_model;
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    std::env::set_var("CFD2_CPU_ENGINE", "transpiled");
+
+    let domain = Vector2::new(3.0, 1.0);
+    let geo = ChannelWithObstacle {
+        length: 3.0,
+        height: 1.0,
+        obstacle_center: Point2::new(1.0, 0.51),
+        obstacle_radius: 0.1,
+    };
+    let cvt = cfd2::meshgen::meshless::generate_cvt_mesh_with_seeds(
+        &geo,
+        0.06,
+        0.06,
+        1.0,
+        domain,
+        &LloydConfig::default(),
+    );
+    let n_cells = cvt.mesh.num_cells();
+    // The PROVEN thermal-ALE recipe (allmach_ale_test::run_obstacle_smoke):
+    // Euler stepping, 6 outer sweeps, dt 5e-3, gauge-pressure psi = 1e-4.
+    // The incompressible GUI defaults (BDF2, 4 sweeps, dt 1e-2) are NOT
+    // stable for the thermal model on this coarse obstacle mesh.
+    let mut params = ale_params();
+    params.time_scheme = TimeScheme::Euler;
+    params.outer_iters = 6;
+    params.requested_dt = 5e-3;
+    params.compressibility_psi = 1e-4;
+    params.inlet_velocity = 0.4;
+    let mut driver = pollster::block_on(MovingMeshDriver::build_with_model(
+        cvt,
+        allmach_thermal_ale_model().expect("allmach_thermal_ale model"),
+        &params,
+        MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+        &vec![(params.inlet_velocity as f64, 0.0); n_cells],
+        &vec![0.0; n_cells],
+        None,
+        None,
+    ))
+    .expect("MovingMeshDriver::build_with_model(allmach_thermal_ale) must succeed");
+    driver.driver_mut().apply_params(&params);
+
+    let smoke = moving_mesh_worker_smoke(driver, 120_000, 15, true);
+    println!(
+        "[moving-gui][thermal-ale] refreshes={} cells=[{:?},{:?}] max_scl={:.2e} \
+         empty={} nonfinite={} err={:?}",
+        smoke.mesh_refresh_events,
+        smoke.min_cells,
+        smoke.max_cells,
+        smoke.max_scl_defect,
+        smoke.saw_empty_cells,
+        smoke.saw_nonfinite_stats,
+        smoke.error,
+    );
+    assert!(
+        smoke.error.is_none(),
+        "thermal-ALE worker reported an error: {:?}",
+        smoke.error
+    );
+    assert!(
+        smoke.mesh_refresh_events >= 15,
+        "expected >=15 thermal-ALE refreshes, got {}",
+        smoke.mesh_refresh_events
+    );
+    assert!(!smoke.saw_empty_cells, "a thermal-ALE refresh carried empty/degenerate cells");
+    assert!(!smoke.saw_nonfinite_stats, "a thermal-ALE refresh carried non-finite stats");
+    assert_eq!(
+        (smoke.min_cells, smoke.max_cells),
+        (Some(n_cells), Some(n_cells)),
+        "thermal-ALE cell count must stay fixed at {n_cells}"
+    );
+    assert!(
+        smoke.max_scl_defect < 1e-3,
+        "thermal-ALE max SCL defect too large: {:.3e}",
+        smoke.max_scl_defect
+    );
+
+    std::env::remove_var("CFD2_BACKEND");
+    std::env::remove_var("CFD2_CPU_ENGINE");
+}

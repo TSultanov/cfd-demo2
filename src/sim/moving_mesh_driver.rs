@@ -186,6 +186,17 @@ pub const ADAPT_WALL_SPLIT_RATIO: f64 = 1.5;
 /// seeds; rate-limited like the interior births).
 pub const ADAPT_MAX_WALL_SPLITS_PER_EVENT: usize = 8;
 
+/// Realized-fluid guard on wall splits: a segment may subdivide only while
+/// its length exceeds this fraction of the ADJACENT interior cells' realized
+/// spacing — the wall may lead the fluid by at most ONE subdivision level.
+/// Without it the wall chases an aggressive target band unboundedly while
+/// the interior is budget-capped, combing the boundary into sliver guard
+/// cells (observed: wall seeds ~10× finer than the adjacent fluid). The
+/// wall/fluid co-refinement staircase: wall splits one level ahead → the
+/// wall-adjacent fluid unlocks (its own gate compares the segment to ITS
+/// realized spacing) and splits → the wall unlocks again.
+pub const ADAPT_WALL_FLUID_RATIO: f64 = 0.9;
+
 /// Default AREPO distortion trigger `η`: the centroid steering ramps in once a
 /// cell's seed-to-centroid offset exceeds `η · R_i` and saturates at `1.1 η`.
 /// Below `0.9 η` the steering is OFF, so well-shaped cells advect PURELY with
@@ -441,6 +452,10 @@ pub struct MovingMeshStats {
     /// Cells KILLED this step by the flow-adaptive sizing (coarsened away
     /// before the step's mesh motion).
     pub cells_killed: usize,
+    /// The adaptivity GROWTH budget is exhausted (count at
+    /// `budget factor × initial` — births suppressed until kills free
+    /// room). Surfaced so a cell count that stops growing is explained.
+    pub at_adapt_budget: bool,
 }
 
 /// One step's shared pre-regen plan ([`MovingMeshDriver::plan_step`]): the
@@ -496,6 +511,19 @@ pub struct MovingMeshDriver {
     /// never fights cells the adaptation deliberately refined/coarsened
     /// past the initial sizing.
     adapt_band: Option<(f64, f64)>,
+    /// The adaptivity growth budget factor: births stop once the count
+    /// reaches `adapt_budget_factor × initial_cell_count`
+    /// ([`Self::set_adaptive_budget_factor`]; default
+    /// [`ADAPT_BUDGET_MAX_FACTOR`]). The GUI sizes its per-cell viz buffers
+    /// from the SAME requested factor, so the two stay a contract.
+    adapt_budget_factor: f64,
+    /// Per-component indicator THRESHOLD multipliers `(|∇U|, |∇p|, strain)`
+    /// ([`Self::set_adaptive_indicator_thresholds`]): each component's
+    /// auto-calibrated quantile scale is multiplied by its factor before
+    /// normalization — `> 1` demands stronger features to trigger
+    /// refinement, `< 1` refines at weaker ones, `0` disables the
+    /// component. Default `(1, 1, 1)` (pure auto-calibration).
+    adapt_thresholds: (f64, f64, f64),
     /// Authoritative seed positions (f64), seed `i` == cell `i` — the CURRENT
     /// (t^n) realized set. Advanced each step by [`MeshMotionSpec`].
     seeds: Vec<Point2<f64>>,
@@ -756,6 +784,8 @@ impl MovingMeshDriver {
             initial_cell_count: n_seeds,
             adapt_every_n: 0,
             adapt_band: None,
+            adapt_budget_factor: ADAPT_BUDGET_MAX_FACTOR,
+            adapt_thresholds: (1.0, 1.0, 1.0),
             seeds0: seeds.clone(),
             time: 0.0,
             seeds,
@@ -896,6 +926,40 @@ impl MovingMeshDriver {
             let (va, vb) = (hex_vol(a.max(0.0)), hex_vol(b.max(0.0)));
             (va.min(vb), va.max(vb))
         });
+    }
+
+    /// Set the adaptivity GROWTH budget factor: births stop once the cell
+    /// count reaches `factor × initial_cell_count` (default
+    /// [`ADAPT_BUDGET_MAX_FACTOR`]). The GUI allocates its per-cell viz
+    /// buffers from the same requested factor — keep the two in sync when
+    /// calling this directly. Clamped to `[1, 16]`.
+    pub fn set_adaptive_budget_factor(&mut self, factor: f64) {
+        self.adapt_budget_factor = factor.clamp(1.0, 16.0);
+    }
+
+    /// The adaptivity growth cap in CELLS (`factor × initial count`).
+    fn adapt_cell_cap(&self) -> usize {
+        (self.initial_cell_count as f64 * self.adapt_budget_factor) as usize
+    }
+
+    /// Set the per-component indicator THRESHOLD multipliers
+    /// `(|∇U|, |∇p|, strain-rate)`. Each component's auto-calibrated scale
+    /// (the [`ADAPT_INDICATOR_QUANTILE`] quantile over the eligible cells)
+    /// is multiplied by its factor before normalization: `> 1` = only
+    /// stronger features refine, `< 1` = refine at weaker ones, `0` =
+    /// ignore this component entirely. Default `(1, 1, 1)`. Clamped to
+    /// `[0, 100]`.
+    pub fn set_adaptive_indicator_thresholds(&mut self, u: f64, p: f64, strain: f64) {
+        let c = |v: f64| v.clamp(0.0, 100.0);
+        self.adapt_thresholds = (c(u), c(p), c(strain));
+    }
+
+    /// Whether the adaptivity growth budget is exhausted (births suppressed;
+    /// kills still free budget). Surfaced per step in
+    /// [`MovingMeshStats::at_adapt_budget`] so a count that stops growing is
+    /// explained, not mysterious.
+    pub fn adapt_budget_reached(&self) -> bool {
+        self.adapt_every_n > 0 && self.seeds.len() >= self.adapt_cell_cap()
     }
 
     /// The flow-adaptation TARGET volume band: the explicit band when set,
@@ -1114,6 +1178,7 @@ impl MovingMeshDriver {
                 recycled: 0,
                 cells_born: 0,
                 cells_killed: 0,
+                at_adapt_budget: false,
             };
             return Ok((outcome, stats));
         }
@@ -1163,6 +1228,7 @@ impl MovingMeshDriver {
                 DeviceStep::Done(mut out) => {
                     out.1.cells_born = cells_born;
                     out.1.cells_killed = cells_killed;
+                    out.1.at_adapt_budget = self.adapt_budget_reached();
                     return Ok(out);
                 }
                 DeviceStep::Fallback(reason) => fallback = Some(reason),
@@ -1172,6 +1238,7 @@ impl MovingMeshDriver {
         let mut out = self.step_cpu_planned(plan, readback, fallback)?;
         out.1.cells_born = cells_born;
         out.1.cells_killed = cells_killed;
+        out.1.at_adapt_budget = self.adapt_budget_reached();
         Ok(out)
     }
 
@@ -1550,6 +1617,7 @@ impl MovingMeshDriver {
             recycled: recycled.len(),
             cells_born: 0,
             cells_killed: 0,
+            at_adapt_budget: false,
         };
         Ok((outcome, stats))
     }
@@ -1751,6 +1819,7 @@ impl MovingMeshDriver {
             recycled: 0,
             cells_born: 0,
             cells_killed: 0,
+            at_adapt_budget: false,
         };
         Ok(DeviceStep::Done((outcome, stats)))
     }
@@ -2541,12 +2610,28 @@ impl MovingMeshDriver {
         let p_off = layout
             .offset_for("p")
             .ok_or("resize_cells: model has no p field")? as usize;
+        // FIRST-ORDER transfer: each new cell's row is its source row plus
+        // the source's Green–Gauss gradient times the centroid offset,
+        // clamped to the source neighborhood's min/max (monotone — no new
+        // extremum can be manufactured). A zeroth-order copy places the
+        // donor's point value at a DIFFERENT location, and the elliptic
+        // pressure reacts to that inconsistency with an unphysical spike;
+        // linear reconstruction places the field's local expansion instead.
+        // A survivor whose cell is geometrically unchanged has a zero
+        // centroid offset — an exact copy, so a no-op resize stays a no-op.
+        let (gsx, gsy, glo, ghi) = state_gradients_and_bounds(&self.mesh, &state, stride);
         let mut rows: Vec<f32> = Vec::with_capacity(n_new * stride);
         let mut init_u: Vec<(f64, f64)> = Vec::with_capacity(n_new);
         let mut init_p: Vec<f64> = Vec::with_capacity(n_new);
-        for &s in &src {
-            let row = &state[s * stride..(s + 1) * stride];
-            rows.extend_from_slice(row);
+        for (c, &s) in src.iter().enumerate() {
+            let dx = new_mesh.cell_cx[c] - self.mesh.cell_cx[s];
+            let dy = new_mesh.cell_cy[c] - self.mesh.cell_cy[s];
+            for k in 0..stride {
+                let idx = s * stride + k;
+                let v = state[idx] as f64 + gsx[idx] * dx + gsy[idx] * dy;
+                rows.push((v as f32).clamp(glo[idx], ghi[idx]));
+            }
+            let row = &rows[c * stride..(c + 1) * stride];
             init_u.push((row[u_off] as f64, row[u_off + 1] as f64));
             init_p.push(row[p_off] as f64);
         }
@@ -2606,17 +2691,36 @@ impl MovingMeshDriver {
     /// grading keeps the wall-adjacent size ratio in the regime the clip
     /// machinery is validated for.
     fn adapt_eligible(&self, i: usize) -> bool {
+        self.adapt_in_bands(i) && self.touching_wall_seg_len(i).is_none()
+    }
+
+    /// The box-band half of eligibility: an interior seed clear of the
+    /// through-flow and wall dead zones.
+    fn adapt_in_bands(&self, i: usize) -> bool {
         let h = self.min_cell_size;
         let s = self.seeds[i];
-        if self.kinds[i] != SeedKind::Interior
-            || s.x <= FLOW_ADVECT_BOX_RAMP_CELLS * h
-            || s.x >= self.domain.x - FLOW_ADVECT_BOX_RAMP_CELLS * h
-            || s.y <= FLOW_ADVECT_BOX_DEAD_CELLS * h
-            || s.y >= self.domain.y - FLOW_ADVECT_BOX_DEAD_CELLS * h
-        {
-            return false;
-        }
+        self.kinds[i] == SeedKind::Interior
+            && s.x > FLOW_ADVECT_BOX_RAMP_CELLS * h
+            && s.x < self.domain.x - FLOW_ADVECT_BOX_RAMP_CELLS * h
+            && s.y > FLOW_ADVECT_BOX_DEAD_CELLS * h
+            && s.y < self.domain.y - FLOW_ADVECT_BOX_DEAD_CELLS * h
+    }
+
+    /// If cell `i` TOUCHES the boundary (shares a face with a boundary-seed
+    /// cell, or has an open face), the coarsest adjacent wall discretization
+    /// scale: the max polyline segment length among the touched wall cells'
+    /// segments (`+∞` for a bare open face). `None` = a bulk interior cell.
+    /// Birth eligibility compares this against the cell's target spacing —
+    /// a wall-adjacent cell may refine once the WALL is at least as fine
+    /// (the wall subdivision keeps up event-by-event), so the boundary
+    /// layer is resolvable without re-opening the out-refine-the-wall
+    /// hernia.
+    fn touching_wall_seg_len(&self, i: usize) -> Option<f64> {
         let m = &self.mesh;
+        let mut worst: Option<f64> = None;
+        let mut bump = |len: f64, worst: &mut Option<f64>| {
+            *worst = Some(worst.map_or(len, |w: f64| w.max(len)));
+        };
         let (fb, fe) = (m.cell_face_offsets[i], m.cell_face_offsets[i + 1]);
         for &f in &m.cell_faces[fb..fe] {
             let other = if m.face_owner[f] == i {
@@ -2625,12 +2729,19 @@ impl MovingMeshDriver {
                 Some(m.face_owner[f])
             };
             match other {
-                None => return false,
-                Some(nb) if self.kinds[nb] != SeedKind::Interior => return false,
-                _ => {}
+                None => bump(f64::INFINITY, &mut worst),
+                Some(nb) => {
+                    if let SeedKind::Boundary { seg_prev, seg_next } = self.kinds[nb] {
+                        let seg_len = |g: u32| {
+                            let (a, b) = self.spec.segment_points(g);
+                            (b - a).norm()
+                        };
+                        bump(seg_len(seg_prev).max(seg_len(seg_next)), &mut worst);
+                    }
+                }
             }
         }
-        true
+        worst
     }
 
     /// Per-cell TARGET volumes for the flow-adaptive sizing: Green–Gauss
@@ -2721,13 +2832,22 @@ impl MovingMeshDriver {
             v[((v.len() - 1) as f64 * ADAPT_INDICATOR_QUANTILE) as usize]
         };
         let (su, ss, sp) = (scale(&grad_u), scale(&strain), scale(&grad_p));
-        let norm = |v: f64, s: f64| if s > 0.0 { (v / s).min(1.0) } else { 0.0 };
+        // Per-component user threshold multipliers (0 disables a component;
+        // the auto-calibrated quantile scale is the reference at 1.0).
+        let (ku, kp, kstrain) = self.adapt_thresholds;
+        let norm = |v: f64, s: f64, k: f64| {
+            if k > 0.0 && s > 0.0 {
+                (v / (s * k)).min(1.0)
+            } else {
+                0.0
+            }
+        };
         let (vmin_t, vmax_t) = self.adapt_vol_band();
         let mut targets: Vec<f64> = (0..n)
             .map(|i| {
-                let ind = norm(grad_u[i], su)
-                    .max(norm(strain[i], ss))
-                    .max(norm(grad_p[i], sp));
+                let ind = norm(grad_u[i], su, ku)
+                    .max(norm(strain[i], ss, kstrain))
+                    .max(norm(grad_p[i], sp, kp));
                 vmax_t + (vmin_t - vmax_t) * ind
             })
             .collect();
@@ -2775,7 +2895,7 @@ impl MovingMeshDriver {
         use std::collections::HashSet;
         let m = &self.mesh;
         let n = self.seeds.len();
-        let n_max = (self.initial_cell_count as f64 * ADAPT_BUDGET_MAX_FACTOR) as usize;
+        let n_max = self.adapt_cell_cap();
         let n_min = (self.initial_cell_count as f64 * ADAPT_BUDGET_MIN_FACTOR) as usize;
 
         let mut kill_cand: Vec<usize> = (0..n)
@@ -2811,11 +2931,28 @@ impl MovingMeshDriver {
         }
 
         let spec_t = self.moved_spec(self.time);
+        let hex = 3.0f64.sqrt() / 2.0;
         let mut birth_cand: Vec<usize> = (0..n)
             .filter(|&i| {
-                self.adapt_eligible(i)
-                    && !kill_set.contains(&i)
-                    && m.cell_vol[i] > ADAPT_REFINE_RATIO * targets[i]
+                if !self.adapt_in_bands(i)
+                    || kill_set.contains(&i)
+                    || m.cell_vol[i] <= ADAPT_REFINE_RATIO * targets[i]
+                {
+                    return false;
+                }
+                // Wall-adjacent cells (the boundary-layer band) may SPLIT
+                // once the adjacent wall discretization is at least as fine
+                // as their own REALIZED spacing — the wall then leads by at
+                // most one level and the pair staircases down together, so
+                // the interior can never out-refine the wall (the hernia
+                // regime) and an extreme target band cannot deadlock the
+                // unlock (a target-based gate would demand a wall the
+                // subdivision only reaches level by level). Kills keep the
+                // hard buffer (adapt_eligible).
+                match self.touching_wall_seg_len(i) {
+                    None => true,
+                    Some(len) => len <= (m.cell_vol[i].max(0.0) / hex).sqrt(),
+                }
             })
             .collect();
         birth_cand.sort_by(|&a, &b| {
@@ -2936,14 +3073,37 @@ impl MovingMeshDriver {
                 .iter()
                 .map(|&i| (targets[i].max(0.0) / hex).sqrt())
                 .fold(f64::INFINITY, f64::min);
-            if t_h.is_finite() && len > ADAPT_WALL_SPLIT_RATIO * t_h {
+            // Realized-fluid guard (see ADAPT_WALL_FLUID_RATIO): the finest
+            // INTERIOR cell adjacent to this segment's wall cells bounds how
+            // far the wall may run ahead of the fluid.
+            let mut h_adj = f64::INFINITY;
+            for &i in &seg_seeds[g] {
+                let (fb, fe) = (
+                    self.mesh.cell_face_offsets[i],
+                    self.mesh.cell_face_offsets[i + 1],
+                );
+                for &f in &self.mesh.cell_faces[fb..fe] {
+                    let other = if self.mesh.face_owner[f] == i {
+                        self.mesh.face_neighbor[f]
+                    } else {
+                        Some(self.mesh.face_owner[f])
+                    };
+                    if let Some(nb) = other {
+                        if self.kinds[nb] == SeedKind::Interior {
+                            h_adj =
+                                h_adj.min((self.mesh.cell_vol[nb].max(0.0) / hex).sqrt());
+                        }
+                    }
+                }
+            }
+            let fluid_ok = !h_adj.is_finite() || len > ADAPT_WALL_FLUID_RATIO * h_adj;
+            if t_h.is_finite() && len > ADAPT_WALL_SPLIT_RATIO * t_h && fluid_ok {
                 cand.push((len / t_h, g));
             }
         }
         cand.sort_by(|x, y| y.0.total_cmp(&x.0));
         // Budget: each split births at most 2 wall seeds.
-        let n_max = (self.initial_cell_count as f64 * ADAPT_BUDGET_MAX_FACTOR) as usize;
-        let budget = n_max.saturating_sub(self.seeds.len()) / 2;
+        let budget = self.adapt_cell_cap().saturating_sub(self.seeds.len()) / 2;
         cand.truncate(ADAPT_MAX_WALL_SPLITS_PER_EVENT.min(budget));
         cand.into_iter().map(|(_, g)| g).collect()
     }
@@ -2979,12 +3139,38 @@ impl MovingMeshDriver {
             let (bx, by) = cell_of(s);
             buckets[by * nx + bx].push(i as u32);
         }
-        let h: Vec<f64> = self
+        let mut h: Vec<f64> = self
             .mesh
             .cell_vol
             .iter()
             .map(|&v| (v.max(0.0) / hex).sqrt())
             .collect();
+        // GRADE the realized spacing field (the same per-layer constraint as
+        // the adaptation targets): a fresh split is locally 2:1 against its
+        // neighbors, and an ungraded sizing would make the Lloyd relaxation
+        // PRESERVE that jump. Min-propagating the spacing lets the smooth
+        // actively fan rapid realized transitions out into graded layers.
+        {
+            let m = &self.mesh;
+            for _ in 0..ADAPT_GRADING_SWEEPS {
+                let mut changed = false;
+                for f in 0..m.num_faces() {
+                    let Some(nb) = m.face_neighbor[f] else { continue };
+                    let o = m.face_owner[f];
+                    if h[nb] > h[o] * ADAPT_GRADING_FACTOR {
+                        h[nb] = h[o] * ADAPT_GRADING_FACTOR;
+                        changed = true;
+                    }
+                    if h[o] > h[nb] * ADAPT_GRADING_FACTOR {
+                        h[o] = h[nb] * ADAPT_GRADING_FACTOR;
+                        changed = true;
+                    }
+                }
+                if !changed {
+                    break;
+                }
+            }
+        }
         let seeds = self.seeds.clone();
         Box::new(move |p: Point2<f64>| -> f64 {
             let (bx, by) = cell_of(&p);
@@ -3196,6 +3382,59 @@ fn vol_extremes(vols: &[f64]) -> (f64, f64) {
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &v| {
             (a.min(v), b.max(v))
         })
+}
+
+/// Green–Gauss gradient of EVERY packed state component plus per-component
+/// monotonicity bounds (min/max over the cell and its face neighbors) — the
+/// first-order state-transfer stencil of a cell-count resize. Boundary faces
+/// use the owner value (zero-gradient closure). Returns
+/// `(gx, gy, lo, hi)`, each `n_cells × stride`.
+fn state_gradients_and_bounds(
+    m: &Mesh,
+    state: &[f32],
+    stride: usize,
+) -> (Vec<f64>, Vec<f64>, Vec<f32>, Vec<f32>) {
+    let n = m.num_cells();
+    let mut gx = vec![0.0f64; n * stride];
+    let mut gy = vec![0.0f64; n * stride];
+    let mut lo = state.to_vec();
+    let mut hi = state.to_vec();
+    for f in 0..m.num_faces() {
+        let o = m.face_owner[f];
+        let (anx, any) = (m.face_area[f] * m.face_nx[f], m.face_area[f] * m.face_ny[f]);
+        match m.face_neighbor[f] {
+            Some(nb) => {
+                for k in 0..stride {
+                    let vo = state[o * stride + k];
+                    let vn = state[nb * stride + k];
+                    let vf = 0.5 * (vo as f64 + vn as f64);
+                    gx[o * stride + k] += vf * anx;
+                    gy[o * stride + k] += vf * any;
+                    gx[nb * stride + k] -= vf * anx;
+                    gy[nb * stride + k] -= vf * any;
+                    lo[o * stride + k] = lo[o * stride + k].min(vn);
+                    hi[o * stride + k] = hi[o * stride + k].max(vn);
+                    lo[nb * stride + k] = lo[nb * stride + k].min(vo);
+                    hi[nb * stride + k] = hi[nb * stride + k].max(vo);
+                }
+            }
+            None => {
+                for k in 0..stride {
+                    let vf = state[o * stride + k] as f64;
+                    gx[o * stride + k] += vf * anx;
+                    gy[o * stride + k] += vf * any;
+                }
+            }
+        }
+    }
+    for c in 0..n {
+        let inv_v = 1.0 / m.cell_vol[c].max(f64::MIN_POSITIVE);
+        for k in 0..stride {
+            gx[c * stride + k] *= inv_v;
+            gy[c * stride + k] *= inv_v;
+        }
+    }
+    (gx, gy, lo, hi)
 }
 
 /// Set one component of the per-face `MovingWall` Dirichlet velocity, resolving

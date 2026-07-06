@@ -209,6 +209,12 @@ pub struct CpuSolver {
     /// Outer iterations actually executed by the last step (== `outer_iters`
     /// unless the plateau detector exited early).
     outer_iterations_done: u32,
+    /// The last outer iteration's per-unknown-row SCALED correction maxima
+    /// (`max|x| / max|state|` per row — the same norm the GPU convergence
+    /// monitor reduces), captured when `collect_convergence_stats` is on.
+    /// Empty otherwise. Feeds the GUI's per-step U/p residual readout, which
+    /// previously stayed at its 0.0 default on the CPU backend.
+    last_outer_scaled: Vec<f32>,
     /// CPU linear-solve relative tolerance (block path; GPU inexact-Picard).
     linear_tol: f64,
     linear_restart: usize,
@@ -505,6 +511,7 @@ impl CpuSolver {
             collect_convergence_stats: false,
             unknown_offsets,
             outer_iterations_done: 0,
+            last_outer_scaled: Vec::new(),
             linear_tol: recipe.linear_solver.tolerance as f64,
             linear_restart: match recipe.linear_solver.solver_type {
                 crate::solver::gpu::recipe::LinearSolverType::Fgmres { max_restart } => max_restart,
@@ -786,6 +793,13 @@ impl CpuSolver {
     /// when the plateau detector exited early).
     pub fn outer_iterations_done(&self) -> u32 {
         self.outer_iterations_done
+    }
+
+    /// The last outer iteration's per-unknown-row scaled correction maxima
+    /// (empty unless `collect_convergence_stats` is on) plus the state
+    /// offset of each row — the caller maps rows onto model fields.
+    pub fn outer_scaled_corrections(&self) -> (&[f32], &[u32]) {
+        (&self.last_outer_scaled, &self.unknown_offsets)
     }
     pub fn set_dt(&mut self, dt: f32) {
         self.dt = dt;
@@ -1323,12 +1337,18 @@ impl CpuSolver {
         const OUTER_TOL_EXIT_MIN_ITERS: usize = 2;
         const OUTER_PLATEAU_FACTOR: f32 = 0.98;
         const OUTER_PLATEAU_CEILING: f32 = 1.01;
-        let plateau_active = self.collect_convergence_stats
+        // Residual COLLECTION is broader than the plateau BREAK: the scaled
+        // correction norms feed the GUI readout for every collecting config
+        // (incl. pseudo-transient / compressible / MMS runs, where the break
+        // stays disabled and `prev_scaled` — the EW forcing input — must
+        // remain untouched to keep those paths byte-identical).
+        let stats_active =
+            self.collect_convergence_stats && !self.unknown_offsets.is_empty();
+        let plateau_active = stats_active
             && self.outer_iters > 1
             && self.dtau <= 0.0
             && self.model_id != "compressible"
             && !self.model_id.ends_with("_mms")
-            && !self.unknown_offsets.is_empty()
             && std::env::var("CFD2_CPU_OUTER_BREAK").map_or(true, |v| v != "0");
         let s_unk = self.unknowns_per_cell;
         let stride = self.state_stride as usize;
@@ -1336,6 +1356,7 @@ impl CpuSolver {
         let mut plateau_scale: Option<Vec<f32>> = None;
         let mut prev_scaled: Vec<f32> = Vec::new();
         let mut outer_iters_done = 0u32;
+        self.last_outer_scaled.clear();
 
         for outer_idx in 0..self.outer_iters {
             // Snapshot current iterate (dual-time reference + outer-break delta).
@@ -1392,8 +1413,9 @@ impl CpuSolver {
 
             outer_iters_done = outer_idx as u32 + 1;
 
-            // Plateau detector (see the block comment above the loop).
-            if plateau_active {
+            // Correction-norm collection + plateau detector (see the block
+            // comment above the loop).
+            if stats_active {
                 // Per-field max |x| — the outer correction norm the GPU
                 // monitor reduces (`delta_maxima` over the solve solution).
                 let x = self.buffers.f32_vec_threaded("x", self.config.threads);
@@ -1420,26 +1442,32 @@ impl CpuSolver {
                     .zip(scale.iter())
                     .map(|(&d, &s)| d / s.max(1.0))
                     .collect();
-                let tol_rel = self.outer_tol.max(0.0) as f32;
-                // Tolerance exit below the stall floor (mirrors the GPU
-                // detector): every field's scaled correction under tolerance
-                // is a genuine convergence criterion, valid from the second
-                // sweep; the 5-sweep floor guards only the STALL exit.
-                let under_tol = outer_idx + 1 >= OUTER_TOL_EXIT_MIN_ITERS
-                    && scaled.iter().all(|&cur| cur <= tol_rel);
-                let plateaued = under_tol
-                    || (outer_idx + 1 >= OUTER_PLATEAU_MIN_ITERS
-                        && !prev_scaled.is_empty()
-                        && scaled.iter().zip(prev_scaled.iter()).all(|(&cur, &prev)| {
-                            if cur <= tol_rel {
-                                return true;
-                            }
-                            let ratio = cur / prev.max(1e-30);
-                            (OUTER_PLATEAU_FACTOR..=OUTER_PLATEAU_CEILING).contains(&ratio)
-                        }));
-                prev_scaled = scaled;
-                if plateaued {
-                    break;
+                self.last_outer_scaled.clear();
+                self.last_outer_scaled.extend_from_slice(&scaled);
+                if plateau_active {
+                    let tol_rel = self.outer_tol.max(0.0) as f32;
+                    // Tolerance exit below the stall floor (mirrors the GPU
+                    // detector): every field's scaled correction under
+                    // tolerance is a genuine convergence criterion, valid
+                    // from the second sweep; the 5-sweep floor guards only
+                    // the STALL exit.
+                    let under_tol = outer_idx + 1 >= OUTER_TOL_EXIT_MIN_ITERS
+                        && scaled.iter().all(|&cur| cur <= tol_rel);
+                    let plateaued = under_tol
+                        || (outer_idx + 1 >= OUTER_PLATEAU_MIN_ITERS
+                            && !prev_scaled.is_empty()
+                            && scaled.iter().zip(prev_scaled.iter()).all(|(&cur, &prev)| {
+                                if cur <= tol_rel {
+                                    return true;
+                                }
+                                let ratio = cur / prev.max(1e-30);
+                                (OUTER_PLATEAU_FACTOR..=OUTER_PLATEAU_CEILING)
+                                    .contains(&ratio)
+                            }));
+                    prev_scaled = scaled;
+                    if plateaued {
+                        break;
+                    }
                 }
             }
 

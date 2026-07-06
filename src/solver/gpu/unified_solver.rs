@@ -426,11 +426,31 @@ impl GpuUnifiedSolver {
         #[cfg(feature = "cpu")]
         if let Some(c) = self.cpu_ref() {
             // CPU has no per-graph telemetry, but reports steady-state auto-pause
-            // (should_stop) and the outer count actually executed, so the GUI
-            // behaves like the GPU under pseudo-transient continuation.
+            // (should_stop), the outer count actually executed, and the last
+            // outer sweep's scaled correction norms mapped onto the U/p
+            // readouts (the same `max|x| / max|state|` norm the GPU monitor
+            // reduces) — previously the GUI residual display stayed frozen at
+            // its 0.0 default on the CPU backend.
             let mut stats = PlanStepStats::default();
             stats.should_stop = Some(c.should_stop());
             stats.outer_iterations = Some(c.outer_iterations_done());
+            let (scaled, offsets) = c.outer_scaled_corrections();
+            if !scaled.is_empty() && scaled.len() == offsets.len() {
+                let layout = &self.model.state_layout;
+                let u_off = layout.offset_for("U").or_else(|| layout.offset_for("u"));
+                let p_off = layout.offset_for("p");
+                for (r, &off) in offsets.iter().enumerate() {
+                    if let Some(u0) = u_off {
+                        if off == u0 || off == u0 + 1 {
+                            let cur = stats.outer_residual_u.unwrap_or(0.0);
+                            stats.outer_residual_u = Some(cur.max(scaled[r]));
+                        }
+                    }
+                    if p_off == Some(off) {
+                        stats.outer_residual_p = Some(scaled[r]);
+                    }
+                }
+            }
             return stats;
         }
         self.plan().step_stats()

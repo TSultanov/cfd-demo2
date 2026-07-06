@@ -363,6 +363,61 @@ fn movingmesh_adaptive_band_steers_planner() {
     }
 }
 
+/// CPU-backend outer stats: with convergence collection on (the GUI's
+/// auto-converge default), `step_stats` must report the executed outer count
+/// AND the scaled U/p correction norms — the GUI readout used to freeze at
+/// "5 iters, U:0.00e0 P:0.00e0" because the CPU arm never filled the
+/// residual fields.
+#[test]
+fn cpu_outer_stats_report_residuals() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    let result = std::panic::catch_unwind(|| {
+        let geo = RectangularChannel {
+            length: LX,
+            height: LY,
+        };
+        let domain = Vector2::new(LX, LY);
+        // Engine default tags (no-slip walls): a uniform IC drives genuinely
+        // nonzero outer corrections from step 1.
+        let cvt =
+            generate_cvt_mesh_with_seeds(&geo, H, H, 1.0, domain, &LloydConfig::default());
+        let n0 = cvt.mesh.num_cells();
+        let mut params = test_params();
+        params.outer_auto_converge = true;
+        let mut moving = pollster::block_on(MovingMeshDriver::build(
+            cvt,
+            &params,
+            MeshMotionSpec::Frozen,
+            &vec![(U0 as f64, 0.0); n0],
+            &vec![0.0; n0],
+            None,
+            None,
+        ))
+        .expect("stats driver build");
+        moving.driver_mut().apply_params(&params);
+        for step in 0..3 {
+            let (outcome, _) =
+                moving.step(false).unwrap_or_else(|e| panic!("stats step {step}: {e}"));
+            assert!(outcome.diverged.is_none());
+        }
+        let ss = moving.driver().solver().step_stats();
+        let iters = ss.outer_iterations.expect("outer count reported");
+        let ru = ss.outer_residual_u.expect("U residual reported");
+        let rp = ss.outer_residual_p.expect("p residual reported");
+        eprintln!("[cpu-stats] outers={iters} res_u={ru:.3e} res_p={rp:.3e}");
+        assert!(iters >= 1);
+        assert!(
+            ru > 0.0 || rp > 0.0,
+            "scaled outer corrections are all zero on a developing flow"
+        );
+    });
+    std::env::remove_var("CFD2_BACKEND");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
 /// The GUI "hernia" configuration: STATIONARY mesh, aggressive adaptation
 /// (every 2 steps) with a band FINER than the built mesh, around an
 /// obstacle whose boundary seeds keep the ORIGINAL coarse spacing. Guards
@@ -419,10 +474,19 @@ fn hernia_guard_body() {
     moving.set_smoothing(10, 1, 0.5);
 
     let segs0 = moving.boundary_segment_count();
+    let layout = moving.driver().solver().model().state_layout.clone();
+    let stride = layout.stride() as usize;
+    let p_off = layout.offset_for("p").expect("p") as usize;
     let (mut born, mut killed) = (0usize, 0usize);
     let mut worst_area_err = 0.0f64;
     let mut worst_inside = 0usize;
     let mut worst_skew = 0.0f64;
+    // Pressure-spike telemetry: the max |Δ max|p|| across a resize event vs
+    // the previous step — a zeroth-order state transfer makes the elliptic
+    // pressure react to the donor-copy inconsistency with a spike.
+    let mut prev_pmax = 0.0f64;
+    let mut worst_spike = 0.0f64;
+    let mut settled_pmax = 0.0f64;
     for step in 0..200 {
         let (outcome, stats) = moving
             .step(false)
@@ -432,6 +496,21 @@ fn hernia_guard_body() {
         killed += stats.cells_killed;
         worst_skew = worst_skew.max(stats.max_skew);
         let m = moving.mesh();
+        let state = pollster::block_on(moving.driver().solver().read_state_f32());
+        let pmax = (0..m.num_cells())
+            .map(|c| (state[c * stride + p_off] as f64).abs())
+            .fold(0.0f64, f64::max);
+        // Windowed past the impulsive cold start (uniform IC against the
+        // obstacle drives |p| ~27× dynamic at step 0, decaying over ~15
+        // steps) — resize events during that decay measure the transient,
+        // not the transfer.
+        if step >= 20 && (stats.cells_born > 0 || stats.cells_killed > 0) {
+            worst_spike = worst_spike.max(pmax - prev_pmax);
+        }
+        prev_pmax = pmax;
+        if step >= 180 {
+            settled_pmax = settled_pmax.max(pmax);
+        }
         // Conservation of covered area: cells bulging into the obstacle (or
         // dropped coverage) show up as Σvol drifting off the fluid area.
         let area: f64 = m.cell_vol.iter().sum();
@@ -448,18 +527,25 @@ fn hernia_guard_body() {
         if step % 25 == 0 || step == 199 {
             eprintln!(
                 "[hernia] step {step:3}: n={} (+{born}/−{killed}) area_err={area_err:.2e} \
-                 inside={inside} skew={:.3} vol=[{:.2e},{:.2e}]",
+                 inside={inside} skew={:.3} vol=[{:.2e},{:.2e}] p_max={pmax:.3} \
+                 h_ratio={:.2} wall_aniso={:.2}",
                 m.num_cells(),
                 stats.max_skew,
                 m.cell_vol.iter().cloned().fold(f64::MAX, f64::min),
                 m.cell_vol.iter().cloned().fold(0.0f64, f64::max),
+                interior_h_ratio_max(m),
+                wall_adjacent_anisotropy_max(m),
             );
         }
     }
     let segs1 = moving.boundary_segment_count();
+    let m = moving.mesh();
+    let final_h_ratio = interior_h_ratio_max(m);
+    let final_aniso = wall_adjacent_anisotropy_max(m);
     eprintln!(
-        "[hernia] worst: area_err={worst_area_err:.2e} inside={worst_inside} skew={worst_skew:.3}; \
-         wall segments {segs0} → {segs1}"
+        "[hernia] worst: area_err={worst_area_err:.2e} inside={worst_inside} skew={worst_skew:.3} \
+         p_spike={worst_spike:.3} (settled p_max={settled_pmax:.3}); wall segments {segs0} → {segs1}; \
+         final h_ratio={final_h_ratio:.2} wall_aniso={final_aniso:.2}"
     );
     assert!(born + killed > 0, "hernia config never adapted");
     assert!(
@@ -479,6 +565,97 @@ fn hernia_guard_body() {
         worst_skew < 0.75,
         "mesh quality collapsed under aggressive adaptation: max skew {worst_skew:.3}"
     );
+    // Resize events must not manufacture pressure: the excursion across an
+    // event stays within the settled field's own scale (dynamic pressure
+    // 0.5·ρU² = 0.5 here; the stagnation field runs a few multiples of it).
+    assert!(
+        worst_spike < 2.0 * settled_pmax.max(0.5),
+        "pressure spiked by {worst_spike:.3} across a resize event (settled max |p| = \
+         {settled_pmax:.3}) — the state transfer is manufacturing pressure"
+    );
+    // Graded targets + graded Lloyd sizing: no rapid realized growth regions
+    // (fresh splits are ~1.41× in spacing; grading caps the settled field).
+    assert!(
+        final_h_ratio < 2.2,
+        "adjacent realized spacing ratio {final_h_ratio:.2} — rapid growth region survived"
+    );
+    // Wall-adjacent cells stay compact enough to carry a boundary layer.
+    assert!(
+        final_aniso < 3.5,
+        "wall-adjacent cell anisotropy {final_aniso:.2} — stretched boundary-layer cells"
+    );
+}
+
+/// Max adjacent realized-SPACING ratio over interior faces (wall cells and
+/// their immediate neighbors excluded — guards are structurally smaller):
+/// `h = √(vol/(√3/2))` per cell, ratio `max(h_o,h_n)/min(h_o,h_n)`.
+fn interior_h_ratio_max(m: &cfd2::solver::mesh::Mesh) -> f64 {
+    let n = m.num_cells();
+    let mut wallish = vec![false; n];
+    for f in 0..m.num_faces() {
+        if m.face_neighbor[f].is_none() {
+            wallish[m.face_owner[f]] = true;
+        }
+    }
+    let h: Vec<f64> = m.cell_vol.iter().map(|&v| v.max(0.0).sqrt()).collect();
+    let mut worst = 1.0f64;
+    for f in 0..m.num_faces() {
+        let Some(nb) = m.face_neighbor[f] else { continue };
+        let o = m.face_owner[f];
+        if wallish[o] || wallish[nb] {
+            continue;
+        }
+        let (a, b) = (h[o], h[nb]);
+        if a > 0.0 && b > 0.0 {
+            worst = worst.max(a.max(b) / a.min(b));
+        }
+    }
+    worst
+}
+
+/// Max anisotropy (max/min face-centre distance from the cell centroid) over
+/// the boundary BAND — the wall cells themselves plus the cells adjacent to
+/// them: the stretch that decides whether a BL profile is resolvable (an
+/// over-split wall combs the WALL cells into slivers).
+fn wall_adjacent_anisotropy_max(m: &cfd2::solver::mesh::Mesh) -> f64 {
+    let n = m.num_cells();
+    let mut wall = vec![false; n];
+    for f in 0..m.num_faces() {
+        if m.face_neighbor[f].is_none() {
+            wall[m.face_owner[f]] = true;
+        }
+    }
+    let mut adj = wall.clone();
+    for f in 0..m.num_faces() {
+        if let Some(nb) = m.face_neighbor[f] {
+            let o = m.face_owner[f];
+            if wall[o] && !wall[nb] {
+                adj[nb] = true;
+            }
+            if wall[nb] && !wall[o] {
+                adj[o] = true;
+            }
+        }
+    }
+    let mut worst = 1.0f64;
+    for c in 0..n {
+        if !adj[c] {
+            continue;
+        }
+        let (fb, fe) = (m.cell_face_offsets[c], m.cell_face_offsets[c + 1]);
+        let (mut dmin, mut dmax) = (f64::INFINITY, 0.0f64);
+        for &f in &m.cell_faces[fb..fe] {
+            let d = ((m.face_cx[f] - m.cell_cx[c]).powi(2)
+                + (m.face_cy[f] - m.cell_cy[c]).powi(2))
+            .sqrt();
+            dmin = dmin.min(d);
+            dmax = dmax.max(d);
+        }
+        if dmin > 0.0 && dmin.is_finite() {
+            worst = worst.max(dmax / dmin);
+        }
+    }
+    worst
 }
 
 /// The flow-adaptive planner on a GRADED obstacle channel (FlowCoupled): the

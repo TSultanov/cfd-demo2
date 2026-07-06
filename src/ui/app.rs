@@ -238,6 +238,14 @@ struct SolverInitRequest {
     // the indicator maps onto). 0 = auto (the mesh's realized sizing band).
     moving_adapt_min_size: f64,
     moving_adapt_max_size: f64,
+    // Adaptivity growth budget: births stop at this multiple of the initial
+    // cell count. The viz buffers are allocated from the same factor.
+    moving_adapt_budget: f64,
+    // Per-indicator threshold multipliers (|∇U|, |∇p|, strain); 1 = auto
+    // calibration, 0 = component disabled.
+    moving_adapt_thresh_u: f64,
+    moving_adapt_thresh_p: f64,
+    moving_adapt_thresh_strain: f64,
     wgpu_device: Option<wgpu::Device>,
     wgpu_queue: Option<wgpu::Queue>,
     target_format: wgpu::TextureFormat,
@@ -623,6 +631,18 @@ pub struct CFDApp {
     /// Applied only when BOTH are > 0.
     moving_adapt_min_size: f64,
     moving_adapt_max_size: f64,
+    /// Adaptivity growth budget factor: births stop once the cell count
+    /// reaches this multiple of the initial count (default 2×). The per-cell
+    /// viz buffers are allocated at the SAME factor, so raising it costs GPU
+    /// memory up front.
+    moving_adapt_budget: f64,
+    /// Per-indicator threshold multipliers (|∇U|, |∇p|, strain rate): each
+    /// scales the auto-calibrated (90th-percentile) reference before
+    /// normalization — > 1 refines only stronger features, < 1 refines at
+    /// weaker ones, 0 disables the component. Default 1.
+    moving_adapt_thresh_u: f64,
+    moving_adapt_thresh_p: f64,
+    moving_adapt_thresh_strain: f64,
     /// Latest per-step moving-mesh telemetry (from `MeshRefreshed`), for display.
     cached_moving_stats: Option<MovingMeshStats>,
     /// Whether the driver the worker is *actually running* is a moving-mesh
@@ -807,6 +827,10 @@ impl CFDApp {
             moving_adapt_every_n: 0,
             moving_adapt_min_size: 0.0,
             moving_adapt_max_size: 0.0,
+            moving_adapt_budget: 2.0,
+            moving_adapt_thresh_u: 1.0,
+            moving_adapt_thresh_p: 1.0,
+            moving_adapt_thresh_strain: 1.0,
             cached_moving_stats: None,
             solver_is_moving: false,
             min_cell_size: 0.025,
@@ -1209,6 +1233,10 @@ impl CFDApp {
             moving_adapt_every_n: self.moving_adapt_every_n,
             moving_adapt_min_size: self.moving_adapt_min_size,
             moving_adapt_max_size: self.moving_adapt_max_size,
+            moving_adapt_budget: self.moving_adapt_budget.clamp(1.0, 16.0),
+            moving_adapt_thresh_u: self.moving_adapt_thresh_u,
+            moving_adapt_thresh_p: self.moving_adapt_thresh_p,
+            moving_adapt_thresh_strain: self.moving_adapt_thresh_strain,
             wgpu_device: self.wgpu_device.clone(),
             wgpu_queue: self.wgpu_queue.clone(),
             target_format: self.target_format,
@@ -2012,11 +2040,14 @@ impl CFDApp {
             let state_size_bytes = mesh.num_cells() as u64 * model_caps.plot_stride as u64 * 4;
             // Moving (ALE) runs may GROW the cell count at runtime (the
             // flow-adaptive sizing births cells, hard-capped by the driver at
-            // ADAPT_BUDGET_MAX_FACTOR × the initial count) — allocate the
+            // the requested budget factor × the initial count) — allocate the
             // per-cell viz buffers at that cap so a resized solver's state
             // still fits. Static runs allocate exactly their fixed size.
             let viz_capacity_bytes = if request.enable_moving_mesh {
-                (state_size_bytes as f64 * crate::sim::ADAPT_BUDGET_MAX_FACTOR).ceil() as u64
+                let factor = request
+                    .moving_adapt_budget
+                    .max(crate::sim::ADAPT_BUDGET_MAX_FACTOR);
+                (state_size_bytes as f64 * factor).ceil() as u64
             } else {
                 state_size_bytes
             };
@@ -2362,6 +2393,14 @@ impl CFDApp {
                 request.moving_adapt_max_size,
             )));
         }
+        // Growth budget (the viz buffers were allocated from the same factor).
+        moving.set_adaptive_budget_factor(request.moving_adapt_budget);
+        // Per-indicator threshold multipliers (1 = auto, 0 = disabled).
+        moving.set_adaptive_indicator_thresholds(
+            request.moving_adapt_thresh_u,
+            request.moving_adapt_thresh_p,
+            request.moving_adapt_thresh_strain,
+        );
         CFDApp::push_trace_init_event(
             trace_init_events,
             "solver.new",
@@ -3196,6 +3235,53 @@ impl eframe::App for CFDApp {
                                          the initial cell count. Applied on Initialize / \
                                          Reset.",
                                     );
+                                    ui.add(
+                                        egui::Slider::new(
+                                            &mut self.moving_adapt_budget,
+                                            1.0..=8.0,
+                                        )
+                                        .text("Adapt cell budget ×"),
+                                    )
+                                    .on_hover_text(
+                                        "Growth budget: adaptive births stop once the \
+                                         cell count reaches this multiple of the initial \
+                                         count (the stats line shows \"adapt budget \
+                                         reached\" while capped). The per-cell viz \
+                                         buffers are allocated at this factor, so a \
+                                         larger budget costs GPU memory up front. \
+                                         Applied on Initialize / Reset.",
+                                    );
+                                    for (value, label, what) in [
+                                        (
+                                            &mut self.moving_adapt_thresh_u,
+                                            "U-gradient threshold ×",
+                                            "the velocity-gradient magnitude |∇U|",
+                                        ),
+                                        (
+                                            &mut self.moving_adapt_thresh_p,
+                                            "p-gradient threshold ×",
+                                            "the pressure-gradient magnitude |∇p|",
+                                        ),
+                                        (
+                                            &mut self.moving_adapt_thresh_strain,
+                                            "Strain threshold ×",
+                                            "the strain-rate magnitude",
+                                        ),
+                                    ] {
+                                        ui.add(
+                                            adaptive_slider(value, 0.0..=5.0).text(label),
+                                        )
+                                        .on_hover_text(format!(
+                                            "Refinement threshold for {what}, relative to \
+                                             its auto-calibrated scale (the 90th \
+                                             percentile over the adaptable cells): 1 = \
+                                             auto, higher = only stronger features \
+                                             refine, lower = refine at weaker ones, 0 = \
+                                             ignore this indicator. The three indicators \
+                                             combine by maximum. Applied on Initialize / \
+                                             Reset.",
+                                        ));
+                                    }
                                 }
                             }
                             // Oscillating obstacle (ChannelObstacle only — its
@@ -4148,7 +4234,7 @@ impl eframe::App for CFDApp {
                                  and the CPU path took it; the GPU is retried next step.",
                             );
                             ui.label(format!(
-                                "ALE mesh: {} cells, {} faces{}{}{}",
+                                "ALE mesh: {} cells, {} faces{}{}{}{}",
                                 m.n_cells,
                                 m.n_faces,
                                 if m.flipped {
@@ -4171,6 +4257,11 @@ impl eframe::App for CFDApp {
                                     )
                                 } else {
                                     String::new()
+                                },
+                                if m.at_adapt_budget {
+                                    " (adapt budget reached)"
+                                } else {
+                                    ""
                                 }
                             ));
                             ui.label(format!(

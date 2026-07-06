@@ -586,6 +586,100 @@ fn hernia_guard_body() {
     );
 }
 
+/// The GUI "leak" configuration: FlowCoupled + very aggressive adaptation
+/// (band far below the built mesh, sensitive thresholds, 5× budget) around
+/// the obstacle. The stagnation-side advection presses seeds against the
+/// fixed obstacle guards; without the hole-containment barrier they slip
+/// through the chord line and colonize the obstacle interior (user-observed
+/// as a cell colony filling the circle). Gate: ZERO interior-cell centroids
+/// inside the obstacle on EVERY step, area conservation, and stability.
+#[test]
+fn movingmesh_adaptive_no_leak_flowcoupled() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    let result = std::panic::catch_unwind(no_leak_body);
+    std::env::remove_var("CFD2_BACKEND");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+fn no_leak_body() {
+    let (lx, ly) = (2.0, 1.0);
+    let (ocx, ocy, or_) = (0.6, 0.51, 0.1);
+    let geo = ChannelWithObstacle {
+        length: lx,
+        height: ly,
+        obstacle_center: Point2::new(ocx, ocy),
+        obstacle_radius: or_,
+    };
+    let domain = Vector2::new(lx, ly);
+    let mut params = test_params();
+    params.requested_dt = 0.01;
+    params.viscosity = 1.33e-3;
+    let h = 0.05;
+    let cvt = generate_cvt_mesh_with_seeds(&geo, h, h, 1.0, domain, &LloydConfig::default());
+    let n0 = cvt.mesh.num_cells();
+    let fluid_area: f64 = cvt.mesh.cell_vol.iter().sum();
+    let mut moving = pollster::block_on(MovingMeshDriver::build(
+        cvt,
+        &params,
+        MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+        &vec![(U0 as f64, 0.0); n0],
+        &vec![0.0; n0],
+        None,
+        None,
+    ))
+    .expect("no-leak driver build");
+    moving.driver_mut().apply_params(&params);
+    moving.set_adaptive_sizing(2);
+    moving.set_adaptive_sizing_band(Some((0.002, 0.06)));
+    moving.set_adaptive_budget_factor(5.0);
+    moving.set_adaptive_indicator_thresholds(0.3, 0.3, 0.3);
+    moving.set_smoothing(2, 1, 0.5);
+
+    let (mut born, mut killed) = (0usize, 0usize);
+    let mut worst_area_err = 0.0f64;
+    for step in 0..250 {
+        let (outcome, stats) = moving
+            .step(false)
+            .unwrap_or_else(|e| panic!("no-leak step {step}: {e}"));
+        assert!(outcome.diverged.is_none(), "no-leak step {step} diverged");
+        assert!(stats.dt > 1e-4, "dt collapsed at step {step}: {}", stats.dt);
+        born += stats.cells_born;
+        killed += stats.cells_killed;
+        let m = moving.mesh();
+        let inside = (0..m.num_cells())
+            .filter(|&c| {
+                let (dx, dy) = (m.cell_cx[c] - ocx, m.cell_cy[c] - ocy);
+                (dx * dx + dy * dy).sqrt() < or_ - 0.015
+            })
+            .count();
+        assert!(
+            inside == 0,
+            "step {step}: {inside} cell centroid(s) INSIDE the obstacle — seeds leaked \
+             through the wall"
+        );
+        let area: f64 = m.cell_vol.iter().sum();
+        worst_area_err = worst_area_err.max((area - fluid_area).abs() / fluid_area);
+        if step % 50 == 0 || step == 249 {
+            eprintln!(
+                "[no-leak] step {step:3}: n={} (+{born}/−{killed}) dt={:.2e} \
+                 area_err={worst_area_err:.2e} segs={}",
+                m.num_cells(),
+                stats.dt,
+                moving.boundary_segment_count(),
+            );
+        }
+    }
+    eprintln!("[no-leak] done: born={born} killed={killed} worst area_err={worst_area_err:.2e}");
+    assert!(born > 0, "aggressive config never adapted");
+    assert!(
+        worst_area_err < 1e-3,
+        "covered area drifted by {worst_area_err:.2e} — coverage broken"
+    );
+}
+
 /// Max adjacent realized-SPACING ratio over interior faces (wall cells and
 /// their immediate neighbors excluded — guards are structurally smaller):
 /// `h = √(vol/(√3/2))` per cell, ratio `max(h_o,h_n)/min(h_o,h_n)`.

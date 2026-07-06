@@ -524,6 +524,15 @@ pub struct MovingMeshDriver {
     /// refinement, `< 1` refines at weaker ones, `0` disables the
     /// component. Default `(1, 1, 1)` (pure auto-calibration).
     adapt_thresholds: (f64, f64, f64),
+    /// The last adaptation event's per-cell TARGET volumes (refreshed each
+    /// event at the current indexing; permuted by reorder; invalidated by a
+    /// direct resize). The per-cell SQUEEZE reference: a cell is
+    /// "compressed" when its volume falls below `LO ×` its OWN target — a
+    /// wide explicit band made the global hold-band floor useless as a
+    /// squeeze detector (an adapted-fine cell and a squeezed cell are
+    /// indistinguishable by volume alone), which let the stagnation-side
+    /// pileup against the obstacle run unchecked.
+    adapt_targets: Option<Vec<f64>>,
     /// Authoritative seed positions (f64), seed `i` == cell `i` — the CURRENT
     /// (t^n) realized set. Advanced each step by [`MeshMotionSpec`].
     seeds: Vec<Point2<f64>>,
@@ -786,6 +795,7 @@ impl MovingMeshDriver {
             adapt_band: None,
             adapt_budget_factor: ADAPT_BUDGET_MAX_FACTOR,
             adapt_thresholds: (1.0, 1.0, 1.0),
+            adapt_targets: None,
             seeds0: seeds.clone(),
             time: 0.0,
             seeds,
@@ -1209,6 +1219,12 @@ impl MovingMeshDriver {
                 let wall_born = self.resize_cells_impl(&kills, &births, &wall_segs)?;
                 cells_born = births.len() + wall_born;
                 cells_killed = kills.len();
+                // Re-derive the per-cell target cache at the NEW indexing
+                // (the resize invalidated it) — the per-cell squeeze
+                // reference for chi_size and the escalation.
+                self.adapt_targets = Some(self.adapt_target_vols()?);
+            } else {
+                self.adapt_targets = Some(targets);
             }
         }
 
@@ -1260,7 +1276,11 @@ impl MovingMeshDriver {
         // (an identity clone of `self.spec` under Static ⇒ byte-identical regen).
         let step_spec = self.moved_spec(new_time);
         let new_seeds = self.maybe_periodic_smooth(&step_spec, new_seeds);
-        let (new_seeds, escalated) = self.maybe_quality_escalate(&step_spec, new_seeds);
+        let (mut new_seeds, escalated) = self.maybe_quality_escalate(&step_spec, new_seeds);
+        // HOLE containment barrier — after EVERY seed-motion stage
+        // (advection/steering, recycling, smoothing, escalation): an interior
+        // seed may not end the step inside an embedded boundary loop.
+        self.contain_seeds(&step_spec, &mut new_seeds);
         let plan_ms = ms_since(plan_start);
         self.record_wall_velocity(&new_seeds, dt);
         Ok(StepPlan {
@@ -2155,6 +2175,18 @@ impl MovingMeshDriver {
 
         let eta = self.arepo_eta;
         let cap_frac = self.flow_disp_cap;
+        // Per-cell squeeze reference: the cell's OWN target when the
+        // adaptation cache is live (a wide explicit band makes the global
+        // hold floor blind to compression — an adapted-fine cell and a
+        // squeezed cell have the same volume); the hold-band floor
+        // otherwise.
+        let hold_lo = QUALITY_VOL_BAND_LO * self.hold_vol_band().0;
+        let squeeze_lo = |i: usize| -> f64 {
+            match &self.adapt_targets {
+                Some(t) if t.len() == self.seeds.len() => QUALITY_VOL_BAND_LO * t[i],
+                _ => hold_lo,
+            }
+        };
         let mut new_seeds = self.seeds.clone();
         for i in 0..self.seeds.len() {
             if self.kinds[i] != SeedKind::Interior {
@@ -2178,19 +2210,17 @@ impl MovingMeshDriver {
             } else {
                 chi_max
             };
-            // SIZING ramp: a cell squeezed below the sizing-HOLD band
+            // SIZING ramp: a cell squeezed below its reference volume
             // (persistent advective compression — e.g. converging streamlines
             // against fixed boundary guards) escalates its centroid pull
             // toward FULL Lloyd weight (χ=1), regardless of `chi_max`. The
             // shape ramp cannot see this (a uniformly squeezed cell stays
             // centroidal), and the global blended escalation is too gentle
             // to balance a steady seed inflow. χ ramps 0→1 as the volume
-            // falls from `LO·hold_min` to half that; the hard displacement
-            // clamp below keeps the move flip-safe. The hold band is the
-            // initial realized band widened by any explicit adaptation band
-            // (cells deliberately refined below the initial sizing must not
-            // trigger the ramp).
-            let lo = QUALITY_VOL_BAND_LO * self.hold_vol_band().0;
+            // falls from `LO·reference` to half that; the hard displacement
+            // clamp below keeps the move flip-safe. Reference = the cell's
+            // own adaptation target when live, else the hold-band floor.
+            let lo = squeeze_lo(i);
             let vol = self.mesh.cell_vol[i];
             let chi_size = if vol >= lo {
                 0.0
@@ -2381,6 +2411,9 @@ impl MovingMeshDriver {
         self.seeds0 = take(&self.seeds0);
         self.kinds = gather.iter().map(|&s| self.kinds[s]).collect();
         self.w_wall = gather.iter().map(|&s| self.w_wall[s]).collect();
+        if let Some(t) = &self.adapt_targets {
+            self.adapt_targets = Some(gather.iter().map(|&s| t[s]).collect());
+        }
 
         // Committed mesh: cell-indexed arrays gather; face arrays keep their
         // ids but owner/neighbor cell ids remap through the inverse.
@@ -2663,6 +2696,9 @@ impl MovingMeshDriver {
         self.w_wall = new_w_wall;
         // The refined label spec (identical shape, subdivided segments).
         self.spec = spec_new;
+        // The per-cell target cache is indexed by the OLD cells — invalid
+        // now (the adapt event re-derives it right after the resize).
+        self.adapt_targets = None;
         // The on-device regen bundle is sized at a fixed seed count —
         // rebuild it lazily at the new count on the next device attempt.
         self.gpu_regen_state = None;
@@ -2673,6 +2709,84 @@ impl MovingMeshDriver {
     /// across all loops) — grows when the wall refinement subdivides.
     pub fn boundary_segment_count(&self) -> usize {
         self.spec.num_segments()
+    }
+
+    /// Expanded bounding boxes of the spec's HOLE loops (negative signed
+    /// area — embedded obstacles), the cheap prefilter for the containment
+    /// tests (`point_in_fluid` walks every polyline point; a subdivided
+    /// obstacle has hundreds).
+    fn hole_bboxes(spec: &BoundarySpec, pad: f64) -> Vec<(f64, f64, f64, f64)> {
+        spec.loops
+            .iter()
+            .filter(|lp| lp.signed_area() < 0.0)
+            .map(|lp| {
+                let (mut x0, mut y0, mut x1, mut y1) =
+                    (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+                for p in &lp.pts {
+                    x0 = x0.min(p.x);
+                    y0 = y0.min(p.y);
+                    x1 = x1.max(p.x);
+                    y1 = y1.max(p.y);
+                }
+                (x0 - pad, y0 - pad, x1 + pad, y1 + pad)
+            })
+            .collect()
+    }
+
+    /// HOLE containment barrier: an INTERIOR seed whose planned position
+    /// falls inside an embedded (hole) loop reverts to its current position
+    /// — the wall polyline is a CLIP for the Voronoi cells, not a physical
+    /// barrier for the seeds, and the stagnation-side advection presses
+    /// seeds against the fixed obstacle guards until one slips through the
+    /// chord line; once inside, nothing ever brings it back (observed as a
+    /// growing cell colony filling the obstacle). A seed ALREADY outside
+    /// the fluid (a pre-barrier leak) is left for the adaptation cleanup
+    /// ([`Self::plan_adaptation`] kills it).
+    fn contain_seeds(&self, spec_t: &BoundarySpec, new_seeds: &mut [Point2<f64>]) {
+        use crate::meshgen::meshless::point_in_fluid;
+        let boxes = Self::hole_bboxes(spec_t, self.min_cell_size);
+        if boxes.is_empty() {
+            return;
+        }
+        for i in 0..new_seeds.len() {
+            if self.kinds[i] != SeedKind::Interior {
+                continue;
+            }
+            let p = new_seeds[i];
+            if p == self.seeds[i] {
+                continue;
+            }
+            let near = boxes
+                .iter()
+                .any(|&(x0, y0, x1, y1)| p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1);
+            if near && !point_in_fluid(p, spec_t) && point_in_fluid(self.seeds[i], spec_t) {
+                new_seeds[i] = self.seeds[i];
+            }
+        }
+    }
+
+    /// Interior seeds currently OUTSIDE the fluid (inside a hole loop) —
+    /// pre-barrier leaks or pathological crossings. Killed unconditionally
+    /// by the adaptation cleanup: their cells cover non-fluid area, their
+    /// state is junk, and they attract further Lloyd/adaptation effort.
+    fn leaked_seeds(&self, spec_t: &BoundarySpec) -> Vec<usize> {
+        use crate::meshgen::meshless::point_in_fluid;
+        let boxes = Self::hole_bboxes(spec_t, 0.0);
+        if boxes.is_empty() {
+            return Vec::new();
+        }
+        (0..self.seeds.len())
+            .filter(|&i| {
+                if self.kinds[i] != SeedKind::Interior {
+                    return false;
+                }
+                let p = self.seeds[i];
+                let near = boxes
+                    .iter()
+                    .any(|&(x0, y0, x1, y1)| p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1);
+                near && !point_in_fluid(p, spec_t)
+            })
+            .collect()
     }
 
     /// Whether cell `i` may be birthed into / killed by the flow-adaptive
@@ -2898,17 +3012,28 @@ impl MovingMeshDriver {
         let n_max = self.adapt_cell_cap();
         let n_min = (self.initial_cell_count as f64 * ADAPT_BUDGET_MIN_FACTOR) as usize;
 
+        // CONTAINMENT cleanup first: interior seeds sitting inside a hole
+        // loop (leaks that predate the barrier) are killed UNCONDITIONALLY —
+        // exempt from the rate limit, the eligibility bands, the
+        // adjacency-independence rule and the budget floor (their cells
+        // cover non-fluid area; removing them is repair, not adaptation).
+        let spec_now = self.moved_spec(self.time);
+        let mut kills: Vec<usize> = self.leaked_seeds(&spec_now);
+        let mut kill_set: HashSet<usize> = kills.iter().cloned().collect();
+
         let mut kill_cand: Vec<usize> = (0..n)
             .filter(|&i| {
-                self.adapt_eligible(i) && m.cell_vol[i] < ADAPT_COARSEN_RATIO * targets[i]
+                !kill_set.contains(&i)
+                    && self.adapt_eligible(i)
+                    && m.cell_vol[i] < ADAPT_COARSEN_RATIO * targets[i]
             })
             .collect();
         kill_cand.sort_by(|&a, &b| {
             (m.cell_vol[a] / targets[a]).total_cmp(&(m.cell_vol[b] / targets[b]))
         });
-        let kill_budget = ADAPT_MAX_KILLS_PER_EVENT.min(n.saturating_sub(n_min));
-        let mut kills: Vec<usize> = Vec::new();
-        let mut kill_set: HashSet<usize> = HashSet::new();
+        let kill_budget = kills.len()
+            + ADAPT_MAX_KILLS_PER_EVENT
+                .min(n.saturating_sub(n_min).saturating_sub(kills.len()));
         'cand: for &i in &kill_cand {
             if kills.len() >= kill_budget {
                 break;
@@ -2930,7 +3055,7 @@ impl MovingMeshDriver {
             kill_set.insert(i);
         }
 
-        let spec_t = self.moved_spec(self.time);
+        let spec_t = spec_now;
         let hex = 3.0f64.sqrt() / 2.0;
         let mut birth_cand: Vec<usize> = (0..n)
             .filter(|&i| {
@@ -3282,7 +3407,17 @@ impl MovingMeshDriver {
             .cell_vol
             .iter()
             .fold((f64::MAX, 0.0f64), |(a, b), &v| (a.min(v), b.max(v)));
-        let size_violated = vmin < lo || vmax > hi;
+        // Per-cell squeeze test against the adaptation targets when live
+        // (probe cell i == candidate seed i): a wide explicit band makes
+        // the global floor blind to compression.
+        let size_violated = match &self.adapt_targets {
+            Some(t) if t.len() == probe.num_cells() => {
+                (0..probe.num_cells())
+                    .any(|i| probe.cell_vol[i] < QUALITY_VOL_BAND_LO * t[i])
+                    || vmax > hi
+            }
+            _ => vmin < lo || vmax > hi,
+        };
         if !size_violated && probe.calculate_max_skewness() <= self.quality_skew_target {
             return (seeds, false);
         }

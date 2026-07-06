@@ -160,6 +160,32 @@ pub const ADAPT_INDICATOR_QUANTILE: f64 = 0.90;
 pub const ADAPT_BUDGET_MAX_FACTOR: f64 = 2.0;
 pub const ADAPT_BUDGET_MIN_FACTOR: f64 = 0.5;
 
+/// Max TARGET-SPACING ratio between face-adjacent cells (the mesh grading
+/// constraint): the raw indicator can step from 1 to 0 across one cell (a
+/// front), demanding the full band jump between neighbors — Voronoi cells
+/// with a several-× size jump mutilate (high skew, degenerate wall clips).
+/// The target field is smoothed by min-propagation sweeps until every
+/// face's spacing ratio is ≤ this factor, so refinement fans out in graded
+/// layers exactly like the meshgen's `growth_rate`.
+pub const ADAPT_GRADING_FACTOR: f64 = 1.3;
+
+/// Max grading min-propagation sweeps (each sweep relaxes one adjacency
+/// layer; a full band traverse at 1.3/layer needs ~5 — 16 is safely past
+/// convergence and the loop breaks early when nothing changes).
+pub const ADAPT_GRADING_SWEEPS: usize = 16;
+
+/// Split a WALL polyline segment once its length exceeds this multiple of
+/// its wall cells' target spacing — the boundary-discretization adaptation.
+/// The wall's own seeds keep whatever spacing the segments give them, so
+/// near-wall flow refinement is only reachable if the wall subdivides
+/// along; a midpoint split halves the length to `0.75×` the trigger, so a
+/// fresh split never immediately re-fires (hysteresis).
+pub const ADAPT_WALL_SPLIT_RATIO: f64 = 1.5;
+
+/// Max wall-segment splits per adaptation event (each split births 1–2 wall
+/// seeds; rate-limited like the interior births).
+pub const ADAPT_MAX_WALL_SPLITS_PER_EVENT: usize = 8;
+
 /// Default AREPO distortion trigger `η`: the centroid steering ramps in once a
 /// cell's seed-to-centroid offset exceeds `η · R_i` and saturates at `1.1 η`.
 /// Below `0.9 η` the steering is OFF, so well-shaped cells advect PURELY with
@@ -364,6 +390,14 @@ pub struct MovingMeshStats {
     pub max_skew: f64,
     pub n_cells: usize,
     pub n_faces: usize,
+    /// Vertex count of the committed mesh (0 for the VERTEX-LESS
+    /// device-built mesh — the on-device regen never materializes vertices).
+    pub n_vertices: usize,
+    /// Cell-volume extremes of the committed mesh — the realized sizing the
+    /// GUI mesh-stats panel tracks live (with adaptive sizing the initial
+    /// snapshot goes stale immediately).
+    pub vol_min: f64,
+    pub vol_max: f64,
     /// The regenerated mesh's face ARRAYS (order and/or adjacency) differ from
     /// the previous step's, so the step drove the TOPOLOGY seam (a full CSR
     /// rebuild) rather than the surgical geometry seam. Any real seed motion
@@ -833,8 +867,13 @@ impl MovingMeshDriver {
     /// count). `0` = off (default). Available under FlowCoupled AND Frozen —
     /// a STATIONARY mesh adapts to the developing flow too (pair with
     /// [`Self::set_smoothing`] for post-resize relaxation; the quality
-    /// escalation activates alongside). Skipped for `Prescribed` motion (its
-    /// analytic law is indexed by the t=0 labels, which a resize re-anchors).
+    /// escalation activates alongside). The BOUNDARY discretization adapts
+    /// along: static `Wall`/`SlipWall` polyline segments whose wall cells'
+    /// target falls below [`ADAPT_WALL_SPLIT_RATIO`]⁻¹ × their length are
+    /// subdivided at their midpoints (geometry-exact — shape and fluid area
+    /// unchanged) so near-wall refinement is actually reachable. Skipped for
+    /// `Prescribed` motion (its analytic law is indexed by the t=0 labels,
+    /// which a resize re-anchors).
     pub fn set_adaptive_sizing(&mut self, every_n: usize) {
         self.adapt_every_n = every_n;
     }
@@ -1050,6 +1089,7 @@ impl MovingMeshDriver {
             let dt = self.pin_dt(0.0);
             let outcome = self.driver.step(readback);
             self.step_index += 1;
+            let (vol_min, vol_max) = vol_extremes(&self.mesh.cell_vol);
             let stats = MovingMeshStats {
                 plan_ms: 0.0,
                 regen_ms: 0.0,
@@ -1060,6 +1100,9 @@ impl MovingMeshDriver {
                 max_skew: self.mesh.calculate_max_skewness(),
                 n_cells: self.mesh.num_cells(),
                 n_faces: self.mesh.num_faces(),
+                n_vertices: self.mesh.num_vertices(),
+                vol_min,
+                vol_max,
                 topo_changed: false,
                 flipped: false,
                 born_faces: 0,
@@ -1087,16 +1130,19 @@ impl MovingMeshDriver {
         }
 
         // Flow-adaptive sizing event (BETWEEN steps, before any seed motion):
-        // derive per-cell target volumes from the flow gradients and
-        // birth/kill cells toward them through the resize seam. The step then
-        // proceeds at the new count with a freshly rebuilt, state-transferred
-        // solver.
+        // derive per-cell target volumes from the flow gradients, plan the
+        // interior birth/kill lists AND the wall-segment subdivisions (the
+        // boundary discretization adapts along), and execute them as ONE
+        // resize event. The step then proceeds at the new count with a
+        // freshly rebuilt, state-transferred solver.
         let (mut cells_born, mut cells_killed) = (0usize, 0usize);
         if self.adapt_fires_this_step() {
-            let (kills, births) = self.plan_adaptation()?;
-            if !kills.is_empty() || !births.is_empty() {
-                self.resize_cells(&kills, &births)?;
-                cells_born = births.len();
+            let targets = self.adapt_target_vols()?;
+            let (kills, births) = self.plan_adaptation(&targets)?;
+            let wall_segs = self.plan_wall_refinement(&targets);
+            if !kills.is_empty() || !births.is_empty() || !wall_segs.is_empty() {
+                let wall_born = self.resize_cells_impl(&kills, &births, &wall_segs)?;
+                cells_born = births.len() + wall_born;
                 cells_killed = kills.len();
             }
         }
@@ -1460,6 +1506,8 @@ impl MovingMeshDriver {
         let max_skew = new_mesh.calculate_max_skewness();
         let n_cells = new_mesh.num_cells();
         let n_faces = new_mesh.num_faces();
+        let n_vertices = new_mesh.num_vertices();
+        let (vol_min, vol_max) = vol_extremes(&new_mesh.cell_vol);
         self.prev_vx = new_mesh.vx.clone();
         self.prev_vy = new_mesh.vy.clone();
         self.mesh = new_mesh;
@@ -1486,6 +1534,9 @@ impl MovingMeshDriver {
             max_skew,
             n_cells,
             n_faces,
+            n_vertices,
+            vol_min,
+            vol_max,
             topo_changed,
             flipped: is_flip,
             born_faces: flip.born_faces,
@@ -1658,6 +1709,8 @@ impl MovingMeshDriver {
 
         let n_cells = new_mesh.num_cells();
         let n_faces = new_mesh.num_faces();
+        let n_vertices = new_mesh.num_vertices();
+        let (vol_min, vol_max) = vol_extremes(&new_mesh.cell_vol);
         // Skewness is vertex-free (cell centres + face normals only), so the
         // vertex-less device mesh reports it like the CPU path does.
         let max_skew = new_mesh.calculate_max_skewness();
@@ -1682,6 +1735,9 @@ impl MovingMeshDriver {
             max_skew,
             n_cells,
             n_faces,
+            n_vertices,
+            vol_min,
+            vol_max,
             // The device path always drives the topology seam (its face order
             // changes every regen).
             topo_changed: true,
@@ -1783,7 +1839,15 @@ impl MovingMeshDriver {
     /// byte-for-byte. A rigid transform preserves chord
     /// lengths, so segment tags/structure are unchanged — only the points move.
     fn moved_spec(&self, t: f64) -> BoundarySpec {
-        let mut spec = self.spec.clone();
+        self.moved_spec_from(&self.spec, t)
+    }
+
+    /// [`Self::moved_spec`] against an EXPLICIT base spec: a cell-count
+    /// resize applies wall subdivisions to a WORKING copy of the label spec
+    /// and needs the moved variant of THAT copy for the assembly (seg ids in
+    /// the updated kinds index the working spec, not `self.spec`).
+    fn moved_spec_from(&self, base: &BoundarySpec, t: f64) -> BoundarySpec {
+        let mut spec = base.clone();
         if let Some(loop_index) = self.boundary_motion.loop_index() {
             for p in spec.loops[loop_index].pts.iter_mut() {
                 let q = self.boundary_motion.eval(t, [p.x, p.y]);
@@ -2323,6 +2387,21 @@ impl MovingMeshDriver {
         kills: &[usize],
         births: &[(Point2<f64>, usize)],
     ) -> Result<(), String> {
+        self.resize_cells_impl(kills, births, &[]).map(|_| ())
+    }
+
+    /// [`Self::resize_cells`] plus WALL refinement: subdivide the given
+    /// boundary segments at their midpoints (geometry-EXACT — the polyline
+    /// shape and the fluid area are unchanged; only the discretization
+    /// refines), re-kind the affected wall seeds against the new segment
+    /// ids, and birth the new wall seeds in the same rebuild-and-gather
+    /// event. Returns the number of wall seeds born.
+    fn resize_cells_impl(
+        &mut self,
+        kills: &[usize],
+        births: &[(Point2<f64>, usize)],
+        wall_segs: &[usize],
+    ) -> Result<usize, String> {
         use crate::meshgen::meshless::point_in_fluid;
         use std::collections::HashSet;
 
@@ -2362,14 +2441,32 @@ impl MovingMeshDriver {
             }
         }
 
-        // New seed set: survivors in slot order, births appended. `src[new]`
-        // is the OLD cell whose state row seeds the new cell (survivor:
-        // itself; birth: its donor). `seeds0` labels are GATHERED, not reset:
-        // boundary seeds keep their t=0 labels (the rigid boundary transform
-        // is evaluated absolutely from them); a birth's label is its spawn
-        // position (interior labels are unused under Frozen-equivalence and
-        // FlowCoupled).
-        let n_new = n - kills.len() + births.len();
+        // WALL refinement: apply the segment subdivisions to a WORKING copy
+        // of the label spec + kinds. Processed in DESCENDING segment order
+        // so the pending (original-numbering) ids stay valid — each split
+        // renumbers only the segments ABOVE it, and the generic remap inside
+        // `split_wall_segment` keeps the already-updated kinds and the
+        // already-emitted wall births consistent.
+        let mut spec_new = self.spec.clone();
+        let mut kinds_upd = self.kinds.clone();
+        let mut wall_births: Vec<(Point2<f64>, usize, SeedKind)> = Vec::new();
+        {
+            let mut segs: Vec<usize> = wall_segs.to_vec();
+            segs.sort_unstable_by(|x, y| y.cmp(x));
+            segs.dedup();
+            for &g in &segs {
+                split_wall_segment(&mut spec_new, &self.seeds, &mut kinds_upd, &mut wall_births, g);
+            }
+        }
+
+        // New seed set: survivors in slot order, then interior births, then
+        // wall births. `src[new]` is the OLD cell whose state row seeds the
+        // new cell (survivor: itself; birth: its donor). `seeds0` labels are
+        // GATHERED, not reset: boundary seeds keep their t=0 labels (the
+        // rigid boundary transform is evaluated absolutely from them); a
+        // birth's label is its spawn position (wall refinement is restricted
+        // to STATIC segments, so a wall birth's label is exact).
+        let n_new = n - kills.len() + births.len() + wall_births.len();
         let mut new_seeds: Vec<Point2<f64>> = Vec::with_capacity(n_new);
         let mut new_seeds0: Vec<Point2<f64>> = Vec::with_capacity(n_new);
         let mut new_kinds: Vec<SeedKind> = Vec::with_capacity(n_new);
@@ -2381,7 +2478,7 @@ impl MovingMeshDriver {
             }
             new_seeds.push(self.seeds[i]);
             new_seeds0.push(self.seeds0[i]);
-            new_kinds.push(self.kinds[i]);
+            new_kinds.push(kinds_upd[i]);
             new_w_wall.push(self.w_wall[i]);
             src.push(i);
         }
@@ -2392,13 +2489,25 @@ impl MovingMeshDriver {
             new_w_wall.push([0.0, 0.0]);
             src.push(donor);
         }
+        for &(p, donor, kind) in &wall_births {
+            new_seeds.push(p);
+            new_seeds0.push(p);
+            new_kinds.push(kind);
+            new_w_wall.push([0.0, 0.0]);
+            src.push(donor);
+        }
 
         // Assemble the new mesh (CPU — a resize is a rare, full topology
-        // event) and re-stamp the tags against the NEW indexing.
+        // event) against the moved variant of the UPDATED spec (the seg ids
+        // in the updated kinds index it) and re-stamp the tags against the
+        // NEW indexing. Midpoint subdivision leaves the polyline shape (and
+        // the fluid area) bit-identical, so the pre-split fluid validation
+        // above still holds.
+        let assemble_spec = self.moved_spec_from(&spec_new, self.time);
         let mut new_mesh = assemble_meshless_from_seeds(
             &new_seeds,
             &new_kinds,
-            &spec_t,
+            &assemble_spec,
             self.domain,
             self.min_cell_size,
         );
@@ -2467,25 +2576,61 @@ impl MovingMeshDriver {
         self.seeds0 = new_seeds0;
         self.kinds = new_kinds;
         self.w_wall = new_w_wall;
+        // The refined label spec (identical shape, subdivided segments).
+        self.spec = spec_new;
         // The on-device regen bundle is sized at a fixed seed count —
         // rebuild it lazily at the new count on the next device attempt.
         self.gpu_regen_state = None;
-        Ok(())
+        Ok(wall_births.len())
+    }
+
+    /// The current boundary discretization size (total polyline segments
+    /// across all loops) — grows when the wall refinement subdivides.
+    pub fn boundary_segment_count(&self) -> usize {
+        self.spec.num_segments()
     }
 
     /// Whether cell `i` may be birthed into / killed by the flow-adaptive
-    /// sizing: an interior seed outside the open-boundary bands. The
-    /// through-flow x-bands belong to the recycling machinery (its density
-    /// trigger + hole-spawn own that traffic); the y-wall dead zone keeps
-    /// splits/kills off the fixed guard seeds.
+    /// sizing: an interior seed outside the open-boundary bands that does
+    /// not TOUCH a boundary cell. The through-flow x-bands belong to the
+    /// recycling machinery (its density trigger + hole-spawn own that
+    /// traffic); the y-wall dead zone keeps splits/kills off the fixed box
+    /// guards. The wall-adjacency buffer (no face shared with a
+    /// boundary-seed cell, no open face) is load-bearing at EMBEDDED
+    /// boundaries: the wall's own seeds keep their build-time spacing —
+    /// adaptation cannot re-discretize the polyline — and fluid cells
+    /// refined well below that spacing degenerate the wall cells until one
+    /// bulges THROUGH the wall into the obstacle interior (observed as the
+    /// GUI "hernia": covered area exceeding the fluid area, cell centroids
+    /// inside the obstacle). One untouched interior layer plus the target
+    /// grading keeps the wall-adjacent size ratio in the regime the clip
+    /// machinery is validated for.
     fn adapt_eligible(&self, i: usize) -> bool {
         let h = self.min_cell_size;
         let s = self.seeds[i];
-        self.kinds[i] == SeedKind::Interior
-            && s.x > FLOW_ADVECT_BOX_RAMP_CELLS * h
-            && s.x < self.domain.x - FLOW_ADVECT_BOX_RAMP_CELLS * h
-            && s.y > FLOW_ADVECT_BOX_DEAD_CELLS * h
-            && s.y < self.domain.y - FLOW_ADVECT_BOX_DEAD_CELLS * h
+        if self.kinds[i] != SeedKind::Interior
+            || s.x <= FLOW_ADVECT_BOX_RAMP_CELLS * h
+            || s.x >= self.domain.x - FLOW_ADVECT_BOX_RAMP_CELLS * h
+            || s.y <= FLOW_ADVECT_BOX_DEAD_CELLS * h
+            || s.y >= self.domain.y - FLOW_ADVECT_BOX_DEAD_CELLS * h
+        {
+            return false;
+        }
+        let m = &self.mesh;
+        let (fb, fe) = (m.cell_face_offsets[i], m.cell_face_offsets[i + 1]);
+        for &f in &m.cell_faces[fb..fe] {
+            let other = if m.face_owner[f] == i {
+                m.face_neighbor[f]
+            } else {
+                Some(m.face_owner[f])
+            };
+            match other {
+                None => return false,
+                Some(nb) if self.kinds[nb] != SeedKind::Interior => return false,
+                _ => {}
+            }
+        }
+        true
     }
 
     /// Per-cell TARGET volumes for the flow-adaptive sizing: Green–Gauss
@@ -2578,28 +2723,56 @@ impl MovingMeshDriver {
         let (su, ss, sp) = (scale(&grad_u), scale(&strain), scale(&grad_p));
         let norm = |v: f64, s: f64| if s > 0.0 { (v / s).min(1.0) } else { 0.0 };
         let (vmin_t, vmax_t) = self.adapt_vol_band();
-        Ok((0..n)
+        let mut targets: Vec<f64> = (0..n)
             .map(|i| {
                 let ind = norm(grad_u[i], su)
                     .max(norm(strain[i], ss))
                     .max(norm(grad_p[i], sp));
                 vmax_t + (vmin_t - vmax_t) * ind
             })
-            .collect())
+            .collect();
+        // GRADING: the raw indicator can step from 1 to 0 across one cell (a
+        // front), demanding the full band jump between face neighbors —
+        // several-× Voronoi size jumps mutilate cells. Min-propagate until
+        // every face's target-SPACING ratio is ≤ ADAPT_GRADING_FACTOR
+        // (volume ratio ≤ its square): refinement fans out in graded layers.
+        let cap = ADAPT_GRADING_FACTOR * ADAPT_GRADING_FACTOR;
+        for _ in 0..ADAPT_GRADING_SWEEPS {
+            let mut changed = false;
+            for f in 0..m.num_faces() {
+                let Some(nb) = m.face_neighbor[f] else { continue };
+                let o = m.face_owner[f];
+                if targets[nb] > targets[o] * cap {
+                    targets[nb] = targets[o] * cap;
+                    changed = true;
+                }
+                if targets[o] > targets[nb] * cap {
+                    targets[o] = targets[nb] * cap;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        Ok(targets)
     }
 
-    /// Plan one flow-adaptive sizing event against the current per-cell
-    /// target volumes: the kill list (over-resolved cells, most-squeezed
-    /// first, thinned to an adjacency-independent set so no survivor absorbs
-    /// two removals at once) and the birth list (under-resolved cells split
-    /// at the midpoint toward their farthest face centre — the cell's long
-    /// axis — subject to the fluid test and a separation floor scaled to
-    /// the cell's TARGET spacing, capped by the meshgen scale). Pure
-    /// planning; [`Self::resize_cells`] executes it.
-    fn plan_adaptation(&self) -> Result<(Vec<usize>, Vec<(Point2<f64>, usize)>), String> {
+    /// Plan one flow-adaptive sizing event against the per-cell target
+    /// volumes (`targets`, from [`Self::adapt_target_vols`]): the kill list
+    /// (over-resolved cells, most-squeezed first, thinned to an
+    /// adjacency-independent set so no survivor absorbs two removals at
+    /// once) and the birth list (under-resolved cells split at the midpoint
+    /// toward their farthest face centre — the cell's long axis — subject
+    /// to the fluid test and a separation floor scaled to the cell's TARGET
+    /// spacing, capped by the meshgen scale). Pure planning;
+    /// [`Self::resize_cells`] executes it.
+    fn plan_adaptation(
+        &self,
+        targets: &[f64],
+    ) -> Result<(Vec<usize>, Vec<(Point2<f64>, usize)>), String> {
         use crate::meshgen::meshless::point_in_fluid;
         use std::collections::HashSet;
-        let targets = self.adapt_target_vols()?;
         let m = &self.mesh;
         let n = self.seeds.len();
         let n_max = (self.initial_cell_count as f64 * ADAPT_BUDGET_MAX_FACTOR) as usize;
@@ -2694,6 +2867,85 @@ impl MovingMeshDriver {
             }
         }
         Ok((kills, births))
+    }
+
+    /// Plan the WALL-refinement half of an adaptation event: the global ids
+    /// of boundary segments whose length exceeds
+    /// [`ADAPT_WALL_SPLIT_RATIO`] × their wall cells' target spacing —
+    /// worst first, rate-limited, budget-bounded. Restricted to segments
+    /// the midpoint subdivision is valid for:
+    /// * STATIC `Wall`/`SlipWall` segments only — the moving loop's seeds
+    ///   follow a rigid transform of their t=0 labels (a mid-run birth has
+    ///   no valid label), and the Inlet/Outlet guard structure belongs to
+    ///   the recycling machinery;
+    /// * segments whose wall seeds follow one of the two canonical
+    ///   patterns (a collapsed mid-chord guard, or endpoint vertex seeds) —
+    ///   an OFF-midpoint guard (a reflex-corner guard) would leave one half
+    ///   uncovered after the split, so such segments are skipped.
+    fn plan_wall_refinement(&self, targets: &[f64]) -> Vec<usize> {
+        let total = self.spec.num_segments();
+        if total == 0 {
+            return Vec::new();
+        }
+        let hex = 3.0f64.sqrt() / 2.0;
+        let tol = MeshgenTolerances::from_geometry(self.min_cell_size, self.domain);
+        // Per-segment wall-seed registry.
+        let mut seg_seeds: Vec<Vec<usize>> = vec![Vec::new(); total];
+        for (i, k) in self.kinds.iter().enumerate() {
+            if let SeedKind::Boundary { seg_prev, seg_next } = *k {
+                seg_seeds[seg_prev as usize].push(i);
+                if seg_next != seg_prev {
+                    seg_seeds[seg_next as usize].push(i);
+                }
+            }
+        }
+        let moving = self.moving_loop_range();
+        let mut cand: Vec<(f64, usize)> = Vec::new();
+        for g in 0..total {
+            if let Some((lo, hi)) = moving {
+                if g >= lo && g < hi {
+                    continue;
+                }
+            }
+            if !matches!(
+                self.spec.segment_tag(g as u32),
+                BoundaryType::Wall | BoundaryType::SlipWall
+            ) {
+                continue;
+            }
+            if seg_seeds[g].is_empty() {
+                continue;
+            }
+            let (a, b) = self.spec.segment_points(g as u32);
+            let len = (b - a).norm();
+            // A half must stay well clear of the degenerate-segment floor.
+            if 0.5 * len <= 8.0 * tol.edge_len_eps {
+                continue;
+            }
+            let mid = Point2::new(0.5 * (a.x + b.x), 0.5 * (a.y + b.y));
+            let splittable = seg_seeds[g].iter().all(|&i| match self.kinds[i] {
+                SeedKind::Boundary { seg_prev, seg_next } if seg_prev == seg_next => {
+                    (self.seeds[i] - mid).norm() <= 0.05 * len
+                }
+                _ => true,
+            });
+            if !splittable {
+                continue;
+            }
+            let t_h = seg_seeds[g]
+                .iter()
+                .map(|&i| (targets[i].max(0.0) / hex).sqrt())
+                .fold(f64::INFINITY, f64::min);
+            if t_h.is_finite() && len > ADAPT_WALL_SPLIT_RATIO * t_h {
+                cand.push((len / t_h, g));
+            }
+        }
+        cand.sort_by(|x, y| y.0.total_cmp(&x.0));
+        // Budget: each split births at most 2 wall seeds.
+        let n_max = (self.initial_cell_count as f64 * ADAPT_BUDGET_MAX_FACTOR) as usize;
+        let budget = n_max.saturating_sub(self.seeds.len()) / 2;
+        cand.truncate(ADAPT_MAX_WALL_SPLITS_PER_EVENT.min(budget));
+        cand.into_iter().map(|(_, g)| g).collect()
     }
 
     /// The Lloyd SIZING function for scheduled smoothing / quality
@@ -2938,6 +3190,14 @@ fn ms_since(start: Instant) -> f32 {
     start.elapsed().as_secs_f32() * 1000.0
 }
 
+/// `(min, max)` cell volume — the per-step realized-sizing telemetry.
+fn vol_extremes(vols: &[f64]) -> (f64, f64) {
+    vols.iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &v| {
+            (a.min(v), b.max(v))
+        })
+}
+
 /// Set one component of the per-face `MovingWall` Dirichlet velocity, resolving
 /// the velocity field name as `"U"` (upper) with a `"u"` (lower) fallback —
 /// mirroring [`set_inlet_velocity`](crate::solver::model::helpers) so the caller
@@ -3002,6 +3262,135 @@ fn force_degenerate_faces_born(
         flip.flipped_cells = flip.cell_flipped.iter().filter(|&&b| b).count();
     }
     added
+}
+
+/// Subdivide global boundary segment `g` of `spec` at its MIDPOINT — the
+/// boundary-discretization refinement primitive. Geometry-EXACT: the new
+/// polyline vertex lies on the old chord, so the wall shape and the fluid
+/// area are bit-unchanged; only the segment (and thus wall-seed) resolution
+/// doubles. Mutates the spec (vertex + duplicated tag inserted, later
+/// `seg_offsets` shifted), remaps every seg id `> g` by `+1` in `kinds` AND
+/// in the already-emitted `births`, and re-kinds/births the wall seeds by
+/// pattern:
+/// * collapsed mid-chord GUARD (`seg_prev == seg_next == g`, at the chord
+///   midpoint — the hole/circle pattern): the guard becomes the new
+///   (straight) vertex seed spanning both halves, and TWO guard births land
+///   at the half-chord midpoints;
+/// * endpoint VERTEX seeds (the straight-wall pattern): ONE vertex-seed
+///   birth lands at the midpoint, and the far endpoint's `seg_prev` moves
+///   to the new half.
+///
+/// Returns `false` (no mutation) for an OFF-midpoint guard (a reflex-corner
+/// guard: splitting would leave one half uncovered) — the planner filters
+/// these, so this is a defensive re-check. Birth donors are the segment's
+/// existing wall seeds (their cells carry the wall-adjacent state).
+fn split_wall_segment(
+    spec: &mut BoundarySpec,
+    seeds: &[Point2<f64>],
+    kinds: &mut [SeedKind],
+    births: &mut Vec<(Point2<f64>, usize, SeedKind)>,
+    g: usize,
+) -> bool {
+    let (l, s) = spec.locate(g as u32);
+    let n_pts = spec.loops[l].pts.len();
+    let a = spec.loops[l].pts[s];
+    let b = spec.loops[l].pts[(s + 1) % n_pts];
+    let m = Point2::new(0.5 * (a.x + b.x), 0.5 * (a.y + b.y));
+    let len = (b - a).norm();
+
+    // Locate the wall seeds referencing `g` and classify the pattern.
+    let mut guard: Option<usize> = None;
+    let mut a_end: Option<usize> = None;
+    let mut b_end: Option<usize> = None;
+    for (i, k) in kinds.iter().enumerate() {
+        if let SeedKind::Boundary { seg_prev, seg_next } = *k {
+            let (p, q) = (seg_prev as usize, seg_next as usize);
+            if p == g && q == g {
+                if (seeds[i] - m).norm() > 0.05 * len {
+                    return false; // off-midpoint (reflex-corner) guard
+                }
+                guard = Some(i);
+            } else if q == g {
+                a_end = Some(i);
+            } else if p == g {
+                b_end = Some(i);
+            }
+        }
+    }
+    if guard.is_none() && a_end.is_none() && b_end.is_none() {
+        return false; // uncovered segment — nothing to re-kind, do not split
+    }
+
+    // Insert the midpoint vertex (duplicating the segment tag) and shift
+    // the later loops' segment offsets.
+    let tag = spec.loops[l].tags[s];
+    spec.loops[l].pts.insert(s + 1, m);
+    spec.loops[l].tags.insert(s + 1, tag);
+    for off in spec.seg_offsets[l + 1..].iter_mut() {
+        *off += 1;
+    }
+
+    // Remap every seg id above `g` (the inserted segment renumbers them).
+    let remap = |k: &mut SeedKind| {
+        if let SeedKind::Boundary { seg_prev, seg_next } = k {
+            if (*seg_prev as usize) > g {
+                *seg_prev += 1;
+            }
+            if (*seg_next as usize) > g {
+                *seg_next += 1;
+            }
+        }
+    };
+    for k in kinds.iter_mut() {
+        remap(k);
+    }
+    for (_, _, k) in births.iter_mut() {
+        remap(k);
+    }
+
+    let (ga, gb) = (g as u32, (g + 1) as u32);
+    match guard {
+        Some(i) => {
+            kinds[i] = SeedKind::Boundary {
+                seg_prev: ga,
+                seg_next: gb,
+            };
+            births.push((
+                Point2::new(0.5 * (a.x + m.x), 0.5 * (a.y + m.y)),
+                i,
+                SeedKind::Boundary {
+                    seg_prev: ga,
+                    seg_next: ga,
+                },
+            ));
+            births.push((
+                Point2::new(0.5 * (m.x + b.x), 0.5 * (m.y + b.y)),
+                i,
+                SeedKind::Boundary {
+                    seg_prev: gb,
+                    seg_next: gb,
+                },
+            ));
+        }
+        None => {
+            // The b-endpoint's vertex seed now abuts the SECOND half.
+            if let Some(ib) = b_end {
+                if let SeedKind::Boundary { seg_prev, .. } = &mut kinds[ib] {
+                    *seg_prev = gb;
+                }
+            }
+            let donor = a_end.or(b_end).expect("checked non-empty above");
+            births.push((
+                m,
+                donor,
+                SeedKind::Boundary {
+                    seg_prev: ga,
+                    seg_next: gb,
+                },
+            ));
+        }
+    }
+    true
 }
 
 /// Whether two meshes with the same cell count differ in face set / adjacency

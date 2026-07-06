@@ -2626,17 +2626,40 @@ impl CFDApp {
         egui::SidePanel::right("legend").show(ctx, |ui| {
             if let Some(mesh) = &self.mesh {
                 ui.heading("Mesh Stats");
-                ui.label(format!("Cells: {}", mesh.num_cells()));
-                ui.label(format!("Faces: {}", mesh.num_faces()));
-                ui.label(format!("Vertices: {}", mesh.num_vertices()));
-                if !mesh.cell_vol.is_empty() {
-                    let min_vol = mesh.cell_vol.iter().cloned().fold(f64::INFINITY, f64::min);
-                    let max_vol = mesh
-                        .cell_vol
-                        .iter()
-                        .cloned()
-                        .fold(f64::NEG_INFINITY, f64::max);
-                    ui.label(format!("Cell vol: {:.2e} - {:.2e}", min_vol, max_vol));
+                // A moving (ALE) run regenerates the mesh every step — and
+                // with adaptive sizing even the CELL COUNT changes — so the
+                // init-time `self.mesh` snapshot goes stale immediately.
+                // Prefer the live per-step telemetry when the running solver
+                // is a moving one.
+                let live = if self.solver_is_moving {
+                    self.cached_moving_stats.as_ref()
+                } else {
+                    None
+                };
+                if let Some(m) = live {
+                    ui.label(format!("Cells: {}", m.n_cells));
+                    ui.label(format!("Faces: {}", m.n_faces));
+                    // The on-device regen builds a vertex-less mesh (0).
+                    if m.n_vertices > 0 {
+                        ui.label(format!("Vertices: {}", m.n_vertices));
+                    }
+                    if m.vol_min.is_finite() {
+                        ui.label(format!("Cell vol: {:.2e} - {:.2e}", m.vol_min, m.vol_max));
+                    }
+                } else {
+                    ui.label(format!("Cells: {}", mesh.num_cells()));
+                    ui.label(format!("Faces: {}", mesh.num_faces()));
+                    ui.label(format!("Vertices: {}", mesh.num_vertices()));
+                    if !mesh.cell_vol.is_empty() {
+                        let min_vol =
+                            mesh.cell_vol.iter().cloned().fold(f64::INFINITY, f64::min);
+                        let max_vol = mesh
+                            .cell_vol
+                            .iter()
+                            .cloned()
+                            .fold(f64::NEG_INFINITY, f64::max);
+                        ui.label(format!("Cell vol: {:.2e} - {:.2e}", min_vol, max_vol));
+                    }
                 }
                 ui.separator();
             }
@@ -3136,7 +3159,9 @@ impl eframe::App for CFDApp {
                                      under-resolved cells split, so the CELL COUNT adapts at \
                                      runtime (bounded to 0.5–2× the initial count; each \
                                      event rebuilds the solver and transfers the state). \
-                                     Applied on Initialize / Reset.",
+                                     Static wall/obstacle discretization refines along \
+                                     (segments subdivide where the flow demands finer wall \
+                                     cells). Applied on Initialize / Reset.",
                                 );
                                 if self.moving_adapt_every_n > 0 {
                                     ui.add(

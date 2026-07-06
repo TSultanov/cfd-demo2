@@ -363,6 +363,124 @@ fn movingmesh_adaptive_band_steers_planner() {
     }
 }
 
+/// The GUI "hernia" configuration: STATIONARY mesh, aggressive adaptation
+/// (every 2 steps) with a band FINER than the built mesh, around an
+/// obstacle whose boundary seeds keep the ORIGINAL coarse spacing. Guards
+/// two failure modes observed in the GUI: (a) the mesh buckling INTO the
+/// obstacle (fluid cells refined far below the wall discretization
+/// degenerate the wall cells until one bulges through — detected as the
+/// total cell area exceeding the fluid area, and as cell centroids inside
+/// the obstacle circle), and (b) ungraded refined↔coarse interfaces
+/// (adjacent targets jumping the full band) mutilating cells — detected as
+/// runaway skew.
+#[test]
+fn movingmesh_adaptive_obstacle_hernia_guard() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    let result = std::panic::catch_unwind(hernia_guard_body);
+    std::env::remove_var("CFD2_BACKEND");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+fn hernia_guard_body() {
+    let (lx, ly) = (2.0, 1.0);
+    let (ocx, ocy, or_) = (0.6, 0.51, 0.1);
+    let geo = ChannelWithObstacle {
+        length: lx,
+        height: ly,
+        obstacle_center: Point2::new(ocx, ocy),
+        obstacle_radius: or_,
+    };
+    let domain = Vector2::new(lx, ly);
+    let mut params = test_params();
+    params.requested_dt = 0.01;
+    params.viscosity = 1.33e-3;
+    // UNIFORM mesh at 0.05; adapt band (0.02, 0.06) — finer than the wall
+    // discretization below, coarser above: both interface directions active.
+    let h = 0.05;
+    let cvt = generate_cvt_mesh_with_seeds(&geo, h, h, 1.0, domain, &LloydConfig::default());
+    let n0 = cvt.mesh.num_cells();
+    let fluid_area: f64 = cvt.mesh.cell_vol.iter().sum();
+    let mut moving = pollster::block_on(MovingMeshDriver::build(
+        cvt,
+        &params,
+        MeshMotionSpec::Frozen,
+        &vec![(U0 as f64, 0.0); n0],
+        &vec![0.0; n0],
+        None,
+        None,
+    ))
+    .expect("hernia driver build");
+    moving.driver_mut().apply_params(&params);
+    moving.set_adaptive_sizing(2);
+    moving.set_adaptive_sizing_band(Some((0.02, 0.06)));
+    moving.set_smoothing(10, 1, 0.5);
+
+    let segs0 = moving.boundary_segment_count();
+    let (mut born, mut killed) = (0usize, 0usize);
+    let mut worst_area_err = 0.0f64;
+    let mut worst_inside = 0usize;
+    let mut worst_skew = 0.0f64;
+    for step in 0..200 {
+        let (outcome, stats) = moving
+            .step(false)
+            .unwrap_or_else(|e| panic!("hernia step {step}: {e}"));
+        assert!(outcome.diverged.is_none(), "hernia step {step} diverged");
+        born += stats.cells_born;
+        killed += stats.cells_killed;
+        worst_skew = worst_skew.max(stats.max_skew);
+        let m = moving.mesh();
+        // Conservation of covered area: cells bulging into the obstacle (or
+        // dropped coverage) show up as Σvol drifting off the fluid area.
+        let area: f64 = m.cell_vol.iter().sum();
+        let area_err = (area - fluid_area).abs() / fluid_area;
+        worst_area_err = worst_area_err.max(area_err);
+        // No cell centroid may sit clearly INSIDE the obstacle.
+        let inside = (0..m.num_cells())
+            .filter(|&c| {
+                let (dx, dy) = (m.cell_cx[c] - ocx, m.cell_cy[c] - ocy);
+                (dx * dx + dy * dy).sqrt() < or_ - 0.015
+            })
+            .count();
+        worst_inside = worst_inside.max(inside);
+        if step % 25 == 0 || step == 199 {
+            eprintln!(
+                "[hernia] step {step:3}: n={} (+{born}/−{killed}) area_err={area_err:.2e} \
+                 inside={inside} skew={:.3} vol=[{:.2e},{:.2e}]",
+                m.num_cells(),
+                stats.max_skew,
+                m.cell_vol.iter().cloned().fold(f64::MAX, f64::min),
+                m.cell_vol.iter().cloned().fold(0.0f64, f64::max),
+            );
+        }
+    }
+    let segs1 = moving.boundary_segment_count();
+    eprintln!(
+        "[hernia] worst: area_err={worst_area_err:.2e} inside={worst_inside} skew={worst_skew:.3}; \
+         wall segments {segs0} → {segs1}"
+    );
+    assert!(born + killed > 0, "hernia config never adapted");
+    assert!(
+        segs1 > segs0,
+        "the wall discretization never refined ({segs0} segments) despite a band finer \
+         than the built wall spacing"
+    );
+    assert!(
+        worst_inside == 0,
+        "{worst_inside} cell centroid(s) inside the obstacle — the mesh herniated"
+    );
+    assert!(
+        worst_area_err < 1e-3,
+        "covered area drifted off the fluid area by {worst_area_err:.2e} — coverage broken"
+    );
+    assert!(
+        worst_skew < 0.75,
+        "mesh quality collapsed under aggressive adaptation: max skew {worst_skew:.3}"
+    );
+}
+
 /// The flow-adaptive planner on a GRADED obstacle channel (FlowCoupled): the
 /// gradient indicator must fire resize events within the run (the
 /// boundary-distance grading mismatches the developing obstacle/wake

@@ -101,6 +101,13 @@ pub(in crate::solver::gpu::lowering) fn spec_reinit_cells(
     generic_coupled_program::spec_reinit_cells(plan, cells, rows, new_vols)
 }
 
+pub(in crate::solver::gpu::lowering) fn spec_permute_cells(
+    plan: &GpuProgramPlan,
+    perm: &[u32],
+) -> Result<(), String> {
+    generic_coupled_program::spec_permute_cells(plan, perm)
+}
+
 pub(in crate::solver::gpu::lowering) fn spec_set_bc_value(
     plan: &GpuProgramPlan,
     boundary: crate::solver::gpu::enums::GpuBoundaryType,

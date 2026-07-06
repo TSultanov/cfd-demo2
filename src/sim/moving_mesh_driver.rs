@@ -490,6 +490,25 @@ pub struct MovingMeshDriver {
     /// strip's initial interior minimum cell volume (see
     /// [`RECYCLE_SQUEEZE_FRACTION`]).
     recycle_vol_floor: f64,
+    /// Periodic mesh smoothing cadence: every `smoothing_every_n` committed
+    /// steps, run `smoothing_iters` blended Lloyd sweeps at weight
+    /// `smoothing_omega` over the interior seeds — UNCONDITIONAL, unlike the
+    /// quality escalation (which fires only on skew/sizing violations).
+    /// `0` = off (default). FlowCoupled only: Frozen/Prescribed recompute
+    /// positions from the t=0 labels every step, so a smooth would be
+    /// overwritten.
+    smoothing_every_n: usize,
+    smoothing_iters: usize,
+    smoothing_omega: f64,
+    /// Periodic MEMORY reordering cadence: every `reorder_every_n` committed
+    /// steps, relabel the cells in Morton order of the CURRENT seed
+    /// positions ([`Self::set_reorder_every_n`]). Long FlowCoupled runs with
+    /// recycling migrate slots arbitrarily far from their neighbors (a slot
+    /// dies at the outlet and respawns at the inlet keeping its index), so
+    /// the initial near-optimal generator order decays toward random —
+    /// measured on this codebase at +30% CPU / +55% GPU step cost. `0` = off
+    /// (default).
+    reorder_every_n: usize,
     /// Number of Lloyd regularization iterations a quality escalation runs
     /// (0 = escalation disabled). Blended (`omega`) so it nudges toward CVT
     /// without erasing the flow displacement.
@@ -653,6 +672,10 @@ impl MovingMeshDriver {
             initial_vol_band,
             seed_recycling: true,
             recycle_vol_floor,
+            smoothing_every_n: 0,
+            smoothing_iters: 1,
+            smoothing_omega: 0.5,
+            reorder_every_n: 0,
             lloyd_escalation_iters: 1,
             lloyd_escalation_omega: 0.4,
             step_index: 0,
@@ -689,6 +712,33 @@ impl MovingMeshDriver {
     /// Set the mesh-motion CFL cap factor (default [`DEFAULT_MESH_CFL`]).
     pub fn set_mesh_cfl(&mut self, cfl: f64) {
         self.mesh_cfl = cfl;
+    }
+
+    /// Configure periodic mesh smoothing (FlowCoupled): every `every_n`
+    /// committed steps, run `iters` blended Lloyd sweeps at weight `omega`
+    /// (0..1) over the interior seeds — a scheduled, unconditional
+    /// regularization on top of the on-demand quality escalation. `every_n
+    /// == 0` disables (default). Small `omega` keeps the smooth from erasing
+    /// the flow-coupled displacement; the hard per-step displacement clamp
+    /// still applies to the following advection, and the smooth itself is
+    /// mesh motion like any other — the swept-flux closure keeps the GCL.
+    pub fn set_smoothing(&mut self, every_n: usize, iters: usize, omega: f64) {
+        self.smoothing_every_n = every_n;
+        self.smoothing_iters = iters.max(1);
+        self.smoothing_omega = omega.clamp(0.0, 1.0);
+    }
+
+    /// Configure periodic memory REORDERING: every `every_n` committed steps,
+    /// relabel the cells in Morton order of the current seed positions —
+    /// state, time history, volume history and warm-start rows are permuted
+    /// on the solver ([`crate::solver::gpu::unified_solver::UnifiedSolver::permute_cells`]),
+    /// the committed mesh is relabeled in place, and the next step's topology
+    /// seam rebuilds the face-indexed stacks. Restores cache locality that
+    /// long FlowCoupled+recycling runs erode (slots migrate arbitrarily far
+    /// from their spatial neighbors). `0` = off (default). A pure relabel:
+    /// zero mesh motion, zero physics.
+    pub fn set_reorder_every_n(&mut self, every_n: usize) {
+        self.reorder_every_n = every_n;
     }
 
     /// Enable/disable FlowCoupled seed RECYCLING (default on): seeds advected
@@ -871,6 +921,17 @@ impl MovingMeshDriver {
             return Ok((outcome, stats));
         }
 
+        // Periodic memory reordering (a pure relabel between steps — zero
+        // mesh motion, zero physics; the regen below reproduces the same
+        // diagram in the new slot order and the topology seam rebuilds the
+        // face-indexed stacks).
+        if self.reorder_every_n > 0
+            && self.step_index > 0
+            && self.step_index % self.reorder_every_n == 0
+        {
+            self.reorder_cells()?;
+        }
+
         // Shared step plan: pinned dt, advected seeds, moved boundary spec,
         // quality escalation, recorded wall velocity — identical for the CPU
         // and device paths.
@@ -909,6 +970,7 @@ impl MovingMeshDriver {
         // The boundary spec at t^{n+1}: the moved loops the regen clips against
         // (an identity clone of `self.spec` under Static ⇒ byte-identical regen).
         let step_spec = self.moved_spec(new_time);
+        let new_seeds = self.maybe_periodic_smooth(&step_spec, new_seeds);
         let (new_seeds, escalated) = self.maybe_quality_escalate(&step_spec, new_seeds);
         let plan_ms = ms_since(plan_start);
         self.record_wall_velocity(&new_seeds, dt);
@@ -1945,6 +2007,122 @@ impl MovingMeshDriver {
                 )
             })
             .collect())
+    }
+
+    /// Relabel the cells in Morton (z-curve) order of the CURRENT seed
+    /// positions: permute the driver's per-seed arrays and the committed
+    /// mesh's cell-indexed arrays in place, and gather the solver's
+    /// cell-indexed stores through the [`UnifiedSolver::permute_cells`] seam.
+    /// A no-op when the current order is already Morton.
+    fn reorder_cells(&mut self) -> Result<(), String> {
+        let n = self.seeds.len();
+        // Morton key: 16-bit quantized x/y, bits interleaved.
+        let key = |p: &Point2<f64>| -> u64 {
+            let qx = ((p.x / self.domain.x).clamp(0.0, 1.0) * 65535.0) as u64;
+            let qy = ((p.y / self.domain.y).clamp(0.0, 1.0) * 65535.0) as u64;
+            let mut z = 0u64;
+            for b in 0..16 {
+                z |= ((qx >> b) & 1) << (2 * b) | ((qy >> b) & 1) << (2 * b + 1);
+            }
+            z
+        };
+        // gather[new] = old, stable by (key, old id) for determinism.
+        let mut gather: Vec<usize> = (0..n).collect();
+        gather.sort_by_key(|&i| (key(&self.seeds[i]), i));
+        if gather.iter().enumerate().all(|(i, &s)| i == s) {
+            return Ok(());
+        }
+        let mut inv = vec![0usize; n];
+        for (new, &old) in gather.iter().enumerate() {
+            inv[old] = new;
+        }
+
+        // Driver per-seed arrays.
+        let take = |v: &Vec<Point2<f64>>| -> Vec<Point2<f64>> {
+            gather.iter().map(|&s| v[s]).collect()
+        };
+        self.seeds = take(&self.seeds);
+        self.seeds0 = take(&self.seeds0);
+        self.kinds = gather.iter().map(|&s| self.kinds[s]).collect();
+        self.w_wall = gather.iter().map(|&s| self.w_wall[s]).collect();
+
+        // Committed mesh: cell-indexed arrays gather; face arrays keep their
+        // ids but owner/neighbor cell ids remap through the inverse.
+        let m = &mut self.mesh;
+        let gather_f64 = |v: &[f64]| -> Vec<f64> { gather.iter().map(|&s| v[s]).collect() };
+        m.cell_cx = gather_f64(&m.cell_cx);
+        m.cell_cy = gather_f64(&m.cell_cy);
+        m.cell_vol = gather_f64(&m.cell_vol);
+        let mut cell_faces = Vec::with_capacity(m.cell_faces.len());
+        let mut cell_face_offsets = Vec::with_capacity(n + 1);
+        cell_face_offsets.push(0usize);
+        for &src in &gather {
+            cell_faces
+                .extend_from_slice(&m.cell_faces[m.cell_face_offsets[src]..m.cell_face_offsets[src + 1]]);
+            cell_face_offsets.push(cell_faces.len());
+        }
+        m.cell_faces = cell_faces;
+        m.cell_face_offsets = cell_face_offsets;
+        if !m.cell_vertex_offsets.is_empty() {
+            let mut cv = Vec::with_capacity(m.cell_vertices.len());
+            let mut cvo = Vec::with_capacity(n + 1);
+            cvo.push(0usize);
+            for &src in &gather {
+                cv.extend_from_slice(
+                    &m.cell_vertices[m.cell_vertex_offsets[src]..m.cell_vertex_offsets[src + 1]],
+                );
+                cvo.push(cv.len());
+            }
+            m.cell_vertices = cv;
+            m.cell_vertex_offsets = cvo;
+        }
+        for f in 0..m.face_owner.len() {
+            m.face_owner[f] = inv[m.face_owner[f]];
+            m.face_neighbor[f] = m.face_neighbor[f].map(|nb| inv[nb]);
+        }
+
+        // Solver cell-indexed stores.
+        let gather_u32: Vec<u32> = gather.iter().map(|&s| s as u32).collect();
+        self.driver.solver().permute_cells(&gather_u32)
+    }
+
+    /// Scheduled periodic Lloyd smoothing (see [`Self::set_smoothing`]): on
+    /// every `smoothing_every_n`-th step, blend the interior seeds toward the
+    /// uniform-density CVT. A no-op when disabled or for non-FlowCoupled
+    /// motion (Frozen/Prescribed recompute positions from labels each step).
+    fn maybe_periodic_smooth(
+        &self,
+        spec: &BoundarySpec,
+        seeds: Vec<Point2<f64>>,
+    ) -> Vec<Point2<f64>> {
+        if self.smoothing_every_n == 0
+            || !matches!(self.motion, MeshMotionSpec::FlowCoupled { .. })
+            || (self.step_index + 1) % self.smoothing_every_n != 0
+        {
+            return seeds;
+        }
+        let mut relaxed = seeds;
+        let min_cell = self.min_cell_size;
+        let sizing = move |_: Point2<f64>| min_cell;
+        let tol = MeshgenTolerances::from_geometry(self.min_cell_size, self.domain);
+        let cfg = EngineConfig::default();
+        let lcfg = LloydConfig {
+            max_iters: self.smoothing_iters,
+            tol_disp: 0.0,
+            omega: self.smoothing_omega,
+            density_exponent: 4.0,
+        };
+        lloyd_relax(
+            &mut relaxed,
+            &self.kinds,
+            spec,
+            &sizing,
+            self.domain,
+            &tol,
+            &cfg,
+            &lcfg,
+        );
+        relaxed
     }
 
     /// FlowCoupled quality escalation: if the advected seed set would regenerate

@@ -721,6 +721,22 @@ impl GpuUnifiedSolver {
         }
     }
 
+    /// Permute every CELL-indexed store by the gather map `perm`
+    /// (`new[i] = old[perm[i]]`): all state time levels, cell volumes + ALE
+    /// volume history, warm-start x rows — the mesh-reordering seam.
+    /// Face-indexed stacks are NOT touched; the caller must rebuild them
+    /// (topology refresh) before the next solve.
+    pub fn permute_cells(&self, perm: &[u32]) -> Result<(), String> {
+        match &self.backend {
+            SolverBackend::Gpu(p) => p.permute_cells(perm),
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(c) => {
+                let perm_usize: Vec<usize> = perm.iter().map(|&p| p as usize).collect();
+                c.permute_cells(&perm_usize)
+            }
+        }
+    }
+
     /// Re-initialize a SUBSET of cells as FRESH fluid parcels (the
     /// seed-recycling seam): overwrite the packed state row in EVERY time
     /// level (the cell's ddt sees a zero rate), zero the ALE volume-history

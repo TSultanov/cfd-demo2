@@ -952,6 +952,49 @@ impl CpuSolver {
             .any(|a| !f32::from_bits(a.load(Ordering::Relaxed)).is_finite())
     }
 
+    /// Permute every CELL-indexed store by the gather map `perm`
+    /// (`new[i] = old[perm[i]]`): all state time levels, the cell volumes +
+    /// ALE volume history, and the warm-start x rows. Face-indexed stores are
+    /// NOT touched — the caller must rebuild them (the moving driver's next
+    /// topology seam does) before any solve. The mesh-reordering seam: long
+    /// FlowCoupled runs with recycling degrade the initial Morton locality
+    /// toward random (measured on this codebase: +30% CPU / +55% GPU step
+    /// cost), and a periodic relabel restores it.
+    pub fn permute_cells(&self, perm: &[usize]) -> Result<(), String> {
+        if perm.len() != self.num_cells {
+            return Err(format!(
+                "permute_cells: perm length {} != num_cells {}",
+                perm.len(),
+                self.num_cells
+            ));
+        }
+        let mut seen = vec![false; self.num_cells];
+        for &src in perm {
+            if src >= self.num_cells || seen[src] {
+                return Err("permute_cells: perm is not a bijection".into());
+            }
+            seen[src] = true;
+        }
+        let permute = |name: &str, width: usize| {
+            let old = self.buffers.f32_vec(name);
+            let mut new = vec![0.0f32; old.len()];
+            for (i, &src) in perm.iter().enumerate() {
+                new[i * width..(i + 1) * width]
+                    .copy_from_slice(&old[src * width..(src + 1) * width]);
+            }
+            self.buffers.copy_into_f32(name, &new);
+        };
+        let stride = self.state_stride as usize;
+        for b in ["state", "state_old", "state_old_old", "state_iter"] {
+            permute(b, stride);
+        }
+        for b in ["cell_vols", "cell_vols_old", "cell_vols_old_old"] {
+            permute(b, 1);
+        }
+        permute("x", self.unknowns_per_cell.max(1));
+        Ok(())
+    }
+
     /// Re-initialize a SUBSET of cells as FRESH fluid parcels (seed-recycling
     /// seam): overwrite the packed state row in EVERY time level
     /// (`state`/`state_old`/`state_old_old`/`state_iter` — the cell's ddt sees

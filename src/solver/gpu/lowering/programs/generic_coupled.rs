@@ -1308,6 +1308,60 @@ pub(crate) fn spec_write_state_bytes_current(
     Ok(())
 }
 
+/// Permute every CELL-indexed device store by the gather map `perm`
+/// (`new[i] = old[perm[i]]`): all three state ping-pong buffers (every time
+/// level), the cell volumes + ALE volume history, and the warm-start x rows.
+/// Host round-trip on purpose — reordering happens at a coarse cadence
+/// (hundreds/thousands of steps), and the caller's next topology seam
+/// rebuilds every face-indexed stack before any solve reads them.
+pub(crate) fn spec_permute_cells(plan: &GpuProgramPlan, perm: &[u32]) -> Result<(), String> {
+    use crate::solver::gpu::profiling::ProfilingStats;
+    use crate::solver::gpu::readback::{read_buffer_cached, StagingBufferCache};
+    let r = res(plan);
+    let ctx = &plan.context;
+    let n = r.runtime.common.num_cells as usize;
+    if perm.len() != n {
+        return Err(format!(
+            "permute_cells: perm length {} != num_cells {n}",
+            perm.len()
+        ));
+    }
+    let cache = StagingBufferCache::default();
+    let prof = ProfilingStats::new();
+    let permute_buf = |buf: &wgpu::Buffer, width: usize| {
+        let bytes = pollster::block_on(read_buffer_cached(
+            ctx,
+            &cache,
+            &prof,
+            buf,
+            (n * width * 4) as u64,
+            "permute_cells:read",
+        ));
+        let old: &[f32] = bytemuck::cast_slice(&bytes);
+        let mut new = vec![0.0f32; n * width];
+        for (i, &src) in perm.iter().enumerate() {
+            let src = src as usize;
+            new[i * width..(i + 1) * width]
+                .copy_from_slice(&old[src * width..(src + 1) * width]);
+        }
+        ctx.queue.write_buffer(buf, 0, bytemuck::cast_slice(&new));
+    };
+    let stride = plan.model.state_layout.stride() as usize;
+    for buf in r.fields.state_buffers() {
+        permute_buf(buf, stride);
+    }
+    let mesh = &r.runtime.common.mesh;
+    permute_buf(&mesh.b_cell_vols, 1);
+    permute_buf(&mesh.b_cell_vols_old, 1);
+    permute_buf(&mesh.b_cell_vols_old_old, 1);
+    let s = (r.recipe.unknowns_per_cell as usize).max(1);
+    permute_buf(
+        r.runtime.linear_port_space.buffer(r.runtime.linear_ports.x),
+        s,
+    );
+    Ok(())
+}
+
 /// Re-initialize a SUBSET of cells as FRESH fluid parcels (the seed-recycling
 /// seam): per-cell `write_buffer` rows into ALL THREE state ping-pong buffers
 /// (every time level — the cell's ddt sees a zero rate), the ALE volume

@@ -3,9 +3,10 @@ use crate::solver::gpu::profiling::ProfilingStats;
 use crate::solver::gpu::program::plan::{
     ModelGpuProgramSpec, ProgramF32Fn, ProgramInitRun, ProgramLinearDebugProvider,
     ProgramOpDispatcher, ProgramOpRegistry, ProgramParamHandler, PlanResources,
-    ProgramReinitCellsFn, ProgramSetBcValueFn, ProgramSetBcValuesPerFaceFn,
-    ProgramSetNamedParamFallback, ProgramSpec, ProgramStateBufferFn, ProgramStepStatsFn,
-    ProgramStepWithStatsFn, ProgramU32Fn, ProgramWriteStateFn,
+    ProgramPermuteCellsFn, ProgramReinitCellsFn, ProgramSetBcValueFn,
+    ProgramSetBcValuesPerFaceFn, ProgramSetNamedParamFallback, ProgramSpec,
+    ProgramStateBufferFn, ProgramStepStatsFn, ProgramStepWithStatsFn, ProgramU32Fn,
+    ProgramWriteStateFn,
 };
 use crate::solver::model::ModelSpec;
 use std::collections::HashMap;
@@ -20,6 +21,7 @@ pub(crate) struct ModelGpuProgramSpecParts {
     pub write_state_bytes: ProgramWriteStateFn,
     pub write_state_bytes_current: Option<ProgramWriteStateFn>,
     pub reinit_cells: Option<ProgramReinitCellsFn>,
+    pub permute_cells: Option<ProgramPermuteCellsFn>,
     pub set_bc_value: Option<ProgramSetBcValueFn>,
     pub set_bc_values_per_face: Option<ProgramSetBcValuesPerFaceFn>,
     pub initialize_history: Option<ProgramInitRun>,
@@ -43,6 +45,7 @@ impl ModelGpuProgramSpecParts {
             write_state_bytes: self.write_state_bytes,
             write_state_bytes_current: self.write_state_bytes_current,
             reinit_cells: self.reinit_cells,
+            permute_cells: self.permute_cells,
             set_bc_value: self.set_bc_value,
             set_bc_values_per_face: self.set_bc_values_per_face,
             program,

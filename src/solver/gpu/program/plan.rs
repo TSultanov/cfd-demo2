@@ -21,6 +21,7 @@ pub(crate) type ProgramStateBufferFn = for<'a> fn(&'a GpuProgramPlan) -> &'a wgp
 pub(crate) type ProgramWriteStateFn = fn(&GpuProgramPlan, bytes: &[u8]) -> Result<(), String>;
 pub(crate) type ProgramReinitCellsFn =
     fn(&GpuProgramPlan, cells: &[u32], rows: &[f32], new_vols: &[f64]) -> Result<(), String>;
+pub(crate) type ProgramPermuteCellsFn = fn(&GpuProgramPlan, perm: &[u32]) -> Result<(), String>;
 pub(crate) type ProgramSetBcValueFn =
     fn(&GpuProgramPlan, crate::solver::gpu::enums::GpuBoundaryType, u32, f32) -> Result<(), String>;
 pub(crate) type ProgramSetBcValuesPerFaceFn = fn(
@@ -328,6 +329,7 @@ pub(crate) struct ModelGpuProgramSpec {
     pub write_state_bytes: ProgramWriteStateFn,
     pub write_state_bytes_current: Option<ProgramWriteStateFn>,
     pub reinit_cells: Option<ProgramReinitCellsFn>,
+    pub permute_cells: Option<ProgramPermuteCellsFn>,
     pub set_bc_value: Option<ProgramSetBcValueFn>,
     pub set_bc_values_per_face: Option<ProgramSetBcValuesPerFaceFn>,
     pub program: ProgramSpec,
@@ -536,6 +538,17 @@ impl GpuProgramPlan {
             return Err("plan does not support per-cell reinitialization".into());
         };
         reinit(self, cells, rows, new_vols)
+    }
+
+    /// Permute every cell-indexed store by the gather map `perm`
+    /// (`new[i] = old[perm[i]]`) — the mesh-reordering seam. Face-indexed
+    /// stacks are NOT touched; the caller must rebuild them (topology
+    /// refresh) before the next solve.
+    pub fn permute_cells(&self, perm: &[u32]) -> Result<(), String> {
+        let Some(permute) = self.spec.permute_cells else {
+            return Err("plan does not support cell permutation".into());
+        };
+        permute(self, perm)
     }
 
     pub fn set_bc_value(

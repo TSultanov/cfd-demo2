@@ -227,6 +227,10 @@ struct SolverInitRequest {
     // only — pre-gated by `make_init_request`, so `build_moving_init` can
     // apply it directly).
     moving_gpu_regen: bool,
+    // Periodic Lloyd smoothing cadence for FlowCoupled (0 = off).
+    moving_smooth_every_n: usize,
+    // Periodic Morton memory-reordering cadence (0 = off).
+    moving_reorder_every_n: usize,
     wgpu_device: Option<wgpu::Device>,
     wgpu_queue: Option<wgpu::Queue>,
     target_format: wgpu::TextureFormat,
@@ -591,6 +595,15 @@ pub struct CFDApp {
     /// certify re-run on the CPU transparently. Default on: a GPU-backend
     /// moving run reconstructs on-device out of the box.
     moving_gpu_regen: bool,
+    /// Periodic Lloyd smoothing cadence for FlowCoupled moving runs: every N
+    /// steps, one gentle blended Lloyd sweep regularizes the interior seeds
+    /// (0 = off; the on-demand quality escalation stays active either way).
+    moving_smooth_every_n: usize,
+    /// Periodic Morton memory-reordering cadence: every N steps, relabel the
+    /// cells in Morton order of the current seed positions (0 = off). Long
+    /// FlowCoupled+recycling runs erode the initial memory locality (measured
+    /// 63→180 mean slot distance over 2000 steps; reordering holds ~70).
+    moving_reorder_every_n: usize,
     /// Latest per-step moving-mesh telemetry (from `MeshRefreshed`), for display.
     cached_moving_stats: Option<MovingMeshStats>,
     /// Whether the driver the worker is *actually running* is a moving-mesh
@@ -770,6 +783,8 @@ impl CFDApp {
             moving_osc_amplitude: 0.01,
             moving_osc_frequency: 0.5,
             moving_gpu_regen: true,
+            moving_smooth_every_n: 0,
+            moving_reorder_every_n: 500,
             cached_moving_stats: None,
             solver_is_moving: false,
             min_cell_size: 0.025,
@@ -1167,6 +1182,8 @@ impl CFDApp {
             // for CPU-solver runs, so the checkbox alone must not enable the
             // device path there.
             moving_gpu_regen: self.moving_gpu_regen && self.backend == BackendChoice::Gpu,
+            moving_smooth_every_n: self.moving_smooth_every_n,
+            moving_reorder_every_n: self.moving_reorder_every_n,
             wgpu_device: self.wgpu_device.clone(),
             wgpu_queue: self.wgpu_queue.clone(),
             target_format: self.target_format,
@@ -2293,6 +2310,11 @@ impl CFDApp {
         // the device cannot certify (flip/sliver) re-run on the CPU for that
         // step; the per-step `regen_backend` stat surfaces the live path.
         moving.set_gpu_regen(request.moving_gpu_regen);
+        // Scheduled Lloyd smoothing (0 = off; one gentle sweep at ω = 0.5).
+        moving.set_smoothing(request.moving_smooth_every_n, 1, 0.5);
+        // Periodic Morton memory reordering (0 = off) — a pure relabel that
+        // restores cache locality eroded by recycling slot migration.
+        moving.set_reorder_every_n(request.moving_reorder_every_n);
         CFDApp::push_trace_init_event(
             trace_init_events,
             "solver.new",
@@ -3015,6 +3037,33 @@ impl eframe::App for CFDApp {
                                     "Centroid-steering strength for flow-coupled motion: \
                                      0 = pure flow advection; higher pulls seeds toward \
                                      cell centroids to hold mesh quality.",
+                                );
+                                ui.add(
+                                    egui::Slider::new(&mut self.moving_smooth_every_n, 0..=100)
+                                        .text("Lloyd smooth every N steps"),
+                                )
+                                .on_hover_text(
+                                    "Scheduled mesh smoothing: every N steps, one gentle \
+                                     blended Lloyd sweep regularizes the interior seeds \
+                                     (0 = off). The on-demand quality escalation (skew / \
+                                     sizing violations) stays active either way. Applied on \
+                                     Initialize / Reset.",
+                                );
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut self.moving_reorder_every_n,
+                                        0..=2000,
+                                    )
+                                    .text("Memory reorder every N steps"),
+                                )
+                                .on_hover_text(
+                                    "Periodically relabel the cells in Morton order of the \
+                                     current seed positions (0 = off) — a pure relabel with \
+                                     zero effect on the physics. Seed recycling migrates \
+                                     slots far from their spatial neighbors over time, \
+                                     degrading memory locality (measured: mean neighbor \
+                                     slot distance 63 → 180 over 2000 steps; reordering \
+                                     holds ~70). Applied on Initialize / Reset.",
                                 );
                             }
                             // Oscillating obstacle (ChannelObstacle only — its

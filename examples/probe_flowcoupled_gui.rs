@@ -113,6 +113,9 @@ mod probe {
             cvt, &params, motion, &initial_u, &initial_p, None, None,
         ))
         .expect("driver build");
+        if let Some(n_reorder) = std::env::var("PROBE_REORDER").ok().and_then(|s| s.parse().ok()) {
+            moving.set_reorder_every_n(n_reorder);
+        }
         moving.driver_mut().apply_params(&params);
 
         let layout = moving.driver().solver().model().state_layout.clone();
@@ -163,10 +166,11 @@ mod probe {
                     "[{label}] step {step:3}: dt={:.2e} |U|max={umax:.3e} \
                      @({:.3},{:.3}) vol@argmax={:.2e} |U|max_interior={umax_interior:.3e} \
                      vol_min={vmin:.2e} @({:.3},{:.3}) vol_max={vmax:.2e} skew={:.3} \
-                     flip={} SCL={:.1e} recycled_total={total_recycled}",
+                     flip={} SCL={:.1e} recycled_total={total_recycled} locality={:.1}",
                     stats.dt, mesh.cell_cx[iu], mesh.cell_cy[iu], mesh.cell_vol[iu],
                     mesh.cell_cx[ivm], mesh.cell_cy[ivm],
                     stats.max_skew, stats.flipped, stats.scl_defect,
+                    locality(mesh),
                 );
             }
         }
@@ -636,6 +640,88 @@ mod probe {
         );
     }
 
+    /// Mean slot distance |owner − neighbor| over interior faces — the memory
+    /// locality the solver's gather/scatter feels.
+    fn locality(mesh: &cfd2::solver::mesh::Mesh) -> f64 {
+        let (mut sum, mut cnt) = (0.0f64, 0usize);
+        for f in 0..mesh.num_faces() {
+            if let Some(nb) = mesh.face_neighbor[f] {
+                sum += (mesh.face_owner[f] as f64 - nb as f64).abs();
+                cnt += 1;
+            }
+        }
+        sum / cnt.max(1) as f64
+    }
+
+    /// Reorder INVARIANCE gate: a rectangular free stream under FROZEN motion
+    /// with periodic Morton reordering — a pure relabel must preserve the
+    /// free stream exactly (any permutation bug corrupts it immediately).
+    fn run_reorder_frozen(steps: usize, every_n: usize) {
+        use cfd2::solver::mesh::{BoundaryType, RectangularChannel};
+        let domain = Vector2::new(LX, LY);
+        let geo = RectangularChannel { length: LX, height: LY };
+        let cvt =
+            generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let n = cvt.mesh.num_cells();
+        fn retag(mesh: &mut cfd2::solver::mesh::Mesh) {
+            let eps = 1e-4;
+            for f in 0..mesh.num_faces() {
+                if mesh.face_neighbor[f].is_some() {
+                    continue;
+                }
+                let (x, y) = (mesh.face_cx[f], mesh.face_cy[f]);
+                mesh.face_boundary[f] = if x < eps {
+                    Some(BoundaryType::Inlet)
+                } else if x > 3.0 - eps {
+                    Some(BoundaryType::Outlet)
+                } else if y < eps || y > 1.0 - eps {
+                    Some(BoundaryType::SlipWall)
+                } else {
+                    continue;
+                };
+            }
+        }
+        let params = gui_params();
+        let mut moving = pollster::block_on(MovingMeshDriver::build(
+            cvt,
+            &params,
+            MeshMotionSpec::Frozen,
+            &vec![(INLET as f64, 0.0); n],
+            &vec![0.0; n],
+            None,
+            None,
+        ))
+        .expect("driver build");
+        moving.set_boundary_retag(Some(retag));
+        moving.set_reorder_every_n(every_n);
+        moving.driver_mut().apply_params(&params);
+        let layout = moving.driver().solver().model().state_layout.clone();
+        let stride = layout.stride() as usize;
+        let u_off = layout.offset_for("U").expect("U") as usize;
+        let mut max_du = 0.0f32;
+        for step in 0..steps {
+            let (outcome, _stats) = moving
+                .step(false)
+                .unwrap_or_else(|e| panic!("reorder-frozen step {step}: {e}"));
+            assert!(outcome.diverged.is_none(), "diverged at step {step}");
+            let state = pollster::block_on(moving.driver().solver().read_state_f32());
+            for c in 0..n {
+                max_du = max_du
+                    .max((state[c * stride + u_off] - INLET).abs())
+                    .max(state[c * stride + u_off + 1].abs());
+            }
+        }
+        println!(
+            "[reorder-frozen] {steps} steps, reorder every {every_n}: max|U-U0| = {max_du:.3e}, \
+             locality(final) = {:.1}",
+            locality(moving.mesh())
+        );
+        assert!(
+            max_du < 1e-4,
+            "free stream corrupted by reordering: {max_du:.3e}"
+        );
+    }
+
     pub fn run() {
         let which = std::env::var("PROBE_CASES").unwrap_or_else(|_| "all".into());
         let has = |k: &str| which == "all" || which.split(',').any(|c| c == k);
@@ -650,6 +736,9 @@ mod probe {
         }
         if has("recycle-spike") {
             run_recycle_spike(800);
+        }
+        if has("reorder-frozen") {
+            run_reorder_frozen(200, 20);
         }
         if has("thermal-ladder") {
             run_thermal_ladder(1500);

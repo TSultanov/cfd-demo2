@@ -609,6 +609,13 @@ pub struct MovingMeshDriver {
     /// inf-norm mass-row residual before/after. Surfaced per adapt step in
     /// [`MovingMeshStats`].
     last_transfer_projection: (f64, f64),
+    /// TRIAL-STEP adaptation ([`Self::set_trial_step_adaptation`], opt-in,
+    /// CPU backend): on adapt steps, trial-solve the step on the current
+    /// mesh, plan the resize from the trial's END state (the solution the
+    /// refinement is FOR, one step fresher than t^n), rewind byte-exactly,
+    /// resize, and re-run the step on the final mesh. One extra solve per
+    /// acting adapt event; free when the plan is empty.
+    trial_step_adaptation: bool,
     /// FLOW-adaptive dt for the moving path ([`Self::set_adaptive_dt`]):
     /// `Some(target_cfl)` re-computes the [`Self::pin_dt`] BASE each step as
     /// `cfl · min_h / (max(|U|, |U_in|) + c_eos)` — the same acoustic-aware
@@ -894,6 +901,7 @@ impl MovingMeshDriver {
                 .map(|v| v != "0")
                 .unwrap_or(true),
             last_transfer_projection: (0.0, 0.0),
+            trial_step_adaptation: false,
             adaptive_dt_cfl: None,
             last_pinned_dt: None,
             seeds0: seeds.clone(),
@@ -1090,6 +1098,24 @@ impl MovingMeshDriver {
     /// behaviour, kept reachable for A/B measurement.
     pub fn set_transfer_projection(&mut self, on: bool) {
         self.transfer_projection = on;
+    }
+
+    /// TRIAL-STEP adaptation (default off; CPU backend, inert elsewhere):
+    /// decide each adapt event's plan from the UPCOMING solution — trial-
+    /// solve the step, plan from its end state, rewind, resize, re-solve on
+    /// the final mesh. One extra solve per acting adapt event.
+    ///
+    /// MEASURED WORSE than the default plan-at-t^n architecture and kept
+    /// only as the executable record of the experiment (extreme-band
+    /// dipole watch, 270-frame window: flagged frames 95→243, dip mean
+    /// 2.18→2.77, max 5.68→14.4, ambient 1.72→2.35, at ~1.5× the cost).
+    /// The plan is computed against the TRIAL's t^{n+1} geometry but
+    /// applied to the rewound t^n mesh — birth positions and indices
+    /// misalign by one step of mesh motion exactly where placement
+    /// precision matters, and the one-step indicator freshness (sub-cell
+    /// at CFL ≤ 0.9) cannot compensate.
+    pub fn set_trial_step_adaptation(&mut self, on: bool) {
+        self.trial_step_adaptation = on;
     }
 
     /// FLOW-adaptive timestep for the moving path: `Some(target_cfl)` makes
@@ -1383,23 +1409,72 @@ impl MovingMeshDriver {
         // boundary discretization adapts along), and execute them as ONE
         // resize event. The step then proceeds at the new count with a
         // freshly rebuilt, state-transferred solver.
+        //
+        // TRIAL-STEP variant (opt-in, [`Self::set_trial_step_adaptation`],
+        // CPU backend): decide the plan from the UPCOMING solution instead
+        // of t^n — trial-solve the whole step on the current mesh, plan
+        // from its END state, and when the plan is non-empty rewind to t^n
+        // (byte-exact MotionCheckpoint), resize there (with the level-n
+        // re-solve inside), and re-run the step on the final mesh. The
+        // published state is then the final mesh's own solution of a step
+        // whose refinement pattern reflects the solution being published —
+        // one full extra solve per acting adapt event; free on empty
+        // events (the trial IS the step).
         let (mut cells_born, mut cells_killed) = (0usize, 0usize);
         let mut transfer_defect = (0.0f64, 0.0f64);
         if self.adapt_fires_this_step() {
-            let targets = self.adapt_target_vols()?;
-            let (kills, births) = self.plan_adaptation(&targets)?;
-            let wall_segs = self.plan_wall_refinement(&targets);
-            if !kills.is_empty() || !births.is_empty() || !wall_segs.is_empty() {
-                let wall_born = self.resize_cells_impl(&kills, &births, &wall_segs)?;
-                cells_born = births.len() + wall_born;
-                cells_killed = kills.len();
-                transfer_defect = self.last_transfer_projection;
-                // Re-derive the per-cell target cache at the NEW indexing
-                // (the resize invalidated it) — the per-cell squeeze
-                // reference for chi_size and the escalation.
+            if self.trial_step_adaptation && self.driver.solver().is_cpu() {
+                let checkpoint = self.motion_checkpoint();
+                let trial = self.step_after_adapt(readback)?;
+                if trial.0.diverged.is_some() {
+                    // A diverged trial is the step's own problem — publish it.
+                    return Ok(trial);
+                }
+                let targets = self.adapt_target_vols()?;
+                let (kills, births) = self.plan_adaptation(&targets)?;
+                let wall_segs = self.plan_wall_refinement(&targets);
+                if kills.is_empty() && births.is_empty() && wall_segs.is_empty() {
+                    // Nothing to adapt: accept the trial as the step.
+                    self.adapt_targets = Some(targets);
+                    let mut trial = trial;
+                    trial.1.at_adapt_budget = self.adapt_budget_reached();
+                    return Ok(trial);
+                }
+                // Rewind to t^n and adapt there. The plan's indices are
+                // slot-stable across the rewind (no resize happened inside
+                // the trial; recycling relabels in place); birth POSITIONS
+                // were chosen on the t^{n+1} geometry, so re-validate them
+                // against the t^n fluid and drop strays (a moving boundary
+                // can invalidate a position one step back).
+                self.motion_restore(&checkpoint)?;
+                let spec_t = self.moved_spec(self.time);
+                let births: Vec<(Point2<f64>, usize)> = births
+                    .into_iter()
+                    .filter(|&(p, _)| crate::meshgen::meshless::point_in_fluid(p, &spec_t))
+                    .collect();
+                if !kills.is_empty() || !births.is_empty() || !wall_segs.is_empty() {
+                    let wall_born = self.resize_cells_impl(&kills, &births, &wall_segs)?;
+                    cells_born = births.len() + wall_born;
+                    cells_killed = kills.len();
+                    transfer_defect = self.last_transfer_projection;
+                }
                 self.adapt_targets = Some(self.adapt_target_vols()?);
             } else {
-                self.adapt_targets = Some(targets);
+                let targets = self.adapt_target_vols()?;
+                let (kills, births) = self.plan_adaptation(&targets)?;
+                let wall_segs = self.plan_wall_refinement(&targets);
+                if !kills.is_empty() || !births.is_empty() || !wall_segs.is_empty() {
+                    let wall_born = self.resize_cells_impl(&kills, &births, &wall_segs)?;
+                    cells_born = births.len() + wall_born;
+                    cells_killed = kills.len();
+                    transfer_defect = self.last_transfer_projection;
+                    // Re-derive the per-cell target cache at the NEW indexing
+                    // (the resize invalidated it) — the per-cell squeeze
+                    // reference for chi_size and the escalation.
+                    self.adapt_targets = Some(self.adapt_target_vols()?);
+                } else {
+                    self.adapt_targets = Some(targets);
+                }
             }
         }
 
@@ -1413,6 +1488,25 @@ impl MovingMeshDriver {
         // volume history AND current volumes). The adaptation event above
         // deliberately stays OUTSIDE the loop: a resize rebuilds the
         // solver, which would invalidate the checkpoint.
+        let mut out = self.step_after_adapt(readback)?;
+        out.1.cells_born = cells_born;
+        out.1.cells_killed = cells_killed;
+        out.1.at_adapt_budget = self.adapt_budget_reached();
+        out.1.transfer_defect_pre = out.1.transfer_defect_pre.max(transfer_defect.0);
+        out.1.transfer_defect_post = out.1.transfer_defect_post.max(transfer_defect.1);
+        Ok(out)
+    }
+
+    /// The post-adaptation remainder of a moving step: the implicit-motion
+    /// loop when armed, else the shared plan + device-or-CPU solve. Split
+    /// out so the TRIAL-STEP adaptation path can run the identical step
+    /// machinery twice (trial on the current mesh, final on the adapted
+    /// one). Adapt telemetry (cells born/killed, budget, transfer defect)
+    /// is patched by the CALLER.
+    fn step_after_adapt(
+        &mut self,
+        readback: bool,
+    ) -> Result<(StepOutcome, MovingMeshStats), String> {
         let outer = if self.motion_outer_iters > 1
             && matches!(self.motion, MeshMotionSpec::FlowCoupled { .. })
             && self.driver.solver().is_cpu()
@@ -1441,12 +1535,7 @@ impl MovingMeshDriver {
                 });
                 let planned = plan.new_seeds.clone();
                 let mut out = self.step_cpu_planned(plan, readback, None)?;
-                out.1.cells_born = cells_born;
-                out.1.cells_killed = cells_killed;
-                out.1.at_adapt_budget = self.adapt_budget_reached();
                 out.1.motion_iters = iters_done;
-                out.1.transfer_defect_pre = out.1.transfer_defect_pre.max(transfer_defect.0);
-                out.1.transfer_defect_post = out.1.transfer_defect_post.max(transfer_defect.1);
                 if converged || iters_done >= outer || out.0.diverged.is_some() {
                     self.motion_u_override = None;
                     return Ok(out);
@@ -1472,25 +1561,14 @@ impl MovingMeshDriver {
         let mut fallback: Option<&'static str> = None;
         if self.gpu_regen_active() {
             match self.try_step_device(&plan, readback)? {
-                DeviceStep::Done(mut out) => {
-                    out.1.cells_born = cells_born;
-                    out.1.cells_killed = cells_killed;
-                    out.1.at_adapt_budget = self.adapt_budget_reached();
-                    out.1.transfer_defect_pre = out.1.transfer_defect_pre.max(transfer_defect.0);
-                    out.1.transfer_defect_post = out.1.transfer_defect_post.max(transfer_defect.1);
+                DeviceStep::Done(out) => {
                     return Ok(out);
                 }
                 DeviceStep::Fallback(reason) => fallback = Some(reason),
             }
         }
 
-        let mut out = self.step_cpu_planned(plan, readback, fallback)?;
-        out.1.cells_born = cells_born;
-        out.1.cells_killed = cells_killed;
-        out.1.at_adapt_budget = self.adapt_budget_reached();
-        out.1.transfer_defect_pre = out.1.transfer_defect_pre.max(transfer_defect.0);
-        out.1.transfer_defect_post = out.1.transfer_defect_post.max(transfer_defect.1);
-        Ok(out)
+        self.step_cpu_planned(plan, readback, fallback)
     }
 
     /// Everything an implicit-mesh-motion retry must rewind: the full

@@ -670,6 +670,15 @@ mod probe {
         {
             moving.set_adaptive_dt(Some(cfl));
         }
+        // PROBE_DIPOLE_TRIAL=1: trial-step adaptation — plan each event
+        // from the UPCOMING solution (trial step, rewind, resize, re-solve
+        // on the final mesh).
+        if std::env::var("PROBE_DIPOLE_TRIAL")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+        {
+            moving.set_trial_step_adaptation(true);
+        }
 
         let layout = moving.driver().solver().model().state_layout.clone();
         let stride = layout.stride() as usize;

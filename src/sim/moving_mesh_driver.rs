@@ -198,6 +198,13 @@ pub const ADAPT_MAX_WALL_SPLITS_PER_EVENT: usize = 8;
 /// realized spacing) and splits → the wall unlocks again.
 pub const ADAPT_WALL_FLUID_RATIO: f64 = 0.9;
 
+/// Through-flow coarsening RAMP length, in BUILD cells: adaptation targets
+/// grade geometrically back up to the build sizing across this many build
+/// cells before each through-flow band (the recycling machinery's strip
+/// discipline assumes build-sized cells — see the ramp comment in
+/// `adapt_target_vols`).
+pub const ADAPT_OUTFLOW_RAMP_CELLS: f64 = 6.0;
+
 /// Sizing-hysteresis PERSISTENCE window, in STEPS: a cell acts on its
 /// split/kill threshold only after violating it for
 /// `ceil(ADAPT_PERSIST_STEPS / adapt_every_n)` consecutive adapt events —
@@ -3755,6 +3762,39 @@ impl MovingMeshDriver {
             }
             if !changed {
                 break;
+            }
+        }
+        // THROUGH-FLOW COARSENING RAMP (applied LAST — the min-propagation
+        // above must not drag it back down): the recycling machinery's
+        // outlet strip runs at the BUILD sizing (its density trigger, park
+        // lines and intake spacing all assume it), so adaptation targets
+        // must grade back UP to the build size before the through-flow
+        // bands. Without this, deep refinement eventually pushes 25x-finer
+        // cells against the strip: the per-cell squeeze floor follows their
+        // fine targets, the drain never fires (`rec 0` while the outlet
+        // degenerates), fine cells pile against the outlet guards and
+        // compress into genuine SLIVERS (measured isoperimetric 10.8 at the
+        // outlet-top corner ~step 900 of the 1600-step watch), whose noise
+        // drives targets finer still — a slow blow-up. The ramp coarsens
+        // targets geometrically (in SIZE) from the local value to the build
+        // hex volume across ADAPT_OUTFLOW_RAMP_CELLS build-cells before
+        // each band; the kill machinery then coarsens advecting cells on
+        // the way in, and inside the bands the targets ARE the build sizing
+        // — restoring the drain's original semantics exactly.
+        let h = self.min_cell_size;
+        let build_vol = 3.0f64.sqrt() / 2.0 * h * h;
+        let edge = FLOW_ADVECT_BOX_RAMP_CELLS * h;
+        let ramp = ADAPT_OUTFLOW_RAMP_CELLS * h;
+        for i in 0..n {
+            let x = m.cell_cx[i];
+            let d = x.min(self.domain.x - x);
+            if d < edge + ramp {
+                // frac: 0 at (and inside) the band edge -> 1 at ramp end.
+                let frac = ((d - edge) / ramp).clamp(0.0, 1.0);
+                // Geometric blend in SIZE: h_graded = h_build^(1-frac) * h_t^frac
+                // == volume blend in log space.
+                let graded = build_vol.powf(1.0 - frac) * targets[i].max(1e-300).powf(frac);
+                targets[i] = targets[i].max(graded);
             }
         }
         Ok(targets)

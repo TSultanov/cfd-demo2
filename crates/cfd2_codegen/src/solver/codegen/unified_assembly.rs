@@ -1624,10 +1624,45 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                                 term_common,
                             ));
                         } else {
-                            let val = term_common * (phi_own.clone() + phi_neigh.clone());
-                            body.push(acc.sub_rhs(u_idx, val));
+                            // BC-aware boundary closure for the explicit
+                            // gradient force. At a boundary face
+                            // `other_idx == idx`, so the mirror sum
+                            // `phi_own + phi_neigh` reduces to `2·p_P` and the
+                            // force never sees a Dirichlet/Neumann boundary
+                            // value. At a Dirichlet-p (outlet-gauge) face that
+                            // FLIPS the sign of the boundary cell's
+                            // pressure→velocity feedback (δp_P < 0 ⇒ extra
+                            // outward force ⇒ more outflux ⇒ the continuity
+                            // row's Dirichlet anchor drives p_P further down)
+                            // — the outlet-band checkerboard that blows up on
+                            // polygonal (CVT) meshes, whose band-parallel
+                            // Rhie-Chow damping is geometrically weaker than a
+                            // grid's. Substitute the ghost (face) value at
+                            // full weight instead: Dirichlet → bc_value,
+                            // Neumann → p_P + g·d_own, ZeroGradient → p_P —
+                            // consistent with the RC grad kernels, the flux
+                            // module, and the continuity anchor. Interior
+                            // faces and ZeroGradient boundaries are bitwise
+                            // unchanged (`0.5·(g + g) ≡ 0.5·(2·g)` in IEEE).
+                            let bc = BcTable::new(Expr::ident("face_idx"), coupled_stride);
+                            let ghost =
+                                bc.ghost_value(p_idx, phi_own.clone(), Expr::ident("dist"));
+                            body.push(dsl::if_block_expr(
+                                !Expr::ident("is_boundary"),
+                                dsl::block(vec![acc.sub_rhs(
+                                    u_idx,
+                                    term_common.clone()
+                                        * (phi_own.clone() + phi_neigh.clone()),
+                                )]),
+                                Some(dsl::block(vec![
+                                    acc.sub_rhs(u_idx, term_common * (ghost * 2.0))
+                                ])),
+                            ));
                         }
                     } else {
+                        // No coupled-unknown offset ⇒ no bc-table column for
+                        // this field; keep the mirror closure (no shipped
+                        // model takes the explicit gradient of a non-unknown).
                         let val = term_common * (phi_own.clone() + phi_neigh.clone());
                         body.push(acc.sub_rhs(u_idx, val));
                     }

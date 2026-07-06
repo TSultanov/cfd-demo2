@@ -937,6 +937,21 @@ impl CpuSolver {
         self.buffers.f32_vec("state")
     }
 
+    /// Any non-finite value in the packed state? Clone-free host-side scan
+    /// over the atomic backing store — the CPU backend's per-step divergence
+    /// probe. The engine's per-solve linear stats are not threaded out of the
+    /// solve loop yet (see `solve_block`), so without this a blown CPU solve
+    /// keeps stepping on inf/NaN silently: the driver's `LinearSolver`
+    /// detection sees an empty stats vec and its `NonFinite` readback scan
+    /// only runs at readback cadence.
+    pub fn state_has_nonfinite(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        self.buffers
+            .atom("state")
+            .iter()
+            .any(|a| !f32::from_bits(a.load(Ordering::Relaxed)).is_finite())
+    }
+
     /// Overwrite the full packed state.
     pub fn write_state_f32(&self, state: &[f32]) -> Result<(), String> {
         let expected = self.num_cells * self.state_stride as usize;

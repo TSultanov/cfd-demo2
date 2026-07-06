@@ -690,7 +690,23 @@ impl GpuUnifiedSolver {
             #[cfg(feature = "cpu")]
             SolverBackend::Cpu(c) => {
                 c.step();
-                Vec::new()
+                // The CPU engine's per-solve linear stats are not threaded out
+                // of its solve loop yet, so the driver's LinearSolver
+                // divergence detection would see an empty vec (vacuously
+                // fine) and its NonFinite scan only runs at readback cadence.
+                // The state is host-resident: scan it every step (clone-free)
+                // and surface a blown solve as one synthetic diverged stat,
+                // so a CPU run stops at the step it dies instead of marching
+                // on inf — GPU-parity detection latency.
+                if c.state_has_nonfinite() {
+                    vec![LinearSolverStats::diverged(
+                        0,
+                        f32::INFINITY,
+                        std::time::Duration::ZERO,
+                    )]
+                } else {
+                    Vec::new()
+                }
             }
         };
         self.apply_srd();

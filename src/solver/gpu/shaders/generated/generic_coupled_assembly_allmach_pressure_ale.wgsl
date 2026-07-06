@@ -319,8 +319,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 diag_1 += phi_1;
             }
         }
-        rhs_0 -= 0.5 * area * normal.x * (state[idx * 12u + 2u] + state[other_idx * 12u + 2u]);
-        rhs_1 -= 0.5 * area * normal.y * (state[idx * 12u + 2u] + state[other_idx * 12u + 2u]);
+        if (!is_boundary) {
+            rhs_0 -= 0.5 * area * normal.x * (state[idx * 12u + 2u] + state[other_idx * 12u + 2u]);
+        } else {
+            rhs_0 -= 0.5 * area * normal.x * select(select(state[idx * 12u + 2u], bc_value[face_idx * 3u + 2u], bc_kind[face_idx * 3u + 2u] == 1u), state[idx * 12u + 2u] + bc_value[face_idx * 3u + 2u] * dist, bc_kind[face_idx * 3u + 2u] == 2u) * 2.0;
+        }
+        if (!is_boundary) {
+            rhs_1 -= 0.5 * area * normal.y * (state[idx * 12u + 2u] + state[other_idx * 12u + 2u]);
+        } else {
+            rhs_1 -= 0.5 * area * normal.y * select(select(state[idx * 12u + 2u], bc_value[face_idx * 3u + 2u], bc_kind[face_idx * 3u + 2u] == 1u), state[idx * 12u + 2u] + bc_value[face_idx * 3u + 2u] * dist, bc_kind[face_idx * 3u + 2u] == 2u) * 2.0;
+        }
         let diff_coeff_p = select(state[idx * 12u + 11u] * state[idx * 12u + 3u], state[idx * 12u + 11u] * state[idx * 12u + 3u] * lambda_f + state[other_idx * 12u + 11u] * state[other_idx * 12u + 3u] * (1.0 - lambda_f), !is_boundary) * area / dist;
         if (!is_boundary) {
             diag_2 += diff_coeff_p;

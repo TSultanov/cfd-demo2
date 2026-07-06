@@ -375,8 +375,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 k1_diag_1 += k1_phi_1;
             }
         }
-        k1_rhs_0 -= 0.5 * k1_area * k1_normal.x * (state[idx * 15u + 2u] + state[k1_other_idx * 15u + 2u]);
-        k1_rhs_1 -= 0.5 * k1_area * k1_normal.y * (state[idx * 15u + 2u] + state[k1_other_idx * 15u + 2u]);
+        if (!k1_is_boundary) {
+            k1_rhs_0 -= 0.5 * k1_area * k1_normal.x * (state[idx * 15u + 2u] + state[k1_other_idx * 15u + 2u]);
+        } else {
+            k1_rhs_0 -= 0.5 * k1_area * k1_normal.x * select(select(state[idx * 15u + 2u], bc_value[k1_face_idx * 3u + 2u], bc_kind[k1_face_idx * 3u + 2u] == 1u), state[idx * 15u + 2u] + bc_value[k1_face_idx * 3u + 2u] * k1_dist, bc_kind[k1_face_idx * 3u + 2u] == 2u) * 2.0;
+        }
+        if (!k1_is_boundary) {
+            k1_rhs_1 -= 0.5 * k1_area * k1_normal.y * (state[idx * 15u + 2u] + state[k1_other_idx * 15u + 2u]);
+        } else {
+            k1_rhs_1 -= 0.5 * k1_area * k1_normal.y * select(select(state[idx * 15u + 2u], bc_value[k1_face_idx * 3u + 2u], bc_kind[k1_face_idx * 3u + 2u] == 1u), state[idx * 15u + 2u] + bc_value[k1_face_idx * 3u + 2u] * k1_dist, bc_kind[k1_face_idx * 3u + 2u] == 2u) * 2.0;
+        }
         let k1_diff_coeff_p = select(state[idx * 15u + 11u] * state[idx * 15u + 3u], state[idx * 15u + 11u] * state[idx * 15u + 3u] * k1_lambda_f + state[k1_other_idx * 15u + 11u] * state[k1_other_idx * 15u + 3u] * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
         if (!k1_is_boundary) {
             k1_diag_2 += k1_diff_coeff_p;

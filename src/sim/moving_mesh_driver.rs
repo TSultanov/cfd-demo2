@@ -59,6 +59,32 @@ use crate::solver::model::incompressible_momentum_ale_model;
 /// the born/dead-face flip remap in their valid regime.
 pub const DEFAULT_FLOW_DISP_CAP: f64 = 0.25;
 
+/// Width (in `min_cell_size` units) of the open-boundary advection ramp for
+/// `FlowCoupled` motion: within this band of the domain box the seed
+/// ADVECTION fades to zero (the mesh is ~Eulerian there), so through-flow
+/// cannot pile interior seeds against the FIXED boundary guard seeds.
+/// Steering and the displacement clamp stay active in the band.
+pub const FLOW_ADVECT_BOX_RAMP_CELLS: f64 = 3.0;
+
+/// Dead-zone width (in `min_cell_size` units) of the advection ramp:
+/// advection is FULLY zero within this distance of the box. A pure linear
+/// ramp only SLOWS the approach (`d' ∝ d` — an exponential decay toward the
+/// boundary that never stops), which measurably compressed the boundary
+/// half-cells without bound (vol_min halved every ~1000 steps on the GUI
+/// obstacle case); the dead zone stalls the creep at its edge, so the last
+/// interior seed row parks ≥ this far from the fixed guards.
+pub const FLOW_ADVECT_BOX_DEAD_CELLS: f64 = 1.5;
+
+/// FlowCoupled cell-SIZING band, relative to the INITIAL mesh's realized
+/// volume extremes (which encode the user's selected min/max cell size): the
+/// quality escalation triggers when any cell volume falls below
+/// `LO · initial_vol_min` or rises above `HI · initial_vol_max`, pulling the
+/// seeds back toward the CVT sizing before cells mutilate into slivers
+/// (near-degenerate faces flip-flopping through zero length every step).
+/// Skew alone cannot catch this: a uniformly squeezed cell stays centroidal.
+pub const QUALITY_VOL_BAND_LO: f64 = 0.5;
+pub const QUALITY_VOL_BAND_HI: f64 = 2.0;
+
 /// Default AREPO distortion trigger `η`: the centroid steering ramps in once a
 /// cell's seed-to-centroid offset exceeds `η · R_i` and saturates at `1.1 η`.
 /// Below `0.9 η` the steering is OFF, so well-shaped cells advect PURELY with
@@ -402,6 +428,11 @@ pub struct MovingMeshDriver {
     /// Regenerated-mesh max-skew above which a FlowCoupled step runs a Lloyd
     /// regularization escalation on the advected seeds.
     quality_skew_target: f64,
+    /// The INITIAL mesh's (vol_min, vol_max) — the realized cell sizing of the
+    /// user's selected mesh settings. FlowCoupled escalation also triggers
+    /// when the advected mesh's volumes leave
+    /// `[QUALITY_VOL_BAND_LO·min, QUALITY_VOL_BAND_HI·max]` (sizing hold).
+    initial_vol_band: (f64, f64),
     /// Number of Lloyd regularization iterations a quality escalation runs
     /// (0 = escalation disabled). Blended (`omega`) so it nudges toward CVT
     /// without erasing the flow displacement.
@@ -517,6 +548,12 @@ impl MovingMeshDriver {
         let prev_vx = mesh.vx.clone();
         let prev_vy = mesh.vy.clone();
         let n_seeds = seeds.len();
+        // The realized cell sizing of the user's mesh settings — the
+        // FlowCoupled sizing-hold band is anchored to it.
+        let initial_vol_band = mesh
+            .cell_vol
+            .iter()
+            .fold((f64::MAX, 0.0f64), |(lo, hi), &v| (lo.min(v), hi.max(v)));
 
         Ok(Self {
             driver: build.driver,
@@ -542,6 +579,7 @@ impl MovingMeshDriver {
             flow_disp_cap: DEFAULT_FLOW_DISP_CAP,
             arepo_eta: DEFAULT_AREPO_ETA,
             quality_skew_target: DEFAULT_QUALITY_SKEW_TARGET,
+            initial_vol_band,
             lloyd_escalation_iters: 1,
             lloyd_escalation_omega: 0.4,
             step_index: 0,
@@ -940,8 +978,8 @@ impl MovingMeshDriver {
             &mut flip,
             self.min_cell_size,
         );
-        let is_flip = genuine_flip || degen > 0;
-        let swept = if is_flip {
+        let mut is_flip = genuine_flip || degen > 0;
+        let strict = if is_flip {
             // Degeneracy-ONLY step (no genuine adjacency change): keep the >1e-9
             // telescoping-identity assert LIVE on every cell not incident to a
             // forced-degenerate face — a lone sliver must not disable the
@@ -971,9 +1009,37 @@ impl MovingMeshDriver {
                 &flip.born_face_mask,
                 hard_assert_exclude,
                 dt,
-            )?
+            )
         } else {
-            swept_mesh_fluxes_closed(&new_mesh, &old_vx_aligned, &old_vy_aligned, dt)?
+            swept_mesh_fluxes_closed(&new_mesh, &old_vx_aligned, &old_vy_aligned, dt)
+        };
+        let swept = match strict {
+            Ok(s) => s,
+            // CONTINUOUS FLIP recovery: a face can pass through zero length
+            // WITHIN the step (endpoints swap; adjacency and endpoint lengths
+            // both look healthy), which no discriminator can see — the
+            // adjacency scan compares sets, the degeneracy forcing only sees
+            // the t^n/t^{n+1} endpoints. The swept quads of the affected
+            // cells are then genuinely inconsistent and the telescoping
+            // identity FAILS — but that is precisely the event class the
+            // flip-aware closure exists for: re-run the step as a flip
+            // (identity relaxed, born faces as detected, GCL guaranteed
+            // per-cell by the forest closure against the actual t^n volumes;
+            // the residual is reported as `flip_defect`). Any other error
+            // (bad inputs, periodic mesh, invalid dt) propagates unchanged.
+            Err(e) if e.contains("telescoping identity") => {
+                is_flip = true;
+                swept_mesh_fluxes_closed_flip(
+                    &new_mesh,
+                    &old_vx_aligned,
+                    &old_vy_aligned,
+                    &self.mesh.cell_vol,
+                    &flip.born_face_mask,
+                    None,
+                    dt,
+                )?
+            }
+            Err(e) => return Err(e),
         };
         let swept_ms = ms_since(swept_start);
 
@@ -1498,16 +1564,36 @@ impl MovingMeshDriver {
     /// * The mesh-motion CFL cap on dt is sized from the flow speed; the steering
     ///   displacement is bounded independently by the clamp, so it never violates
     ///   the GCL (fluxes are geometric, closed against exactly this pinned dt).
+    /// * **Open-boundary anti-pileup**: the ADVECTION part ramps to zero within
+    ///   [`FLOW_ADVECT_BOX_RAMP_CELLS`]`·min_cell` of the domain box. Boundary
+    ///   guard seeds are fixed, so flow THROUGH an inlet/outlet would otherwise
+    ///   pile the advected interior seeds against them without bound (measured:
+    ///   outlet-band cell volumes shrank 7× over 300 steps, collapsing the
+    ///   mesh-motion dt cap). Near the box the mesh is ~Eulerian; the wake /
+    ///   obstacle region (interior loops are NOT the box) keeps full advection,
+    ///   and the steering stays active everywhere (quality hold). No-slip walls
+    ///   are unaffected in practice (u ≈ 0 there anyway).
     fn plan_flow_coupled(&mut self, chi_max: f64) -> Result<(f64, Vec<Point2<f64>>), String> {
         use std::f64::consts::PI;
         let u = self.read_cell_velocities()?;
-        // dt handshake: cap off the max interior flow speed.
+        let dead_len = FLOW_ADVECT_BOX_DEAD_CELLS * self.min_cell_size;
+        let ramp_len =
+            ((FLOW_ADVECT_BOX_RAMP_CELLS - FLOW_ADVECT_BOX_DEAD_CELLS) * self.min_cell_size)
+                .max(1e-30);
+        let domain = self.domain;
+        let box_ramp = move |s: &Point2<f64>| -> f64 {
+            let d = s.x.min(domain.x - s.x).min(s.y).min(domain.y - s.y);
+            ((d - dead_len) / ramp_len).clamp(0.0, 1.0)
+        };
+        // dt handshake: cap off the max EFFECTIVE advection speed (the ramped
+        // velocity each seed actually moves with).
         let mut w_flow_max = 0.0f64;
         for (i, &(ux, uy)) in u.iter().enumerate() {
             if self.kinds[i] != SeedKind::Interior {
                 continue;
             }
-            w_flow_max = w_flow_max.max((ux * ux + uy * uy).sqrt());
+            let w = (ux * ux + uy * uy).sqrt() * box_ramp(&self.seeds[i]);
+            w_flow_max = w_flow_max.max(w);
         }
         // The moving boundary speed also enters the dt cap.
         let w_max = w_flow_max.max(self.max_boundary_speed(self.configured_dt));
@@ -1521,7 +1607,8 @@ impl MovingMeshDriver {
                 continue; // boundary seeds fixed
             }
             let s = self.seeds[i];
-            let (ux, uy) = u[i];
+            let ramp = box_ramp(&s);
+            let (ux, uy) = (u[i].0 * ramp, u[i].1 * ramp);
             // Effective cell radius (uniform-density Lloyd target is the geometric
             // centroid, already stored on the mesh as cell_cx/cell_cy).
             let r = (self.mesh.cell_vol[i].max(0.0) / PI).sqrt().max(1e-30);
@@ -1530,13 +1617,30 @@ impl MovingMeshDriver {
             let dist = (dcx * dcx + dcy * dcy).sqrt();
             // AREPO ramp on the distortion ratio d/R.
             let ratio = dist / r;
-            let chi = if ratio < 0.9 * eta {
+            let chi_shape = if ratio < 0.9 * eta {
                 0.0
             } else if ratio < 1.1 * eta {
                 chi_max * (ratio - 0.9 * eta) / (0.2 * eta)
             } else {
                 chi_max
             };
+            // SIZING ramp: a cell squeezed below the initial sizing band
+            // (persistent advective compression — e.g. converging streamlines
+            // against fixed boundary guards) escalates its centroid pull
+            // toward FULL Lloyd weight (χ=1), regardless of `chi_max`. The
+            // shape ramp cannot see this (a uniformly squeezed cell stays
+            // centroidal), and the global blended escalation is too gentle
+            // to balance a steady seed inflow. χ ramps 0→1 as the volume
+            // falls from `LO·initial_min` to half that; the hard
+            // displacement clamp below keeps the move flip-safe.
+            let lo = QUALITY_VOL_BAND_LO * self.initial_vol_band.0;
+            let vol = self.mesh.cell_vol[i];
+            let chi_size = if vol >= lo {
+                0.0
+            } else {
+                ((lo - vol) / (0.5 * lo)).clamp(0.0, 1.0)
+            };
+            let chi = chi_shape.max(chi_size);
             let mut dx = ux * dt + chi * dcx;
             let mut dy = uy * dt + chi * dcy;
             // Hard anti-tangling clamp.
@@ -1605,7 +1709,22 @@ impl MovingMeshDriver {
             self.domain,
             self.min_cell_size,
         );
-        if probe.calculate_max_skewness() <= self.quality_skew_target {
+        // Sizing hold: volumes leaving the band anchored to the INITIAL
+        // mesh's realized sizing (the user's min/max cell settings) trigger
+        // the same Lloyd pull-back as excess skew. A shape-only trigger
+        // cannot see this — a uniformly squeezed cell stays centroidal — and
+        // mutilated undersized cells are what breed the continuous-flip
+        // slivers (faces flip-flopping through zero length every step).
+        let (lo, hi) = (
+            QUALITY_VOL_BAND_LO * self.initial_vol_band.0,
+            QUALITY_VOL_BAND_HI * self.initial_vol_band.1,
+        );
+        let (vmin, vmax) = probe
+            .cell_vol
+            .iter()
+            .fold((f64::MAX, 0.0f64), |(a, b), &v| (a.min(v), b.max(v)));
+        let size_violated = vmin < lo || vmax > hi;
+        if !size_violated && probe.calculate_max_skewness() <= self.quality_skew_target {
             return (seeds, false);
         }
         // Gentle, blended Lloyd toward the (uniform-density) CVT. `tol_disp = 0`

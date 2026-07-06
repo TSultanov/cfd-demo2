@@ -3279,26 +3279,37 @@ impl MovingMeshDriver {
                 if let Err(e) = driver.restore(&snap) {
                     eprintln!("moving-mesh: resize BDF continuity skipped: {e}");
                 } else {
-                    // RESIZE RE-SOLVE: the published post-resize frame used
-                    // to be the INTERPOLATED state — the first real step
-                    // then carried the transition between the old and the
-                    // new discretization as a visible 1-3-cell pressure
-                    // mark at every re-meshed site (transfer-order
+                    // RESIZE RE-SOLVE (TWO levels): the published post-resize
+                    // frame used to be the INTERPOLATED state — the first
+                    // real step then carried the transition between the old
+                    // and the new discretization as a visible 1-3-cell
+                    // pressure mark at every re-meshed site (transfer-order
                     // independent; it is the difference between the two
                     // meshes' own solutions, not a state error). Absorb the
-                    // transition BEFORE anything is published: rewind one
-                    // level (state <- t^{n-1}, old <- t^{n-2}, time -= dt)
-                    // and RE-SOLVE the same physical step on the NEW mesh —
-                    // no extra physical time, the original dt (no 1/dt
+                    // transition BEFORE anything is published: rewind TWO
+                    // levels (state <- t^{n-2}, time -= 2dt) and RE-SOLVE
+                    // both physical steps on the NEW mesh — no extra
+                    // physical time, the original dts (no 1/dt
                     // amplification: this is NOT the refuted dt/M
-                    // settle-substeps), one extra solve per resize event.
-                    // The state the next real step starts from is then the
-                    // new mesh's OWN converged level-n solution. On any
-                    // re-solve failure, fall back to the transferred state.
+                    // settle-substeps). Two levels, not one: the next real
+                    // step's BDF2 references levels n and n-1 — a one-level
+                    // redo leaves the INTERPOLATED t^{n-1} inside its ddt,
+                    // and that residual history error re-emerged as
+                    // 2.5-5.7x marks exactly when the refinement frontier
+                    // reached the obstacle arc's finest generations
+                    // (measured: late-window flags 139/200 vs the event-free
+                    // control's 21/150). After the two-level redo, every
+                    // level the published step touches is the new mesh's
+                    // OWN converged solution. The first redo step runs
+                    // Euler (no t^{n-3} exists — two steps back, weight
+                    // ~0.3 in the final BDF2, the degradation is
+                    // negligible); the second runs BDF2 on the redone
+                    // level. On any failure, fall back to the transferred
+                    // t^n state.
                     let mut x_prev = vec![0.0f32; n_new * s_unk];
                     for c in 0..n_new {
                         for (r, &off) in offsets.iter().enumerate() {
-                            x_prev[c * s_unk + r] = state_old[c * stride + off];
+                            x_prev[c * s_unk + r] = state_old_old[c * stride + off];
                         }
                     }
                     let redo = crate::solver::SolverStateSnapshot {
@@ -3306,7 +3317,7 @@ impl MovingMeshDriver {
                         num_faces: new_mesh.num_faces(),
                         state_stride: stride as u32,
                         unknowns_per_cell: s_unk,
-                        state: state_old.clone(),
+                        state: state_old_old.clone(),
                         state_old: state_old_old.clone(),
                         state_old_old: state_old_old.clone(),
                         x: x_prev,
@@ -3314,25 +3325,40 @@ impl MovingMeshDriver {
                         cell_vols_old: vols_f32.clone(),
                         cell_vols_old_old: vols_f32,
                         mesh_fluxes: vec![0.0; new_mesh.num_faces()],
-                        time: old_snap.time - old_snap.dt,
-                        dt: old_snap.dt,
+                        // dt bookkeeping: the redo of level n-1 uses dt_old
+                        // (that step's own dt); the redo of level n then
+                        // uses dt. `SolverDriver::step` re-pins
+                        // params.requested_dt, so the first redo step
+                        // temporarily pins dt_old and the second restores
+                        // the committed dt.
+                        time: old_snap.time - old_snap.dt - old_snap.dt_old,
+                        dt: old_snap.dt_old,
                         dt_old: old_snap.dt_old,
                         dtau: old_snap.dtau,
-                        step_count: old_snap.step_count.saturating_sub(1),
+                        step_count: old_snap.step_count.saturating_sub(2),
                         last_rel_delta: old_snap.last_rel_delta,
                         schur_amg_active: old_snap.schur_amg_active,
                         has_history: true,
                     };
-                    if driver.restore(&redo).is_ok() {
-                        let outcome = driver.step(false);
-                        if outcome.diverged.is_some() {
-                            // Fall back to the transferred t^n state.
-                            if let Err(e) = driver.restore(&snap) {
-                                eprintln!("moving-mesh: resize re-solve fallback failed: {e}");
-                            }
+                    let committed_dt = driver.params().requested_dt;
+                    let mut ok = driver.restore(&redo).is_ok();
+                    if ok {
+                        driver.set_requested_dt(old_snap.dt_old);
+                        let o1 = driver.step(false);
+                        driver.set_requested_dt(committed_dt);
+                        if o1.diverged.is_none() {
+                            let o2 = driver.step(false);
+                            ok = o2.diverged.is_none();
+                        } else {
+                            ok = false;
                         }
-                    } else if let Err(e) = driver.restore(&snap) {
-                        eprintln!("moving-mesh: resize re-solve fallback failed: {e}");
+                    }
+                    if !ok {
+                        // Fall back to the transferred t^n state.
+                        driver.set_requested_dt(committed_dt);
+                        if let Err(e) = driver.restore(&snap) {
+                            eprintln!("moving-mesh: resize re-solve fallback failed: {e}");
+                        }
                     }
                 }
             }

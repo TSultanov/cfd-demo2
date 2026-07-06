@@ -586,6 +586,91 @@ fn hernia_guard_body() {
     );
 }
 
+/// RESIZE pressure-spike REGRESSION bound. The first-order monotone state
+/// transfer leaves a small mass inconsistency; the coupled solve answers it
+/// with a local pressure dipole that decays over 2–3 steps — measured at
+/// ~0.06 (≈7% of the settled max |p| ≈ 0.86) on this config. Two remedies
+/// were tried and REFUTED BY MEASUREMENT (keep them dead): frozen-mesh
+/// settle sub-steps at dt/M amplify the projection pressure as 1/dt
+/// (0.28 at M=4); a local average-flux patch projection of the transferred
+/// velocity WORSENS the excursion (0.11 with the correct sign, 0.53 with
+/// the sign flipped) because the solver's mass operator is the Rhie–Chow
+/// flux, not the average face flux — a consistent projection must go
+/// through the solver's own mass row. This gate pins the shipped behaviour
+/// so any future transfer change is measured against it.
+#[test]
+fn movingmesh_resize_pressure_spike_regression() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    let result = std::panic::catch_unwind(|| {
+        let spike = adapt_spike_run();
+        eprintln!("[spike-regression] worst adapt-step |p| excursion: {spike:.4}");
+        assert!(
+            spike <= 0.08,
+            "adapt-step pressure excursion {spike:.4} regressed past the validated \
+             baseline (~0.062)"
+        );
+    });
+    std::env::remove_var("CFD2_BACKEND");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// One 120-step stationary adaptive run (the hernia configuration);
+/// returns the worst adapt-step max-|p| excursion past the impulsive cold
+/// start.
+fn adapt_spike_run() -> f64 {
+    let (lx, ly) = (2.0, 1.0);
+    let geo = ChannelWithObstacle {
+        length: lx,
+        height: ly,
+        obstacle_center: Point2::new(0.6, 0.51),
+        obstacle_radius: 0.1,
+    };
+    let domain = Vector2::new(lx, ly);
+    let mut params = test_params();
+    params.requested_dt = 0.01;
+    params.viscosity = 1.33e-3;
+    let h = 0.05;
+    let cvt = generate_cvt_mesh_with_seeds(&geo, h, h, 1.0, domain, &LloydConfig::default());
+    let n0 = cvt.mesh.num_cells();
+    let mut moving = pollster::block_on(MovingMeshDriver::build(
+        cvt,
+        &params,
+        MeshMotionSpec::Frozen,
+        &vec![(U0 as f64, 0.0); n0],
+        &vec![0.0; n0],
+        None,
+        None,
+    ))
+    .expect("spike driver build");
+    moving.driver_mut().apply_params(&params);
+    moving.set_adaptive_sizing(2);
+    moving.set_adaptive_sizing_band(Some((0.02, 0.06)));
+
+    let layout = moving.driver().solver().model().state_layout.clone();
+    let stride = layout.stride() as usize;
+    let p_off = layout.offset_for("p").expect("p") as usize;
+    let (mut prev_pmax, mut worst) = (0.0f64, 0.0f64);
+    for step in 0..120 {
+        let (outcome, stats) = moving
+            .step(false)
+            .unwrap_or_else(|e| panic!("spike step {step}: {e}"));
+        assert!(outcome.diverged.is_none(), "spike step {step} diverged");
+        let state = pollster::block_on(moving.driver().solver().read_state_f32());
+        let n = moving.mesh().num_cells();
+        let pmax = (0..n)
+            .map(|c| (state[c * stride + p_off] as f64).abs())
+            .fold(0.0f64, f64::max);
+        if step >= 20 && (stats.cells_born > 0 || stats.cells_killed > 0) {
+            worst = worst.max(pmax - prev_pmax);
+        }
+        prev_pmax = pmax;
+    }
+    worst
+}
+
 /// IMPLICIT mesh motion on a uniform free stream: the fixed point is exact
 /// (the end-of-step velocity equals the t^n velocity), so the loop must
 /// accept on its SECOND attempt every step — and preserve the stream. Any

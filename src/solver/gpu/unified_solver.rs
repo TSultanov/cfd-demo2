@@ -493,7 +493,12 @@ impl GpuUnifiedSolver {
     }
 
     pub fn copy_state_to_buffer(&self, dst: &wgpu::Buffer) {
-        let size_bytes = self.state_size_bytes();
+        // Clamp to the destination's capacity: a moving-mesh cell-count
+        // RESIZE can grow the solver state past a viz buffer allocated at
+        // build (the GUI sizes it with the adaptivity budget headroom, but an
+        // out-of-contract overshoot must degrade to a partial copy, not a
+        // wgpu validation panic).
+        let size_bytes = self.state_size_bytes().min(dst.size());
         if size_bytes == 0 {
             return;
         }

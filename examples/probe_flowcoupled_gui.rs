@@ -176,6 +176,102 @@ mod probe {
         }
     }
 
+    /// Flow-adaptive sizing long-run probe (arc d): a GRADED obstacle channel
+    /// under FlowCoupled with `set_adaptive_sizing(every_n)` — reports the
+    /// cell count trajectory, cumulative births/kills, and the mean cell
+    /// volume near the obstacle+wake vs the far field (adaptation should
+    /// steer volume DOWN where the gradients live). Cell count changes at
+    /// runtime, so every per-cell scan re-derives `n` from the current mesh.
+    fn run_adapt(steps: usize, every_n: usize) {
+        let domain = Vector2::new(LX, LY);
+        let geo = ChannelWithObstacle {
+            length: LX,
+            height: LY,
+            obstacle_center: Point2::new(1.0, 0.51),
+            obstacle_radius: 0.1,
+        };
+        // Graded 0.025→0.05: a wide realized volume band gives the indicator
+        // room in both directions.
+        let cvt =
+            generate_cvt_mesh_with_seeds(&geo, H, 2.0 * H, 1.2, domain, &LloydConfig::default());
+        let n0 = cvt.mesh.num_cells();
+        let params = gui_params();
+        let initial_u = vec![(INLET as f64, 0.0); n0];
+        let initial_p = vec![0.0; n0];
+        let mut moving = pollster::block_on(MovingMeshDriver::build(
+            cvt,
+            &params,
+            MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+            &initial_u,
+            &initial_p,
+            None,
+            None,
+        ))
+        .expect("adapt driver build");
+        moving.driver_mut().apply_params(&params);
+        moving.set_adaptive_sizing(every_n);
+
+        let layout = moving.driver().solver().model().state_layout.clone();
+        let stride = layout.stride() as usize;
+        let u_off = layout.offset_for("U").expect("U") as usize;
+        // "Near" = within 2.5 obstacle radii of the obstacle centre or its
+        // 1-diameter wake box; everything else is "far".
+        let near = |x: f64, y: f64| -> bool {
+            let (dx, dy) = (x - 1.0, y - 0.51);
+            (dx * dx + dy * dy).sqrt() < 0.25 || (x > 1.0 && x < 1.8 && (y - 0.51).abs() < 0.2)
+        };
+        let report_every = (steps / 20).max(10);
+        let (mut born, mut killed, mut recycled) = (0usize, 0usize, 0usize);
+        for step in 0..steps {
+            let (outcome, stats) = match moving.step(false) {
+                Ok(r) => r,
+                Err(e) => {
+                    println!("[adapt] step {step}: ERROR {e}");
+                    return;
+                }
+            };
+            if let Some(reason) = &outcome.diverged {
+                println!("[adapt] step {step}: DIVERGED {reason:?}");
+                return;
+            }
+            born += stats.cells_born;
+            killed += stats.cells_killed;
+            recycled += stats.recycled;
+            if step % report_every == 0 || step == steps - 1 || stats.cells_born > 0 {
+                let mesh = moving.mesh();
+                let n = mesh.num_cells();
+                let state = pollster::block_on(moving.driver().solver().read_state_f32());
+                let mut umax = 0.0f32;
+                let (mut v_near, mut c_near, mut v_far, mut c_far) = (0.0f64, 0usize, 0.0f64, 0usize);
+                for c in 0..n {
+                    let (ux, uy) = (state[c * stride + u_off], state[c * stride + u_off + 1]);
+                    umax = umax.max((ux * ux + uy * uy).sqrt());
+                    if near(mesh.cell_cx[c], mesh.cell_cy[c]) {
+                        v_near += mesh.cell_vol[c];
+                        c_near += 1;
+                    } else {
+                        v_far += mesh.cell_vol[c];
+                        c_far += 1;
+                    }
+                }
+                println!(
+                    "[adapt] step {step:4}: n={n} (+{born}/−{killed}, recycled {recycled}) \
+                     dt={:.2e} |U|max={umax:.3e} mean_vol near/far = {:.3e}/{:.3e} ({:.2}x) \
+                     skew={:.3}",
+                    stats.dt,
+                    v_near / c_near.max(1) as f64,
+                    v_far / c_far.max(1) as f64,
+                    (v_far / c_far.max(1) as f64) / (v_near / c_near.max(1) as f64),
+                    stats.max_skew,
+                );
+            }
+        }
+        println!(
+            "[adapt] done: {n0} → {} cells, born={born} killed={killed} recycled={recycled}",
+            moving.mesh().num_cells()
+        );
+    }
+
     /// Static reference: a plain `SolverDriver` on the SAME CVT mesh (no
     /// MovingMeshDriver, no ALE seam) — separates "base solver on this mesh"
     /// from "ALE driver machinery". `obstacle=false` runs a plain rectangular
@@ -773,6 +869,9 @@ mod probe {
                 MeshMotionSpec::FlowCoupled { regularization: 0.5 },
                 2000,
             );
+        }
+        if has("adapt") {
+            run_adapt(2000, 50);
         }
     }
 }

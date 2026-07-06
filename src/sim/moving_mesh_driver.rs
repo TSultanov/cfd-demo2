@@ -20,9 +20,15 @@
 //!    the closed fluxes.
 //! 6. **step**: `SolverDriver::step` (fixed dt, divergence detection).
 //!
-//! **Fixed seed count**: seed `i` is cell `i` for the whole run; no
-//! insertion/deletion. This lets every cell-indexed solver buffer (state, BDF2
-//! history, warm-start `x`) survive the refresh untouched.
+//! **Fixed seed count within a step**: seed `i` is cell `i` across every
+//! per-step regen; no insertion/deletion happens inside the moving cycle, so
+//! every cell-indexed solver buffer (state, BDF2 history, warm-start `x`)
+//! survives the refresh untouched. The cell COUNT may change BETWEEN steps
+//! through the [`resize_cells`](MovingMeshDriver::resize_cells) seam (a
+//! rebuild-and-gather event: the wrapped solver is rebuilt at the new count
+//! and every surviving cell's full state row is transferred), which the
+//! flow-adaptive sizing ([`set_adaptive_sizing`](MovingMeshDriver::set_adaptive_sizing))
+//! drives from the flow's velocity/pressure/strain gradients.
 //!
 //! **Model scope**: `incompressible_momentum_ale` only.
 //!
@@ -119,6 +125,40 @@ pub const RECYCLE_MAX_PER_STEP: usize = 8;
 /// minimum is the reference that fires on genuine compression and never on
 /// the fresh mesh.
 pub const RECYCLE_SQUEEZE_FRACTION: f64 = 0.75;
+
+/// Max cells BORN (split) per flow-adaptive sizing event. Rate-limited like
+/// recycling: each event is a full solver rebuild-and-gather, so bulk changes
+/// are spread over successive events instead of one giant remesh.
+pub const ADAPT_MAX_BIRTHS_PER_EVENT: usize = 8;
+
+/// Max cells KILLED (coarsened away) per flow-adaptive sizing event.
+pub const ADAPT_MAX_KILLS_PER_EVENT: usize = 8;
+
+/// Refine trigger: a cell is split once its volume exceeds
+/// `ADAPT_REFINE_RATIO ×` its flow-derived target volume. The split halves the
+/// volume, landing the children near the target — comfortably above the kill
+/// trigger below (hysteresis: no birth→kill flip-flop).
+pub const ADAPT_REFINE_RATIO: f64 = 2.0;
+
+/// Coarsen trigger: a cell is removed once its volume falls below
+/// `ADAPT_COARSEN_RATIO ×` its target. Its volume is absorbed by the
+/// neighbors on the next regen (each grows by a fraction of one target —
+/// well below the refine trigger; hysteresis again). Deliberately below 0.5
+/// (the post-split child ratio) so a freshly split pair is never re-merged.
+pub const ADAPT_COARSEN_RATIO: f64 = 0.45;
+
+/// Robust normalization quantile for the flow-adaptation indicators: each raw
+/// indicator (|∇U|, |∇p|, strain rate) is normalized by its q-quantile over
+/// the eligible cells rather than its max, so one spike cell cannot flatten
+/// the whole indicator field to ~0.
+pub const ADAPT_INDICATOR_QUANTILE: f64 = 0.90;
+
+/// Hard cell-count budget of the flow-adaptive sizing, as factors of the
+/// INITIAL cell count: births stop at `MAX_FACTOR·n0`, kills at
+/// `MIN_FACTOR·n0`. The GUI sizes its per-cell viz buffers against
+/// `MAX_FACTOR` at build, so the cap is a contract, not a tuning knob.
+pub const ADAPT_BUDGET_MAX_FACTOR: f64 = 2.0;
+pub const ADAPT_BUDGET_MIN_FACTOR: f64 = 0.5;
 
 /// Default AREPO distortion trigger `η`: the centroid steering ramps in once a
 /// cell's seed-to-centroid offset exceeds `η · R_i` and saturates at `1.1 η`.
@@ -360,6 +400,13 @@ pub struct MovingMeshStats {
     /// cells were re-seeded as fresh inlet parcels. 0 unless FlowCoupled
     /// with recycling enabled.
     pub recycled: usize,
+    /// Cells BORN this step by the flow-adaptive sizing (a split before the
+    /// step's mesh motion; the step ran at the new count). 0 unless
+    /// [`MovingMeshDriver::set_adaptive_sizing`] fired this step.
+    pub cells_born: usize,
+    /// Cells KILLED this step by the flow-adaptive sizing (coarsened away
+    /// before the step's mesh motion).
+    pub cells_killed: usize,
 }
 
 /// One step's shared pre-regen plan ([`MovingMeshDriver::plan_step`]): the
@@ -394,6 +441,19 @@ enum DeviceStep {
 /// realized mesh, and the wrapped [`SolverDriver`].
 pub struct MovingMeshDriver {
     driver: SolverDriver,
+    /// The ALE model spec the wrapped solver was built with — retained so a
+    /// cell-count RESIZE ([`Self::resize_cells`]) can rebuild the solver at
+    /// the new count with the identical physics.
+    model: crate::solver::model::ModelSpec,
+    /// The INITIAL cell count — the flow-adaptive sizing budget anchor
+    /// (births/kills are bounded to
+    /// `[ADAPT_BUDGET_MIN_FACTOR, ADAPT_BUDGET_MAX_FACTOR]·initial_cell_count`).
+    initial_cell_count: usize,
+    /// Flow-adaptive sizing cadence: every `adapt_every_n` committed steps,
+    /// derive a per-cell target volume from the flow's velocity/pressure/
+    /// strain gradients and birth/kill cells toward it
+    /// ([`Self::set_adaptive_sizing`]). `0` = off (default).
+    adapt_every_n: usize,
     /// Authoritative seed positions (f64), seed `i` == cell `i` — the CURRENT
     /// (t^n) realized set. Advanced each step by [`MeshMotionSpec`].
     seeds: Vec<Point2<f64>>,
@@ -616,6 +676,8 @@ impl MovingMeshDriver {
         // build consumes them (wgpu Device/Queue are cheap Arc clones).
         let device_kept = device.clone();
         let queue_kept = queue.clone();
+        // Keep the model spec for cell-count RESIZE rebuilds (resize_cells).
+        let model_kept = model.clone();
         let build = SolverDriver::build(
             &mesh, model, params, initial_u, initial_p, device, queue,
         )
@@ -647,6 +709,9 @@ impl MovingMeshDriver {
 
         Ok(Self {
             driver: build.driver,
+            model: model_kept,
+            initial_cell_count: n_seeds,
+            adapt_every_n: 0,
             seeds0: seeds.clone(),
             time: 0.0,
             seeds,
@@ -739,6 +804,35 @@ impl MovingMeshDriver {
     /// zero mesh motion, zero physics.
     pub fn set_reorder_every_n(&mut self, every_n: usize) {
         self.reorder_every_n = every_n;
+    }
+
+    /// Configure FLOW-ADAPTIVE sizing: every `every_n` committed steps, derive
+    /// a per-cell target volume from the flow (|∇U|, |∇p| and the strain-rate
+    /// magnitude, Green–Gauss over the current mesh; high gradients → the
+    /// initial mesh's finest realized volume, smooth regions → its coarsest)
+    /// and BIRTH/KILL cells toward it through [`Self::resize_cells`]:
+    /// over-resolved cells (volume < [`ADAPT_COARSEN_RATIO`]·target) are
+    /// removed, under-resolved ones (volume > [`ADAPT_REFINE_RATIO`]·target)
+    /// are split. Rate-limited ([`ADAPT_MAX_BIRTHS_PER_EVENT`] /
+    /// [`ADAPT_MAX_KILLS_PER_EVENT`]) and budget-bounded
+    /// ([`ADAPT_BUDGET_MIN_FACTOR`]‥[`ADAPT_BUDGET_MAX_FACTOR`] × the initial
+    /// count). `0` = off (default). Skipped for `Prescribed` motion (its
+    /// analytic law is indexed by the t=0 labels, which a resize re-anchors).
+    pub fn set_adaptive_sizing(&mut self, every_n: usize) {
+        self.adapt_every_n = every_n;
+    }
+
+    /// Whether the flow-adaptive sizing will PLAN a resize on the upcoming
+    /// `step()` call (cadence hit; the event may still be empty if no cell
+    /// violates its target band). The GUI worker uses this to force a
+    /// readback+mesh publish on resize steps so the per-cell viz arrays and
+    /// the polygon set change together.
+    pub fn adapt_fires_this_step(&self) -> bool {
+        self.adapt_every_n > 0
+            && self.regen_each_step
+            && self.step_index > 0
+            && self.step_index % self.adapt_every_n == 0
+            && !matches!(self.motion, MeshMotionSpec::Prescribed(_))
     }
 
     /// Enable/disable FlowCoupled seed RECYCLING (default on): seeds advected
@@ -917,6 +1011,8 @@ impl MovingMeshDriver {
                 dt,
                 regen_backend: RegenBackend::Skipped,
                 recycled: 0,
+                cells_born: 0,
+                cells_killed: 0,
             };
             return Ok((outcome, stats));
         }
@@ -932,6 +1028,21 @@ impl MovingMeshDriver {
             self.reorder_cells()?;
         }
 
+        // Flow-adaptive sizing event (BETWEEN steps, before any seed motion):
+        // derive per-cell target volumes from the flow gradients and
+        // birth/kill cells toward them through the resize seam. The step then
+        // proceeds at the new count with a freshly rebuilt, state-transferred
+        // solver.
+        let (mut cells_born, mut cells_killed) = (0usize, 0usize);
+        if self.adapt_fires_this_step() {
+            let (kills, births) = self.plan_adaptation()?;
+            if !kills.is_empty() || !births.is_empty() {
+                self.resize_cells(&kills, &births)?;
+                cells_born = births.len();
+                cells_killed = kills.len();
+            }
+        }
+
         // Shared step plan: pinned dt, advected seeds, moved boundary spec,
         // quality escalation, recorded wall velocity — identical for the CPU
         // and device paths.
@@ -945,12 +1056,19 @@ impl MovingMeshDriver {
         let mut fallback: Option<&'static str> = None;
         if self.gpu_regen_active() {
             match self.try_step_device(&plan, readback)? {
-                DeviceStep::Done(out) => return Ok(out),
+                DeviceStep::Done(mut out) => {
+                    out.1.cells_born = cells_born;
+                    out.1.cells_killed = cells_killed;
+                    return Ok(out);
+                }
                 DeviceStep::Fallback(reason) => fallback = Some(reason),
             }
         }
 
-        self.step_cpu_planned(plan, readback, fallback)
+        let mut out = self.step_cpu_planned(plan, readback, fallback)?;
+        out.1.cells_born = cells_born;
+        out.1.cells_killed = cells_killed;
+        Ok(out)
     }
 
     /// The shared pre-regen work of one moving step (both paths): pin the
@@ -1321,6 +1439,8 @@ impl MovingMeshDriver {
                 .map(RegenBackend::GpuFallback)
                 .unwrap_or(RegenBackend::Cpu),
             recycled: recycled.len(),
+            cells_born: 0,
+            cells_killed: 0,
         };
         Ok((outcome, stats))
     }
@@ -1515,6 +1635,8 @@ impl MovingMeshDriver {
             dt,
             regen_backend: RegenBackend::GpuOnDevice,
             recycled: 0,
+            cells_born: 0,
+            cells_killed: 0,
         };
         Ok(DeviceStep::Done((outcome, stats)))
     }
@@ -1679,12 +1801,28 @@ impl MovingMeshDriver {
     /// and a `RigidLoop` is declared. Must run BEFORE the ALE seam so the solver
     /// builds a `MovingWall` boundary-face list to receive the velocity.
     fn retag_moving_wall_faces(&self, mesh: &mut Mesh) {
-        if !self.moving_wall_bc || self.moving_loop_range().is_none() {
+        self.retag_moving_wall_faces_with(mesh, &self.kinds);
+    }
+
+    /// [`Self::retag_moving_wall_faces`] against an EXPLICIT per-seed kind
+    /// array: during a cell-count resize the freshly assembled mesh is indexed
+    /// by the NEW seed order while `self.kinds` still holds the old one, so
+    /// the moving-wall test must read the caller's array.
+    fn retag_moving_wall_faces_with(&self, mesh: &mut Mesh, kinds: &[SeedKind]) {
+        if !self.moving_wall_bc {
             return;
         }
+        let Some((lo, hi)) = self.moving_loop_range() else {
+            return;
+        };
         for f in 0..mesh.num_faces() {
-            if mesh.face_neighbor[f].is_none() && self.is_moving_boundary_seed(mesh.face_owner[f]) {
-                mesh.face_boundary[f] = Some(BoundaryType::MovingWall);
+            if mesh.face_neighbor[f].is_none() {
+                if let SeedKind::Boundary { seg_next, .. } = kinds[mesh.face_owner[f]] {
+                    let s = seg_next as usize;
+                    if s >= lo && s < hi {
+                        mesh.face_boundary[f] = Some(BoundaryType::MovingWall);
+                    }
+                }
             }
         }
     }
@@ -2084,6 +2222,401 @@ impl MovingMeshDriver {
         // Solver cell-indexed stores.
         let gather_u32: Vec<u32> = gather.iter().map(|&s| s as u32).collect();
         self.driver.solver().permute_cells(&gather_u32)
+    }
+
+    /// RESIZE the cell count between steps (the variable-cell-count seam):
+    /// remove the `kills` cells and insert one new cell per `births` entry
+    /// `(position, donor)`. A **rebuild-and-gather** event, not an
+    /// incremental edit:
+    ///
+    /// 1. the survivor seeds (slot order preserved) plus the birth positions
+    ///    form the new seed set; a fresh mesh is assembled from it at the
+    ///    current time's boundary spec;
+    /// 2. the wrapped [`SolverDriver`] is REBUILT on that mesh at the new
+    ///    count (same model, same params — `apply_params` restores the
+    ///    phase-2 knobs and the params-derived BCs);
+    /// 3. every new cell's FULL state row (all fields, all time levels,
+    ///    volume history, warm-start x) is written through the
+    ///    [`UnifiedSolver::reinit_cells`](crate::solver::UnifiedSolver::reinit_cells)
+    ///    seam from its source row — a survivor keeps its own row, a birth
+    ///    copies its donor's — so the run RESUMES, it does not restart.
+    ///
+    /// The resize happens at fixed simulated time (zero mesh motion): the
+    /// volume history restarts at the new mesh's volumes on every level, so
+    /// the next ALE step sees zero mesh-volume rate, and the equal rows at
+    /// all time levels degrade the first post-resize ddt to backward-Euler
+    /// for exactly one step (the recycling seam's proven behaviour).
+    ///
+    /// Kills must be interior cells; birth positions must lie in the fluid;
+    /// birth donors must survive the event. `Prescribed` motion is rejected
+    /// (its analytic law is indexed by the t=0 labels, which a resize
+    /// re-anchors for the inserted cells). On `Err` before the commit point
+    /// the driver is untouched; a failed solver rebuild propagates with the
+    /// driver still on the OLD mesh/solver (the event simply did not happen).
+    pub fn resize_cells(
+        &mut self,
+        kills: &[usize],
+        births: &[(Point2<f64>, usize)],
+    ) -> Result<(), String> {
+        use crate::meshgen::meshless::point_in_fluid;
+        use std::collections::HashSet;
+
+        if matches!(self.motion, MeshMotionSpec::Prescribed(_)) {
+            return Err(
+                "MovingMeshDriver::resize_cells: Prescribed motion samples the analytic law \
+                 from the t=0 seed labels, which a resize re-anchors — resize supports \
+                 Frozen/FlowCoupled motion only."
+                    .into(),
+            );
+        }
+        let n = self.seeds.len();
+        let kill_set: HashSet<usize> = kills.iter().cloned().collect();
+        if kill_set.len() != kills.len() {
+            return Err("resize_cells: duplicate kill indices".into());
+        }
+        for &i in kills {
+            if i >= n {
+                return Err(format!("resize_cells: kill index {i} out of range ({n} cells)"));
+            }
+            if self.kinds[i] != SeedKind::Interior {
+                return Err(format!("resize_cells: kill index {i} is a boundary seed"));
+            }
+        }
+        let spec_t = self.moved_spec(self.time);
+        for &(p, donor) in births {
+            if donor >= n || kill_set.contains(&donor) {
+                return Err(format!(
+                    "resize_cells: birth donor {donor} is out of range or killed"
+                ));
+            }
+            if !point_in_fluid(p, &spec_t) {
+                return Err(format!(
+                    "resize_cells: birth position ({}, {}) is outside the fluid",
+                    p.x, p.y
+                ));
+            }
+        }
+
+        // New seed set: survivors in slot order, births appended. `src[new]`
+        // is the OLD cell whose state row seeds the new cell (survivor:
+        // itself; birth: its donor). `seeds0` labels are GATHERED, not reset:
+        // boundary seeds keep their t=0 labels (the rigid boundary transform
+        // is evaluated absolutely from them); a birth's label is its spawn
+        // position (interior labels are unused under Frozen-equivalence and
+        // FlowCoupled).
+        let n_new = n - kills.len() + births.len();
+        let mut new_seeds: Vec<Point2<f64>> = Vec::with_capacity(n_new);
+        let mut new_seeds0: Vec<Point2<f64>> = Vec::with_capacity(n_new);
+        let mut new_kinds: Vec<SeedKind> = Vec::with_capacity(n_new);
+        let mut new_w_wall: Vec<[f64; 2]> = Vec::with_capacity(n_new);
+        let mut src: Vec<usize> = Vec::with_capacity(n_new);
+        for i in 0..n {
+            if kill_set.contains(&i) {
+                continue;
+            }
+            new_seeds.push(self.seeds[i]);
+            new_seeds0.push(self.seeds0[i]);
+            new_kinds.push(self.kinds[i]);
+            new_w_wall.push(self.w_wall[i]);
+            src.push(i);
+        }
+        for &(p, donor) in births {
+            new_seeds.push(p);
+            new_seeds0.push(p);
+            new_kinds.push(SeedKind::Interior);
+            new_w_wall.push([0.0, 0.0]);
+            src.push(donor);
+        }
+
+        // Assemble the new mesh (CPU — a resize is a rare, full topology
+        // event) and re-stamp the tags against the NEW indexing.
+        let mut new_mesh = assemble_meshless_from_seeds(
+            &new_seeds,
+            &new_kinds,
+            &spec_t,
+            self.domain,
+            self.min_cell_size,
+        );
+        if let Some(retag) = self.boundary_retag {
+            retag(&mut new_mesh);
+        }
+        self.retag_moving_wall_faces_with(&mut new_mesh, &new_kinds);
+        if new_mesh.num_cells() != n_new {
+            return Err(format!(
+                "resize_cells: regen produced {} cells for {} seeds",
+                new_mesh.num_cells(),
+                n_new
+            ));
+        }
+
+        // Gather the full state rows (all fields, packed by the state layout
+        // — model-agnostic) through the old→new source map.
+        let state = pollster::block_on(self.driver.solver().read_state_f32());
+        let layout = &self.driver.solver().model().state_layout;
+        let stride = layout.stride() as usize;
+        if state.len() != n * stride {
+            return Err(format!(
+                "resize_cells: state length {} != n_cells*stride {}",
+                state.len(),
+                n * stride
+            ));
+        }
+        let u_off = layout
+            .offset_for("U")
+            .ok_or("resize_cells: model has no U field")? as usize;
+        let p_off = layout
+            .offset_for("p")
+            .ok_or("resize_cells: model has no p field")? as usize;
+        let mut rows: Vec<f32> = Vec::with_capacity(n_new * stride);
+        let mut init_u: Vec<(f64, f64)> = Vec::with_capacity(n_new);
+        let mut init_p: Vec<f64> = Vec::with_capacity(n_new);
+        for &s in &src {
+            let row = &state[s * stride..(s + 1) * stride];
+            rows.extend_from_slice(row);
+            init_u.push((row[u_off] as f64, row[u_off + 1] as f64));
+            init_p.push(row[p_off] as f64);
+        }
+
+        // Rebuild the wrapped solver at the new count and transfer the rows.
+        let params = *self.driver.params();
+        let build = pollster::block_on(SolverDriver::build(
+            &new_mesh,
+            self.model.clone(),
+            &params,
+            &init_u,
+            &init_p,
+            self.device.clone(),
+            self.queue.clone(),
+        ))?;
+        let mut driver = build.driver;
+        driver.apply_params(&params);
+        let cells: Vec<u32> = (0..n_new as u32).collect();
+        driver.solver().reinit_cells(&cells, &rows, &new_mesh.cell_vol)?;
+
+        // Commit.
+        self.driver = driver;
+        self.prev_vx = new_mesh.vx.clone();
+        self.prev_vy = new_mesh.vy.clone();
+        self.mesh = new_mesh;
+        self.seeds = new_seeds;
+        self.seeds0 = new_seeds0;
+        self.kinds = new_kinds;
+        self.w_wall = new_w_wall;
+        // The on-device regen bundle is sized at a fixed seed count —
+        // rebuild it lazily at the new count on the next device attempt.
+        self.gpu_regen_state = None;
+        Ok(())
+    }
+
+    /// Whether cell `i` may be birthed into / killed by the flow-adaptive
+    /// sizing: an interior seed outside the open-boundary bands. The
+    /// through-flow x-bands belong to the recycling machinery (its density
+    /// trigger + hole-spawn own that traffic); the y-wall dead zone keeps
+    /// splits/kills off the fixed guard seeds.
+    fn adapt_eligible(&self, i: usize) -> bool {
+        let h = self.min_cell_size;
+        let s = self.seeds[i];
+        self.kinds[i] == SeedKind::Interior
+            && s.x > FLOW_ADVECT_BOX_RAMP_CELLS * h
+            && s.x < self.domain.x - FLOW_ADVECT_BOX_RAMP_CELLS * h
+            && s.y > FLOW_ADVECT_BOX_DEAD_CELLS * h
+            && s.y < self.domain.y - FLOW_ADVECT_BOX_DEAD_CELLS * h
+    }
+
+    /// Per-cell TARGET volumes for the flow-adaptive sizing: Green–Gauss
+    /// |∇U| (Frobenius), strain-rate magnitude (the symmetric part) and
+    /// |∇p| over the current mesh, each normalized by its
+    /// [`ADAPT_INDICATOR_QUANTILE`] quantile over the adapt-eligible cells
+    /// (robust to a single spike; boundary-band jumps excluded from the
+    /// scale), combined by max, then mapped linearly onto the INITIAL mesh's
+    /// realized volume band — the user's selected sizing: indicator 0 →
+    /// the coarsest initial volume, 1 → the finest.
+    fn adapt_target_vols(&self) -> Result<Vec<f64>, String> {
+        let layout = &self.driver.solver().model().state_layout;
+        let stride = layout.stride() as usize;
+        let u_off = layout
+            .offset_for("U")
+            .ok_or("adaptive sizing: model has no U field")? as usize;
+        let p_off = layout
+            .offset_for("p")
+            .ok_or("adaptive sizing: model has no p field")? as usize;
+        let state = pollster::block_on(self.driver.solver().read_state_f32());
+        let m = &self.mesh;
+        let n = m.num_cells();
+        if state.len() != n * stride {
+            return Err(format!(
+                "adaptive sizing: state length {} != n_cells*stride {}",
+                state.len(),
+                n * stride
+            ));
+        }
+        let val = |c: usize| -> (f64, f64, f64) {
+            (
+                state[c * stride + u_off] as f64,
+                state[c * stride + u_off + 1] as f64,
+                state[c * stride + p_off] as f64,
+            )
+        };
+        // Green–Gauss accumulation (face normals point owner→neighbor).
+        // Boundary faces use the owner value (a zero-gradient closure —
+        // adequate for an indicator; the boundary bands are adapt-ineligible
+        // anyway). acc = V·[du/dx, du/dy, dv/dx, dv/dy, dp/dx, dp/dy].
+        let mut acc = vec![[0.0f64; 6]; n];
+        for f in 0..m.num_faces() {
+            let o = m.face_owner[f];
+            let (uo, vo, po) = val(o);
+            let (uf, vf, pf) = match m.face_neighbor[f] {
+                Some(nb) => {
+                    let (un, vn, pn) = val(nb);
+                    (0.5 * (uo + un), 0.5 * (vo + vn), 0.5 * (po + pn))
+                }
+                None => (uo, vo, po),
+            };
+            let (anx, any) = (m.face_area[f] * m.face_nx[f], m.face_area[f] * m.face_ny[f]);
+            let add = [uf * anx, uf * any, vf * anx, vf * any, pf * anx, pf * any];
+            for k in 0..6 {
+                acc[o][k] += add[k];
+            }
+            if let Some(nb) = m.face_neighbor[f] {
+                for k in 0..6 {
+                    acc[nb][k] -= add[k];
+                }
+            }
+        }
+        let mut grad_u = vec![0.0f64; n];
+        let mut strain = vec![0.0f64; n];
+        let mut grad_p = vec![0.0f64; n];
+        for i in 0..n {
+            let inv_v = 1.0 / m.cell_vol[i].max(f64::MIN_POSITIVE);
+            let g = [
+                acc[i][0] * inv_v,
+                acc[i][1] * inv_v,
+                acc[i][2] * inv_v,
+                acc[i][3] * inv_v,
+            ];
+            grad_u[i] = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2] + g[3] * g[3]).sqrt();
+            let s01 = 0.5 * (g[1] + g[2]);
+            strain[i] = (g[0] * g[0] + 2.0 * s01 * s01 + g[3] * g[3]).sqrt();
+            grad_p[i] = (acc[i][4] * inv_v).hypot(acc[i][5] * inv_v);
+        }
+        let eligible: Vec<usize> = (0..n).filter(|&i| self.adapt_eligible(i)).collect();
+        let scale = |q: &[f64]| -> f64 {
+            let mut v: Vec<f64> = eligible.iter().map(|&i| q[i]).collect();
+            if v.is_empty() {
+                return 0.0;
+            }
+            v.sort_by(|a, b| a.total_cmp(b));
+            v[((v.len() - 1) as f64 * ADAPT_INDICATOR_QUANTILE) as usize]
+        };
+        let (su, ss, sp) = (scale(&grad_u), scale(&strain), scale(&grad_p));
+        let norm = |v: f64, s: f64| if s > 0.0 { (v / s).min(1.0) } else { 0.0 };
+        let (vmin_t, vmax_t) = self.initial_vol_band;
+        Ok((0..n)
+            .map(|i| {
+                let ind = norm(grad_u[i], su)
+                    .max(norm(strain[i], ss))
+                    .max(norm(grad_p[i], sp));
+                vmax_t + (vmin_t - vmax_t) * ind
+            })
+            .collect())
+    }
+
+    /// Plan one flow-adaptive sizing event against the current per-cell
+    /// target volumes: the kill list (over-resolved cells, most-squeezed
+    /// first, thinned to an adjacency-independent set so no survivor absorbs
+    /// two removals at once) and the birth list (under-resolved cells split
+    /// at the midpoint toward their farthest face centre — the cell's long
+    /// axis — subject to the fluid test and the coalescing-pitch separation
+    /// floor). Pure planning; [`Self::resize_cells`] executes it.
+    fn plan_adaptation(&self) -> Result<(Vec<usize>, Vec<(Point2<f64>, usize)>), String> {
+        use crate::meshgen::meshless::point_in_fluid;
+        use std::collections::HashSet;
+        let targets = self.adapt_target_vols()?;
+        let m = &self.mesh;
+        let n = self.seeds.len();
+        let n_max = (self.initial_cell_count as f64 * ADAPT_BUDGET_MAX_FACTOR) as usize;
+        let n_min = (self.initial_cell_count as f64 * ADAPT_BUDGET_MIN_FACTOR) as usize;
+
+        let mut kill_cand: Vec<usize> = (0..n)
+            .filter(|&i| {
+                self.adapt_eligible(i) && m.cell_vol[i] < ADAPT_COARSEN_RATIO * targets[i]
+            })
+            .collect();
+        kill_cand.sort_by(|&a, &b| {
+            (m.cell_vol[a] / targets[a]).total_cmp(&(m.cell_vol[b] / targets[b]))
+        });
+        let kill_budget = ADAPT_MAX_KILLS_PER_EVENT.min(n.saturating_sub(n_min));
+        let mut kills: Vec<usize> = Vec::new();
+        let mut kill_set: HashSet<usize> = HashSet::new();
+        'cand: for &i in &kill_cand {
+            if kills.len() >= kill_budget {
+                break;
+            }
+            let (fb, fe) = (m.cell_face_offsets[i], m.cell_face_offsets[i + 1]);
+            for &f in &m.cell_faces[fb..fe] {
+                let other = if m.face_owner[f] == i {
+                    m.face_neighbor[f]
+                } else {
+                    Some(m.face_owner[f])
+                };
+                if let Some(nb) = other {
+                    if kill_set.contains(&nb) {
+                        continue 'cand;
+                    }
+                }
+            }
+            kills.push(i);
+            kill_set.insert(i);
+        }
+
+        let spec_t = self.moved_spec(self.time);
+        let min_sep2 = (RECYCLE_MIN_SEP_CELLS * self.min_cell_size).powi(2);
+        let mut birth_cand: Vec<usize> = (0..n)
+            .filter(|&i| {
+                self.adapt_eligible(i)
+                    && !kill_set.contains(&i)
+                    && m.cell_vol[i] > ADAPT_REFINE_RATIO * targets[i]
+            })
+            .collect();
+        birth_cand.sort_by(|&a, &b| {
+            (m.cell_vol[b] / targets[b]).total_cmp(&(m.cell_vol[a] / targets[a]))
+        });
+        let birth_budget = ADAPT_MAX_BIRTHS_PER_EVENT
+            .min(n_max.saturating_sub(n.saturating_sub(kills.len())));
+        let mut births: Vec<(Point2<f64>, usize)> = Vec::new();
+        for &i in &birth_cand {
+            if births.len() >= birth_budget {
+                break;
+            }
+            let s = self.seeds[i];
+            let (fb, fe) = (m.cell_face_offsets[i], m.cell_face_offsets[i + 1]);
+            let mut far: Option<(f64, Point2<f64>)> = None;
+            for &f in &m.cell_faces[fb..fe] {
+                let c = Point2::new(m.face_cx[f], m.face_cy[f]);
+                let d2 = (c - s).norm_squared();
+                if far.map_or(true, |(b, _)| d2 > b) {
+                    far = Some((d2, c));
+                }
+            }
+            let Some((_, fc)) = far else { continue };
+            let p = Point2::new(0.5 * (s.x + fc.x), 0.5 * (s.y + fc.y));
+            if !point_in_fluid(p, &spec_t) {
+                continue;
+            }
+            let clear = self
+                .seeds
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| !kill_set.contains(&j))
+                .all(|(_, q)| (q - p).norm_squared() >= min_sep2)
+                && births
+                    .iter()
+                    .all(|(q, _)| (q - p).norm_squared() >= min_sep2);
+            if clear {
+                births.push((p, i));
+            }
+        }
+        Ok((kills, births))
     }
 
     /// Scheduled periodic Lloyd smoothing (see [`Self::set_smoothing`]): on

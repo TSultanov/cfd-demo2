@@ -231,6 +231,9 @@ struct SolverInitRequest {
     moving_smooth_every_n: usize,
     // Periodic Morton memory-reordering cadence (0 = off).
     moving_reorder_every_n: usize,
+    // Flow-adaptive sizing cadence (0 = off): every N steps birth/kill cells
+    // toward a target volume derived from |∇U|/|∇p|/strain gradients.
+    moving_adapt_every_n: usize,
     wgpu_device: Option<wgpu::Device>,
     wgpu_queue: Option<wgpu::Queue>,
     target_format: wgpu::TextureFormat,
@@ -604,6 +607,11 @@ pub struct CFDApp {
     /// FlowCoupled+recycling runs erode the initial memory locality (measured
     /// 63→180 mean slot distance over 2000 steps; reordering holds ~70).
     moving_reorder_every_n: usize,
+    /// Flow-adaptive sizing cadence: every N steps the moving driver derives
+    /// a per-cell target volume from the flow's velocity/pressure/strain
+    /// gradients and births/kills cells toward it — the cell COUNT changes at
+    /// runtime, bounded to [0.5, 2]× the initial count (0 = off).
+    moving_adapt_every_n: usize,
     /// Latest per-step moving-mesh telemetry (from `MeshRefreshed`), for display.
     cached_moving_stats: Option<MovingMeshStats>,
     /// Whether the driver the worker is *actually running* is a moving-mesh
@@ -785,6 +793,7 @@ impl CFDApp {
             moving_gpu_regen: true,
             moving_smooth_every_n: 0,
             moving_reorder_every_n: 500,
+            moving_adapt_every_n: 0,
             cached_moving_stats: None,
             solver_is_moving: false,
             min_cell_size: 0.025,
@@ -1184,6 +1193,7 @@ impl CFDApp {
             moving_gpu_regen: self.moving_gpu_regen && self.backend == BackendChoice::Gpu,
             moving_smooth_every_n: self.moving_smooth_every_n,
             moving_reorder_every_n: self.moving_reorder_every_n,
+            moving_adapt_every_n: self.moving_adapt_every_n,
             wgpu_device: self.wgpu_device.clone(),
             wgpu_queue: self.wgpu_queue.clone(),
             target_format: self.target_format,
@@ -1985,21 +1995,31 @@ impl CFDApp {
             (&request.wgpu_device, &request.wgpu_queue)
         {
             let state_size_bytes = mesh.num_cells() as u64 * model_caps.plot_stride as u64 * 4;
+            // Moving (ALE) runs may GROW the cell count at runtime (the
+            // flow-adaptive sizing births cells, hard-capped by the driver at
+            // ADAPT_BUDGET_MAX_FACTOR × the initial count) — allocate the
+            // per-cell viz buffers at that cap so a resized solver's state
+            // still fits. Static runs allocate exactly their fixed size.
+            let viz_capacity_bytes = if request.enable_moving_mesh {
+                (state_size_bytes as f64 * crate::sim::ADAPT_BUDGET_MAX_FACTOR).ceil() as u64
+            } else {
+                state_size_bytes
+            };
             let viz_buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("CFD Viz Field Buffer 0"),
-                size: state_size_bytes.max(4),
+                size: viz_capacity_bytes.max(4),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
             let viz_buffer_1 = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("CFD Viz Field Buffer 1"),
-                size: state_size_bytes.max(4),
+                size: viz_capacity_bytes.max(4),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
             let viz_buffer_2 = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("CFD Viz Field Buffer 2"),
-                size: state_size_bytes.max(4),
+                size: viz_capacity_bytes.max(4),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
@@ -2315,6 +2335,10 @@ impl CFDApp {
         // Periodic Morton memory reordering (0 = off) — a pure relabel that
         // restores cache locality eroded by recycling slot migration.
         moving.set_reorder_every_n(request.moving_reorder_every_n);
+        // Flow-adaptive sizing (0 = off): birth/kill cells toward a target
+        // volume derived from the flow's velocity/pressure/strain gradients.
+        // The viz buffers are allocated with the driver's 2× budget headroom.
+        moving.set_adaptive_sizing(request.moving_adapt_every_n);
         CFDApp::push_trace_init_event(
             trace_init_events,
             "solver.new",
@@ -3064,6 +3088,21 @@ impl eframe::App for CFDApp {
                                      degrading memory locality (measured: mean neighbor \
                                      slot distance 63 → 180 over 2000 steps; reordering \
                                      holds ~70). Applied on Initialize / Reset.",
+                                );
+                                ui.add(
+                                    egui::Slider::new(&mut self.moving_adapt_every_n, 0..=500)
+                                        .text("Adaptive sizing every N steps"),
+                                )
+                                .on_hover_text(
+                                    "Flow-adaptive cell birth/kill (0 = off): every N steps \
+                                     a per-cell target volume is derived from the flow's \
+                                     velocity, pressure and strain gradients (high gradients \
+                                     → the mesh's finest initial sizing, smooth regions → \
+                                     its coarsest); over-resolved cells are removed and \
+                                     under-resolved cells split, so the CELL COUNT adapts at \
+                                     runtime (bounded to 0.5–2× the initial count; each \
+                                     event rebuilds the solver and transfers the state). \
+                                     Applied on Initialize / Reset.",
                                 );
                             }
                             // Oscillating obstacle (ChannelObstacle only — its
@@ -4016,7 +4055,7 @@ impl eframe::App for CFDApp {
                                  and the CPU path took it; the GPU is retried next step.",
                             );
                             ui.label(format!(
-                                "ALE mesh: {} cells, {} faces{}{}",
+                                "ALE mesh: {} cells, {} faces{}{}{}",
                                 m.n_cells,
                                 m.n_faces,
                                 if m.flipped {
@@ -4029,6 +4068,14 @@ impl eframe::App for CFDApp {
                                 },
                                 if m.recycled > 0 {
                                     format!(" (recycled {} seeds)", m.recycled)
+                                } else {
+                                    String::new()
+                                },
+                                if m.cells_born > 0 || m.cells_killed > 0 {
+                                    format!(
+                                        " (adapted: +{} / −{} cells)",
+                                        m.cells_born, m.cells_killed
+                                    )
                                 } else {
                                     String::new()
                                 }
@@ -4313,9 +4360,18 @@ fn solver_worker_main(
         // Logging / readback cadence (depends on the current step index + timers).
         let log_every_steps = params.log_every_steps.max(1) as u64;
         let should_log = params.log_convergence && (step_idx % log_every_steps == 0);
+        // A flow-adaptive sizing event changes the CELL COUNT this step: force
+        // a full readback so the published u/p snapshot and the published
+        // polygon set change length together (a stale-length snapshot against
+        // the resized mesh would mis-index the per-cell colors).
+        let adapt_step = matches!(
+            &*mode,
+            SolverMode::MovingMesh(m) if m.adapt_fires_this_step()
+        );
         let should_readback = step_idx == 0
             || last_snapshot_publish.elapsed() >= snapshot_publish_interval
-            || should_log;
+            || should_log
+            || adapt_step;
 
         // Adaptive timestep + step + divergence / steady-state detection live in
         // the shared driver; GUI-only concerns (viz upload, publishing, trace)
@@ -4348,7 +4404,15 @@ fn solver_worker_main(
                     // outlet). Recycle steps are rare (≤ RECYCLE_MAX_PER_STEP
                     // seeds, ~0.2/step measured), so the extra publish is
                     // negligible.
-                    let refresh = if should_readback || mstats.recycled > 0 {
+                    // Resize (adapt) steps likewise publish immediately: the
+                    // polygon COUNT changed, so every consumer of the cached
+                    // cells must see the new set alongside the (forced, see
+                    // `adapt_step`) fresh state snapshot.
+                    let refresh = if should_readback
+                        || mstats.recycled > 0
+                        || mstats.cells_born > 0
+                        || mstats.cells_killed > 0
+                    {
                         Some((CFDApp::cache_cells(m.mesh()), mstats))
                     } else {
                         None

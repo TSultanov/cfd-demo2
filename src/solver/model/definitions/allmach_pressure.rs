@@ -527,6 +527,14 @@ pub fn allmach_thermal_compressible_mms_model() -> Result<ModelSpec, String> {
     allmach_pressure_model_impl(true, true, true, false)
 }
 
+/// ALE (moving-mesh) variant of the compressible thermal MMS: same kept-physics +
+/// manufactured sources with mesh-relative convection. With `mesh_fluxes` zero-filled
+/// and equal volume history it reproduces the static `allmach_thermal_compressible_mms`
+/// bitwise (the ALE zero-flux invariant), which is what the ALE MMS gate checks.
+pub fn allmach_thermal_compressible_mms_ale_model() -> Result<ModelSpec, String> {
+    allmach_pressure_model_impl(true, true, true, true)
+}
+
 /// ALE (moving-mesh) variant of `allmach_pressure`: the barotropic all-Mach
 /// compressible solver with mesh-relative convection. `div(phi,U).bounded()` and
 /// `div_flux(phi,p)` are declared `.with_mesh_relative()`, so assembly consumes

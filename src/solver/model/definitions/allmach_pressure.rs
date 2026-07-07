@@ -218,9 +218,22 @@ const USE_FULL_DEV2: bool = true;
 fn build_allmach_system(
     _fields: &AllMachPressureFields,
     with_mms_source: bool,
+    compressible_mms: bool,
     thermal: bool,
     ale: bool,
 ) -> EquationSystem {
+    // Two manufactured-solution modes:
+    //  - BAROTROPIC mms (`with_mms_source && !compressible_mms`): strips the
+    //    compressible physics to the barotropic `psi*p` density and isolates the 1/T
+    //    variation (`strip_all == true`).
+    //  - COMPRESSIBLE mms (`with_mms_source && compressible_mms`): keeps the FULL
+    //    production physics (real-EOS `rho(p,T)`, U.grad(p) heating, viscous
+    //    dissipation) and ADDS manufactured sources on top, so the compressible
+    //    spatial operator is order-verified. The genuinely TRANSIENT terms it carries
+    //    (dp/dt heating, thermal expansion, acoustic ddt) are identically zero at the
+    //    steady manufactured solution, so they don't affect the manufactured source or
+    //    the observed order — they only shape the march to steady state.
+    let strip_all = with_mms_source && !compressible_mms;
     let u_typed = TypedFieldRef::<Velocity, Vector2>::new("U");
     let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
     let phi_typed = TypedFluxRef::<MassFlux, Scalar>::new("phi");
@@ -294,7 +307,7 @@ fn build_allmach_system(
     // unchanged. Omitted on the `_mms` variant; identically zero when `psi = 0`.
     let p_div_flux_term = {
         let term = typed_fvm::div_flux(phi_typed, p_typed);
-        let term = if with_mms_source {
+        let term = if strip_all {
             term
         } else {
             let psi_lin = TypedCoeff::from_field(TypedFieldRef::<Compressibility, Scalar>::new(
@@ -322,7 +335,7 @@ fn build_allmach_system(
     // TRANSIENT term (zero at steady state), so OMITTED from the `_mms` steady
     // order test (contributes nothing to spatial-operator accuracy, only stalls the
     // pinned closed-box march); production (`allmach_thermal`) always carries it.
-    if thermal && !with_mms_source {
+    if thermal && !strip_all {
         let t_typed_p = TypedFieldRef::<Temperature, Scalar>::new(ALLMACH_TEMPERATURE_FIELD);
         let rho_dt_coeff =
             TypedCoeff::from_field(TypedFieldRef::<RhoDtUnit, Scalar>::new(ALLMACH_RHO_DT_FIELD));
@@ -356,7 +369,7 @@ fn build_allmach_system(
         // defect (ddt(rho,T)+div(phi,T) = rho*DT/Dt - T*d(rho)/dt). The `_mms`
         // variant keeps the conservative form (compression terms zero at steady state).
         let t_div = {
-            let d = if with_mms_source {
+            let d = if strip_all {
                 typed_fvm::div(phi_typed, t_typed)
             } else {
                 typed_fvm::div(phi_typed, t_typed).bounded()
@@ -383,7 +396,7 @@ fn build_allmach_system(
         // keeps it consistent with the EOS (psi = 1/c^2) so the isentropic relation
         // T/T0 = (p/p0)^((g-1)/g) emerges. SIGN certified empirically: a positive
         // dp/dt must drive dT/dt > 0.
-        if !with_mms_source {
+        if !strip_all {
             // (T1) dp/dt half: implicit T<-p cross-ddt, coefficient -inv_cp.
             let inv_cp_const: TypedCoeff<Temperature> =
                 TypedCoeff::constant(-(ALLMACH_GAMMA - 1.0) * ALLMACH_T_REF);
@@ -461,17 +474,17 @@ fn build_allmach_system(
 
 pub fn allmach_pressure_system() -> EquationSystem {
     let fields = AllMachPressureFields::new();
-    build_allmach_system(&fields, false, false, false)
+    build_allmach_system(&fields, false, false, false, false)
 }
 
 pub fn allmach_pressure_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(false, false, false)
+    allmach_pressure_model_impl(false, false, false, false)
 }
 
 /// `allmach_pressure` plus manufactured momentum + continuity source fields for
 /// MMS order tests.
 pub fn allmach_pressure_mms_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(true, false, false)
+    allmach_pressure_model_impl(true, false, false, false)
 }
 
 /// Thermal all-Mach: `allmach_pressure` + a temperature transport equation and
@@ -480,13 +493,25 @@ pub fn allmach_pressure_mms_model() -> Result<ModelSpec, String> {
 /// kernel — no hand-written kernel). The barotropic model is the `T = T_ref`
 /// limit.
 pub fn allmach_thermal_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(false, true, false)
+    allmach_pressure_model_impl(false, false, true, false)
 }
 
 /// `allmach_thermal` plus manufactured momentum + continuity + temperature
-/// source fields for MMS order tests.
+/// source fields for MMS order tests. BAROTROPIC mms: strips the compressible
+/// physics to isolate the 1/T density variation (PSI = 0 in the test).
 pub fn allmach_thermal_mms_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(true, true, false)
+    allmach_pressure_model_impl(true, false, true, false)
+}
+
+/// COMPRESSIBLE thermal MMS: `allmach_thermal` with the FULL production physics
+/// (real-EOS `rho(p,T)`, U.grad(p) compression heating, viscous dissipation Φ) plus
+/// manufactured momentum/continuity/temperature sources. Unlike the barotropic
+/// `allmach_thermal_mms`, it does NOT strip the compressible terms, so a steady
+/// order test at PSI > 0 verifies the compressible spatial operator. Its genuinely
+/// transient terms (dp/dt heating, thermal expansion, acoustic ddt) vanish at the
+/// steady manufactured solution and so leave the observed order unaffected.
+pub fn allmach_thermal_compressible_mms_model() -> Result<ModelSpec, String> {
+    allmach_pressure_model_impl(true, true, true, false)
 }
 
 /// ALE (moving-mesh) variant of `allmach_pressure`: the barotropic all-Mach
@@ -498,13 +523,13 @@ pub fn allmach_thermal_mms_model() -> Result<ModelSpec, String> {
 /// Its own model id ⇒ own generated kernels; with `mesh_fluxes` zero-filled and
 /// equal volume history it reproduces the static `allmach_pressure` bitwise.
 pub fn allmach_pressure_ale_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(false, false, true)
+    allmach_pressure_model_impl(false, false, false, true)
 }
 
 /// `allmach_pressure_ale` + manufactured sources (prescribed-motion compressible
 /// MMS order test).
 pub fn allmach_pressure_ale_mms_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(true, false, true)
+    allmach_pressure_model_impl(true, false, false, true)
 }
 
 /// ALE (moving-mesh) variant of `allmach_thermal`: the thermal all-Mach solver
@@ -512,13 +537,13 @@ pub fn allmach_pressure_ale_mms_model() -> Result<ModelSpec, String> {
 /// cross-variable thermal-expansion / compression-heating ddt terms get the same
 /// moving-volume weighting as the primary ddts.
 pub fn allmach_thermal_ale_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(false, true, true)
+    allmach_pressure_model_impl(false, false, true, true)
 }
 
 /// `allmach_thermal_ale` + manufactured sources (prescribed-motion thermal
-/// compressible MMS order test).
+/// compressible MMS order test). BAROTROPIC mms.
 pub fn allmach_thermal_ale_mms_model() -> Result<ModelSpec, String> {
-    allmach_pressure_model_impl(true, true, true)
+    allmach_pressure_model_impl(true, false, true, true)
 }
 
 /// In-place flip of an all-Mach model's Inlet/Outlet boundary KINDS to CD-nozzle
@@ -568,11 +593,16 @@ pub fn apply_pressure_inlet_nozzle_bcs(model: &mut ModelSpec) {
 
 fn allmach_pressure_model_impl(
     with_mms_source: bool,
+    compressible_mms: bool,
     thermal: bool,
     ale: bool,
 ) -> Result<ModelSpec, String> {
+    // See `build_allmach_system`: `strip_all` strips the compressible physics for the
+    // BAROTROPIC mms only; the COMPRESSIBLE mms keeps the full production physics
+    // (real-EOS recovery, layout fields, Rhie–Chow) and just adds manufactured sources.
+    let strip_all = with_mms_source && !compressible_mms;
     let fields = AllMachPressureFields::new();
-    let system = build_allmach_system(&fields, with_mms_source, thermal, ale);
+    let system = build_allmach_system(&fields, with_mms_source, compressible_mms, thermal, ale);
 
     // Keep U,p,d_p,grad_p,grad_p_old at the same offsets as incompressible
     // (0,2,3,4,6); append psi (and any MMS sources) after. Offsets are load-bearing.
@@ -598,8 +628,9 @@ fn allmach_pressure_model_impl(
         layout_fields.push(vol_scalar_dim::<Temperature>(ALLMACH_TEMPERATURE_FIELD));
         layout_fields.push(vol_scalar_dim::<RhoTRefUnit>(ALLMACH_RHO_T_REF_FIELD));
         // Thermal-expansion coefficient d(rho)/dT, recovered on-device from T.
-        // Only present where the term is (production, not the steady `_mms` variant).
-        if !with_mms_source {
+        // Present for production AND the compressible mms (kept physics), absent for
+        // the barotropic mms (`strip_all`).
+        if !strip_all {
             layout_fields.push(vol_scalar_dim::<RhoDtUnit>(ALLMACH_RHO_DT_FIELD));
             // U.grad(p), recovered on-device for the compression-heating source.
             layout_fields.push(vol_scalar_dim::<PressureRateUnit>(ALLMACH_U_DOT_GRAD_P_FIELD));
@@ -823,12 +854,13 @@ fn allmach_pressure_model_impl(
         // * p (Pressure) / T (Temp) = Density, matching rho_t_ref/T (Density).
         // In production, clamp at `rho_floor` (= psi * absolute-pressure floor) so a
         // transient gauge undershoot below -P_REF cannot drive rho non-positive.
-        let p_compr = if with_mms_source {
+        let p_compr = if strip_all {
             Expr::ident("psi") * Expr::ident("p")
         } else {
             // Uses the REFERENCE compressibility (constant), not the local `psi`:
             // gamma*psi_ref*t_ref/T = 1/(R*T) is the isothermal d(rho)/d(p)|_T, so the
             // recovery stays a consistent ideal gas rho = p/(R*T) as `psi` goes local.
+            // Kept for the compressible mms so the real-EOS operator is order-verified.
             Expr::lit_f32(ALLMACH_GAMMA as f32)
                 * Expr::ident(ALLMACH_PSI_REF_FIELD)
                 * Expr::ident(ALLMACH_T_REF_FIELD)
@@ -838,7 +870,7 @@ fn allmach_pressure_model_impl(
         let rho_recovery = Expr::ident(ALLMACH_RHO_T_REF_FIELD)
             / Expr::ident(ALLMACH_TEMPERATURE_FIELD)
             + p_compr;
-        let rho_recovery = if with_mms_source {
+        let rho_recovery = if strip_all {
             rho_recovery
         } else {
             Expr::call_named("max", vec![rho_recovery, Expr::ident(ALLMACH_RHO_FLOOR_FIELD)])
@@ -848,7 +880,7 @@ fn allmach_pressure_model_impl(
         // real T-varying compressibility, rho = (rho_t_ref + gamma*psi*t_ref*p)/T, so
         // rho_dT = -(rho_t_ref + gamma*psi*t_ref*p)/T^2 (= -rho/T). Units: (Density*Temp)/
         // T^2 = Density/Temperature; the Add is Density*Temp + Density*Temp (no panic).
-        if !with_mms_source {
+        if !strip_all {
             let rho_numer = Expr::ident(ALLMACH_RHO_T_REF_FIELD)
                 + Expr::lit_f32(ALLMACH_GAMMA as f32)
                     * Expr::ident(ALLMACH_PSI_REF_FIELD)
@@ -944,15 +976,25 @@ fn allmach_pressure_model_impl(
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
     Ok(ModelSpec {
-        id: match (thermal, with_mms_source, ale) {
-            (true, true, false) => "allmach_thermal_mms",
-            (true, false, false) => "allmach_thermal",
-            (false, true, false) => "allmach_pressure_mms",
-            (false, false, false) => "allmach_pressure",
-            (true, true, true) => "allmach_thermal_ale_mms",
-            (true, false, true) => "allmach_thermal_ale",
-            (false, true, true) => "allmach_pressure_ale_mms",
-            (false, false, true) => "allmach_pressure_ale",
+        id: match (thermal, with_mms_source, compressible_mms, ale) {
+            // Compressible thermal MMS (kept-physics + manufactured sources).
+            (true, true, true, false) => "allmach_thermal_compressible_mms",
+            (true, true, true, true) => "allmach_thermal_compressible_mms_ale",
+            // Barotropic mms + production (compressible_mms = false).
+            (true, true, false, false) => "allmach_thermal_mms",
+            (true, false, false, false) => "allmach_thermal",
+            (false, true, false, false) => "allmach_pressure_mms",
+            (false, false, false, false) => "allmach_pressure",
+            (true, true, false, true) => "allmach_thermal_ale_mms",
+            (true, false, false, true) => "allmach_thermal_ale",
+            (false, true, false, true) => "allmach_pressure_ale_mms",
+            (false, false, false, true) => "allmach_pressure_ale",
+            // compressible_mms only valid on the thermal mms path.
+            (_, _, true, _) => {
+                return Err(
+                    "compressible_mms requires thermal=true and with_mms_source=true".into(),
+                )
+            }
         },
         system,
         state_layout: layout,

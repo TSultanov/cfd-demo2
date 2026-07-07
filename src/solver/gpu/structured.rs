@@ -413,6 +413,16 @@ impl StructuredGpuSolver {
                 _ => continue,
             }
         }
+        if std::env::var("CFD2_STRUCTGPU_DEBUG").is_ok() {
+            eprintln!("[structgpu] s={s} state_stride={state_stride} flux_stride={flux_stride}");
+            eprintln!("[structgpu] prep={prep:?}");
+            eprintln!("[structgpu] per_iter={per_iter:?}");
+            eprintln!("[structgpu] update={update:?}");
+            for (id, k) in &kernels {
+                let names: Vec<&str> = k.bindings.iter().map(|b| b.name.as_str()).collect();
+                eprintln!("[structgpu]   {id}: {names:?}");
+            }
+        }
 
         // Buffers (by name), sized as on the CPU structured solver.
         let mut buffers = HashMap::new();
@@ -536,6 +546,25 @@ impl StructuredGpuSolver {
         self.upload_f32("state_old_old", &state);
     }
 
+    /// Seed a packed state component (by state-layout offset) from cell-centre
+    /// coords — writes all history buffers (IC semantics). Mirrors the CPU
+    /// `StructuredModelSolver::set_state`.
+    pub fn set_state_component<F: Fn(f64, f64) -> f64>(&mut self, offset: usize, f: F) {
+        let mut state = self.read_f32("state", self.n * self.state_stride);
+        for p in 0..self.n {
+            let (x, y) = self.grid.cell_center(p);
+            state[p * self.state_stride + offset] = f(x, y) as f32;
+        }
+        self.upload_f32("state", &state);
+        self.upload_f32("state_old", &state);
+        self.upload_f32("state_old_old", &state);
+    }
+
+    /// Coupled unknowns per cell (banded block stride).
+    pub fn unknowns(&self) -> usize {
+        self.s
+    }
+
     pub fn field_offset(&self, name: &str) -> Option<usize> {
         self.layout.offset_for(name).map(|o| o as usize)
     }
@@ -587,15 +616,29 @@ impl StructuredGpuSolver {
         self.upload_u32("face_boundary", &face_boundary);
     }
 
-    fn copy_buf(&self, encoder: &mut wgpu::CommandEncoder, src: &str, dst: &str, len: usize) {
-        encoder.copy_buffer_to_buffer(self.buf(src), 0, self.buf(dst), 0, (len * 4) as u64);
+    /// Copy `src -> dst` in its own submission.
+    fn copy_submit(&self, src: &str, dst: &str, len: usize) {
+        let mut enc = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("copy") });
+        enc.copy_buffer_to_buffer(self.buf(src), 0, self.buf(dst), 0, (len * 4) as u64);
+        self.ctx.queue.submit(Some(enc.finish()));
     }
 
-    fn dispatch_ids(&self, encoder: &mut wgpu::CommandEncoder, ids: &[String]) {
+    /// Dispatch each kernel in its own submission. Separate command buffers are
+    /// strictly ordered on the queue with full memory visibility between them, so
+    /// the chained schedule (flux -> gradients -> assembly) sees each prior
+    /// kernel's storage writes.
+    fn dispatch_ids(&self, ids: &[String]) {
         let resolve = |name: &str| self.buf(name);
         for id in ids {
+            let mut enc = self.ctx.device.create_command_encoder(
+                &wgpu::CommandEncoderDescriptor { label: Some(id) },
+            );
             let k = &self.kernels[id];
-            k.dispatch(&self.ctx.device, encoder, self.n as u32, &resolve);
+            k.dispatch(&self.ctx.device, &mut enc, self.n as u32, &resolve);
+            self.ctx.queue.submit(Some(enc.finish()));
         }
     }
 
@@ -604,15 +647,10 @@ impl StructuredGpuSolver {
     pub fn assemble_only(&mut self) {
         let n = self.n;
         let sstride = self.state_stride;
-        let mut encoder = self
-            .ctx
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("assemble") });
-        self.copy_buf(&mut encoder, "state", "state_old", n * sstride);
-        self.copy_buf(&mut encoder, "state", "state_iter", n * sstride);
+        self.copy_submit("state", "state_old", n * sstride);
+        self.copy_submit("state", "state_iter", n * sstride);
         let ids: Vec<String> = self.prep.iter().chain(self.per_iter.iter()).cloned().collect();
-        self.dispatch_ids(&mut encoder, &ids);
-        self.ctx.queue.submit(Some(encoder.finish()));
+        self.dispatch_ids(&ids);
     }
 
     /// Read the assembled banded operator (`N*5*s*s`).
@@ -622,6 +660,11 @@ impl StructuredGpuSolver {
     /// Read the assembled RHS (`N*s`).
     pub fn rhs(&self) -> Vec<f32> {
         self.read_f32("rhs", self.n * self.s)
+    }
+
+    /// Read a named storage buffer back as `f32` (debug/parity).
+    pub fn read_named(&self, name: &str, len: usize) -> Vec<f32> {
+        self.read_f32(name, len)
     }
 
     /// One implicit (backward-Euler) time step: advance history, then
@@ -637,36 +680,18 @@ impl StructuredGpuSolver {
             .write_buffer(&self.constants_buf, 0, bytemuck::bytes_of(&self.constants));
 
         // Advance history: old_old <- old, old <- state.
-        {
-            let mut enc = self.ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("history"),
-            });
-            self.copy_buf(&mut enc, "state_old", "state_old_old", n * sstride);
-            self.copy_buf(&mut enc, "state", "state_old", n * sstride);
-            self.ctx.queue.submit(Some(enc.finish()));
-        }
+        self.copy_submit("state_old", "state_old_old", n * sstride);
+        self.copy_submit("state", "state_old", n * sstride);
 
         // Prep once.
-        {
-            let mut enc = self.ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("prep"),
-            });
-            let prep = self.prep.clone();
-            self.dispatch_ids(&mut enc, &prep);
-            self.ctx.queue.submit(Some(enc.finish()));
-        }
+        let prep = self.prep.clone();
+        self.dispatch_ids(&prep);
 
         for _outer in 0..self.outer_iters {
             // state_iter <- state, then flux/gradients/assembly.
-            {
-                let mut enc = self.ctx.device.create_command_encoder(
-                    &wgpu::CommandEncoderDescriptor { label: Some("assembly") },
-                );
-                self.copy_buf(&mut enc, "state", "state_iter", n * sstride);
-                let per = self.per_iter.clone();
-                self.dispatch_ids(&mut enc, &per);
-                self.ctx.queue.submit(Some(enc.finish()));
-            }
+            self.copy_submit("state", "state_iter", n * sstride);
+            let per = self.per_iter.clone();
+            self.dispatch_ids(&per);
 
             // Banded solve: x = A^{-1} rhs (fully on the GPU).
             self.solver.solve(
@@ -678,14 +703,8 @@ impl StructuredGpuSolver {
             );
 
             // Update: state <- f(x).
-            {
-                let mut enc = self.ctx.device.create_command_encoder(
-                    &wgpu::CommandEncoderDescriptor { label: Some("update") },
-                );
-                let upd = self.update.clone();
-                self.dispatch_ids(&mut enc, &upd);
-                self.ctx.queue.submit(Some(enc.finish()));
-            }
+            let upd = self.update.clone();
+            self.dispatch_ids(&upd);
         }
     }
 
@@ -724,11 +743,16 @@ struct LaScalar {
 /// solve on the host (dispatching GPU kernels; only scalars cross the bus).
 struct BandedGpuLinAlg {
     n: u32,
+    nx: u32,
+    ny: u32,
+    s: u32,
     ndof: u32,
+    restart: usize,
     dims_buf: wgpu::Buffer,
     scalar_buf: wgpu::Buffer,
 
     p_spmv: wgpu::ComputePipeline,
+    p_vscale: wgpu::ComputePipeline,
     p_binv: wgpu::ComputePipeline,
     p_papply: wgpu::ComputePipeline,
     p_axpy: wgpu::ComputePipeline,
@@ -742,6 +766,11 @@ struct BandedGpuLinAlg {
     z: wgpu::Buffer,
     p: wgpu::Buffer,
     ap: wgpu::Buffer,
+    // GMRES Arnoldi scratch: `v` holds w = M^{-1} A v_k.
+    v: wgpu::Buffer,
+    // GMRES Krylov basis (restart+1 vectors) — the robust solver for the
+    // indefinite saddle-point system whose block-Jacobi diagonal is singular.
+    basis: Vec<wgpu::Buffer>,
     partials: wgpu::Buffer,
     partials_staging: wgpu::Buffer,
     n_partials: u32,
@@ -797,12 +826,23 @@ impl BandedGpuLinAlg {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        // GMRES restart: capped by the DOF count so tiny systems don't
+        // over-allocate. 60 matches the CPU banded_block_gmres.
+        let restart = (60).min(ndof as usize).max(1);
+        let basis: Vec<wgpu::Buffer> = (0..=restart)
+            .map(|i| storage_buffer(device, &format!("la_basis_{i}"), ndof as usize))
+            .collect();
         Self {
             n,
+            nx,
+            ny,
+            s,
             ndof,
+            restart,
             dims_buf,
             scalar_buf,
             p_spmv: make(LA_SPMV, "spmv"),
+            p_vscale: make(LA_VSCALE, "vscale"),
             p_binv: make(LA_BLOCK_INVERT, "block_invert"),
             p_papply: make(LA_PRECOND, "precond_apply"),
             p_axpy: make(LA_AXPY, "axpy"),
@@ -814,6 +854,8 @@ impl BandedGpuLinAlg {
             z: storage_buffer(device, "la_z", ndof as usize),
             p: storage_buffer(device, "la_p", ndof as usize),
             ap: storage_buffer(device, "la_ap", ndof as usize),
+            v: storage_buffer(device, "la_v", ndof as usize),
+            basis,
             partials,
             partials_staging,
             n_partials,
@@ -896,9 +938,9 @@ impl BandedGpuLinAlg {
         );
     }
 
-    /// Solve `A x = rhs` (banded, block-Jacobi preconditioned CG). `x` is
-    /// overwritten (initial guess zero). Works for the SPD scalar case; the
-    /// coupled indefinite case is handled by [`Self::solve`] dispatching BiCGStab.
+    /// Solve `A x = rhs` (matrix-free banded, block-Jacobi preconditioned). Picks
+    /// CG for the SPD scalar system (`s == 1`) and BiCGStab for the indefinite
+    /// coupled U–p system (`s > 1`). `x` is overwritten (initial guess zero).
     fn solve(
         &self,
         ctx: &GpuContext,
@@ -909,16 +951,58 @@ impl BandedGpuLinAlg {
     ) {
         let device = &ctx.device;
         let queue = &ctx.queue;
+        if self.s == 1 {
+            // SPD scalar: fully on-device block-Jacobi CG.
+            self.run(
+                device,
+                queue,
+                &self.p_binv,
+                &[(0, &self.dims_buf), (1, mat), (2, &self.dinv)],
+                self.n,
+            );
+            self.cg(device, queue, grid, mat, rhs, x);
+        } else if std::env::var("CFD2_STRUCTGPU_ONDEVICE_SOLVE").is_ok() {
+            // Opt-in fully on-device GMRES (correct but per-dot readback makes it
+            // slow for the many-iteration saddle-point solve).
+            self.run(
+                device,
+                queue,
+                &self.p_binv,
+                &[(0, &self.dims_buf), (1, mat), (2, &self.dinv)],
+                self.n,
+            );
+            self.gmres(device, queue, grid, mat, rhs, x);
+        } else {
+            // Coupled indefinite U-p: the assembly runs on the GPU, but the
+            // banded block-GMRES inner solve is done host-side in f64 (one matrix
+            // + rhs readback, one x upload per solve) — robust and fast, avoiding
+            // O(iters^2) GPU dot-product round-trips on a weakly-preconditioned,
+            // often-hundreds-of-iterations saddle-point system.
+            self.host_solve(ctx, mat, rhs, x);
+        }
+    }
 
-        // dinv = (diag block)^{-1} per cell.
-        self.run(
-            device,
-            queue,
-            &self.p_binv,
-            &[(0, &self.dims_buf), (1, mat), (2, &self.dinv)],
-            self.n,
-        );
+    /// Host-side block-Jacobi-preconditioned banded GMRES (f64) — the GPU analog
+    /// path reads the assembled banded operator + rhs back, solves, and uploads
+    /// the correction. Mirrors the CPU `banded_block_gmres`.
+    fn host_solve(&self, ctx: &GpuContext, mat: &wgpu::Buffer, rhs: &wgpu::Buffer, x: &wgpu::Buffer) {
+        let (nx, ny, s) = (self.nx as usize, self.ny as usize, self.s as usize);
+        let a = read_buffer_f32(ctx, mat, nx * ny * BAND_STRIDE * s * s);
+        let b = read_buffer_f32(ctx, rhs, nx * ny * s);
+        let xh = host_banded_gmres(&a, nx, ny, s, &b, self.restart.max(1), 200, 1e-9);
+        ctx.queue.write_buffer(x, 0, bytemuck::cast_slice(&xh));
+    }
 
+    /// Block-Jacobi preconditioned CG (SPD scalar system). Assumes `dinv` is set.
+    fn cg(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        grid: &wgpu::Buffer,
+        mat: &wgpu::Buffer,
+        rhs: &wgpu::Buffer,
+        x: &wgpu::Buffer,
+    ) {
         // Initial guess x <- 0, so the initial residual r <- rhs. Then
         // z <- M^{-1} r and the search direction p <- z.
         self.zero(queue, x);
@@ -971,6 +1055,135 @@ impl BandedGpuLinAlg {
         }
     }
 
+    /// Restarted, block-Jacobi (left)-preconditioned GMRES — the GPU analog of the
+    /// CPU `banded_block_gmres`. Arnoldi/Givens run on the host over the small
+    /// Hessenberg; all vector work (SpMV, precond, dot, axpy, scale) is on the
+    /// device, with only scalars crossing the bus. Assumes `dinv` is set.
+    fn gmres(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        grid: &wgpu::Buffer,
+        mat: &wgpu::Buffer,
+        rhs: &wgpu::Buffer,
+        x: &wgpu::Buffer,
+    ) {
+        let axpy = |src: &wgpu::Buffer, dst: &wgpu::Buffer, a: f64| {
+            self.set_scalar(queue, a as f32, 0.0);
+            self.run(device, queue, &self.p_axpy, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, src), (3, dst)], self.ndof);
+        };
+        let scale = |src: &wgpu::Buffer, dst: &wgpu::Buffer, a: f64| {
+            self.set_scalar(queue, a as f32, 0.0);
+            self.run(device, queue, &self.p_vscale, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, src), (3, dst)], self.ndof);
+        };
+        let copy = |src: &wgpu::Buffer, dst: &wgpu::Buffer| {
+            self.run(device, queue, &self.p_copy, &[(0, &self.dims_buf), (1, src), (2, dst)], self.ndof);
+        };
+        let precond = |rin: &wgpu::Buffer, zout: &wgpu::Buffer| {
+            self.run(device, queue, &self.p_papply, &[(0, &self.dims_buf), (1, &self.dinv), (2, rin), (3, zout)], self.n);
+        };
+        let spmv = |xin: &wgpu::Buffer, yout: &wgpu::Buffer| {
+            self.run(device, queue, &self.p_spmv, &[(0, grid), (1, &self.dims_buf), (2, mat), (3, xin), (4, yout)], self.n);
+        };
+        let dot = |a: &wgpu::Buffer, b: &wgpu::Buffer| self.dot(device, queue, a, b);
+        let norm = |a: &wgpu::Buffer| dot(a, a).sqrt();
+
+        let m = self.restart;
+        let bnorm = norm(rhs).max(1e-30);
+        let tol = 1e-8_f64;
+        let max_outer = 50usize;
+        let debug = std::env::var("CFD2_STRUCTGPU_DEBUG").is_ok();
+        self.zero(queue, x);
+
+        let mut total_k = 0usize;
+        let mut final_rel = 1.0_f64;
+        for _outer in 0..max_outer {
+            // r = b - A x ; z = M^{-1} r ; beta = ||z||.
+            spmv(x, &self.ap);
+            copy(rhs, &self.r);
+            axpy(&self.ap, &self.r, -1.0);
+            precond(&self.r, &self.z);
+            let beta = norm(&self.z);
+            if beta / bnorm <= tol {
+                final_rel = beta / bnorm;
+                break;
+            }
+            scale(&self.z, &self.basis[0], 1.0 / beta);
+
+            let mut h = vec![vec![0.0f64; m]; m + 1];
+            let mut g = vec![0.0f64; m + 1];
+            g[0] = beta;
+            let mut cs = vec![0.0f64; m];
+            let mut sn = vec![0.0f64; m];
+            let mut k_used = 0usize;
+
+            for k in 0..m {
+                // w = M^{-1} A v_k  (use `v` as w).
+                spmv(&self.basis[k], &self.ap);
+                precond(&self.ap, &self.v);
+                // Modified Gram-Schmidt against the existing basis.
+                for i in 0..=k {
+                    h[i][k] = dot(&self.v, &self.basis[i]);
+                    axpy(&self.basis[i], &self.v, -h[i][k]);
+                }
+                h[k + 1][k] = norm(&self.v);
+                if h[k + 1][k] > 1e-14 {
+                    scale(&self.v, &self.basis[k + 1], 1.0 / h[k + 1][k]);
+                } else {
+                    self.zero(queue, &self.basis[k + 1]);
+                }
+                // Apply previous Givens rotations, then a new one.
+                for i in 0..k {
+                    let temp = cs[i] * h[i][k] + sn[i] * h[i + 1][k];
+                    h[i + 1][k] = -sn[i] * h[i][k] + cs[i] * h[i + 1][k];
+                    h[i][k] = temp;
+                }
+                let denom = (h[k][k] * h[k][k] + h[k + 1][k] * h[k + 1][k]).sqrt();
+                if denom < 1e-300 {
+                    k_used = k;
+                    break;
+                }
+                cs[k] = h[k][k] / denom;
+                sn[k] = h[k + 1][k] / denom;
+                h[k][k] = cs[k] * h[k][k] + sn[k] * h[k + 1][k];
+                h[k + 1][k] = 0.0;
+                g[k + 1] = -sn[k] * g[k];
+                g[k] = cs[k] * g[k];
+                k_used = k + 1;
+                if g[k + 1].abs() / bnorm <= tol {
+                    break;
+                }
+            }
+
+            // Back-substitute y, then x += sum y_i v_i.
+            let kk = k_used;
+            let mut y = vec![0.0f64; kk];
+            for i in (0..kk).rev() {
+                let mut sum = g[i];
+                for j in (i + 1)..kk {
+                    sum -= h[i][j] * y[j];
+                }
+                y[i] = if h[i][i].abs() > 1e-300 { sum / h[i][i] } else { 0.0 };
+            }
+            for i in 0..kk {
+                axpy(&self.basis[i], x, y[i]);
+            }
+            total_k += kk;
+
+            // True-residual convergence check.
+            spmv(x, &self.ap);
+            copy(rhs, &self.r);
+            axpy(&self.ap, &self.r, -1.0);
+            final_rel = norm(&self.r) / bnorm;
+            if final_rel <= tol {
+                break;
+            }
+        }
+        if debug {
+            eprintln!("[structgpu] gmres: {total_k} inner iters, rel_res = {final_rel:e}");
+        }
+    }
+
     fn zero(&self, queue: &wgpu::Queue, buf: &wgpu::Buffer) {
         queue.write_buffer(buf, 0, &vec![0u8; (self.ndof * 4) as usize]);
     }
@@ -1012,6 +1225,239 @@ fn read_buffer_f32_via(
     drop(data);
     staging.unmap();
     out
+}
+
+// ===========================================================================
+// Host-side banded block GMRES (f64) over a read-back `matrix_values` slice.
+// The GPU assembles the operator; this solves the coupled (indefinite) system
+// in double precision. Mirrors the CPU `banded_block_gmres` exactly (bands
+// [S,W,diag,E,N]; matrix_values[p*5*s*s + 5*s*r + band*s + c]).
+// ===========================================================================
+
+#[inline]
+fn hb_block(a: &[f32], s: usize, p: usize, band: usize, r: usize, c: usize) -> f64 {
+    a[p * 5 * s * s + 5 * s * r + band * s + c] as f64
+}
+
+fn hb_spmv(a: &[f32], nx: usize, ny: usize, s: usize, x: &[f64]) -> Vec<f64> {
+    let n = nx * ny;
+    let mut y = vec![0.0f64; n * s];
+    for j in 0..ny {
+        for i in 0..nx {
+            let p = j * nx + i;
+            // (band, neighbour) pairs present; edge bands are zero (closed via RHS).
+            let mut nbrs: Vec<(usize, usize)> = vec![(2, p)];
+            if j > 0 {
+                nbrs.push((0, p - nx));
+            }
+            if i > 0 {
+                nbrs.push((1, p - 1));
+            }
+            if i + 1 < nx {
+                nbrs.push((3, p + 1));
+            }
+            if j + 1 < ny {
+                nbrs.push((4, p + nx));
+            }
+            for r in 0..s {
+                let mut acc = 0.0;
+                for &(band, q) in &nbrs {
+                    for c in 0..s {
+                        acc += hb_block(a, s, p, band, r, c) * x[q * s + c];
+                    }
+                }
+                y[p * s + r] = acc;
+            }
+        }
+    }
+    y
+}
+
+/// Invert an `s x s` matrix (row-major) via Gauss–Jordan with partial pivoting;
+/// singular blocks fall back to the (pseudo-)diagonal inverse.
+fn hb_invert(m: &[f64], s: usize) -> Vec<f64> {
+    let mut a = vec![0.0f64; s * 2 * s];
+    for r in 0..s {
+        for c in 0..s {
+            a[r * 2 * s + c] = m[r * s + c];
+        }
+        a[r * 2 * s + s + r] = 1.0;
+    }
+    for col in 0..s {
+        let mut piv = col;
+        let mut best = a[col * 2 * s + col].abs();
+        for r in (col + 1)..s {
+            let v = a[r * 2 * s + col].abs();
+            if v > best {
+                best = v;
+                piv = r;
+            }
+        }
+        if best < 1e-30 {
+            let mut out = vec![0.0f64; s * s];
+            for k in 0..s {
+                let d = m[k * s + k];
+                out[k * s + k] = if d.abs() > 1e-30 { 1.0 / d } else { 0.0 };
+            }
+            return out;
+        }
+        if piv != col {
+            for c in 0..(2 * s) {
+                a.swap(col * 2 * s + c, piv * 2 * s + c);
+            }
+        }
+        let d = a[col * 2 * s + col];
+        for c in 0..(2 * s) {
+            a[col * 2 * s + c] /= d;
+        }
+        for r in 0..s {
+            if r == col {
+                continue;
+            }
+            let f = a[r * 2 * s + col];
+            if f != 0.0 {
+                for c in 0..(2 * s) {
+                    a[r * 2 * s + c] -= f * a[col * 2 * s + c];
+                }
+            }
+        }
+    }
+    let mut out = vec![0.0f64; s * s];
+    for r in 0..s {
+        for c in 0..s {
+            out[r * s + c] = a[r * 2 * s + s + c];
+        }
+    }
+    out
+}
+
+fn hb_diag_inverses(a: &[f32], nx: usize, ny: usize, s: usize) -> Vec<Vec<f64>> {
+    (0..nx * ny)
+        .map(|p| {
+            let mut m = vec![0.0f64; s * s];
+            for r in 0..s {
+                for c in 0..s {
+                    m[r * s + c] = hb_block(a, s, p, 2, r, c);
+                }
+            }
+            hb_invert(&m, s)
+        })
+        .collect()
+}
+
+fn hb_apply_jacobi(minv: &[Vec<f64>], s: usize, r: &[f64]) -> Vec<f64> {
+    let ncells = minv.len();
+    let mut z = vec![0.0f64; ncells * s];
+    for p in 0..ncells {
+        for i in 0..s {
+            let mut acc = 0.0;
+            for k in 0..s {
+                acc += minv[p][i * s + k] * r[p * s + k];
+            }
+            z[p * s + i] = acc;
+        }
+    }
+    z
+}
+
+fn hb_norm(v: &[f64]) -> f64 {
+    v.iter().map(|&x| x * x).sum::<f64>().sqrt()
+}
+fn hb_dot(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b).map(|(&x, &y)| x * y).sum()
+}
+
+/// Restarted block-Jacobi-preconditioned GMRES on the banded block operator.
+fn host_banded_gmres(
+    a: &[f32],
+    nx: usize,
+    ny: usize,
+    s: usize,
+    b: &[f32],
+    restart: usize,
+    max_outer: usize,
+    tol: f64,
+) -> Vec<f32> {
+    let n = nx * ny * s;
+    let minv = hb_diag_inverses(a, nx, ny, s);
+    let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
+    let bnorm = hb_norm(&b64).max(1e-30);
+    let mut x = vec![0.0f64; n];
+    let m = restart;
+
+    for _ in 0..max_outer {
+        let ax = hb_spmv(a, nx, ny, s, &x);
+        let r0: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
+        let mut r = hb_apply_jacobi(&minv, s, &r0);
+        let beta = hb_norm(&r);
+        if beta / bnorm <= tol {
+            return x.iter().map(|&v| v as f32).collect();
+        }
+        let mut v: Vec<Vec<f64>> = Vec::with_capacity(m + 1);
+        v.push(r.iter().map(|&x| x / beta).collect());
+        let mut h = vec![vec![0.0f64; m]; m + 1];
+        let mut g = vec![0.0f64; m + 1];
+        g[0] = beta;
+        let mut cs = vec![0.0f64; m];
+        let mut sn = vec![0.0f64; m];
+        let mut k_used = 0;
+        for k in 0..m {
+            let av = hb_spmv(a, nx, ny, s, &v[k]);
+            let mut w = hb_apply_jacobi(&minv, s, &av);
+            for i in 0..=k {
+                h[i][k] = hb_dot(&w, &v[i]);
+                for t in 0..n {
+                    w[t] -= h[i][k] * v[i][t];
+                }
+            }
+            h[k + 1][k] = hb_norm(&w);
+            if h[k + 1][k] > 1e-14 {
+                v.push(w.iter().map(|&x| x / h[k + 1][k]).collect());
+            } else {
+                v.push(vec![0.0f64; n]);
+            }
+            for i in 0..k {
+                let temp = cs[i] * h[i][k] + sn[i] * h[i + 1][k];
+                h[i + 1][k] = -sn[i] * h[i][k] + cs[i] * h[i + 1][k];
+                h[i][k] = temp;
+            }
+            let denom = (h[k][k] * h[k][k] + h[k + 1][k] * h[k + 1][k]).sqrt();
+            if denom < 1e-300 {
+                k_used = k;
+                break;
+            }
+            cs[k] = h[k][k] / denom;
+            sn[k] = h[k + 1][k] / denom;
+            h[k][k] = cs[k] * h[k][k] + sn[k] * h[k + 1][k];
+            h[k + 1][k] = 0.0;
+            g[k + 1] = -sn[k] * g[k];
+            g[k] = cs[k] * g[k];
+            k_used = k + 1;
+            if g[k + 1].abs() / bnorm <= tol {
+                break;
+            }
+        }
+        let kk = k_used;
+        let mut y = vec![0.0f64; kk];
+        for i in (0..kk).rev() {
+            let mut sum = g[i];
+            for j in (i + 1)..kk {
+                sum -= h[i][j] * y[j];
+            }
+            y[i] = if h[i][i].abs() > 1e-300 { sum / h[i][i] } else { 0.0 };
+        }
+        for i in 0..kk {
+            for t in 0..n {
+                x[t] += y[i] * v[i][t];
+            }
+        }
+        let ax = hb_spmv(a, nx, ny, s, &x);
+        r = (0..n).map(|i| b64[i] - ax[i]).collect();
+        if hb_norm(&r) / bnorm <= tol {
+            return x.iter().map(|&v| v as f32).collect();
+        }
+    }
+    x.iter().map(|&v| v as f32).collect()
 }
 
 const LA_HEADER: &str = r#"
@@ -1065,6 +1511,21 @@ fn spmv(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         yout[p * s + r] = acc;
     }
+}
+"#;
+
+// ---- vscale: dst = a * src -------------------------------------------------
+const LA_VSCALE: &str = r#"
+@group(0) @binding(0) var<uniform> vsdims: Dims;
+@group(0) @binding(1) var<uniform> vssc: Scalar;
+@group(0) @binding(2) var<storage, read> vssrc: array<f32>;
+@group(0) @binding(3) var<storage, read_write> vsdst: array<f32>;
+
+@compute @workgroup_size(64)
+fn vscale(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= vsdims.ndof) { return; }
+    vsdst[i] = vssc.a * vssrc[i];
 }
 "#;
 

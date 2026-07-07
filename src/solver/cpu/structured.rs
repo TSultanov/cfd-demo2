@@ -947,6 +947,43 @@ impl StructuredModelSolver {
             .collect()
     }
 
+    /// Assemble the banded operator once (prep + one flux/gradients/assembly
+    /// sweep against the current state) WITHOUT solving — for GPU parity tests.
+    pub fn assemble_only(&mut self) {
+        let n = self.grid.num_cells();
+        // Match `step()`: the time-step size drives the `ddt` diagonal; the
+        // constructor leaves `constants.dt` at the recipe default until a step.
+        self.constants.dt = self.dt as f32;
+        self.constants.dt_old = self.dt as f32;
+        let cur = self.buffers.f32_vec("state");
+        self.buffers.copy_into_f32("state_old", &cur);
+        self.buffers.copy_into_f32("state_iter", &cur);
+        let ctx = self.build_ctx();
+        let prep = self.prep.clone();
+        for id in &prep {
+            self.run(id, n, &ctx);
+        }
+        let per = self.per_iter.clone();
+        for id in &per {
+            self.run(id, n, &ctx);
+        }
+    }
+
+    /// Read the assembled banded operator (`N*BAND*s*s`).
+    pub fn matrix_values(&self) -> Vec<f32> {
+        self.buffers.f32_vec("matrix_values")
+    }
+
+    /// Read the assembled RHS (`N*s`).
+    pub fn rhs(&self) -> Vec<f32> {
+        self.buffers.f32_vec("rhs")
+    }
+
+    /// Read a named buffer (debug/parity).
+    pub fn read_buffer(&self, name: &str) -> Vec<f32> {
+        self.buffers.f32_vec(name)
+    }
+
     /// Run only the Preparation-phase kernels once (including the structured
     /// expression-BC closure `bc_expr`) against the currently-seeded state — for
     /// tests that assert what `bc_expr` writes into `bc_value` before any solve.

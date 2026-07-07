@@ -249,6 +249,71 @@ fn gpu_structured_momentum_assembly_matches_cpu() {
     println!("[gpu-structured] momentum assembly max|Δmat|={max_m:e} max|Δrhs|={max_r:e}");
 }
 
+/// BC TYPES: exercise the SlipWall (type 4) free-slip boundary on the structured
+/// path (flux + assembly reflect the velocity, removing its normal component) and
+/// confirm GPU == CPU. Together with the lid-cavity (Wall type 3 + MovingWall type
+/// 5) this covers every velocity boundary type structured.
+#[test]
+fn gpu_structured_slipwall_matches_cpu() {
+    let (nx, ny) = (16usize, 16usize);
+    let steps = 12;
+    let model = incompressible_momentum_structured_model().expect("model");
+
+    // Top lid slides (MovingWall 5); the other three walls are SLIP (type 4).
+    let bc = |edge: Edge| {
+        if matches!(edge, Edge::Top) {
+            (
+                5u32,
+                vec![
+                    BcComp { kind: 1, value: 1.0 },
+                    BcComp { kind: 1, value: 0.0 },
+                    BcComp { kind: 2, value: 0.0 },
+                ],
+            )
+        } else {
+            (
+                4u32,
+                vec![
+                    BcComp { kind: 0, value: 0.0 },
+                    BcComp { kind: 0, value: 0.0 },
+                    BcComp { kind: 2, value: 0.0 },
+                ],
+            )
+        }
+    };
+
+    let mut cpu =
+        StructuredModelSolver::new(StructuredGrid::new(nx, ny, 1.0, 1.0), &model, 0.05, 3).unwrap();
+    cpu.set_fluid(1.0, 0.01);
+    cpu.set_boundaries(|e, _x, _y| bc(e));
+    for _ in 0..steps {
+        cpu.step();
+    }
+    let cpu_ux = cpu.state_field(0);
+
+    let mut gpu =
+        StructuredGpuSolver::new(StructuredGrid::new(nx, ny, 1.0, 1.0), &model, 0.05, 3).unwrap();
+    gpu.set_fluid(1.0, 0.01);
+    gpu.set_boundaries(|e, _x, _y| bc(e));
+    for _ in 0..steps {
+        gpu.step();
+    }
+    let gpu_ux = gpu.state_field(0);
+    let gpu_uy = gpu.state_field(1);
+
+    let mut umax = 0.0f64;
+    let mut max_d = 0.0f64;
+    for p in 0..cpu_ux.len() {
+        assert!(gpu_ux[p].is_finite() && gpu_uy[p].is_finite(), "slip GPU diverged");
+        umax = umax.max(gpu_ux[p].hypot(gpu_uy[p]));
+        max_d = max_d.max((cpu_ux[p] - gpu_ux[p]).abs());
+    }
+    assert!(umax > 0.05 && umax < 5.0, "unphysical slip-wall speed {umax}");
+    let side_col_speed: f64 = (0..ny).map(|j| gpu_ux[j * nx + 1].abs()).sum::<f64>() / ny as f64;
+    println!("[gpu-structured] slipwall: umax={umax:.4}, side_col_ux={side_col_speed:.4}, max|Δcpu|={max_d:e}");
+    assert!(max_d < 3e-2, "GPU vs CPU slip-wall mismatch {max_d}");
+}
+
 /// COUPLED: the GPU structured incompressible-momentum lid cavity (block SpMV +
 /// block-Jacobi BiCGStab on the indefinite U–p system, plus the structured
 /// flux/gradients/assembly kernels on the device) must reproduce the CPU

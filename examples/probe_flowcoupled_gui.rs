@@ -645,12 +645,39 @@ mod probe {
             .unwrap_or(false);
         let mut params = gui_params();
         if thermal {
-            params.time_scheme = TimeScheme::Euler;
-            params.requested_dt = 0.005;
-            params.outer_iters = 6;
-            params.compressibility_psi = 1.0e-4;
-            params.viscosity = 1e-2;
-            params.inlet_velocity = 0.4;
+            // PROBE_DIPOLE_GUI=1 reproduces the ACTUAL GUI thermal-obstacle
+            // config (gui_params() verbatim: BDF2, dt 0.02, target_cfl 0.9,
+            // outer 8 auto-converge, inlet 0.011, real Air viscosity) — the
+            // reported divergence config. Otherwise the STABLE gate override
+            // (Euler, dt 5e-3, inlet 0.4) used by the shipped dipole gate.
+            let gui_faithful = std::env::var("PROBE_DIPOLE_GUI")
+                .map(|v| v == "1")
+                .unwrap_or(false);
+            if gui_faithful {
+                // The thermal model needs a positive compressibility; the GUI
+                // derives psi = 1/c^2 from the gas EOS (real Air ~8.3e-6).
+                params.compressibility_psi = std::env::var("PROBE_DIPOLE_PSI")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(8.3e-6);
+                // PROBE_DIPOLE_INLET speeds up the fix-iteration loop: a higher
+                // inlet develops the wake to the outlet in fewer steps (the
+                // divergence is a through-flow-reaches-outlet event). Default
+                // 0.011 (the reported config).
+                if let Some(u) = std::env::var("PROBE_DIPOLE_INLET")
+                    .ok()
+                    .and_then(|s| s.parse::<f32>().ok())
+                {
+                    params.inlet_velocity = u;
+                }
+            } else {
+                params.time_scheme = TimeScheme::Euler;
+                params.requested_dt = 0.005;
+                params.outer_iters = 6;
+                params.compressibility_psi = 1.0e-4;
+                params.viscosity = 1e-2;
+                params.inlet_velocity = 0.4;
+            }
         }
         if let Some(outers) = std::env::var("PROBE_DIPOLE_OUTERS")
             .ok()
@@ -660,6 +687,16 @@ mod probe {
             // exit would cut it before the slow wall modes relax.
             params.outer_iters = outers;
             params.outer_auto_converge = false;
+        }
+        // PROBE_DIPOLE_DTAU enables pseudo-transient continuation (dual-time):
+        // a dtau>0 pseudo-time ddt term that damps the re-excited low-Mach
+        // pseudo-acoustics each step (the standard cure for the transient
+        // preconditioner mismatch).
+        if let Some(dtau) = std::env::var("PROBE_DIPOLE_DTAU")
+            .ok()
+            .and_then(|s| s.parse::<f32>().ok())
+        {
+            params.dtau = dtau;
         }
         let inlet = params.inlet_velocity;
         let mut moving = if thermal {
@@ -695,8 +732,22 @@ mod probe {
         // The user's GUI settings, verbatim.
         moving.set_adaptive_sizing(1);
         moving.set_adaptive_sizing_band(Some((0.001, 0.03)));
-        moving.set_adaptive_budget_factor(5.0);
+        // PROBE_DIPOLE_BUDGET overrides the growth budget (default 5x); the
+        // reported outlet-divergence config uses 8x.
+        let budget = std::env::var("PROBE_DIPOLE_BUDGET")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(5.0);
+        moving.set_adaptive_budget_factor(budget);
         moving.set_smoothing(1, 1, 0.5);
+        // PROBE_DIPOLE_REORDER=N enables periodic cell reordering every N steps
+        // (default off); the reported config uses 20.
+        if let Some(n) = std::env::var("PROBE_DIPOLE_REORDER")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
+            moving.set_reorder_every_n(n);
+        }
         // PROBE_DIPOLE_ADAPTIVE_DT=cfl enables the driver-side flow-CFL dt
         // (the shipped GUI default on the moving path). The transfer-noise
         // pressure response scales ~ rho*du*h/dt = interp-error/CFL — at the
@@ -765,6 +816,54 @@ mod probe {
                 println!("[dipole-watch] step {step}: FROZE ({freeze_mode})");
             }
             let (outcome, stats) = moving.step(false).expect("step");
+            // OUTLET-DIVERGENCE DIAGNOSTIC: track T / rho / |U| / p extremes
+            // (and their locations) BEFORE the divergence assert so the
+            // proximate cause (T->0 => rho spike, sub-vacuum p, or |U| blow-up)
+            // is visible. Print each step once the flow is stressed, and a full
+            // dump on the diverging step. `T`/`rho` offsets exist only for the
+            // thermal model.
+            {
+                let st = pollster::block_on(moving.driver().solver().read_state_f32());
+                let m = moving.mesh();
+                let nn = m.num_cells();
+                let t_off = layout.offset_for("T").map(|o| o as usize);
+                let rho_off = layout.offset_for("rho").map(|o| o as usize);
+                let u_off = layout.offset_for("U").expect("U") as usize;
+                let mut tmin = (f64::INFINITY, 0usize);
+                let mut rhomax = (0.0f64, 0usize);
+                let mut umax = (0.0f64, 0usize);
+                let mut pmin = (f64::INFINITY, 0usize);
+                for c in 0..nn {
+                    if let Some(to) = t_off {
+                        let t = st[c * stride + to] as f64;
+                        if t < tmin.0 { tmin = (t, c); }
+                    }
+                    if let Some(ro) = rho_off {
+                        let r = st[c * stride + ro] as f64;
+                        if r > rhomax.0 { rhomax = (r, c); }
+                    }
+                    let uu = (st[c * stride + u_off] as f64).hypot(st[c * stride + u_off + 1] as f64);
+                    if uu > umax.0 { umax = (uu, c); }
+                    let pp = st[c * stride + p_off] as f64;
+                    if pp < pmin.0 { pmin = (pp, c); }
+                }
+                let loc = |c: usize| (m.cell_cx[c], m.cell_cy[c], m.cell_vol[c]);
+                let diverged = outcome.diverged.is_some()
+                    || !umax.0.is_finite()
+                    || umax.0 > 100.0 * inlet as f64;
+                if diverged || step % 50 == 0 {
+                    let (tx, ty, tv) = loc(tmin.1);
+                    let (rx, ry, rv) = loc(rhomax.1);
+                    let (ux, uy, uv) = loc(umax.1);
+                    let (px, py, pv) = loc(pmin.1);
+                    println!(
+                        "[diag] step {step} {}| Tmin={:.4e}@({:.3},{:.3},vol={:.2e}) rhomax={:.4e}@({:.3},{:.3},vol={:.2e}) |U|max={:.4e}@({:.3},{:.3},vol={:.2e}) pmin={:.4e}@({:.3},{:.3},vol={:.2e}) cells={} born={} killed={} recyc={} dt={:.3e}",
+                        if diverged { "DIVERGING " } else { "" },
+                        tmin.0, tx, ty, tv, rhomax.0, rx, ry, rv, umax.0, ux, uy, uv,
+                        pmin.0, px, py, pv, nn, stats.cells_born, stats.cells_killed, stats.recycled, stats.dt,
+                    );
+                }
+            }
             assert!(
                 outcome.diverged.is_none(),
                 "[dipole-watch] diverged at step {step}"
@@ -1020,12 +1119,16 @@ mod probe {
                     }
                 }
             }
-            render_voronoi_field(
-                mesh,
-                &p_of,
-                (ocx, ocy, orad),
-                &out_dir.join(format!("p{step:04}.png")),
-            );
+            // PROBE_DIPOLE_NORENDER=1 skips the per-step PNG (long divergence
+            // hunts): the [diag]/[osc-frame] telemetry is enough to localize.
+            if std::env::var("PROBE_DIPOLE_NORENDER").map(|v| v != "1").unwrap_or(true) {
+                render_voronoi_field(
+                    mesh,
+                    &p_of,
+                    (ocx, ocy, orad),
+                    &out_dir.join(format!("p{step:04}.png")),
+                );
+            }
             if step % 50 == 0 || dip > 1.5 {
                 println!(
                     "[dipole-watch] step {step:4}: {} cells, dip {dip:.3} ambient {ambient_dip:.3} \

@@ -69,6 +69,19 @@ pub struct DriverBuild {
 /// `k * target_cfl ~ O(1)` instead of the unpreconditioned `c * dt / h ~ 667`.
 const ALLMACH_PRECOND_MACH_K: f64 = 2.0;
 
+/// Default minimum preconditioner reference velocity (see [`allmach_psi_precond`]).
+/// `0.0` = the original unfloored behaviour. `0.2` lifts the pseudo-sound of
+/// pathologically-slow near-incompressible inlets: at inlet 0.011 it raises
+/// `beta = k·U_ref` from 0.022 to `k·0.2 = 0.4`, so the low-Mach pressure mode
+/// convects out of an LX≈3 domain in ~8 flow-times (~230 steps) instead of
+/// standing at the outlet and being re-excited every adaptation step — the
+/// compressible-ALE outlet divergence. It is FAR below any real-flow reference
+/// the shipping cases use (supersonic nozzle U_ref≈313, standard obstacle 0.4),
+/// so those are bit-identical; only inlets below 0.2 are lifted. `psi_precond`
+/// is a TRANSIENT (ddt-only) term, so steady/MMS results are unchanged.
+/// Overridable via `ALLMACH_PRECOND_UREF_MIN`.
+const ALLMACH_PRECOND_UREF_MIN_DEFAULT: f64 = 0.2;
+
 /// Absolute-pressure floor for the all-Mach EOS (Pascals, gauge-referenced as
 /// `P_abs = P_REF + p`). The barotropic density is `rho = psi * P_abs`, so a transient
 /// gauge-pressure undershoot below `-P_REF` would drive `P_abs < 0` and `rho <= 0`,
@@ -99,7 +112,21 @@ fn allmach_psi_precond(u: &[(f64, f64)], real_psi: f64, u_ref: f64) -> Vec<f64> 
     if real_psi <= 0.0 {
         return vec![0.0; u.len()];
     }
-    let conv_floor2 = (ALLMACH_PRECOND_MACH_K * u_ref.abs()).powi(2);
+    // Floor the preconditioner reference velocity. The pseudo-sound speed is
+    // `beta = k*U_ref`; at a very SLOW inlet (near-incompressible, e.g. Air at
+    // inlet 0.011 -> beta 0.022) beta is barely above the flow, so the low-Mach
+    // pseudo-acoustics convect out at only `beta - |U|` and a standing pressure
+    // mode grows at the fixed Dirichlet-p outlet once the developed wake reaches
+    // it under moving-mesh adaptation (the compressible-ALE outlet divergence).
+    // A reference-velocity floor keeps beta fast enough to convect the mode out
+    // WITHOUT adding numerical dissipation (unlike a pseudo-transient dtau, which
+    // over-damps the wake). It is far below any real-flow reference used by the
+    // shipping cases (supersonic nozzle U_ref~313, standard obstacle 0.4), so
+    // those are unaffected; it only lifts the pathologically-slow near-zero
+    // inlet. Env-tunable for validation; `0` = the original (unfloored) behaviour.
+    let uref_min = allmach_precond_uref_min();
+    let u_ref_eff = u_ref.abs().max(uref_min);
+    let conv_floor2 = (ALLMACH_PRECOND_MACH_K * u_ref_eff).powi(2);
     u.iter()
         .map(|&(vx, vy)| {
             // 1e-12 only guards beta->0 in the degenerate closed-box (U_ref=0, |U|=0) case;
@@ -108,6 +135,19 @@ fn allmach_psi_precond(u: &[(f64, f64)], real_psi: f64, u_ref: f64) -> Vec<f64> 
             real_psi.max(1.0 / beta2)
         })
         .collect()
+}
+
+/// Minimum preconditioner reference velocity (see [`allmach_psi_precond`]),
+/// overridable via `ALLMACH_PRECOND_UREF_MIN` for validation. Read once.
+fn allmach_precond_uref_min() -> f64 {
+    static V: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("ALLMACH_PRECOND_UREF_MIN")
+            .ok()
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .unwrap_or(ALLMACH_PRECOND_UREF_MIN_DEFAULT)
+    })
 }
 
 /// Construct a CPU-backend [`UnifiedSolver`] regardless of `CFD2_BACKEND`.

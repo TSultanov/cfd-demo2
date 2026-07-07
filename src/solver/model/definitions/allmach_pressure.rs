@@ -691,9 +691,24 @@ fn allmach_pressure_model_impl(
             ),
     );
     if thermal {
-        // T defaults: Inlet/Outlet/MovingWall isothermal (Dirichlet, values set
+        // T defaults: Inlet/MovingWall isothermal (Dirichlet, values set
         // per-face by the seeder/MMS), Wall/SlipWall adiabatic (zero-gradient).
+        //
+        // OUTLET: ZeroGradient (convective outflow) for the PRODUCTION model —
+        // a Dirichlet(t_ref) over-specifies an outflow face: it hard-clamps the
+        // exit temperature and reflects any thermal/pressure disturbance the
+        // developed flow carries into the outlet, feeding the moving-mesh
+        // outlet-corner instability (the gas must be free to convect its state
+        // out, exactly as the supersonic-nozzle path already does). The MMS
+        // variant KEEPS the Dirichlet outlet: its manufactured solution pins T
+        // at every boundary via per-face Dirichlet values, and a ZeroGradient
+        // outlet would drop those and break the steady order test.
         let t_ref = ALLMACH_T_REF;
+        let outlet_t = if with_mms_source {
+            BoundaryCondition::dirichlet_dim::<Temperature>(t_ref)
+        } else {
+            BoundaryCondition::zero_gradient_dim::<DivDim<Temperature, Length>>()
+        };
         boundaries.set_field(
             ALLMACH_TEMPERATURE_FIELD,
             FieldBoundarySpec::new()
@@ -702,11 +717,7 @@ fn allmach_pressure_model_impl(
                     1,
                     BoundaryCondition::dirichlet_dim::<Temperature>(t_ref),
                 )
-                .set_uniform(
-                    GpuBoundaryType::Outlet,
-                    1,
-                    BoundaryCondition::dirichlet_dim::<Temperature>(t_ref),
-                )
+                .set_uniform(GpuBoundaryType::Outlet, 1, outlet_t)
                 .set_uniform(
                     GpuBoundaryType::Wall,
                     1,

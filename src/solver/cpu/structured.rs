@@ -471,24 +471,24 @@ impl<'a> BandedBlockOperator<'a> {
     }
 
     /// Per-cell block-Jacobi preconditioner: the inverse of each cell's diagonal
-    /// `s x s` block. Returns a flat `[N/s][s*s]` array of inverted blocks.
-    fn block_jacobi_inverses(&self) -> Vec<[f64; 9]> {
+    /// `s x s` block, stored as a flat `s*s` slice per cell (any block size).
+    fn block_jacobi_inverses(&self) -> Vec<Vec<f64>> {
         let ncells = self.nx * self.ny;
         let s = self.s;
-        let mut inv = vec![[0.0f64; 9]; ncells];
+        let mut inv = vec![Vec::new(); ncells];
         for p in 0..ncells {
-            let mut m = [0.0f64; 9];
+            let mut m = vec![0.0f64; s * s];
             for r in 0..s {
                 for c in 0..s {
                     m[r * s + c] = self.block(p, BAND_DIAG, r, c);
                 }
             }
-            inv[p] = invert_small(&m, s);
+            inv[p] = invert_block(&m, s);
         }
         inv
     }
 
-    fn apply_block_jacobi(&self, minv: &[[f64; 9]], r: &[f64]) -> Vec<f64> {
+    fn apply_block_jacobi(&self, minv: &[Vec<f64>], r: &[f64]) -> Vec<f64> {
         let s = self.s;
         let ncells = self.nx * self.ny;
         let mut z = vec![0.0f64; self.n()];
@@ -505,49 +505,63 @@ impl<'a> BandedBlockOperator<'a> {
     }
 }
 
-/// Invert an `s x s` (s ≤ 3) matrix stored row-major in the first `s*s` slots;
-/// falls back to the pseudo-diagonal when singular (keeps the preconditioner
-/// well-defined for saddle rows with a weak pressure block).
-fn invert_small(m: &[f64; 9], s: usize) -> [f64; 9] {
-    let mut out = [0.0f64; 9];
-    match s {
-        1 => {
-            out[0] = if m[0].abs() > 1e-30 { 1.0 / m[0] } else { 0.0 };
+/// Invert a general `s x s` matrix (row-major) via Gauss–Jordan with partial
+/// pivoting; falls back to the (pseudo-)diagonal inverse for singular blocks so
+/// the preconditioner stays well-defined on weak saddle rows.
+fn invert_block(m: &[f64], s: usize) -> Vec<f64> {
+    // Augmented [m | I].
+    let mut a = vec![0.0f64; s * 2 * s];
+    for r in 0..s {
+        for c in 0..s {
+            a[r * 2 * s + c] = m[r * s + c];
         }
-        2 => {
-            let det = m[0] * m[3] - m[1] * m[2];
-            if det.abs() > 1e-30 {
-                let id = 1.0 / det;
-                out[0] = m[3] * id;
-                out[1] = -m[1] * id;
-                out[2] = -m[2] * id;
-                out[3] = m[0] * id;
-            } else {
-                for k in 0..s {
-                    out[k * s + k] = if m[k * s + k].abs() > 1e-30 { 1.0 / m[k * s + k] } else { 0.0 };
+        a[r * 2 * s + s + r] = 1.0;
+    }
+    for col in 0..s {
+        // Partial pivot.
+        let mut piv = col;
+        let mut best = a[col * 2 * s + col].abs();
+        for r in (col + 1)..s {
+            let v = a[r * 2 * s + col].abs();
+            if v > best {
+                best = v;
+                piv = r;
+            }
+        }
+        if best < 1e-30 {
+            // Singular: diagonal fallback.
+            let mut out = vec![0.0f64; s * s];
+            for k in 0..s {
+                let d = m[k * s + k];
+                out[k * s + k] = if d.abs() > 1e-30 { 1.0 / d } else { 0.0 };
+            }
+            return out;
+        }
+        if piv != col {
+            for c in 0..(2 * s) {
+                a.swap(col * 2 * s + c, piv * 2 * s + c);
+            }
+        }
+        let d = a[col * 2 * s + col];
+        for c in 0..(2 * s) {
+            a[col * 2 * s + c] /= d;
+        }
+        for r in 0..s {
+            if r == col {
+                continue;
+            }
+            let f = a[r * 2 * s + col];
+            if f != 0.0 {
+                for c in 0..(2 * s) {
+                    a[r * 2 * s + c] -= f * a[col * 2 * s + c];
                 }
             }
         }
-        _ => {
-            // 3x3 cofactor inverse.
-            let det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6])
-                + m[2] * (m[3] * m[7] - m[4] * m[6]);
-            if det.abs() > 1e-30 {
-                let id = 1.0 / det;
-                out[0] = (m[4] * m[8] - m[5] * m[7]) * id;
-                out[1] = (m[2] * m[7] - m[1] * m[8]) * id;
-                out[2] = (m[1] * m[5] - m[2] * m[4]) * id;
-                out[3] = (m[5] * m[6] - m[3] * m[8]) * id;
-                out[4] = (m[0] * m[8] - m[2] * m[6]) * id;
-                out[5] = (m[2] * m[3] - m[0] * m[5]) * id;
-                out[6] = (m[3] * m[7] - m[4] * m[6]) * id;
-                out[7] = (m[1] * m[6] - m[0] * m[7]) * id;
-                out[8] = (m[0] * m[4] - m[1] * m[3]) * id;
-            } else {
-                for k in 0..3 {
-                    out[k * 3 + k] = if m[k * 3 + k].abs() > 1e-30 { 1.0 / m[k * 3 + k] } else { 0.0 };
-                }
-            }
+    }
+    let mut out = vec![0.0f64; s * s];
+    for r in 0..s {
+        for c in 0..s {
+            out[r * s + c] = a[r * 2 * s + s + c];
         }
     }
     out
@@ -690,6 +704,7 @@ pub struct StructuredModelSolver {
     grid: StructuredGrid,
     s: usize,            // coupled unknowns per cell (banded block stride)
     state_stride: usize, // full state layout stride
+    layout: crate::solver::model::backend::state_layout::StateLayout,
     prep: Vec<String>,
     per_iter: Vec<String>,
     update: Vec<String>,
@@ -797,6 +812,7 @@ impl StructuredModelSolver {
             grid,
             s,
             state_stride,
+            layout: model.state_layout.clone(),
             prep,
             per_iter,
             update,
@@ -954,6 +970,22 @@ impl StructuredModelSolver {
     pub fn set_fluid(&mut self, density: f64, viscosity: f64) {
         self.constants.density = density as f32;
         self.constants.viscosity = viscosity as f32;
+    }
+
+    /// Seed a named state field from a closure of the cell-centre coords (writes
+    /// all history buffers — IC semantics). Panics if the field is absent.
+    pub fn set_named_field<F: Fn(f64, f64) -> f64>(&mut self, name: &str, f: F) {
+        let off = self
+            .layout
+            .offset_for(name)
+            .unwrap_or_else(|| panic!("structured solver: no state field `{name}`"))
+            as usize;
+        self.set_state(off, f);
+    }
+
+    /// The state-layout offset of a named field, if present.
+    pub fn field_offset(&self, name: &str) -> Option<usize> {
+        self.layout.offset_for(name).map(|o| o as usize)
     }
 
     /// Number of coupled unknowns per cell (the banded block stride).
@@ -1256,6 +1288,68 @@ mod tests {
             top_row_mean_ux > 0.1,
             "near-lid x-velocity did not develop ({top_row_mean_ux})"
         );
+    }
+
+    /// End-to-end smoke of the ALL-MACH THERMAL structured pipeline: the
+    /// pressure-based compressible solver (momentum + continuity + temperature,
+    /// on-device EOS density recovery `rho = rho_t_ref/T + psi*p`) runs its full
+    /// structured, indirection-free kernel schedule on the dense grid and stays
+    /// bounded, with the lid-driven flow developing. Proves all-Mach thermal
+    /// SOLVES structured on CPU.
+    #[test]
+    fn structured_allmach_thermal_lid_cavity_runs() {
+        use crate::solver::model::allmach_thermal_structured_model;
+        let (nx, ny) = (20, 20);
+        let grid = StructuredGrid::new(nx, ny, 1.0, 1.0);
+        let model = allmach_thermal_structured_model().unwrap();
+        let s = model.system.unknowns_per_cell() as usize; // Ux, Uy, p, T
+        let mut solver = StructuredModelSolver::new(grid, &model, 0.02, 3).unwrap();
+        solver.set_fluid(1.0, 0.02);
+        // All-Mach extra state seeds (mirror driver.rs): low-Mach compressibility,
+        // reference density/temperature for the on-device EOS recovery.
+        let psi = 0.5;
+        solver.set_named_field("psi", |_, _| psi);
+        solver.set_named_field("psi_precond", |_, _| psi.max(1.0));
+        solver.set_named_field("rho", |_, _| 1.0);
+        solver.set_named_field("rho_t_ref", |_, _| 1.0); // density * T_ref (T_ref = 1)
+        solver.set_named_field("T", |_, _| 1.0);
+        if solver.field_offset("t_ref").is_some() {
+            solver.set_named_field("t_ref", |_, _| 1.0);
+        }
+        if solver.field_offset("rho_floor").is_some() {
+            solver.set_named_field("rho_floor", |_, _| psi * 1.0e-5);
+        }
+        // Lid cavity BCs (Ux, Uy, p, T): moving top lid, no-slip walls, p & T
+        // zero-gradient (adiabatic).
+        solver.set_boundaries(move |edge, _x, _y| {
+            let u_wall = if matches!(edge, Edge::Top) { 1.0 } else { 0.0 };
+            let mut v = vec![
+                BcComp { kind: 1, value: u_wall },
+                BcComp { kind: 1, value: 0.0 },
+                BcComp { kind: 2, value: 0.0 },
+            ];
+            if s >= 4 {
+                v.push(BcComp { kind: 2, value: 0.0 }); // T Neumann 0
+            }
+            v
+        });
+
+        for _ in 0..30 {
+            solver.step();
+        }
+        let ux = solver.state_field(0);
+        let temp_off = solver.field_offset("T").unwrap();
+        let t = solver.state_field(temp_off);
+        let mut umax = 0.0f64;
+        for (&a, &ti) in ux.iter().zip(&t) {
+            assert!(a.is_finite() && ti.is_finite(), "all-Mach state diverged");
+            umax = umax.max(a.abs());
+        }
+        assert!(umax > 0.05 && umax < 5.0, "unphysical all-Mach lid speed {umax}");
+        // Temperature stays near the reference (adiabatic, low-Mach): bounded.
+        for &ti in &t {
+            assert!(ti > 0.5 && ti < 2.0, "all-Mach temperature out of band: {ti}");
+        }
     }
 
     /// Not an assertion — prints an ASCII heat map of the structured IBM solve so

@@ -818,6 +818,45 @@ pub fn generate_structured_nozzle_mesh(
     exit_height: f64,
     boundaries: BoundarySides,
 ) -> Mesh {
+    nozzle_mesh_impl(
+        nx, ny, length, height, throat_height, throat_frac, exit_height, false, boundaries,
+    )
+}
+
+/// SYMMETRIC converging–diverging nozzle: the same `nozzle_height` area profile,
+/// but CENTERED on the channel mid-line so BOTH walls curve symmetrically — the top
+/// at `(height + h)/2`, the bottom at `(height - h)/2`. This is the iconic CD-nozzle
+/// shape (a symmetric bell), and it yields a clean, symmetric core jet with no
+/// asymmetric flat-bottom boundary layer — the geometry used by the GUI supersonic
+/// demo. Area ratio and throat location are identical to the flat-bottom variant.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_structured_symmetric_nozzle_mesh(
+    nx: usize,
+    ny: usize,
+    length: f64,
+    height: f64,
+    throat_height: f64,
+    throat_frac: f64,
+    exit_height: f64,
+    boundaries: BoundarySides,
+) -> Mesh {
+    nozzle_mesh_impl(
+        nx, ny, length, height, throat_height, throat_frac, exit_height, true, boundaries,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn nozzle_mesh_impl(
+    nx: usize,
+    ny: usize,
+    length: f64,
+    height: f64,
+    throat_height: f64,
+    throat_frac: f64,
+    exit_height: f64,
+    symmetric: bool,
+    boundaries: BoundarySides,
+) -> Mesh {
     assert!(nx > 0 && ny > 0);
     assert!(length > 0.0 && height > 0.0);
     assert!(throat_height > 0.0 && throat_height <= height);
@@ -835,9 +874,12 @@ pub fn generate_structured_nozzle_mesh(
             let xi = i as f64 / nx as f64;
             let x = xi * length;
             let h = nozzle_height(xi, height, throat_height, throat_frac, exit_height);
+            // Symmetric: center the channel on the mid-line so both walls curve.
+            // Flat-bottom: bottom at y=0, only the top wall is shaped.
+            let y0 = if symmetric { 0.5 * (height - h) } else { 0.0 };
             let v = vid(i, j);
             vx[v] = x;
-            vy[v] = eta * h;
+            vy[v] = y0 + eta * h;
         }
     }
 

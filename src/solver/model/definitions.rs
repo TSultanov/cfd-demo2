@@ -661,6 +661,7 @@ pub use allmach_pressure::{
     allmach_pressure_model, allmach_pressure_system, allmach_thermal_ale_mms_model,
     allmach_thermal_ale_model, allmach_thermal_compressible_mms_ale_model,
     allmach_thermal_compressible_mms_model, allmach_thermal_mms_model, allmach_thermal_model,
+    allmach_thermal_structured_model,
     apply_pressure_inlet_nozzle_bcs,
     AllMachPressureFields, ALLMACH_GAMMA, ALLMACH_K_OVER_CP,
     ALLMACH_MMS_SOURCE_P_FIELD, ALLMACH_MMS_SOURCE_T_FIELD, ALLMACH_MMS_SOURCE_U_FIELD,
@@ -717,6 +718,7 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
         generic_diffusion_demo_structured_mms_model()?,
         generic_diffusion_demo_structured_ibm_model()?,
         incompressible_momentum_structured_model()?,
+        allmach_thermal_structured_model()?,
         scalar_transport_model()?,
         scalar_transport_sou_model()?,
     ])

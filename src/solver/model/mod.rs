@@ -37,6 +37,7 @@ pub use definitions::{
     allmach_pressure_model, allmach_pressure_system, allmach_thermal_ale_mms_model,
     allmach_thermal_ale_model, allmach_thermal_compressible_mms_ale_model,
     allmach_thermal_compressible_mms_model, allmach_thermal_mms_model, allmach_thermal_model,
+    allmach_thermal_structured_model,
     apply_pressure_inlet_nozzle_bcs,
     BcValue, BoundaryCondition, BoundarySpec, CompressibleFields, FieldBoundarySpec,
     GenericCoupledFields,

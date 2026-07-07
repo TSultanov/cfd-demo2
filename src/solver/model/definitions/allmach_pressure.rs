@@ -618,12 +618,43 @@ fn allmach_pressure_model_impl(
     thermal: bool,
     ale: bool,
 ) -> Result<ModelSpec, String> {
+    allmach_pressure_model_impl_topo(
+        with_mms_source,
+        compressible_mms,
+        thermal,
+        ale,
+        cfd2_ir::equation::TopologyMode::Unstructured,
+    )
+}
+
+/// STRUCTURED (`TopologyMode::Structured2D`) all-Mach THERMAL model: the same
+/// barotropic + thermal pressure-based compressible physics on the dense
+/// Cartesian grid (indirection-free operator, Rhie–Chow flux and on-device EOS
+/// recovery).
+pub fn allmach_thermal_structured_model() -> Result<ModelSpec, String> {
+    allmach_pressure_model_impl_topo(
+        false,
+        false,
+        true,
+        false,
+        cfd2_ir::equation::TopologyMode::Structured2D,
+    )
+}
+
+fn allmach_pressure_model_impl_topo(
+    with_mms_source: bool,
+    compressible_mms: bool,
+    thermal: bool,
+    ale: bool,
+    topology: cfd2_ir::equation::TopologyMode,
+) -> Result<ModelSpec, String> {
     // See `build_allmach_system`: `strip_all` strips the compressible physics for the
     // BAROTROPIC mms only; the COMPRESSIBLE mms keeps the full production physics
     // (real-EOS recovery, layout fields, Rhie–Chow) and just adds manufactured sources.
     let strip_all = with_mms_source && !compressible_mms;
     let fields = AllMachPressureFields::new();
-    let system = build_allmach_system(&fields, with_mms_source, compressible_mms, thermal, ale);
+    let mut system = build_allmach_system(&fields, with_mms_source, compressible_mms, thermal, ale);
+    system.set_topology(topology);
 
     // Keep U,p,d_p,grad_p,grad_p_old at the same offsets as incompressible
     // (0,2,3,4,6); append psi (and any MMS sources) after. Offsets are load-bearing.
@@ -1008,21 +1039,26 @@ fn allmach_pressure_model_impl(
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
     Ok(ModelSpec {
-        id: match (thermal, with_mms_source, compressible_mms, ale) {
+        id: match (thermal, with_mms_source, compressible_mms, ale, topology) {
+            // STRUCTURED all-Mach thermal (dense Cartesian). Must precede the
+            // unstructured `allmach_thermal` wildcard below.
+            (true, false, false, false, cfd2_ir::equation::TopologyMode::Structured2D) => {
+                "allmach_thermal_structured"
+            }
             // Compressible thermal MMS (kept-physics + manufactured sources).
-            (true, true, true, false) => "allmach_thermal_compressible_mms",
-            (true, true, true, true) => "allmach_thermal_compressible_mms_ale",
+            (true, true, true, false, _) => "allmach_thermal_compressible_mms",
+            (true, true, true, true, _) => "allmach_thermal_compressible_mms_ale",
             // Barotropic mms + production (compressible_mms = false).
-            (true, true, false, false) => "allmach_thermal_mms",
-            (true, false, false, false) => "allmach_thermal",
-            (false, true, false, false) => "allmach_pressure_mms",
-            (false, false, false, false) => "allmach_pressure",
-            (true, true, false, true) => "allmach_thermal_ale_mms",
-            (true, false, false, true) => "allmach_thermal_ale",
-            (false, true, false, true) => "allmach_pressure_ale_mms",
-            (false, false, false, true) => "allmach_pressure_ale",
+            (true, true, false, false, _) => "allmach_thermal_mms",
+            (true, false, false, false, _) => "allmach_thermal",
+            (false, true, false, false, _) => "allmach_pressure_mms",
+            (false, false, false, false, _) => "allmach_pressure",
+            (true, true, false, true, _) => "allmach_thermal_ale_mms",
+            (true, false, false, true, _) => "allmach_thermal_ale",
+            (false, true, false, true, _) => "allmach_pressure_ale_mms",
+            (false, false, false, true, _) => "allmach_pressure_ale",
             // compressible_mms only valid on the thermal mms path.
-            (_, _, true, _) => {
+            (_, _, true, _, _) => {
                 return Err(
                     "compressible_mms requires thermal=true and with_mms_source=true".into(),
                 )

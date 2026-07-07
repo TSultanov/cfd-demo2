@@ -102,6 +102,18 @@ pub const ALLMACH_U_DOT_GRAD_P_FIELD: &str = "u_dot_grad_p";
 /// recoveries unit-clean (a Temperature factor the resolver can track).
 pub const ALLMACH_T_REF_FIELD: &str = "t_ref";
 
+/// Reference compressibility `psi_ref = 1/(gamma*R*T_ref) = 1/c_ref^2` (unit
+/// Compressibility), seeded by the driver to `params.compressibility_psi`. This is
+/// the CONSTANT reference value the ideal-gas EOS coefficients read: the density
+/// recovery `rho = rho_t_ref/T + gamma*psi_ref*t_ref*p/T` (= `p/(R*T)`), the
+/// thermal-expansion `rho_dT`, and the compression-heating `1/cp =
+/// (gamma-1)*T_ref*psi_ref`. It is DECOUPLED from the `psi` field, which carries the
+/// LOCAL `1/c^2(T)` consumed by the low-Mach preconditioner and the Mach diagnostics
+/// (see the `psi = psi_ref*t_ref/T` recovery). At the reference temperature
+/// `T = T_ref` the two coincide (`psi == psi_ref`), so a model seeded with a uniform
+/// `psi = psi_ref` is byte-unchanged. Thermal production variant only.
+pub const ALLMACH_PSI_REF_FIELD: &str = "psi_ref";
+
 /// Reference temperature of the thermal EOS linearization. The canonical value
 /// the MMS manufactured solution and the GUI default are derived from; seeders
 /// set `rho_t_ref = density * ALLMACH_T_REF`.
@@ -360,8 +372,10 @@ fn build_allmach_system(
             // (T1) dp/dt half: implicit T<-p cross-ddt, coefficient -inv_cp.
             let inv_cp_const: TypedCoeff<Temperature> =
                 TypedCoeff::constant(-(ALLMACH_GAMMA - 1.0) * ALLMACH_T_REF);
+            // 1/cp = (gamma-1)*T_ref*psi_ref uses the REFERENCE compressibility so cp
+            // stays constant (an ideal gas) as `psi` becomes the local 1/c^2.
             let inv_cp = inv_cp_const.multiply(TypedCoeff::from_field(
-                TypedFieldRef::<Compressibility, Scalar>::new("psi"),
+                TypedFieldRef::<Compressibility, Scalar>::new(ALLMACH_PSI_REF_FIELD),
             ));
             let comp_ddt = typed_fvm::ddt_coeff(inv_cp, p_typed);
             t_sum = t_sum + comp_ddt.cast_to::<TEquationUnit>();
@@ -382,13 +396,35 @@ fn build_allmach_system(
                 TypedCoeff::constant((ALLMACH_GAMMA - 1.0) * ALLMACH_T_REF);
             let comp_adv_coeff = inv_cp_src
                 .multiply(TypedCoeff::from_field(
-                    TypedFieldRef::<Compressibility, Scalar>::new("psi"),
+                    TypedFieldRef::<Compressibility, Scalar>::new(ALLMACH_PSI_REF_FIELD),
                 ))
                 .multiply(TypedCoeff::from_field(
                     TypedFieldRef::<PressureRateUnit, Scalar>::new(ALLMACH_U_DOT_GRAD_P_FIELD),
                 ));
             t_sum =
                 t_sum + typed_fvc::source_coeff(comp_adv_coeff, t_typed).cast_to::<TEquationUnit>();
+
+            // Viscous dissipation Phi = tau:grad(U): the deviatoric strain-rate
+            // contraction that heats the gas under shear (always >= 0, so it can
+            // only raise T). Declared on the energy row reading U's gradient tensor
+            // from grad_state (the same buffer the momentum dev2 term consumes).
+            // Coefficient = 1/cp * mu = (gamma-1)*T_ref*psi_ref * mu folds in the
+            // constant 1/cp (reference psi, matching the compression-heating terms);
+            // the codegen supplies Phi_grad = 2[(du/dx)^2 + (dv/dy)^2 +
+            // 0.5(du/dy+dv/dx)^2 - (1/3)(div U)^2] (unit Velocity^2/Length^2), so the
+            // term integrates to TEquationUnit. STEADY-active (nonzero at steady
+            // state), unlike the transient compression/thermal-expansion terms.
+            let visc_diss_coeff =
+                TypedCoeff::<Temperature>::constant((ALLMACH_GAMMA - 1.0) * ALLMACH_T_REF)
+                    .multiply(TypedCoeff::from_field(
+                        TypedFieldRef::<Compressibility, Scalar>::new(ALLMACH_PSI_REF_FIELD),
+                    ))
+                    .multiply(TypedCoeff::from_field(
+                        TypedFieldRef::<DynamicViscosity, Scalar>::new("mu"),
+                    ));
+            t_sum = t_sum
+                + typed_fvc::viscous_dissipation(visc_diss_coeff, u_typed)
+                    .cast_to::<TEquationUnit>();
         }
 
         if with_mms_source {
@@ -563,6 +599,12 @@ fn allmach_pressure_model_impl(
             // continuity stiffens correctly — the coupling the constant-psi model lacked.
             // `t_ref` is the Temperature factor that keeps that recovery unit-clean.
             layout_fields.push(vol_scalar_dim::<Temperature>(ALLMACH_T_REF_FIELD));
+            // Reference compressibility (= 1/c_ref^2), seeded by the driver. The
+            // ideal-gas EOS coefficients (rho recovery, rho_dT, 1/cp compression
+            // heating) read THIS constant, decoupling them from the `psi` field that
+            // carries the LOCAL 1/c^2(T). Appended last so every prior field's offset
+            // is unchanged (offsets are load-bearing).
+            layout_fields.push(vol_scalar_dim::<Compressibility>(ALLMACH_PSI_REF_FIELD));
         }
     }
     if with_mms_source {
@@ -763,8 +805,11 @@ fn allmach_pressure_model_impl(
         let p_compr = if with_mms_source {
             Expr::ident("psi") * Expr::ident("p")
         } else {
+            // Uses the REFERENCE compressibility (constant), not the local `psi`:
+            // gamma*psi_ref*t_ref/T = 1/(R*T) is the isothermal d(rho)/d(p)|_T, so the
+            // recovery stays a consistent ideal gas rho = p/(R*T) as `psi` goes local.
             Expr::lit_f32(ALLMACH_GAMMA as f32)
-                * Expr::ident("psi")
+                * Expr::ident(ALLMACH_PSI_REF_FIELD)
                 * Expr::ident(ALLMACH_T_REF_FIELD)
                 * Expr::ident("p")
                 / Expr::ident(ALLMACH_TEMPERATURE_FIELD)
@@ -785,7 +830,7 @@ fn allmach_pressure_model_impl(
         if !with_mms_source {
             let rho_numer = Expr::ident(ALLMACH_RHO_T_REF_FIELD)
                 + Expr::lit_f32(ALLMACH_GAMMA as f32)
-                    * Expr::ident("psi")
+                    * Expr::ident(ALLMACH_PSI_REF_FIELD)
                     * Expr::ident(ALLMACH_T_REF_FIELD)
                     * Expr::ident("p");
             derivations.insert(

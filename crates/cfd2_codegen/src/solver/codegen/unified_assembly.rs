@@ -422,6 +422,71 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 
             let field_name = source_op.field.name();
             let field_offset_opt = offsets.get(field_name).copied();
+
+            // Viscous-dissipation energy source Phi = tau:grad(U). Read the owner
+            // cell's velocity-gradient tensor from grad_state (STATE-OFFSET keyed,
+            // like the dev2 term) and add `coeff * Phi_grad * V` to the (scalar)
+            // energy row, where
+            //   Phi_grad = 2[(du/dx)^2 + (dv/dy)^2 + 0.5(du/dy+dv/dx)^2 - (1/3)(divU)^2]
+            // (>= 0, so it always heats). Handled before the generic source paths.
+            if source_op.viscous_dissipation {
+                if source_op.field.kind() != FieldKind::Vector2 {
+                    panic!(
+                        "viscous_dissipation requires a Vector2 velocity field (field={field_name})"
+                    );
+                }
+                // grad_state is keyed by the velocity's STATE base offset (slots),
+                // NOT the coupled-rank `offsets` map (rank-vs-offset bug class).
+                let vel_offset = slots
+                    .slots
+                    .iter()
+                    .find(|s| s.name == field_name)
+                    .map(|s| s.base_offset)
+                    .unwrap_or_else(|| {
+                        panic!("viscous_dissipation: velocity '{field_name}' missing from state slots")
+                    });
+                // Only the grad_state assembly variant binds grad_state. Declaring a
+                // viscous_dissipation term forces that variant on (needs_gradients),
+                // so the non-grad variant (never scheduled for such a model) simply
+                // omits the term and still compiles.
+                if needs_gradients {
+                    // gx = grad(U_x) = (du/dx, du/dy); gy = grad(U_y) = (dv/dx, dv/dy).
+                    let grad_comp = |c: u32| {
+                        dsl::array_access_linear(
+                            "grad_state",
+                            Expr::ident("idx"),
+                            slots.stride,
+                            vel_offset + c,
+                        )
+                    };
+                    let gx = grad_comp(0);
+                    let gy = grad_comp(1);
+                    let dudx = gx.clone().field("x");
+                    let dudy = gx.field("y");
+                    let dvdx = gy.clone().field("x");
+                    let dvdy = gy.field("y");
+                    let shear = dudy + dvdx;
+                    let div_u = dudx.clone() + dvdy.clone();
+                    // Phi_grad = 2[ (du/dx)^2 + (dv/dy)^2 + 0.5*shear^2 - (1/3)*divU^2 ].
+                    let phi_grad = Expr::lit_f32(2.0)
+                        * (dudx.clone() * dudx
+                            + dvdy.clone() * dvdy
+                            + Expr::lit_f32(0.5) * shear.clone() * shear
+                            - Expr::lit_f32(1.0 / 3.0) * div_u.clone() * div_u);
+                    let coeff_val = coefficient_value_expr(
+                        slots,
+                        source_op.coeff.as_ref(),
+                        "idx",
+                        0.0.into(),
+                    );
+                    stmts.push(acc.add_rhs(
+                        base_offset,
+                        coeff_val * phi_grad * Expr::ident("vol"),
+                    ));
+                }
+                continue;
+            }
+
             if source_op.discretization == Discretization::Implicit {
                 let val =
                     coefficient_value_expr(slots, source_op.coeff.as_ref(), "idx", 0.0.into());

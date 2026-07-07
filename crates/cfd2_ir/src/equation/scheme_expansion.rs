@@ -41,7 +41,10 @@ pub fn expand_schemes_unchecked(
             // would otherwise be skipped entirely).
             let needs_gradient = (matches!(term.op, TermOp::Div | TermOp::DivFlux)
                 && scheme != Scheme::Upwind)
-                || term.transpose_dev2;
+                || term.transpose_dev2
+                // Viscous dissipation reads the velocity-gradient tensor from
+                // grad_state too, so its field needs the gradients pipeline.
+                || term.viscous_dissipation;
             if !needs_gradient {
                 continue;
             }

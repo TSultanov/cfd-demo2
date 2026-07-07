@@ -487,6 +487,22 @@ pub type SourceStaticUnit<FieldD, CoeffD> = crate::dimensions::MulDim<CoeffD, Fi
 pub type SourceExplicitUnit<CoeffD> =
     crate::dimensions::MulDim<CoeffD, crate::dimensions::Volume>;
 
+/// Type-level computation for the explicit viscous-dissipation source integrated
+/// unit: `coeff * (field/length)^2 * volume`. The `(field/length)^2` factor is the
+/// squared velocity-gradient magnitude (`Phi_grad`, unit Velocity^2/Length^2) that
+/// assembly synthesizes from `grad_state`; `coeff` carries the `mu/cp` scaling, so
+/// the whole term integrates to the energy-equation unit.
+pub type ViscousDissipationUnit<FieldD, CoeffD> = crate::dimensions::MulDim<
+    crate::dimensions::MulDim<
+        CoeffD,
+        crate::dimensions::DivDim<
+            crate::dimensions::MulDim<FieldD, FieldD>,
+            crate::dimensions::MulDim<crate::dimensions::Length, crate::dimensions::Length>,
+        >,
+    >,
+    crate::dimensions::Volume,
+>;
+
 pub mod typed_fvm {
     use super::*;
 
@@ -792,6 +808,32 @@ pub mod typed_fvc {
                 Some(coeff.to_untyped()),
             )
             .with_transpose_dev2(),
+            _dim: PhantomData,
+        }
+    }
+
+    /// Explicit viscous-dissipation energy source `Phi = tau:grad(U)` (the
+    /// deviatoric strain-rate contraction that heats the fluid under shear).
+    /// Declared on the ENERGY equation with `field` = the velocity: assembly reads
+    /// the owner cell's velocity-gradient tensor from `grad_state` and adds
+    /// `coeff * Phi_grad * V`, where
+    /// `Phi_grad = 2[(du/dx)^2 + (dv/dy)^2 + 0.5(du/dy+dv/dx)^2 - (1/3)(div U)^2]`
+    /// (unit field^2/length^2, always >= 0) and `coeff` carries the `mu/cp`
+    /// scaling. Like `div_dev2_grad_transpose` it consumes `grad_state` cell
+    /// gradients, so declaring it forces the gradients pipeline on. Vector2 field.
+    pub fn viscous_dissipation<FieldD: UnitDimension, CoeffD: UnitDimension>(
+        coeff: TypedCoeff<CoeffD>,
+        field: TypedFieldRef<FieldD, Vector2>,
+    ) -> TypedTerm<ViscousDissipationUnit<FieldD, CoeffD>> {
+        TypedTerm {
+            inner: Term::new(
+                TermOp::Source,
+                Discretization::Explicit,
+                field.to_untyped(),
+                None,
+                Some(coeff.to_untyped()),
+            )
+            .with_viscous_dissipation(),
             _dim: PhantomData,
         }
     }

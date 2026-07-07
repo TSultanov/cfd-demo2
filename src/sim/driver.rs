@@ -336,8 +336,12 @@ impl SolverDriver {
                         .set_field_scalar("rho_t_ref", &vec![params.density as f64 * t_ref; n_cells]);
                     let _ = solver.set_field_scalar("T", &vec![t_ref; n_cells]);
                     // Reference-temperature field for the REAL T-varying compressibility in
-                    // the density recovery (gamma*psi*t_ref/T). Constant = T_ref.
+                    // the density recovery (gamma*psi_ref*t_ref/T). Constant = T_ref.
                     let _ = solver.set_field_scalar("t_ref", &vec![t_ref; n_cells]);
+                    // Reference compressibility (= 1/c_ref^2): the CONSTANT the ideal-gas
+                    // EOS coefficients read, decoupled from the local `psi`. Seeded = psi
+                    // so at the reference temperature the model is byte-unchanged.
+                    let _ = solver.set_field_scalar("psi_ref", &vec![psi; n_cells]);
                     // EOS density floor = psi * absolute-pressure floor (rho = psi*P_abs),
                     // so the on-device recovery clamps rho positive against a transient
                     // gauge-pressure undershoot through vacuum. Constant field; refreshed
@@ -461,6 +465,9 @@ impl SolverDriver {
                 "rho_floor",
                 &vec![psi * ALLMACH_ABS_PRESSURE_FLOOR; n],
             );
+            // Keep the reference compressibility in step with the slider. Thermal only
+            // (a no-op where the `psi_ref` field is absent).
+            let _ = solver.set_field_scalar_current("psi_ref", &vec![psi; n]);
             if params.pressure_inlet {
                 // Pressure-inlet nozzle: pin the INLET gauge pressure (the gauge anchor
                 // moved upstream by `apply_pressure_inlet_nozzle_bcs`). The outlet `p` is

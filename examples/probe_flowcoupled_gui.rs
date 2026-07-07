@@ -21,6 +21,7 @@ fn main() {
 mod probe {
     use cfd2::meshgen::meshless::generate_cvt_mesh_with_seeds;
     use cfd2::meshgen::{ChannelWithObstacle, LloydConfig};
+    use cfd2::meshgen::meshless::SeedKind;
     use cfd2::sim::{MeshMotionSpec, MovingMeshDriver, RuntimeParams};
     use cfd2::solver::model::eos::EosSpec;
     use cfd2::solver::scheme::Scheme;
@@ -738,6 +739,12 @@ mod probe {
             for c in n - born..n {
                 events.push((mesh.cell_cx[c], mesh.cell_cy[c], step));
             }
+            // KILL sites are event zones too (the hole the absorbing
+            // neighbors settle into) — without them the "ambient" split
+            // still contains kill transients.
+            for &(kx, ky) in moving.last_kill_sites() {
+                events.push((kx, ky, step));
+            }
             // RECYCLED slots keep their index but teleport outlet -> inlet;
             // both the drained site and the respawn site are event zones.
             let seeds_now = moving.seeds().to_vec();
@@ -814,18 +821,66 @@ mod probe {
                 }
             }
             let (mut osc_amp, mut osc_face) = (0.0f64, 0usize);
+            // AMBIENT variant: excludes the event zones (fresh births +
+            // recycle teleport sites, same window as the dip split above)
+            // — the "does adaptation leave dipoles AWAY from its own
+            // in-flight transients" discriminator.
+            let (mut osc_amb_amp, mut osc_amb_face) = (0.0f64, 0usize);
             for f in 0..mesh.num_faces() {
                 if let Some(nb) = mesh.face_neighbor[f] {
                     let (ro, rn) = (resid[mesh.face_owner[f]], resid[nb]);
-                    if ro * rn < 0.0 && ro.abs().min(rn.abs()) > osc_amp {
-                        osc_amp = ro.abs().min(rn.abs());
-                        osc_face = f;
+                    let amp = ro.abs().min(rn.abs());
+                    if ro * rn < 0.0 && amp > osc_amb_amp.min(osc_amp) {
+                        if amp > osc_amp {
+                            osc_amp = amp;
+                            osc_face = f;
+                        }
+                        if amp > osc_amb_amp {
+                            let (fx, fy) = (mesh.face_cx[f], mesh.face_cy[f]);
+                            let h_loc = mesh.cell_vol[mesh.face_owner[f]].max(1e-30).sqrt();
+                            let r = EVENT_R_CELLS * h_loc.max(H);
+                            let near_event = events
+                                .iter()
+                                .any(|&(ex, ey, _)| (ex - fx).hypot(ey - fy) < r);
+                            if !near_event {
+                                osc_amb_amp = amp;
+                                osc_amb_face = f;
+                            }
+                        }
                     }
                 }
             }
             let osc = osc_amp / range;
+            let osc_amb = osc_amb_amp / range;
             osc_series.push((step, osc));
             osc_sites.push((osc, step, mesh.face_cx[osc_face], mesh.face_cy[osc_face]));
+            println!(
+                "[osc-frame] step {step} osc {osc:.4} @({:.3},{:.3}) ambient {osc_amb:.4} @({:.3},{:.3})",
+                mesh.face_cx[osc_face],
+                mesh.face_cy[osc_face],
+                mesh.face_cx[osc_amb_face],
+                mesh.face_cy[osc_amb_face]
+            );
+            // STRIP-GUARD watch: the y-wall guard cells inside the outlet
+            // strip are recycle-exempt and immovable — track how deeply the
+            // advected crowd shaves them (the corner-hill suspect).
+            {
+                let kinds_now = moving.seed_kinds();
+                let (mut gv_min, mut gx, mut gy) = (f64::INFINITY, 0.0, 0.0);
+                for c in 0..n {
+                    if mesh.cell_cx[c] > 2.8
+                        && !matches!(kinds_now[c], SeedKind::Interior)
+                        && mesh.cell_vol[c] < gv_min
+                    {
+                        gv_min = mesh.cell_vol[c];
+                        gx = mesh.cell_cx[c];
+                        gy = mesh.cell_cy[c];
+                    }
+                }
+                if gv_min.is_finite() {
+                    println!("[strip-guards] step {step} vmin {gv_min:.3e} @({gx:.3},{gy:.3})");
+                }
+            }
             // Flare anatomy: is the worst +/- pair the TWIN half-guards born
             // by a wall split (two near-identical tiny wall cells sharing a
             // face = weakly damped two-cell checkerboard mode)?
@@ -842,7 +897,17 @@ mod probe {
                             } else {
                                 Some(mesh.face_owner[f])
                             };
-                            other.map(|x| format!("{x}:{:+.4e}(v{:.2e})", p_of(x), mesh.cell_vol[x]))
+                            other.map(|x| {
+                                let kc = match kinds[x] {
+                                    SeedKind::Interior => "I",
+                                    _ => "B",
+                                };
+                                format!(
+                                    "{x}{kc}:{:+.4e}(v{:.2e})",
+                                    p_of(x),
+                                    mesh.cell_vol[x]
+                                )
+                            })
                         })
                         .collect();
                     println!(

@@ -616,6 +616,12 @@ pub struct MovingMeshDriver {
     /// inf-norm mass-row residual before/after. Surfaced per adapt step in
     /// [`MovingMeshStats`].
     last_transfer_projection: (f64, f64),
+    /// Positions of the seeds KILLED by the latest adaptation event
+    /// (cleared every step) — probe support: kill sites are event zones for
+    /// the ambient/event artifact split, exactly like births and recycle
+    /// teleports, but the killed slot vanishes from the seed array so a
+    /// post-step observer cannot recover where the hole opened.
+    last_kill_sites: Vec<(f64, f64)>,
     /// TRIAL-STEP adaptation ([`Self::set_trial_step_adaptation`], opt-in,
     /// CPU backend): on adapt steps, trial-solve the step on the current
     /// mesh, plan the resize from the trial's END state (the solution the
@@ -908,6 +914,7 @@ impl MovingMeshDriver {
                 .map(|v| v != "0")
                 .unwrap_or(true),
             last_transfer_projection: (0.0, 0.0),
+            last_kill_sites: Vec::new(),
             trial_step_adaptation: false,
             adaptive_dt_cfl: None,
             last_pinned_dt: None,
@@ -1429,6 +1436,7 @@ impl MovingMeshDriver {
         // events (the trial IS the step).
         let (mut cells_born, mut cells_killed) = (0usize, 0usize);
         let mut transfer_defect = (0.0f64, 0.0f64);
+        self.last_kill_sites.clear();
         if self.adapt_fires_this_step() {
             if self.trial_step_adaptation && self.driver.solver().is_cpu() {
                 let checkpoint = self.motion_checkpoint();
@@ -2708,21 +2716,49 @@ impl MovingMeshDriver {
         // same per-cell-target pattern that cured the chi_size squeeze
         // misread in the leak arc.
         let targets = self.adapt_targets.as_deref();
-        let squeeze_floor = |i: usize| -> f64 {
-            match targets.and_then(|t| t.get(i)) {
+        // Y-WALL CORNER RELIEF (env-gated, default OFF — MEASURED WORSE,
+        // kept as the executable record): the box y-wall guard seeds inside
+        // the strip are recycle-EXEMPT and immovable, so the advected
+        // interior crowd shaves their cells into the outlet corners
+        // (measured: guard cells at ~0.35× the floor under the corner
+        // pressure hill the OSC watch flags). Raising the interior floor
+        // near the y-walls exports the crowd earlier — but the corner
+        // flares scale with the recycle-EVENT RATE, not the shaving depth,
+        // so the extra exports pumped MORE flares (14 vs 7 per 1000 steps)
+        // at both corners and at the inlet respawn band.
+        let relief: f64 = std::env::var("CFD2_RECYCLE_WALL_RELIEF")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.0);
+        let dom_y = self.domain.y;
+        let squeeze_floor = move |i: usize, y: f64| -> f64 {
+            let base = match targets.and_then(|t| t.get(i)) {
                 Some(&t_vol) if t_vol.is_finite() && t_vol > 0.0 => {
                     vol_lo.min(RECYCLE_SQUEEZE_FRACTION * t_vol)
                 }
                 _ => vol_lo,
+            };
+            if relief > 0.0 {
+                let w = (1.0 - y.min(dom_y - y) / (3.0 * h)).max(0.0);
+                base * (1.0 + relief * w).min(1.15)
+            } else {
+                base
             }
         };
         let mut out: Vec<usize> = (0..seeds.len())
             .filter(|&i| {
                 self.kinds[i] == SeedKind::Interior
                     && seeds[i].x > strip_x
-                    && self.mesh.cell_vol[i] < squeeze_floor(i)
+                    && self.mesh.cell_vol[i] < squeeze_floor(i, seeds[i].y)
             })
             .collect();
+        // Most-squeezed first. (Corner-flare redesigns of this selection
+        // were all measured: near-wall floor relief and a y-wall seed hold
+        // both RAISE the recycle-event rate and pump MORE corner flares;
+        // exporting wall-adjacent cells last is NEUTRAL — the corner event
+        // amplitude is realization noise around ~1.4-1.9 OSC with or
+        // without adaptation, and the frozen control's own worst exceeds
+        // the running config's in some realizations.)
         out.sort_by(|&a, &b| self.mesh.cell_vol[a].total_cmp(&self.mesh.cell_vol[b]));
         out.truncate(RECYCLE_MAX_PER_STEP);
 
@@ -2731,6 +2767,10 @@ impl MovingMeshDriver {
         // seed that presses past the park line (1.5 cells from the outlet
         // guards) is clamped there — squeezing then shows up as shrinking
         // volumes IN the strip, which is exactly the recycle trigger.
+        // (A y-wall mirror of this clamp — holding interior seeds off the
+        // y-walls in the strip — was MEASURED WORSE, like the near-wall
+        // floor relief: both raise the recycle-event rate, and the corner
+        // flares scale with event rate, not with guard-shaving depth.)
         for i in 0..seeds.len() {
             if self.kinds[i] == SeedKind::Interior && !out.contains(&i) && seeds[i].x > park_x {
                 seeds[i].x = park_x;
@@ -2979,6 +3019,8 @@ impl MovingMeshDriver {
                 return Err(format!("resize_cells: kill index {i} is a boundary seed"));
             }
         }
+        self.last_kill_sites
+            .extend(kills.iter().map(|&i| (self.seeds[i].x, self.seeds[i].y)));
         let spec_t = self.moved_spec(self.time);
         for &(p, donor) in births {
             if donor >= n || kill_set.contains(&donor) {
@@ -4444,6 +4486,12 @@ impl MovingMeshDriver {
     /// The per-seed kinds (seed `i` == cell `i`) — diagnostics/probes.
     pub fn seed_kinds(&self) -> &[SeedKind] {
         &self.kinds
+    }
+
+    /// Positions of the seeds killed by this step's adaptation event
+    /// (empty when none) — diagnostics/probes.
+    pub fn last_kill_sites(&self) -> &[(f64, f64)] {
+        &self.last_kill_sites
     }
 
     /// Committed step count.

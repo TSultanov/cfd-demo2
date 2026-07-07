@@ -1355,6 +1355,13 @@ fn emit_transpiled_cpu_kernels(
     let mut fns = String::new();
     let mut entries: Vec<(String, String, String)> = Vec::new();
     for model in models {
+        // Structured (`TopologyMode::Structured2D`) kernels reference the `grid`
+        // uniform and `Vector2` constructor, which the Rust transpiler prelude
+        // does not yet provide; run them through the interpreter (the CPU
+        // correctness oracle) instead of the compiled-Rust speed path.
+        if model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D {
+            continue;
+        }
         for module in &model.modules {
             let module: &dyn ModelModule = module;
             for spec in module.kernel_generators() {

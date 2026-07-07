@@ -1147,17 +1147,35 @@ pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgs
     let needs_constants_struct = by_slot
         .values()
         .any(|binding| binding.wgsl_type == "Constants");
-    let needs_vector2_struct = by_slot
+    // Structured (Cartesian) kernels bind the `grid: StructuredGrid` uniform in
+    // place of the connectivity buffers.
+    let needs_structured_grid_struct = by_slot
         .values()
-        .any(|binding| binding.wgsl_type.contains("Vector2"));
+        .any(|binding| binding.wgsl_type == "StructuredGrid");
+    // A Vector2 is needed either by a Vector2-typed binding OR by the structured
+    // kernels' arithmetic geometry (cell/face centres, normals), which construct
+    // `Vector2(...)` in the body without any Vector2-typed binding.
+    let needs_vector2_struct = needs_structured_grid_struct
+        || by_slot
+            .values()
+            .any(|binding| binding.wgsl_type.contains("Vector2"));
     let needs_low_mach_params_struct = by_slot
         .values()
         .any(|binding| binding.wgsl_type == "LowMachParams");
-    if needs_constants_struct || needs_vector2_struct || needs_low_mach_params_struct {
+    if needs_constants_struct
+        || needs_vector2_struct
+        || needs_low_mach_params_struct
+        || needs_structured_grid_struct
+    {
         let mut shared_structs_module = super::wgsl_ast::Module::new();
         if needs_vector2_struct {
             shared_structs_module.push(super::wgsl_ast::Item::Struct(
                 super::wgsl_bindings::vector2_struct(),
+            ));
+        }
+        if needs_structured_grid_struct {
+            shared_structs_module.push(super::wgsl_ast::Item::Struct(
+                super::coupled_common::structured_grid_struct(),
             ));
         }
         if needs_constants_struct {

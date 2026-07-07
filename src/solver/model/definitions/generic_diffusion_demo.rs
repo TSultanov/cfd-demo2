@@ -1,5 +1,5 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
-use crate::solver::model::backend::ast::{vol_scalar_dim, EquationSystem};
+use crate::solver::model::backend::ast::{vol_scalar_dim, EquationSystem, TopologyMode};
 use crate::solver::model::backend::typed_ast::{typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef};
 use crate::solver::model::ports::PortRegistry;
 use cfd2_ir::dimensions::{Area, Dimensionless, DivDim, InvTime, Length, Time, Volume};
@@ -60,6 +60,15 @@ fn build_diffusion_model(
     variant: DiffusionBcVariant,
     with_mms_source: bool,
 ) -> Result<ModelSpec, String> {
+    build_diffusion_model_topo(id, variant, with_mms_source, TopologyMode::Unstructured)
+}
+
+fn build_diffusion_model_topo(
+    id: &'static str,
+    variant: DiffusionBcVariant,
+    with_mms_source: bool,
+    topology: TopologyMode,
+) -> Result<ModelSpec, String> {
     let phi_typed = TypedFieldRef::<Dimensionless, Scalar>::new("phi");
     let kappa_typed: TypedCoeff<DivDim<Area, Time>> = TypedCoeff::constant(1.0);
 
@@ -88,6 +97,7 @@ fn build_diffusion_model(
 
     let mut system = EquationSystem::new();
     system.add_equation(eqn);
+    system.set_topology(topology);
 
     system
         .validate_units()
@@ -164,4 +174,92 @@ pub fn generic_diffusion_demo_mms_neumann_model() -> Result<ModelSpec, String> {
         DiffusionBcVariant::DirichletWithNeumannWalls,
         true,
     )
+}
+
+/// STRUCTURED (`TopologyMode::Structured2D`) diffusion demo: the identical
+/// `ddt(phi) + laplacian(kappa, phi)` heat-equation math, but lowered to the
+/// dense-array Cartesian assembly (no connectivity indirection; the operator
+/// expansion emits the 5-point stencil arithmetically). Dirichlet on every
+/// boundary (values set per structured face at runtime).
+pub fn generic_diffusion_demo_structured_model() -> Result<ModelSpec, String> {
+    build_diffusion_model_topo(
+        "generic_diffusion_demo_structured",
+        DiffusionBcVariant::DirichletAll,
+        false,
+        TopologyMode::Structured2D,
+    )
+}
+
+/// Structured MMS variant (manufactured source term), for convergence-order
+/// verification of the structured operator on a Cartesian grid.
+pub fn generic_diffusion_demo_structured_mms_model() -> Result<ModelSpec, String> {
+    build_diffusion_model_topo(
+        "generic_diffusion_demo_structured_mms",
+        DiffusionBcVariant::DirichletAll,
+        true,
+        TopologyMode::Structured2D,
+    )
+}
+
+/// Name of the per-cell Brinkman penalisation field (`chi/eta`, unit `1/Time`):
+/// large inside an immersed solid obstacle, zero in the fluid. Host code samples
+/// the obstacle SDF at cell centres and uploads this via `set_field_scalar`.
+pub const IBM_PENALTY_FIELD: &str = "ibm_penalty";
+
+/// STRUCTURED + IMMERSED-BOUNDARY diffusion demo. On the FULL Cartesian grid
+/// (no cell cutting), an obstacle is imposed by **Brinkman volume penalisation**:
+/// an implicit sink `source_coeff(chi/eta, phi)` adds `(chi/eta)*V` to the
+/// diagonal, driving `phi -> 0` wherever the penalty field is large (inside the
+/// solid) while leaving the fluid (`chi/eta = 0`) byte-identical to the base
+/// diffusion operator. This is the immersed-boundary counterpart of cutting the
+/// obstacle out of the mesh — impossible on a dense array — and the natural
+/// obstacle treatment for a structured grid.
+pub fn generic_diffusion_demo_structured_ibm_model() -> Result<ModelSpec, String> {
+    let id = "generic_diffusion_demo_structured_ibm";
+    let phi_typed = TypedFieldRef::<Dimensionless, Scalar>::new("phi");
+    let kappa_typed: TypedCoeff<DivDim<Area, Time>> = TypedCoeff::constant(1.0);
+    let penalty_typed = TypedFieldRef::<InvTime, Scalar>::new(IBM_PENALTY_FIELD);
+
+    let ddt_cast = typed_fvm::ddt(phi_typed).cast_to::<DiffusionIntegratedUnit>();
+    let laplacian_cast =
+        typed_fvm::laplacian(kappa_typed, phi_typed).cast_to::<DiffusionIntegratedUnit>();
+    // Implicit Brinkman penalisation: coeff = chi/eta (a reaction rate), so the
+    // integrated term chi/eta * phi * V has unit Volume/Time to match.
+    let penalty_coeff = TypedCoeff::from_field(penalty_typed);
+    let penalty_cast =
+        typed_fvm::source_coeff(penalty_coeff, phi_typed).cast_to::<DiffusionIntegratedUnit>();
+
+    let eqn = (ddt_cast + laplacian_cast + penalty_cast).eqn(phi_typed);
+
+    let mut system = EquationSystem::new();
+    system.add_equation(eqn);
+    system.set_topology(TopologyMode::Structured2D);
+    system
+        .validate_units()
+        .map_err(|e| format!("{id} system failed unit validation: {e:?}"))?;
+
+    let layout = PortRegistry::from_fields(vec![
+        vol_scalar_dim::<Dimensionless>("phi"),
+        vol_scalar_dim::<InvTime>(IBM_PENALTY_FIELD),
+    ])
+    .into_state_layout();
+
+    Ok(ModelSpec {
+        id,
+        system,
+        state_layout: layout,
+        boundaries: diffusion_boundaries(DiffusionBcVariant::DirichletAll),
+        modules: vec![
+            crate::solver::model::modules::eos::eos_module(
+                crate::solver::model::eos::EosSpec::Constant,
+            ),
+            crate::solver::model::modules::generic_coupled::generic_coupled_module(
+                crate::solver::model::method::MethodSpec::Coupled(
+                    crate::solver::model::method::CoupledCapabilities::default(),
+                ),
+            ),
+        ],
+        linear_solver: None,
+        primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
+    })
 }

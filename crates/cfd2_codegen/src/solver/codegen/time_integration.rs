@@ -15,7 +15,7 @@ use crate::solver::ir::Discretization;
 use crate::solver::ir::ports::ResolvedStateSlotsSpec;
 use std::collections::HashMap;
 
-fn local_dual_time_scale_setup() -> Vec<Stmt> {
+fn local_dual_time_scale_setup(structured: bool) -> Vec<Stmt> {
     let dtau_safe = Expr::call_named(
         "max",
         vec![Expr::ident("constants").field("dtau"), Expr::from(1e-12)],
@@ -24,28 +24,40 @@ fn local_dual_time_scale_setup() -> Vec<Stmt> {
     let mut stmts = vec![
         dsl::let_expr("dtau_safe", dtau_safe.clone()),
         dsl::let_expr("global_dual_time_scale", Expr::ident("vol") / dtau_safe),
-        dsl::var_typed_expr(
+    ];
+
+    if structured {
+        // A uniform Cartesian cell's perimeter is the closed form `2*(dx+dy)`;
+        // no face walk (and no `cell_faces` / `face_areas` buffers) needed.
+        stmts.push(dsl::let_expr(
+            "perimeter_sum",
+            Expr::from(2.0) * (Expr::ident("grid").field("dx") + Expr::ident("grid").field("dy")),
+        ));
+    } else {
+        stmts.push(dsl::var_typed_expr(
             "perimeter_sum",
             super::wgsl_ast::Type::F32,
             Some(Expr::from(0.0)),
-        ),
-    ];
-
-    stmts.push(dsl::for_loop_expr(
-        dsl::for_init_var_expr("k", Expr::ident("start")),
-        Expr::ident("k").lt(Expr::ident("end")),
-        dsl::for_step_increment_expr(Expr::ident("k")),
-        dsl::block(vec![
-            dsl::let_expr(
-                "area",
-                dsl::array_access("face_areas", dsl::array_access("cell_faces", Expr::ident("k"))),
-            ),
-            dsl::assign_expr(
-                Expr::ident("perimeter_sum"),
-                Expr::ident("perimeter_sum") + Expr::ident("area"),
-            ),
-        ]),
-    ));
+        ));
+        stmts.push(dsl::for_loop_expr(
+            dsl::for_init_var_expr("k", Expr::ident("start")),
+            Expr::ident("k").lt(Expr::ident("end")),
+            dsl::for_step_increment_expr(Expr::ident("k")),
+            dsl::block(vec![
+                dsl::let_expr(
+                    "area",
+                    dsl::array_access(
+                        "face_areas",
+                        dsl::array_access("cell_faces", Expr::ident("k")),
+                    ),
+                ),
+                dsl::assign_expr(
+                    Expr::ident("perimeter_sum"),
+                    Expr::ident("perimeter_sum") + Expr::ident("area"),
+                ),
+            ]),
+        ));
+    }
 
     stmts.push(dsl::let_expr(
         "face_metric_scale",
@@ -307,7 +319,8 @@ pub fn emit_ddt_contributions(
     acc: &CoupledAccumulators,
     integrator: &dyn TimeIntegrator,
 ) -> Vec<Stmt> {
-    let mut stmts = local_dual_time_scale_setup();
+    let mut stmts =
+        local_dual_time_scale_setup(system.topology() == crate::solver::ir::TopologyMode::Structured2D);
 
     // ALE (moving-mesh) systems get the moving-volume ddt: volume-history
     // locals here, ratio-weighted history states below. Non-ALE systems take

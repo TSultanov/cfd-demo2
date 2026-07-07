@@ -24,9 +24,11 @@ pub mod lowering;
 pub mod parallel;
 pub(crate) mod pool;
 pub mod solver;
+pub mod structured;
 pub mod transpile_rt;
 
 pub use solver::CpuSolver;
+pub use structured::{StructuredCpuSolver, StructuredGrid};
 
 /// Kernel execution engine for the CPU backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -10,7 +10,7 @@ pub use crate::equation::{
     },
     expand_schemes, expand_schemes_unchecked, fvc, fvm, Coefficient, Discretization, Equation,
     EquationSystem, FieldKind, FieldRef, FluxRef, SchemeExpansion, SchemeRegistry, StateField,
-    StateLayout, Term, TermKey, TermOp,
+    StateLayout, Term, TermKey, TermOp, TopologyMode,
 };
 
 use crate::scheme::Scheme;

@@ -758,7 +758,9 @@ impl<'a> Interpreter<'a> {
                 Value::F32(dot(d, d).sqrt())
             }
             // ── vector constructors (splat when 1 arg) ──
-            "vec2<f32>" => {
+            // `Vector2` is the codegen's custom 2-vector struct (cell/face
+            // centres, normals); the structured assembly constructs it directly.
+            "vec2<f32>" | "Vector2" => {
                 if a.len() == 1 {
                     let s = a[0].as_f32();
                     Value::Vec2([s, s])

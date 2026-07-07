@@ -638,7 +638,9 @@ pub use compressible::{
 pub use generic_diffusion_demo::{
     generic_diffusion_demo_mms_dirichlet_model, generic_diffusion_demo_mms_model,
     generic_diffusion_demo_mms_neumann_model, generic_diffusion_demo_model,
-    generic_diffusion_demo_neumann_model, MMS_SOURCE_FIELD,
+    generic_diffusion_demo_neumann_model, generic_diffusion_demo_structured_ibm_model,
+    generic_diffusion_demo_structured_mms_model, generic_diffusion_demo_structured_model,
+    IBM_PENALTY_FIELD, MMS_SOURCE_FIELD,
 };
 #[allow(unused_imports)]
 pub use buoyant_incompressible::{
@@ -711,6 +713,9 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
         generic_diffusion_demo_mms_model()?,
         generic_diffusion_demo_mms_dirichlet_model()?,
         generic_diffusion_demo_mms_neumann_model()?,
+        generic_diffusion_demo_structured_model()?,
+        generic_diffusion_demo_structured_mms_model()?,
+        generic_diffusion_demo_structured_ibm_model()?,
         scalar_transport_model()?,
         scalar_transport_sou_model()?,
     ])

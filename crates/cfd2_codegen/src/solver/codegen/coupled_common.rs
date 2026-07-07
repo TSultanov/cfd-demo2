@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use super::coeff_expr::coeff_cell_expr;
 use super::constants::constants_struct;
-use super::wgsl_ast::{AccessMode, Attribute, Expr, Item, StorageClass, Stmt, Type};
+use super::wgsl_ast::{AccessMode, Attribute, Expr, Item, StorageClass, Stmt, StructDef, StructField, Type};
 use super::wgsl_bindings::{storage_var, uniform_var, vector2_struct};
 use crate::solver::codegen::ir::DiscreteSystem;
 use crate::solver::ir::ports::{ParamSpec, ResolvedStateSlotsSpec};
@@ -113,6 +113,88 @@ pub fn base_mesh_items(eos_params: &[ParamSpec]) -> Vec<Item> {
             AccessMode::Read,
         ),
     ]
+}
+
+/// The uniform describing a uniform Cartesian grid, bound by the structured
+/// (`TopologyMode::Structured2D`) assembly kernels in place of the group-0
+/// connectivity/geometry buffers. Cell `p = j*nx + i`; neighbours are `p±1`
+/// (in-row) and `p±nx` (adjacent row); every face-geometry quantity is derived
+/// from `(dx, dy)`. There is NO connectivity indirection — this is the whole
+/// point of the structured mode.
+pub fn structured_grid_struct() -> StructDef {
+    StructDef::new(
+        "StructuredGrid",
+        vec![
+            StructField::new("nx", Type::U32),
+            StructField::new("ny", Type::U32),
+            StructField::new("dx", Type::F32),
+            StructField::new("dy", Type::F32),
+        ],
+    )
+}
+
+/// Group-0 declarations for a structured (Cartesian) assembly kernel: the
+/// `Vector2` + `Constants` + `StructuredGrid` struct definitions and the single
+/// `grid` uniform. Deliberately emits NONE of the unstructured connectivity /
+/// geometry storage buffers (`face_owner`, `cell_faces`, `cell_face_offsets`,
+/// `cell_centers`, …) — the structured kernel computes all of that arithmetic.
+pub fn base_mesh_items_structured(eos_params: &[ParamSpec]) -> Vec<Item> {
+    vec![
+        Item::Struct(vector2_struct()),
+        Item::Struct(constants_struct(eos_params)),
+        Item::Struct(structured_grid_struct()),
+        Item::Comment("Group 0: Structured Cartesian grid (no connectivity)".to_string()),
+        uniform_var("grid", Type::Custom("StructuredGrid".to_string()), 0, 0),
+    ]
+}
+
+/// Structured counterpart of [`base_assembly_items`]: same state (group 1),
+/// matrix + RHS (group 2) and BC (group 3) bindings, but a connectivity-free
+/// group 0 (`grid` uniform only) and NO `scalar_row_offsets` — the row layout of
+/// the fixed 5-point banded operator (`matrix_values` sized `N*5`) is arithmetic
+/// (`row = idx*5`).
+pub fn base_assembly_items_structured(
+    needs_gradients: bool,
+    needs_fluxes: bool,
+    eos_params: &[ParamSpec],
+) -> Vec<Item> {
+    let mut items = base_mesh_items_structured(eos_params);
+    items.extend(base_state_items(needs_gradients, needs_fluxes));
+    items.push(Item::Comment(
+        "Group 2: Solver (banded 5-point values + RHS)".to_string(),
+    ));
+    items.push(storage_var(
+        "matrix_values",
+        Type::array(Type::F32),
+        2,
+        0,
+        AccessMode::ReadWrite,
+    ));
+    items.push(storage_var(
+        "rhs",
+        Type::array(Type::F32),
+        2,
+        1,
+        AccessMode::ReadWrite,
+    ));
+    items.push(Item::Comment(
+        "Group 3: Boundary conditions (per structured face x unknown)".to_string(),
+    ));
+    items.push(storage_var(
+        "bc_kind",
+        Type::array(Type::U32),
+        3,
+        0,
+        AccessMode::Read,
+    ));
+    items.push(storage_var(
+        "bc_value",
+        Type::array(Type::F32),
+        3,
+        1,
+        AccessMode::Read,
+    ));
+    items
 }
 
 /// Emit WGSL global declarations for state fields (group 1 bindings).

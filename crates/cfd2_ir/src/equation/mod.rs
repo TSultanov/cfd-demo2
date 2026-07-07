@@ -12,7 +12,7 @@ pub use algebraic::{
 };
 pub use ast::{
     fvc, fvm, Coefficient, Discretization, Equation, EquationSystem, FieldKind, FieldRef, FluxRef,
-    Term, TermOp,
+    Term, TermOp, TopologyMode,
 };
 pub use boundary::{eval_boundary_expr, BoundaryExpr};
 pub use scheme::{SchemeRegistry, TermKey};

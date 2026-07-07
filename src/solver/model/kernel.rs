@@ -448,6 +448,16 @@ pub fn derive_kernel_specs_for_model(
 pub fn derive_kernel_fusion_rules_for_model(
     model: &crate::solver::model::ModelSpec,
 ) -> Vec<ModelKernelFusionRule> {
+    // Structured (`TopologyMode::Structured2D`) models run their kernels
+    // unfused: the fused variants (e.g. packed_state_gradients + grad-state
+    // assembly) mix a structured assembly with an as-yet-unstructured gradients
+    // kernel, whose launch bounds differ, and the gradient pipeline is unused by
+    // the structured pure-diffusion slice anyway (`RequiresNoGradState`).
+    // Keeping fusion off here is byte-identical for every existing (unstructured)
+    // model and avoids synthesizing a launch-incompatible fused kernel.
+    if model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D {
+        return Vec::new();
+    }
     let mut rules = Vec::new();
     for module in &model.modules {
         let module: &dyn crate::solver::model::module::ModelModule = module;

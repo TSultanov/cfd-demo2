@@ -530,15 +530,39 @@ impl Equation {
     }
 }
 
+/// Mesh-topology mode for kernel lowering.
+///
+/// The IR (equations / terms / operators) is deliberately topology-agnostic —
+/// this enum only tells the *codegen* how to materialise the "sum over a cell's
+/// faces". It selects an alternate kernel family exactly like the ALE
+/// `relative_to_mesh` marker does, with the default arm (`Unstructured`)
+/// producing byte-identical output to the pre-topology codegen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TopologyMode {
+    /// General face-connectivity mesh: neighbours are found by reading the
+    /// `cell_faces` / `face_owner` / `face_neighbor` connectivity arrays and
+    /// the matrix is a sorted-adjacency block-CSR. This is the incumbent path.
+    #[default]
+    Unstructured,
+    /// Uniform Cartesian grid stored as a dense `nx * ny` array with NO
+    /// connectivity indirection: cell `p = j*nx + i`, neighbours `p±1` / `p±nx`,
+    /// face geometry from `(dx, dy)`, and a fixed 5-point banded operator
+    /// (`matrix_values` sized `N*5`, arithmetic ranks). Obstacles are immersed
+    /// (masking / Brinkman penalisation), never cut out of the grid.
+    Structured2D,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EquationSystem {
     equations: Vec<Equation>,
+    topology: TopologyMode,
 }
 
 impl EquationSystem {
     pub fn new() -> Self {
         Self {
             equations: Vec::new(),
+            topology: TopologyMode::Unstructured,
         }
     }
 
@@ -548,6 +572,22 @@ impl EquationSystem {
 
     pub fn equations(&self) -> &[Equation] {
         &self.equations
+    }
+
+    /// The mesh-topology mode this system's kernels should be lowered for.
+    pub fn topology(&self) -> TopologyMode {
+        self.topology
+    }
+
+    /// Set the topology mode (used by structured-grid model variants).
+    pub fn set_topology(&mut self, topology: TopologyMode) {
+        self.topology = topology;
+    }
+
+    /// Builder form of [`set_topology`](Self::set_topology).
+    pub fn with_topology(mut self, topology: TopologyMode) -> Self {
+        self.topology = topology;
+        self
     }
 
     pub fn unknowns_per_cell(&self) -> u32 {

@@ -2,7 +2,7 @@ use crate::solver::scheme::Scheme;
 
 use crate::solver::ir::{
     Coefficient, Discretization, EquationSystem, FieldRef, FluxRef, SchemeRegistry, Term, TermOp,
-    UnitValidationError,
+    TopologyMode, UnitValidationError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -85,9 +85,18 @@ pub struct DiscreteEquation {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiscreteSystem {
     pub equations: Vec<DiscreteEquation>,
+    /// Mesh-topology mode carried from the source [`EquationSystem`]; selects
+    /// the structured-vs-unstructured face-loop lowering in the assembly
+    /// generators. Defaults to `Unstructured` (byte-identical incumbent path).
+    pub topology: TopologyMode,
 }
 
 impl DiscreteSystem {
+    /// The mesh-topology mode this discrete system lowers for.
+    pub fn topology(&self) -> TopologyMode {
+        self.topology
+    }
+
     /// ALE marker, derived: a system is ALE iff any op consumes its face flux
     /// relative to the mesh (`Term::relative_to_mesh`). Gates the ALE codegen:
     /// the `mesh_fluxes` / `cell_vols_old{,_old}` storage bindings, the
@@ -118,7 +127,10 @@ pub fn lower_system_unchecked(system: &EquationSystem, schemes: &SchemeRegistry)
             ops,
         });
     }
-    DiscreteSystem { equations }
+    DiscreteSystem {
+        equations,
+        topology: system.topology(),
+    }
 }
 
 /// Lower an equation system to a discrete system with validation.
